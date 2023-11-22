@@ -1,5 +1,5 @@
 import React from "react";
-import "./AboutDuende.css"
+import "./AboutConfio.css"
 import pic from '../../images/Dashboard.png'
 import AboutHeader from "../../components/FaqPage/AboutHeader";
 import styles from "../../styles/TermsPage.module.css";

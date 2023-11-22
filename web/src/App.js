@@ -9,7 +9,7 @@ import TermsPage from './pages/TermsPage/TermsPage'
 import SignIn from './components/SignIn/index'
 import SignUp from './components/SignUp/index'
 import PolicyPage from './pages/PolicyPage/PolicyPage'
-import About from './components/LandingPage/AboutDuende'
+import About from './components/LandingPage/AboutConfio'
 
 
 function App() {
