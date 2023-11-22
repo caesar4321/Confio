@@ -1,0 +1,131 @@
+.video-container{
+  position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    padding: 5vw;
+}
+ .vdo{
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.vdo video {
+  position: absolute;
+    width: 100vw !important;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0.8;
+}
+
+  .hero-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  object-fit: contain;
+}
+
+  
+  .hero-container > h1 {
+    color: #fff;
+    font-size: 50px;
+    margin-left: 20px;
+    bottom:160px;
+    left: 20px;
+    position: absolute;
+  }
+  .bottom-section{
+    display: flex;
+    position: absolute;
+    margin-left: 20px;
+    bottom:50px;
+    width: auto;
+    bottom: 50px;
+    left: 20px;
+    right: 20px;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .IconButton{
+    font-size: 14px;
+    color: rgb(138, 138, 138);
+    border-radius: 60px;
+    background-color: rgba(255, 255, 255, 0.1);
+    padding: 20px;
+    margin-right: 12px;
+  }
+  .hero-buttons{
+    justify-self: start;
+  
+  }
+  .hero-social-icons{
+    margin-top: 1.938rem;
+    display: flex;
+    column-gap: 1.2rem;
+  }
+  .hero-social-icons .hs_icon{
+    width: 1.875rem;
+    cursor: pointer;
+  }
+  .downloadBtn{
+    padding-right: 10px;
+    width: 35%;
+  }
+  .play-pause-container{
+    justify-self: end; 
+    display: flex;
+  }
+  .mute-unmute-button, .play-pause-button{
+    background: rgba(0, 0, 0, 0.5);
+    padding: 25px;
+    border-radius: 50%;
+    margin-right: 12px;
+    height: 50px;
+    width: 50px;
+    display: flex;
+    justify-content: center;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  /* .play-pause-button:hover, .mute-unmute-button:hover{
+    background: rgba(255, 255, 255, 0.226)
+  } */
+  .fa-pause, .fa-play, .fa-volume-up, .fa-volume-mute{
+    font-size:22px;
+    color: #fff;
+    padding: 25px;
+    border-radius: 50%;
+  }
+
+  
+  @media screen and (max-width: 562px) {
+    .hero-container > h1 {
+      font-size: 30px;
+      margin-top: -100px;
+    }
+
+    .hero-container > p {
+      font-size: 30px;
+    }
+    .bottom-section{
+      display: block;
+      bottom:1px;
+    }
+    .play-pause-container{
+      padding-top: 10px;
+    }
+
+    .mute-unmute-button, .play-pause-button
+    {
+      height: 25px;
+      width: 25px;
+    }
+    .fa-pause, .fa-play, .fa-volume-up, .fa-volume-mute
+    {
+      font-size: 18px;
+    }
+}

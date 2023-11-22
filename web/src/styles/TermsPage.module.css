@@ -1,0 +1,102 @@
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background-color: var(--white-color);
+  font-family: var(--ff-primary);
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+
+a {
+  /* color: inherit; */
+  text-decoration: none;
+}
+
+* {
+  -webkit-box-sizing: border-box;
+          box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+html,
+body,
+p,
+ol,
+ul,
+li,
+dl,
+dt,
+dd,
+blockquote,
+figure,
+fieldset,
+legend,
+textarea,
+pre,
+iframe,
+hr,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  padding: 0;
+}
+
+ul {
+  list-style: none;
+}
+img {
+  width: 100%;
+  height: 100%;
+  -o-object-fit: cover;
+     object-fit: cover;
+}
+
+input,
+textarea:focus {
+  outline: none;
+}
+
+.row {
+  --bs-gutter-x: 1.5rem;
+  --bs-gutter-y: 1.5rem;
+}
+
+
+
+.terms_page_holder {
+  background-color: var(--white-color);
+  -webkit-box-shadow: 0px 4px 25px #2e1c5540;
+          box-shadow: 0px 4px 25px #2e1c5540;
+  margin-top: -60px;
+  border-radius: 15px;
+  padding: 4rem;
+  margin-bottom: 3rem;
+}
+
+@media only screen and (max-width: 992px) {
+  .terms_page_holder {
+    padding: 4rem 2.5rem;
+  }
+}
+
+.terms_page_holder .term_item {
+  color: var(--primary-color);
+}
+
+.terms_page_holder .term_item .heading {
+  font-size: 2.2rem;
+  font-weight: 600;
+  margin-bottom: 3rem;
+}
+
+.terms_page_holder .term_item .content {
+  font-size: 1.35rem;
+  margin-bottom: 3rem;
+  line-height: 1.6;
+}
+/*# sourceMappingURL=TermsPage.module.css.map */
