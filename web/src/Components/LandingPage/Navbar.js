@@ -137,7 +137,7 @@ function Navbar() {
                     >
                       {/* HIDDEN LIST */}
                       <ul className={styles.hidden_list}>
-                      <Link to={`/terms_of_service`}><li>Terms of Services</li></Link>
+                      <Link to={`/terms_of_service`}><li>Terms of Service</li></Link>
                       <Link to={`/privacy_policy`}><li>Privacy Policy</li></Link>
                       </ul>
                     </div>
