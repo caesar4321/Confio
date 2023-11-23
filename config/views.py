@@ -3,8 +3,6 @@ from django.utils.translation import get_language_from_request
 
 # Create your views here.
 
-supported_languages = dict(LANGUAGE_CHOICES)
-
 def index(request):
 	path = request.path.lower()
 
