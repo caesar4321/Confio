@@ -105,7 +105,7 @@ function HeroSection(props) {
 
               <div className="hero-social-icons">
                 <div className="hs_icon">
-                <a href={ "https://www.linkedin.com/company/duende4world/" } target="_blank">
+                <a href={ "https://www.linkedin.com/company/confio4world/" } target="_blank">
                 <img src={linkedin} alt="linkedin-icon"/>
                 </a>
                 </div>
