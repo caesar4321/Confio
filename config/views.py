@@ -1,7 +1,5 @@
 from django.shortcuts import render, redirect
 from django.utils.translation import get_language_from_request
-from languages import LANGUAGE_CHOICES
-from language_pack import translated_message
 
 # Create your views here.
 
