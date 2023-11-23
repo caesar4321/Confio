@@ -34,9 +34,8 @@ font-weight: 400;
 font-size: 18px;
 }
 .about-right{
-    margin-top: 0;
-    float: right;
-    vertical-align:top;
+    margin-bottom: auto;
+    display:inline-block;
 }
 .about-image{
     width: 100%;
