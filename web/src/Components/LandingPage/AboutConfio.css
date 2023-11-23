@@ -13,7 +13,6 @@
 }
 .about-container{
     display: grid;
-    grid-template-columns: 1fr 1fr;
     align-items: center;
     justify-self: center;
     /* width: 80%; */
@@ -22,9 +21,8 @@
 }      
 .about-left{ 
     justify-self: start;
-    margin-left: 20px;
+    margin: 20px;
     color: #2E1C55;
-    width: 80%;
 }
 .about-description{
 margin-top: 1rem;
@@ -34,6 +32,7 @@ font-weight: 400;
 font-size: 18px;
 }
 .about-right{
+    display: inline;
 }
 .about-image{
     vertical-align: top;
