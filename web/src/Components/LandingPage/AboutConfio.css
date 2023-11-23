@@ -35,7 +35,7 @@ font-size: 18px;
 }
 .about-right{
     text-align: center;
-    vertical-align: top;
+    margin-top: auto;
 }
 .about-image{
     width: 100%;
@@ -94,7 +94,7 @@ font-size: 18px;
   }
   .hero-social-icons-founder{
     margin-top: 1.938rem;
-    padding: 5rem;
+    padding: 2.5rem;
     border-radius: 0.5rem;
     display: flex;
     column-gap: 1.2rem;
