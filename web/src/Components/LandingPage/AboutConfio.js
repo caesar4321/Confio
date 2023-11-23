@@ -38,12 +38,11 @@ function About() {
                   <p className='about-description'>
                     Founder Julian was born and raised in South Korea, where IT and banking infrastructures are phenomenally well-developed. This environment allowed Julian to experience the sleek User Experiences (UX) of Korean finance and fintech ecosystems. After Julian became fascinated by Web 3 and Blockchain, he traveled to Latin America, where he always had been interested in its culture and saw great potential in adopting blockchain in Latin America. The region’s banking infrastructures were very poor, and he had to top up various services’ balances in a rather difficult way. He was pushed to buy various gift cards from grocery stores to transfer money online. It was still heavily a cash-based society. However, at the same time, Julian witnessed Airbnb and Uber are entirely changing foreigners’ experiences in Latin America with lax regulations, or at least its local equivalents, such as Rappi and Cabify, are thriving. Julian came to see that there is room for blockchains to flourish in Latin America with lax regulations, easiness, and flexibility in adopting tech platforms with the region’s young population. Most importantly, there was a great disparity between the unbanked/underbanked population and mobile internet penetration rates. Having lived through 2 years in Latin America, Julian reconfirmed his hypothesis. Julian moved around from Paraguay to the Dominican Republic, to Costa Rica, to Panama, to Colombia, to Ecuador, to Peru, to Argentina, and to Uruguay. He wrapped up his journey at the São Paulo airport in Brazil, dreaming of entirely changing Latin America’s finances and creating the region’s biggest unicorn.
                     </p>
-                    <div className='about-right'>
-                <img src={founder_image} alt='logo' className='about-image'/>
-              </div>
               </div>
 
-              
+              <div className='about-right'>
+                <img src={founder_image} alt='logo' className='about-image'/>
+              </div>
 
        <div className="hero-social-icons-founder">
                 <div className="hs_icon">
