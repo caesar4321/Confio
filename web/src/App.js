@@ -22,8 +22,8 @@ function App() {
         <Switch>
         <Route path='/' exact component={Home} />
           <Route path='/about' exact component={About} />
-          <Route path='/faq' exact component={FaqPage} />
-          <Route path='/terms_of_services' exact component={TermsPage} />
+          <Route path='/frequently_asked_questions' exact component={FaqPage} />
+          <Route path='/terms_of_service' exact component={TermsPage} />
           <Route path='/privacy_policy' exact component={PolicyPage} />
         </Switch>
     </Router>
