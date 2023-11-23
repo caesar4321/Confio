@@ -10,10 +10,10 @@ function TermsHeader() {
           <div className={styles.inner}>
             {/* TITLE */}
             <h1 className={`${styles.title} ${styles.less_margin}`}>
-              Duende Terms of Service
+              Confío Terms of Service
             </h1>
             {/* SUB-TITLE */}
-            <h6 className={styles.sub_title}>Welcome to Duende!</h6>
+            <h6 className={styles.sub_title}>Welcome to Confío!</h6>
           </div>
         </div>
       </header>
