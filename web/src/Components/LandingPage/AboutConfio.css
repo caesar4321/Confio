@@ -12,7 +12,6 @@
     margin-bottom: 3rem;
 }
 .about-container{
-    height: 180vh;
     display: grid;
     grid-template-columns: 1fr 1fr;
     align-items: center;
@@ -96,7 +95,7 @@ font-size: 18px;
     margin-top: 1.938rem;
     display: flex;
     column-gap: 1.2rem;
-    color: #a097ed;
+    background-color: #a097ed;
   }
   .hero-social-icons .hs_icon{
     width: 1.875rem;
