@@ -92,36 +92,7 @@ CHANNEL_LAYERS = {
 
 CELERY_BROKER_URL = 'redis://localhost:6379'
 CELERY_RESULT_BACKEND = 'redis://localhost:6379'
-CELERY_BEAT_SCHEDULE  = {
-    'prune-online': {
-        'task': 'users.tasks.prune_online',
-        'schedule': 60
-    },
-    'update_exchange_rates': {
-        'task': 'finance.tasks.update_exchange_rates',
-        'schedule': timedelta(hours=12)
-    },
-    'perform_payroll': {
-        'task': 'finance.tasks.perform_payroll',
-        'schedule': 60 * 10
-    },
-    'payout': {
-        'task': 'finance.tasks.payout',
-        'schedule': 60 * 10
-    },
-    'double_check_sent_on_chain_transactions': {
-        'task': 'finance.tasks.double_check_sent_on_chain_transactions',
-        'schedule': 30
-    },
-    'sync_receiving_address_with_node_server': {
-        'task': 'finance.tasks.sync_receiving_address_with_node_server',
-        'schedule': 5
-    },
-    'update_market_price_history': {
-        'task': 'exchange.tasks.update_market_price_history',
-        'schedule': 60 * 60
-    },
-}
+
 
 MIDDLEWARE = []
 if DEBUG:
@@ -179,8 +150,6 @@ if DEBUG:
     DATABASES['default']['PASSWORD'] = '12345678'
     DATABASES['default']['HOST'] = 'localhost'
     DATABASES['default']['PORT'] = ''
-
-AUTH_USER_MODEL = 'users.User'
 
 EMAIL_USE_TLS = True
 EMAIL_HOST = 'smtp.elasticemail.com'
