@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import TermsHeader from "../../components/FaqPage/PolicyHeader";
+import TermsHeader from "../../Components/FaqPage/PolicyHeader";
 import styles from "../../styles/TermsPage.module.css";
 import WebSocketInstance from '../../websocket.js';
 

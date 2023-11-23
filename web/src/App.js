@@ -1,15 +1,15 @@
 import React from 'react';
 import "react-accessible-accordion/dist/fancy-example.css";
-import Navbar from './components/LandingPage/Navbar';
+import Navbar from './Components/LandingPage/Navbar';
 import './App.css';
 import Home from './pages/Home';
 import { BrowserRouter as Router, Switch, Route } from 'react-router-dom';
 import FaqPage from './pages/FaqPage/FaqPage'
 import TermsPage from './pages/TermsPage/TermsPage'
-import SignIn from './components/SignIn/index'
-import SignUp from './components/SignUp/index'
+import SignIn from './Components/SignIn/index'
+import SignUp from './Components/SignUp/index'
 import PolicyPage from './pages/PolicyPage/PolicyPage'
-import About from './components/LandingPage/AboutConfio'
+import About from './Components/LandingPage/AboutConfio'
 
 
 function App() {

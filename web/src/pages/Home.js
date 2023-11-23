@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import '../App.css';
-import HeroSection from '../components/LandingPage/HeroSection';
-import Footer from '../components/LandingPage/Footer';
-import About from '../components/LandingPage/AboutConfio'
+import HeroSection from '../Components/LandingPage/HeroSection';
+import Footer from '../Components/LandingPage/Footer';
+import About from '../Components/LandingPage/AboutConfio'
 
 window.history.pushState(null, null, window.location.href);
 window.onpopstate = function(event) {

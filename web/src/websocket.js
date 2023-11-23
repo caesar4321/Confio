@@ -4,7 +4,7 @@ import { WebSocketLink } from '@apollo/client/link/ws';
 import { SubscriptionClient } from 'subscriptions-transport-ws';
 import { onError } from '@apollo/client/link/error';
 
-import LanguagePack from './components/LanguagePack';
+import LanguagePack from './Components/LanguagePack';
 
 export const DEBUG = false;
 const WEBSOCKET_BASE_URL =

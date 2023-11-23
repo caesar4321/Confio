@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import FaqHeader from "../../components/FaqPage/FaqHeader";
+import FaqHeader from "../../Components/FaqPage/FaqHeader";
 import WebSocketInstance from '../../websocket.js';
 import '../../styles/FaqAccordion.css'
 import styles from '../../styles/FaqPage.module.css'

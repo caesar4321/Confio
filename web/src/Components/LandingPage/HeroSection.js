@@ -1,6 +1,6 @@
 // import React from 'react';
 import React, { useState } from "react";
-import LanguagePack from '../../components/LanguagePack';
+import LanguagePack from '../../Components/LanguagePack';
 import ReactPlayer from "react-player";
 import "../../App.css";
 import { Link } from "react-router-dom";
