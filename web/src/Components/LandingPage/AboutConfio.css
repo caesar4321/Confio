@@ -34,8 +34,9 @@ font-weight: 400;
 font-size: 18px;
 }
 .about-right{
-    text-align: center;
-    margin-top: auto;
+    margin-top: 0;
+    float: right;
+    vertical-align:top;
 }
 .about-image{
     width: 100%;
