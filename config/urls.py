@@ -17,7 +17,7 @@ from django.contrib import admin
 from django.urls import path, re_path
 from django.views.generic import TemplateView
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
-from .views import `
+from .views import index
 from .sitemaps import StaticViewSitemap, LocalizationSitemap
 from django.contrib.sitemaps.views import sitemap
 from graphene_django.views import GraphQLView
