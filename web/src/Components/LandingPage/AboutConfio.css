@@ -92,3 +92,12 @@ font-size: 18px;
          font-size: 15px;
      }
   }
+  .hero-social-icons{
+    margin-top: 1.938rem;
+    display: flex;
+    column-gap: 1.2rem;
+  }
+  .hero-social-icons .hs_icon{
+    width: 1.875rem;
+    cursor: pointer;
+  }

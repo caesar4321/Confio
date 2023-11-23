@@ -103,7 +103,7 @@ function HeroSection(props) {
                   <img className="downloadBtn" src={apple} alt="Get It On Google Pay" />
                 </>
 
-                <div className="hero-social-icons">
+              <div className="hero-social-icons">
                 <div className="hs_icon">
                 <a href={ "https://www.linkedin.com/company/duende4world/" } target="_blank">
                 <img src={linkedin} alt="linkedin-icon"/>
