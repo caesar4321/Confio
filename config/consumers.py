@@ -2,7 +2,6 @@ import channels_graphql_ws
 from .schema import schema
 from django.conf import settings
 from channels.auth import get_user
-from users import models as users_models
 from channels.db import database_sync_to_async
 from django.core.cache import cache
 
@@ -45,12 +44,6 @@ class MyGraphqlWsConsumer(channels_graphql_ws.GraphqlWsConsumer):
 			user = self.scope['user']
 		else:
 			user = None
-		await self.initialize_online(user)
-
-	@database_sync_to_async
-	def initialize_online(self, user):
-		online = users_models.Online(channel_name=self.channel_name, user=user)
-		online.save()
 
 	async def idle_close(self, event):
 		await self.close(1000) # 1001 is server or browser is away from... but 1001 is not allowed for close()
@@ -59,21 +52,10 @@ class MyGraphqlWsConsumer(channels_graphql_ws.GraphqlWsConsumer):
 	async def receive(self, text_data=None, bytes_data=None, **kwargs):
 		last_active = cache.get(self.channel_name)
 
-		if not last_active:
-			await self.update_online()
 		if text_data:
 			await self.receive_json(await self.decode_json(text_data), **kwargs) #Graphql-websocket receive_json()
 		else:
 			raise ValueError("No text section for incoming WebSocket frame!")
-
-	@database_sync_to_async
-	def update_online(self):
-		try:
-			online = users_models.Online.objects.get(channel_name=self.channel_name)
-			online.save()
-			cache.set(self.channel_name, 1, 25)
-		except:
-			pass
 
 class MyGraphqlAppWsConsumer(channels_graphql_ws.GraphqlWsConsumer):
 	"""Channels WebSocket consumer which provides GraphQL API."""
@@ -94,12 +76,6 @@ class MyGraphqlAppWsConsumer(channels_graphql_ws.GraphqlWsConsumer):
 			user = self.scope['user']
 		else:
 			user = None
-		await self.initialize_online(user)
-
-	@database_sync_to_async
-	def initialize_online(self, user):
-		online = users_models.Online(channel_name=self.channel_name, user=user)
-		online.save()
 
 	async def idle_close(self, event):
 		await self.close(1000) # 1001 is server or browser is away from... but 1001 is not allowed for close()
@@ -108,18 +84,7 @@ class MyGraphqlAppWsConsumer(channels_graphql_ws.GraphqlWsConsumer):
 	async def receive(self, text_data=None, bytes_data=None, **kwargs):
 		last_active = cache.get(self.channel_name)
 
-		if not last_active:
-			await self.update_online()
 		if text_data:
 			await self.receive_json(await self.decode_json(text_data), **kwargs) #Graphql-websocket receive_json()
 		else:
 			raise ValueError("No text section for incoming WebSocket frame!")
-
-	@database_sync_to_async
-	def update_online(self):
-		try:
-			online = users_models.Online.objects.get(channel_name=self.channel_name)
-			online.save()
-			cache.set(self.channel_name, 1, 25)
-		except:
-			pass
