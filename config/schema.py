@@ -1,12 +1,13 @@
 import graphene
+from graphene_django.types import DjangoObjectType
 
-class Query(graphene.ObjectType):
+class Query(DjangoObjectType):
 	pass
 
-class Mutation(graphene.ObjectType):
+class Mutation(DjangoObjectType):
 	pass
 
-class Subscription(graphene.ObjectType):
+class Subscription(DjangoObjectType):
 	pass
 
 schema = graphene.Schema(query=Query, mutation=Mutation, subscription=Subscription)
