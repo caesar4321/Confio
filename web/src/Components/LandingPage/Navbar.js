@@ -80,7 +80,7 @@ function Navbar() {
                     About
                   </li>
                 </Link>
-                <Link to={`/faq`}>
+                <Link to={`/frequently_asked_questions`}>
                   <li
                     onMouseOver={() => closeNavTabs()}
                     onClick={() => closeNavTabs()}
