@@ -1,5 +1,5 @@
-import aderess from '../../images/aderess.png';
-import threejs from '../../images/threejs.png';
+import address from '../../images/aderess.png';
+import roadmap from '../../images/threejs.png';
 import payment from '../../images/payment.png';
 import whitepaper from '../../images/whitepaper.png'
 import services from '../../images/services.png'
@@ -10,13 +10,13 @@ import policy from '../../images/policy.png'
 
 export const MenuItems1 = [
   {
-    src:whitepaper,
+    src: whitepaper,
     title: 'Whitepaper',
     // path: '/marketing',
     cName: 'dropdown-link'
   },
   {
-    src:aderess,
+    src: address,
     title: 'Token Contract Address',
     path: '/consulting',
     cName: 'dropdown-link'
