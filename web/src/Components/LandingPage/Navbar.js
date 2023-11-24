@@ -110,8 +110,8 @@ function Navbar() {
                       <ul className={styles.hidden_list}>
                       <Link to={{ pathname: "https://medium.com/confio4world/confío-latin-americas-paypal-3784e12341e2" }} target="_blank" ><li>Whitepaper</li></Link>
                       <Link to={{ pathname: "https://etherscan.io/token/0xb5653dce3ae89de4b2b2238026eeb691fb094269" }} target="_blank"><li>Token Contract Address</li></Link>
-                      <Link to={`/`}><li>Roadmap</li></Link>
-                      <Link to={`/`}><li>Proof of Payment Stream</li></Link>
+                      <Link to={{ pathname: "https://medium.com/confio4world/confío-roadmap-from-latin-americas-paypal-to-having-a-mainnet-2c9bdfbc742e" }} target="_blank"><li>Roadmap</li></Link>
+                      <Link to={{ pathname: "https://medium.com/confio4world/proof-of-payment-stream-as-did-decentralized-identity-for-confío-93fbcdbf3ab6" }} target="_blank"><li>Proof of Payment Stream (NFT)</li></Link>
 
                       </ul>
                     </div>
