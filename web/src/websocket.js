@@ -8,9 +8,9 @@ import LanguagePack from './Components/LanguagePack';
 
 export const DEBUG = false;
 const WEBSOCKET_BASE_URL =
-	DEBUG ? 'ws://127.0.0.1:8000/graphql/' : 'wss://duende.me/graphql/';
+	DEBUG ? 'ws://127.0.0.1:8000/graphql/' : 'wss://confio.me/graphql/';
 const HTTP_BASE_URL =
-	DEBUG ? 'http://127.0.0.1:8000' :  'https://duende.me';
+	DEBUG ? 'http://127.0.0.1:8000' :  'https://confio.me';
 const authObservable = createRef();
 
 class WebSocketService {
