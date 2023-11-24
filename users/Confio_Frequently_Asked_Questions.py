@@ -22,7 +22,7 @@ data = {
 			{
 				"header": "4. Who's Behind Confío?",
 				"paragraphs": [
-					"Confío was started by Julian, a fresh graduate from Yonsei University in Korea, who always wished to change the world for a better place. He founded Duende Limited in 2019 in Seychelles and developed the Duende app from scratch as a self-taught programmer. After that, he changed the name to Confío."
+					"Confío was started by Julian, a fresh graduate from Yonsei University in Korea, who always wished to change the world for a better place. He founded Duende Limited in 2019 in Seychelles and developed the Duende app from scratch as a self-taught programmer. He did everything from planning to developing the app to marketing. After that, he changed the name to Confío for rebranding to form a team and supportive community with a fresh atmosphere."
 				]
 			},
 			{
@@ -46,13 +46,13 @@ data = {
 			{
 				"header": "8. Why Did Confío Not Start Over All Social Media But Inherrited All Social/Group from Duende?",
 				"paragraphs": [
-					"Some people advisesd Julian that he needs to start all over from a completely new group/social, because we made a lot of mistakes in the past and there are our footprints. However, the founder Julian personally believes that the history and our current moves add more trust on us."
+					"Some people advisesd Julian that he needs to start all over from a completely new group/social, because we made a lot of mistakes in the past and there are our footprints and people can criticize us. However, the founder Julian personally believes that the history and our current moves add more trust on us."
 				]
 			},
 			{
-				"header": "9. How Many Team Members Do You Have?",
+				"header": "9. What's Confío Team Composed Of?",
 				"paragraphs": [
-					"We used to have many more, but now except the founder Julian, who has stayed with Confío from the begining without any compensation, there are one more senior Product Designer and another senior Programmer Julian can immediately reach out to re-join the team. They have left the team due to the lack of the funds of the project."
+					"We used to have many more team members, but now except the founder Julian, who has stayed with Confío from the begining without any compensation, there are one more Senior Product Designer and another Senior Programmer Julian can immediately reach out to re-join the team. All team members other than Julian has left the team due to the lack of the funds of the project. As Julian now understands the necessity of the crypto marketing much better than before, Julian is communicating and advised by many reputable marketing agencies that have extensive experiences in crypto marketing/listings."
 				]
 			},
 			{
