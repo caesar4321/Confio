@@ -52,7 +52,7 @@ data = {
 			{
 				"header": "9. What's Confío Team Composed Of?",
 				"paragraphs": [
-					"We used to have many more team members, but now except the founder Julian, who has stayed with Confío from the begining without any compensation, there are one more Senior Product Designer and another Senior Programmer Julian can immediately reach out to re-join the team. All team members other than Julian has left the team due to the lack of the funds of the project. As Julian now understands the necessity of the crypto marketing much better than before, Julian is communicating and advised by many reputable marketing agencies that have extensive experiences in crypto marketing/listings."
+					"We used to have many more team members, but now except the founder Julian, who has stayed with Confío from the begining without any compensation, there are one more Senior Product Designer and another Senior Programmer Julian can immediately reach out to re-join the team. All team members other than Julian has left the team due to the lack of the funds of the project. As Julian also understands the necessity of the crypto marketing now much better than before, Julian is actively communicating and being advised by many reputable marketing agencies that have extensive experiences in crypto marketing/listings."
 				]
 			},
 			{
