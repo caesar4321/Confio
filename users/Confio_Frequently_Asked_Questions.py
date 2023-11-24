@@ -46,7 +46,7 @@ data = {
 			{
 				"header": "8. Why Did Confío Not Start Over All Social Media But Inherrited All Social/Group from Duende?",
 				"paragraphs": [
-					"Some people advisesd Julian that he needs to start all over from a completely new group/social, because we made a lot of mistakes in the past and there are our footprints and people can criticize us. However, the founder Julian personally believes that the history and our current moves add more trust on us."
+					"Some people advised that Julian needs to start all over from a completely new group/social, because we made a lot of mistakes in the past and there are our footprints that people can track and criticize us. However, the founder Julian personally believes that the history of our mistakes and our current moves willing to learn from the mistakes add more trust on us."
 				]
 			},
 			{
