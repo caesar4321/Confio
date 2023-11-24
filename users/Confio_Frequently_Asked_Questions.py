@@ -4,13 +4,13 @@ data = {
 			{
 				"header": "1. What Do You Mean By 'Latin America's PayPal?'",
 				"paragraphs": [
-					"We aim to be Latin America's PayPal by helping Venezuelans and Argentines from hyperinflation by allowing them to pay and send in US dollar stablecoins and then expanding to the whole Latin America."
+					"We aim to be Latin America's PayPal by helping Venezuelans and Argentines from hyperinflation by allowing them to pay and send in US dollar stablecoins and then expanding to the whole Latin America. We set our headline as such, because PayPal is already an established reputable service everyone knows, so it is easy for people to understand."
 				]
 			},
 			{
 				"header": "2. What Is US Dollar Stablecoin?",
 				"paragraphs": [
-					"US Dollar stablecoin is a cryptocurrency that is pegged to one United States dollar per one coin by depositing the same worth of assets in financial instutitions. Confío is not affiliated with any US dollar stablecoins. Please visit their website for more information."
+					"US Dollar stablecoin is a cryptocurrency that is pegged to one United States dollar per one coin by depositing the same worth of assets in financial instutitions. It is much easier to deliver and make the US dollar stablecoins circulate than traditional US dollars in the vulnerable economies, so we chose to take advantage of the US dolar stablecoins that are on permissionless blockchains."
 				]
 			},
 			{
@@ -22,13 +22,13 @@ data = {
 			{
 				"header": "4. Who's Behind Confío?",
 				"paragraphs": [
-					"Confío was started by Julian, a fresh graduate from Yonsei University in Korea, who always wished to change the world for a better place. He founded Duende Limited in 2019 in Seychelles and developed the Duende app from scratch as a self-taught programmer. He did everything from planning to developing the app to marketing. After that, he changed the name to Confío for rebranding to form a team and supportive community with a fresh atmosphere."
+					"Confío was started by Julian, a fresh graduate from Yonsei University in Korea back then, who always wished to change the world for a better place. He founded Duende Limited in 2019 in Seychelles and developed the Duende app from scratch as a self-taught programmer. He did everything from planning to developing the app to marketing. After that, he changed the name to Confío for rebranding to form a new team and supportive community with a fresh atmosphere."
 				]
 			},
 			{
 				"header": "5. What Was Julian's Initiative to Start Confío?",
 				"paragraphs": [
-					"If you ask why he is interested in solving Venezuela's problem, which is far from his home country (Korea), it is because he believes, in the end, cryptocurrencies should be helpful for people. Of course, many people will make a lot of money in the process, but that's not the primary purpose he believes in. One day, the news caught his attention that Venezuela was suffering from hyperinflation, so people couldn't afford to buy food and gasoline. He thought this was a problem worth dedicating his time to and, to a more significant extent, a part of his life that should hopefully be helpful for Venezuelans."
+					"If you ask why Julian is interested in solving Venezuela's problem, which is far from his home country (Korea), it is because he believes, in the end, cryptocurrencies should be helpful for people. Of course, many people will make a lot of money in the process, but that's not the primary purpose he believes in. One day, the news caught his attention that Venezuela was suffering from hyperinflation, so people couldn't afford to buy food and gasoline. He thought this was a problem worth dedicating his time to and, to a more significant extent, a part of his life that should hopefully be helpful for Venezuelans."
 				]
 			},
 			{
@@ -58,7 +58,7 @@ data = {
 			{
 				"header": "10. What's Next for Us?",
 				"paragraphs": [
-					"Building a global English community, expanding it to Latin American(Spanish/Portuguese) community, interacting with and getting feedback from the community, expanding rapidly with supports from the community, and finally becomming the biggest unicorn in Latin America."
+					"Building a global English crypto community, expanding it to Latin American(Spanish/Portuguese) crypto community, interacting with and getting feedback from the community in the process of developing the Confío services, expanding rapidly with supports from the community, targeting and marketing ordinary, Web 3 people in Venezuela and Argentina, expanding to other Latin American neighboring countries with a single market strategies based on the same language(Spanish) and similar historical/cultural backgrounds, and finally becomming Latin America's biggest unicorn."
 				]
 			},
 		],
