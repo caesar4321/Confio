@@ -38,7 +38,6 @@ urlpatterns = [
     path('terms_of_service/', ensure_csrf_cookie(index), name='terms_of_service'),
     path('privacy_policy/', ensure_csrf_cookie(index), name='privacy_policy'),
     path('frequently_asked_questions/', ensure_csrf_cookie(index), name='frequently_asked_questions'),
-    path('whitepaper/', ensure_csrf_cookie(index), name='whitepaper'),
     path('career/programmer/', ensure_csrf_cookie(index), name='career/programmer'),
     path('career/content_creator', ensure_csrf_cookie(index), name='career/content_creator'),
     re_path(r'^[a-z]{2}/terms_of_service/$', ensure_csrf_cookie(index)),
