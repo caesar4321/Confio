@@ -2,7 +2,7 @@ import graphene
 import channels_graphql_ws
 from graphene_django.types import DjangoObjectType
 from . import Confio_Terms_of_Service, Confio_Privacy_Policy, Confio_Frequently_Asked_Questions
-
+import json
 
 class Query(graphene.ObjectType):
 	terms_of_service = graphene.String(language=graphene.String())
