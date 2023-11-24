@@ -58,7 +58,7 @@ data = {
 			{
 				"header": "10. What's Next for Us?",
 				"paragraphs": [
-					"1. Building a global English crypto community."
+					"1. Building a global English crypto community.",
 					"2. Expanding it to Latin American(Spanish/Portuguese) crypto community,",
 					"3. Interacting with and getting feedback from the community in the process of developing the Confío services.",
 					"4. Expanding rapidly with supports from the community.",
