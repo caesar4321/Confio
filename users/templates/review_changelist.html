@@ -1,0 +1,6 @@
+{% extends 'admin/change_list.html' %}
+
+{% block object-tools %}
+    <span>Average Rating <b>{{ average_rating }}</b></span><br>
+    {{ block.super }}
+{% endblock %}

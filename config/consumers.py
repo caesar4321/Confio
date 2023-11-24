@@ -25,7 +25,7 @@ class MyGraphqlWsConsumer(channels_graphql_ws.GraphqlWsConsumer):
 		if settings.DEBUG:
 			return True
 		else:
-			if origin == 'https://duende.me' or origin == 'https://www.duende.me':
+			if origin == 'https://confio.me' or origin == 'https://www.confio.me':
 				return True
 			else:
 				return False
