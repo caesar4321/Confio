@@ -58,7 +58,7 @@ data = {
 			{
 				"header": "10. What's Next for Us?",
 				"paragraphs": [
-					"Building a global English crypto community, expanding it to Latin American(Spanish/Portuguese) crypto community, interacting with and getting feedback from the community in the process of developing the Confío services, expanding rapidly with supports from the community, targeting and marketing ordinary, Web 3 people in Venezuela and Argentina, expanding to other Latin American neighboring countries with a single market strategies based on the same language(Spanish) and similar historical/cultural backgrounds, and finally becomming Latin America's biggest unicorn."
+					"Building a global English crypto community, expanding it to Latin American(Spanish/Portuguese) crypto community, interacting with and getting feedback from the community in the process of developing the Confío services, expanding rapidly with supports from the community, targeting and marketing ordinary, Web 2 people in Venezuela and Argentina, expanding to other Latin American neighboring countries with a single market strategies based on the same language(Spanish) and similar historical/cultural backgrounds, and finally becomming Latin America's biggest unicorn."
 				]
 			},
 		],
