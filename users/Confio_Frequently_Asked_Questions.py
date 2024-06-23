@@ -52,22 +52,16 @@ data = {
 			{
 				"header": "9. What's Confío Team Composed Of?",
 				"paragraphs": [
-					"We used to have many more team members, but now except the founder Julian, who has stayed with Confío from the begining without any compensation, there are one more Senior Product Designer and another Senior Programmer Julian can immediately reach out to re-join the team. All team members other than Julian has left the team due to the lack of the funds of the project. As Julian also understands the necessity of the crypto marketing now much better than before, Julian is actively communicating and being advised by many reputable marketing agencies that have extensive experiences in crypto marketing/listings."
+					"We used to have many more team members, but now except the founder Julian, who has stayed with Confío from the begining without any compensation, all other team members have left due to the lack of the funds of the project. Julian did not give up and kept persuing it, rebranding the name, as an influencer/community token/project."
 				]
 			},
 			{
 				"header": "10. What's Next for Us?",
 				"paragraphs": [
-					"1. Building a global English crypto community.",
-					"2. Expanding it to Latin American(Spanish/Portuguese) crypto community,",
-					"3. Interacting with and getting feedback from the community in the process of developing the Confío services.",
-					"4. Expanding rapidly with supports from the community.",
-					"5. Targeting and marketing ordinary, Web 2 people in Venezuela and Argentina.",
-					"6. Expanding to other Latin American neighboring countries with a single market strategy based on the same language(Spanish) and similar historical/cultural backgrounds.",
-					"7. Finally becomming Latin America's biggest unicorn."
+					"Watch how Julian is building a new community from scratch with his TikTok influencer activites in Latin America."
 				]
 			},
 		],
-		"effectiveDate": "Last Update: November 24, 2023"
+		"effectiveDate": "Last Update: June 23, 2024"
 	},
 }
