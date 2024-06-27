@@ -76,8 +76,30 @@ function Navbar() {
                     <div className={openDuendeWorldList ? `${styles.holder_hidden_list} ${styles.active}` : `${styles.holder_hidden_list}`}>
                       {/* HIDDEN LIST */}
                       <ul className={styles.hidden_list}>
-                        <Link to={{ pathname: "https://medium.com/confio4world/confío-latin-americas-paypal-3784e12341e2" }} target="_blank">
+                        <Link
+                          to={{
+                            pathname:
+                              "https://medium.com/confio4world/duende-cryptocurrency-and-its-exclusive-payment-platform-to-facilitate-cryptocurrency-mass-c0a7499d0e81",
+                          }}
+                          target="_blank"
+                        >
                           <li>Whitepaper</li>
+                        </Link>
+                        <Link
+                          to={{
+                            pathname: "https://docs.google.com/presentation/d/1wRK7VE90fOZT8rqx2My61GKYJt7SPtum9ZMO2F1CK1Q/edit?usp=sharing",
+                          }}
+                          target="_blank"
+                        >
+                          <li>Pitch Deck</li>
+                        </Link>
+                        <Link
+                          to={{
+                            pathname: "https://docs.google.com/document/d/19qr-dRVtHgyxJ97sevJZYhyeyJ4-eXjDiC4W8ZbPBt0/edit?usp=sharing",
+                          }}
+                          target="_blank"
+                        >
+                          <li>Lean Canvas</li>
                         </Link>
                         <Link to={{ pathname: "https://etherscan.io/token/0xb5653dce3ae89de4b2b2238026eeb691fb094269" }} target="_blank">
                           <li>Token Contract Address</li>
