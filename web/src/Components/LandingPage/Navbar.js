@@ -101,7 +101,7 @@ function Navbar() {
                         >
                           <li>Lean Canvas</li>
                         </Link>
-                        <Link to={{ pathname: "https://etherscan.io/token/0xb5653dce3ae89de4b2b2238026eeb691fb094269" }} target="_blank">
+                        <Link to={{ pathname: "https://solscan.io/token/J4D4RmKCwmV4d93hcUrq6DQwDBWtV2eSevHGCp2PzhoH" }} target="_blank">
                           <li>Token Contract Address</li>
                         </Link>
                         <Link
