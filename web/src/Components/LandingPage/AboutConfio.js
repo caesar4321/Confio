@@ -25,8 +25,7 @@ function About() {
                 <img src={"https://sos-ch-dk-2.exo.io/duende-public/preview_image.jpeg"} alt="logo" className="about-image" />
                 <h1 className="about_heading">About Confío</h1>
                 <span className="about-description">
-                  Confío aims to be Latin America's PayPal by helping Venezuelans and Argentines from hyperinflation by allowing them to pay in US dollar
-                  stablecoins.
+                  Confío aims to be Latin America's PayPal by helping Venezuelans and Argentines from hyperinflation by allowing them to pay and send in US dollar stablecoins.
                 </span>
               </div>
             </div>
@@ -44,39 +43,38 @@ function About() {
                   regulations, or at least its local equivalents, such as Rappi and Cabify, are thriving. Julian came to see that there is room for blockchains
                   to flourish in Latin America with lax regulations, easiness, and flexibility in adopting tech platforms with the region’s young population.
                   Most importantly, there was a great disparity between the unbanked/underbanked population and mobile internet penetration rates. Having lived
-                  through 2 years in Latin America, Julian reconfirmed his hypothesis. Julian moved around from Paraguay to the Dominican Republic, to Costa
-                  Rica, to Panama, to Colombia, to Ecuador, to Peru, to Argentina, and to Uruguay. He wrapped up his journey at the São Paulo airport in Brazil,
-                  dreaming of entirely changing Latin America’s finances and creating the region’s biggest unicorn.
+                  through 2 years in Latin America, Julian reconfirmed his hypothesis. Julian nomaded from Paraguay to the Dominican Republic, Costa
+                  Rica, Panama, Colombia, Ecuador, Peru, Argentina, Uruguay, Mexico, Guatemala, El Salvador, Brazil. His journey is still on-going, dreaming of entirely revolutioinalizing Latin America’s finances and creating the region’s biggest unicorn.
                 </span>
 
                 <div className="hero-social-icons-founder">
                   <div className="hs_icon">
-                    <a href={"https://www.linkedin.com/in/JulianMoonLuna/"} target="_blank">
+                    <a href={"https://www.linkedin.com/in/julianmoonluna/"} target="_blank">
                       <img src={linkedin} alt="linkedin-icon" />
                     </a>
                   </div>
                   <div className="hs_icon">
-                    <a href={"https://tiktok.com/@JulianMoonLuna"} target="_blank">
+                    <a href={"https://tiktok.com/@julianmoonluna"} target="_blank">
                       <img src={tiktok} alt="tiktok-icon" />
                     </a>
                   </div>
                   <div className="hs_icon">
-                    <a href={"https://t.me/JulianMoonLuna/"} target="_blank">
+                    <a href={"https://t.me/julianmoonluna/"} target="_blank">
                       <img src={telegram} alt="telegram-icon" />
                     </a>
                   </div>
                   <div className="hs_icon">
-                    <a href={"https://x.com/JulianMoonLuna"} target="_blank">
+                    <a href={"https://x.com/julianmoonluna"} target="_blank">
                       <img src={twitter} alt="twitter-icon" />
                     </a>
                   </div>
                   <div className="hs_icon">
-                    <a href={"https://instagram.com/JulianMoonLuna"} target="_blank">
+                    <a href={"https://instagram.com/julianmoonluna"} target="_blank">
                       <img src={instagram} alt="instagram-icon" />
                     </a>
                   </div>
                   <div className="hs_icon">
-                    <a href={"https://youtube.com/@JulianMoonLuna"} target="_blank">
+                    <a href={"https://youtube.com/@julianmoonluna"} target="_blank">
                       <img src={youTube} alt="youTube-icon" />
                     </a>
                   </div>

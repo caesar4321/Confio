@@ -52,7 +52,7 @@ data = {
 			{
 				"header": "9. What's Confío Team Composed Of?",
 				"paragraphs": [
-					"We used to have many more team members, but now except the founder Julian, who has stayed with Confío from the begining without any compensation, all other team members have left due to the lack of the funds of the project. Julian did not give up and kept persuing it, rebranding the name, as an influencer/community token/project."
+					"Founder Julian (South Korea), Designer Susy (Guatemala), Programmer Jaesung (South Korea). We didn't initially start as a team. They are rather community members who voluteered to work for Julian's vision for free for quite a while."
 				]
 			},
 			{

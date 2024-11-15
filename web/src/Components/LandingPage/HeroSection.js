@@ -100,33 +100,13 @@ function HeroSection(props) {
 
               <div className="hero-social-icons">
                 <div className="hs_icon">
-                  <a href={"https://linkedin.com/company/confio4world/"} target="_blank">
-                    <img src={linkedin} alt="linkedin-icon" />
-                  </a>
-                </div>
-                <div className="hs_icon">
-                  <a href={"https://t.me/confio4world"} target="_blank">
+                  <a href={"https://t.me/FansDeJulian"} target="_blank">
                     <img src={telegram} alt="telegram-icon" />
-                  </a>
-                </div>
-                <div className="hs_icon">
-                  <a href={"https://tiktok.com/@confio4world"} target="_blank">
-                    <img src={tiktok} alt="tiktok-icon" />
                   </a>
                 </div>
                 <div className="hs_icon">
                   <a href={"https://x.com/confio4world"} target="_blank">
                     <img src={twitter} alt="twitter-icon" />
-                  </a>
-                </div>
-                <div className="hs_icon">
-                  <a href={"https://instagram.com/confio4world"} target="_blank">
-                    <img src={instagram} alt="instagram-icon" />
-                  </a>
-                </div>
-                <div className="hs_icon">
-                  <a href={"https://youtube.com/@confio4world"} target="_blank">
-                    <img src={youTube} alt="youTube-icon" />
                   </a>
                 </div>
               </div>
