@@ -12,12 +12,6 @@ export const MenuItems1 = [
     cName: "dropdown-link",
   },
   {
-    src: address,
-    title: "Token Contract Address",
-    path: "/consulting",
-    cName: "dropdown-link",
-  },
-  {
     src: payment,
     title: "Julian's Web3 Community Token Distribution",
     path: "/design",

@@ -11,8 +11,6 @@ function Footer() {
             <Link to='/'>About Us</Link>
             <Link to='/'>FAQ</Link>
             <Link to='/'>Whitepaper</Link>
-            <Link to='/'>Token Contract Address</Link>
-            <Link to='/'>Proof of Payment Stream</Link>
             <Link to='/'>Terms of Service</Link>
             <Link to='/'>Privacy Policy</Link>
           </div>

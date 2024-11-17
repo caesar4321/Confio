@@ -101,9 +101,9 @@ function Navbar() {
                         >
                           <li>Lean Canvas</li>
                         </Link>
-                        <Link to={{ pathname: "https://solscan.io/token/J4D4RmKCwmV4d93hcUrq6DQwDBWtV2eSevHGCp2PzhoH" }} target="_blank">
+                        {/*<Link to={{ pathname: "https://solscan.io/token/J4D4RmKCwmV4d93hcUrq6DQwDBWtV2eSevHGCp2PzhoH" }} target="_blank">
                           <li>Token Contract Address</li>
-                        </Link>
+                        </Link>*/}
                         <Link
                           to={{ pathname: "https://docs.google.com/spreadsheets/d/1weknEMqEiq90V53MqRGs8pZouM8ycfTwrRhWfjuAUPc/edit?usp=sharing" }}
                           target="_blank"
