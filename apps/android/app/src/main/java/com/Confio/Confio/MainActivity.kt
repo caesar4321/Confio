@@ -1,4 +1,4 @@
-package com.confio.confio
+package com.Confio.Confio
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate

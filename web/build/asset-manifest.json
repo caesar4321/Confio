@@ -1,26 +1,19 @@
 {
   "files": {
-    "main.css": "/static/css/main.ea1e9c85.css",
-    "main.js": "/static/js/main.1c6baa50.js",
-    "static/media/header_bg.svg": "/static/media/header_bg.63ea2f8d3ae5413adf41.svg",
-    "static/media/Frame 2.png": "/static/media/Frame 2.52a860d83cbe08a322f6.png",
-    "static/media/Dashboard.png": "/static/media/Dashboard.507ab35a1698aa2122b6.png",
-    "static/media/founder_image.jpeg": "/static/media/founder_image.77611b65ceb3c7457238.jpeg",
-    "static/media/ELFS.png": "/static/media/ELFS.f85a4884ec55fd64509f.png",
-    "static/media/logo.svg": "/static/media/logo.63f90d130171e3af6c80bfeec2ef8a81.svg",
-    "static/media/instagram_icon.svg": "/static/media/instagram_icon.323c28561b88b6f6a6dce7f380551aed.svg",
-    "static/media/discord_icon.svg": "/static/media/discord_icon.2352b6cd2d571249b7c320bbfc7aec24.svg",
+    "main.css": "/static/css/main.9e73eef2.css",
+    "main.js": "/static/js/main.dd3c304e.js",
+    "static/media/JulianMoon_Founder.jpeg": "/static/media/JulianMoon_Founder.77611b65ceb3c7457238.jpeg",
+    "static/media/$cUSD.png": "/static/media/$cUSD.661eddfa58b01fe037d4.png",
+    "static/media/TikTok.png": "/static/media/TikTok.c0aae623631b10c441d6.png",
+    "static/media/Telegram.png": "/static/media/Telegram.d3e76dd5d32093b7e448.png",
+    "static/media/$CONFIO.png": "/static/media/$CONFIO.e77f3e4c08a252bdbb03.png",
+    "static/media/ConfioApp.jpeg": "/static/media/ConfioApp.fa3a0133b07fb6fba31c.jpeg",
     "index.html": "/index.html",
-    "static/media/twitter_icon.svg": "/static/media/twitter_icon.0d46016f07ad3d12abde784b6b21d91f.svg",
-    "static/media/telegram_icon.svg": "/static/media/telegram_icon.d524ce60a5271a2d84bbeb6759286b02.svg",
-    "static/media/youTube_icon.svg": "/static/media/youTube_icon.d48aa42ca450609df0f79873f1c29a26.svg",
-    "static/media/linkedIn_icon.svg": "/static/media/linkedIn_icon.c97e33eef06d97d544be57c16a0d1c7e.svg",
-    "static/media/tikTok_icon.svg": "/static/media/tikTok_icon.d687b7f8656c481eaa96d0dc26b003ad.svg",
-    "main.ea1e9c85.css.map": "/static/css/main.ea1e9c85.css.map",
-    "main.1c6baa50.js.map": "/static/js/main.1c6baa50.js.map"
+    "main.9e73eef2.css.map": "/static/css/main.9e73eef2.css.map",
+    "main.dd3c304e.js.map": "/static/js/main.dd3c304e.js.map"
   },
   "entrypoints": [
-    "static/css/main.ea1e9c85.css",
-    "static/js/main.1c6baa50.js"
+    "static/css/main.9e73eef2.css",
+    "static/js/main.dd3c304e.js"
   ]
 }

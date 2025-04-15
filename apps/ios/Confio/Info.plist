@@ -9,7 +9,7 @@
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<string>com.Confio.Confio</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -48,5 +48,39 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<!-- Google Sign-in -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<!-- Development (Sui Test) URL scheme -->
+				<string>com.googleusercontent.apps.1001709244115-2h2k3sdvr3ggr1t5pgob4pkb3k92ug1p</string>
+				<!-- Production URL scheme -->
+				<string>com.googleusercontent.apps.730050241347-m60gqh7aahb818c6g7vb4jkpkl5iauld</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.Confio.Confio</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.Confio.Confio</string>
+				<string>confio</string>
+				<string>Confio</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>googlechrome</string>
+		<string>googlechromes</string>
+		<string>com.googleusercontent.apps.1001709244115-2h2k3sdvr3ggr1t5pgob4pkb3k92ug1p</string>
+		<string>com.googleusercontent.apps.730050241347-m60gqh7aahb818c6g7vb4jkpkl5iauld</string>
+	</array>
 </dict>
 </plist>

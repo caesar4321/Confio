@@ -1,6 +1,56 @@
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
-plugins { id("com.facebook.react.settings") }
-extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
-rootProject.name = 'com.Confio.Confio'
-include ':app'
-includeBuild('../node_modules/@react-native/gradle-plugin')
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven {
+            url("$rootDir/../node_modules/@react-native/gradle-plugin")
+        }
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "Confio"
+
+include(":app")
+
+// Include the React Native Gradle plugin
+includeBuild("../node_modules/@react-native/gradle-plugin")
+
+// Include Apple Authentication module
+include(":invertase_react-native-apple-authentication")
+project(":invertase_react-native-apple-authentication").projectDir = new File(rootDir, "../node_modules/@invertase/react-native-apple-authentication/android")
+
+// Include Firebase modules
+include(":react-native-firebase_app")
+project(":react-native-firebase_app").projectDir = new File(rootDir, "../node_modules/@react-native-firebase/app/android")
+
+include(":react-native-firebase_auth")
+project(":react-native-firebase_auth").projectDir = new File(rootDir, "../node_modules/@react-native-firebase/auth/android")
+
+// Include Google Sign-In module
+include(":react-native-google-signin_google-signin")
+project(":react-native-google-signin_google-signin").projectDir = new File(rootDir, "../node_modules/@react-native-google-signin/google-signin/android")
+
+// Include Get Random Values module
+include(":react-native-get-random-values")
+project(":react-native-get-random-values").projectDir = new File(rootDir, "../node_modules/react-native-get-random-values/android")
+
+// Include Keychain module
+include(":react-native-keychain")
+project(":react-native-keychain").projectDir = new File(rootDir, "../node_modules/react-native-keychain/android")
+
+// Include Vector Icons module
+include(":react-native-vector-icons")
+project(":react-native-vector-icons").projectDir = new File(rootDir, "../node_modules/react-native-vector-icons/android")
+
+// Include SVG module
+include(":react-native-svg")
+project(":react-native-svg").projectDir = new File(rootDir, "../node_modules/react-native-svg/android")

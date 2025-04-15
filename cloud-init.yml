@@ -1,0 +1,70 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+packages:
+  - nginx
+  - supervisor
+  - python3
+  - python3-pip
+  - python3-venv
+  - git
+  - curl
+  - wget
+  - unzip
+  - build-essential
+  - libssl-dev
+  - libffi-dev
+  - python3-dev
+
+runcmd:
+  - systemctl enable nginx
+  - systemctl enable supervisor
+  - mkdir -p /var/www/html
+  - chown -R www-data:www-data /var/www/html
+  - chmod -R 755 /var/www/html
+  - mkdir -p /etc/nginx/sites-available
+  - mkdir -p /etc/nginx/sites-enabled
+  - mkdir -p /etc/supervisor/conf.d
+  - mkdir -p /var/log/nginx
+  - mkdir -p /var/log/supervisor
+  - chown -R www-data:www-data /var/log/nginx
+  - chown -R www-data:www-data /var/log/supervisor
+  - chmod -R 755 /var/log/nginx
+  - chmod -R 755 /var/log/supervisor
+  - ln -sf /etc/nginx/sites-available/confio /etc/nginx/sites-enabled/confio
+  - nginx -t
+  - systemctl restart nginx
+  - systemctl restart supervisor
+
+write_files:
+  - path: /etc/logrotate.d/confio
+    content: |
+      /var/log/confio/*.log {
+        daily
+        missingok
+        rotate 14
+        compress
+        delaycompress
+        notifempty
+        create 0640 www-data www-data
+        sharedscripts
+        postrotate
+          systemctl reload nginx >/dev/null 2>&1 || true
+        endscript
+      }
+
+  - path: /etc/apt/apt.conf.d/50unattended-upgrades
+    content: |
+      Unattended-Upgrade::Allowed-Origins {
+        "${distro_id}:${distro_codename}";
+        "${distro_id}:${distro_codename}-security";
+        "${distro_id}ESMApps:${distro_codename}-apps-security";
+        "${distro_id}ESM:${distro_codename}-infra-security";
+      };
+      Unattended-Upgrade::Package-Blacklist {
+      };
+      Unattended-Upgrade::DevRelease "auto";
+      Unattended-Upgrade::Remove-Unused-Dependencies "true";
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "02:00"; 

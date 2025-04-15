@@ -1,0 +1,2 @@
+#include "Pods/Target Support Files/Pods-Confio/Pods-Confio.debug.xcconfig"
+#include "bridging-headers.xcconfig" 

@@ -19,3 +19,7 @@ boto3
 requests
 google-api-python-client
 azure-cognitiveservices-vision-face
+gunicorn==20.1.0
+flask==2.0.1
+python-dotenv==1.0.0
+psycopg2-binary==2.9.9

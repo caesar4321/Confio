@@ -1,4 +1,4 @@
-package com.confio.confio
+package com.Confio.Confio
 
 import android.app.Application
 import com.facebook.react.PackageList

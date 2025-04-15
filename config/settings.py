@@ -14,24 +14,30 @@ import os
 import logging
 from datetime import timedelta
 from pathlib import Path
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load environment variables from .env file
+env_file = os.path.join(BASE_DIR, '..', 'credentials', 'env', 'development', '.env')
+if os.getenv('DJANGO_ENV') == 'production':
+    env_file = os.path.join(BASE_DIR, '..', 'credentials', 'env', 'production', '.env')
+load_dotenv(env_file)
 
 # Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/3.1/howto/deployment/checklist/
+# See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = '&(hehrlb0sqdkf8awe$55l!k9k)u_6a-5wn1ro))s(prkri2_t'
+SECRET_KEY = os.getenv('SECRET_KEY', '&(hehrlb0sqdkf8awe$55l!k9k)u_6a-5wn1ro))s(prkri2_t')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
 if DEBUG:
-    ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
+    ALLOWED_HOSTS = os.getenv('DEVELOPMENT_HOSTS', '127.0.0.1,localhost').split(',')
 else:
-    ALLOWED_HOSTS = ['.confio.me', '194.182.166.232', '194.182.166.225', '10.0.0.1', '10.0.0.2']
+    ALLOWED_HOSTS = os.getenv('PRODUCTION_HOSTS', 'confio.lat,159.100.246.64').split(',')
 
 
 # Application definition
@@ -82,10 +88,9 @@ CACHES = {
 
 CHANNEL_LAYERS = {
     'default': {
-        #'BACKEND': 'channels.layers.InMemoryChannelLayer',
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            'hosts': [('localhost', 6379)],
+            'hosts': [('127.0.0.1', 6379)],
             'capacity': 10000000,
         },
     },
@@ -120,7 +125,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': ['web/build'],
+        'DIRS': [os.path.join(BASE_DIR, 'templates')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -142,8 +147,11 @@ WSGI_APPLICATION = 'config.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.contrib.gis.db.backends.postgis',
-        'NAME': 'duende',
-        'USER': 'julian',
+        'NAME': os.getenv('DB_NAME', 'confio'),
+        'USER': os.getenv('DB_USER', 'confio'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'Kj8#mP2$vL9nQ5@xR3&tY7*wZ4!cB6'),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': os.getenv('DB_PORT', '5432'),
     }
 }
 if DEBUG:
@@ -151,13 +159,6 @@ if DEBUG:
     DATABASES['default']['PASSWORD'] = '12345678'
     DATABASES['default']['HOST'] = 'localhost'
     DATABASES['default']['PORT'] = ''
-
-EMAIL_USE_TLS = True
-EMAIL_HOST = 'smtp.elasticemail.com'
-EMAIL_HOST_USER = 'julian@duende.me'
-EMAIL_HOST_PASSWORD = '5A37734AC679F5B525C266BCCDF6EBC0285C'
-DEFAULT_FROM_EMAIL = 'Duende <support@duende.me>'
-EMAIL_PORT = 587
 
 # Password validation
 # https://docs.djangoproject.com/en/3.1/ref/settings/#auth-password-validators
@@ -202,44 +203,30 @@ LEAFLET_CONFIG = {
 }
 
 STATIC_URL = '/static/'
-
-EXOSCALE_ACCESS_KEY_ID = 'EXO53716446d63d880bf0980088'
-EXOSCALE_SECRET_KEY = 'AaKrbeLtx7PxfKdwUvf6VdVuJMJ_xFyHfztGdE0GPs0'
-SOS_ENDPOINT = 'sos-ch-dk-2.exo.io'
-SOS_BUCKET_TEST = 'duende-test-image'
-SOS_BUCKET_USER = 'duende-user-image' if not DEBUG else SOS_BUCKET_TEST
-SOS_BUCKET_BUSINESS_VERIFICATION = 'duende-business-verification-image' if not DEBUG else SOS_BUCKET_TEST
-SOS_BUCKET_USER_VERIFICATION = 'duende-user-verification-image' if not DEBUG else SOS_BUCKET_TEST
-
-NODE_API_KEY = 'NODEKLSDF%^$540HR*%&%^#SGUBSEBtyg45$#^dtvtes*(!)'
-NODE_SECRET_KEY = 'NODElso-4k09g954ktJU@#$dfhrf9JD)DKFKDJFOK))099sfief'
-
-if DEBUG:
-    STATICFILES_DIRS = (#Development Mode
-        'static',
-    )
-
-else:
-    STATIC_ROOT = os.path.join(BASE_DIR, 'web/build/static')
-    LOGGING = {
-        'version': 1,
-        'disable_existing_loggers': False,
-        'handlers': {
-            'file': {
-                'level': 'INFO',
-                'filters': None,
-                'class': 'logging.FileHandler',
-                'filename': os.path.join(BASE_DIR, 'logs/')
-            },
-        },
-        'loggers': {
-            'django': {
-                'handlers': ['file'],
-                'level': 'INFO',
-            },
-        },
-    }
+STATIC_ROOT = '/var/www/html/static/'
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'static'),
+]
 
 if DEBUG:
     GDAL_LIBRARY_PATH = '/opt/homebrew/opt/gdal/lib/libgdal.dylib'
     GEOS_LIBRARY_PATH = '/opt/homebrew/opt/geos/lib/libgeos_c.dylib'
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'file': {
+            'level': 'INFO',
+            'filters': None,
+            'class': 'logging.FileHandler',
+            'filename': os.path.join(BASE_DIR, 'logs/')
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['file'],
+            'level': 'INFO',
+        },
+    },
+}

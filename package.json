@@ -1,0 +1,9 @@
+{
+  "devDependencies": {
+    "@react-native-community/cli": "^18.0.0"
+  },
+  "dependencies": {
+    "react-native": "^0.79.0",
+    "react-native-gradle-plugin": "^0.71.19"
+  }
+}

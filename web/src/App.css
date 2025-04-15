@@ -1,11 +1,11 @@
 @import url("https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap");
 :root {
-  --primary-color: #2e1c55;
-  --white-color: #ffffff;
-  --dull-white: #f6f6f6;
-  --black-color: #333;
-  --grey-color: #888;
-   font-family: "Poppins", sans-serif;
+  --primary-color: #72D9BC;  /* Verde Confío */
+  --white-color: #FFFFFF;    /* Blanco */
+  --accent-color: #8B5CF6;   /* Violeta Acento */
+  --dark-gray: #1F2937;      /* Gris Oscuro */
+  --light-gray: #F3F4F6;     /* Gris Claro */
+  font-family: "Poppins", sans-serif;
   --ff-primary: "Poppins", sans-serif;
   --header-title: clamp(1.8rem, calc(0.98rem + 4.11vw), 3.91rem);
 }
@@ -16,12 +16,44 @@ html,body{
   margin: 0;
 }
 * {
-  -webkit-box-sizing: border-box;
-          box-sizing: border-box;
   margin: 0;
   padding: 0;
+  box-sizing: border-box;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: #333;
+  line-height: 1.6;
+}
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
 }
 a{
   text-decoration: none;
       color: inherit;
+}
+button {
+  cursor: pointer;
+}
+img {
+  max-width: 100%;
+  height: auto;
+}
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+/* Remove focus outline for mouse users */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+/* Add focus outline for keyboard users */
+:focus-visible {
+  outline: 2px solid #72D9BC;
+  outline-offset: 2px;
 }

@@ -10,6 +10,12 @@
       android:allowBackup="false"
       android:theme="@style/AppTheme"
       android:supportsRtl="true">
+      
+      <!-- Google Sign-In configuration -->
+      <meta-data
+        android:name="com.google.android.gms.version"
+        android:value="@integer/google_play_services_version" />
+
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"
@@ -20,6 +26,26 @@
         <intent-filter>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent-filter>
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="com.Confio.Confio" android:host="oauth2redirect" />
+            <data android:scheme="confio" />
+            <data android:scheme="Confio" />
+        </intent-filter>
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="com.googleusercontent.apps.1001709244115-2h2k3sdvr3ggr1t5pgob4pkb3k92ug1p" />
+        </intent-filter>
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="com.googleusercontent.apps.730050241347-ft2v34hm2okng97rb4on37kr9qt9lbhp" />
         </intent-filter>
       </activity>
     </application>

@@ -1,24 +1,22 @@
-# Resolve react_native_pods.rb with node to allow for hoisting
-require Pod::Executable.execute_command('node', ['-p',
-  'require.resolve(
-    "react-native/scripts/react_native_pods.rb",
-    {paths: [process.argv[1]]},
-  )', __dir__]).strip
+require_relative '../node_modules/react-native/scripts/react_native_pods'
+require_relative '../node_modules/react-native/scripts/cocoapods/autolinking'
 
-platform :ios, min_ios_version_supported
+platform :ios, '16.0'
 prepare_react_native_project!
 
-linkage = ENV['USE_FRAMEWORKS']
-if linkage != nil
-  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
-  use_frameworks! :linkage => linkage.to_sym
-end
+# Use static frameworks (required for some Swift pods, and safer for iOS 17/18 SDK)
+use_frameworks! :linkage => :static
 
 target 'Confio' do
   config = use_native_modules!
 
+  # Flags change depending on the env values.
+  flags = get_default_flags()
+
   use_react_native!(
     :path => config[:reactNativePath],
+    :hermes_enabled => flags[:hermes_enabled],
+    :fabric_enabled => flags[:fabric_enabled],
     # An absolute path to your application root.
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
@@ -28,8 +26,24 @@ target 'Confio' do
     react_native_post_install(
       installer,
       config[:reactNativePath],
-      :mac_catalyst_enabled => false,
-      # :ccache_enabled => true
+      :mac_catalyst_enabled => false
     )
+    
+    # This is necessary for Xcode 14, because it signs resource bundles by default
+    # when building for devices.
+    installer.target_installation_results.pod_target_installation_results
+      .each do |pod_name, target_installation_result|
+      target_installation_result.resource_bundle_targets.each do |resource_bundle_target|
+        resource_bundle_target.build_configurations.each do |config|
+          config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+        end
+      end
+    end
+
+    # Set build settings for M1 compatibility
+    installer.pods_project.build_configurations.each do |config|
+      config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+    end
   end
-end
+end 

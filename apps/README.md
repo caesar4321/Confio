@@ -66,7 +66,7 @@ This is one way to run your app — you can also build it directly from Android 
 
 Now that you have successfully run the app, let's make changes!
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
 
 When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
 
@@ -82,9 +82,23 @@ You've successfully run and modified your React Native App. :partying_face:
 - If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
 - If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
 
-# Troubleshooting
+# Confío
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+## Troubleshooting
+
+### iOS Build Issues
+
+If you encounter the following error when running `pod install`:
+```
+Invalid `Podfile` file: cannot load such file -- /Users/[username]/[path]/node_modules/@react-native-community/cli-platform-ios/native_modules
+```
+
+The solution is to run:
+```bash
+npm audit fix
+```
+
+This will update and fix the React Native dependencies, including the required `react_native_pods` file, after which `pod install` should work successfully.
 
 # Learn More
 
