@@ -45,7 +45,7 @@ Confío helps people access stable dollars, send remittances, and pay each other
 This is a **monolithic repository** containing the full Confío stack:
 
 ```bash
-/Confío/
+/Confio/
 ├── apps/         # React Native wallet app
 ├── contracts/    # Sui Move smart contracts (cUSD, escrow, etc.)
 ├── relay/        # Django backend (tx sponsor, Firebase JWT check, etc.)
@@ -83,4 +83,4 @@ MIT License — build freely, fork proudly, remix for your country.
 ## 🙏 Credits
 
 Confío is led by Julian Moon,
-a Korean builder based in Latin America, inspired by the dream of a trustworthy, borderless dollar economy for everyone. 
+a Korean builder based in Latin America, inspired by the dream of a trustworthy, borderless financial inclusion for everyone. 
