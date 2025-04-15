@@ -68,6 +68,7 @@ Confío is more than a wallet — it's a mission to bring financial confidence t
 
 Come build the future with us:
 
+🌐 Website: [confio.lat](https://confio.lat)  
 🔗 Telegram (Community): [t.me/FansDeJulian](https://t.me/FansDeJulian)  
 📱 TikTok (Latinoamérica): [@JulianMoonLuna](https://tiktok.com/@JulianMoonLuna)
 
