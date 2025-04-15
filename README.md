@@ -31,7 +31,7 @@ Confío helps people access stable dollars, send remittances, and pay each other
 
 | Layer         | Stack                         |
 |---------------|-------------------------------|
-| Frontend      | React Native (pure, no Expo)  |
+| Frontend      | React Native (no Expo)        |
 | Auth          | Firebase Authentication       |
 | Blockchain    | [Sui](https://sui.io)         |
 | Smart Contracts | Move language               |
@@ -45,7 +45,7 @@ Confío helps people access stable dollars, send remittances, and pay each other
 This is a **monolithic repository** containing the full Confío stack:
 
 ```bash
-/Confio/
+/Confío/
 ├── apps/         # React Native wallet app
 ├── contracts/    # Sui Move smart contracts (cUSD, escrow, etc.)
 ├── relay/        # Django backend (tx sponsor, Firebase JWT check, etc.)
@@ -58,9 +58,7 @@ This is a **monolithic repository** containing the full Confío stack:
 
 - ❌ Not a custodial wallet — we never store user funds
 - ❌ No backend "tricks" — money logic lives entirely on-chain
-- ❌ No analytics, tracking, or shadow data collection
-
-We are radically transparent and proudly open by design.
+- ❌ No crypto knowledge required — users sign in with Google or Apple
 
 ---
 
