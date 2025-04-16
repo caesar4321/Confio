@@ -1,1 +1,33 @@
- 
+# Environment files
+.env filter=git-crypt diff=git-crypt
+.env.* filter=git-crypt diff=git-crypt
+!.env.example
+
+# OAuth and Firebase configuration
+apps/src/config/oauth-config.js filter=git-crypt diff=git-crypt
+apps/src/config/firebase-config.js filter=git-crypt diff=git-crypt
+google-services.json filter=git-crypt diff=git-crypt
+GoogleService-Info.plist filter=git-crypt diff=git-crypt
+
+# Android credentials
+apps/android/app/confio.keystore filter=git-crypt diff=git-crypt
+apps/android/app/debug.keystore filter=git-crypt diff=git-crypt
+apps/android/app/release.keystore filter=git-crypt diff=git-crypt
+apps/android/app/upload-keystore.jks filter=git-crypt diff=git-crypt
+apps/android/app/key.properties filter=git-crypt diff=git-crypt
+apps/android/app/src/main/res/values/secrets.xml filter=git-crypt diff=git-crypt
+apps/android/gradle.properties filter=git-crypt diff=git-crypt
+
+# iOS credentials
+apps/ios/confio.xcodeproj/project.pbxproj filter=git-crypt diff=git-crypt
+apps/ios/confio/Secrets.swift filter=git-crypt diff=git-crypt
+apps/ios/confio/Config.swift filter=git-crypt diff=git-crypt
+apps/ios/fastlane/** filter=git-crypt diff=git-crypt
+
+# Deployment files
+confio.tar.gz filter=git-crypt diff=git-crypt
+deploy.sh filter=git-crypt diff=git-crypt
+
+# Credentials directory
+credentials/** filter=git-crypt diff=git-crypt
+!credentials/README.md 
