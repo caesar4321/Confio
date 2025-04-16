@@ -1,7 +1,7 @@
 # Environment files
 .env filter=git-crypt diff=git-crypt
 .env.* filter=git-crypt diff=git-crypt
-!.env.example
+\!.env.example
 
 # OAuth and Firebase configuration
 apps/src/config/oauth-config.js filter=git-crypt diff=git-crypt
@@ -30,4 +30,4 @@ deploy.sh filter=git-crypt diff=git-crypt
 
 # Credentials directory
 credentials/** filter=git-crypt diff=git-crypt
-!credentials/README.md 
+\!credentials/README.md 
