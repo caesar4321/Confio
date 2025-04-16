@@ -113,12 +113,12 @@ This is a **monolithic repository** containing the full Confío stack:
 ├── credentials/       # Encrypted credentials (git-crypt)
 ├── prover/            # Server-side proof verification
 │   ├── models.py      # Database models
-│   ├── views.py       # API endpoints
+│   ├── schema.py      # GraphQL schema and resolvers
 │   ├── serializers.py # Data serialization
 │   └── tests/         # Test cases
 ├── users/             # User authentication and management
 │   ├── models.py      # User models
-│   ├── views.py       # User endpoints
+│   ├── schema.py      # GraphQL schema and resolvers
 │   ├── serializers.py # User data serialization
 │   └── tests/         # User tests
 ├── manage.py          # Django management script
@@ -197,11 +197,12 @@ This is a **monolithic repository** containing the full Confío stack:
 >     - `SECURE_PROXY_SSL_HEADER`: Proxy SSL header configuration
 >     - `USE_X_FORWARDED_HOST`: Use X-Forwarded-Host header (True/False)
 >     - `USE_X_FORWARDED_PORT`: Use X-Forwarded-Port header (True/False)
->     - `GOOGLE_OAUTH_CLIENT_ID`: Google OAuth client ID for web application
->     - `GOOGLE_OAUTH_CLIENT_SECRET`: Google OAuth client secret for web application
->     - `GOOGLE_OAUTH_REDIRECT_URI`: Google OAuth redirect URI for web application
 >   - `apps/.env` (⚠️ **Location**: `/Confio/apps/.env`): React Native app settings
 >     - `API_URL`: Backend API URL
+>     - `API_URL_DEV`: Development API URL
+>     - `GOOGLE_WEB_CLIENT_ID`: Google OAuth client ID for web application
+>     - `GOOGLE_IOS_CLIENT_ID`: Google OAuth client ID for iOS app
+>     - `GOOGLE_ANDROID_CLIENT_ID`: Google OAuth client ID for Android app
 >     - `FIREBASE_CONFIG`: Firebase configuration JSON
 >     - `SUI_NODE_URL`: Sui blockchain node URL
 >     - `SUI_FAUCET_URL`: Sui faucet URL for testnet
@@ -218,10 +219,6 @@ This is a **monolithic repository** containing the full Confío stack:
 >     - `DEEP_LINK_PREFIX`: Deep link URL prefix
 >     - `APPLE_APP_ID`: Apple App Store ID
 >     - `GOOGLE_PLAY_APP_ID`: Google Play Store ID
->     - `GOOGLE_OAUTH_CLIENT_ID_IOS`: Google OAuth client ID for iOS app
->     - `GOOGLE_OAUTH_CLIENT_ID_ANDROID`: Google OAuth client ID for Android app
->     - `GOOGLE_OAUTH_REVERSED_CLIENT_ID`: Google OAuth reversed client ID for iOS
->     - `GOOGLE_OAUTH_WEB_CLIENT_ID`: Google OAuth web client ID for server verification
 >   - `apps/android/.env` (⚠️ **Location**: `/Confio/apps/android/.env`): Android-specific settings
 >     - `KEYSTORE_PASSWORD`: Keystore password
 >     - `KEY_ALIAS`: Key alias
@@ -237,8 +234,6 @@ This is a **monolithic repository** containing the full Confío stack:
 >     - `ANDROID_DEBUG_KEY_ALIAS`: Debug key alias
 >     - `ANDROID_DEBUG_KEY_PASSWORD`: Debug key password
 >     - `ANDROID_DEBUG_STORE_PASSWORD`: Debug store password
->     - `GOOGLE_OAUTH_CLIENT_ID`: Google OAuth client ID for Android app
->     - `GOOGLE_OAUTH_CLIENT_SECRET`: Google OAuth client secret for Android app
 >   - `apps/ios/.env` (⚠️ **Location**: `/Confio/apps/ios/.env`): iOS-specific settings
 >     - `APPLE_TEAM_ID`: Apple Developer Team ID
 >     - `APPLE_DEVELOPER_TEAM`: Apple Developer Team name
@@ -256,9 +251,6 @@ This is a **monolithic repository** containing the full Confío stack:
 >     - `APPLE_KEYCHAIN_LOCK_TIMEOUT`: Keychain lock timeout
 >     - `APPLE_KEYCHAIN_LOCK_AFTER_USE`: Lock keychain after use (True/False)
 >     - `APPLE_KEYCHAIN_LOCK_WHEN_SLEEPING`: Lock keychain when sleeping (True/False)
->     - `GOOGLE_OAUTH_CLIENT_ID`: Google OAuth client ID for iOS app
->     - `GOOGLE_OAUTH_CLIENT_SECRET`: Google OAuth client secret for iOS app
->     - `GOOGLE_OAUTH_REVERSED_CLIENT_ID`: Google OAuth reversed client ID
 > - Firebase Configuration Files (⚠️ **Critical Development Files**):
 >   - `google-services.json` (⚠️ **Location**: `/Confio/apps/android/app/google-services.json`): Android Firebase config
 >   - `GoogleService-Info.plist` (⚠️ **Location**: `/Confio/apps/ios/Confio/GoogleService-Info.plist`): iOS Firebase config
