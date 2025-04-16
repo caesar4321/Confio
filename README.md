@@ -121,10 +121,6 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── views.py       # User endpoints
 │   ├── serializers.py # User data serialization
 │   └── tests/         # User tests
-├── web/               # Web application frontend
-│   ├── static/        # Static assets
-│   ├── templates/     # HTML templates
-│   └── views.py       # Web views
 ├── manage.py          # Django management script
 ├── requirements.txt   # Python dependencies
 └── celery.py   
