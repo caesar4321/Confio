@@ -35,7 +35,7 @@ Confío helps people access stable dollars, send remittances, and pay each other
 | Auth          | Firebase Authentication       |
 | Blockchain    | [Sui](https://sui.io)         |
 | Smart Contracts | Move language               |
-| Backend Relay | Python (Django)               |
+| Backend API   | Django + GraphQL              |
 | CI/CD         | Cloudflare Pages              |
 
 ---
@@ -80,36 +80,32 @@ This is a **monolithic repository** containing the full Confío stack:
 ```bash
 /Confio/
 ├── web/               # React-based web application
-│   │   ├── public/        # Static public files
-│   │   ├── src/           # React source code
-│   │   │   ├── Components/    # React components
-│   │   │   ├── images/        # Image assets
-│   │   │   ├── styles/        # CSS styles
-│   │   │   ├── types/         # TypeScript type definitions
-│   │   │   ├── App.css        # Main application styles
-│   │   │   ├── App.js         # Main application component
-│   │   │   └── index.js       # Application entry point
-│   │   ├── build/           # Production build output
-│   │   ├── static/          # Static assets
-│   │   ├── templates/       # HTML templates
-│   │   ├── .eslintrc.json   # ESLint configuration
-│   │   ├── .prettierrc       # Prettier configuration
-│   │   ├── nginx.conf         # Nginx configuration
-│   │   ├── package.json       # Node.js dependencies
-│   │   ├── tsconfig.json      # TypeScript configuration
-│   │   └── yarn.lock          # Yarn lock file
-│   ├── manage.py          # Django management script
-│   ├── requirements.txt   # Python dependencies
-│   └── celery.py       
+│   ├── public/        # Static public files
+│   ├── src/           # React source code
+│   │   ├── Components/    # React components
+│   │   ├── images/        # Image assets
+│   │   ├── styles/        # CSS styles
+│   │   ├── types/         # TypeScript type definitions
+│   │   ├── App.css        # Main application styles
+│   │   ├── App.js         # Main application component
+│   │   └── index.js       # Application entry point
+│   ├── build/           # Production build output
+│   ├── static/          # Static assets
+│   ├── templates/       # HTML templates
+│   ├── .eslintrc.json   # ESLint configuration
+│   ├── .prettierrc       # Prettier configuration
+│   ├── nginx.conf         # Nginx configuration
+│   ├── package.json       # Node.js dependencies
+│   ├── tsconfig.json      # TypeScript configuration
+│   └── yarn.lock          # Yarn lock file
 
 ├── config/            # Django project configuration
-│   ├── settings/      # Environment-specific settings
-│   │   ├── base.py   # Base settings
-│   │   ├── dev.py    # Development settings
-│   │   └── prod.py   # Production settings
+│   ├── settings.py    # Django settings
 │   ├── urls.py        # URL routing
 │   ├── wsgi.py        # WSGI configuration
-│   └── asgi.py        # ASGI configuration
+│   ├── schema.py      # Root GraphQL schema
+│   ├── celery.py      # Celery configuration
+│   └── views.py       # View functions
 ├── credentials/       # Encrypted credentials (git-crypt)
 ├── prover/            # Server-side proof verification
 │   ├── models.py      # Database models
@@ -123,7 +119,7 @@ This is a **monolithic repository** containing the full Confío stack:
 │   └── tests/         # User tests
 ├── manage.py          # Django management script
 ├── requirements.txt   # Python dependencies
-└── celery.py   
+└── celery.py         # Celery worker configuration
 
 ├── apps/                    # React Native mobile application
 │   ├── android/            # Android-specific native code and configurations
@@ -168,7 +164,6 @@ This is a **monolithic repository** containing the full Confío stack:
 >     - `DB_HOST`: PostgreSQL database host
 >     - `DB_PORT`: PostgreSQL database port
 >     - `SECRET_KEY`: Django secret key for cryptographic signing
->     - `EXISTING_INSTANCE_IP`: Exoscale instance IP address
 >     - `PYTHONPATH`: Python path for Django
 >     - `DJANGO_SETTINGS_MODULE`: Django settings module path
 >   - `apps/.env` (⚠️ **Location**: `/Confio/apps/.env`): React Native app settings
