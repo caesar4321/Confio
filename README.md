@@ -160,97 +160,30 @@ This is a **monolithic repository** containing the full Confío stack:
 
 > - `.env` files (⚠️ **Critical Development Files**):
 >   - Root `.env` (⚠️ **Location**: `/Confio/.env`): Django settings
+>     - `PRODUCTION_HOSTS`: Comma-separated list of production hostnames
+>     - `DEVELOPMENT_HOSTS`: Comma-separated list of development hostnames
+>     - `DB_NAME`: PostgreSQL database name
+>     - `DB_USER`: PostgreSQL database user
+>     - `DB_PASSWORD`: PostgreSQL database password
+>     - `DB_HOST`: PostgreSQL database host
+>     - `DB_PORT`: PostgreSQL database port
 >     - `SECRET_KEY`: Django secret key for cryptographic signing
->     - `DEBUG`: Django debug mode (True/False)
->     - `ALLOWED_HOSTS`: Comma-separated list of allowed hostnames
->     - `DATABASE_URL`: PostgreSQL database connection URL
->     - `REDIS_URL`: Redis connection URL for caching
->     - `EMAIL_HOST`: SMTP server host
->     - `EMAIL_PORT`: SMTP server port
->     - `EMAIL_HOST_USER`: SMTP username
->     - `EMAIL_HOST_PASSWORD`: SMTP password
->     - `EMAIL_USE_TLS`: Use TLS for email (True/False)
->     - `DEFAULT_FROM_EMAIL`: Default sender email address
->     - `SUI_NODE_URL`: Sui blockchain node URL
->     - `SUI_FAUCET_URL`: Sui faucet URL for testnet
->     - `SUI_GAS_BUDGET`: Gas budget for transactions
->     - `SUI_PACKAGE_ID`: Sui package ID for smart contracts
->     - `SUI_ADMIN_ADDRESS`: Admin wallet address
->     - `SUI_ADMIN_PRIVATE_KEY`: Admin wallet private key
->     - `FIREBASE_PROJECT_ID`: Firebase project ID
->     - `FIREBASE_PRIVATE_KEY`: Firebase private key
->     - `FIREBASE_CLIENT_EMAIL`: Firebase client email
->     - `FIREBASE_DATABASE_URL`: Firebase Realtime Database URL
->     - `CLOUDINARY_CLOUD_NAME`: Cloudinary cloud name
->     - `CLOUDINARY_API_KEY`: Cloudinary API key
->     - `CLOUDINARY_API_SECRET`: Cloudinary API secret
->     - `SENTRY_DSN`: Sentry error tracking DSN
->     - `LOG_LEVEL`: Application log level
->     - `CORS_ALLOWED_ORIGINS`: Comma-separated list of allowed CORS origins
->     - `CSRF_TRUSTED_ORIGINS`: Comma-separated list of trusted CSRF origins
->     - `SECURE_SSL_REDIRECT`: Redirect to HTTPS (True/False)
->     - `SESSION_COOKIE_SECURE`: Secure session cookies (True/False)
->     - `CSRF_COOKIE_SECURE`: Secure CSRF cookies (True/False)
->     - `SECURE_HSTS_SECONDS`: HSTS header duration
->     - `SECURE_HSTS_INCLUDE_SUBDOMAINS`: Include subdomains in HSTS (True/False)
->     - `SECURE_HSTS_PRELOAD`: Enable HSTS preload (True/False)
->     - `SECURE_PROXY_SSL_HEADER`: Proxy SSL header configuration
->     - `USE_X_FORWARDED_HOST`: Use X-Forwarded-Host header (True/False)
->     - `USE_X_FORWARDED_PORT`: Use X-Forwarded-Port header (True/False)
+>     - `EXISTING_INSTANCE_IP`: Exoscale instance IP address
+>     - `PYTHONPATH`: Python path for Django
+>     - `DJANGO_SETTINGS_MODULE`: Django settings module path
 >   - `apps/.env` (⚠️ **Location**: `/Confio/apps/.env`): React Native app settings
->     - `API_URL`: Backend API URL
->     - `API_URL_DEV`: Development API URL
 >     - `GOOGLE_WEB_CLIENT_ID`: Google OAuth client ID for web application
 >     - `GOOGLE_IOS_CLIENT_ID`: Google OAuth client ID for iOS app
 >     - `GOOGLE_ANDROID_CLIENT_ID`: Google OAuth client ID for Android app
->     - `FIREBASE_CONFIG`: Firebase configuration JSON
->     - `SUI_NODE_URL`: Sui blockchain node URL
->     - `SUI_FAUCET_URL`: Sui faucet URL for testnet
->     - `SUI_GAS_BUDGET`: Gas budget for transactions
->     - `SUI_PACKAGE_ID`: Sui package ID for smart contracts
->     - `SENTRY_DSN`: Sentry error tracking DSN
->     - `LOG_LEVEL`: Application log level
->     - `ENVIRONMENT`: App environment (development/production)
->     - `VERSION`: App version number
->     - `BUILD_NUMBER`: App build number
->     - `APP_NAME`: App display name
->     - `APP_IDENTIFIER`: App bundle identifier
->     - `APP_SCHEME`: App URL scheme
->     - `DEEP_LINK_PREFIX`: Deep link URL prefix
->     - `APPLE_APP_ID`: Apple App Store ID
->     - `GOOGLE_PLAY_APP_ID`: Google Play Store ID
+>     - `API_URL`: Production backend API URL
+>     - `API_URL_DEV`: Development backend API URL
 >   - `apps/android/.env` (⚠️ **Location**: `/Confio/apps/android/.env`): Android-specific settings
+>     - `KEYSTORE_FILE`: Path to Android keystore file
 >     - `KEYSTORE_PASSWORD`: Keystore password
 >     - `KEY_ALIAS`: Key alias
 >     - `KEY_PASSWORD`: Key password
->     - `KEYSTORE_PATH`: Keystore file path
->     - `ANDROID_SDK_PATH`: Android SDK path
->     - `ANDROID_NDK_PATH`: Android NDK path
->     - `ANDROID_HOME`: Android home directory
->     - `JAVA_HOME`: Java home directory
->     - `GRADLE_USER_HOME`: Gradle user home directory
->     - `GRADLE_OPTS`: Gradle options
->     - `ANDROID_DEBUG_KEYSTORE`: Debug keystore path
->     - `ANDROID_DEBUG_KEY_ALIAS`: Debug key alias
->     - `ANDROID_DEBUG_KEY_PASSWORD`: Debug key password
->     - `ANDROID_DEBUG_STORE_PASSWORD`: Debug store password
 >   - `apps/ios/.env` (⚠️ **Location**: `/Confio/apps/ios/.env`): iOS-specific settings
->     - `APPLE_TEAM_ID`: Apple Developer Team ID
->     - `APPLE_DEVELOPER_TEAM`: Apple Developer Team name
->     - `APPLE_PROVISIONING_PROFILE`: Provisioning profile name
->     - `APPLE_CODE_SIGN_IDENTITY`: Code signing identity
->     - `APPLE_DISTRIBUTION_CERTIFICATE`: Distribution certificate name
->     - `APPLE_DEVELOPMENT_CERTIFICATE`: Development certificate name
->     - `APPLE_KEYCHAIN_PASSWORD`: Keychain password
->     - `APPLE_KEYCHAIN_PATH`: Keychain path
->     - `APPLE_KEYCHAIN_NAME`: Keychain name
->     - `APPLE_KEYCHAIN_CREATE`: Create keychain (True/False)
->     - `APPLE_KEYCHAIN_DEFAULT`: Default keychain (True/False)
->     - `APPLE_KEYCHAIN_UNLOCK`: Unlock keychain (True/False)
->     - `APPLE_KEYCHAIN_TIMEOUT`: Keychain timeout
->     - `APPLE_KEYCHAIN_LOCK_TIMEOUT`: Keychain lock timeout
->     - `APPLE_KEYCHAIN_LOCK_AFTER_USE`: Lock keychain after use (True/False)
->     - `APPLE_KEYCHAIN_LOCK_WHEN_SLEEPING`: Lock keychain when sleeping (True/False)
+>     - (No environment variables currently defined)
 > - Firebase Configuration Files (⚠️ **Critical Development Files**):
 >   - `google-services.json` (⚠️ **Location**: `/Confio/apps/android/app/google-services.json`): Android Firebase config
 >   - `GoogleService-Info.plist` (⚠️ **Location**: `/Confio/apps/ios/Confio/GoogleService-Info.plist`): iOS Firebase config
