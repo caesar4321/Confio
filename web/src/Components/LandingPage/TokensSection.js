@@ -1,8 +1,8 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import styles from '../../styles/TokensSection.module.css';
-import cUSDLogo from '../../images/$cUSD.png';
-import confioLogo from '../../images/$CONFIO.png';
+import cUSDLogo from '../../images/cUSD.png';
+import confioLogo from '../../images/CONFIO.png';
 
 const TokensSection = () => {
   return (

@@ -122,7 +122,7 @@ export const AuthScreen = () => {
             ]}
           >
             <Image
-              source={require('../../assets/png/$CONFIO.png')}
+              source={require('../../assets/png/CONFIO.png')}
               style={styles.confioLogo}
               resizeMode="contain"
             />

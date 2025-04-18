@@ -159,3 +159,6 @@ apps/ios/fastlane/.env.*
 # Credentials directory (except README)
 credentials/
 !credentials/README.md
+
+# Firebase service account
+config/service-account.json

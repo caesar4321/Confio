@@ -24,4 +24,44 @@ export const VERIFY_ZKLOGIN_PROOF = gql`
       suiAddress
     }
   }
+`;
+
+export const VERIFY_TOKEN = gql`
+  mutation VerifyToken($firebaseToken: String!, $googleToken: String!) {
+    verifyToken(
+      firebaseToken: $firebaseToken
+      googleToken: $googleToken
+    ) {
+      success
+      error
+      details
+      firebaseUser {
+        uid
+        email
+        name
+        picture
+        __typename
+      }
+      googleTokenData {
+        sub
+        aud
+        iss
+        email
+        emailVerified
+        name
+        picture
+        __typename
+      }
+      zkLoginData {
+        zkProof
+        suiAddress
+        ephemeralPublicKey
+        maxEpoch
+        randomness
+        salt
+        __typename
+      }
+      __typename
+    }
+  }
 `; 

@@ -163,13 +163,13 @@ This is a **monolithic repository** containing the full Confío stack:
 >     - `DB_PASSWORD`: PostgreSQL database password
 >     - `DB_HOST`: PostgreSQL database host
 >     - `DB_PORT`: PostgreSQL database port
->     - `SECRET_KEY`: Django secret key for cryptographic signing
+>     - `SECRET_KEY`: Django secret key for cryptographic signing (e.g., '***REMOVED***')
 >     - `PYTHONPATH`: Python path for Django
 >     - `DJANGO_SETTINGS_MODULE`: Django settings module path
 >   - `apps/.env` (⚠️ **Location**: `/Confio/apps/.env`): React Native app settings
->     - `GOOGLE_WEB_CLIENT_ID`: Google OAuth client ID for web application
->     - `GOOGLE_IOS_CLIENT_ID`: Google OAuth client ID for iOS app
->     - `GOOGLE_ANDROID_CLIENT_ID`: Google OAuth client ID for Android app
+>     - `GOOGLE_WEB_CLIENT_ID`: Google OAuth client ID for web platform
+>     - `GOOGLE_IOS_CLIENT_ID`: Google OAuth client ID for iOS platform
+>     - `GOOGLE_ANDROID_CLIENT_ID`: Google OAuth client ID for Android platform
 >     - `API_URL`: Production backend API URL
 >     - `API_URL_DEV`: Development backend API URL
 >   - `apps/android/.env` (⚠️ **Location**: `/Confio/apps/android/.env`): Android-specific settings
@@ -182,6 +182,11 @@ This is a **monolithic repository** containing the full Confío stack:
 > - Firebase Configuration Files (⚠️ **Critical Development Files**):
 >   - `google-services.json` (⚠️ **Location**: `/Confio/apps/android/app/google-services.json`): Android Firebase config
 >   - `GoogleService-Info.plist` (⚠️ **Location**: `/Confio/apps/ios/Confio/GoogleService-Info.plist`): iOS Firebase config
+>   - `service-account.json` (⚠️ **Location**: `/Confio/config/service-account.json`): Firebase Admin SDK service account key
+>     - Required for server-side Firebase operations (e.g., token verification)
+>     - Download from Firebase Console > Project Settings > Service Accounts > Generate New Private Key
 > - `confio.tar.gz` (deployment archive)
 > - `apps/android/gradle.properties` (contains keystore and signing configurations)
 > - Any other files containing sensitive information or credentials
+
+> **Note**: Google OAuth Client IDs are configured in `apps/.env` and accessed through `apps/src/config/env.ts` using `react-native-dotenv`.

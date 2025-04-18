@@ -1,4 +1,4 @@
-.PHONY: runserver migrate makemigrations shell test clean
+.PHONY: runserver migrate makemigrations shell test clean db-setup db-migrate db-reset
 
 # Virtual environment path
 VENV_PATH = /Users/julianmoon/Confio/myvenv
@@ -40,4 +40,26 @@ createsuperuser:
 
 # Run with full path (alternative to runserver)
 run:
-	/Users/julianmoon/Confio/myvenv/bin/python manage.py runserver 0.0.0.0:8000 
+	/Users/julianmoon/Confio/myvenv/bin/python manage.py runserver 0.0.0.0:8000
+
+# Database setup
+db-setup:
+	@echo "Creating PostgreSQL user and database..."
+	@psql postgres -c "CREATE USER confio WITH PASSWORD 'Kj8#mP2$vL9nQ5@xR3&tY7*wZ4!cB6';" || true
+	@psql postgres -c "CREATE DATABASE confio OWNER confio;" || true
+	@echo "Database setup complete!"
+
+# Run migrations
+db-migrate:
+	@echo "Running database migrations..."
+	@$(PYTHON) manage.py migrate
+	@echo "Migrations complete!"
+
+# Reset database (WARNING: This will delete all data)
+db-reset:
+	@echo "Resetting database..."
+	@psql postgres -c "DROP DATABASE IF EXISTS confio;"
+	@psql postgres -c "DROP USER IF EXISTS confio;"
+	@make db-setup
+	@make db-migrate
+	@echo "Database reset complete!" 
