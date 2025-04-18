@@ -16,13 +16,6 @@ import { apolloClient } from '../apollo/client';
 import { gql } from '@apollo/client';
 import { GoogleAuthProvider, signInWithCredential } from '@firebase/auth';
 
-// Helper function to generate 32 bytes of random data
-const generateRandomBytes = () => {
-  const bytes = new Uint8Array(32);
-  global.crypto.getRandomValues(bytes);
-  return Buffer.from(bytes).toString('base64');
-};
-
 export class AuthService {
   private static instance: AuthService;
   private suiKeypair: Ed25519Keypair | null = null;
@@ -269,15 +262,11 @@ export class AuthService {
 
       const ephemeralPublicKey = this.suiKeypair.getPublicKey().toBase64();
       
-      // Generate 32 bytes of randomness using our helper function
-      const jwtRandomness = generateRandomBytes();
-      
       console.log('Requesting ZK proof with params:', {
         maxEpoch,
         randomness,
         keyClaimName: 'sub',
         extendedEphemeralPublicKey: ephemeralPublicKey,
-        jwtRandomness,
         salt: this.userSalt,
         audience: platformClientId
       });
@@ -334,15 +323,15 @@ export class AuthService {
       // Generate ephemeral key pair
       this.suiKeypair = new Ed25519Keypair();
       
-      // Generate 32 bytes of randomness using our helper function
-      const randomness = generateRandomBytes();
+      // Generate randomness using @mysten/zklogin's utility
+      const randomness = generateRandomness();
       
       // Generate nonce using the randomness
       const nonce = generateNonce(this.suiKeypair.getPublicKey(), maxEpoch, randomness);
       console.log('Generated ephemeral key pair and randomness');
 
-      // Generate 32 bytes of user salt using our helper function
-      this.userSalt = generateRandomBytes();
+      // Generate user salt using @mysten/zklogin's utility
+      this.userSalt = generateRandomness();
       console.log('Generated user salt');
 
       // Get ZK proof from our GraphQL server
