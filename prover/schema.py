@@ -190,7 +190,7 @@ class VerifyToken(graphene.Mutation):
             logger.info("Generating zkLogin inputs")
             try:
                 # 1. Generate user salt
-                user_salt = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+                user_salt = base64.b64encode(os.urandom(32)).decode()
                 logger.info(f"Generated user salt: {user_salt}")
 
                 # 2. Get current epoch from Sui
@@ -213,7 +213,7 @@ class VerifyToken(graphene.Mutation):
                 logger.info(f"Generated ephemeral public key: {ephemeral_public_key}")
 
                 # 4. Generate randomness
-                randomness = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+                randomness = base64.b64encode(os.urandom(32)).decode()
                 logger.info(f"Generated randomness: {randomness}")
 
                 # 5. Call zkLogin Prover service
