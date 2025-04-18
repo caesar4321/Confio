@@ -1,9 +1,6 @@
 wheel
 celery
-channels
-channels-redis
 Django
-django-channels-graphql-ws
 django-redis
 firebase-admin
 graphene

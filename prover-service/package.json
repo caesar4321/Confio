@@ -1,0 +1,22 @@
+{
+  "name": "prover-service",
+  "version": "1.0.0",
+  "description": "zkLogin Prover Service",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@mysten/sui": "^1.27.1",
+    "@mysten/zklogin": "^0.8.1",
+    "bn.js": "^5.2.1",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "long": "^5.3.1"
+  }
+}

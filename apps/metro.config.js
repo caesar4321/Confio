@@ -26,6 +26,33 @@ const config = {
   resolver: {
     assetExts: assetExts.filter(ext => ext !== 'svg'),
     sourceExts: [...sourceExts, 'svg'],
+    resolveRequest: (context, moduleName, platform) => {
+      if (moduleName === 'node:buffer' || moduleName === 'buffer') {
+        return {
+          filePath: require.resolve('react-native-buffer'),
+          type: 'sourceFile',
+        };
+      }
+      if (moduleName === 'node:util' || moduleName === 'util') {
+        return {
+          filePath: require.resolve('react-native-util'),
+          type: 'sourceFile',
+        };
+      }
+      if (moduleName === 'node:crypto' || moduleName === 'crypto') {
+        return {
+          filePath: require.resolve('react-native-crypto'),
+          type: 'sourceFile',
+        };
+      }
+      if (moduleName === 'node:https' || moduleName === 'https') {
+        return {
+          filePath: require.resolve('react-native-https'),
+          type: 'sourceFile',
+        };
+      }
+      return context.resolveRequest(context, moduleName, platform);
+    },
   },
 };
 

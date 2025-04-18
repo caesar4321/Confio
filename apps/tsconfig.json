@@ -1,3 +1,23 @@
 {
-  "extends": "@react-native/typescript-config/tsconfig.json"
+  "extends": "@react-native/typescript-config/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "allowJs": true,
+    "jsx": "react-native",
+    "lib": ["es2017"],
+    "module": "Node16",
+    "moduleResolution": "node16",
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "target": "esnext",
+    "typeRoots": ["./node_modules/@types", "./src/types"]
+  },
+  "include": ["src", "src/declaration.d.ts"],
+  "exclude": [
+    "node_modules",
+    "babel.config.js",
+    "metro.config.js",
+    "jest.config.js"
+  ]
 }

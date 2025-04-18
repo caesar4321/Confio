@@ -1,42 +1,26 @@
 // Polyfill for crypto.getRandomValues
 import 'react-native-get-random-values';
 
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { GoogleSignin, User } from '@react-native-google-signin/google-signin';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { fromB64 } from '@mysten/sui/utils';
 import { generateNonce, generateRandomness, genAddressSeed, getZkLoginSignature } from '@mysten/sui/zklogin';
 import { SuiClient } from '@mysten/sui/client';
 import { jwtDecode } from 'jwt-decode';
 import * as Keychain from 'react-native-keychain';
-import { getGoogleClientIds } from '../config/env';
+import { GOOGLE_CLIENT_IDS, ZKLOGIN_CLIENT_ID, API_URL } from '../config/env';
 import auth from '@react-native-firebase/auth';
-import { Platform } from 'react-native';
+import Platform from 'react-native';
+import { VERIFY_TOKEN } from '../apollo/queries';
+import { apolloClient } from '../apollo/client';
+import { gql } from '@apollo/client';
+import { GoogleAuthProvider, signInWithCredential } from '@firebase/auth';
 
-// Sui DevNet test client ID for zkLogin
-const ZKLOGIN_GOOGLE_CLIENT_ID = '1001709244115-2h2k3sdvr3ggr1t5pgob4pkb3k92ug1p.apps.googleusercontent.com';
-
-// Configure Google Sign-In
-const configureGoogleSignIn = async () => {
-  try {
-    console.group('Google Sign-In Configuration');
-    console.log('Starting configuration...');
-    const { web, ios, android } = getGoogleClientIds();
-    console.log('Client IDs:', { web, ios, android });
-    
-    await GoogleSignin.configure({
-      webClientId: web,
-      iosClientId: ios,
-      offlineAccess: true,
-      scopes: ['profile', 'email'],
-    });
-    console.log('Configuration successful');
-    console.groupEnd();
-  } catch (error) {
-    console.group('Google Sign-In Configuration Error');
-    console.error('Error details:', error);
-    console.groupEnd();
-    throw error;
-  }
+// Helper function to generate 32 bytes of random data
+const generateRandomBytes = () => {
+  const bytes = new Uint8Array(32);
+  global.crypto.getRandomValues(bytes);
+  return Buffer.from(bytes).toString('base64');
 };
 
 export class AuthService {
@@ -45,7 +29,6 @@ export class AuthService {
   private suiClient: SuiClient;
   private userSalt: string | null = null;
   private zkProof: any = null;
-  private readonly PROVER_URL = 'https://prover.mystenlabs.com/v1';
   private auth = auth();
 
   private constructor() {
@@ -63,90 +46,153 @@ export class AuthService {
 
   private async initializeFirebase() {
     try {
-      console.group('Firebase Initialization');
-      console.log('Initializing Firebase...');
-      
-      // Configure Google Sign-In
-      const { web, ios, android } = getGoogleClientIds();
-      await GoogleSignin.configure({
-        webClientId: web,
-        iosClientId: ios,
+      await this.configureGoogleSignIn();
+    } catch (error) {
+      console.error('Firebase initialization error:', error);
+      throw error;
+    }
+  }
+
+  private async configureGoogleSignIn() {
+    try {
+      const clientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
+      const config: {
+        webClientId: string;
+        offlineAccess: boolean;
+        scopes: string[];
+        iosClientId?: string;
+        androidClientId?: string;
+      } = {
+        webClientId: clientIds.web,
         offlineAccess: true,
         scopes: ['profile', 'email'],
-      });
+      };
 
-      // Configure Apple Sign-In
-      await this.configureAppleSignIn();
-      
-      console.log('Firebase initialized successfully');
-      console.groupEnd();
-    } catch (error) {
-      console.group('Firebase Initialization Error');
-      console.error('Error details:', error);
-      console.groupEnd();
-      throw error;
-    }
-  }
-
-  private async configureAppleSignIn() {
-    if (Platform.OS !== 'ios') {
-      return;
-    }
-    
-    try {
-      const { appleAuth } = await import('@invertase/react-native-apple-authentication');
-      if (!appleAuth.isSupported) {
-        throw new Error('Apple Sign In is not supported on this device');
+      if (Platform.OS === 'ios') {
+        config.iosClientId = clientIds.ios;
+      } else if (Platform.OS === 'android') {
+        config.androidClientId = clientIds.android;
       }
+      
+      await GoogleSignin.configure(config);
+      console.log('Google Sign-In configuration successful');
     } catch (error) {
-      console.error('Failed to load Apple Sign In:', error);
+      console.error('Error configuring Google Sign-In:', error);
       throw error;
     }
   }
 
-  // Google Sign-In
   async signInWithGoogle() {
     try {
-      console.group('Google Sign-In Process');
-      console.log('Starting sign-in process...');
-      
-      // Get the users Google ID token
-      const signInResult = await GoogleSignin.signIn();
-      console.log('Google Sign-In successful, getting ID token...');
-
-      // Get the ID token
+      await this.configureGoogleSignIn();
+      const result = await GoogleSignin.signIn();
       const { idToken } = await GoogleSignin.getTokens();
-      if (!idToken) {
-        throw new Error('Failed to get ID token');
-      }
-
-      // Create a Firebase credential with the Google ID token
+      
+      // Create Firebase credential with Google token
       const googleCredential = auth.GoogleAuthProvider.credential(idToken);
-      console.log('Created Firebase credential');
-
+      
       // Sign in with Firebase using the Google credential
       const userCredential = await this.auth.signInWithCredential(googleCredential);
-      console.log('Firebase sign-in successful:', userCredential.user);
-
-      // Get the ID token for zkLogin
       const firebaseToken = await userCredential.user.getIdToken();
-      console.log('Got Firebase ID token');
 
-      // Initialize zkLogin with the Firebase token
-      console.log('Initializing zkLogin...');
-      const zkLoginData = await this.initializeZkLogin(firebaseToken);
-      console.log('zkLogin initialized successfully:', zkLoginData);
+      console.log('Sending tokens to GraphQL server:', {
+        firebaseToken: firebaseToken.substring(0, 20) + '...',
+        googleToken: idToken.substring(0, 20) + '...'
+      });
 
-      console.groupEnd();
-      
+      // Verify both tokens and get zkLogin data
+      const { data, errors } = await apolloClient.mutate({
+        mutation: VERIFY_TOKEN,
+        variables: {
+          firebaseToken: firebaseToken,
+          googleToken: idToken,
+        },
+      });
+
+      if (errors) {
+        console.error('GraphQL Errors:', errors);
+        throw new Error('GraphQL mutation failed');
+      }
+
+      if (!data?.verifyToken) {
+        throw new Error('No data received from token verification');
+      }
+
+      if (!data.verifyToken.success) {
+        throw new Error(data.verifyToken.error || 'Token verification failed');
+      }
+
+      // Store zkLogin data securely
+      const zkLoginData = data.verifyToken.zkLoginData;
+      if (!zkLoginData) {
+        throw new Error('No zkLogin data received');
+      }
+
+      // Store all sensitive data in a single secure entry
+      await Keychain.setGenericPassword(
+        'zkLoginData',
+        JSON.stringify({
+          suiKeypair: zkLoginData.suiKeypair,
+          userSalt: zkLoginData.userSalt,
+          zkProof: zkLoginData.zkProof,
+          ephemeralPublicKey: zkLoginData.ephemeralPublicKey,
+          maxEpoch: zkLoginData.maxEpoch.toString(),
+          randomness: zkLoginData.randomness
+        }),
+        {
+          service: 'com.confio.zklogin',
+          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY
+        }
+      );
+
       return {
-        userInfo: userCredential.user,
-        zkLoginData
+        user: {
+          uid: data.verifyToken.firebaseUser.uid,
+          email: data.verifyToken.firebaseUser.email,
+          name: data.verifyToken.firebaseUser.name,
+          picture: data.verifyToken.firebaseUser.picture,
+          __typename: data.verifyToken.firebaseUser.__typename
+        },
+        zkLoginData: {
+          suiKeypair: zkLoginData.suiKeypair,
+          userSalt: zkLoginData.userSalt,
+          zkProof: zkLoginData.zkProof,
+          ephemeralPublicKey: zkLoginData.ephemeralPublicKey,
+          maxEpoch: zkLoginData.maxEpoch,
+          randomness: zkLoginData.randomness,
+          __typename: zkLoginData.__typename
+        }
       };
     } catch (error) {
-      console.group('Google Sign-In Error');
-      console.error('Error details:', error);
-      console.groupEnd();
+      console.error('Google Sign-In Error:', error);
+      throw error;
+    }
+  }
+
+  async getStoredZkLoginData() {
+    try {
+      const credentials = await Keychain.getGenericPassword({
+        service: 'com.confio.zklogin'
+      });
+
+      if (!credentials) {
+        return null;
+      }
+
+      return JSON.parse(credentials.password);
+    } catch (error) {
+      console.error('Error retrieving zkLogin data:', error);
+      throw error;
+    }
+  }
+
+  async clearZkLoginData() {
+    try {
+      await Keychain.resetGenericPassword({
+        service: 'com.confio.zklogin'
+      });
+    } catch (error) {
+      console.error('Error clearing zkLogin data:', error);
       throw error;
     }
   }
@@ -199,7 +245,7 @@ export class AuthService {
     }
   }
 
-  // Get ZK proof from prover service
+  // Get ZK proof from our GraphQL server
   private async getZkProof(jwt: string, maxEpoch: number, randomness: string): Promise<any> {
     try {
       if (!this.suiKeypair) {
@@ -215,8 +261,16 @@ export class AuthService {
         throw new Error('Invalid JWT: missing issuer claim');
       }
 
+      // Get the platform-specific client ID
+      const clientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
+      const platformClientId = Platform.OS === 'ios' ? clientIds.ios : 
+                             Platform.OS === 'android' ? clientIds.android : 
+                             clientIds.web;
+
       const ephemeralPublicKey = this.suiKeypair.getPublicKey().toBase64();
-      const jwtRandomness = generateRandomness();
+      
+      // Generate 32 bytes of randomness using our helper function
+      const jwtRandomness = generateRandomBytes();
       
       console.log('Requesting ZK proof with params:', {
         maxEpoch,
@@ -225,39 +279,42 @@ export class AuthService {
         extendedEphemeralPublicKey: ephemeralPublicKey,
         jwtRandomness,
         salt: this.userSalt,
-        audience: ZKLOGIN_GOOGLE_CLIENT_ID
+        audience: platformClientId
       });
 
-      const response = await fetch(this.PROVER_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          jwt,
-          maxEpoch,
-          randomness,
-          keyClaimName: 'sub',
-          extendedEphemeralPublicKey: ephemeralPublicKey,
-          jwtRandomness,
-          salt: this.userSalt,
-          audience: ZKLOGIN_GOOGLE_CLIENT_ID
-        }),
+      const { data } = await apolloClient.mutate({
+        mutation: gql`
+          mutation ZkLogin($input: ZkLoginInput!) {
+            zkLogin(input: $input) {
+              zkProof
+              suiAddress
+              error
+              details
+            }
+          }
+        `,
+        variables: {
+          input: {
+            jwt,
+            maxEpoch,
+            randomness,
+            keyClaimName: 'sub',
+            extendedEphemeralPublicKey: ephemeralPublicKey,
+            salt: this.userSalt,
+            audience: platformClientId
+          }
+        }
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Prover service error details:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorText
-        });
-        throw new Error(`Prover service error: ${response.status} - ${errorText}`);
+      if (data.zkLogin.error) {
+        throw new Error(`Prover service error: ${data.zkLogin.error} - ${data.zkLogin.details}`);
       }
 
-      const result = await response.json();
-      console.log('Successfully received ZK proof');
-      return result;
+      console.log('Successfully received ZK proof and Sui address');
+      return {
+        zkProof: data.zkLogin.zkProof,
+        suiAddress: data.zkLogin.suiAddress
+      };
     } catch (error) {
       console.error('ZK Proof Generation Error:', error);
       throw error;
@@ -274,20 +331,24 @@ export class AuthService {
       const maxEpoch = Number(epoch) + 2;
       console.log('Current epoch:', epoch, 'Max epoch:', maxEpoch);
 
-      // Generate ephemeral key pair and randomness
+      // Generate ephemeral key pair
       this.suiKeypair = new Ed25519Keypair();
-      const randomness = generateRandomness();
+      
+      // Generate 32 bytes of randomness using our helper function
+      const randomness = generateRandomBytes();
+      
+      // Generate nonce using the randomness
       const nonce = generateNonce(this.suiKeypair.getPublicKey(), maxEpoch, randomness);
       console.log('Generated ephemeral key pair and randomness');
 
-      // Generate user salt
-      this.userSalt = Math.floor(Math.random() * 2 ** 128).toString();
+      // Generate 32 bytes of user salt using our helper function
+      this.userSalt = generateRandomBytes();
       console.log('Generated user salt');
 
-      // Get ZK proof from prover service
-      console.log('Requesting ZK proof from prover service');
+      // Get ZK proof from our GraphQL server
+      console.log('Requesting ZK proof from our GraphQL server');
       this.zkProof = await this.getZkProof(idToken, maxEpoch, randomness);
-      console.log('Received ZK proof from prover service');
+      console.log('Received ZK proof from our GraphQL server');
 
       // Store sensitive data securely
       await this.storeSensitiveData({
@@ -364,13 +425,19 @@ export class AuthService {
       throw new Error('Invalid JWT: missing required claims');
     }
 
-    console.log('Using Google Web Client ID as audience:', ZKLOGIN_GOOGLE_CLIENT_ID);
+    // Get the platform-specific client ID
+    const clientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
+    const platformClientId = Platform.OS === 'ios' ? clientIds.ios : 
+                           Platform.OS === 'android' ? clientIds.android : 
+                           clientIds.web;
+
+    console.log('Using platform-specific client ID as audience:', platformClientId);
 
     const addressSeed = genAddressSeed(
       BigInt(this.userSalt),
       'sub',
       decodedJwt.sub,
-      ZKLOGIN_GOOGLE_CLIENT_ID
+      platformClientId  // Use platform-specific client ID
     ).toString();
 
     if (!this.suiKeypair) {

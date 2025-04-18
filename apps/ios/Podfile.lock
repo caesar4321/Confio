@@ -9,29 +9,29 @@ PODS:
   - DoubleConversion (1.1.6)
   - fast_float (6.1.4)
   - FBLazyVector (0.79.0)
-  - Firebase/Auth (11.10.0):
+  - Firebase/Auth (11.11.0):
     - Firebase/CoreOnly
-    - FirebaseAuth (~> 11.10.0)
-  - Firebase/CoreOnly (11.10.0):
-    - FirebaseCore (~> 11.10.0)
+    - FirebaseAuth (~> 11.11.0)
+  - Firebase/CoreOnly (11.11.0):
+    - FirebaseCore (~> 11.11.0)
   - FirebaseAppCheckInterop (11.11.0)
-  - FirebaseAuth (11.10.0):
+  - FirebaseAuth (11.11.0):
     - FirebaseAppCheckInterop (~> 11.0)
     - FirebaseAuthInterop (~> 11.0)
-    - FirebaseCore (~> 11.10.0)
-    - FirebaseCoreExtension (~> 11.10.0)
+    - FirebaseCore (~> 11.11.0)
+    - FirebaseCoreExtension (~> 11.11.0)
     - GoogleUtilities/AppDelegateSwizzler (~> 8.0)
     - GoogleUtilities/Environment (~> 8.0)
     - GTMSessionFetcher/Core (< 5.0, >= 3.4)
     - RecaptchaInterop (~> 101.0)
   - FirebaseAuthInterop (11.11.0)
-  - FirebaseCore (11.10.0):
-    - FirebaseCoreInternal (~> 11.10.0)
+  - FirebaseCore (11.11.0):
+    - FirebaseCoreInternal (~> 11.11.0)
     - GoogleUtilities/Environment (~> 8.0)
     - GoogleUtilities/Logger (~> 8.0)
-  - FirebaseCoreExtension (11.10.0):
-    - FirebaseCore (~> 11.10.0)
-  - FirebaseCoreInternal (11.10.0):
+  - FirebaseCoreExtension (11.11.0):
+    - FirebaseCore (~> 11.11.0)
+  - FirebaseCoreInternal (11.11.0):
     - "GoogleUtilities/NSData+zlib (~> 8.0)"
   - fmt (11.0.2)
   - glog (0.3.5)
@@ -1393,6 +1393,8 @@ PODS:
     - ReactCommon/turbomodule/core
   - react-native-get-random-values (1.11.0):
     - React-Core
+  - react-native-randombytes (3.6.1):
+    - React-Core
   - React-NativeModulesApple (0.79.0):
     - glog
     - hermes-engine
@@ -1718,11 +1720,11 @@ PODS:
   - RecaptchaInterop (101.0.0)
   - RNAppleAuthentication (2.4.1):
     - React-Core
-  - RNFBApp (21.13.0):
-    - Firebase/CoreOnly (= 11.10.0)
+  - RNFBApp (21.14.0):
+    - Firebase/CoreOnly (= 11.11.0)
     - React-Core
-  - RNFBAuth (21.13.0):
-    - Firebase/Auth (= 11.10.0)
+  - RNFBAuth (21.14.0):
+    - Firebase/Auth (= 11.11.0)
     - React-Core
     - RNFBApp
   - RNGoogleSignin (13.2.0):
@@ -1892,6 +1894,7 @@ DEPENDENCIES:
   - React-Mapbuffer (from `../node_modules/react-native/ReactCommon`)
   - React-microtasksnativemodule (from `../node_modules/react-native/ReactCommon/react/nativemodule/microtasks`)
   - react-native-get-random-values (from `../node_modules/react-native-get-random-values`)
+  - react-native-randombytes (from `../node_modules/react-native-randombytes`)
   - React-NativeModulesApple (from `../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)
   - React-oscompat (from `../node_modules/react-native/ReactCommon/oscompat`)
   - React-perflogger (from `../node_modules/react-native/ReactCommon/reactperflogger`)
@@ -2029,6 +2032,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/microtasks"
   react-native-get-random-values:
     :path: "../node_modules/react-native-get-random-values"
+  react-native-randombytes:
+    :path: "../node_modules/react-native-randombytes"
   React-NativeModulesApple:
     :path: "../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios"
   React-oscompat:
@@ -2114,13 +2119,13 @@ SPEC CHECKSUMS:
   DoubleConversion: cb417026b2400c8f53ae97020b2be961b59470cb
   fast_float: 06eeec4fe712a76acc9376682e4808b05ce978b6
   FBLazyVector: 758fbc1be5fb7ce700b23160033d82e574c2b6b7
-  Firebase: 1fe1c0a7d9aaea32efe01fbea5f0ebd8d70e53a2
+  Firebase: 6a8f201c61eda24e98f1ce2b44b1b9c2caf525cc
   FirebaseAppCheckInterop: f23709c9ce92d810aa53ff4ce12ad3e666a3c7be
-  FirebaseAuth: c4146bdfdc87329f9962babd24dae89373f49a32
+  FirebaseAuth: 783fa4cc0420b0f6eed580721b12d4f0a5306746
   FirebaseAuthInterop: ac22ed402c2f4e3a8c63ebd3278af9a06073c1be
-  FirebaseCore: 8344daef5e2661eb004b177488d6f9f0f24251b7
-  FirebaseCoreExtension: 6f357679327f3614e995dc7cf3f2d600bdc774ac
-  FirebaseCoreInternal: ef4505d2afb1d0ebbc33162cb3795382904b5679
+  FirebaseCore: 2321536f9c423b1f857e047a82b8a42abc6d9e2c
+  FirebaseCoreExtension: 3a64994969dd05f4bcb7e6896c654eded238e75b
+  FirebaseCoreInternal: 31ee350d87b30a9349e907f84bf49ef8e6791e5a
   fmt: a40bb5bd0294ea969aaaba240a927bd33d878cdd
   glog: 5683914934d5b6e4240e497e0f4a3b42d1854183
   GoogleSignIn: d4281ab6cf21542b1cfaff85c191f230b399d2db
@@ -2160,6 +2165,7 @@ SPEC CHECKSUMS:
   React-Mapbuffer: ccbeb05302cb0beaa3a8ad11a81254568a3a7105
   React-microtasksnativemodule: 6700c80816adde1b15377c9dac30a7201e8476d2
   react-native-get-random-values: 21325b2244dfa6b58878f51f9aa42821e7ba3d06
+  react-native-randombytes: 421f1c7d48c0af8dbcd471b0324393ebf8fe7846
   React-NativeModulesApple: 0a4b25ef768e35905536a2c3a51c864e9be70168
   React-oscompat: faff1df234d57a7368b56e9642222dde9eb9f422
   React-perflogger: 978df3d0a604cd92887381d2e199461d4d7f2659
@@ -2193,8 +2199,8 @@ SPEC CHECKSUMS:
   ReactCommon: 4349cde22a191c006feaf907cef267e75e1460a1
   RecaptchaInterop: 11e0b637842dfb48308d242afc3f448062325aba
   RNAppleAuthentication: b2d8b5ccba86b5b1e55a1a2e858f7ac6d8a21816
-  RNFBApp: 9b353818307a942fd12025ec8963375649086f37
-  RNFBAuth: 5cdcba52eada64622c849b668f9cb47a87442923
+  RNFBApp: b67ded6e4b0a6c0fee5e4f8e75e3a31567949a08
+  RNFBAuth: 6aabe6440ba66c82b3c87fc8ebf70d921e5156dd
   RNGoogleSignin: 6a6a1768ffa4059891964c85e04c0c01109a7eb7
   RNKeychain: 93ad8613ccd7ea183b748040697b8ab4640b5fac
   RNSVG: 257f59c952e296c9c36035a8f49b61fda48e398a
