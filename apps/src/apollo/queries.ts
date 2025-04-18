@@ -15,12 +15,24 @@ export const GET_USER_PROFILE = gql`
   }
 `;
 
-export const VERIFY_ZKLOGIN_PROOF = gql`
-  mutation VerifyZkLoginProof($proofData: String!) {
-    verifyZkLoginProof(proofData: $proofData) {
-      id
-      isVerified
-      createdAt
+export const INITIALIZE_ZKLOGIN = gql`
+  mutation InitializeZkLogin($firebaseToken: String!, $providerToken: String!, $provider: String!) {
+    initializeZkLogin(firebaseToken: $firebaseToken, providerToken: $providerToken, provider: $provider) {
+      maxEpoch
+      randomness
+      salt
+    }
+  }
+`;
+
+export const FINALIZE_ZKLOGIN = gql`
+  mutation FinalizeZkLogin($input: FinalizeZkLoginInput!) {
+    finalizeZkLogin(input: $input) {
+      zkProof {
+        a
+        b
+        c
+      }
       suiAddress
     }
   }

@@ -5,10 +5,10 @@ import { generateNonce, generateRandomness, genAddressSeed, getZkLoginSignature 
 import { SuiClient } from '@mysten/sui/client';
 import { jwtDecode } from 'jwt-decode';
 import * as Keychain from 'react-native-keychain';
-import { GOOGLE_CLIENT_IDS, ZKLOGIN_CLIENT_ID, API_URL } from '../config/env';
+import { GOOGLE_CLIENT_IDS, API_URL } from '../config/env';
 import auth from '@react-native-firebase/auth';
-import Platform from 'react-native';
-import { INITIALIZE_ZKLOGIN, FINALIZE_ZKLOGIN } from '../apollo/queries';
+import { Platform } from 'react-native';
+import { INITIALIZE_ZKLOGIN, FINALIZE_ZKLOGIN, INITIALIZE_APPLE_ZKLOGIN } from '../apollo/queries';
 import { apolloClient } from '../apollo/client';
 import { gql } from '@apollo/client';
 import { Buffer } from 'buffer';
@@ -73,10 +73,25 @@ export class AuthService {
       // Check if Google Play Services is available
       await GoogleSignin.hasPlayServices();
 
+      // Get the platform-specific client ID
+      const clientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
+      const platformClientId = Platform.OS === 'ios' ? clientIds.ios : 
+                             Platform.OS === 'android' ? clientIds.android : 
+                             clientIds.web;
+
+      // Configure Google Sign-In with the platform-specific client ID
+      await GoogleSignin.configure({
+        webClientId: platformClientId,
+        offlineAccess: true,
+        scopes: ['profile', 'email'],
+        iosClientId: Platform.OS === 'ios' ? clientIds.ios : undefined,
+        androidClientid: Platform.OS === 'android' ? clientIds.android : undefined,
+      });
+
       // Sign in with Google
       const userInfo = await GoogleSignin.signIn();
       
-      // Get the ID token
+      // Get the ID token with the platform-specific client ID
       const { idToken } = await GoogleSignin.getTokens();
       
       if (!idToken) {
@@ -93,25 +108,14 @@ export class AuthService {
 
       const firebaseToken = await userCredential.user.getIdToken();
 
-      // Generate ephemeral key pair
-      this.suiKeypair = new Ed25519Keypair();
-      const randomness = generateRandomness();
-      const userSalt = generateRandomness();
-
-      // Step 1: Initialize zkLogin
+      // Initialize zkLogin with the Firebase token
+      console.log('Initializing zkLogin...');
       const { data: initData } = await apolloClient.mutate({
-        mutation: gql`
-          mutation InitializeZkLogin($firebaseToken: String!, $googleToken: String!) {
-            initializeZkLogin(firebaseToken: $firebaseToken, googleToken: $googleToken) {
-              maxEpoch
-              randomness
-              salt
-            }
-          }
-        `,
+        mutation: INITIALIZE_ZKLOGIN,
         variables: {
           firebaseToken,
-          googleToken: idToken
+          providerToken: idToken,
+          provider: 'google'
         }
       });
 
@@ -121,17 +125,10 @@ export class AuthService {
 
       const { maxEpoch, randomness: serverRandomness, salt: serverSalt } = initData.initializeZkLogin;
 
-      // Log the received values
-      console.log('Received from server:');
-      console.log('maxEpoch:', maxEpoch);
-      console.log('serverRandomness:', serverRandomness);
-      console.log('serverSalt:', serverSalt);
-
-      // Get the platform-specific client ID
-      const clientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
-      const platformClientId = Platform.OS === 'ios' ? clientIds.ios : 
-                             Platform.OS === 'android' ? clientIds.android : 
-                             clientIds.web;
+      // Generate ephemeral key pair
+      this.suiKeypair = new Ed25519Keypair();
+      const randomness = generateRandomness();
+      const userSalt = generateRandomness();
 
       // Generate nonce using the randomness
       const nonce = generateNonce(this.suiKeypair.getPublicKey(), maxEpoch, randomness);
@@ -159,20 +156,9 @@ export class AuthService {
       const userSigBytes = await this.suiKeypair.sign(seedBytes);
       const userSignatureBase64 = toB64(userSigBytes);
 
-      // Step 2: Finalize zkLogin
+      // Finalize zkLogin
       const { data: finalizeData } = await apolloClient.mutate({
-        mutation: gql`
-          mutation FinalizeZkLogin($input: FinalizeZkLoginInput!) {
-            finalizeZkLogin(input: $input) {
-              zkProof {
-                a
-                b
-                c
-              }
-              suiAddress
-            }
-          }
-        `,
+        mutation: FINALIZE_ZKLOGIN,
         variables: {
           input: {
             maxEpoch: maxEpoch.toString(),
@@ -271,12 +257,83 @@ export class AuthService {
 
       // Initialize zkLogin with the Firebase token
       console.log('Initializing zkLogin...');
-      const zkLoginData = await this.initializeZkLogin(firebaseToken);
-      console.log('zkLogin initialized successfully:', zkLoginData);
+      const { data: initData } = await apolloClient.mutate({
+        mutation: INITIALIZE_ZKLOGIN,
+        variables: {
+          firebaseToken,
+          providerToken: identityToken,
+          provider: 'apple'
+        }
+      });
+
+      if (!initData?.initializeZkLogin) {
+        throw new Error('No data received from zkLogin initialization');
+      }
+
+      const { maxEpoch, randomness: serverRandomness, salt: serverSalt } = initData.initializeZkLogin;
+
+      // Generate ephemeral key pair
+      this.suiKeypair = new Ed25519Keypair();
+      const randomness = generateRandomness();
+      const userSalt = generateRandomness();
+
+      // Generate zkLogin nonce using the randomness
+      const zkLoginNonce = generateNonce(this.suiKeypair.getPublicKey(), maxEpoch, randomness);
+
+      // Generate address seed
+      const saltBytes = fromB64(serverSalt);
+      const saltHex = Buffer.from(saltBytes).toString('hex');
+      const saltBigInt = BigInt('0x' + saltHex) % BN254_MODULUS;
+
+      const addressSeed = genAddressSeed(
+        saltBigInt,
+        'sub',
+        jwtDecode(identityToken).sub,
+        'apple' // Using 'apple' as the audience for Apple Sign-In
+      ).toString();
+
+      // BCS-serialize the seed to bytes (u64)
+      const seedBytes = new Uint8Array(8);
+      const seedBigInt = BigInt(addressSeed);
+      for (let i = 0; i < 8; i++) {
+        seedBytes[i] = Number((seedBigInt >> BigInt(i * 8)) & BigInt(0xFF));
+      }
+
+      // Sign the seed bytes
+      const userSigBytes = await this.suiKeypair.sign(seedBytes);
+      const userSignatureBase64 = toB64(userSigBytes);
+
+      // Finalize zkLogin
+      const { data: finalizeData } = await apolloClient.mutate({
+        mutation: FINALIZE_ZKLOGIN,
+        variables: {
+          input: {
+            maxEpoch: maxEpoch.toString(),
+            randomness: serverRandomness,
+            salt: serverSalt,
+            extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
+            userSignature: userSignatureBase64,
+            jwt: identityToken,
+            keyClaimName: 'sub',
+            audience: 'apple'
+          }
+        }
+      });
+
+      if (!finalizeData?.finalizeZkLogin) {
+        throw new Error('No data received from zkLogin finalization');
+      }
 
       return {
-        userInfo: userCredential.user,
-        zkLoginData
+        userInfo: {
+          email: userCredential.user.email,
+          name: userCredential.user.displayName,
+          photoURL: userCredential.user.photoURL
+        },
+        zkLoginData: {
+          zkProof: finalizeData.finalizeZkLogin.zkProof,
+          suiAddress: finalizeData.finalizeZkLogin.suiAddress
+        }
       };
     } catch (error) {
       console.error('Apple Sign In Error:', error);
@@ -410,7 +467,7 @@ export class AuthService {
         saltBigInt,
         'sub',
         jwtDecode(idToken).sub,
-        platformClientId
+        platformClientId  // Use platform-specific client ID
       ).toString();
 
       // BCS-serialize the seed to bytes (u64)
