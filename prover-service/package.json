@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Standalone service for proof generation and verification",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js",
     "test": "jest",

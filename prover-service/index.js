@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { randomBytes } from 'crypto';
 import { SuiClient } from '@mysten/sui/client';
-import { getZkLoginSignature } from '@mysten/zklogin';
+import { getZkLoginSignature, genAddressSeed } from '@mysten/zklogin';
 
 const app = express();
 const port = 3001;
@@ -11,15 +11,72 @@ const port = 3001;
 app.use(cors());
 app.use(express.json());
 
-// Helper: decode base64 → Buffer
-function b64ToBuf(s) {
-  return Buffer.from(s, 'base64');
+// BN254 field modulus
+const BN254_MODULUS = BigInt('21888242871839275222246405745257275088548364400416034343698204186575808495617');
+
+// Helper: decode base64 → Buffer with length validation
+function b64ToBytes(s, fieldName) {
+  try {
+    const buf = Buffer.from(s, 'base64');
+    if (buf.length !== 32) {
+      throw new Error(`Expected 32 bytes for ${fieldName}, got ${buf.length}`);
+    }
+    return buf;
+  } catch (error) {
+    throw new Error(`Base64 decoding failed for ${fieldName}: ${error.message} (input: ${s})`);
+  }
 }
 
-// Helper function to extract sub claim from JWT
+// Helper: extract sub from JWT
 function extractSubFromJwt(jwt) {
-  const payload = jwt.split('.')[1];
-  return JSON.parse(Buffer.from(payload, 'base64url')).sub;
+  try {
+    const parts = jwt.split('.');
+    if (parts.length !== 3) {
+      throw new Error('Invalid JWT: Must have three parts');
+    }
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+    if (!payload.sub) {
+      throw new Error('JWT does not contain a "sub" claim');
+    }
+    return payload.sub;
+  } catch (error) {
+    throw new Error(`Failed to extract sub from JWT: ${error.message}`);
+  }
+}
+
+// Helper: validate JWT
+function validateJwt(jwt) {
+  try {
+    const parts = jwt.split('.');
+    if (parts.length !== 3) {
+      throw new Error('Invalid JWT: Must have three parts');
+    }
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+    if (!payload.sub || !payload.aud || !payload.iss) {
+      throw new Error('Invalid JWT: Missing required claims (sub, aud, iss)');
+    }
+    return payload;
+  } catch (error) {
+    throw new Error(`JWT validation failed: ${error.message}`);
+  }
+}
+
+// Helper: convert buffer to BN254 field element
+function bufferToBn254Field(buffer) {
+  const hex = buffer.toString('hex');
+  const num = BigInt(`0x${hex}`);
+  return num % BN254_MODULUS;
+}
+
+// Helper: create mock proof for testing
+function createMockProof() {
+  return {
+    proof_points: {
+      a: ['0', '0'],
+      b: [['0', '0'], ['0', '0']],
+      c: ['0', '0']
+    }
+  };
 }
 
 // Initialize Sui client
@@ -38,106 +95,78 @@ app.post('/generate-proof', async (req, res) => {
       audience
     } = req.body;
 
-    // extract the "sub" claim (string)
-    const sub = extractSubFromJwt(jwt);
-
-    // Create the inputs object with exact structure expected by @mysten/zklogin
-    const inputs = {
-      // JWT string
-      jwt,
-
-      // u64 fields as BigInt
-      maxEpoch: BigInt(maxEpoch),
-
-      // claims as a plain object map with BigInt values
-      claims: {
-        [keyClaimName]: BigInt(sub)
-      },
-
-      // byte arrays as Buffers (all must be exactly 32 bytes)
-      ephemeralPublicKey: b64ToBuf(extendedEphemeralPublicKey),
-      randomness: b64ToBuf(randomness),
-      salt: b64ToBuf(salt),
-
-      // string fields
+    console.log('Request body:', {
+      jwt: jwt ? jwt.substring(0, 20) + '...' : 'undefined',
+      extendedEphemeralPublicKey,
+      maxEpoch,
+      randomness,
+      salt,
       keyClaimName,
+      audience
+    });
+
+    // Validate required fields
+    if (!jwt || !extendedEphemeralPublicKey || !maxEpoch || !randomness || !salt || !keyClaimName || !audience) {
+      throw new Error('Missing required fields in request body');
+    }
+
+    // Extract sub claim from JWT
+    const sub = extractSubFromJwt(jwt);
+    console.log('Extracted sub claim:', sub);
+
+    // Create inputs with the exact shape zkLogin expects
+    const inputs = {
+      jwt,
+      maxEpoch: BigInt(maxEpoch),
+      ephemeralPublicKey: b64ToBytes(extendedEphemeralPublicKey, 'ephemeralPublicKey'),
+      randomness: b64ToBytes(randomness, 'randomness'),
+      salt: b64ToBytes(salt, 'salt'),
+      keyClaimName,
+      claims: { sub: BigInt(sub) },
       audience
     };
 
-    // Verify buffer lengths
-    if (inputs.randomness.length !== 32) {
-      throw new Error(`randomness must be exactly 32 bytes, got ${inputs.randomness.length}`);
-    }
-    if (inputs.salt.length !== 32) {
-      throw new Error(`salt must be exactly 32 bytes, got ${inputs.salt.length}`);
-    }
-    if (inputs.ephemeralPublicKey.length !== 32) {
-      throw new Error(`ephemeralPublicKey must be exactly 32 bytes, got ${inputs.ephemeralPublicKey.length}`);
-    }
-
-    // Log the exact structure being passed to getZkLoginSignature
-    console.log('Inputs structure:', JSON.stringify({
-      jwt: typeof inputs.jwt,
-      maxEpoch: {
-        type: typeof inputs.maxEpoch,
-        value: inputs.maxEpoch.toString()
-      },
-      claims: Object.fromEntries(
-        Object.entries(inputs.claims).map(([key, value]) => [
-          key,
-          {
-            type: typeof value,
-            value: value.toString()
-          }
-        ])
-      ),
+    console.log('Inputs for getZkLoginSignature:', {
+      jwt: inputs.jwt ? inputs.jwt.substring(0, 20) + '...' : 'undefined',
+      maxEpoch: inputs.maxEpoch.toString(),
       ephemeralPublicKey: {
         type: inputs.ephemeralPublicKey.constructor.name,
         length: inputs.ephemeralPublicKey.length,
-        firstBytes: inputs.ephemeralPublicKey.slice(0, 4).toString('hex')
+        value: inputs.ephemeralPublicKey.toString('base64')
       },
       randomness: {
         type: inputs.randomness.constructor.name,
         length: inputs.randomness.length,
-        firstBytes: inputs.randomness.slice(0, 4).toString('hex')
+        value: inputs.randomness.toString('base64')
       },
       salt: {
         type: inputs.salt.constructor.name,
         length: inputs.salt.length,
-        firstBytes: inputs.salt.slice(0, 4).toString('hex')
+        value: inputs.salt.toString('base64')
       },
-      keyClaimName: typeof inputs.keyClaimName,
-      audience: typeof inputs.audience
-    }, null, 2));
+      keyClaimName: inputs.keyClaimName,
+      claims: inputs.claims,
+      audience: inputs.audience
+    });
 
+    // Generate signature
     try {
       const { signature, address } = await getZkLoginSignature({ inputs });
-      console.log('Generated signature:', signature);
-      console.log('Sui address:', address);
-      return res.json({ signature, address });
-    } catch (innerErr) {
-      console.error('Detailed error in getZkLoginSignature:', {
-        message: innerErr.message,
-        stack: innerErr.stack,
-        inputs: {
-          maxEpoch: inputs.maxEpoch.toString(),
-          claims: Object.fromEntries(
-            Object.entries(inputs.claims).map(([key, value]) => [
-              key,
-              value.toString()
-            ])
-          ),
-          ephemeralPublicKey: inputs.ephemeralPublicKey.toString('hex'),
-          randomness: inputs.randomness.toString('hex'),
-          salt: inputs.salt.toString('hex')
-        }
+      console.log('Generated signature:', signature, 'address:', address);
+      res.json({
+        signature,
+        address
       });
-      throw innerErr;
+    } catch (error) {
+      console.error('Detailed error in getZkLoginSignature:', error);
+      throw error;
     }
-
-  } catch (err) {
-    console.error('Error generating proof:', err);
-    return res.status(500).json({ error: err.message });
+  } catch (error) {
+    console.error('Error generating proof:', error);
+    res.status(400).json({
+      error: error.message,
+      stack: error.stack
+    });
   }
 });
 
