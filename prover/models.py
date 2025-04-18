@@ -1,25 +1,44 @@
 from django.db import models
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import User
+from django.utils import timezone
+import uuid
 
 User = get_user_model()
 
-class ZkLoginProof(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='zk_login_proofs')
-    jwt = models.TextField(help_text="The JWT token to be proven")
-    max_epoch = models.IntegerField(help_text="Maximum epoch for which the proof is valid")
-    randomness = models.CharField(max_length=255, help_text="Randomness used in proof generation")
-    salt = models.CharField(max_length=255, help_text="Salt used in proof generation")
-    proof_data = models.JSONField(help_text="The actual zkLogin proof data")
-    created_at = models.DateTimeField(auto_now_add=True)
-    verified_at = models.DateTimeField(null=True, blank=True)
-    is_verified = models.BooleanField(default=False)
+def generate_proof_id():
+    return str(uuid.uuid4())
 
-    class Meta:
-        ordering = ['-created_at']
-        indexes = [
-            models.Index(fields=['user', 'created_at']),
-            models.Index(fields=['is_verified']),
-        ]
+class ZkLoginProof(models.Model):
+    proof_id = models.CharField(max_length=64, unique=True, default=generate_proof_id)
+    jwt = models.TextField(null=True, blank=True)
+    max_epoch = models.BigIntegerField(null=True, blank=True)
+    randomness = models.BinaryField(null=True, blank=True)
+    salt = models.BinaryField(null=True, blank=True)
+    user_salt = models.BinaryField(null=True, blank=True)
+    extended_ephemeral_public_key = models.BinaryField(null=True, blank=True)
+    user_signature = models.BinaryField(null=True, blank=True)
+    proof = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='zk_proofs', null=True)
 
     def __str__(self):
-        return f"ZkLoginProof for {self.user.email} at {self.created_at}"
+        return f"ZkLoginProof {self.proof_id}"
+
+    class Meta:
+        db_table = 'zk_login_proofs'
+
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile', null=True)
+    sui_address = models.CharField(max_length=128, unique=True, null=True, blank=True)
+    user_salt = models.BinaryField(null=True, blank=True)
+    google_sub = models.CharField(max_length=128, null=True, blank=True)
+    apple_sub = models.CharField(max_length=128, null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    last_login_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"Profile for {self.user.username if self.user else 'Unknown'}"
+
+    class Meta:
+        db_table = 'user_profiles'
