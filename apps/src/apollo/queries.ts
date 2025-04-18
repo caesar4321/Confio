@@ -64,4 +64,19 @@ export const VERIFY_TOKEN = gql`
       __typename
     }
   }
+`;
+
+export const ZKLOGIN = gql`
+  mutation ZkLogin($input: ZkLoginInput!) {
+    zkLogin(input: $input) {
+      zkProof {
+        a
+        b
+        c
+        __typename
+      }
+      suiAddress
+      __typename
+    }
+  }
 `; 

@@ -156,10 +156,6 @@ This is a **monolithic repository** containing the full Confío stack:
 │   │   ├── services/      # API and business logic services
 │   │   ├── types/         # TypeScript type definitions
 │   │   └── utils/         # Utility functions
-│   ├── prover/            # React Native module for client-side proof generation
-│   │   ├── index.js      # Main entry point for the prover module
-│   │   ├── prover.js     # Core proof generation logic
-│   │   └── utils.js      # Utility functions for proof generation
 │   ├── scripts/           # Build and development scripts
 │   ├── .env               # Environment variables (⚠️ Add to .gitignore)
 │   ├── babel.config.js    # Babel configuration

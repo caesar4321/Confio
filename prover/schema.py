@@ -119,8 +119,13 @@ class GoogleTokenDataType(graphene.ObjectType):
     name = graphene.String()
     picture = graphene.String()
 
+class ProofPointsType(graphene.ObjectType):
+    a = graphene.List(graphene.String, required=True)
+    b = graphene.List(graphene.List(graphene.String), required=True)
+    c = graphene.List(graphene.String, required=True)
+
 class ZkLoginDataType(graphene.ObjectType):
-    zkProof = graphene.String()
+    zkProof = graphene.Field(ProofPointsType)
     suiAddress = graphene.String()
     ephemeralPublicKey = graphene.String()
     maxEpoch = graphene.String()
@@ -272,10 +277,14 @@ class VerifyToken(graphene.Mutation):
                     picture=google_data.get('picture', '')
                 ),
                 zkLoginData=ZkLoginDataType(
-                    zkProof=prover_data['proof'],
+                    zkProof=ProofPointsType(
+                        a=prover_data['proof']['a'],
+                        b=prover_data['proof']['b'],
+                        c=prover_data['proof']['c']
+                    ),
                     suiAddress=prover_data['suiAddress'],
                     ephemeralPublicKey=ephemeral_public_key,
-                    maxEpoch=str(current_epoch + 2),  # Convert to string here
+                    maxEpoch=str(current_epoch + 2),
                     randomness=randomness,
                     salt=user_salt
                 )
@@ -349,11 +358,200 @@ class ZkLoginMutation(graphene.Mutation):
                 details=str(e)
             )
 
+def get_current_epoch():
+    """Get the current epoch from the Sui blockchain.
+    
+    Returns:
+        int: The current epoch number
+    """
+    try:
+        # Determine which Sui network to use based on environment
+        sui_network = os.getenv('SUI_NETWORK', 'devnet')
+        sui_url = {
+            'devnet': 'https://fullnode.devnet.sui.io',
+            'testnet': 'https://fullnode.testnet.sui.io',
+            'mainnet': 'https://fullnode.mainnet.sui.io'
+        }.get(sui_network, 'https://fullnode.devnet.sui.io')
+
+        # Make request to Sui fullnode to get current epoch
+        sui_response = requests.post(
+            sui_url,
+            json={
+                'jsonrpc': '2.0',
+                'id': 1,
+                'method': 'suix_getLatestSuiSystemState',
+                'params': []
+            },
+            timeout=5  # Add timeout to prevent hanging
+        )
+        sui_response.raise_for_status()
+        current_epoch = int(sui_response.json()['result']['epoch'])
+        logger.info(f"Retrieved current epoch from {sui_network}: {current_epoch}")
+        return current_epoch
+    except Exception as e:
+        logger.error(f"Failed to get current epoch: {str(e)}")
+        # In development, we can fall back to a reasonable value
+        if os.getenv('ENVIRONMENT') == 'development':
+            logger.warning("Using fallback epoch value for development")
+            return 1000
+        raise Exception(f"Failed to get current epoch: {str(e)}")
+
+class InitializeZkLogin(graphene.Mutation):
+    class Arguments:
+        firebaseToken = graphene.String(required=True)
+        googleToken = graphene.String(required=True)
+
+    maxEpoch = graphene.String()
+    randomness = graphene.String()
+    salt = graphene.String()
+
+    def mutate(self, info, firebaseToken, googleToken):
+        try:
+            logger.info("Starting zkLogin initialization")
+            logger.debug(f"Firebase token (first 20 chars): {firebaseToken[:20]}...")
+            logger.debug(f"Google token (first 20 chars): {googleToken[:20]}...")
+            
+            # Validate input tokens
+            if not firebaseToken or not googleToken:
+                logger.error("Missing required tokens")
+                raise Exception("Both firebaseToken and googleToken are required")
+
+            # Verify Firebase token using Admin SDK
+            logger.info("Verifying Firebase token")
+            try:
+                decoded_token = auth.verify_id_token(firebaseToken)
+                logger.debug(f"Firebase token decoded: {json.dumps(decoded_token, indent=2)}")
+                logger.info("Firebase token verified successfully")
+            except auth.InvalidIdTokenError as e:
+                logger.error(f"Firebase token verification failed: {str(e)}")
+                raise Exception(f"Firebase token verification failed: {str(e)}")
+
+            # Verify Google token
+            logger.info("Verifying Google token")
+            try:
+                google_response = requests.get(
+                    f'https://oauth2.googleapis.com/tokeninfo?id_token={googleToken}'
+                )
+                google_response.raise_for_status()
+                google_data = google_response.json()
+                logger.debug(f"Google token response: {json.dumps(google_data, indent=2)}")
+                logger.info("Google token verified successfully")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Google token verification failed: {str(e)}")
+                raise Exception(f"Google token verification failed: {str(e)}")
+
+            # Generate zkLogin inputs
+            logger.info("Generating zkLogin inputs")
+            
+            # Generate salt as base64 string
+            raw_salt = os.urandom(32)
+            base64_salt = base64.b64encode(raw_salt).decode('utf-8')
+            logger.info(f"Generated user salt: {base64_salt}")
+
+            # Use a fixed epoch value (current epoch + 2)
+            current_epoch = 1000  # Fixed value for development
+            logger.info(f"Using fixed epoch value: {current_epoch}")
+
+            # Generate ephemeral key pair and randomness
+            signing_key = nacl.signing.SigningKey.generate()
+            ephemeral_public_key = base64.b64encode(signing_key.verify_key.encode()).decode('utf-8')
+            
+            # Generate randomness as base64 string
+            raw_randomness = os.urandom(32)
+            base64_randomness = base64.b64encode(raw_randomness).decode('utf-8')
+            logger.info(f"Generated randomness: {base64_randomness}")
+
+            return InitializeZkLogin(
+                maxEpoch=str(current_epoch + 2),
+                randomness=base64_randomness,
+                salt=base64_salt
+            )
+
+        except Exception as e:
+            logger.error(f"Unexpected error in InitializeZkLogin mutation: {str(e)}", exc_info=True)
+            raise Exception(f"Unexpected error: {str(e)}")
+
+class FinalizeZkLoginInput(graphene.InputObjectType):
+    maxEpoch = graphene.String(required=True)
+    randomness = graphene.String(required=True)
+    salt = graphene.String(required=True)
+    extendedEphemeralPublicKey = graphene.String(required=True)
+    userSignature = graphene.String(required=True)
+    jwt = graphene.String(required=True)
+    keyClaimName = graphene.String(required=True)
+    audience = graphene.String(required=True)
+
+class FinalizeZkLoginPayload(graphene.ObjectType):
+    zkProof = graphene.Field(ProofPointsType)
+    suiAddress = graphene.String()
+
+def resolve_finalize_zk_login(self, info, input):
+    try:
+        # Log the input for debugging
+        logger.info("Received finalize zkLogin request with input:")
+        logger.info(f"jwt: {input.jwt[:20]}...")
+        logger.info(f"maxEpoch: {input.maxEpoch}")
+        logger.info(f"randomness: {input.randomness[:20]}...")
+        logger.info(f"salt: {input.salt[:20]}...")
+        logger.info(f"extendedEphemeralPublicKey: {input.extendedEphemeralPublicKey[:20]}...")
+        logger.info(f"keyClaimName: {input.keyClaimName}")
+        logger.info(f"audience: {input.audience}")
+
+        # Prepare the request payload
+        payload = {
+            'jwt': input.jwt,
+            'maxEpoch': input.maxEpoch,
+            'randomness': input.randomness,
+            'keyClaimName': input.keyClaimName,
+            'extendedEphemeralPublicKey': input.extendedEphemeralPublicKey,
+            'salt': input.salt,
+            'audience': input.audience,
+            'userSignature': input.userSignature
+        }
+
+        # Log the request payload
+        logger.info("Sending request to prover service with payload:")
+        logger.info(json.dumps(payload, indent=2))
+
+        # Make request to prover service
+        resp = requests.post(
+            'http://localhost:3001/generate-proof',
+            json=payload,
+            timeout=30  # Add timeout to prevent hanging
+        )
+        resp.raise_for_status()
+        
+        # Parse response
+        data = resp.json()
+        logger.info("Received response from prover service:")
+        logger.info(json.dumps(data, indent=2))
+
+        # Validate response structure
+        if 'proof' not in data or 'suiAddress' not in data:
+            raise Exception(f"Invalid response from prover service: {data}")
+
+        return FinalizeZkLoginPayload(
+            zkProof=data['proof'],
+            suiAddress=data['suiAddress']
+        )
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to generate proof: {str(e)}")
+        raise Exception(f"Failed to generate proof: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in finalizeZkLogin: {str(e)}")
+        raise Exception(f"Unexpected error: {str(e)}")
+
 class Mutation(client.ClientMutation, server.ServerMutation, graphene.ObjectType):
     generate_zk_login_proof = GenerateZkLoginProof.Field()
     verify_zk_login_proof = VerifyZkLoginProof.Field()
     verify_token = VerifyToken.Field()
     zk_login = ZkLoginMutation.Field()
+    initialize_zk_login = InitializeZkLogin.Field()
+    finalize_zk_login = graphene.Field(
+        FinalizeZkLoginPayload,
+        input=FinalizeZkLoginInput(required=True),
+        resolver=resolve_finalize_zk_login
+    )
 
 class Query(graphene.ObjectType):
     zk_login_proof = graphene.Field(ZkLoginProofType, id=graphene.ID())

@@ -5,83 +5,60 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  FlatList,
 } from 'react-native';
-import { useZkLogin, ZkLoginProof } from '../hooks/useZkLogin';
+import { AuthService } from '../services/authService';
 
 export const ZkLoginManager: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { generateProof, verifyProof, proofs, proofsLoading } = useZkLogin();
 
-  const handleGenerateProof = useCallback(async () => {
+  const handleSignInWithGoogle = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      
-      // Calculate max epoch (current epoch + 1000)
-      const currentEpoch = Math.floor(Date.now() / 1000);
-      const maxEpoch = currentEpoch + 1000;
-      
-      await generateProof(maxEpoch);
+      const authService = AuthService.getInstance();
+      await authService.signInWithGoogle();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate proof');
+      setError(err instanceof Error ? err.message : 'Failed to sign in with Google');
     } finally {
       setLoading(false);
     }
-  }, [generateProof]);
+  }, []);
 
-  const handleVerifyProof = useCallback(async (proofId: string) => {
+  const handleSignInWithApple = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      await verifyProof(proofId);
+      const authService = AuthService.getInstance();
+      await authService.signInWithApple();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to verify proof');
+      setError(err instanceof Error ? err.message : 'Failed to sign in with Apple');
     } finally {
       setLoading(false);
     }
-  }, [verifyProof]);
-
-  const renderProof = ({ item }: { item: ZkLoginProof }) => (
-    <View style={styles.proofContainer}>
-      <Text style={styles.proofId}>ID: {item.id}</Text>
-      <Text>Created: {new Date(item.createdAt).toLocaleString()}</Text>
-      <Text>Status: {item.isVerified ? 'Verified' : 'Unverified'}</Text>
-      {!item.isVerified && (
-        <TouchableOpacity
-          style={styles.verifyButton}
-          onPress={() => handleVerifyProof(item.id)}
-        >
-          <Text style={styles.buttonText}>Verify</Text>
-        </TouchableOpacity>
-      )}
-    </View>
-  );
+  }, []);
 
   return (
     <View style={styles.container}>
       <TouchableOpacity
-        style={styles.generateButton}
-        onPress={handleGenerateProof}
+        style={styles.button}
+        onPress={handleSignInWithGoogle}
         disabled={loading}
       >
-        <Text style={styles.buttonText}>Generate New Proof</Text>
+        <Text style={styles.buttonText}>Sign in with Google</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.button}
+        onPress={handleSignInWithApple}
+        disabled={loading}
+      >
+        <Text style={styles.buttonText}>Sign in with Apple</Text>
       </TouchableOpacity>
 
       {error && <Text style={styles.error}>{error}</Text>}
 
-      {(loading || proofsLoading) && (
-        <ActivityIndicator size="large" color="#0000ff" />
-      )}
-
-      <Text style={styles.title}>Your Proofs</Text>
-      <FlatList
-        data={proofs}
-        renderItem={renderProof}
-        keyExtractor={(item) => item.id}
-        style={styles.list}
-      />
+      {loading && <ActivityIndicator size="large" color="#0000ff" />}
     </View>
   );
 };
@@ -92,45 +69,21 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: '#fff',
   },
-  generateButton: {
+  button: {
     backgroundColor: '#007AFF',
     padding: 16,
     borderRadius: 8,
     alignItems: 'center',
     marginBottom: 16,
   },
-  verifyButton: {
-    backgroundColor: '#34C759',
-    padding: 8,
-    borderRadius: 6,
-    alignItems: 'center',
-    marginTop: 8,
-  },
   buttonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: 'bold',
   },
   error: {
-    color: '#FF3B30',
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 16,
-  },
-  list: {
-    flex: 1,
-  },
-  proofContainer: {
-    backgroundColor: '#F2F2F7',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  proofId: {
-    fontWeight: '600',
-    marginBottom: 4,
+    color: 'red',
+    marginTop: 16,
+    textAlign: 'center',
   },
 }); 
