@@ -54,6 +54,11 @@ const config = {
       return context.resolveRequest(context, moduleName, platform);
     },
   },
+  serializer: {
+    getModulesRunBeforeMainModule: () => [
+      require.resolve("./polyfills.js"),
+    ],
+  },
 };
 
 module.exports = mergeConfig(defaultConfig, config);

@@ -1,9 +1,6 @@
-// Polyfill for crypto.getRandomValues
-import 'react-native-get-random-values';
-
 import { GoogleSignin, User } from '@react-native-google-signin/google-signin';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { fromB64 } from '@mysten/sui/utils';
+import { fromB64, toB64 } from '@mysten/sui/utils';
 import { generateNonce, generateRandomness, genAddressSeed, getZkLoginSignature } from '@mysten/sui/zklogin';
 import { SuiClient } from '@mysten/sui/client';
 import { jwtDecode } from 'jwt-decode';
@@ -11,10 +8,16 @@ import * as Keychain from 'react-native-keychain';
 import { GOOGLE_CLIENT_IDS, ZKLOGIN_CLIENT_ID, API_URL } from '../config/env';
 import auth from '@react-native-firebase/auth';
 import Platform from 'react-native';
-import { VERIFY_TOKEN } from '../apollo/queries';
+import { INITIALIZE_ZKLOGIN, FINALIZE_ZKLOGIN } from '../apollo/queries';
 import { apolloClient } from '../apollo/client';
 import { gql } from '@apollo/client';
-import { GoogleAuthProvider, signInWithCredential } from '@firebase/auth';
+import { Buffer } from 'buffer';
+
+// Add type definitions for BigInt
+declare const BigInt: (value: string | number | bigint) => bigint;
+
+// BN254 field modulus
+const BN254_MODULUS = BigInt('0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001');
 
 export class AuthService {
   private static instance: AuthService;
@@ -49,23 +52,13 @@ export class AuthService {
   private async configureGoogleSignIn() {
     try {
       const clientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
-      const config: {
-        webClientId: string;
-        offlineAccess: boolean;
-        scopes: string[];
-        iosClientId?: string;
-        androidClientId?: string;
-      } = {
+      const config = {
         webClientId: clientIds.web,
         offlineAccess: true,
         scopes: ['profile', 'email'],
+        iosClientId: Platform.OS === 'ios' ? clientIds.ios : undefined,
+        androidClientid: Platform.OS === 'android' ? clientIds.android : undefined,
       };
-
-      if (Platform.OS === 'ios') {
-        config.iosClientId = clientIds.ios;
-      } else if (Platform.OS === 'android') {
-        config.androidClientId = clientIds.android;
-      }
       
       await GoogleSignin.configure(config);
       console.log('Google Sign-In configuration successful');
@@ -77,87 +70,140 @@ export class AuthService {
 
   async signInWithGoogle() {
     try {
-      await this.configureGoogleSignIn();
-      const result = await GoogleSignin.signIn();
+      // Check if Google Play Services is available
+      await GoogleSignin.hasPlayServices();
+
+      // Sign in with Google
+      const userInfo = await GoogleSignin.signIn();
+      
+      // Get the ID token
       const { idToken } = await GoogleSignin.getTokens();
       
-      // Create Firebase credential with Google token
-      const googleCredential = auth.GoogleAuthProvider.credential(idToken);
+      if (!idToken) {
+        throw new Error('No ID token received from Google Sign-In');
+      }
+
+      // Create Firebase credential with the ID token
+      const credential = auth.GoogleAuthProvider.credential(idToken);
+      const userCredential = await this.auth.signInWithCredential(credential);
       
-      // Sign in with Firebase using the Google credential
-      const userCredential = await this.auth.signInWithCredential(googleCredential);
+      if (!userCredential.user) {
+        throw new Error('No user returned from Firebase sign-in');
+      }
+
       const firebaseToken = await userCredential.user.getIdToken();
 
-      console.log('Sending tokens to GraphQL server:', {
-        firebaseToken: firebaseToken.substring(0, 20) + '...',
-        googleToken: idToken.substring(0, 20) + '...'
-      });
+      // Generate ephemeral key pair
+      this.suiKeypair = new Ed25519Keypair();
+      const randomness = generateRandomness();
+      const userSalt = generateRandomness();
 
-      // Verify both tokens and get zkLogin data
-      const { data, errors } = await apolloClient.mutate({
-        mutation: VERIFY_TOKEN,
+      // Step 1: Initialize zkLogin
+      const { data: initData } = await apolloClient.mutate({
+        mutation: gql`
+          mutation InitializeZkLogin($firebaseToken: String!, $googleToken: String!) {
+            initializeZkLogin(firebaseToken: $firebaseToken, googleToken: $googleToken) {
+              maxEpoch
+              randomness
+              salt
+            }
+          }
+        `,
         variables: {
-          firebaseToken: firebaseToken,
-          googleToken: idToken,
-        },
+          firebaseToken,
+          googleToken: idToken
+        }
       });
 
-      if (errors) {
-        console.error('GraphQL Errors:', errors);
-        throw new Error('GraphQL mutation failed');
+      if (!initData?.initializeZkLogin) {
+        throw new Error('No data received from zkLogin initialization');
       }
 
-      if (!data?.verifyToken) {
-        throw new Error('No data received from token verification');
+      const { maxEpoch, randomness: serverRandomness, salt: serverSalt } = initData.initializeZkLogin;
+
+      // Log the received values
+      console.log('Received from server:');
+      console.log('maxEpoch:', maxEpoch);
+      console.log('serverRandomness:', serverRandomness);
+      console.log('serverSalt:', serverSalt);
+
+      // Get the platform-specific client ID
+      const clientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
+      const platformClientId = Platform.OS === 'ios' ? clientIds.ios : 
+                             Platform.OS === 'android' ? clientIds.android : 
+                             clientIds.web;
+
+      // Generate nonce using the randomness
+      const nonce = generateNonce(this.suiKeypair.getPublicKey(), maxEpoch, randomness);
+
+      // Generate address seed
+      const saltBytes = fromB64(serverSalt);
+      const saltHex = Buffer.from(saltBytes).toString('hex');
+      const saltBigInt = BigInt('0x' + saltHex) % BN254_MODULUS;
+
+      const addressSeed = genAddressSeed(
+        saltBigInt,
+        'sub',
+        jwtDecode(idToken).sub,
+        platformClientId
+      ).toString();
+
+      // BCS-serialize the seed to bytes (u64)
+      const seedBytes = new Uint8Array(8);
+      const seedBigInt = BigInt(addressSeed);
+      for (let i = 0; i < 8; i++) {
+        seedBytes[i] = Number((seedBigInt >> BigInt(i * 8)) & BigInt(0xFF));
       }
 
-      if (!data.verifyToken.success) {
-        throw new Error(data.verifyToken.error || 'Token verification failed');
-      }
+      // Sign the seed bytes
+      const userSigBytes = await this.suiKeypair.sign(seedBytes);
+      const userSignatureBase64 = toB64(userSigBytes);
 
-      // Store zkLogin data securely
-      const zkLoginData = data.verifyToken.zkLoginData;
-      if (!zkLoginData) {
-        throw new Error('No zkLogin data received');
-      }
-
-      // Store all sensitive data in a single secure entry
-      await Keychain.setGenericPassword(
-        'zkLoginData',
-        JSON.stringify({
-          suiKeypair: zkLoginData.suiKeypair,
-          userSalt: zkLoginData.userSalt,
-          zkProof: zkLoginData.zkProof,
-          ephemeralPublicKey: zkLoginData.ephemeralPublicKey,
-          maxEpoch: zkLoginData.maxEpoch.toString(),
-          randomness: zkLoginData.randomness
-        }),
-        {
-          service: 'com.confio.zklogin',
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY
+      // Step 2: Finalize zkLogin
+      const { data: finalizeData } = await apolloClient.mutate({
+        mutation: gql`
+          mutation FinalizeZkLogin($input: FinalizeZkLoginInput!) {
+            finalizeZkLogin(input: $input) {
+              zkProof {
+                a
+                b
+                c
+              }
+              suiAddress
+            }
+          }
+        `,
+        variables: {
+          input: {
+            maxEpoch: maxEpoch.toString(),
+            randomness: serverRandomness,
+            salt: serverSalt,
+            extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
+            userSignature: userSignatureBase64,
+            jwt: idToken,
+            keyClaimName: 'sub',
+            audience: platformClientId
+          }
         }
-      );
+      });
+
+      if (!finalizeData?.finalizeZkLogin) {
+        throw new Error('No data received from zkLogin finalization');
+      }
 
       return {
-        user: {
-          uid: data.verifyToken.firebaseUser.uid,
-          email: data.verifyToken.firebaseUser.email,
-          name: data.verifyToken.firebaseUser.name,
-          picture: data.verifyToken.firebaseUser.picture,
-          __typename: data.verifyToken.firebaseUser.__typename
+        userInfo: {
+          email: userCredential.user.email,
+          name: userCredential.user.displayName,
+          photoURL: userCredential.user.photoURL
         },
         zkLoginData: {
-          suiKeypair: zkLoginData.suiKeypair,
-          userSalt: zkLoginData.userSalt,
-          zkProof: zkLoginData.zkProof,
-          ephemeralPublicKey: zkLoginData.ephemeralPublicKey,
-          maxEpoch: zkLoginData.maxEpoch,
-          randomness: zkLoginData.randomness,
-          __typename: zkLoginData.__typename
+          zkProof: finalizeData.finalizeZkLogin.zkProof,
+          suiAddress: finalizeData.finalizeZkLogin.suiAddress
         }
       };
     } catch (error) {
-      console.error('Google Sign-In Error:', error);
+      console.error('Error signing in with Google:', error);
       throw error;
     }
   }
@@ -315,43 +361,119 @@ export class AuthService {
     try {
       console.log('Initializing zkLogin with ID token');
       
-      // Get current epoch information
-      const { epoch } = await this.suiClient.getLatestSuiSystemState();
-      const maxEpoch = Number(epoch) + 2;
-      console.log('Current epoch:', epoch, 'Max epoch:', maxEpoch);
-
       // Generate ephemeral key pair
       this.suiKeypair = new Ed25519Keypair();
       
       // Generate randomness using @mysten/zklogin's utility
       const randomness = generateRandomness();
       
+      // Generate user salt
+      this.userSalt = generateRandomness();
+      console.log('Generated user salt');
+
+      // Step 1: Initialize zkLogin with the server
+      const { data: initData, errors: initErrors } = await apolloClient.mutate({
+        mutation: INITIALIZE_ZKLOGIN,
+        variables: {
+          firebaseToken: idToken,
+          googleToken: idToken // Using the same token for both for now
+        }
+      });
+
+      if (initErrors) {
+        console.error('GraphQL Errors:', initErrors);
+        throw new Error('GraphQL mutation failed');
+      }
+
+      if (!initData?.initializeZkLogin) {
+        throw new Error('No data received from zkLogin initialization');
+      }
+
+      const { maxEpoch, randomness: serverRandomness, salt: serverSalt } = initData.initializeZkLogin;
+
       // Generate nonce using the randomness
       const nonce = generateNonce(this.suiKeypair.getPublicKey(), maxEpoch, randomness);
       console.log('Generated ephemeral key pair and randomness');
 
-      // Generate user salt using @mysten/zklogin's utility
-      this.userSalt = generateRandomness();
-      console.log('Generated user salt');
+      // Get the platform-specific client ID
+      const clientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
+      const platformClientId = Platform.OS === 'ios' ? clientIds.ios : 
+                             Platform.OS === 'android' ? clientIds.android : 
+                             clientIds.web;
 
-      // Get ZK proof from our GraphQL server
-      console.log('Requesting ZK proof from our GraphQL server');
-      this.zkProof = await this.getZkProof(idToken, maxEpoch, randomness);
-      console.log('Received ZK proof from our GraphQL server');
+      // Generate address seed
+      const saltBytes = fromB64(serverSalt);
+      const saltHex = Buffer.from(saltBytes).toString('hex');
+      const saltBigInt = BigInt('0x' + saltHex) % BN254_MODULUS;
+
+      const addressSeed = genAddressSeed(
+        saltBigInt,
+        'sub',
+        jwtDecode(idToken).sub,
+        platformClientId
+      ).toString();
+
+      // BCS-serialize the seed to bytes (u64)
+      const seedBytes = new Uint8Array(8);
+      const seedBigInt = BigInt(addressSeed);
+      for (let i = 0; i < 8; i++) {
+        seedBytes[i] = Number((seedBigInt >> BigInt(i * 8)) & BigInt(0xFF));
+      }
+
+      // Sign the seed bytes
+      const userSigBytes = await this.suiKeypair.sign(seedBytes);
+      const userSignatureBase64 = toB64(userSigBytes);
+
+      // Log the request body for debugging
+      console.log('→ calling generate-proof with', {
+        jwt: idToken,
+        extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
+        maxEpoch: maxEpoch.toString(),
+        randomness: serverRandomness,
+        salt: serverSalt,
+        keyClaimName: 'sub',
+        audience: platformClientId,
+        userSignature: userSignatureBase64
+      });
+
+      // Step 2: Finalize zkLogin with the server
+      const { data: finalizeData, errors: finalizeErrors } = await apolloClient.mutate({
+        mutation: FINALIZE_ZKLOGIN,
+        variables: {
+          maxEpoch: maxEpoch.toString(),
+          randomness: serverRandomness,
+          salt: serverSalt,
+          extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
+          userSignature: userSignatureBase64
+        }
+      });
+
+      if (finalizeErrors) {
+        console.error('GraphQL Errors:', finalizeErrors);
+        throw new Error('GraphQL mutation failed');
+      }
+
+      if (!finalizeData?.finalizeZkLogin) {
+        throw new Error('No data received from zkLogin finalization');
+      }
+
+      const { zkProof, suiAddress } = finalizeData.finalizeZkLogin;
 
       // Store sensitive data securely
       await this.storeSensitiveData({
         suiKeypair: this.suiKeypair.getSecretKey(),
-        userSalt: this.userSalt,
-        zkProof: this.zkProof,
+        userSalt: serverSalt,
+        zkProof,
+        suiAddress
       });
       console.log('Stored sensitive data securely');
 
       return {
         maxEpoch,
-        randomness,
+        randomness: serverRandomness,
         nonce,
-        userSalt: this.userSalt
+        userSalt: serverSalt,
+        suiAddress
       };
     } catch (error) {
       console.error('zkLogin Initialization Error:', error);
@@ -364,6 +486,7 @@ export class AuthService {
     suiKeypair: string;
     userSalt: string;
     zkProof: any;
+    suiAddress: string;
   }) {
     try {
       await Keychain.setGenericPassword(
