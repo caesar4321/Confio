@@ -108,10 +108,25 @@ This is a **monolithic repository** containing the full Confío stack:
 │   └── views.py       # View functions
 ├── credentials/       # Encrypted credentials (git-crypt)
 ├── prover/            # Server-side proof verification
-│   ├── models.py      # Database models
-│   ├── schema.py      # GraphQL schema and resolvers
-│   ├── serializers.py # Data serialization
-│   └── tests/         # Test cases
+│   ├── models.py      # Database models for storing proof verification results
+│   ├── schema.py      # GraphQL schema and resolvers for proof verification endpoints
+│   ├── serializers.py # Data serialization for proof verification
+│   └── tests/         # Test cases for proof verification
+├── prover-service/    # Standalone service for proof generation and verification
+│   ├── index.js      # Main entry point for the prover service
+│   ├── prover.js     # Core proof generation and verification logic
+│   ├── utils.js      # Utility functions for proof operations
+│   ├── tests/        # Test cases for the prover service
+│   └── package.json  # Node.js dependencies and scripts
+│       ├── Dependencies:
+│       │   ├── @mysten/zklogin: zkLogin functionality
+│       │   ├── express: Web server
+│       │   ├── cors: Cross-Origin Resource Sharing
+│       │   └── dotenv: Environment variable management
+│       └── Scripts:
+│           ├── start: Run the service
+│           ├── test: Run tests
+│           └── lint: Run the linter
 ├── users/             # User authentication and management
 │   ├── models.py      # User models
 │   ├── schema.py      # GraphQL schema and resolvers
@@ -142,6 +157,9 @@ This is a **monolithic repository** containing the full Confío stack:
 │   │   ├── types/         # TypeScript type definitions
 │   │   └── utils/         # Utility functions
 │   ├── prover/            # React Native module for client-side proof generation
+│   │   ├── index.js      # Main entry point for the prover module
+│   │   ├── prover.js     # Core proof generation logic
+│   │   └── utils.js      # Utility functions for proof generation
 │   ├── scripts/           # Build and development scripts
 │   ├── .env               # Environment variables (⚠️ Add to .gitignore)
 │   ├── babel.config.js    # Babel configuration
