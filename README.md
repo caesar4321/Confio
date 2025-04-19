@@ -150,7 +150,6 @@ This is a **monolithic repository** containing the full Confío stack:
 │   │   ├── assets/        # Static assets (images, fonts, etc.)
 │   │   ├── components/    # Reusable React components
 │   │   ├── config/        # Application configuration
-│   │   ├── graphql/       # GraphQL schema and type definitions
 │   │   ├── hooks/         # Custom React hooks
 │   │   ├── screens/       # Screen components
 │   │   ├── services/      # API and business logic services
