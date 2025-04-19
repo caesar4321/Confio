@@ -12,6 +12,7 @@ import json
 from django.conf import settings
 import requests
 import nacl.signing
+import nacl.encoding
 import base64
 import secrets
 import random
@@ -57,344 +58,6 @@ def normalize_prover_payload(payload):
             raise ValueError(f"Missing required field: {field}")
     
     return normalized
-
-class UserProfileType(DjangoObjectType):
-    class Meta:
-        model = UserProfile
-        exclude = ('user_salt',)
-
-class ZkLoginProofType(DjangoObjectType):
-    class Meta:
-        model = ZkLoginProof
-        exclude = ('randomness', 'salt', 'user_salt', 'extended_ephemeral_public_key', 'user_signature')
-
-    # Add computed fields for binary data
-    randomness = graphene.String()
-    salt = graphene.String()
-    user_salt = graphene.String()
-    extended_ephemeral_public_key = graphene.String()
-    user_signature = graphene.String()
-
-    def resolve_randomness(self, info):
-        return base64.b64encode(self.randomness).decode('utf-8') if self.randomness else None
-
-    def resolve_salt(self, info):
-        return base64.b64encode(self.salt).decode('utf-8') if self.salt else None
-
-    def resolve_user_salt(self, info):
-        return base64.b64encode(self.user_salt).decode('utf-8') if self.user_salt else None
-
-    def resolve_extended_ephemeral_public_key(self, info):
-        return base64.b64encode(self.extended_ephemeral_public_key).decode('utf-8') if self.extended_ephemeral_public_key else None
-
-    def resolve_user_signature(self, info):
-        return base64.b64encode(self.user_signature).decode('utf-8') if self.user_signature else None
-
-class GenerateZkLoginProof(graphene.Mutation):
-    class Arguments:
-        jwt = graphene.String(required=True)
-        max_epoch = graphene.Int(required=True)
-        randomness = graphene.String(required=True)
-        salt = graphene.String(required=True)
-
-    proof = graphene.Field(ZkLoginProofType)
-    error = graphene.String()
-
-    def mutate(self, info, jwt, max_epoch, randomness, salt):
-        try:
-            # TODO: Implement actual zkLogin proof generation
-            # This is a placeholder for the actual implementation
-            proof = ZkLoginProof.objects.create(
-                jwt=jwt,
-                max_epoch=max_epoch,
-                randomness=randomness,
-                salt=salt,
-                proof_data="{}"  # Placeholder for actual proof data
-            )
-            return GenerateZkLoginProof(proof=proof)
-        except Exception as e:
-            return GenerateZkLoginProof(error=str(e))
-
-class VerifyZkLoginProof(graphene.Mutation):
-    class Arguments:
-        proof_id = graphene.ID(required=True)
-
-    success = graphene.Boolean()
-    error = graphene.String()
-
-    def mutate(self, info, proof_id):
-        try:
-            proof = ZkLoginProof.objects.get(id=proof_id)
-            # TODO: Implement actual proof verification
-            # This is a placeholder for the actual implementation
-            return VerifyZkLoginProof(success=True)
-        except ZkLoginProof.DoesNotExist:
-            return VerifyZkLoginProof(error="Proof not found")
-        except Exception as e:
-            return VerifyZkLoginProof(error=str(e))
-
-class TokenVerificationType(graphene.ObjectType):
-    sub = graphene.String()
-    aud = graphene.String()
-    iss = graphene.String()
-    email = graphene.String()
-    email_verified = graphene.Boolean()
-    name = graphene.String()
-    picture = graphene.String()
-
-class FirebaseUserType(graphene.ObjectType):
-    uid = graphene.String()
-    email = graphene.String()
-    name = graphene.String()
-    picture = graphene.String()
-
-class GoogleTokenDataType(graphene.ObjectType):
-    sub = graphene.String()
-    aud = graphene.String()
-    iss = graphene.String()
-    email = graphene.String()
-    email_verified = graphene.Boolean()
-    name = graphene.String()
-    picture = graphene.String()
-
-class ProofPointsType(graphene.ObjectType):
-    a = graphene.List(graphene.String, required=True)
-    b = graphene.List(graphene.List(graphene.String), required=True)
-    c = graphene.List(graphene.String, required=True)
-
-class ZkLoginDataType(graphene.ObjectType):
-    zkProof = graphene.Field(ProofPointsType)
-    suiAddress = graphene.String()
-    ephemeralPublicKey = graphene.String()
-    maxEpoch = graphene.String()
-    randomness = graphene.String()
-    salt = graphene.String()
-
-class VerifyToken(graphene.Mutation):
-    class Arguments:
-        firebaseToken = graphene.String(required=True)
-        googleToken = graphene.String(required=True)
-
-    success = graphene.Boolean()
-    error = graphene.String()
-    details = graphene.String()
-    firebaseUser = graphene.Field(FirebaseUserType)
-    googleTokenData = graphene.Field(GoogleTokenDataType)
-    zkLoginData = graphene.Field(ZkLoginDataType)
-
-    def mutate(self, info, firebaseToken, googleToken):
-        try:
-            logger.info("Starting token verification process")
-            logger.debug(f"Firebase token (first 20 chars): {firebaseToken[:20]}...")
-            logger.debug(f"Google token (first 20 chars): {googleToken[:20]}...")
-            
-            # Validate input tokens
-            if not firebaseToken or not googleToken:
-                logger.error("Missing required tokens")
-                return VerifyToken(
-                    success=False,
-                    error="Missing required tokens",
-                    details="Both firebaseToken and googleToken are required"
-                )
-
-            # Verify Firebase token using Admin SDK
-            logger.info("Verifying Firebase token")
-            try:
-                decoded_token = auth.verify_id_token(firebaseToken)
-                logger.debug(f"Firebase token decoded: {json.dumps(decoded_token, indent=2)}")
-                logger.info("Firebase token verified successfully")
-            except auth.InvalidIdTokenError as e:
-                logger.error(f"Firebase token verification failed: {str(e)}")
-                return VerifyToken(
-                    success=False,
-                    error="Firebase token verification failed",
-                    details=str(e)
-                )
-
-            # Verify Google token
-            logger.info("Verifying Google token")
-            try:
-                google_response = requests.get(
-                    f'https://oauth2.googleapis.com/tokeninfo?id_token={googleToken}'
-                )
-                google_response.raise_for_status()
-                google_data = google_response.json()
-                logger.debug(f"Google token response: {json.dumps(google_data, indent=2)}")
-                logger.info("Google token verified successfully")
-            except requests.exceptions.RequestException as e:
-                logger.error(f"Google token verification failed: {str(e)}")
-                return VerifyToken(
-                    success=False,
-                    error="Google token verification failed",
-                    details=str(e)
-                )
-
-            # Generate zkLogin inputs
-            logger.info("Generating zkLogin inputs")
-            try:
-                # 1. Generate user salt
-                user_salt = base64.b64encode(os.urandom(32)).decode()
-                logger.info(f"Generated user salt: {user_salt}")
-
-                # 2. Get current epoch from Sui
-                sui_response = requests.post(
-                    'https://fullnode.devnet.sui.io',
-                    json={
-                        'jsonrpc': '2.0',
-                        'id': 1,
-                        'method': 'suix_getLatestSuiSystemState',
-                        'params': []
-                    }
-                )
-                sui_response.raise_for_status()
-                current_epoch = int(sui_response.json()['result']['epoch'])  # Convert to int
-                logger.info(f"Retrieved current epoch: {current_epoch}")
-
-                # 3. Generate ephemeral keypair
-                signing_key = nacl.signing.SigningKey.generate()
-                ephemeral_public_key = base64.b64encode(signing_key.verify_key.encode()).decode()
-                logger.info(f"Generated ephemeral public key: {ephemeral_public_key}")
-
-                # 4. Generate randomness
-                randomness = base64.b64encode(os.urandom(32)).decode()
-                logger.info(f"Generated randomness: {randomness}")
-
-                # 5. Call zkLogin Prover service
-                raw_payload = {
-                    'jwt': googleToken,
-                    'extendedEphemeralPublicKey': ephemeral_public_key,
-                    'maxEpoch': str(current_epoch + 2),
-                    'randomness': randomness,
-                    'salt': user_salt,
-                    'keyClaimName': 'sub',
-                    'audience': google_data.get('aud', '')
-                }
-                # this will cast every value to str and blow up if any required key is missing
-                prover_payload = normalize_prover_payload(raw_payload)
-                logger.debug(f"Prover service payload (all strings):\n{json.dumps(prover_payload, indent=2)}")
-
-                prover_response = requests.post(
-                    'http://localhost:3001/generate-proof',
-                    json=prover_payload
-                )
-                prover_response.raise_for_status()
-                prover_data = prover_response.json()
-                logger.debug(f"Prover service response: {json.dumps(prover_data, indent=2)}")
-                logger.info("Generated zkLogin proof successfully")
-
-            except Exception as e:
-                logger.exception("Failed to generate zkLogin inputs")
-                return VerifyToken(
-                    success=False,
-                    error="Failed to generate zkLogin inputs",
-                    details=f"Internal error: {str(e)}",
-                    firebaseUser=None,
-                    googleTokenData=None,
-                    zkLoginData=None
-                )
-
-            # Return success response
-            logger.info("Token verification process completed successfully")
-            return VerifyToken(
-                success=True,
-                error=None,
-                details=None,
-                firebaseUser=FirebaseUserType(
-                    uid=decoded_token['uid'],
-                    email=decoded_token.get('email', ''),
-                    name=decoded_token.get('name', ''),
-                    picture=decoded_token.get('picture', '')
-                ),
-                googleTokenData=GoogleTokenDataType(
-                    sub=google_data['sub'],
-                    aud=google_data['aud'],
-                    iss=google_data['iss'],
-                    email=google_data['email'],
-                    email_verified=google_data['email_verified'] == 'true',
-                    name=google_data.get('name', ''),
-                    picture=google_data.get('picture', '')
-                ),
-                zkLoginData=ZkLoginDataType(
-                    zkProof=ProofPointsType(
-                        a=prover_data['proof']['a'],
-                        b=prover_data['proof']['b'],
-                        c=prover_data['proof']['c']
-                    ),
-                    suiAddress=prover_data['suiAddress'],
-                    ephemeralPublicKey=ephemeral_public_key,
-                    maxEpoch=str(current_epoch + 2),
-                    randomness=randomness,
-                    salt=user_salt
-                )
-            )
-
-        except Exception as e:
-            logger.error(f"Unexpected error in VerifyToken mutation: {str(e)}", exc_info=True)
-            return VerifyToken(
-                success=False,
-                error="Unexpected error",
-                details=str(e)
-            )
-
-class ZkLoginInput(graphene.InputObjectType):
-    jwt = graphene.String(required=True)
-    max_epoch = graphene.Int(required=True)
-    randomness = graphene.String(required=True)
-    key_claim_name = graphene.String(required=True)
-    extended_ephemeral_public_key = graphene.String(required=True)
-    salt = graphene.String(required=True)
-    audience = graphene.String(required=True)
-
-class ZkLoginResult(graphene.ObjectType):
-    zk_proof = graphene.JSONString()
-    sui_address = graphene.String()
-    error = graphene.String()
-    details = graphene.String()
-
-class ZkLoginMutation(graphene.Mutation):
-    class Arguments:
-        input = ZkLoginInput(required=True)
-
-    Output = ZkLoginResult
-
-    def mutate(self, info, input):
-        try:
-            # Verify Google token
-            google_info = id_token.verify_oauth2_token(
-                input.jwt,
-                google_requests.Request(),
-                input.audience
-            )
-
-            # Call zkLogin Prover service
-            prover_url = "http://localhost:3001"  # Base URL without endpoint
-            payload = {
-                "jwt": input.jwt,
-                "maxEpoch": str(input.max_epoch),  # Convert to string
-                "jwtRandomness": input.randomness,
-                "keyClaimName": input.key_claim_name,
-                "extendedEphemeralPublicKey": input.extended_ephemeral_public_key,
-                "salt": input.salt,
-                "audience": input.audience
-            }
-
-            response = requests.post(prover_url + "/generate-proof", json=payload)
-            response.raise_for_status()
-            zk_proof = response.json()
-
-            # The prover service should return the Sui address
-            sui_address = zk_proof.get('suiAddress')
-
-            return ZkLoginResult(
-                zk_proof=zk_proof['proof'],
-                sui_address=sui_address
-            )
-
-        except Exception as e:
-            return ZkLoginResult(
-                error="zkLogin error",
-                details=str(e)
-            )
 
 def get_current_epoch():
     """Get the current epoch from the Sui blockchain.
@@ -443,289 +106,149 @@ def get_current_epoch():
             return 1000
         raise Exception(f"Failed to get current epoch: {str(e)}")
 
-class FirebaseLoginPayload(graphene.ObjectType):
-    success = graphene.Boolean()
-    error = graphene.String()
-    user_profile = graphene.Field(UserProfileType)
+class UserProfileType(DjangoObjectType):
+    class Meta:
+        model = UserProfile
+        exclude = ('user_salt',)
 
-class FirebaseLogin(graphene.Mutation):
-    class Arguments:
-        firebase_token = graphene.String(required=True)
+class ZkLoginProofType(DjangoObjectType):
+    class Meta:
+        model = ZkLoginProof
+        fields = ('proof_id', 'profile', 'max_epoch', 'proof_data', 'created_at')
 
-    Output = FirebaseLoginPayload
+class ProofPointsType(graphene.ObjectType):
+    a = graphene.List(graphene.String)
+    b = graphene.List(graphene.List(graphene.String))
+    c = graphene.List(graphene.String)
 
-    def mutate(self, info, firebase_token):
-        try:
-            # Verify Firebase token
-            try:
-                decoded_token = auth.verify_id_token(firebase_token)
-                firebase_uid = decoded_token['uid']
-                email = decoded_token.get('email', '')
-                name = decoded_token.get('name', '')
-            except Exception as e:
-                logger.error(f"Firebase token verification failed: {str(e)}")
-                return FirebaseLoginPayload(
-                    success=False,
-                    error=f"Invalid Firebase token: {str(e)}"
-                )
-
-            # Create or update Django User
-            with transaction.atomic():
-                user, created = User.objects.get_or_create(
-                    username=firebase_uid,
-                    defaults={
-                        'email': email,
-                        'first_name': name.split()[0] if name else '',
-                        'last_name': ' '.join(name.split()[1:]) if name and len(name.split()) > 1 else ''
-                    }
-                )
-                
-                if not created:
-                    # Update existing user's information
-                    user.email = email
-                    if name:
-                        user.first_name = name.split()[0]
-                        user.last_name = ' '.join(name.split()[1:]) if len(name.split()) > 1 else ''
-                    user.save()
-
-                # Create or update UserProfile
-                profile, profile_created = UserProfile.objects.get_or_create(
-                    user=user,
-                    defaults={
-                        'created_at': timezone.now()
-                    }
-                )
-                
-                # Update last login
-                profile.last_login_at = timezone.now()
-                profile.save()
-
-            logger.info(f"User login successful: {firebase_uid}")
-            return FirebaseLoginPayload(
-                success=True,
-                user_profile=profile
-            )
-
-        except Exception as e:
-            logger.error(f"Error in FirebaseLogin: {str(e)}")
-            return FirebaseLoginPayload(
-                success=False,
-                error=str(e)
-            )
+class ZkLoginDataType(graphene.ObjectType):
+    zkProof = graphene.Field(ProofPointsType)
+    suiAddress = graphene.String()
+    ephemeralPublicKey = graphene.String()
+    maxEpoch = graphene.String()
+    randomness = graphene.String()
+    salt = graphene.String()
 
 class InitializeZkLogin(graphene.Mutation):
     class Arguments:
-        firebase_token = graphene.String(required=True)
-        provider_token = graphene.String(required=True)
-        provider = graphene.String(required=True)  # 'google' or 'apple'
+        firebaseToken = graphene.String(required=True)
+        providerToken = graphene.String(required=True)
+        provider = graphene.String(required=True)
 
-    maxEpoch = graphene.Int()
+    class Meta:
+        description = "Initialize zkLogin process"
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    maxEpoch = graphene.String()
     randomness = graphene.String()
     salt = graphene.String()
 
-    def mutate(self, info, firebase_token, provider_token, provider):
+    @staticmethod
+    def mutate(root, info, firebaseToken, providerToken, provider):
         try:
-            # Verify Firebase token and get user
-            decoded_token = auth.verify_id_token(firebase_token)
-            firebase_uid = decoded_token['uid']
-            email = decoded_token.get('email', '')
-            name = decoded_token.get('name', '')
+            logger.info("Starting zkLogin initialization")
             
-            # Verify provider token based on provider type
-            if provider == 'google':
-                try:
-                    google_response = requests.get(
-                        f'https://oauth2.googleapis.com/tokeninfo?id_token={provider_token}'
-                    )
-                    google_response.raise_for_status()
-                    provider_data = google_response.json()
-                    provider_sub = provider_data['sub']
-                except requests.exceptions.RequestException as e:
-                    logger.error(f"Google token verification failed: {str(e)}")
-                    raise Exception("Invalid Google token")
-            elif provider == 'apple':
-                try:
-                    # Apple token verification
-                    token_parts = provider_token.split('.')
-                    if len(token_parts) != 3:
-                        raise Exception("Invalid Apple token format")
-                    
-                    # Decode the payload (second part)
-                    payload = json.loads(base64.urlsafe_b64decode(token_parts[1] + '=' * (-len(token_parts[1]) % 4)).decode())
-                    provider_sub = payload.get('sub')
-                    if not provider_sub:
-                        raise Exception("Missing sub claim in Apple token")
-                except Exception as e:
-                    logger.error(f"Apple token verification failed: {str(e)}")
-                    raise Exception("Invalid Apple token")
-            else:
-                raise Exception(f"Unsupported provider: {provider}")
-            
-            # Create or get user profile
-            with transaction.atomic():
-                user, created = User.objects.get_or_create(
-                    username=firebase_uid,
-                    defaults={
-                        'email': email,
-                        'first_name': name.split()[0] if name else '',
-                        'last_name': ' '.join(name.split()[1:]) if name and len(name.split()) > 1 else ''
-                    }
-                )
-                
-                if not created:
-                    # Update existing user's information
-                    user.email = email
-                    if name:
-                        user.first_name = name.split()[0]
-                        user.last_name = ' '.join(name.split()[1:]) if len(name.split()) > 1 else ''
-                    user.save()
+            # Verify Firebase token
+            try:
+                decoded_token = auth.verify_id_token(firebaseToken)
+                firebase_uid = decoded_token.get('uid')
+                email = decoded_token.get('email', '')
+                name = decoded_token.get('name', '')
+                logger.info(f"Firebase token verified for user: {firebase_uid}")
+            except Exception as e:
+                logger.error(f"Firebase token verification failed: {str(e)}")
+                return InitializeZkLogin(success=False, error="Invalid Firebase token")
 
-                # Create or get UserProfile
-                profile, profile_created = UserProfile.objects.get_or_create(
-                    user=user,
-                    defaults={
-                        'created_at': timezone.now()
-                    }
-                )
-                
-                # Store provider sub in profile for Sui operations
+            # Get or create User
+            User = get_user_model()
+            user, created = User.objects.get_or_create(
+                username=firebase_uid,
+                defaults={
+                    'email': email,
+                    'first_name': name
+                }
+            )
+
+            # Get or create user profile
+            user_profile, created = UserProfile.objects.get_or_create(
+                user=user,
+                defaults={'google_sub': None, 'apple_sub': None}
+            )
+
+            # Verify provider token and store sub
+            try:
                 if provider == 'google':
-                    profile.google_sub = provider_sub
+                    response = requests.get(
+                        f'https://oauth2.googleapis.com/tokeninfo?id_token={providerToken}'
+                    )
+                    response.raise_for_status()
+                    token_data = response.json()
+                    user_profile.google_sub = token_data['sub']
                 elif provider == 'apple':
-                    profile.apple_sub = provider_sub
-                profile.save()
-                
-                # Generate user salt if it doesn't exist
-                if not profile.user_salt:
-                    profile.user_salt = os.urandom(32)
-                    profile.save()
-            
-            # Generate randomness
-            randomness_bytes = os.urandom(32)
-            base64_randomness = base64.b64encode(randomness_bytes).decode('utf-8')
-            
-            # Get current epoch from Sui blockchain
-            try:
-                max_epoch = get_current_epoch()
-            except Exception as e:
-                if os.getenv('ENVIRONMENT', 'development') == 'development':
-                    logger.warning(f"Using fallback epoch value due to error: {str(e)}")
-                    max_epoch = 1000
+                    parts = providerToken.split('.')
+                    if len(parts) != 3:
+                        raise ValueError("Invalid JWT format")
+                    payload = json.loads(base64.b64decode(parts[1] + '=' * (-len(parts[1]) % 4)).decode('utf-8'))
+                    user_profile.apple_sub = payload['sub']
                 else:
-                    raise Exception(f"Failed to get current epoch: {str(e)}")
-            
-            logger.info(f"Initialized zkLogin for user {firebase_uid} with provider {provider}")
-            
+                    return InitializeZkLogin(success=False, error="Invalid provider")
+                
+                user_profile.save()
+                logger.info(f"Provider token verified and sub stored: {user_profile.google_sub or user_profile.apple_sub}")
+            except Exception as e:
+                logger.error(f"Provider token verification failed: {str(e)}")
+                return InitializeZkLogin(success=False, error="Invalid provider token")
+
+            # Get or generate user salt
+            if not user_profile.user_salt:
+                user_profile.user_salt = secrets.token_bytes(32)
+                user_profile.save()
+                logger.info("Generated new user salt")
+            else:
+                logger.info("Retrieved existing user salt")
+
+            # Get current epoch from Sui
+            try:
+                current_epoch = get_current_epoch()
+                logger.info(f"Retrieved current epoch: {current_epoch}")
+            except Exception as e:
+                logger.error(f"Failed to get current epoch: {str(e)}")
+                return InitializeZkLogin(success=False, error="Failed to get current epoch")
+
+            # Generate ephemeral keypair
+            ephemeral_keypair = generate_ephemeral_keypair()
+            ephemeral_public_key = base64.b64encode(ephemeral_keypair.public_key).decode('utf-8')
+            logger.info(f"Generated ephemeral public key: {ephemeral_public_key}")
+
+            # Generate randomness
+            randomness = secrets.token_bytes(32)
+            randomness_b64 = base64.b64encode(randomness).decode('utf-8')
+            logger.info(f"Generated randomness: {randomness_b64}")
+
+            # Convert salt to base64
+            salt_b64 = base64.b64encode(user_profile.user_salt).decode('utf-8')
+
             return InitializeZkLogin(
-                maxEpoch=max_epoch,
-                randomness=base64_randomness,
-                salt=base64.b64encode(profile.user_salt).decode('utf-8') if profile.user_salt else None
+                success=True,
+                maxEpoch=str(current_epoch + 2),  # Allow for 2 epochs of drift
+                randomness=randomness_b64,
+                salt=salt_b64
             )
-            
+
         except Exception as e:
-            logger.error(f"Error in InitializeZkLogin: {str(e)}")
-            raise Exception(f"Failed to initialize zkLogin: {str(e)}")
-
-class InitializeAppleZkLogin(graphene.Mutation):
-    class Arguments:
-        firebase_token = graphene.String(required=True)
-        apple_token = graphene.String(required=True)
-
-    maxEpoch = graphene.Int()
-    randomness = graphene.String()
-    salt = graphene.String()
-
-    def mutate(self, info, firebase_token, apple_token):
-        try:
-            # Verify Firebase token and get user
-            decoded_token = auth.verify_id_token(firebase_token)
-            firebase_uid = decoded_token['uid']
-            email = decoded_token.get('email', '')
-            name = decoded_token.get('name', '')
-            
-            # Verify Apple token
-            try:
-                # Apple token verification is different from Google
-                # We'll need to implement proper Apple token verification
-                # For now, we'll just decode the token to get the claims
-                import jwt
-                apple_data = jwt.decode(apple_token, options={"verify_signature": False})
-                
-                # Verify that the Apple token matches the Firebase user
-                if apple_data['sub'] != decoded_token['firebase']['identities']['apple.com'][0]:
-                    raise Exception("Apple token does not match Firebase user")
-                    
-            except Exception as e:
-                logger.error(f"Apple token verification failed: {str(e)}")
-                raise Exception("Invalid Apple token")
-            
-            # Create or get user profile
-            with transaction.atomic():
-                user, created = User.objects.get_or_create(
-                    username=firebase_uid,
-                    defaults={
-                        'email': email,
-                        'first_name': name.split()[0] if name else '',
-                        'last_name': ' '.join(name.split()[1:]) if name and len(name.split()) > 1 else ''
-                    }
-                )
-                
-                if not created:
-                    # Update existing user's information
-                    user.email = email
-                    if name:
-                        user.first_name = name.split()[0]
-                        user.last_name = ' '.join(name.split()[1:]) if len(name.split()) > 1 else ''
-                    user.save()
-
-                # Create or get UserProfile
-                profile, profile_created = UserProfile.objects.get_or_create(
-                    user=user,
-                    defaults={
-                        'created_at': timezone.now()
-                    }
-                )
-                
-                # Generate user salt if it doesn't exist
-                if not profile.user_salt:
-                    profile.user_salt = os.urandom(32)
-                    profile.save()
-            
-            # Generate randomness
-            randomness_bytes = os.urandom(32)
-            base64_randomness = base64.b64encode(randomness_bytes).decode('utf-8')
-            
-            # Get current epoch from Sui blockchain
-            try:
-                max_epoch = get_current_epoch()
-            except Exception as e:
-                if os.getenv('ENVIRONMENT', 'development') == 'development':
-                    logger.warning(f"Using fallback epoch value due to error: {str(e)}")
-                    max_epoch = 1000
-                else:
-                    raise Exception(f"Failed to get current epoch: {str(e)}")
-            
-            logger.info(f"Initialized Apple zkLogin for user {firebase_uid}")
-            
-            return InitializeAppleZkLogin(
-                maxEpoch=max_epoch,
-                randomness=base64_randomness,
-                salt=base64.b64encode(profile.user_salt).decode('utf-8') if profile.user_salt else None
-            )
-            
-        except Exception as e:
-            logger.error(f"Error in InitializeAppleZkLogin: {str(e)}")
-            raise Exception(f"Failed to initialize Apple zkLogin: {str(e)}")
+            logger.error(f"Unexpected error in initialize_zk_login: {str(e)}")
+            return InitializeZkLogin(success=False, error=str(e))
 
 class FinalizeZkLoginInput(graphene.InputObjectType):
     maxEpoch = graphene.String(required=True)
     randomness = graphene.String(required=True)
-    salt = graphene.String(required=True)
     extendedEphemeralPublicKey = graphene.String(required=True)
     userSignature = graphene.String(required=True)
     jwt = graphene.String(required=True)
     keyClaimName = graphene.String(required=True)
     audience = graphene.String(required=True)
+    salt = graphene.String(required=True)
 
 class FinalizeZkLoginPayload(graphene.ObjectType):
     success = graphene.Boolean()
@@ -733,148 +256,198 @@ class FinalizeZkLoginPayload(graphene.ObjectType):
     suiAddress = graphene.String()
     error = graphene.String()
 
+class FinalizeZkLogin(graphene.Mutation):
+    class Arguments:
+        input = FinalizeZkLoginInput(required=True)
+
+    Output = FinalizeZkLoginPayload
+
+    def mutate(self, info, input):
+        return resolve_finalize_zk_login(self, info, input)
+
+@transaction.atomic
 def resolve_finalize_zk_login(self, info, input):
     try:
-        # Get the JWT and audience from input
-        jwt_token = input.get('jwt')
-        audience = input.get('audience')
-        if not jwt_token or not audience:
-            raise Exception("JWT and audience are required")
+        logger.info("Starting finalize_zk_login with input: %s", input)
         
-        # Verify the token based on audience
-        if audience == 'apple':
-            try:
-                # Apple token verification
-                token_parts = jwt_token.split('.')
-                if len(token_parts) != 3:
-                    raise Exception("Invalid Apple token format")
-                
-                # Decode the payload (second part)
-                payload = json.loads(base64.urlsafe_b64decode(token_parts[1] + '=' * (-len(token_parts[1]) % 4)).decode())
-                provider_sub = payload.get('sub')
-                if not provider_sub:
-                    raise Exception("Missing sub claim in Apple token")
-                
-                # Get user from provider sub
-                try:
-                    profile = UserProfile.objects.get(apple_sub=provider_sub)
-                    user = profile.user
-                except UserProfile.DoesNotExist:
-                    raise Exception("User must be created through Firebase login first")
-                
-            except Exception as e:
-                logger.error(f"Error verifying Apple token or getting user: {str(e)}")
-                raise Exception("Invalid Apple token or user not found")
-        else:
-            try:
-                # Google token verification
-                google_response = requests.get(
-                    f'https://oauth2.googleapis.com/tokeninfo?id_token={jwt_token}'
-                )
-                google_response.raise_for_status()
-                google_data = google_response.json()
-                
-                # Verify audience matches
-                if google_data.get('aud') != audience:
-                    raise Exception(f"Invalid audience. Expected {audience}, got {google_data.get('aud')}")
-                
-                # Get Google sub claim for Sui operations
-                provider_sub = google_data.get('sub')
-                if not provider_sub:
-                    raise Exception("Missing sub claim in Google token")
-                
-                # Get user from provider sub
-                try:
-                    profile = UserProfile.objects.get(google_sub=provider_sub)
-                    user = profile.user
-                except UserProfile.DoesNotExist:
-                    raise Exception("User must be created through Firebase login first")
-                
-            except Exception as e:
-                logger.error(f"Error verifying Google token or getting user: {str(e)}")
-                raise Exception("Invalid Google token or user not found")
+        # Extract JWT payload to get sub claim
+        try:
+            token_parts = input.jwt.split('.')
+            payload = json.loads(base64.b64decode(token_parts[1] + '==').decode('utf-8'))
+            sub = payload['sub']
+            logger.info("Extracted sub claim from JWT: %s", sub)
+        except Exception as e:
+            logger.error("Failed to decode JWT: %s", str(e))
+            return FinalizeZkLoginPayload(
+                success=False,
+                error="Invalid JWT format"
+            )
 
-        # Prepare the request to the prover service
-        prover_url = "http://localhost:3001"  # Base URL without endpoint
-        request_body = {
-            'jwt': jwt_token,
-            'maxEpoch': input.get('maxEpoch'),
-            'randomness': input.get('randomness'),
-            'salt': input.get('salt'),
-            'extendedEphemeralPublicKey': input.get('extendedEphemeralPublicKey'),
-            'userSignature': input.get('userSignature'),
-            'keyClaimName': input.get('keyClaimName'),
-            'audience': audience
+        # Find user profile by sub claim
+        try:
+            # Check if the audience is a Google client ID
+            if 'googleusercontent.com' in input.audience:
+                profile = UserProfile.objects.get(google_sub=sub)
+                logger.info("Found user profile with Google sub: %s", sub)
+            elif input.audience == 'apple':
+                profile = UserProfile.objects.get(apple_sub=sub)
+                logger.info("Found user profile with Apple sub: %s", sub)
+            else:
+                logger.error("Invalid audience: %s", input.audience)
+                return FinalizeZkLoginPayload(
+                    success=False,
+                    error="Invalid audience"
+                )
+        except UserProfile.DoesNotExist:
+            logger.error("User profile not found for sub: %s", sub)
+            return FinalizeZkLoginPayload(
+                success=False,
+                error="User profile not found"
+            )
+
+        # Always use the stored user_salt from the profile
+        salt = base64.b64encode(profile.user_salt).decode('utf-8')
+        logger.info("Using stored user salt for profile: %s", profile.id)
+
+        # Prepare prover payload
+        prover_payload = {
+            "jwt": input.jwt,
+            "extendedEphemeralPublicKey": input.extendedEphemeralPublicKey,
+            "maxEpoch": input.maxEpoch,
+            "randomness": input.randomness,
+            "userSignature": input.userSignature,
+            "keyClaimName": input.keyClaimName,
+            "audience": input.audience,
+            "salt": salt  # Use the stored salt
         }
-        
-        logger.info(f"Sending request to prover service: {request_body}")
-        
-        # Make the request to the prover service
-        response = requests.post(
-            f"{prover_url}/generate-proof",  # Append endpoint here
-            json=request_body,
-            timeout=30
-        )
-        
-        if response.status_code != 200:
-            logger.error(f"Prover service error: {response.text}")
-            raise Exception(f"Prover service error: {response.text}")
-        
-        prover_response = response.json()
-        
-        # Validate the response structure
-        if 'proof' not in prover_response or 'suiAddress' not in prover_response:
-            logger.error(f"Invalid prover response structure: {prover_response}")
-            raise Exception("Invalid response from prover service")
-        
-        # Create the ZkLoginProof record
-        proof = ZkLoginProof.objects.create(
-            proof_id=str(uuid.uuid4()),
-            jwt=jwt_token,
-            max_epoch=input.get('maxEpoch'),
-            randomness=base64.b64decode(input.get('randomness')),
-            salt=base64.b64decode(input.get('salt')),
-            user_salt=base64.b64decode(input.get('userSignature')),
-            extended_ephemeral_public_key=base64.b64decode(input.get('extendedEphemeralPublicKey')),
-            user_signature=base64.b64decode(input.get('userSignature')),
-            proof=prover_response['proof'],
-            user=user
-        )
-        
-        # Update user profile with Sui address
-        profile.sui_address = prover_response['suiAddress']
-        profile.save()
-        
-        return FinalizeZkLoginPayload(
-            success=True,
-            zkProof=ProofPointsType(
-                a=prover_response['proof']['a'],
-                b=prover_response['proof']['b'],
-                c=prover_response['proof']['c']
-            ),
-            suiAddress=prover_response['suiAddress']
-        )
-        
+        logger.info("Prepared prover payload: %s", json.dumps(prover_payload))
+
+        # Call prover service
+        try:
+            logger.info("Calling prover service at: %s", settings.PROVER_SERVICE_URL)
+            response = requests.post(
+                f"{settings.PROVER_SERVICE_URL}/generate-proof",
+                json=prover_payload,
+                timeout=30
+            )
+            logger.info("Prover service response status: %s", response.status_code)
+            logger.info("Prover service response body: %s", response.text)
+
+            if response.status_code != 200:
+                logger.error("Prover service error: %s", response.text)
+                return FinalizeZkLoginPayload(
+                    success=False,
+                    error=f"Prover service error: {response.text}"
+                )
+
+            result = response.json()
+            if not result.get('proof') or not result.get('suiAddress'):
+                logger.error("Invalid prover service response: %s", result)
+                return FinalizeZkLoginPayload(
+                    success=False,
+                    error="Invalid prover service response"
+                )
+
+            # Create ZkLoginProof record
+            proof = ZkLoginProof.objects.create(
+                profile=profile,
+                max_epoch=int(input.maxEpoch),
+                randomness=base64.b64decode(input.randomness),
+                extended_ephemeral_public_key=base64.b64decode(input.extendedEphemeralPublicKey),
+                user_signature=base64.b64decode(input.userSignature),
+                proof_data=result['proof']
+            )
+            logger.info("Created ZkLoginProof record: %s", proof.id)
+
+            # Update user's Sui address
+            profile.sui_address = result['suiAddress']
+            profile.save()
+            logger.info("Updated user profile with Sui address: %s", result['suiAddress'])
+
+            return FinalizeZkLoginPayload(
+                success=True,
+                zkProof=ProofPointsType(**result['proof']),
+                suiAddress=result['suiAddress']
+            )
+
+        except requests.exceptions.RequestException as e:
+            logger.error("Prover service request failed: %s", str(e))
+            return FinalizeZkLoginPayload(
+                success=False,
+                error=f"Prover service request failed: {str(e)}"
+            )
+
     except Exception as e:
-        logger.error(f"Error in finalize_zk_login: {str(e)}")
+        logger.error("Error in finalize_zk_login: %s\n%s", str(e), traceback.format_exc())
         return FinalizeZkLoginPayload(
             success=False,
             error=str(e)
         )
 
-class Mutation(client.ClientMutation, server.ServerMutation, graphene.ObjectType):
-    firebase_login = FirebaseLogin.Field()
-    generate_zk_login_proof = GenerateZkLoginProof.Field()
-    verify_zk_login_proof = VerifyZkLoginProof.Field()
-    verify_token = VerifyToken.Field()
-    zk_login = ZkLoginMutation.Field()
+def verify_google_token(token):
+    """Verify a Google OAuth token and return its claims.
+    
+    Args:
+        token (str): The Google OAuth token to verify
+        
+    Returns:
+        dict: The decoded token claims
+        
+    Raises:
+        Exception: If token verification fails
+    """
+    try:
+        response = requests.get(
+            f'https://oauth2.googleapis.com/tokeninfo?id_token={token}'
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.error(f"Google token verification failed: {str(e)}")
+        raise Exception("Invalid Google token")
+
+def verify_apple_token(token):
+    """Verify an Apple OAuth token and return its claims.
+    
+    Args:
+        token (str): The Apple OAuth token to verify
+        
+    Returns:
+        dict: The decoded token claims
+        
+    Raises:
+        Exception: If token verification fails
+    """
+    try:
+        # For Apple, we need to decode the JWT to get the claims
+        parts = token.split('.')
+        if len(parts) != 3:
+            raise ValueError("Invalid JWT format")
+        
+        # Decode the payload part
+        payload = json.loads(base64.b64decode(parts[1] + '=' * (-len(parts[1]) % 4)).decode('utf-8'))
+        return payload
+    except Exception as e:
+        logger.error(f"Apple token verification failed: {str(e)}")
+        raise Exception("Invalid Apple token")
+
+def generate_ephemeral_keypair():
+    """Generate a new ephemeral keypair for zkLogin.
+    
+    Returns:
+        tuple: A tuple containing (private_key, public_key) as bytes
+    """
+    signing_key = nacl.signing.SigningKey.generate()
+    verify_key = signing_key.verify_key
+    
+    return type('EphemeralKeypair', (), {
+        'private_key': signing_key.encode(),
+        'public_key': verify_key.encode()
+    })
+
+class Mutation(graphene.ObjectType):
     initialize_zk_login = InitializeZkLogin.Field()
-    initialize_apple_zk_login = InitializeAppleZkLogin.Field()
-    finalize_zk_login = graphene.Field(
-        FinalizeZkLoginPayload,
-        input=FinalizeZkLoginInput(required=True),
-        resolver=resolve_finalize_zk_login
-    )
+    finalize_zk_login = FinalizeZkLogin.Field()
 
 class Query(graphene.ObjectType):
     zk_login_proof = graphene.Field(ZkLoginProofType, id=graphene.ID())
