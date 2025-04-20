@@ -1,6 +1,6 @@
 import { GoogleSignin, User } from '@react-native-google-signin/google-signin';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { generateNonce, generateRandomness, genAddressSeed, getZkLoginSignature } from '@mysten/sui/zklogin';
+import { genAddressSeed, getZkLoginSignature } from '@mysten/sui/zklogin';
 import { SuiClient } from '@mysten/sui/client';
 import { jwtDecode } from 'jwt-decode';
 import * as Keychain from 'react-native-keychain';
@@ -12,43 +12,31 @@ import { apolloClient } from '../apollo/client';
 import { gql } from '@apollo/client';
 import { Buffer } from 'buffer';
 import { sha256 } from '@noble/hashes/sha256';
-import { base64ToBytes, bytesToBase64 } from '../utils/base64';
-import { stringToUtf8Bytes } from '../utils/fastBase64Shim';
+import { base64ToBytes, bytesToBase64, stringToUtf8Bytes } from '../utils/encoding';
 
-// Add type declarations for TextEncoder and crypto
-declare global {
-  interface Window {
-    crypto?: {
-      getRandomValues: (array: Uint8Array) => Uint8Array;
-    };
-  }
+interface StoredZkLogin {
+  salt: string;           // init.salt (base64)
+  subject: string;        // sub
+  clientId: string;       // oauth clientId
+  maxEpoch: number;       // Number(init.maxEpoch)
+  zkProof: any;          // the full proof object (points a/b/c etc)
+  secretKey: string;     // base64-encoded 32-byte seed
 }
 
-class TextEncoder {
-  encode(str: string): Uint8Array {
-    const bytes = new Uint8Array(str.length);
-    for (let i = 0; i < str.length; i++) {
-      bytes[i] = str.charCodeAt(i);
-    }
-    return bytes;
-  }
-}
-
-// BN254 field modulus
-const BN254_MODULUS = BigInt('0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001');
+const KEYCHAIN_SERVICE = 'com.confio.zklogin';
 
 export class AuthService {
   private static instance: AuthService;
   private suiKeypair: Ed25519Keypair | null = null;
   private suiClient: SuiClient;
   private userSalt: string | null = null;
-  private zkProof: any = null;
+  private zkProof: any | null = null;
+  private maxEpoch: number | null = null;
   private auth = auth();
+  private isInitialized = false;
 
   private constructor() {
-    // Initialize Sui client
     this.suiClient = new SuiClient({ url: 'https://fullnode.devnet.sui.io' });
-    this.initializeFirebase();
   }
 
   public static getInstance(): AuthService {
@@ -56,6 +44,19 @@ export class AuthService {
       AuthService.instance = new AuthService();
     }
     return AuthService.instance;
+  }
+
+  public async initialize(): Promise<void> {
+    if (this.isInitialized) return;
+    
+    try {
+      await this.initializeFirebase();
+      await this.rehydrateZkLoginData();
+      this.isInitialized = true;
+    } catch (error) {
+      console.error('Failed to initialize AuthService:', error);
+      throw error;
+    }
   }
 
   private async initializeFirebase() {
@@ -130,9 +131,7 @@ export class AuthService {
         throw new Error('Invalid maxEpoch value received from server');
       }
 
-      const randomnessBI = BigInt('0x' + Buffer.from(init.randomness, 'base64').toString('hex'));
-
-      // 5) Derive keypair (only once!)
+      // 5) Derive ephemeral keypair (only once!)
       const { sub } = jwtDecode<{ sub: string }>(idToken);
       if (!sub) {
         throw new Error('Invalid JWT: missing sub claim');
@@ -142,16 +141,7 @@ export class AuthService {
         ? GOOGLE_CLIENT_IDS.production.ios
         : GOOGLE_CLIENT_IDS.production.android;
 
-      const saltBytes = base64ToBytes(init.salt);
-      const encoder = new TextEncoder();
-      const seedInput = new Uint8Array([
-        ...saltBytes,
-        ...encoder.encode(sub),
-        ...encoder.encode(clientId)
-      ]);
-      const fullHash = sha256(seedInput);
-      const seed = fullHash.slice(0, 32);
-      this.suiKeypair = Ed25519Keypair.fromSecretKey(seed);
+      this.suiKeypair = this.deriveEphemeralKeypair(init.salt, sub, clientId);
 
       // 6) Finalize zkLogin
       const extendedPub = this.suiKeypair.getPublicKey().toBase64();
@@ -177,12 +167,12 @@ export class AuthService {
       }
 
       // 7) Store sensitive data securely
-      await this.storeSensitiveData({
-        suiKeypair: this.suiKeypair.getSecretKey(),
-        userSalt: init.salt,
-        zkProof: fin.zkProof,
-        suiAddress: fin.suiAddress
-      });
+      await this.storeSensitiveData(fin, init.salt, sub, clientId, maxEpochNum);
+
+      // Update instance state
+      this.userSalt = init.salt;
+      this.zkProof = fin;
+      this.maxEpoch = maxEpochNum;
 
       // Split display name into first and last name
       const [firstName, ...lastNameParts] = user.displayName?.split(' ') || [];
@@ -207,7 +197,7 @@ export class AuthService {
   async getStoredZkLoginData() {
     try {
       const credentials = await Keychain.getGenericPassword({
-        service: 'com.confio.zklogin'
+        service: KEYCHAIN_SERVICE
       });
 
       if (!credentials) {
@@ -224,7 +214,7 @@ export class AuthService {
   async clearZkLoginData() {
     try {
       await Keychain.resetGenericPassword({
-        service: 'com.confio.zklogin'
+        service: KEYCHAIN_SERVICE
       });
     } catch (error) {
       console.error('Error clearing zkLogin data:', error);
@@ -288,7 +278,7 @@ export class AuthService {
       const { maxEpoch, randomness: serverRandomness, salt: serverSalt } = initData.initializeZkLogin;
 
       // Derive the single, deterministic ephemeral keypair
-      this.suiKeypair = await this._deriveKeypair(appleSub, 'apple', serverSalt);
+      this.suiKeypair = this.deriveEphemeralKeypair(serverSalt, appleSub, 'apple');
 
       // Convert randomness to BigInt
       const randomnessBigInt = BigInt('0x' + Buffer.from(serverRandomness, 'base64').toString('hex'));
@@ -319,6 +309,14 @@ export class AuthService {
       if (!finalizeData?.finalizeZkLogin) {
         throw new Error('No data received from zkLogin finalization');
       }
+
+      // Store sensitive data securely
+      await this.storeSensitiveData(finalizeData.finalizeZkLogin, serverSalt, appleSub, 'apple', Number(maxEpoch));
+
+      // Update instance state
+      this.userSalt = serverSalt;
+      this.zkProof = finalizeData.finalizeZkLogin;
+      this.maxEpoch = Number(maxEpoch);
 
       // Split display name into first and last name
       const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
@@ -414,26 +412,64 @@ export class AuthService {
     }
   }
 
-  // Store sensitive data securely
-  private async storeSensitiveData(data: {
-    suiKeypair: string;
-    userSalt: string;
-    zkProof: any;
-    suiAddress: string;
-  }) {
+  private async rehydrateZkLoginData() {
     try {
-      await Keychain.setGenericPassword(
-        'zkLoginData',
-        JSON.stringify(data),
-        {
-          service: 'com.Confio.Confio.zkLogin',
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-        }
-      );
+      const credentials = await Keychain.getGenericPassword({
+        service: KEYCHAIN_SERVICE
+      });
+
+      if (!credentials) return;
+
+      const data = JSON.parse(credentials.password) as StoredZkLogin;
+      
+      // Verify the secret key is exactly 32 bytes
+      const secretKeyBytes = Buffer.from(data.secretKey, 'base64');
+      if (secretKeyBytes.length !== 32) {
+        throw new Error('Invalid secret key length');
+      }
+
+      this.suiKeypair = Ed25519Keypair.fromSecretKey(secretKeyBytes);
+      this.userSalt = data.salt;
+      this.zkProof = data.zkProof;
+      this.maxEpoch = data.maxEpoch;
     } catch (error) {
-      console.error('Secure Storage Error:', error);
+      console.error('Error rehydrating zkLogin data:', error);
       throw error;
     }
+  }
+
+  private async storeSensitiveData(proof: any, salt: string, subject: string, clientId: string, maxEpoch: number) {
+    if (!this.suiKeypair) {
+      throw new Error('Sui keypair not initialized');
+    }
+
+    const secretKey = this.suiKeypair.getSecretKey();
+    if (secretKey.length !== 32) {
+      throw new Error('Invalid secret key length');
+    }
+
+    const secretKeyB64 = Buffer.from(secretKey).toString('base64');
+    const toSave: StoredZkLogin = { 
+      salt, 
+      subject, 
+      clientId, 
+      maxEpoch, 
+      zkProof: proof,
+      secretKey: secretKeyB64
+    };
+    
+    await Keychain.setGenericPassword(
+      'zkLoginData',
+      JSON.stringify(toSave),
+      {
+        service: KEYCHAIN_SERVICE,
+        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY
+      }
+    );
+
+    this.zkProof = proof;
+    this.userSalt = salt;
+    this.maxEpoch = maxEpoch;
   }
 
   // Load sensitive data from secure storage
@@ -448,6 +484,7 @@ export class AuthService {
         this.suiKeypair = Ed25519Keypair.fromSecretKey(Buffer.from(data.suiKeypair, 'base64'));
         this.userSalt = data.userSalt;
         this.zkProof = data.zkProof;
+        this.maxEpoch = Number(data.maxEpoch);
       }
     } catch (error) {
       console.error('Secure Storage Load Error:', error);
@@ -456,50 +493,47 @@ export class AuthService {
   }
 
   // Get the user's Sui address
-  async getZkLoginAddress(jwt: string): Promise<string> {
-    if (!this.userSalt) {
-      await this.loadSensitiveData();
+  public async getZkLoginAddress(): Promise<string> {
+    if (!this.isInitialized) {
+      await this.initialize();
     }
-
-    if (!this.userSalt) {
-      throw new Error('User salt not found');
-    }
-
-    const decodedJwt = jwtDecode(jwt);
-    if (!decodedJwt.sub) {
-      throw new Error('Invalid JWT: missing required claims');
-    }
-
-    // Get the platform-specific client ID
-    const clientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
-    const platformClientId = Platform.OS === 'ios' ? clientIds.ios : 
-                           Platform.OS === 'android' ? clientIds.android : 
-                           clientIds.web;
-
-    console.log('Using platform-specific client ID as audience:', platformClientId);
-
-    const addressSeed = genAddressSeed(
-      BigInt(this.userSalt),
-      'sub',
-      decodedJwt.sub,
-      platformClientId  // Use platform-specific client ID
-    ).toString();
 
     if (!this.suiKeypair) {
-      throw new Error('Sui keypair not found');
+      throw new Error('No zkLogin data stored');
     }
-    const signature = await this.suiKeypair.sign(new Uint8Array(0));
-    const zkLoginSignature = getZkLoginSignature({
-      inputs: {
-        ...this.zkProof,
-        addressSeed,
-      },
-      maxEpoch: this.zkProof.maxEpoch,
-      userSignature: signature,
+
+    const credentials = await Keychain.getGenericPassword({
+      service: KEYCHAIN_SERVICE
     });
 
-    // The address is derived from the signature
-    return zkLoginSignature;
+    if (!credentials) throw new Error('No zkLogin data stored');
+    
+    const { zkProof, salt, subject, clientId, maxEpoch } = JSON.parse(credentials.password) as StoredZkLogin;
+
+    // 1) turn base64 salt → BigInt
+    const saltBytes = base64ToBytes(salt);
+    const saltBigInt = BigInt('0x' + Buffer.from(saltBytes).toString('hex'));
+
+    // 2) compute the same address-seed used to build the proof
+    const addressSeed = genAddressSeed(
+      saltBigInt,
+      'sub',        // keyClaimName
+      subject,
+      clientId
+    ).toString();
+
+    // 3) sign an empty message with the stored ephemeral key
+    const userSignature = await this.suiKeypair.sign(new Uint8Array());
+
+    // 4) get the final address using the lib's helper
+    return getZkLoginSignature({
+      inputs: {
+        ...zkProof,
+        addressSeed
+      },
+      maxEpoch,
+      userSignature
+    });
   }
 
   // Sign out
@@ -509,8 +543,9 @@ export class AuthService {
       this.suiKeypair = null;
       this.userSalt = null;
       this.zkProof = null;
+      this.maxEpoch = null;
       await Keychain.resetGenericPassword({
-        service: 'com.Confio.Confio.zkLogin',
+        service: KEYCHAIN_SERVICE,
       });
     } catch (error) {
       console.error('Sign Out Error:', error);
@@ -524,71 +559,31 @@ export class AuthService {
   }
 
   private async _generateNonce(): Promise<string> {
-    const encoder = new TextEncoder();
     const randomBytes = new Uint8Array(32);
-    if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-      crypto.getRandomValues(randomBytes);
-    } else {
-      // Fallback for environments without crypto
-      for (let i = 0; i < randomBytes.length; i++) {
-        randomBytes[i] = Math.floor(Math.random() * 256);
-      }
+    for (let i = 0; i < randomBytes.length; i++) {
+      randomBytes[i] = Math.floor(Math.random() * 256);
     }
     const hash = sha256(randomBytes);
     return bytesToBase64(hash);
   }
 
-  private async _deriveKeypair(sub: string, aud: string, saltB64: string): Promise<Ed25519Keypair> {
+  private deriveEphemeralKeypair(saltB64: string, sub: string, clientId: string): Ed25519Keypair {
     try {
-      const saltBytes = base64ToBytes(saltB64);
-      const encoder = new TextEncoder();
-      const subBytes = encoder.encode(sub);
-      const audBytes = encoder.encode(aud);
-      
-      const combinedBytes = new Uint8Array(saltBytes.length + subBytes.length + audBytes.length);
-      combinedBytes.set(saltBytes);
-      combinedBytes.set(subBytes, saltBytes.length);
-      combinedBytes.set(audBytes, saltBytes.length + subBytes.length);
-      
-      const hash = sha256(combinedBytes);
-      return Ed25519Keypair.fromSecretKey(hash);
-    } catch (error) {
-      console.error('Error deriving keypair:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Re-derives the zkLogin address for a user
-   * @param saltB64 Base64-encoded user salt
-   * @param sub User's subject claim from JWT
-   * @param clientId OAuth client ID
-   * @returns The derived Sui address
-   */
-  async rederiveZkLoginAddress(saltB64: string, sub: string, clientId: string): Promise<string> {
-    try {
-      // Convert inputs to bytes
       const saltBytes = base64ToBytes(saltB64);
       const subBytes = stringToUtf8Bytes(sub);
       const clientIdBytes = stringToUtf8Bytes(clientId);
 
-      // Concatenate bytes
-      const seedBytes = new Uint8Array(saltBytes.length + subBytes.length + clientIdBytes.length);
-      seedBytes.set(saltBytes, 0);
-      seedBytes.set(subBytes, saltBytes.length);
-      seedBytes.set(clientIdBytes, saltBytes.length + subBytes.length);
+      const seedInput = new Uint8Array([
+        ...saltBytes,
+        ...subBytes,
+        ...clientIdBytes
+      ]);
 
-      // Hash to get seed
-      const seed = await crypto.subtle.digest('SHA-256', seedBytes);
-      const seedArray = new Uint8Array(seed);
-
-      // Derive keypair from seed
-      const keypair = Ed25519Keypair.fromSecretKey(seedArray.slice(0, 32));
-      
-      // Get address from public key
-      return keypair.getPublicKey().toSuiAddress();
+      const fullHash = sha256(seedInput);
+      const seed = fullHash.slice(0, 32);
+      return Ed25519Keypair.fromSecretKey(seed);
     } catch (error) {
-      console.error('Error re-deriving zkLogin address:', error);
+      console.error('Error deriving ephemeral keypair:', error);
       throw error;
     }
   }
