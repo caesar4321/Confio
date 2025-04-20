@@ -13,6 +13,7 @@ import { gql } from '@apollo/client';
 import { Buffer } from 'buffer';
 import { sha256 } from '@noble/hashes/sha256';
 import { base64ToBytes, bytesToBase64 } from '../utils/base64';
+import { stringToUtf8Bytes } from '../utils/fastBase64Shim';
 
 // Add type declarations for TextEncoder and crypto
 declare global {
@@ -553,6 +554,41 @@ export class AuthService {
       return Ed25519Keypair.fromSecretKey(hash);
     } catch (error) {
       console.error('Error deriving keypair:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Re-derives the zkLogin address for a user
+   * @param saltB64 Base64-encoded user salt
+   * @param sub User's subject claim from JWT
+   * @param clientId OAuth client ID
+   * @returns The derived Sui address
+   */
+  async rederiveZkLoginAddress(saltB64: string, sub: string, clientId: string): Promise<string> {
+    try {
+      // Convert inputs to bytes
+      const saltBytes = base64ToBytes(saltB64);
+      const subBytes = stringToUtf8Bytes(sub);
+      const clientIdBytes = stringToUtf8Bytes(clientId);
+
+      // Concatenate bytes
+      const seedBytes = new Uint8Array(saltBytes.length + subBytes.length + clientIdBytes.length);
+      seedBytes.set(saltBytes, 0);
+      seedBytes.set(subBytes, saltBytes.length);
+      seedBytes.set(clientIdBytes, saltBytes.length + subBytes.length);
+
+      // Hash to get seed
+      const seed = await crypto.subtle.digest('SHA-256', seedBytes);
+      const seedArray = new Uint8Array(seed);
+
+      // Derive keypair from seed
+      const keypair = Ed25519Keypair.fromSecretKey(seedArray.slice(0, 32));
+      
+      // Get address from public key
+      return keypair.getPublicKey().toSuiAddress();
+    } catch (error) {
+      console.error('Error re-deriving zkLogin address:', error);
       throw error;
     }
   }
