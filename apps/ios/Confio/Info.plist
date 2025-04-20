@@ -20,14 +20,13 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleSignature</key>
 	<string>????</string>
+	<key>GIDClientID</key>
+	<string>730050241347-m60gqh7aahb818c6g7vb4jkpkl5iauld.apps.googleusercontent.com</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.1001709244115-2h2k3sdvr3ggr1t5pgob4pkb3k92ug1p</string>
 				<string>com.googleusercontent.apps.730050241347-m60gqh7aahb818c6g7vb4jkpkl5iauld</string>
 			</array>
 		</dict>
@@ -50,7 +49,6 @@
 	<array>
 		<string>googlechrome</string>
 		<string>googlechromes</string>
-		<string>com.googleusercontent.apps.1001709244115-2h2k3sdvr3ggr1t5pgob4pkb3k92ug1p</string>
 		<string>com.googleusercontent.apps.730050241347-m60gqh7aahb818c6g7vb4jkpkl5iauld</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
