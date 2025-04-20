@@ -1,6 +1,5 @@
 import { GoogleSignin, User } from '@react-native-google-signin/google-signin';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { fromB64, toB64 } from '@mysten/sui/utils';
 import { generateNonce, generateRandomness, genAddressSeed, getZkLoginSignature } from '@mysten/sui/zklogin';
 import { SuiClient } from '@mysten/sui/client';
 import { jwtDecode } from 'jwt-decode';
@@ -8,10 +7,11 @@ import * as Keychain from 'react-native-keychain';
 import { GOOGLE_CLIENT_IDS, API_URL } from '../config/env';
 import auth from '@react-native-firebase/auth';
 import { Platform } from 'react-native';
-import { INITIALIZE_ZKLOGIN, FINALIZE_ZKLOGIN, INITIALIZE_APPLE_ZKLOGIN } from '../apollo/queries';
+import { INITIALIZE_ZKLOGIN, FINALIZE_ZKLOGIN } from '../apollo/queries';
 import { apolloClient } from '../apollo/client';
 import { gql } from '@apollo/client';
 import { Buffer } from 'buffer';
+import { sha256 } from '@noble/hashes/sha256';
 
 // Add type definitions for BigInt
 declare const BigInt: (value: string | number | bigint) => bigint;
@@ -52,14 +52,19 @@ export class AuthService {
   private async configureGoogleSignIn() {
     try {
       const clientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
-      const config = {
+      const config: any = {
         webClientId: clientIds.web,
         offlineAccess: true,
-        scopes: ['profile', 'email'],
-        iosClientId: Platform.OS === 'ios' ? clientIds.ios : undefined,
-        androidClientid: Platform.OS === 'android' ? clientIds.android : undefined,
+        scopes: ['profile', 'email']
       };
-      
+
+      // Add platform-specific client IDs
+      if (Platform.OS === 'ios') {
+        config.iosClientId = clientIds.ios;
+      } else if (Platform.OS === 'android') {
+        config.androidClientId = clientIds.android;
+      }
+
       await GoogleSignin.configure(config);
       console.log('Google Sign-In configuration successful');
     } catch (error) {
@@ -85,7 +90,7 @@ export class AuthService {
         offlineAccess: true,
         scopes: ['profile', 'email'],
         iosClientId: Platform.OS === 'ios' ? clientIds.ios : undefined,
-        androidClientid: Platform.OS === 'android' ? clientIds.android : undefined,
+        androidClientId: Platform.OS === 'android' ? clientIds.android : undefined,
       });
 
       // Sign in with Google
@@ -125,50 +130,32 @@ export class AuthService {
 
       const { maxEpoch, randomness: serverRandomness, salt: serverSalt } = initData.initializeZkLogin;
 
-      // Generate ephemeral key pair
-      this.suiKeypair = new Ed25519Keypair();
-      const randomness = generateRandomness();
-      const userSalt = generateRandomness();
-
-      // Generate nonce using the randomness
-      const nonce = generateNonce(this.suiKeypair.getPublicKey(), maxEpoch, randomness);
-
-      // Generate address seed
-      const saltBytes = fromB64(serverSalt);
-      const saltHex = Buffer.from(saltBytes).toString('hex');
-      const saltBigInt = BigInt('0x' + saltHex) % BN254_MODULUS;
-
-      const addressSeed = genAddressSeed(
-        saltBigInt,
-        'sub',
-        jwtDecode(idToken).sub,
-        platformClientId
-      ).toString();
-
-      // BCS-serialize the seed to bytes (u64)
-      const seedBytes = new Uint8Array(8);
-      const seedBigInt = BigInt(addressSeed);
-      for (let i = 0; i < 8; i++) {
-        seedBytes[i] = Number((seedBigInt >> BigInt(i * 8)) & BigInt(0xFF));
+      // Derive the single, deterministic ephemeral keypair
+      const { sub } = jwtDecode<{ sub: string }>(idToken);
+      if (!sub) {
+        throw new Error('Invalid JWT: missing sub claim');
       }
+      this.suiKeypair = await deriveKeypair(sub, platformClientId, serverSalt);
 
-      // Sign the seed bytes
-      const userSigBytes = await this.suiKeypair.sign(seedBytes);
-      const userSignatureBase64 = toB64(userSigBytes);
+      // Generate nonce using the server's randomness
+      const zkLoginNonce = generateNonce(this.suiKeypair.getPublicKey(), maxEpoch, serverRandomness);
+
+      // Get the extended ephemeral public key (now deterministic)
+      const extendedEphemeralPublicKey = this.suiKeypair.getPublicKey().toBase64();
 
       // Finalize zkLogin
       const { data: finalizeData } = await apolloClient.mutate({
         mutation: FINALIZE_ZKLOGIN,
         variables: {
           input: {
+            extendedEphemeralPublicKey,
+            jwt: idToken,
             maxEpoch: maxEpoch.toString(),
             randomness: serverRandomness,
             salt: serverSalt,
-            extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
-            userSignature: userSignatureBase64,
-            jwt: idToken,
+            userSignature: Buffer.from(await this.suiKeypair.sign(new Uint8Array(0))).toString('base64'),
             keyClaimName: 'sub',
-            audience: platformClientId
+            audience: platformClientId,
           }
         }
       });
@@ -243,8 +230,13 @@ export class AuthService {
       }
 
       // Create Firebase credential with Apple token
-      const { identityToken, nonce } = appleAuthRequestResponse;
-      const appleCredential = auth.AppleAuthProvider.credential(identityToken, nonce);
+      const { identityToken, nonce: appleAuthNonce } = appleAuthRequestResponse;
+      const decodedAppleJwt = jwtDecode<{ sub: string }>(identityToken);
+      if (!decodedAppleJwt.sub) {
+        throw new Error('Invalid Apple JWT: missing sub claim');
+      }
+      const appleSub = decodedAppleJwt.sub;
+      const appleCredential = auth.AppleAuthProvider.credential(identityToken, appleAuthNonce);
       console.log('Created Firebase credential');
 
       // Sign in with Firebase using the Apple credential
@@ -272,48 +264,26 @@ export class AuthService {
 
       const { maxEpoch, randomness: serverRandomness, salt: serverSalt } = initData.initializeZkLogin;
 
-      // Generate ephemeral key pair
-      this.suiKeypair = new Ed25519Keypair();
-      const randomness = generateRandomness();
-      const userSalt = generateRandomness();
+      // Derive the single, deterministic ephemeral keypair
+      this.suiKeypair = await deriveKeypair(appleSub, 'apple', serverSalt);
 
-      // Generate zkLogin nonce using the randomness
-      const zkLoginNonce = generateNonce(this.suiKeypair.getPublicKey(), maxEpoch, randomness);
+      // Generate nonce using the server's randomness
+      const zkLoginNonce = generateNonce(this.suiKeypair.getPublicKey(), maxEpoch, serverRandomness);
 
-      // Generate address seed
-      const saltBytes = fromB64(serverSalt);
-      const saltHex = Buffer.from(saltBytes).toString('hex');
-      const saltBigInt = BigInt('0x' + saltHex) % BN254_MODULUS;
-
-      const addressSeed = genAddressSeed(
-        saltBigInt,
-        'sub',
-        jwtDecode(identityToken).sub,
-        'apple' // Using 'apple' as the audience for Apple Sign-In
-      ).toString();
-
-      // BCS-serialize the seed to bytes (u64)
-      const seedBytes = new Uint8Array(8);
-      const seedBigInt = BigInt(addressSeed);
-      for (let i = 0; i < 8; i++) {
-        seedBytes[i] = Number((seedBigInt >> BigInt(i * 8)) & BigInt(0xFF));
-      }
-
-      // Sign the seed bytes
-      const userSigBytes = await this.suiKeypair.sign(seedBytes);
-      const userSignatureBase64 = toB64(userSigBytes);
+      // Get the extended ephemeral public key (now deterministic)
+      const extendedEphemeralPublicKey = this.suiKeypair.getPublicKey().toBase64();
 
       // Finalize zkLogin
       const { data: finalizeData } = await apolloClient.mutate({
         mutation: FINALIZE_ZKLOGIN,
         variables: {
           input: {
+            extendedEphemeralPublicKey,
+            jwt: identityToken,
             maxEpoch: maxEpoch.toString(),
             randomness: serverRandomness,
             salt: serverSalt,
-            extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
-            userSignature: userSignatureBase64,
-            jwt: identityToken,
+            userSignature: Buffer.from(await this.suiKeypair.sign(new Uint8Array(0))).toString('base64'),
             keyClaimName: 'sub',
             audience: 'apple'
           }
@@ -459,7 +429,7 @@ export class AuthService {
                              clientIds.web;
 
       // Generate address seed
-      const saltBytes = fromB64(serverSalt);
+      const saltBytes = Buffer.from(serverSalt, 'base64');
       const saltHex = Buffer.from(saltBytes).toString('hex');
       const saltBigInt = BigInt('0x' + saltHex) % BN254_MODULUS;
 
@@ -479,7 +449,7 @@ export class AuthService {
 
       // Sign the seed bytes
       const userSigBytes = await this.suiKeypair.sign(seedBytes);
-      const userSignatureBase64 = toB64(userSigBytes);
+      const userSignatureBase64 = Buffer.from(userSigBytes).toString('base64');
 
       // Log the request body for debugging
       console.log('→ calling generate-proof with', {
@@ -569,7 +539,7 @@ export class AuthService {
 
       if (credentials) {
         const data = JSON.parse(credentials.password);
-        this.suiKeypair = Ed25519Keypair.fromSecretKey(fromB64(data.suiKeypair));
+        this.suiKeypair = Ed25519Keypair.fromSecretKey(Buffer.from(data.suiKeypair, 'base64'));
         this.userSalt = data.userSalt;
         this.zkProof = data.zkProof;
       }
@@ -646,4 +616,31 @@ export class AuthService {
   getSuiKeypair(): Ed25519Keypair | null {
     return this.suiKeypair;
   }
-} 
+}
+
+// Derive a deterministic Ed25519 keypair
+const deriveKeypair = async (sub: string, aud: string, saltB64: string): Promise<Ed25519Keypair> => {
+  try {
+    // Convert base64 salt to bytes using Buffer
+    const saltBytes = Buffer.from(saltB64, 'base64');
+    
+    // Convert strings to UTF-8 bytes using Buffer
+    const subBytes = Buffer.from(sub, 'utf8');
+    const audBytes = Buffer.from(aud, 'utf8');
+    
+    // Concatenate all bytes
+    const input = Buffer.concat([saltBytes, subBytes, audBytes]);
+    
+    // Hash the concatenated bytes using @noble/hashes
+    const hash = sha256(input);
+    
+    // Use first 32 bytes as seed
+    const seed = new Uint8Array(hash).slice(0, 32);
+    
+    // Create keypair from seed
+    return Ed25519Keypair.fromSecretKey(seed);
+  } catch (error) {
+    console.error('Error in deriveKeypair:', error);
+    throw error;
+  }
+}; 
