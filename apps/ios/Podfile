@@ -1,49 +1,40 @@
-require_relative '../node_modules/react-native/scripts/react_native_pods'
-require_relative '../node_modules/react-native/scripts/cocoapods/autolinking'
-
 platform :ios, '16.0'
+
+# bring in RN's own pod helpers (this will include autolinking)
+require_relative "../node_modules/react-native/scripts/react_native_pods"
+
 prepare_react_native_project!
 
-# Use static frameworks (required for some Swift pods, and safer for iOS 17/18 SDK)
+# Build Swift pods (like FirebaseAuth) as static frameworks:
 use_frameworks! :linkage => :static
 
 target 'Confio' do
   config = use_native_modules!
 
-  # Flags change depending on the env values.
-  flags = get_default_flags()
-
   use_react_native!(
     :path => config[:reactNativePath],
-    :hermes_enabled => flags[:hermes_enabled],
-    :fabric_enabled => flags[:fabric_enabled],
-    # An absolute path to your application root.
-    :app_path => "#{Pod::Config.instance.installation_root}/.."
+    :hermes_enabled => true,
+    :fabric_enabled => true
   )
 
-  post_install do |installer|
-    # https://github.com/facebook/react-native/blob/main/packages/react-native/scripts/react_native_pods.rb#L197-L202
-    react_native_post_install(
-      installer,
-      config[:reactNativePath],
-      :mac_catalyst_enabled => false
-    )
-    
-    # This is necessary for Xcode 14, because it signs resource bundles by default
-    # when building for devices.
-    installer.target_installation_results.pod_target_installation_results
-      .each do |pod_name, target_installation_result|
-      target_installation_result.resource_bundle_targets.each do |resource_bundle_target|
-        resource_bundle_target.build_configurations.each do |config|
-          config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-        end
-      end
-    end
+  # (You do NOT need to manually pod RNFBApp & RNFBAuth here;
+  #  react-native-firebase will auto-link for you.)
+  pod 'GoogleSignIn', '~> 7.0'
+end
 
-    # Set build settings for M1 compatibility
-    installer.pods_project.build_configurations.each do |config|
+post_install do |installer|
+  react_native_post_install(installer)
+
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      # keep your C++ flags happy
+      config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20'
+      config.build_settings['CLANG_CXX_LIBRARY']        = 'libc++'
+      # M1 simulator hack
       config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']          = '16.0'
+      # ensure Swift pods compile with Swift 5+
+      config.build_settings['SWIFT_VERSION'] = '5.0'
     end
   end
 end 
