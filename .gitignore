@@ -59,7 +59,6 @@ yarn.lock # include if you are using npm - don't use both npm and yarn
 # BUCK
 buck-out/
 \.buckd/
-*.keystore
 
 # Fastlane
 #
@@ -75,15 +74,6 @@ buck-out/
 # Bundle artifact
 *.jsbundle
 
-.env
-.env.*
-!.env.example
-deploy.env
-exoscale.env
-*.env.local
-*.env.development
-*.env.production
-
 # Development artifacts
 *.log
 *.sqlite3
@@ -98,67 +88,3 @@ exoscale.env
 # IDE and editor files
 .idea/
 .vscode/
-*.swp
-*.swo
-.DS_Store
-Thumbs.db
-
-# Deployment artifacts
-*.tar.gz
-*.zip
-*.rar
-*.7z
-deploy/
-dist/
-build/
-*.egg-info/
-
-# Credentials and secrets
-**/secrets/
-**/keys/
-**/certificates/
-**/private/
-**/config/private/
-**/config/secrets/
-**/config/keys/
-
-# OAuth credentials
-apps/src/config/oauth-config.js
-apps/src/config/firebase-config.js
-apps/src/config/google-services.json
-apps/src/config/GoogleService-Info.plist
-
-# Android credentials
-apps/android/app/confio.keystore
-apps/android/app/debug.keystore
-apps/android/app/release.keystore
-apps/android/app/upload-keystore.jks
-apps/android/app/key.properties
-apps/android/app/google-services.json
-apps/android/app/src/main/res/values/secrets.xml
-apps/android/gradle.properties
-apps/android/app/gradle.properties
-
-# iOS credentials
-apps/ios/confio.xcodeproj/project.pbxproj
-apps/ios/confio.xcodeproj/xcshareddata/xcschemes/*.xcscheme
-apps/ios/confio/GoogleService-Info.plist
-apps/ios/confio/Secrets.swift
-apps/ios/confio/Config.swift
-apps/ios/fastlane/.env
-apps/ios/fastlane/certificates
-apps/ios/fastlane/profiles
-apps/ios/fastlane/README.md
-apps/ios/fastlane/report.xml
-apps/ios/fastlane/Preview.html
-apps/ios/fastlane/screenshots
-apps/ios/fastlane/test_output
-apps/ios/fastlane/.env.default
-apps/ios/fastlane/.env.*
-
-# Credentials directory (except README)
-credentials/
-!credentials/README.md
-
-# Firebase service account
-config/service-account.json
