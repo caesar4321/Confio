@@ -1,7 +1,7 @@
 .PHONY: runserver migrate makemigrations shell test clean db-setup db-migrate db-reset
 
 # Virtual environment path
-VENV_PATH = /Users/julianmoon/Confio/myvenv
+VENV_PATH = ./myvenv
 PYTHON = $(VENV_PATH)/bin/python
 PIP = $(VENV_PATH)/bin/pip
 
@@ -40,7 +40,7 @@ createsuperuser:
 
 # Run with full path (alternative to runserver)
 run:
-	/Users/julianmoon/Confio/myvenv/bin/python manage.py runserver 0.0.0.0:8000
+	./myvenv/bin/python manage.py runserver 0.0.0.0:8000
 
 # Database setup
 db-setup:
