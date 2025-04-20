@@ -3,6 +3,7 @@ const base64Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456
 
 function encode(input) {
   if (typeof input === 'string') {
+    // Use TextEncoder for proper UTF-8 encoding
     input = new TextEncoder().encode(input);
   }
   let output = '';
@@ -25,7 +26,7 @@ function encode(input) {
 
 function decode(b64) {
   const bytes = toByteArray(b64);
-  return new TextDecoder().decode(bytes);
+  return new TextDecoder('utf-8').decode(bytes);
 }
 
 function toByteArray(b64) {
