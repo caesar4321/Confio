@@ -27,4 +27,15 @@ export function bytesToBase64(bytes: Uint8Array): string {
  */
 export function stringToUtf8Bytes(str: string): Uint8Array {
   return new TextEncoder().encode(str);
+}
+
+/**
+ * Converts a Uint8Array to a hex string
+ * @param bytes The bytes to convert
+ * @returns A hex string
+ */
+export function bufferToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
 } 

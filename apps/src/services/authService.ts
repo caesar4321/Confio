@@ -12,7 +12,7 @@ import { apolloClient } from '../apollo/client';
 import { gql } from '@apollo/client';
 import { Buffer } from 'buffer';
 import { sha256 } from '@noble/hashes/sha256';
-import { base64ToBytes, bytesToBase64, stringToUtf8Bytes } from '../utils/encoding';
+import { base64ToBytes, bytesToBase64, stringToUtf8Bytes, bufferToHex } from '../utils/encoding';
 
 interface StoredZkLogin {
   salt: string;           // init.salt (base64)
@@ -21,9 +21,12 @@ interface StoredZkLogin {
   maxEpoch: number;       // Number(init.maxEpoch)
   zkProof: any;          // the full proof object (points a/b/c etc)
   secretKey: string;     // base64-encoded 32-byte seed
+  initRandomness: string; // randomness from initializeZkLogin
+  initJwt: string;       // original JWT from sign-in
 }
 
 const KEYCHAIN_SERVICE = 'com.confio.zklogin';
+const KEYCHAIN_USERNAME = 'zkLoginData';
 
 export class AuthService {
   private static instance: AuthService;
@@ -77,10 +80,8 @@ export class AuthService {
         scopes: ['profile', 'email']
       };
 
-      // Add platform-specific client IDs
-      if (Platform.OS === 'ios') {
-        config.iosClientId = clientIds.ios;
-      } else if (Platform.OS === 'android') {
+      // Only add Android client ID since iOS client ID is handled by native SDK
+      if (Platform.OS === 'android') {
         config.androidClientId = clientIds.android;
       }
 
@@ -167,7 +168,7 @@ export class AuthService {
       }
 
       // 7) Store sensitive data securely
-      await this.storeSensitiveData(fin, init.salt, sub, clientId, maxEpochNum);
+      await this.storeSensitiveData(fin, init.salt, sub, clientId, maxEpochNum, init.randomness, idToken);
 
       // Update instance state
       this.userSalt = init.salt;
@@ -311,7 +312,7 @@ export class AuthService {
       }
 
       // Store sensitive data securely
-      await this.storeSensitiveData(finalizeData.finalizeZkLogin, serverSalt, appleSub, 'apple', Number(maxEpoch));
+      await this.storeSensitiveData(finalizeData.finalizeZkLogin, serverSalt, appleSub, 'apple', Number(maxEpoch), serverRandomness, identityToken);
 
       // Update instance state
       this.userSalt = serverSalt;
@@ -415,7 +416,8 @@ export class AuthService {
   private async rehydrateZkLoginData() {
     try {
       const credentials = await Keychain.getGenericPassword({
-        service: KEYCHAIN_SERVICE
+        service: KEYCHAIN_SERVICE,
+        username: KEYCHAIN_USERNAME
       });
 
       if (!credentials) return;
@@ -423,7 +425,7 @@ export class AuthService {
       const data = JSON.parse(credentials.password) as StoredZkLogin;
       
       // Verify the secret key is exactly 32 bytes
-      const secretKeyBytes = Buffer.from(data.secretKey, 'base64');
+      const secretKeyBytes = base64ToBytes(data.secretKey);
       if (secretKeyBytes.length !== 32) {
         throw new Error('Invalid secret key length');
       }
@@ -438,28 +440,51 @@ export class AuthService {
     }
   }
 
-  private async storeSensitiveData(proof: any, salt: string, subject: string, clientId: string, maxEpoch: number) {
+  private async storeSensitiveData(proof: any, salt: string, subject: string, clientId: string, maxEpoch: number, initRandomness: string, initJwt: string) {
     if (!this.suiKeypair) {
       throw new Error('Sui keypair not initialized');
     }
 
     const secretKey = this.suiKeypair.getSecretKey();
-    if (secretKey.length !== 32) {
-      throw new Error('Invalid secret key length');
+    console.log('Secret key type:', typeof secretKey);
+    console.log('Secret key length:', secretKey.length);
+    console.log('Secret key bytes:', Array.from(secretKey));
+
+    // Convert string to Uint8Array if needed
+    let secretKeyBytes: Uint8Array;
+    if (typeof secretKey === 'string') {
+      // The secret key string appears to be prefixed with "suiprivkey"
+      // Extract just the key bytes (should be 32 bytes)
+      const keyBytes = secretKey.slice('suiprivkey'.length);
+      secretKeyBytes = new Uint8Array(32);
+      for (let i = 0; i < 32; i++) {
+        secretKeyBytes[i] = keyBytes.charCodeAt(i);
+      }
+    } else if (secretKey instanceof Uint8Array) {
+      secretKeyBytes = secretKey;
+    } else {
+      throw new Error('Invalid secret key type');
     }
 
-    const secretKeyB64 = Buffer.from(secretKey).toString('base64');
+    if (secretKeyBytes.length !== 32) {
+      throw new Error(`Invalid secret key length: ${secretKeyBytes.length} (expected 32)`);
+    }
+
+    const secretKeyB64 = bytesToBase64(secretKeyBytes);
+    
     const toSave: StoredZkLogin = { 
       salt, 
       subject, 
       clientId, 
       maxEpoch, 
       zkProof: proof,
-      secretKey: secretKeyB64
+      secretKey: secretKeyB64,
+      initRandomness,
+      initJwt
     };
     
     await Keychain.setGenericPassword(
-      'zkLoginData',
+      KEYCHAIN_USERNAME,
       JSON.stringify(toSave),
       {
         service: KEYCHAIN_SERVICE,
@@ -498,28 +523,35 @@ export class AuthService {
       await this.initialize();
     }
 
-    if (!this.suiKeypair) {
+    if (!this.suiKeypair || !this.zkProof || !this.userSalt || !this.maxEpoch) {
       throw new Error('No zkLogin data stored');
     }
 
-    const credentials = await Keychain.getGenericPassword({
-      service: KEYCHAIN_SERVICE
-    });
-
-    if (!credentials) throw new Error('No zkLogin data stored');
-    
-    const { zkProof, salt, subject, clientId, maxEpoch } = JSON.parse(credentials.password) as StoredZkLogin;
+    // Check if we need to refresh the proof due to epoch expiration
+    try {
+      const state = await this.suiClient.getLatestSuiSystemState();
+      const currentEpoch = Number(state.epoch);
+      
+      // If we're within 1 epoch of expiration, fetch a new proof
+      if (currentEpoch >= this.maxEpoch - 1) {
+        console.log('zkLogin proof approaching expiration, refreshing...');
+        await this.fetchNewProof();
+      }
+    } catch (error) {
+      console.error('Error checking epoch expiration:', error);
+      // Continue with existing proof if we can't check epoch
+    }
 
     // 1) turn base64 salt → BigInt
-    const saltBytes = base64ToBytes(salt);
-    const saltBigInt = BigInt('0x' + Buffer.from(saltBytes).toString('hex'));
+    const saltBytes = base64ToBytes(this.userSalt);
+    const saltBigInt = BigInt('0x' + bufferToHex(saltBytes));
 
     // 2) compute the same address-seed used to build the proof
     const addressSeed = genAddressSeed(
       saltBigInt,
       'sub',        // keyClaimName
-      subject,
-      clientId
+      this.zkProof.subject,
+      this.zkProof.clientId
     ).toString();
 
     // 3) sign an empty message with the stored ephemeral key
@@ -528,10 +560,10 @@ export class AuthService {
     // 4) get the final address using the lib's helper
     return getZkLoginSignature({
       inputs: {
-        ...zkProof,
+        ...this.zkProof,
         addressSeed
       },
-      maxEpoch,
+      maxEpoch: this.maxEpoch,
       userSignature
     });
   }
@@ -546,6 +578,7 @@ export class AuthService {
       this.maxEpoch = null;
       await Keychain.resetGenericPassword({
         service: KEYCHAIN_SERVICE,
+        username: KEYCHAIN_USERNAME
       });
     } catch (error) {
       console.error('Sign Out Error:', error);
@@ -581,9 +614,76 @@ export class AuthService {
 
       const fullHash = sha256(seedInput);
       const seed = fullHash.slice(0, 32);
+      
+      console.log('Derived seed length:', seed.length);
+      console.log('Derived seed bytes:', Array.from(seed));
+      
       return Ed25519Keypair.fromSecretKey(seed);
     } catch (error) {
       console.error('Error deriving ephemeral keypair:', error);
+      throw error;
+    }
+  }
+
+  private async fetchNewProof(): Promise<void> {
+    if (!this.suiKeypair || !this.userSalt || !this.maxEpoch || !this.zkProof) {
+      throw new Error("Can't refresh without keypair/salt/proof");
+    }
+
+    try {
+      // Get stored data to access initJwt and initRandomness
+      const credentials = await Keychain.getGenericPassword({
+        service: KEYCHAIN_SERVICE,
+        username: KEYCHAIN_USERNAME
+      });
+
+      if (!credentials) {
+        throw new Error("No stored zkLogin data found");
+      }
+
+      const stored = JSON.parse(credentials.password) as StoredZkLogin;
+
+      // Get a fresh proof from the server
+      const { data } = await apolloClient.mutate({
+        mutation: FINALIZE_ZKLOGIN,
+        variables: {
+          input: {
+            jwt: stored.initJwt,
+            maxEpoch: this.maxEpoch.toString(),
+            randomness: stored.initRandomness,
+            salt: this.userSalt,
+            extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
+            userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0))),
+            keyClaimName: 'sub',
+            audience: this.zkProof.clientId
+          }
+        }
+      });
+
+      if (!data?.finalizeZkLogin) {
+        throw new Error("Failed to refresh proof");
+      }
+
+      const fin = data.finalizeZkLogin;
+
+      // Update in-memory state
+      this.zkProof = fin;
+      this.maxEpoch = Number(fin.maxEpoch);
+
+      // Update Keychain storage
+      await this.storeSensitiveData(
+        fin,
+        this.userSalt,
+        this.zkProof.subject,
+        this.zkProof.clientId,
+        Number(fin.maxEpoch),
+        stored.initRandomness,
+        stored.initJwt
+      );
+
+      console.log('Successfully refreshed zkLogin proof');
+    } catch (error) {
+      console.error('Error refreshing zkLogin proof:', error);
       throw error;
     }
   }
