@@ -27,6 +27,7 @@ interface StoredZkLogin {
 }
 
 const KEYCHAIN_SERVICE = 'com.confio.zklogin';
+const KEYCHAIN_USERNAME = 'zkLoginData';
 
 export class AuthService {
   private static instance: AuthService;
@@ -215,7 +216,7 @@ export class AuthService {
   async clearZkLoginData() {
     try {
       await Keychain.resetGenericPassword({
-        service: KEYCHAIN_SERVICE
+        service: KEYCHAIN_SERVICE,
       });
     } catch (error) {
       console.error('Error clearing zkLogin data:', error);
@@ -281,12 +282,6 @@ export class AuthService {
       // Derive the single, deterministic ephemeral keypair
       this.suiKeypair = this.deriveEphemeralKeypair(serverSalt, appleSub, 'apple');
 
-      // Convert randomness to BigInt
-      const randomnessBigInt = BigInt('0x' + Buffer.from(serverRandomness, 'base64').toString('hex'));
-
-      // Generate nonce using the randomness
-      const zkLoginNonce = await this._generateNonce();
-
       // Get the extended ephemeral public key (now deterministic)
       const extendedEphemeralPublicKey = this.suiKeypair.getPublicKey().toBase64();
 
@@ -300,7 +295,7 @@ export class AuthService {
             maxEpoch: maxEpoch.toString(),
             randomness: serverRandomness,
             salt: serverSalt,
-            userSignature: Buffer.from(await this.suiKeypair.sign(new Uint8Array(0))).toString('base64'),
+            userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0))),
             keyClaimName: 'sub',
             audience: 'apple'
           }
@@ -413,7 +408,6 @@ export class AuthService {
     try {
       const credentials = await Keychain.getGenericPassword({
         service: KEYCHAIN_SERVICE,
-        username: KEYCHAIN_USERNAME
       });
 
       if (!credentials) return;
@@ -574,7 +568,6 @@ export class AuthService {
       this.maxEpoch = null;
       await Keychain.resetGenericPassword({
         service: KEYCHAIN_SERVICE,
-        username: KEYCHAIN_USERNAME
       });
     } catch (error) {
       console.error('Sign Out Error:', error);
@@ -629,8 +622,7 @@ export class AuthService {
     try {
       // Get stored data to access initJwt and initRandomness
       const credentials = await Keychain.getGenericPassword({
-        service: KEYCHAIN_SERVICE,
-        account: KEYCHAIN_USERNAME
+        service: KEYCHAIN_SERVICE
       });
 
       if (!credentials) {

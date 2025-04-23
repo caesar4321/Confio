@@ -1,12 +1,14 @@
 buildscript {
     ext {
-        buildToolsVersion = "34.0.0"
+        buildToolsVersion = "35.0.0"
         minSdkVersion = 24
-        compileSdkVersion = 34
-        targetSdkVersion = 34
+        compileSdkVersion = 35
+        targetSdkVersion = 35
         ndkVersion = "25.1.8937393"
         kotlinVersion = "1.8.0"
         gradleVersion = "8.1.0"
+        FLIPPER_VERSION = "0.182.0"
+        hermesEnabled = true
     }
     repositories {
         google()
@@ -21,7 +23,7 @@ buildscript {
 
 plugins {
     id("com.android.application") version "8.1.0" apply false
-    id("com.facebook.react") version "0.79.0"
+    id("com.facebook.react") version "0.73.0"
 }
 
 apply plugin: "com.facebook.react"

@@ -1,0 +1,11 @@
+def config = project.hasProperty("vectoricons") ? project.vectoricons : [];
+
+def fonts = config.fonts ?: [];
+
+android {
+    sourceSets {
+        main {
+            res.srcDirs += fonts
+        }
+    }
+} 
