@@ -1,12 +1,14 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
 buildscript {
     ext {
-        buildToolsVersion = "35.0.0"
+        buildToolsVersion = "34.0.0"
         minSdkVersion = 24
-        compileSdkVersion = 35
-        targetSdkVersion = 35
-        ndkVersion = "25.1.8937393"
-        kotlinVersion = "1.8.0"
-        gradleVersion = "8.1.0"
+        compileSdkVersion = 34
+        targetSdkVersion = 34
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "1.9.22"
+        gradleVersion = "8.2.2"
         FLIPPER_VERSION = "0.182.0"
         hermesEnabled = true
     }
@@ -16,36 +18,20 @@ buildscript {
     }
     dependencies {
         classpath("com.android.tools.build:gradle:${gradleVersion}")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${kotlinVersion}")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
         classpath("com.google.gms:google-services:4.4.1")
+        classpath("com.facebook.react:react-native-gradle-plugin")
     }
 }
 
-plugins {
-    id("com.android.application") version "8.1.0" apply false
-    id("com.facebook.react") version "0.73.0"
-}
-
-apply plugin: "com.facebook.react"
-
-allprojects {
-    repositories {
-        maven {
-            // All of React Native (JS, Obj-C sources, Android binaries) is installed from npm
-            url("$rootDir/../node_modules/react-native/android")
-        }
-        maven {
-            // Android JSC is installed from npm
-            url("$rootDir/../node_modules/jsc-android/dist")
-        }
-        mavenCentral {
-            // We don't want to fetch react-native from Maven Central as there are
-            // older versions over there.
-            content {
-                excludeGroup "com.facebook.react"
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            android {
+                compileSdkVersion rootProject.ext.compileSdkVersion
+                buildToolsVersion rootProject.ext.buildToolsVersion
             }
         }
-        google()
-        maven { url 'https://www.jitpack.io' }
     }
 }
+
