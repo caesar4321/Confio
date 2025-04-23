@@ -1,6 +1,27 @@
 // Buffer polyfill
 if (typeof Buffer === 'undefined') {
-  global.Buffer = require('buffer').Buffer;
+  global.Buffer = require('react-native-buffer').Buffer;
+}
+
+// crypto shim
+import 'react-native-get-random-values';
+
+// padEnd shim
+if (!String.prototype.padEnd) {
+  Object.defineProperty(String.prototype, 'padEnd', {
+    configurable: true,
+    writable: true,
+    value: function padEnd(targetLength, padString = ' ') {
+      const str = String(this);
+      const len = str.length;
+      targetLength = targetLength >> 0; // integer
+      if (targetLength <= len) return str;
+      padString = String(padString);
+      const padLen = targetLength - len;
+      const repeated = padString.repeat(Math.ceil(padLen / padString.length));
+      return str + repeated.slice(0, padLen);
+    },
+  });
 }
 
 // atob and btoa polyfills
@@ -42,12 +63,13 @@ if (typeof btoa === 'undefined') {
       const chr1 = str.charCodeAt(i++);
       const chr2 = str.charCodeAt(i++);
       const chr3 = str.charCodeAt(i++);
-      const enc1 = chr1 >> 2;
-      const enc2 = ((chr1 & 3) << 4) | (chr2 >> 4);
-      const enc3 = ((chr2 & 15) << 2) | (chr3 >> 6);
-      const enc4 = chr3 & 63;
+      let enc1 = chr1 >> 2;
+      let enc2 = ((chr1 & 3) << 4) | (chr2 >> 4);
+      let enc3 = ((chr2 & 15) << 2) | (chr3 >> 6);
+      let enc4 = chr3 & 63;
       if (isNaN(chr2)) {
-        enc3 = enc4 = 64;
+        enc3 = 64;
+        enc4 = 64;
       } else if (isNaN(chr3)) {
         enc4 = 64;
       }
@@ -58,24 +80,3 @@ if (typeof btoa === 'undefined') {
 }
 
 console.log("[polyfills] running padEnd/crypto shims…");
-
-// 1️⃣ crypto shim
-import 'react-native-get-random-values';
-
-// 2️⃣ padEnd shim
-if (!String.prototype.padEnd) {
-  Object.defineProperty(String.prototype, 'padEnd', {
-    configurable: true,
-    writable: true,
-    value: function padEnd(targetLength, padString = ' ') {
-      const str = String(this);
-      const len = str.length;
-      targetLength = targetLength >> 0; // integer
-      if (targetLength <= len) return str;
-      padString = String(padString);
-      const padLen = targetLength - len;
-      const repeated = padString.repeat(Math.ceil(padLen / padString.length));
-      return str + repeated.slice(0, padLen);
-    },
-  });
-} 

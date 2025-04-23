@@ -6,6 +6,7 @@ myvenv
 /media
 .DS_Store
 logs
+service-account.json
 celerybeat-schedule.bak
 celerybeat-schedule.dat
 celerybeat-schedule.dir
