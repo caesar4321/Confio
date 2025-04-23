@@ -1,0 +1,28 @@
+*** Begin Patch
+*** Update File: node_modules/react-native/src/private/specs_DEPRECATED/components/DebuggingOverlayNativeComponent.js
+@@
+-/**
+ * Copyright (c) Meta Platforms...
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ *
+ */
+
+/**
+ * @flow
+ */
+
+ 'use strict';
+
+const {TurboModuleRegistry} = require('../../../NativeModules/TurboModuleRegistry');
+
+/**
+ * The Debugging overlay native component is only available in dev builds.
+ */
+module.exports = (TurboModuleRegistry.getEnforcing('DebuggingOverlay') : ?Tur
+-boModule);
++// Stubbed out by patch-package to avoid unsupported  param errors
++// (the real implementation only matters in RN-devtools, not in your app runtime)
++module.exports = {};
+*** End Patch

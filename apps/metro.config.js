@@ -5,8 +5,9 @@
  * @format
  */
 
-const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const path = require('path');
+const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
+const exclusionList = require('metro-config/src/defaults/exclusionList');
 
 const defaultConfig = getDefaultConfig(__dirname);
 
@@ -52,17 +53,30 @@ const config = {
           type: 'sourceFile',
         };
       }
+      if (moduleName.includes('DebuggingOverlayNativeComponent')) {
+        return {
+          filePath: require.resolve('./stubs/DebuggingOverlayNativeComponent.js'),
+          type: 'sourceFile',
+        };
+      }
+      if (moduleName.includes('NativeDevMenu')) {
+        return {
+          filePath: require.resolve('./stubs/NativeDevMenu.js'),
+          type: 'sourceFile',
+        };
+      }
       return context.resolveRequest(context, moduleName, platform);
     },
-    extraNodeModules: {
-      'react-native-fast-base64': path.resolve(__dirname, 'base64.js'),
-    },
+    blacklistRE: exclusionList([]),
   },
   serializer: {
     getModulesRunBeforeMainModule: () => [
       require.resolve("./polyfills.js"),
     ],
   },
+  watchFolders: [
+    path.resolve(__dirname, 'stubs'),
+  ],
 };
 
 module.exports = mergeConfig(defaultConfig, config);

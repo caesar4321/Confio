@@ -162,11 +162,22 @@ class InitializeZkLogin(graphene.Mutation):
 
             # Get or create User
             User = get_user_model()
+            
+            # Split name into first and last name
+            first_name = ''
+            last_name = ''
+            if name:
+                name_parts = name.strip().split()
+                if name_parts:
+                    first_name = name_parts[0]
+                    last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
+            
             user, created = User.objects.get_or_create(
                 username=firebase_uid,
                 defaults={
                     'email': email,
-                    'first_name': name
+                    'first_name': first_name,
+                    'last_name': last_name
                 }
             )
 

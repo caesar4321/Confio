@@ -13,6 +13,7 @@ import { gql } from '@apollo/client';
 import { Buffer } from 'buffer';
 import { sha256 } from '@noble/hashes/sha256';
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes, bufferToHex } from '../utils/encoding';
+import { ApolloClient } from '@apollo/client';
 
 interface StoredZkLogin {
   salt: string;           // init.salt (base64)
@@ -26,7 +27,6 @@ interface StoredZkLogin {
 }
 
 const KEYCHAIN_SERVICE = 'com.confio.zklogin';
-const KEYCHAIN_USERNAME = 'zkLoginData';
 
 export class AuthService {
   private static instance: AuthService;
@@ -342,7 +342,7 @@ export class AuthService {
   }
 
   // Get ZK proof from our GraphQL server
-  private async getZkProof(jwt: string, maxEpoch: number, randomness: string): Promise<any> {
+  private async getZkProof(jwt: string, maxEpoch: number, randomness: string, apolloClient: ApolloClient<any>): Promise<any> {
     try {
       if (!this.suiKeypair) {
         throw new Error('Sui keypair not initialized');
@@ -399,14 +399,10 @@ export class AuthService {
       });
 
       if (data.zkLogin.error) {
-        throw new Error(`Prover service error: ${data.zkLogin.error} - ${data.zkLogin.details}`);
+        throw new Error(`ZK proof generation failed: ${data.zkLogin.error}`);
       }
 
-      console.log('Successfully received ZK proof and Sui address');
-      return {
-        zkProof: data.zkLogin.zkProof,
-        suiAddress: data.zkLogin.suiAddress
-      };
+      return data.zkLogin;
     } catch (error) {
       console.error('ZK Proof Generation Error:', error);
       throw error;
@@ -535,7 +531,7 @@ export class AuthService {
       // If we're within 1 epoch of expiration, fetch a new proof
       if (currentEpoch >= this.maxEpoch - 1) {
         console.log('zkLogin proof approaching expiration, refreshing...');
-        await this.fetchNewProof();
+        await this.fetchNewProof(apolloClient);
       }
     } catch (error) {
       console.error('Error checking epoch expiration:', error);
@@ -625,7 +621,7 @@ export class AuthService {
     }
   }
 
-  private async fetchNewProof(): Promise<void> {
+  private async fetchNewProof(apolloClient: ApolloClient<any>): Promise<void> {
     if (!this.suiKeypair || !this.userSalt || !this.maxEpoch || !this.zkProof) {
       throw new Error("Can't refresh without keypair/salt/proof");
     }
@@ -634,7 +630,7 @@ export class AuthService {
       // Get stored data to access initJwt and initRandomness
       const credentials = await Keychain.getGenericPassword({
         service: KEYCHAIN_SERVICE,
-        username: KEYCHAIN_USERNAME
+        account: KEYCHAIN_USERNAME
       });
 
       if (!credentials) {
@@ -660,28 +656,21 @@ export class AuthService {
         }
       });
 
-      if (!data?.finalizeZkLogin) {
-        throw new Error("Failed to refresh proof");
+      if (data.finalizeZkLogin.error) {
+        throw new Error(`Proof refresh failed: ${data.finalizeZkLogin.error}`);
       }
 
-      const fin = data.finalizeZkLogin;
-
-      // Update in-memory state
-      this.zkProof = fin;
-      this.maxEpoch = Number(fin.maxEpoch);
-
-      // Update Keychain storage
+      // Update the stored proof
+      this.zkProof = data.finalizeZkLogin.zkProof;
       await this.storeSensitiveData(
-        fin,
+        data.finalizeZkLogin.zkProof,
         this.userSalt,
-        this.zkProof.subject,
-        this.zkProof.clientId,
-        Number(fin.maxEpoch),
-        stored.initRandomness,
-        stored.initJwt
+        data.finalizeZkLogin.subject,
+        data.finalizeZkLogin.clientId,
+        Number(data.finalizeZkLogin.maxEpoch),
+        data.finalizeZkLogin.randomness,
+        data.finalizeZkLogin.jwt
       );
-
-      console.log('Successfully refreshed zkLogin proof');
     } catch (error) {
       console.error('Error refreshing zkLogin proof:', error);
       throw error;

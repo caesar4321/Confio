@@ -1,8 +1,10 @@
 {
   "devDependencies": {
-    "@react-native-community/cli": "^18.0.0"
+    "@react-native-community/cli": "^18.0.0",
+    "eslint-import-resolver-typescript": "^4.3.4"
   },
   "dependencies": {
+    "react": "19.0.0",
     "react-native": "^0.79.0",
     "react-native-gradle-plugin": "^0.71.19"
   }

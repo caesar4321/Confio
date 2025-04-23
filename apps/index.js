@@ -25,14 +25,15 @@ const client = new ApolloClient({
 import { AppRegistry } from 'react-native';
 import { name as appName } from './app.json';
 import * as suiUtils from '@mysten/sui/utils';
-import { base64ToBytes, bytesToBase64 } from './src/utils/fastBase64Shim';
+import { Buffer } from 'buffer';
 
-// Monkey-patch the Sui helpers to use our Buffer-based implementation
-suiUtils.fromB64 = base64ToBytes;
-suiUtils.toB64 = bytesToBase64;
+// Monkey-patch the Sui helpers to use Buffer directly
+global.Buffer = Buffer;
+suiUtils.fromB64 = (str) => Buffer.from(str, 'base64');
+suiUtils.toB64 = (bytes) => Buffer.from(bytes).toString('base64');
 
-// Import App component after patching
-import App from './App';
+// Import App component
+import App from './src/App';
 
 // Wrap your app with ApolloProvider
 const AppWithApollo = () => (
@@ -41,4 +42,5 @@ const AppWithApollo = () => (
   </ApolloProvider>
 );
 
+// Register the app
 AppRegistry.registerComponent(appName, () => AppWithApollo);
