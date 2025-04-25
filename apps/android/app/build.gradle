@@ -37,6 +37,24 @@ def enableProguardInReleaseBuilds = (findProperty('android.enableProguardInRelea
  */
 def jscFlavor = 'org.webkit:android-jsc:+'
 
+def envProperties = new Properties()
+def envFile = new File(projectDir, "../.env")
+println "Looking for .env at: ${envFile.absolutePath}"
+println "Env file exists: ${envFile.exists()}"
+if (envFile.exists()) {
+    envFile.eachLine { line ->
+        println "Reading line: $line"
+        def matcher = (line =~ /^([^=]+)=(.*)$/)
+        if (matcher.matches()) {
+            def key = matcher.group(1).trim()
+            def value = matcher.group(2).trim()
+            envProperties[key] = value
+            println "Added property: $key = $value"
+        }
+    }
+}
+println "Final properties: $envProperties"
+
 android {
     ndkVersion "27.1.12297006"
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -64,16 +82,16 @@ android {
     }
     signingConfigs {
         debug {
-            storeFile file("../credentials/android/keystore/confio.keystore")
-            storePassword project.hasProperty('KEYSTORE_PASSWORD') ? KEYSTORE_PASSWORD : ""
-            keyAlias project.hasProperty('KEY_ALIAS') ? KEY_ALIAS : ""
-            keyPassword project.hasProperty('KEY_PASSWORD') ? KEY_PASSWORD : ""
+            storeFile file("${envProperties['KEYSTORE_FILE']}")
+            storePassword "${envProperties['KEYSTORE_PASSWORD']}"
+            keyAlias "${envProperties['KEY_ALIAS']}"
+            keyPassword "${envProperties['KEY_PASSWORD']}"
         }
         release {
-            storeFile file("../credentials/android/keystore/confio.keystore")
-            storePassword project.hasProperty('KEYSTORE_PASSWORD') ? KEYSTORE_PASSWORD : ""
-            keyAlias project.hasProperty('KEY_ALIAS') ? KEY_ALIAS : ""
-            keyPassword project.hasProperty('KEY_PASSWORD') ? KEY_PASSWORD : ""
+            storeFile file("${envProperties['KEYSTORE_FILE']}")
+            storePassword "${envProperties['KEYSTORE_PASSWORD']}"
+            keyAlias "${envProperties['KEY_ALIAS']}"
+            keyPassword "${envProperties['KEY_PASSWORD']}"
         }
     }
     buildTypes {
