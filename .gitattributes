@@ -9,6 +9,7 @@ apps/src/config/firebase-config.js filter=git-crypt diff=git-crypt
 **/google-services.json filter=git-crypt diff=git-crypt
 **/GoogleService-Info.plist filter=git-crypt diff=git-crypt
 apps/src/config/env.ts filter=git-crypt diff=git-crypt
+config/firebase-service-account.json filter=git-crypt diff=git-crypt
 
 # Android credentials
 apps/android/app/confio.keystore filter=git-crypt diff=git-crypt
