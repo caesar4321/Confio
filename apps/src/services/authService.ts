@@ -139,9 +139,8 @@ export class AuthService {
         throw new Error('Invalid JWT: missing sub claim');
       }
 
-      const clientId = Platform.OS === 'ios'
-        ? GOOGLE_CLIENT_IDS.production.ios
-        : GOOGLE_CLIENT_IDS.production.android;
+      // Use the same client ID for all platforms to ensure consistent Sui addresses
+      const clientId = GOOGLE_CLIENT_IDS.production.web;
 
       this.suiKeypair = this.deriveEphemeralKeypair(init.salt, sub, clientId);
 

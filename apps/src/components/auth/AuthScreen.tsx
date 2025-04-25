@@ -17,6 +17,11 @@ export const AuthScreen = () => {
   const glowOpacity = useRef(new Animated.Value(0.5)).current;
 
   useEffect(() => {
+    // Initialize AuthService
+    authService.initialize().catch(error => {
+      console.error('Failed to initialize AuthService:', error);
+    });
+
     // Logo entrance animation
     Animated.parallel([
       Animated.timing(logoScale, {
