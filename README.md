@@ -161,7 +161,14 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── firebase.json      # Firebase configuration
 │   ├── metro.config.js    # Metro bundler configuration
 │   └── package.json       # Node.js dependencies
-├── contracts/    # Sui Move smart contracts (cUSD, escrow, etc.)
+├── contracts/    # Sui Move smart contracts
+│   ├── sources/  # Move source files
+│   │   ├── cusd.move              # CUSD stablecoin implementation
+│   │   ├── cusd_vault_usdc.move   # USDC vault for CUSD minting/burning
+│   │   ├── cusd_vault_treasury.move # Treasury vault for CUSD operations
+│   │   └── confio.move            # CONFIO governance token
+│   ├── Move.toml # Package configuration
+│   └── Move.lock # Dependency lock file
 └── README.md
 ```
 
@@ -203,3 +210,52 @@ This is a **monolithic repository** containing the full Confío stack:
 > - Any other files containing sensitive information or credentials
 
 > **Note**: Google OAuth Client IDs are configured in `apps/.env` and accessed through `apps/src/config/env.ts` using `react-native-dotenv`.
+
+## 📜 Smart Contracts
+
+### CUSD (Confío USD)
+- **File**: `contracts/sources/cusd.move`
+- **Purpose**: Implementation of the CUSD stablecoin
+- **Key Features**:
+  - 6 decimal places precision
+  - USD-pegged stablecoin
+  - Minting and burning through authorized vaults
+  - Transfer and split functionality
+- **Authorities**:
+  - `USDCVaultMintAuthority`: For minting/burning through USDC vault
+  - `TreasuryVaultMintAuthority`: For minting/burning through treasury vault
+
+### USDC Vault
+- **File**: `contracts/sources/cusd_vault_usdc.move`
+- **Purpose**: Manages USDC collateral for CUSD operations
+- **Key Features**:
+  - Lock USDC to mint CUSD
+  - Burn CUSD to redeem USDC
+  - Event emission for tracking operations
+- **Components**:
+  - `USDCVault`: Holds treasury caps for both USDC and CUSD
+  - `USDCTreasuryCap`: Manages USDC treasury
+  - `USDCMintAuthority`: Controls USDC minting
+
+### Treasury Vault
+- **File**: `contracts/sources/cusd_vault_treasury.move`
+- **Purpose**: Manages CUSD operations through the treasury
+- **Key Features**:
+  - Mint CUSD from treasury
+  - Burn CUSD back to treasury
+  - Timestamped event emission
+- **Events**:
+  - `MintEvent`: Records treasury mints
+  - `BurnEvent`: Records treasury burns
+
+### CONFIO Token
+- **File**: `contracts/sources/confio.move`
+- **Purpose**: Governance and utility token for the Confío platform
+- **Key Features**:
+  - Fixed supply of 1 billion tokens
+  - 6 decimal places precision
+  - UTF-8 support for Spanish characters
+  - Custom icon URL
+- **Distribution**:
+  - Initial supply minted to contract deployer
+  - Metadata and treasury cap frozen after initialization
