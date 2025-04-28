@@ -213,15 +213,15 @@ This is a **monolithic repository** containing the full Confío stack:
 
 ## 📜 Smart Contracts
 
-### cUSD (Confío USD)
+### Confío Dollar ($cUSD)
 - **File**: `contracts/sources/cusd.move`
-- **Purpose**: Implementation of the cUSD stablecoin, a gasless stablecoin designed for everyday transactions in Latin America
+- **Purpose**: Implementation of the $cUSD stablecoin, a gasless stablecoin designed for everyday transactions in Latin America
 - **Key Features**:
   - 6 decimal places precision for micro-transactions
   - USD-pegged stablecoin backed by USDC
   - Gasless transactions enabled through sponsored transactions: For minting/burning through treasury vault
 
-### CONFIO Token
+### Confío ($CONFIO)
 - **File**: `contracts/sources/confio.move`
 - **Purpose**: Governance and utility token for the Confío platform
 - **Key Features**:
