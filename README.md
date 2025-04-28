@@ -213,40 +213,13 @@ This is a **monolithic repository** containing the full Confío stack:
 
 ## 📜 Smart Contracts
 
-### CUSD (Confío USD)
+### cUSD (Confío USD)
 - **File**: `contracts/sources/cusd.move`
-- **Purpose**: Implementation of the CUSD stablecoin
+- **Purpose**: Implementation of the cUSD stablecoin, a gasless stablecoin designed for everyday transactions in Latin America
 - **Key Features**:
-  - 6 decimal places precision
-  - USD-pegged stablecoin
-  - Minting and burning through authorized vaults
-  - Transfer and split functionality
-- **Authorities**:
-  - `USDCVaultMintAuthority`: For minting/burning through USDC vault
-  - `TreasuryVaultMintAuthority`: For minting/burning through treasury vault
-
-### USDC Vault
-- **File**: `contracts/sources/cusd_vault_usdc.move`
-- **Purpose**: Manages USDC collateral for CUSD operations
-- **Key Features**:
-  - Lock USDC to mint CUSD
-  - Burn CUSD to redeem USDC
-  - Event emission for tracking operations
-- **Components**:
-  - `USDCVault`: Holds treasury caps for both USDC and CUSD
-  - `USDCTreasuryCap`: Manages USDC treasury
-  - `USDCMintAuthority`: Controls USDC minting
-
-### Treasury Vault
-- **File**: `contracts/sources/cusd_vault_treasury.move`
-- **Purpose**: Manages CUSD operations through the treasury
-- **Key Features**:
-  - Mint CUSD from treasury
-  - Burn CUSD back to treasury
-  - Timestamped event emission
-- **Events**:
-  - `MintEvent`: Records treasury mints
-  - `BurnEvent`: Records treasury burns
+  - 6 decimal places precision for micro-transactions
+  - USD-pegged stablecoin backed by USDC
+  - Gasless transactions enabled through sponsored transactions: For minting/burning through treasury vault
 
 ### CONFIO Token
 - **File**: `contracts/sources/confio.move`
