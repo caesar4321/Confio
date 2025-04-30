@@ -1,8 +1,0 @@
-[package]
-name = "confio"
-version = "0.1.0"
-edition = "2024"
-
-[addresses]
-confio = "0x0"
-cusd   = "0x0"
