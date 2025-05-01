@@ -162,13 +162,18 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── metro.config.js    # Metro bundler configuration
 │   └── package.json       # Node.js dependencies
 ├── contracts/    # Sui Move smart contracts
-│   ├── sources/  # Move source files
-│   │   ├── cusd.move              # CUSD stablecoin implementation
-│   │   ├── cusd_vault_usdc.move   # USDC vault for CUSD minting/burning
-│   │   ├── cusd_vault_treasury.move # Treasury vault for CUSD operations
-│   │   └── confio.move            # CONFIO governance token
-│   ├── Move.toml # Package configuration
-│   └── Move.lock # Dependency lock file
+│   ├── cusd/     # CUSD stablecoin implementation
+│   │   ├── sources/  # Move source files
+│   │   │   ├── cusd.move              # CUSD stablecoin implementation
+│   │   │   ├── cusd_vault_usdc.move   # USDC vault for CUSD minting/burning
+│   │   │   └── cusd_vault_treasury.move # Treasury vault for CUSD operations
+│   │   ├── Move.toml # Package configuration
+│   │   └── Move.lock # Dependency lock file
+│   └── confio/   # CONFIO governance token
+│       ├── sources/  # Move source files
+│       │   └── confio.move            # CONFIO governance token implementation
+│       ├── Move.toml # Package configuration
+│       └── Move.lock # Dependency lock file
 └── README.md
 ```
 
@@ -214,15 +219,16 @@ This is a **monolithic repository** containing the full Confío stack:
 ## 📜 Smart Contracts
 
 ### Confío Dollar ($cUSD)
-- **File**: `contracts/sources/cusd.move`
+- **File**: `contracts/cusd/sources/cusd.move`
 - **Purpose**: Implementation of the $cUSD stablecoin, a gasless stablecoin designed for everyday transactions in Latin America
 - **Key Features**:
   - 6 decimal places precision for micro-transactions
   - USD-pegged stablecoin backed by USDC
-  - Gasless transactions enabled through sponsored transactions: For minting/burning through treasury vault
+  - Gasless transactions enabled through Sui's native sponsored transaction system
+  - Vault system for USDC backing and treasury operations
 
 ### Confío ($CONFIO)
-- **File**: `contracts/sources/confio.move`
+- **File**: `contracts/confio/sources/confio.move`
 - **Purpose**: Governance and utility token for the Confío platform
 - **Key Features**:
   - Fixed supply of 1 billion tokens
@@ -232,3 +238,14 @@ This is a **monolithic repository** containing the full Confío stack:
 - **Distribution**:
   - Initial supply minted to contract deployer
   - Metadata and treasury cap frozen after initialization
+
+### Gasless Transactions
+- **Implementation**: Handled off-chain through Sui's native sponsored transaction system
+- **Components**:
+  - App server maintains SUI balance for gas sponsorship
+  - Client SDK integrates with Sui's sponsored transaction API
+  - Rate limiting and gas budget controls implemented at the application level
+- **Benefits**:
+  - Zero gas fees for end users
+  - Native Sui protocol support
+  - Simplified implementation without additional smart contracts
