@@ -10,6 +10,7 @@ from django.views.decorators.http import require_http_methods
 import requests
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+from django.views.generic import TemplateView
 
 logger = logging.getLogger(__name__)
 
@@ -183,5 +184,12 @@ class DebugGraphQLView(GraphQLView):
 			return JsonResponse({
 				"errors": [{"message": str(e)}]
 			}, status=400)
+
+class LegalPageView(TemplateView):
+	template_name = None
+
+	def get_template_names(self):
+		page = self.kwargs.get('page')
+		return [f'legal/{page}.html']
 
 
