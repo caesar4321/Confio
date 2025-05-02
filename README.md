@@ -81,23 +81,34 @@ This is a **monolithic repository** containing the full Confío stack:
 /Confio/
 ├── web/               # React-based web application
 │   ├── public/        # Static public files
+│   │   ├── index.html # Base HTML template
+│   │   ├── manifest.json # Web app manifest
+│   │   └── images/    # Public images
 │   ├── src/           # React source code
-│   │   ├── Components/    # React components
-│   │   ├── images/        # Image assets
-│   │   ├── styles/        # CSS styles
-│   │   ├── types/         # TypeScript type definitions
-│   │   ├── App.css        # Main application styles
-│   │   ├── App.js         # Main application component
-│   │   └── index.js       # Application entry point
+│   │   ├── components/    # React components
+│   │   ├── pages/        # Page components
+│   │   │   ├── TermsPage.js    # Terms of Service page
+│   │   │   ├── PrivacyPage.js  # Privacy Policy page
+│   │   │   └── DeletionPage.js # Data Deletion page
+│   │   ├── styles/       # CSS and SCSS files
+│   │   ├── types/        # TypeScript type definitions
+│   │   ├── App.css       # Main application styles
+│   │   ├── App.js        # Main application component
+│   │   └── index.js      # Application entry point
 │   ├── build/           # Production build output
-│   ├── static/          # Static assets
-│   ├── templates/       # HTML templates
+│   │   ├── static/       # Compiled static assets
+│   │   │   ├── css/      # Compiled CSS files
+│   │   │   ├── js/       # Compiled JavaScript files
+│   │   │   └── media/    # Compiled media files
+│   │   └── index.html    # Production HTML template
+│   ├── scripts/         # Build and utility scripts
+│   │   └── copy-index.js # Script to sync React build with Django
 │   ├── .eslintrc.json   # ESLint configuration
-│   ├── .prettierrc       # Prettier configuration
-│   ├── nginx.conf         # Nginx configuration
-│   ├── package.json       # Node.js dependencies
-│   ├── tsconfig.json      # TypeScript configuration
-│   └── yarn.lock          # Yarn lock file
+│   ├── .prettierrc      # Prettier configuration
+│   ├── nginx.conf       # Nginx configuration
+│   ├── package.json     # Node.js dependencies
+│   ├── tsconfig.json    # TypeScript configuration
+│   └── yarn.lock        # Yarn lock file
 
 ├── config/            # Django project configuration
 │   ├── settings.py    # Django settings
@@ -176,6 +187,62 @@ This is a **monolithic repository** containing the full Confío stack:
 │       └── Move.lock # Dependency lock file
 └── README.md
 ```
+
+## 🚀 Development Setup
+
+### Web Application (React + Django)
+
+1. **Install Dependencies**
+   ```bash
+   # Install Python dependencies
+   pip install -r requirements.txt
+
+   # Install Node.js dependencies
+   cd web
+   yarn install
+   ```
+
+2. **Build React App**
+   ```bash
+   cd web
+   yarn build
+   ```
+   This will:
+   - Build the React application
+   - Automatically copy the new `index.html` to Django's templates directory
+   - Generate static files with unique hashes for cache busting
+
+3. **Run Django Development Server**
+   ```bash
+   python manage.py runserver
+   ```
+   The server will:
+   - Serve the React app at the root URL
+   - Handle static files using Whitenoise
+   - Provide GraphQL API endpoints
+
+4. **Development Workflow**
+   - For React development: `yarn start` (runs on port 3000)
+   - For Django development: `python manage.py runserver` (runs on port 8000)
+   - After making React changes, run `yarn build` to update the Django-served version
+
+### Static File Handling
+
+The project uses a combination of Django and Whitenoise for static file serving:
+
+1. **Development**
+   - Django's development server serves static files
+   - React development server (port 3000) serves files directly
+
+2. **Production**
+   - Whitenoise serves static files efficiently
+   - Files are compressed and cached
+   - No separate web server needed for static files
+
+3. **Build Process**
+   - React build generates hashed filenames for cache busting
+   - `copy-index.js` script syncs the build with Django templates
+   - Static files are collected into Django's static directory
 
 ⚠️ **Important**: The following files and directories should be added to `.gitignore` for security:
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import styles from '../../styles/HeroSection.module.css';
-import confioLogo from '../../images/$CONFIO.png';
+import confioLogo from '../../images/CONFIO.png';
 import tiktokLogo from '../../images/TikTok.png';
 
 const HeroSection = () => {

@@ -1,0 +1,144 @@
+/* Legal Pages Styles */
+:root {
+  --primary-color: #72D9BC;  /* Verde Confío */
+  --white-color: #FFFFFF;    /* Blanco */
+  --accent-color: #8B5CF6;   /* Violeta Acento */
+  --dark-gray: #1F2937;      /* Gris Oscuro */
+  --light-gray: #F3F4F6;     /* Gris Claro */
+}
+
+body {
+    font-family: "Poppins", sans-serif;
+    line-height: 1.6;
+    color: var(--dark-gray);
+    margin: 0;
+    padding: 0;
+    background-color: var(--white-color);
+}
+
+.legal-container {
+    max-width: 800px;
+    margin: 40px auto;
+    padding: 40px;
+    background-color: var(--white-color);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    border-radius: 16px;
+}
+
+h1 {
+    color: var(--dark-gray);
+    font-size: 2.5em;
+    margin-bottom: 0.5em;
+    text-align: center;
+    font-weight: 600;
+}
+
+h2 {
+    color: var(--dark-gray);
+    font-size: 1.8em;
+    margin-top: 1.5em;
+    margin-bottom: 0.8em;
+    font-weight: 500;
+}
+
+.last-updated {
+    color: var(--accent-color);
+    font-style: italic;
+    text-align: center;
+    margin-bottom: 2em;
+    font-size: 0.9em;
+}
+
+section {
+    margin-bottom: 2.5em;
+    padding: 1.5em;
+    background-color: var(--light-gray);
+    border-radius: 12px;
+    transition: transform 0.3s ease;
+}
+
+section:hover {
+    transform: translateY(-2px);
+}
+
+p {
+    margin-bottom: 1em;
+    color: var(--dark-gray);
+    font-size: 1.1em;
+}
+
+ul, ol {
+    margin-bottom: 1.5em;
+    padding-left: 2em;
+}
+
+li {
+    margin-bottom: 0.8em;
+    color: var(--dark-gray);
+}
+
+strong {
+    color: var(--accent-color);
+    font-weight: 600;
+}
+
+.back-link {
+    margin-top: 3em;
+    text-align: center;
+}
+
+.back-link a {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 500;
+    padding: 12px 24px;
+    border: 2px solid var(--primary-color);
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    display: inline-block;
+}
+
+.back-link a:hover {
+    background-color: var(--primary-color);
+    color: var(--white-color);
+    transform: translateY(-2px);
+}
+
+/* Responsive Design */
+@media (max-width: 900px) {
+    .legal-container {
+        margin: 20px;
+        padding: 20px;
+    }
+
+    h1 {
+        font-size: 2em;
+    }
+
+    h2 {
+        font-size: 1.5em;
+    }
+
+    section {
+        padding: 1em;
+    }
+}
+
+@media (max-width: 480px) {
+    .legal-container {
+        margin: 10px;
+        padding: 15px;
+    }
+
+    h1 {
+        font-size: 1.8em;
+    }
+
+    h2 {
+        font-size: 1.3em;
+    }
+
+    p {
+        font-size: 1em;
+    }
+} 

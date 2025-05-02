@@ -1,9 +1,14 @@
-.PHONY: runserver migrate makemigrations shell test clean db-setup db-migrate db-reset
+.PHONY: runserver migrate makemigrations shell test clean db-setup db-migrate db-reset collectstatic
 
 # Virtual environment path
 VENV_PATH = ./myvenv
 PYTHON = $(VENV_PATH)/bin/python
 PIP = $(VENV_PATH)/bin/pip
+
+# Collect static files
+collectstatic:
+	$(PYTHON) manage.py collectstatic --noinput
+	@echo "Static files collected successfully!"
 
 # Run development server
 runserver:
