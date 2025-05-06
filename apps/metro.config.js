@@ -13,9 +13,17 @@ const defaultConfig = getDefaultConfig(__dirname);
 
 const {
   resolver: { sourceExts, assetExts },
-} = getDefaultConfig(__dirname);
+} = defaultConfig;
+
+const projectRoot = path.resolve(__dirname);
 
 const config = {
+  projectRoot,
+  watchFolders: [
+    path.resolve(__dirname, 'stubs'),
+    path.resolve(__dirname, '../node_modules'),
+    path.resolve(__dirname, '..'),
+  ],
   transformer: {
     getTransformOptions: async () => ({
       transform: {
@@ -28,6 +36,7 @@ const config = {
   resolver: {
     assetExts: assetExts.filter(ext => ext !== 'svg'),
     sourceExts: [...sourceExts, 'svg'],
+    unstable_enableSymlinks: true,
     resolveRequest: (context, moduleName, platform) => {
       if (moduleName === 'node:buffer' || moduleName === 'buffer') {
         return {
@@ -74,9 +83,6 @@ const config = {
       require.resolve("./polyfills.js"),
     ],
   },
-  watchFolders: [
-    path.resolve(__dirname, 'stubs'),
-  ],
 };
 
 module.exports = mergeConfig(defaultConfig, config);
