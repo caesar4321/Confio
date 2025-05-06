@@ -91,3 +91,14 @@ buck-out/
 
 # Move build artifacts
 /contracts/build/
+
+# Heap dumps
+*.hprof
+
+# Sensitive files
+# Note: .env files are now tracked and encrypted with git-crypt
+!**/.env
+!**/.env.*
+google-services.json
+GoogleService-Info.plist
+service-account.json

@@ -14,7 +14,8 @@ target 'Confio' do
   use_react_native!(
     :path => config[:reactNativePath],
     :hermes_enabled => true,
-    :fabric_enabled => true
+    :fabric_enabled => false,
+    :new_arch_enabled => false
   )
 
   # (You do NOT need to manually pod RNFBApp & RNFBAuth here;

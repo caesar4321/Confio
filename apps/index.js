@@ -5,6 +5,10 @@
 // MUST be the very first line of your app's entry point:
 require("./polyfills.js");
 
+// Enable screens before any other imports
+import { enableScreens } from 'react-native-screens';
+enableScreens();
+
 // Apollo Client setup and error messages
 import { ApolloClient, InMemoryCache, ApolloProvider } from '@apollo/client';
 import { loadErrorMessages, loadDevMessages } from "@apollo/client/dev";

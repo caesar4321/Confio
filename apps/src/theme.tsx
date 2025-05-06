@@ -21,7 +21,9 @@ const ThemeContext = createContext<Theme>(defaultTheme);
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
     <ThemeContext.Provider value={defaultTheme}>
-      {children}
+      <React.Fragment>
+        {children}
+      </React.Fragment>
     </ThemeContext.Provider>
   );
 };

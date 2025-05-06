@@ -2,21 +2,41 @@ import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, Easing } from 'react-native';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { appleAuth } from '@invertase/react-native-apple-authentication';
-import { AuthService } from '../../services/authService';
-import GoogleLogo from '../../assets/svg/GoogleLogo.svg';
-import AppleLogo from '../../assets/svg/AppleLogo.svg';
-import { Gradient } from '../common/Gradient';
+import { AuthService } from '../services/authService';
+import GoogleLogo from '../assets/svg/GoogleLogo.svg';
+import AppleLogo from '../assets/svg/AppleLogo.svg';
+import { Gradient } from '../components/common/Gradient';
 import Svg, { Defs, RadialGradient, Stop, Circle } from 'react-native-svg';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useAuth } from '../contexts/AuthContext';
 
 const { width: screenWidth } = Dimensions.get('window');
 
+type RootStackParamList = {
+  Auth: undefined;
+  Home: undefined;
+};
+
+type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Auth'>;
+
 export const AuthScreen = () => {
+  const navigation = useNavigation<NavigationProp>();
   const authService = AuthService.getInstance();
+  const { isAuthenticated, checkServerSession } = useAuth();
   const logoScale = useRef(new Animated.Value(0.7)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
   const glowOpacity = useRef(new Animated.Value(0.5)).current;
 
   useEffect(() => {
+    // If already authenticated, navigate to Home
+    console.log('AuthScreen useEffect - isAuthenticated:', isAuthenticated);
+    if (isAuthenticated) {
+      console.log('Navigating to Home screen...');
+      navigation.replace('Home');
+      return;
+    }
+
     // Initialize AuthService
     authService.initialize().catch(error => {
       console.error('Failed to initialize AuthService:', error);
@@ -55,14 +75,54 @@ export const AuthScreen = () => {
         }),
       ])
     ).start();
-  }, []);
+  }, [isAuthenticated]);
+
+  const handleSuccessfulLogin = async (userData: any) => {
+    try {
+      console.log('Handling successful login...');
+      console.log('Login successful:', userData);
+      
+      // Ensure zkLogin data is properly stored
+      const authService = AuthService.getInstance();
+      const storedZkLoginData = await authService.getStoredZkLoginData();
+      console.log('Stored zkLogin data:', !!storedZkLoginData);
+      
+      if (!storedZkLoginData) {
+        console.log('Waiting for zkLogin data to be stored...');
+        // Wait a bit and check again
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const retryZkLoginData = await authService.getStoredZkLoginData();
+        console.log('Retry stored zkLogin data:', !!retryZkLoginData);
+        
+        if (!retryZkLoginData) {
+          console.error('Failed to store zkLogin data');
+          return;
+        }
+      }
+      
+      // Now that we have zkLogin data, trigger auth state check
+      console.log('Triggering auth state re-check...');
+      await checkServerSession();
+      
+      // If still not authenticated, wait and try one more time
+      if (!isAuthenticated) {
+        console.log('Not authenticated yet, waiting and checking again...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        await checkServerSession();
+        console.log('Final auth check complete, isAuthenticated:', isAuthenticated);
+      }
+    } catch (error) {
+      console.error('Error handling successful login:', error);
+      // Handle error (show error message to user)
+    }
+  };
 
   const handleGoogleSignIn = async () => {
     try {
       console.log('Google Sign-In button pressed');
       const result = await authService.signInWithGoogle();
       console.log('Google Sign-In result:', result);
-      // Handle successful sign-in
+      await handleSuccessfulLogin(result);
     } catch (error) {
       console.error('Google Sign-In failed:', error);
       // Handle error
@@ -73,7 +133,7 @@ export const AuthScreen = () => {
     try {
       const response = await authService.signInWithApple();
       console.log('Apple Sign-In Success:', response);
-      // Handle successful sign-in (e.g., navigate to main app)
+      await handleSuccessfulLogin(response);
     } catch (error) {
       console.error('Apple Sign-In Error:', error);
     }
@@ -127,7 +187,7 @@ export const AuthScreen = () => {
             ]}
           >
             <Image
-              source={require('../../assets/png/CONFIO.png')}
+              source={require('../assets/png/CONFIO.png')}
               style={styles.confioLogo}
               resizeMode="contain"
             />

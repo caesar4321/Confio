@@ -14,6 +14,7 @@ react {
   codegenDir             = file("$jsRoot/node_modules/@react-native/codegen")
   cliFile                = file("$jsRoot/node_modules/react-native/cli.js")
   nodeExecutableAndArgs  = ["node"]
+  newArchEnabled         = false  // Disable New Architecture
 }
 
 // 4) any other scripts (fonts, etc)
@@ -57,7 +58,7 @@ println "Final properties: $envProperties"
 
 android {
     ndkVersion "27.1.12297006"
-    buildToolsVersion rootProject.ext.buildToolsVersion
+    buildToolsVersion "35.0.0"  // Update to match AGP requirement
     compileSdkVersion rootProject.ext.compileSdkVersion
 
     namespace "com.Confio.Confio"
@@ -76,7 +77,13 @@ android {
                          "-DCMAKE_CXX_EXTENSIONS=OFF",
                          "-DANDROID_STL=c++_shared",
                          "-DANDROID_PLATFORM=android-24",
-                         "-DANDROID_TOOLCHAIN=clang"
+                         "-DANDROID_TOOLCHAIN=clang",
+                         "-DREACT_NATIVE_MINOR_VERSION=79",
+                         "-DREACT_NATIVE_DIR=${rootProject.projectDir}/../node_modules/react-native",
+                         "-DJS_RUNTIME=hermes",
+                         "-DJS_RUNTIME_DIR=${rootProject.projectDir}/../node_modules/react-native/sdks/hermes",
+                         "-DIS_NEW_ARCHITECTURE_ENABLED=false",
+                         "-DHERMES_ENABLE_DEBUGGER=1"
             }
         }
     }
@@ -132,6 +139,8 @@ dependencies {
     implementation project(':react-native-keychain')
     implementation project(':react-native-svg')
     implementation project(':react-native-vector-icons')
+    implementation project(':react-native-screens')
+    implementation project(':react-native-safe-area-context')
 
     // Add Google Sign-In dependencies
     implementation 'com.google.android.gms:play-services-auth:20.7.0'
