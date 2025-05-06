@@ -265,6 +265,8 @@ class FinalizeZkLoginPayload(graphene.ObjectType):
     success = graphene.Boolean()
     zkProof = graphene.Field(ProofPointsType)
     suiAddress = graphene.String()
+    headerBase64 = graphene.String()
+    issBase64Details = graphene.String()
     error = graphene.String()
 
 class FinalizeZkLogin(graphene.Mutation):
@@ -378,7 +380,9 @@ def resolve_finalize_zk_login(self, info, input):
             return FinalizeZkLoginPayload(
                 success=True,
                 zkProof=ProofPointsType(**result['proof']),
-                suiAddress=result['suiAddress']
+                suiAddress=result['suiAddress'],
+                headerBase64=result.get('headerBase64', ''),
+                issBase64Details=result.get('issBase64Details', '')
             )
 
         except requests.exceptions.RequestException as e:

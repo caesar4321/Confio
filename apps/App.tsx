@@ -7,7 +7,7 @@
 
 import React, { useEffect } from 'react';
 import { SafeAreaView, StatusBar } from 'react-native';
-import { AuthScreen } from './src/components/auth/AuthScreen';
+import { AuthScreen } from './src/screens/AuthScreen';
 import auth from '@react-native-firebase/auth';
 
 function App(): React.JSX.Element {

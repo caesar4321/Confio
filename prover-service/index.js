@@ -118,7 +118,13 @@ app.post('/generate-proof', async (req, res) => {
     // Return the proof and Sui address
     res.json({
       proof,
-      suiAddress: "0x" + Buffer.from(ephemeralPublicKey).toString('hex')
+      suiAddress: "0x" + Buffer.from(ephemeralPublicKey).toString('hex'),
+      headerBase64: header,
+      issBase64Details: Buffer.from(JSON.stringify({
+        iss: payloadObj.iss,
+        aud: payloadObj.aud,
+        sub: payloadObj.sub
+      })).toString('base64')
     });
   } catch (error) {
     console.error('Error generating proof:', error);

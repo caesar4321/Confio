@@ -15,6 +15,11 @@ import { sha256 } from '@noble/hashes/sha256';
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes, bufferToHex } from '../utils/encoding';
 import { ApolloClient } from '@apollo/client';
 
+// Debug logging for environment variables
+console.log('Environment variables loaded:');
+console.log('GOOGLE_CLIENT_IDS:', GOOGLE_CLIENT_IDS);
+console.log('API_URL:', API_URL);
+
 interface StoredZkLogin {
   salt: string;           // init.salt (base64)
   subject: string;        // sub
@@ -24,6 +29,8 @@ interface StoredZkLogin {
   secretKey: string;     // base64-encoded 32-byte seed
   initRandomness: string; // randomness from initializeZkLogin
   initJwt: string;       // original JWT from sign-in
+  headerBase64: string;  // Base64-encoded header from finalization
+  issBase64Details: string; // Base64-encoded issuer details from finalization
 }
 
 const KEYCHAIN_SERVICE = 'com.confio.zklogin';
@@ -96,33 +103,52 @@ export class AuthService {
 
   async signInWithGoogle() {
     try {
+      console.log('Starting Google Sign-In process...');
+      
       // 1) Sign in with Google first
+      console.log('Checking Play Services...');
       await GoogleSignin.hasPlayServices();
+      console.log('Play Services check passed');
+      
+      console.log('Attempting Google Sign-In...');
       const userInfo = await GoogleSignin.signIn();
+      console.log('Google Sign-In response:', userInfo);
+      
       if (!userInfo) {
         throw new Error('No user info returned from Google Sign-In');
       }
 
       // 2) Get the ID token after successful sign-in
+      console.log('Getting Google ID token...');
       const { idToken } = await GoogleSignin.getTokens();
+      console.log('Got ID token:', idToken ? 'Token received' : 'No token');
+      
       if (!idToken) {
         throw new Error('No ID token received from Google Sign-In');
       }
 
       // 3) Sign in with Firebase using the Google credential
+      console.log('Creating Firebase credential...');
       const firebaseCred = auth.GoogleAuthProvider.credential(idToken);
+      console.log('Signing in with Firebase...');
       const { user } = await this.auth.signInWithCredential(firebaseCred);
+      console.log('Firebase sign-in response:', user ? 'User received' : 'No user');
+      
       if (!user) {
         throw new Error('No user returned from Firebase sign-in');
       }
 
+      console.log('Getting Firebase ID token...');
       const firebaseToken = await user.getIdToken();
+      console.log('Firebase token received');
 
       // 4) Initialize zkLogin
+      console.log('Initializing zkLogin...');
       const { data: { initializeZkLogin: init } } = await apolloClient.mutate({
         mutation: INITIALIZE_ZKLOGIN,
         variables: { firebaseToken, providerToken: idToken, provider: 'google' }
       });
+      console.log('zkLogin initialization response:', init ? 'Data received' : 'No data');
 
       if (!init) {
         throw new Error('No data received from zkLogin initialization');
@@ -168,19 +194,16 @@ export class AuthService {
       }
 
       // 7) Store sensitive data securely
+      console.log('Storing sensitive data...');
       await this.storeSensitiveData(fin, init.salt, sub, clientId, maxEpochNum, init.randomness, idToken);
-
-      // Update instance state
-      this.userSalt = init.salt;
-      this.zkProof = fin;
-      this.maxEpoch = maxEpochNum;
+      console.log('Sensitive data stored successfully');
 
       // Split display name into first and last name
       const [firstName, ...lastNameParts] = user.displayName?.split(' ') || [];
       const lastName = lastNameParts.join(' ');
 
       // 8) Return user info and zkLogin data
-      return {
+      const result = {
         userInfo: { 
           email: user.email, 
           firstName: firstName || '',
@@ -189,8 +212,15 @@ export class AuthService {
         },
         zkLoginData: { zkProof: fin.zkProof, suiAddress: fin.suiAddress }
       };
+      console.log('Sign-in process completed successfully:', result);
+      return result;
     } catch (error) {
       console.error('Error signing in with Google:', error);
+      if (error instanceof Error) {
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+      }
       throw error;
     }
   }
@@ -308,11 +338,6 @@ export class AuthService {
       // Store sensitive data securely
       await this.storeSensitiveData(finalizeData.finalizeZkLogin, serverSalt, appleSub, 'apple', Number(maxEpoch), serverRandomness, identityToken);
 
-      // Update instance state
-      this.userSalt = serverSalt;
-      this.zkProof = finalizeData.finalizeZkLogin;
-      this.maxEpoch = Number(maxEpoch);
-
       // Split display name into first and last name
       const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
       const lastName = lastNameParts.join(' ');
@@ -409,9 +434,26 @@ export class AuthService {
         service: KEYCHAIN_SERVICE,
       });
 
-      if (!credentials) return;
+      if (!credentials) {
+        console.log('No stored credentials found');
+        return;
+      }
 
       const data = JSON.parse(credentials.password) as StoredZkLogin;
+      const { headerBase64, issBase64Details } = data;
+      
+      console.log('Rehydrating zkLogin data:', {
+        hasSalt: !!data.salt,
+        hasSubject: !!data.subject,
+        hasClientId: !!data.clientId,
+        hasMaxEpoch: !!data.maxEpoch,
+        hasZkProof: !!data.zkProof,
+        hasSecretKey: !!data.secretKey,
+        hasInitRandomness: !!data.initRandomness,
+        hasInitJwt: !!data.initJwt,
+        hasHeaderBase64: !!headerBase64,
+        hasIssBase64Details: !!issBase64Details
+      });
       
       // Verify the secret key is exactly 32 bytes
       const secretKeyBytes = base64ToBytes(data.secretKey);
@@ -419,17 +461,72 @@ export class AuthService {
         throw new Error('Invalid secret key length');
       }
 
+      // Normalize b to object form on load
+      if (data.zkProof.zkProof?.b) {
+        data.zkProof.zkProof.b = data.zkProof.zkProof.b.map((point: any) => {
+          if (typeof point === 'object' && 'x' in point && 'y' in point) {
+            return { x: point.x, y: point.y };
+          }
+          if (Array.isArray(point) && point.length === 2) {
+            return { x: point[0], y: point[1] };
+          }
+          if (typeof point === 'string') {
+            const [x, y] = point.split(',');
+            return { x: x.trim(), y: y.trim() };
+          }
+          throw new Error(`Invalid stored point: ${JSON.stringify(point)}`);
+        });
+      }
+
+      // Reconstruct the full proof object with all required fields
+      const fullProof = {
+        zkProof: data.zkProof.zkProof,
+        subject: data.subject,
+        clientId: data.clientId,
+        suiAddress: data.zkProof.suiAddress,
+        headerBase64,
+        issBase64Details
+      };
+
       this.suiKeypair = Ed25519Keypair.fromSecretKey(secretKeyBytes);
       this.userSalt = data.salt;
-      this.zkProof = data.zkProof;
+      this.zkProof = fullProof;  // Store the reconstructed full proof
       this.maxEpoch = data.maxEpoch;
+
+      console.log('Successfully rehydrated zkLogin data:', {
+        hasKeypair: !!this.suiKeypair,
+        hasUserSalt: !!this.userSalt,
+        hasZkProof: !!this.zkProof,
+        hasMaxEpoch: !!this.maxEpoch,
+        proofFields: {
+          hasZkProof: !!this.zkProof.zkProof,
+          hasSubject: !!this.zkProof.subject,
+          hasClientId: !!this.zkProof.clientId,
+          hasHeaderBase64: !!this.zkProof.headerBase64,
+          hasIssBase64Details: !!this.zkProof.issBase64Details,
+          bStructure: this.zkProof.zkProof?.b?.map((p: any) => ({
+            type: typeof p,
+            isArray: Array.isArray(p),
+            length: p?.length,
+            values: p
+          }))
+        }
+      });
     } catch (error) {
       console.error('Error rehydrating zkLogin data:', error);
       throw error;
     }
   }
 
-  private async storeSensitiveData(proof: any, salt: string, subject: string, clientId: string, maxEpoch: number, initRandomness: string, initJwt: string) {
+  private async storeSensitiveData(
+    proof: any,
+    salt: string,
+    subject: string,
+    clientId: string,
+    maxEpoch: number,
+    initRandomness: string,
+    initJwt: string
+  ) {
     if (!this.suiKeypair) {
       throw new Error('Sui keypair not initialized');
     }
@@ -461,16 +558,66 @@ export class AuthService {
 
     const secretKeyB64 = bytesToBase64(secretKeyBytes);
     
-    const toSave: StoredZkLogin = { 
-      salt, 
-      subject, 
-      clientId, 
-      maxEpoch, 
-      zkProof: proof,
+    // Ensure the proof object has the required structure
+    const serializedProof = {
+      zkProof: {
+        ...proof.zkProof,
+        b: proof.zkProof.b.map((pt: any) =>
+          pt && typeof pt === 'object' && 'x' in pt && 'y' in pt
+            ? { x: pt.x, y: pt.y }
+            : Array.isArray(pt) && pt.length === 2
+            ? { x: pt[0], y: pt[1] }
+            : typeof pt === 'string'
+            ? (() => {
+                const [x, y] = pt.split(',');
+                return { x: x.trim(), y: y.trim() };
+              })()
+            : (() => { throw new Error(`Invalid point on store: ${JSON.stringify(pt)}`); })()
+        )
+      },
+      subject,
+      clientId,
+      suiAddress: proof.suiAddress,
+      headerBase64: proof.headerBase64,
+      issBase64Details: proof.issBase64Details
+    };
+
+    const toSave: StoredZkLogin = {
+      salt,
+      subject,
+      clientId,
+      maxEpoch,
+      zkProof: serializedProof,
       secretKey: secretKeyB64,
       initRandomness,
-      initJwt
+      initJwt,
+      headerBase64: proof.headerBase64,
+      issBase64Details: proof.issBase64Details
     };
+    
+    console.log('Storing zkLogin data with fields:', {
+      hasSalt: !!salt,
+      hasSubject: !!subject,
+      hasClientId: !!clientId,
+      hasMaxEpoch: !!maxEpoch,
+      hasZkProof: !!proof.zkProof,
+      hasSecretKey: !!secretKeyB64,
+      hasInitRandomness: !!initRandomness,
+      hasInitJwt: !!initJwt,
+      hasHeaderBase64: !!proof.headerBase64,
+      hasIssBase64Details: !!proof.issBase64Details,
+      proofFields: {
+        hasZkProof: !!proof.zkProof,
+        hasSubject: !!subject,
+        hasClientId: !!clientId,
+        bStructure: proof.zkProof?.b?.map((p: any) => ({
+          type: typeof p,
+          isArray: Array.isArray(p),
+          length: p?.length,
+          values: p
+        }))
+      }
+    });
     
     await Keychain.setGenericPassword(
       KEYCHAIN_USERNAME,
@@ -481,7 +628,8 @@ export class AuthService {
       }
     );
 
-    this.zkProof = proof;
+    // Store the serialized proof with subject and clientId
+    this.zkProof = serializedProof;
     this.userSalt = salt;
     this.maxEpoch = maxEpoch;
   }
@@ -512,8 +660,40 @@ export class AuthService {
       await this.initialize();
     }
 
+    // Validate all required data is present
     if (!this.suiKeypair || !this.zkProof || !this.userSalt || !this.maxEpoch) {
+      console.error('Missing required zkLogin data:', {
+        hasKeypair: !!this.suiKeypair,
+        hasZkProof: !!this.zkProof,
+        hasUserSalt: !!this.userSalt,
+        hasMaxEpoch: !!this.maxEpoch
+      });
       throw new Error('No zkLogin data stored');
+    }
+
+    // Log the full zkProof structure
+    console.log('Full zkProof structure:', {
+      zkProof: this.zkProof,
+      hasInnerZkProof: !!this.zkProof.zkProof,
+      innerZkProofType: typeof this.zkProof.zkProof,
+      innerZkProofKeys: this.zkProof.zkProof ? Object.keys(this.zkProof.zkProof) : [],
+      innerZkProofValue: this.zkProof.zkProof,
+      hasHeaderBase64: !!this.zkProof.headerBase64,
+      hasIssBase64Details: !!this.zkProof.issBase64Details
+    });
+
+    // Validate zkProof has all required fields
+    if (!this.zkProof.zkProof || !this.zkProof.subject || !this.zkProof.clientId || 
+        !this.zkProof.headerBase64 || !this.zkProof.issBase64Details) {
+      console.error('Invalid zkProof data:', {
+        hasZkProof: !!this.zkProof.zkProof,
+        hasSubject: !!this.zkProof.subject,
+        hasClientId: !!this.zkProof.clientId,
+        hasHeaderBase64: !!this.zkProof.headerBase64,
+        hasIssBase64Details: !!this.zkProof.issBase64Details,
+        zkProof: this.zkProof
+      });
+      throw new Error('Invalid zkProof loaded - missing required fields');
     }
 
     // Check if we need to refresh the proof due to epoch expiration
@@ -531,30 +711,40 @@ export class AuthService {
       // Continue with existing proof if we can't check epoch
     }
 
-    // 1) turn base64 salt → BigInt
     const saltBytes = base64ToBytes(this.userSalt);
     const saltBigInt = BigInt('0x' + bufferToHex(saltBytes));
-
-    // 2) compute the same address-seed used to build the proof
-    const addressSeed = genAddressSeed(
-      saltBigInt,
-      'sub',        // keyClaimName
-      this.zkProof.subject,
-      this.zkProof.clientId
-    ).toString();
-
-    // 3) sign an empty message with the stored ephemeral key
+    const addressSeed = genAddressSeed(saltBigInt, 'sub', this.zkProof.subject, this.zkProof.clientId).toString();
     const userSignature = await this.suiKeypair.sign(new Uint8Array());
+    const proofData = this.zkProof.zkProof;
 
-    // 4) get the final address using the lib's helper
-    return getZkLoginSignature({
-      inputs: {
-        ...this.zkProof,
-        addressSeed
-      },
-      maxEpoch: this.maxEpoch,
-      userSignature
-    });
+    // Helper to structure proof points as [string, string][]
+    const structureProofPoints = (points: { a: string[]; b: any[]; c: string[] }) => {
+      const bPoints: [string, string][] = points.b.map(point => {
+        if (Array.isArray(point)) {
+          if (point.length !== 2) throw new Error(`Invalid array point: ${point}`);
+          return [String(point[0]), String(point[1])] as [string, string];
+        } else if (typeof point === 'string') {
+          const [x, y] = point.split(',').map(s => s.trim());
+          if (!x || !y) throw new Error(`Invalid string point: ${point}`);
+          return [x, y] as [string, string];
+        } else if (point && typeof point === 'object') {
+          if (!('x' in point) || !('y' in point))
+            throw new Error(`Invalid object point: ${JSON.stringify(point)}`);
+          return [String(point.x), String(point.y)] as [string, string];
+        }
+        throw new Error(`Invalid point format: ${JSON.stringify(point)}`);
+      });
+      return { a: points.a, b: bPoints, c: points.c };
+    };
+
+    const inputs = {
+      proofPoints: structureProofPoints({ a: proofData.a, b: proofData.b, c: proofData.c }),
+      issBase64Details: this.zkProof.issBase64Details,
+      headerBase64: this.zkProof.headerBase64,
+      addressSeed
+    };
+
+    return getZkLoginSignature({ inputs, maxEpoch: this.maxEpoch, userSignature });
   }
 
   // Sign out
@@ -666,5 +856,42 @@ export class AuthService {
       console.error('Error refreshing zkLogin proof:', error);
       throw error;
     }
+  }
+
+  async getOrCreateSuiAddress(userData: any): Promise<string> {
+    try {
+      // First, check if user already has a Sui address
+      const existingAddress = await this.getUserSuiAddress(userData.uid);
+      if (existingAddress) {
+        return existingAddress;
+      }
+
+      // If no address exists, generate a new one
+      const newAddress = await this.generateSuiAddress(userData);
+      
+      // Store the new address
+      await this.storeUserSuiAddress(userData.uid, newAddress);
+      
+      return newAddress;
+    } catch (error) {
+      console.error('Error in getOrCreateSuiAddress:', error);
+      throw error;
+    }
+  }
+
+  private async getUserSuiAddress(userId: string): Promise<string | null> {
+    // TODO: Implement fetching from your backend
+    return null;
+  }
+
+  private async generateSuiAddress(userData: any): Promise<string> {
+    // TODO: Implement Sui address generation
+    // This should use the Sui SDK to generate a new address
+    return '0x' + Math.random().toString(16).substring(2, 42); // Placeholder
+  }
+
+  private async storeUserSuiAddress(userId: string, address: string): Promise<void> {
+    // TODO: Implement storing in your backend
+    console.log(`Storing Sui address ${address} for user ${userId}`);
   }
 } 
