@@ -166,18 +166,20 @@ export class AuthService {
         throw new Error('Invalid maxEpoch value received from server');
       }
 
-      // 5) Derive ephemeral keypair (only once!)
-      const { sub } = jwtDecode<{ sub: string }>(idToken);
-      if (!sub) {
-        throw new Error('Invalid JWT: missing sub claim');
+      // 5) Decode JWT and generate salt
+      const decodedJwt = jwtDecode<{ sub: string, iss: string }>(idToken);
+      if (!decodedJwt.sub || !decodedJwt.iss) {
+        throw new Error('Invalid JWT: missing sub or iss claim');
       }
 
-      // Use the same client ID for all platforms to ensure consistent Sui addresses
-      const clientId = GOOGLE_CLIENT_IDS.production.web;
+      // Generate salt on client side
+      const salt = this.generateZkLoginSalt(decodedJwt.iss, decodedJwt.sub, GOOGLE_CLIENT_IDS.production.web);
+      console.log('Generated client-side salt:', salt);
 
-      this.suiKeypair = this.deriveEphemeralKeypair(init.salt, sub, clientId);
+      // 6) Derive ephemeral keypair
+      this.suiKeypair = this.deriveEphemeralKeypair(salt, decodedJwt.sub, GOOGLE_CLIENT_IDS.production.web);
 
-      // 6) Finalize zkLogin
+      // 7) Finalize zkLogin
       const extendedPub = this.suiKeypair.getPublicKey().toBase64();
       const userSig = bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0)));
       const { data: { finalizeZkLogin: fin } } = await apolloClient.mutate({
@@ -187,11 +189,12 @@ export class AuthService {
             jwt: idToken,
             maxEpoch: init.maxEpoch,
             randomness: init.randomness,
-            salt: init.salt,
+            salt: salt,
             extendedEphemeralPublicKey: extendedPub,
             userSignature: userSig,
             keyClaimName: 'sub',
-            audience: clientId
+            audience: GOOGLE_CLIENT_IDS.production.web,
+            firebaseToken: firebaseToken
           }
         }
       });
@@ -200,16 +203,16 @@ export class AuthService {
         throw new Error('No data received from zkLogin finalization');
       }
 
-      // 7) Store sensitive data securely
+      // 8) Store sensitive data securely
       console.log('Storing sensitive data...');
-      await this.storeSensitiveData(fin, init.salt, sub, clientId, maxEpochNum, init.randomness, idToken);
+      await this.storeSensitiveData(fin, salt, decodedJwt.sub, GOOGLE_CLIENT_IDS.production.web, maxEpochNum, init.randomness, idToken);
       console.log('Sensitive data stored successfully');
 
       // Split display name into first and last name
       const [firstName, ...lastNameParts] = user.displayName?.split(' ') || [];
       const lastName = lastNameParts.join(' ');
 
-      // 8) Return user info and zkLogin data
+      // 9) Return user info and zkLogin data
       const result = {
         userInfo: { 
           email: user.email, 
@@ -267,6 +270,9 @@ export class AuthService {
     }
 
     try {
+      if (!apolloClient) {
+        throw new Error('Apollo client not initialized');
+      }
       const { appleAuth } = await import('@invertase/react-native-apple-authentication');
       
       const appleAuthRequestResponse = await appleAuth.performRequest({
@@ -282,9 +288,9 @@ export class AuthService {
 
       // Create Firebase credential with Apple token
       const { identityToken, nonce: appleAuthNonce } = appleAuthRequestResponse;
-      const decodedAppleJwt = jwtDecode<{ sub: string }>(identityToken);
-      if (!decodedAppleJwt.sub) {
-        throw new Error('Invalid Apple JWT: missing sub claim');
+      const decodedAppleJwt = jwtDecode<{ sub: string, iss: string }>(identityToken);
+      if (!decodedAppleJwt.sub || !decodedAppleJwt.iss) {
+        throw new Error('Invalid Apple JWT: missing sub or iss claim');
       }
       const appleSub = decodedAppleJwt.sub;
       const appleCredential = auth.AppleAuthProvider.credential(identityToken, appleAuthNonce);
@@ -313,10 +319,14 @@ export class AuthService {
         throw new Error('No data received from zkLogin initialization');
       }
 
-      const { maxEpoch, randomness: serverRandomness, salt: serverSalt } = initData.initializeZkLogin;
+      const { maxEpoch, randomness: serverRandomness } = initData.initializeZkLogin;
+      
+      // Generate salt on client side
+      const salt = this.generateZkLoginSalt(decodedAppleJwt.iss, appleSub, 'apple');
+      console.log('Generated client-side salt:', salt);
 
       // Derive the single, deterministic ephemeral keypair
-      this.suiKeypair = this.deriveEphemeralKeypair(serverSalt, appleSub, 'apple');
+      this.suiKeypair = this.deriveEphemeralKeypair(salt, appleSub, 'apple');
 
       // Get the extended ephemeral public key (now deterministic)
       const extendedEphemeralPublicKey = this.suiKeypair.getPublicKey().toBase64();
@@ -330,10 +340,11 @@ export class AuthService {
             jwt: identityToken,
             maxEpoch: maxEpoch.toString(),
             randomness: serverRandomness,
-            salt: serverSalt,
+            salt: salt,
             userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0))),
             keyClaimName: 'sub',
-            audience: 'apple'
+            audience: 'apple',
+            firebaseToken: firebaseToken
           }
         }
       });
@@ -343,7 +354,15 @@ export class AuthService {
       }
 
       // Store sensitive data securely
-      await this.storeSensitiveData(finalizeData.finalizeZkLogin, serverSalt, appleSub, 'apple', Number(maxEpoch), serverRandomness, identityToken);
+      await this.storeSensitiveData(
+        finalizeData.finalizeZkLogin,
+        salt,
+        appleSub,
+        'apple',
+        Number(maxEpoch),
+        serverRandomness,
+        identityToken
+      );
 
       // Split display name into first and last name
       const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
@@ -757,17 +776,7 @@ export class AuthService {
   private deriveEphemeralKeypair(saltB64: string, sub: string, clientId: string): Ed25519Keypair {
     try {
       const saltBytes = base64ToBytes(saltB64);
-      const subBytes = stringToUtf8Bytes(sub);
-      const clientIdBytes = stringToUtf8Bytes(clientId);
-
-      const seedInput = new Uint8Array([
-        ...saltBytes,
-        ...subBytes,
-        ...clientIdBytes
-      ]);
-
-      const fullHash = sha256(seedInput);
-      const seed = fullHash.slice(0, 32);
+      const seed = saltBytes.slice(0, 32);
       
       console.log('Derived seed length:', seed.length);
       console.log('Derived seed bytes:', Array.from(seed));
@@ -796,6 +805,13 @@ export class AuthService {
 
       const stored = JSON.parse(credentials.password) as StoredZkLogin;
 
+      // Get a fresh Firebase token
+      const currentUser = this.auth.currentUser;
+      if (!currentUser) {
+        throw new Error("No Firebase user found");
+      }
+      const firebaseToken = await currentUser.getIdToken();
+
       // Get a fresh proof from the server
       const { data } = await apolloClient.mutate({
         mutation: FINALIZE_ZKLOGIN,
@@ -808,7 +824,8 @@ export class AuthService {
             extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
             userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0))),
             keyClaimName: 'sub',
-            audience: this.zkProof.clientId
+            audience: this.zkProof.clientId,
+            firebaseToken: firebaseToken
           }
         }
       });
@@ -876,5 +893,15 @@ export class AuthService {
       throw new Error('Apollo client not initialized');
     }
     await this.fetchNewProof(this.apolloClient);
+  }
+
+  private generateZkLoginSalt(iss: string, sub: string, clientId: string): string {
+    const saltInput = new Uint8Array([
+      ...stringToUtf8Bytes(iss),
+      ...stringToUtf8Bytes(sub),
+      ...stringToUtf8Bytes(clientId)
+    ]);
+    const saltHash = sha256(saltInput);
+    return bytesToBase64(saltHash);
   }
 } 

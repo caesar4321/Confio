@@ -12,6 +12,7 @@ enableScreens();
 // Apollo Client setup and error messages
 import { ApolloClient, InMemoryCache, ApolloProvider } from '@apollo/client';
 import { loadErrorMessages, loadDevMessages } from "@apollo/client/dev";
+import { getApiUrl } from './src/config/env';
 
 if (__DEV__) {
   // Adds messages only in a dev environment
@@ -21,8 +22,21 @@ if (__DEV__) {
 
 // Create Apollo Client instance
 const client = new ApolloClient({
-  uri: 'YOUR_GRAPHQL_ENDPOINT', // Replace with your GraphQL endpoint
+  uri: getApiUrl(),
   cache: new InMemoryCache(),
+  defaultOptions: {
+    watchQuery: {
+      fetchPolicy: 'network-only',
+      errorPolicy: 'all',
+    },
+    query: {
+      fetchPolicy: 'network-only',
+      errorPolicy: 'all',
+    },
+    mutate: {
+      errorPolicy: 'all',
+    },
+  },
 });
 
 // Now you can import the rest of your app

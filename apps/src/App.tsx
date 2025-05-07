@@ -54,13 +54,28 @@ export default function App() {
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
   useEffect(() => {
-    if (apolloClient) {
-      setClient(apolloClient);
-    }
+    const initializeApollo = async () => {
+      try {
+        if (apolloClient) {
+          setClient(apolloClient);
+          console.log('Apollo client initialized successfully');
+        } else {
+          console.error('Apollo client is null');
+        }
+      } catch (error) {
+        console.error('Failed to initialize Apollo client:', error);
+      }
+    };
+
+    initializeApollo();
   }, []);
 
   if (!client) {
-    return null; // Or a loading screen
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#0000ff" />
+      </View>
+    );
   }
 
   return (

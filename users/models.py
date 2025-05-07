@@ -34,20 +34,6 @@ class UserProfile(models.Model):
     # —————————————————————————————
     # persistent per‑user state
     # —————————————————————————————
-    user_salt = models.BinaryField(
-        help_text="Persistent salt used to derive the same Sui address",
-        editable=False,
-    )
-    google_sub = models.CharField(
-        max_length=255,
-        blank=True, null=True,
-        help_text="'sub' claim from Google ID token"
-    )
-    apple_sub = models.CharField(
-        max_length=255,
-        blank=True, null=True,
-        help_text="'sub' claim from Apple ID token"
-    )
     sui_address = models.CharField(
         max_length=66,
         blank=True, null=True,

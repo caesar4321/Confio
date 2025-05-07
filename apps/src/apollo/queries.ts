@@ -20,7 +20,6 @@ export const INITIALIZE_ZKLOGIN = gql`
     initializeZkLogin(firebaseToken: $firebaseToken, providerToken: $providerToken, provider: $provider) {
       maxEpoch
       randomness
-      salt
     }
   }
 `;
