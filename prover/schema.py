@@ -464,6 +464,7 @@ class Query(graphene.ObjectType):
     zk_login_proof = graphene.Field(ZkLoginProofType, id=graphene.ID())
     zk_login_proofs = graphene.List(ZkLoginProofType)
     ping = graphene.String()
+    currentEpoch = graphene.Int()
 
     def resolve_zk_login_proof(self, info, id):
         return ZkLoginProof.objects.get(id=id)
@@ -473,5 +474,12 @@ class Query(graphene.ObjectType):
 
     def resolve_ping(self, info):
         return "pong"
+        
+    def resolve_currentEpoch(self, info):
+        try:
+            return get_current_epoch()
+        except Exception as e:
+            logger.error(f"Error getting current epoch: {str(e)}")
+            raise Exception("Failed to get current epoch")
 
 schema = graphene.Schema(query=Query, mutation=Mutation) 
