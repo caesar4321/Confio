@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, RefObject } from 'react';
 import { AuthService } from '../services/authService';
 import { apolloClient } from '../apollo/client';
 import { gql } from '@apollo/client';
+import { NavigationContainerRef } from '@react-navigation/native';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -21,11 +22,17 @@ const CHECK_SESSION = gql`
   }
 `;
 
+type RootStackParamList = {
+  Auth: undefined;
+  Home: undefined;
+};
+
 interface AuthProviderProps {
   children: React.ReactNode;
+  navigationRef: RefObject<NavigationContainerRef<RootStackParamList>>;
 }
 
-export const AuthProvider = ({ children }: AuthProviderProps) => {
+export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -33,27 +40,35 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     checkAuthState();
   }, []);
 
+  // Effect to handle navigation based on auth state
+  useEffect(() => {
+    if (!isLoading && navigationRef.current) {
+      if (isAuthenticated) {
+        navigationRef.current.reset({
+          index: 0,
+          routes: [{ name: 'Home' }],
+        });
+      } else {
+        navigationRef.current.reset({
+          index: 0,
+          routes: [{ name: 'Auth' }],
+        });
+      }
+    }
+  }, [isAuthenticated, isLoading]);
+
   const checkAuthState = async () => {
     try {
       console.log('Checking auth state...');
       const authService = AuthService.getInstance();
-      // Check if we have valid zkLogin data
       const zkLoginData = await authService.getStoredZkLoginData();
       console.log('Has zkLogin data:', !!zkLoginData);
       
       if (zkLoginData) {
-        // Verify the zkLogin data has all required fields
         const hasRequiredFields = zkLoginData.zkProof && 
                                 zkLoginData.salt && 
                                 zkLoginData.subject && 
                                 zkLoginData.clientId;
-        console.log('zkLogin data has required fields:', hasRequiredFields);
-        console.log('Required fields status:', {
-          hasProof: !!zkLoginData.zkProof,
-          hasSalt: !!zkLoginData.salt,
-          hasSubject: !!zkLoginData.subject,
-          hasClientId: !!zkLoginData.clientId
-        });
         
         if (hasRequiredFields) {
           console.log('Valid zkLogin data found, setting isAuthenticated to true');
@@ -89,12 +104,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const signOut = async () => {
     try {
+      console.log('Starting sign out process...');
       const authService = AuthService.getInstance();
       await authService.signOut();
       setIsAuthenticated(false);
     } catch (error) {
       console.error('Error signing out:', error);
-      // Even if there's an error, we want to set isAuthenticated to false
       setIsAuthenticated(false);
     }
   };
@@ -105,6 +120,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       const checkInterval = setInterval(async () => {
         const isValid = await checkServerSession();
         if (!isValid) {
+          setIsAuthenticated(false);
           clearInterval(checkInterval);
         }
       }, 60000); // Check every minute

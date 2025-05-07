@@ -26,15 +26,22 @@ export const HomeScreen = () => {
         const isSessionValid = await checkServerSession();
         if (!isSessionValid) {
           console.log('Session invalid, returning to auth screen');
-          return; // AuthContext will handle navigation
+          return;
         }
 
         // Get stored zkLogin data first
         const authService = AuthService.getInstance();
-        const zkLoginData = await authService.getStoredZkLoginData();
+        let zkLoginData = await authService.getStoredZkLoginData();
         
+        // If no data found, wait and retry once
         if (!zkLoginData) {
-          console.log('No zkLogin data found, returning to auth screen');
+          console.log('No zkLogin data found, waiting and retrying...');
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          zkLoginData = await authService.getStoredZkLoginData();
+        }
+
+        if (!zkLoginData) {
+          console.log('Still no zkLogin data found after retry, returning to auth screen');
           return;
         }
 
@@ -49,11 +56,28 @@ export const HomeScreen = () => {
           return;
         }
 
+        // Ensure the proof structure is valid
+        if (!zkLoginData.zkProof.zkProof) {
+          console.log('Invalid proof structure:', {
+            hasZkProof: !!zkLoginData.zkProof.zkProof,
+            hasSubject: !!zkLoginData.subject,
+            hasClientId: !!zkLoginData.clientId
+          });
+          return;
+        }
+
         // Then load Sui address
         console.log('Loading Sui address...');
         const address = await authService.getZkLoginAddress();
         console.log('Sui address loaded:', address);
         setSuiAddress(address);
+
+        console.log('zkLogin data:', {
+          hasZkProof: !!zkLoginData.zkProof,
+          hasSubject: !!zkLoginData.subject,
+          hasClientId: !!zkLoginData.clientId,
+          zkProof: zkLoginData.zkProof
+        });
       } catch (error) {
         console.error('Error loading data:', error);
         // If there's an error, check session again
@@ -69,20 +93,8 @@ export const HomeScreen = () => {
   const handleSignOut = async () => {
     try {
       console.log('Starting sign out process...');
-      const authService = AuthService.getInstance();
-      
-      // Sign out from all services
-      await authService.signOut();
-      
-      // Clear any local state
-      setSuiAddress(null);
-      
-      // Navigate back to auth screen
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Auth' }],
-      });
-      
+      await signOut();
+      setSuiAddress('');
       console.log('Sign out completed successfully');
     } catch (error) {
       console.error('Error during sign out:', error);
@@ -119,7 +131,9 @@ export const HomeScreen = () => {
         {suiAddress && (
           <View style={styles.addressContainer}>
             <Text style={styles.addressLabel}>Your Sui Address:</Text>
-            <Text style={styles.address}>{suiAddress}</Text>
+            <Text style={styles.address}>
+              {suiAddress.slice(0, 6)}...{suiAddress.slice(-4)}
+            </Text>
           </View>
         )}
         <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>

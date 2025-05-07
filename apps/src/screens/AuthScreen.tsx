@@ -29,14 +29,6 @@ export const AuthScreen = () => {
   const glowOpacity = useRef(new Animated.Value(0.5)).current;
 
   useEffect(() => {
-    // If already authenticated, navigate to Home
-    console.log('AuthScreen useEffect - isAuthenticated:', isAuthenticated);
-    if (isAuthenticated) {
-      console.log('Navigating to Home screen...');
-      navigation.replace('Home');
-      return;
-    }
-
     // Initialize AuthService
     authService.initialize().catch(error => {
       console.error('Failed to initialize AuthService:', error);
@@ -75,7 +67,7 @@ export const AuthScreen = () => {
         }),
       ])
     ).start();
-  }, [isAuthenticated]);
+  }, []);
 
   const handleSuccessfulLogin = async (userData: any) => {
     try {
