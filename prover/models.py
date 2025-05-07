@@ -13,10 +13,7 @@ class UserProfile(models.Model):
         on_delete=models.CASCADE,
         related_name='zk_profile'
     )
-    google_sub = models.CharField(max_length=255, null=True, blank=True)
-    apple_sub = models.CharField(max_length=255, null=True, blank=True)
     sui_address = models.CharField(max_length=255, null=True, blank=True)
-    user_salt = models.BinaryField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

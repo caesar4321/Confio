@@ -142,7 +142,6 @@ class InitializeZkLogin(graphene.Mutation):
     error = graphene.String()
     maxEpoch = graphene.String()
     randomness = graphene.String()
-    salt = graphene.String()
 
     @staticmethod
     def mutate(root, info, firebaseToken, providerToken, provider):
@@ -184,10 +183,10 @@ class InitializeZkLogin(graphene.Mutation):
             # Get or create user profile
             user_profile, created = UserProfile.objects.get_or_create(
                 user=user,
-                defaults={'google_sub': None, 'apple_sub': None}
+                defaults={}
             )
 
-            # Verify provider token and store sub
+            # Verify provider token
             try:
                 if provider == 'google':
                     response = requests.get(
@@ -195,29 +194,18 @@ class InitializeZkLogin(graphene.Mutation):
                     )
                     response.raise_for_status()
                     token_data = response.json()
-                    user_profile.google_sub = token_data['sub']
                 elif provider == 'apple':
                     parts = providerToken.split('.')
                     if len(parts) != 3:
                         raise ValueError("Invalid JWT format")
                     payload = json.loads(base64.b64decode(parts[1] + '=' * (-len(parts[1]) % 4)).decode('utf-8'))
-                    user_profile.apple_sub = payload['sub']
                 else:
                     return InitializeZkLogin(success=False, error="Invalid provider")
                 
-                user_profile.save()
-                logger.info(f"Provider token verified and sub stored: {user_profile.google_sub or user_profile.apple_sub}")
+                logger.info(f"Provider token verified")
             except Exception as e:
                 logger.error(f"Provider token verification failed: {str(e)}")
                 return InitializeZkLogin(success=False, error="Invalid provider token")
-
-            # Get or generate user salt
-            if not user_profile.user_salt:
-                user_profile.user_salt = secrets.token_bytes(32)
-                user_profile.save()
-                logger.info("Generated new user salt")
-            else:
-                logger.info("Retrieved existing user salt")
 
             # Get current epoch from Sui
             try:
@@ -227,24 +215,15 @@ class InitializeZkLogin(graphene.Mutation):
                 logger.error(f"Failed to get current epoch: {str(e)}")
                 return InitializeZkLogin(success=False, error="Failed to get current epoch")
 
-            # Generate ephemeral keypair
-            ephemeral_keypair = generate_ephemeral_keypair()
-            ephemeral_public_key = base64.b64encode(ephemeral_keypair.public_key).decode('utf-8')
-            logger.info(f"Generated ephemeral public key: {ephemeral_public_key}")
-
             # Generate randomness
             randomness = secrets.token_bytes(32)
             randomness_b64 = base64.b64encode(randomness).decode('utf-8')
             logger.info(f"Generated randomness: {randomness_b64}")
 
-            # Convert salt to base64
-            salt_b64 = base64.b64encode(user_profile.user_salt).decode('utf-8')
-
             return InitializeZkLogin(
                 success=True,
                 maxEpoch=str(current_epoch + 2),  # Allow for 2 epochs of drift
-                randomness=randomness_b64,
-                salt=salt_b64
+                randomness=randomness_b64
             )
 
         except Exception as e:
@@ -259,6 +238,7 @@ class FinalizeZkLoginInput(graphene.InputObjectType):
     jwt = graphene.String(required=True)
     keyClaimName = graphene.String(required=True)
     audience = graphene.String(required=True)
+    firebaseToken = graphene.String(required=True)
     salt = graphene.String(required=True)
 
 class FinalizeZkLoginPayload(graphene.ObjectType):
@@ -281,44 +261,21 @@ def resolve_finalize_zk_login(self, info, input):
     try:
         logger.info("Starting finalize_zk_login with input: %s", input)
         
-        # Extract JWT payload to get sub claim
+        # Find user profile by Firebase UID
         try:
-            token_parts = input.jwt.split('.')
-            payload = json.loads(base64.b64decode(token_parts[1] + '==').decode('utf-8'))
-            sub = payload['sub']
-            logger.info("Extracted sub claim from JWT: %s", sub)
-        except Exception as e:
-            logger.error("Failed to decode JWT: %s", str(e))
-            return FinalizeZkLoginPayload(
-                success=False,
-                error="Invalid JWT format"
-            )
-
-        # Find user profile by sub claim
-        try:
-            # Check if the audience is a Google client ID
-            if 'googleusercontent.com' in input.audience:
-                profile = UserProfile.objects.get(google_sub=sub)
-                logger.info("Found user profile with Google sub: %s", sub)
-            elif input.audience == 'apple':
-                profile = UserProfile.objects.get(apple_sub=sub)
-                logger.info("Found user profile with Apple sub: %s", sub)
-            else:
-                logger.error("Invalid audience: %s", input.audience)
-                return FinalizeZkLoginPayload(
-                    success=False,
-                    error="Invalid audience"
-                )
+            # Get the Firebase UID from the Firebase token
+            decoded_token = auth.verify_id_token(input.firebaseToken)
+            firebase_uid = decoded_token.get('uid')
+            
+            # Find the user profile by the user's username (which is set to Firebase UID)
+            profile = UserProfile.objects.get(user__username=firebase_uid)
+            logger.info("Found user profile for Firebase UID: %s", firebase_uid)
         except UserProfile.DoesNotExist:
-            logger.error("User profile not found for sub: %s", sub)
+            logger.error("User profile not found for Firebase UID: %s", firebase_uid)
             return FinalizeZkLoginPayload(
                 success=False,
                 error="User profile not found"
             )
-
-        # Always use the stored user_salt from the profile
-        salt = base64.b64encode(profile.user_salt).decode('utf-8')
-        logger.info("Using stored user salt for profile: %s", profile.id)
 
         # Prepare prover payload
         prover_payload = {
@@ -329,7 +286,7 @@ def resolve_finalize_zk_login(self, info, input):
             "userSignature": input.userSignature,
             "keyClaimName": input.keyClaimName,
             "audience": input.audience,
-            "salt": salt  # Use the stored salt
+            "salt": input.salt
         }
         logger.info("Prepared prover payload: %s", json.dumps(prover_payload))
 
