@@ -500,6 +500,32 @@ export class AuthService {
         suiAddress: data.zkProof.suiAddress
       };
 
+      // Check if we need to refresh the proof
+      if (this.apolloClient) {
+        try {
+          // Get current epoch from Sui
+          const { data: epochData } = await this.apolloClient.query({
+            query: gql`
+              query GetCurrentEpoch {
+                currentEpoch
+              }
+            `
+          });
+
+          const currentEpoch = epochData.currentEpoch;
+          console.log('Current epoch:', currentEpoch, 'Max epoch:', this.maxEpoch);
+
+          // Refresh one epoch before expiration to prevent signature failures
+          if (currentEpoch >= this.maxEpoch - 1) {
+            console.log('zkLogin proof approaching expiration, refreshing proactively...');
+            await this.fetchNewProof(this.apolloClient);
+          }
+        } catch (error) {
+          console.error('Error checking epoch or refreshing proof:', error);
+          // Don't throw here, as we still have a valid proof for now
+        }
+      }
+
       console.log('Successfully rehydrated zkLogin data:', {
         hasKeypair: !!this.suiKeypair,
         hasUserSalt: !!this.userSalt,
