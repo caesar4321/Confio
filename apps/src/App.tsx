@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { enableScreens } from 'react-native-screens';
 import { ApolloProvider } from '@apollo/client';
 import { ApolloClient, NormalizedCacheObject } from '@apollo/client';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { apolloClient } from './apollo/client';
 import { StatusBar, View, ActivityIndicator } from 'react-native';
@@ -16,8 +16,15 @@ enableScreens();
 
 const Stack = createNativeStackNavigator();
 
+// Create a type for our navigation parameters
+type RootStackParamList = {
+  Auth: undefined;
+  Home: undefined;
+};
+
 const Navigation = () => {
   const { isAuthenticated, isLoading } = useAuth();
+  const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
   if (isLoading) {
     return (
@@ -44,6 +51,7 @@ const Navigation = () => {
 
 export default function App() {
   const [client, setClient] = useState<ApolloClient<NormalizedCacheObject> | null>(null);
+  const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
   useEffect(() => {
     if (apolloClient) {
@@ -58,8 +66,9 @@ export default function App() {
   return (
     <ApolloProvider client={client}>
       <ThemeProvider>
-        <AuthProvider>
+        <AuthProvider navigationRef={navigationRef}>
           <NavigationContainer
+            ref={navigationRef}
             theme={{
               dark: false,
               colors: {

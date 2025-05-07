@@ -33,8 +33,6 @@ export const FINALIZE_ZKLOGIN = gql`
         b
         c
       }
-      headerBase64
-      issBase64Details
       suiAddress
     }
   }

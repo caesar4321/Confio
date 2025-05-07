@@ -25,12 +25,15 @@ interface StoredZkLogin {
   subject: string;        // sub
   clientId: string;       // oauth clientId
   maxEpoch: number;       // Number(init.maxEpoch)
-  zkProof: any;          // the full proof object (points a/b/c etc)
+  zkProof: {
+    zkProof: any;        // the full proof object (points a/b/c etc)
+    subject: string;     // sub
+    clientId: string;    // oauth clientId
+    suiAddress: string;  // the user's Sui address
+  };
   secretKey: string;     // base64-encoded 32-byte seed
   initRandomness: string; // randomness from initializeZkLogin
   initJwt: string;       // original JWT from sign-in
-  headerBase64: string;  // Base64-encoded header from finalization
-  issBase64Details: string; // Base64-encoded issuer details from finalization
 }
 
 const KEYCHAIN_SERVICE = 'com.confio.zklogin';
@@ -44,7 +47,8 @@ export class AuthService {
   private zkProof: any | null = null;
   private maxEpoch: number | null = null;
   private auth = auth();
-  private isInitialized = false;
+  private firebaseIsInitialized = false;
+  private apolloClient: ApolloClient<any> | null = null;
 
   private constructor() {
     this.suiClient = new SuiClient({ url: 'https://fullnode.devnet.sui.io' });
@@ -58,12 +62,15 @@ export class AuthService {
   }
 
   public async initialize(): Promise<void> {
-    if (this.isInitialized) return;
-    
     try {
-      await this.initializeFirebase();
+      // Only initialize Firebase once
+      if (!this.firebaseIsInitialized) {
+        await this.initializeFirebase();
+        this.firebaseIsInitialized = true;
+      }
+      
+      // Always rehydrate zkLogin data
       await this.rehydrateZkLoginData();
-      this.isInitialized = true;
     } catch (error) {
       console.error('Failed to initialize AuthService:', error);
       throw error;
@@ -440,7 +447,6 @@ export class AuthService {
       }
 
       const data = JSON.parse(credentials.password) as StoredZkLogin;
-      const { headerBase64, issBase64Details } = data;
       
       console.log('Rehydrating zkLogin data:', {
         hasSalt: !!data.salt,
@@ -451,47 +457,48 @@ export class AuthService {
         hasSecretKey: !!data.secretKey,
         hasInitRandomness: !!data.initRandomness,
         hasInitJwt: !!data.initJwt,
-        hasHeaderBase64: !!headerBase64,
-        hasIssBase64Details: !!issBase64Details
+        hasSuiAddress: !!data.zkProof?.suiAddress,
+        secretKeyLength: data.secretKey?.length
       });
-      
-      // Verify the secret key is exactly 32 bytes
-      const secretKeyBytes = base64ToBytes(data.secretKey);
+
+      // Convert base64 secret key to Uint8Array using a more reliable method
+      const secretKeyB64 = data.secretKey;
+      if (!secretKeyB64) {
+        throw new Error('No secret key found in stored data');
+      }
+
+      // Create a Uint8Array from the base64 string
+      const binaryStr = atob(secretKeyB64);
+      const secretKeyBytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        secretKeyBytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      console.log('Secret key conversion:', {
+        originalLength: secretKeyB64.length,
+        binaryLength: binaryStr.length,
+        bytesLength: secretKeyBytes.length,
+        firstFewBytes: Array.from(secretKeyBytes.slice(0, 4))
+      });
+
       if (secretKeyBytes.length !== 32) {
-        throw new Error('Invalid secret key length');
+        throw new Error(`Invalid secret key length: ${secretKeyBytes.length} (expected 32)`);
       }
 
-      // Normalize b to object form on load
-      if (data.zkProof.zkProof?.b) {
-        data.zkProof.zkProof.b = data.zkProof.zkProof.b.map((point: any) => {
-          if (typeof point === 'object' && 'x' in point && 'y' in point) {
-            return { x: point.x, y: point.y };
-          }
-          if (Array.isArray(point) && point.length === 2) {
-            return { x: point[0], y: point[1] };
-          }
-          if (typeof point === 'string') {
-            const [x, y] = point.split(',');
-            return { x: x.trim(), y: y.trim() };
-          }
-          throw new Error(`Invalid stored point: ${JSON.stringify(point)}`);
-        });
-      }
+      // Create the keypair from the secret key
+      this.suiKeypair = Ed25519Keypair.fromSecretKey(secretKeyBytes);
+      
+      // Store the basic data
+      this.userSalt = data.salt;
+      this.maxEpoch = data.maxEpoch;
 
-      // Reconstruct the full proof object with all required fields
-      const fullProof = {
+      // Store the full proof object with all required fields including suiAddress
+      this.zkProof = {
         zkProof: data.zkProof.zkProof,
         subject: data.subject,
         clientId: data.clientId,
-        suiAddress: data.zkProof.suiAddress,
-        headerBase64,
-        issBase64Details
+        suiAddress: data.zkProof.suiAddress
       };
-
-      this.suiKeypair = Ed25519Keypair.fromSecretKey(secretKeyBytes);
-      this.userSalt = data.salt;
-      this.zkProof = fullProof;  // Store the reconstructed full proof
-      this.maxEpoch = data.maxEpoch;
 
       console.log('Successfully rehydrated zkLogin data:', {
         hasKeypair: !!this.suiKeypair,
@@ -499,21 +506,21 @@ export class AuthService {
         hasZkProof: !!this.zkProof,
         hasMaxEpoch: !!this.maxEpoch,
         proofFields: {
-          hasZkProof: !!this.zkProof.zkProof,
-          hasSubject: !!this.zkProof.subject,
-          hasClientId: !!this.zkProof.clientId,
-          hasHeaderBase64: !!this.zkProof.headerBase64,
-          hasIssBase64Details: !!this.zkProof.issBase64Details,
-          bStructure: this.zkProof.zkProof?.b?.map((p: any) => ({
-            type: typeof p,
-            isArray: Array.isArray(p),
-            length: p?.length,
-            values: p
-          }))
+          hasZkProof: !!this.zkProof?.zkProof,
+          hasSubject: !!this.zkProof?.subject,
+          hasClientId: !!this.zkProof?.clientId,
+          hasSuiAddress: !!this.zkProof?.suiAddress
         }
       });
     } catch (error) {
       console.error('Error rehydrating zkLogin data:', error);
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          name: error.name,
+          message: error.message,
+          stack: error.stack
+        });
+      }
       throw error;
     }
   }
@@ -531,107 +538,73 @@ export class AuthService {
       throw new Error('Sui keypair not initialized');
     }
 
-    const secretKey = this.suiKeypair.getSecretKey();
-    console.log('Secret key type:', typeof secretKey);
-    console.log('Secret key length:', secretKey.length);
-    console.log('Secret key bytes:', Array.from(secretKey));
+    // Get the private key (first 32 bytes of the secret key)
+    const secretKey = this.suiKeypair.getSecretKey().slice(0, 32);
+    const secretKeyB64 = btoa(String.fromCharCode.apply(null, Array.from(secretKey).map(Number)));
 
-    // Convert string to Uint8Array if needed
-    let secretKeyBytes: Uint8Array;
-    if (typeof secretKey === 'string') {
-      // The secret key string appears to be prefixed with "suiprivkey"
-      // Extract just the key bytes (should be 32 bytes)
-      const keyBytes = secretKey.slice('suiprivkey'.length);
-      secretKeyBytes = new Uint8Array(32);
-      for (let i = 0; i < 32; i++) {
-        secretKeyBytes[i] = keyBytes.charCodeAt(i);
-      }
-    } else if (secretKey instanceof Uint8Array) {
-      secretKeyBytes = secretKey;
-    } else {
-      throw new Error('Invalid secret key type');
-    }
+    console.log('Storing secret key:', {
+      originalLength: secretKey.length,
+      base64Length: secretKeyB64.length,
+      firstFewBytes: Array.from(secretKey.slice(0, 4))
+    });
 
-    if (secretKeyBytes.length !== 32) {
-      throw new Error(`Invalid secret key length: ${secretKeyBytes.length} (expected 32)`);
-    }
+    // Log the incoming proof structure
+    console.log('Storing proof with structure:', {
+      hasZkProof: !!proof.zkProof,
+      bPointsType: typeof proof.zkProof?.b,
+      isArray: Array.isArray(proof.zkProof?.b),
+      firstPoint: proof.zkProof?.b?.[0],
+      firstPointType: typeof proof.zkProof?.b?.[0],
+      suiAddress: proof.suiAddress
+    });
 
-    const secretKeyB64 = bytesToBase64(secretKeyBytes);
-    
-    // Ensure the proof object has the required structure
-    const serializedProof = {
-      zkProof: {
-        ...proof.zkProof,
-        b: proof.zkProof.b.map((pt: any) =>
-          pt && typeof pt === 'object' && 'x' in pt && 'y' in pt
-            ? { x: pt.x, y: pt.y }
-            : Array.isArray(pt) && pt.length === 2
-            ? { x: pt[0], y: pt[1] }
-            : typeof pt === 'string'
-            ? (() => {
-                const [x, y] = pt.split(',');
-                return { x: x.trim(), y: y.trim() };
-              })()
-            : (() => { throw new Error(`Invalid point on store: ${JSON.stringify(pt)}`); })()
-        )
-      },
+    // Structure the zkProof data with only required fields
+    const structuredProof = {
+      zkProof: proof.zkProof,
       subject,
       clientId,
-      suiAddress: proof.suiAddress,
-      headerBase64: proof.headerBase64,
-      issBase64Details: proof.issBase64Details
+      suiAddress: proof.suiAddress
     };
 
+    // Store the proof with proper structure
     const toSave: StoredZkLogin = {
       salt,
       subject,
       clientId,
       maxEpoch,
-      zkProof: serializedProof,
+      zkProof: structuredProof,
       secretKey: secretKeyB64,
       initRandomness,
-      initJwt,
-      headerBase64: proof.headerBase64,
-      issBase64Details: proof.issBase64Details
+      initJwt
     };
-    
-    console.log('Storing zkLogin data with fields:', {
-      hasSalt: !!salt,
-      hasSubject: !!subject,
-      hasClientId: !!clientId,
-      hasMaxEpoch: !!maxEpoch,
-      hasZkProof: !!proof.zkProof,
-      hasSecretKey: !!secretKeyB64,
-      hasInitRandomness: !!initRandomness,
-      hasInitJwt: !!initJwt,
-      hasHeaderBase64: !!proof.headerBase64,
-      hasIssBase64Details: !!proof.issBase64Details,
-      proofFields: {
-        hasZkProof: !!proof.zkProof,
-        hasSubject: !!subject,
-        hasClientId: !!clientId,
-        bStructure: proof.zkProof?.b?.map((p: any) => ({
-          type: typeof p,
-          isArray: Array.isArray(p),
-          length: p?.length,
-          values: p
-        }))
+
+    // Log the final structure being saved to Keychain
+    console.log('Final structure being saved to Keychain:', {
+      hasSalt: !!toSave.salt,
+      hasSubject: !!toSave.subject,
+      hasClientId: !!toSave.clientId,
+      hasMaxEpoch: !!toSave.maxEpoch,
+      hasZkProof: !!toSave.zkProof,
+      hasSecretKey: !!toSave.secretKey,
+      hasInitRandomness: !!toSave.initRandomness,
+      hasInitJwt: !!toSave.initJwt,
+      secretKeyLength: toSave.secretKey.length,
+      zkProofStructure: {
+        hasZkProof: !!toSave.zkProof.zkProof,
+        hasSubject: !!toSave.zkProof.subject,
+        hasClientId: !!toSave.zkProof.clientId,
+        hasSuiAddress: !!toSave.zkProof.suiAddress
       }
     });
-    
+
     await Keychain.setGenericPassword(
       KEYCHAIN_USERNAME,
       JSON.stringify(toSave),
       {
         service: KEYCHAIN_SERVICE,
-        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY
+        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
       }
     );
-
-    // Store the serialized proof with subject and clientId
-    this.zkProof = serializedProof;
-    this.userSalt = salt;
-    this.maxEpoch = maxEpoch;
   }
 
   // Load sensitive data from secure storage
@@ -656,111 +629,88 @@ export class AuthService {
 
   // Get the user's Sui address
   public async getZkLoginAddress(): Promise<string> {
-    if (!this.isInitialized) {
+    if (!this.firebaseIsInitialized) {
       await this.initialize();
     }
 
-    // Validate all required data is present
-    if (!this.suiKeypair || !this.zkProof || !this.userSalt || !this.maxEpoch) {
-      console.error('Missing required zkLogin data:', {
-        hasKeypair: !!this.suiKeypair,
-        hasZkProof: !!this.zkProof,
-        hasUserSalt: !!this.userSalt,
-        hasMaxEpoch: !!this.maxEpoch
-      });
+    // Get stored zkLogin data
+    const storedData = await this.getStoredZkLoginData();
+    if (!storedData) {
       throw new Error('No zkLogin data stored');
     }
 
-    // Log the full zkProof structure
-    console.log('Full zkProof structure:', {
-      zkProof: this.zkProof,
-      hasInnerZkProof: !!this.zkProof.zkProof,
-      innerZkProofType: typeof this.zkProof.zkProof,
-      innerZkProofKeys: this.zkProof.zkProof ? Object.keys(this.zkProof.zkProof) : [],
-      innerZkProofValue: this.zkProof.zkProof,
-      hasHeaderBase64: !!this.zkProof.headerBase64,
-      hasIssBase64Details: !!this.zkProof.issBase64Details
+    // Log the stored data structure for debugging
+    console.log('Stored zkLogin data structure:', {
+      hasZkProof: !!storedData.zkProof,
+      hasSubject: !!storedData.subject,
+      hasClientId: !!storedData.clientId,
+      data: storedData
     });
 
-    // Validate zkProof has all required fields
-    if (!this.zkProof.zkProof || !this.zkProof.subject || !this.zkProof.clientId || 
-        !this.zkProof.headerBase64 || !this.zkProof.issBase64Details) {
-      console.error('Invalid zkProof data:', {
-        hasZkProof: !!this.zkProof.zkProof,
-        hasSubject: !!this.zkProof.subject,
-        hasClientId: !!this.zkProof.clientId,
-        hasHeaderBase64: !!this.zkProof.headerBase64,
-        hasIssBase64Details: !!this.zkProof.issBase64Details,
-        zkProof: this.zkProof
-      });
-      throw new Error('Invalid zkProof loaded - missing required fields');
+    // Return the stored Sui address from the zkProof
+    if (!storedData.zkProof || !storedData.zkProof.suiAddress) {
+      throw new Error('No Sui address found in stored data');
     }
 
-    // Check if we need to refresh the proof due to epoch expiration
-    try {
-      const state = await this.suiClient.getLatestSuiSystemState();
-      const currentEpoch = Number(state.epoch);
-      
-      // If we're within 1 epoch of expiration, fetch a new proof
-      if (currentEpoch >= this.maxEpoch - 1) {
-        console.log('zkLogin proof approaching expiration, refreshing...');
-        await this.fetchNewProof(apolloClient);
-      }
-    } catch (error) {
-      console.error('Error checking epoch expiration:', error);
-      // Continue with existing proof if we can't check epoch
-    }
-
-    const saltBytes = base64ToBytes(this.userSalt);
-    const saltBigInt = BigInt('0x' + bufferToHex(saltBytes));
-    const addressSeed = genAddressSeed(saltBigInt, 'sub', this.zkProof.subject, this.zkProof.clientId).toString();
-    const userSignature = await this.suiKeypair.sign(new Uint8Array());
-    const proofData = this.zkProof.zkProof;
-
-    // Helper to structure proof points as [string, string][]
-    const structureProofPoints = (points: { a: string[]; b: any[]; c: string[] }) => {
-      const bPoints: [string, string][] = points.b.map(point => {
-        if (Array.isArray(point)) {
-          if (point.length !== 2) throw new Error(`Invalid array point: ${point}`);
-          return [String(point[0]), String(point[1])] as [string, string];
-        } else if (typeof point === 'string') {
-          const [x, y] = point.split(',').map(s => s.trim());
-          if (!x || !y) throw new Error(`Invalid string point: ${point}`);
-          return [x, y] as [string, string];
-        } else if (point && typeof point === 'object') {
-          if (!('x' in point) || !('y' in point))
-            throw new Error(`Invalid object point: ${JSON.stringify(point)}`);
-          return [String(point.x), String(point.y)] as [string, string];
-        }
-        throw new Error(`Invalid point format: ${JSON.stringify(point)}`);
-      });
-      return { a: points.a, b: bPoints, c: points.c };
-    };
-
-    const inputs = {
-      proofPoints: structureProofPoints({ a: proofData.a, b: proofData.b, c: proofData.c }),
-      issBase64Details: this.zkProof.issBase64Details,
-      headerBase64: this.zkProof.headerBase64,
-      addressSeed
-    };
-
-    return getZkLoginSignature({ inputs, maxEpoch: this.maxEpoch, userSignature });
+    return storedData.zkProof.suiAddress;
   }
 
   // Sign out
   async signOut() {
     try {
-      await GoogleSignin.signOut();
+      console.log('Starting sign out process...');
+      
+      // 1. Sign out from Firebase (if there's a current user)
+      const currentUser = this.auth.currentUser;
+      if (currentUser) {
+        await this.auth.signOut();
+        console.log('Firebase sign out complete');
+      } else {
+        console.log('No Firebase user to sign out');
+      }
+      
+      // 2. Sign out from Google (if applicable)
+      try {
+        await GoogleSignin.signOut();
+        console.log('Google sign out complete');
+      } catch (error) {
+        console.log('Google sign out skipped or failed:', error);
+      }
+      
+      // 3. Clear local state
       this.suiKeypair = null;
       this.userSalt = null;
       this.zkProof = null;
       this.maxEpoch = null;
+      this.firebaseIsInitialized = false;
+      console.log('Local state cleared');
+      
+      // 4. Clear stored credentials
       await Keychain.resetGenericPassword({
         service: KEYCHAIN_SERVICE,
       });
+      console.log('Stored credentials cleared');
+      
+      console.log('Sign out process completed successfully');
     } catch (error) {
       console.error('Sign Out Error:', error);
-      throw error;
+      // Don't throw the error, just log it and continue with cleanup
+      console.log('Continuing with cleanup despite error...');
+      
+      // Ensure we still clear local state and credentials even if sign out fails
+      this.suiKeypair = null;
+      this.userSalt = null;
+      this.zkProof = null;
+      this.maxEpoch = null;
+      this.firebaseIsInitialized = false;
+      
+      try {
+        await Keychain.resetGenericPassword({
+          service: KEYCHAIN_SERVICE,
+        });
+      } catch (keychainError) {
+        console.error('Error clearing Keychain:', keychainError);
+      }
     }
   }
 
@@ -893,5 +843,12 @@ export class AuthService {
   private async storeUserSuiAddress(userId: string, address: string): Promise<void> {
     // TODO: Implement storing in your backend
     console.log(`Storing Sui address ${address} for user ${userId}`);
+  }
+
+  private async refreshZkLoginProof() {
+    if (!this.apolloClient) {
+      throw new Error('Apollo client not initialized');
+    }
+    await this.fetchNewProof(this.apolloClient);
   }
 } 
