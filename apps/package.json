@@ -46,6 +46,7 @@
     "@react-native/typescript-config": "^0.73.1",
     "@types/jest": "^29.5.2",
     "@types/react": "^19.0.0",
+    "@types/react-native-vector-icons": "^6.4.18",
     "@types/react-test-renderer": "^19.0.0",
     "babel-jest": "^29.6.3",
     "babel-plugin-syntax-hermes-parser": "^0.28.1",
