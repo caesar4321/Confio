@@ -1,10 +1,13 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Platform, Alert, ScrollView, Image } from 'react-native';
 import { Gradient } from '../components/common/Gradient';
 import { AuthService } from '../services/authService';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
+import cUSDLogo from '../assets/png/cUSD.png';
+import USDCLogo from '../assets/png/USDC.png';
+import CONFIOLogo from '../assets/png/CONFIO.png';
 
 type RootStackParamList = {
   Auth: undefined;
@@ -18,69 +21,45 @@ export const HomeScreen = () => {
   const { signOut, checkServerSession } = useAuth();
   const [suiAddress, setSuiAddress] = React.useState<string>('');
   const [isLoading, setIsLoading] = React.useState(true);
+  const [showLocalCurrency, setShowLocalCurrency] = useState(false);
+  
+  // Mock balances - replace with real data later
+  const mockBalances = {
+    cusd: "1,234.56",
+    usdc: "789.10",
+    confio: "1,000.00"
+  };
+
+  // Mock exchange rates - replace with real data later
+  const mockLocalCurrency = {
+    name: "Bolívares",
+    rate: 35.5,
+    symbol: "Bs."
+  };
 
   React.useEffect(() => {
     const loadData = async () => {
       try {
-        // First check server session
         const isSessionValid = await checkServerSession();
         if (!isSessionValid) {
           console.log('Session invalid, returning to auth screen');
           return;
         }
 
-        // Get stored zkLogin data first
         const authService = AuthService.getInstance();
         let zkLoginData = await authService.getStoredZkLoginData();
         
-        // If no data found, wait and retry once
         if (!zkLoginData) {
-          console.log('No zkLogin data found, waiting and retrying...');
           await new Promise(resolve => setTimeout(resolve, 1000));
           zkLoginData = await authService.getStoredZkLoginData();
         }
 
-        if (!zkLoginData) {
-          console.log('Still no zkLogin data found after retry, returning to auth screen');
-          return;
+        if (zkLoginData) {
+          const address = await authService.getZkLoginAddress();
+          setSuiAddress(address);
         }
-
-        // Verify we have all required fields
-        if (!zkLoginData.zkProof || !zkLoginData.salt || !zkLoginData.subject || !zkLoginData.clientId) {
-          console.log('Missing required zkLogin data fields:', {
-            hasProof: !!zkLoginData.zkProof,
-            hasSalt: !!zkLoginData.salt,
-            hasSubject: !!zkLoginData.subject,
-            hasClientId: !!zkLoginData.clientId
-          });
-          return;
-        }
-
-        // Ensure the proof structure is valid
-        if (!zkLoginData.zkProof.zkProof) {
-          console.log('Invalid proof structure:', {
-            hasZkProof: !!zkLoginData.zkProof.zkProof,
-            hasSubject: !!zkLoginData.subject,
-            hasClientId: !!zkLoginData.clientId
-          });
-          return;
-        }
-
-        // Then load Sui address
-        console.log('Loading Sui address...');
-        const address = await authService.getZkLoginAddress();
-        console.log('Sui address loaded:', address);
-        setSuiAddress(address);
-
-        console.log('zkLogin data:', {
-          hasZkProof: !!zkLoginData.zkProof,
-          hasSubject: !!zkLoginData.subject,
-          hasClientId: !!zkLoginData.clientId,
-          zkProof: zkLoginData.zkProof
-        });
       } catch (error) {
         console.error('Error loading data:', error);
-        // If there's an error, check session again
         await checkServerSession();
       } finally {
         setIsLoading(false);
@@ -92,15 +71,13 @@ export const HomeScreen = () => {
 
   const handleSignOut = async () => {
     try {
-      console.log('Starting sign out process...');
       await signOut();
       setSuiAddress('');
-      console.log('Sign out completed successfully');
     } catch (error) {
       console.error('Error during sign out:', error);
       Alert.alert(
-        'Sign Out Error',
-        'There was an error signing out. Please try again.'
+        'Error al cerrar sesión',
+        'Hubo un error al cerrar la sesión. Por favor intente de nuevo.'
       );
     }
   };
@@ -113,84 +90,216 @@ export const HomeScreen = () => {
         style={styles.container}
       >
         <View style={styles.content}>
-          <Text style={styles.title}>Loading...</Text>
+          <Text style={styles.loadingText}>Cargando...</Text>
         </View>
       </Gradient>
     );
   }
 
   return (
-    <Gradient
-      fromColor="#5AC8A8"
-      toColor="#72D9BC"
-      style={styles.container}
-    >
-      <View style={styles.content}>
-        <Text style={styles.title}>Welcome to Confío</Text>
-        <Text style={styles.subtitle}>Your Sui wallet is ready</Text>
-        {suiAddress && (
-          <View style={styles.addressContainer}>
-            <Text style={styles.addressLabel}>Your Sui Address:</Text>
-            <Text style={styles.address}>
-              {suiAddress.slice(0, 6)}...{suiAddress.slice(-4)}
-            </Text>
+    <View style={{ flex: 1, backgroundColor: '#F3F4F6' }}>
+      {/* Header Section */}
+      <View style={styles.headerBox}>
+        <View style={styles.headerTopRow}>
+          <Text style={styles.headerTitle}>Confío</Text>
+          <View style={styles.headerButtons}>
+            <TouchableOpacity style={styles.headerCircleButton}>
+              <Text style={styles.headerButtonText}>🔍</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerCircleButton}>
+              <Text style={styles.headerButtonText}>🔔</Text>
+            </TouchableOpacity>
           </View>
-        )}
-        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-          <Text style={styles.signOutText}>Sign Out</Text>
+        </View>
+        <Text style={styles.balanceLabel}>Dólares estadounidenses</Text>
+        <Text style={styles.balanceAmount}>${mockBalances.cusd}</Text>
+        <TouchableOpacity 
+          style={styles.currencyToggle}
+          onPress={() => setShowLocalCurrency(!showLocalCurrency)}
+        >
+          {showLocalCurrency && (
+            <Text style={styles.localCurrency}>
+              {mockLocalCurrency.symbol} {(Number(mockBalances.cusd.replace(',', '')) * mockLocalCurrency.rate).toLocaleString()}
+            </Text>
+          )}
+          <Text style={styles.toggleText}>
+            {showLocalCurrency ? 'Ocultar moneda local' : 'Mostrar en moneda local'}
+          </Text>
         </TouchableOpacity>
       </View>
-    </Gradient>
+
+      {/* Wallets Section */}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 12 }}>
+        <View style={styles.assetsHeaderRow}>
+          <Text style={styles.assetsTitle}>Mis Activos</Text>
+        </View>
+        <View style={styles.walletsContainer}>
+          <View style={styles.assetCard}>
+            <Image source={cUSDLogo} style={styles.assetLogo} />
+            <View style={styles.assetInfo}>
+              <Text style={styles.assetName}>Confío Dollar</Text>
+              <Text style={styles.assetSymbol}>$cUSD</Text>
+            </View>
+            <View style={styles.assetValueBlock}>
+              <Text style={styles.assetValue}>${mockBalances.cusd}</Text>
+            </View>
+          </View>
+          <View style={styles.assetCard}>
+            <Image source={USDCLogo} style={styles.assetLogo} />
+            <View style={styles.assetInfo}>
+              <Text style={styles.assetName}>USD Coin</Text>
+              <Text style={styles.assetSymbol}>$USDC</Text>
+            </View>
+            <View style={styles.assetValueBlock}>
+              <Text style={styles.assetValue}>${mockBalances.usdc}</Text>
+            </View>
+          </View>
+          <View style={styles.assetCard}>
+            <Image source={CONFIOLogo} style={styles.assetLogo} />
+            <View style={styles.assetInfo}>
+              <Text style={styles.assetName}>Confío</Text>
+              <Text style={styles.assetSymbol}>$CONFIO</Text>
+            </View>
+            <View style={styles.assetValueBlock}>
+              <Text style={styles.assetValue}>{mockBalances.confio}</Text>
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#1F2937',
   },
   content: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
   },
-  title: {
+  loadingText: {
+    fontSize: 18,
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
+  headerBox: {
+    backgroundColor: '#72D9BC',
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+    paddingTop: 56,
+    paddingBottom: 32,
+    paddingHorizontal: 20,
+  },
+  headerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  headerTitle: {
     fontSize: 24,
     fontWeight: 'bold',
     color: '#FFFFFF',
-    marginBottom: 10,
   },
-  subtitle: {
-    fontSize: 16,
+  headerButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  headerCircleButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  headerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 20,
+  },
+  balanceLabel: {
+    fontSize: 15,
     color: '#FFFFFF',
     opacity: 0.8,
-    marginBottom: 30,
+    marginBottom: 4,
   },
-  addressContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 15,
-    borderRadius: 10,
-    width: '100%',
-    marginBottom: 30,
+  balanceAmount: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    marginBottom: 20,
   },
-  addressLabel: {
+  currencyToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+    borderRadius: 16,
+  },
+  localCurrency: {
     color: '#FFFFFF',
     fontSize: 14,
-    marginBottom: 5,
+    marginRight: 8,
   },
-  address: {
+  toggleText: {
     color: '#FFFFFF',
-    fontSize: 12,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 14,
   },
-  signOutButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  assetsHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
+    marginBottom: 8,
   },
-  signOutText: {
-    color: '#FFFFFF',
+  assetsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  walletsContainer: {
+    gap: 14,
+    paddingHorizontal: 12,
+  },
+  assetCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 6,
+  },
+  assetLogo: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  },
+  assetInfo: {
+    flex: 1,
+  },
+  assetName: {
     fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  assetSymbol: {
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: 2,
+  },
+  assetValueBlock: {
+    alignItems: 'flex-end',
+    minWidth: 90,
+  },
+  assetValue: {
+    fontSize: 17,
+    fontWeight: 'bold',
+    color: '#1F2937',
   },
 }); 
