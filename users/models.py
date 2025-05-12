@@ -1,9 +1,18 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.conf import settings
+from .country_codes import COUNTRY_CODES
 
 class User(AbstractUser):
     firebase_uid = models.CharField(max_length=128, unique=True)
+    phone_country = models.CharField(
+        max_length=2,
+        blank=True,
+        null=True,
+        choices=[(code[2], f"{code[0]} ({code[1]})") for code in COUNTRY_CODES],
+        help_text="User's country ISO code for phone number"
+    )
+    phone_number = models.CharField(max_length=15, blank=True, null=True, help_text="User's phone number without country code")
     groups = models.ManyToManyField(
         'auth.Group',
         verbose_name='groups',
@@ -23,6 +32,26 @@ class User(AbstractUser):
     
     def __str__(self):
         return self.username or self.email or self.firebase_uid
+
+    @property
+    def phone_country_code(self):
+        """Get the country code for the user's phone country"""
+        if not self.phone_country:
+            return None
+        for country in COUNTRY_CODES:
+            if country[2] == self.phone_country:
+                return country[1]
+        return None
+
+    @property
+    def phone_country_name(self):
+        """Get the country name for the user's phone country"""
+        if not self.phone_country:
+            return None
+        for country in COUNTRY_CODES:
+            if country[2] == self.phone_country:
+                return country[0]
+        return None
 
 class UserProfile(models.Model):
     user = models.OneToOneField(
