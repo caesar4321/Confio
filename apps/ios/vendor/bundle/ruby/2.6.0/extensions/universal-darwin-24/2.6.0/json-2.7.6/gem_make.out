@@ -1,0 +1,19 @@
+current directory: /Users/julian/Confio/apps/ios/vendor/bundle/ruby/2.6.0/gems/json-2.7.6/ext/json/ext/parser
+/System/Library/Frameworks/Ruby.framework/Versions/2.6/usr/bin/ruby -I /System/Library/Frameworks/Ruby.framework/Versions/2.6/usr/lib/ruby/2.6.0 -r ./siteconf20250512-40234-1tpuwm6.rb extconf.rb
+checking for rb_enc_raise() in ruby.h... yes
+checking for rb_enc_interned_str() in ruby.h... no
+checking for whether -std=c99 is accepted as CFLAGS... yes
+creating Makefile
+
+current directory: /Users/julian/Confio/apps/ios/vendor/bundle/ruby/2.6.0/gems/json-2.7.6/ext/json/ext/parser
+make "DESTDIR=" clean
+
+current directory: /Users/julian/Confio/apps/ios/vendor/bundle/ruby/2.6.0/gems/json-2.7.6/ext/json/ext/parser
+make "DESTDIR="
+compiling parser.c
+linking shared-object json/ext/parser.bundle
+ld: warning: search path '/AppleInternal/Library/BuildRoots/01adf19d-fba1-11ef-a947-f2a857e00a32/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.4.Internal.sdk/usr/local/lib' not found
+
+current directory: /Users/julian/Confio/apps/ios/vendor/bundle/ruby/2.6.0/gems/json-2.7.6/ext/json/ext/parser
+make "DESTDIR=" install
+/usr/bin/install -c -m 0755 parser.bundle ./.gem.20250512-40234-17t2oun/json/ext
