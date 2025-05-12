@@ -166,6 +166,21 @@ export const HomeScreen = () => {
           </View>
         </View>
       </ScrollView>
+
+      {/* Temporary Sign Out Button for Testing */}
+      <View style={{ padding: 20 }}>
+        <TouchableOpacity
+          style={{
+            backgroundColor: '#EF4444',
+            paddingVertical: 14,
+            borderRadius: 10,
+            alignItems: 'center',
+          }}
+          onPress={handleSignOut}
+        >
+          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Sign Out (Test)</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };
