@@ -30,7 +30,7 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Auth'>;
 export const AuthScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const authService = AuthService.getInstance();
-  const { isAuthenticated, checkServerSession } = useAuth();
+  const { handleSuccessfulLogin } = useAuth();
 
   useEffect(() => {
     authService.initialize().catch(error => {
@@ -38,29 +38,10 @@ export const AuthScreen = () => {
     });
   }, []);
 
-  const handleSuccessfulLogin = async (userData: any) => {
-    try {
-      const authService = AuthService.getInstance();
-      const storedZkLoginData = await authService.getStoredZkLoginData();
-      if (!storedZkLoginData) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        const retryZkLoginData = await authService.getStoredZkLoginData();
-        if (!retryZkLoginData) return;
-      }
-      await checkServerSession();
-      if (!isAuthenticated) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        await checkServerSession();
-      }
-    } catch (error) {
-      console.error('Error handling successful login:', error);
-    }
-  };
-
   const handleGoogleSignIn = async () => {
     try {
       const result = await authService.signInWithGoogle();
-      await handleSuccessfulLogin(result);
+      await handleSuccessfulLogin(result.zkLoginData.isPhoneVerified);
     } catch (error) {
       console.error('Google Sign-In failed:', error);
     }
@@ -68,8 +49,8 @@ export const AuthScreen = () => {
 
   const handleAppleSignIn = async () => {
     try {
-      const response = await authService.signInWithApple();
-      await handleSuccessfulLogin(response);
+      const result = await authService.signInWithApple();
+      await handleSuccessfulLogin(result.zkLoginData.isPhoneVerified);
     } catch (error) {
       console.error('Apple Sign-In Error:', error);
     }
@@ -367,12 +348,11 @@ const styles = StyleSheet.create({
   termsText: {
     color: '#6B7280',
     fontSize: 14,
-    marginBottom: 2,
+    marginBottom: 4,
   },
   termsLinks: {
     fontSize: 14,
-    color: colors.confioGreen,
-    fontWeight: '500',
+    textAlign: 'center',
   },
   termsLink: {
     color: colors.confioGreen,

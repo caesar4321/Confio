@@ -1,32 +1,34 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useRef } from 'react';
 import { enableScreens } from 'react-native-screens';
 import { ApolloProvider } from '@apollo/client';
 import { ApolloClient, NormalizedCacheObject } from '@apollo/client';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { apolloClient } from './apollo/client';
-import { StatusBar, View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator } from 'react-native';
 import { ThemeProvider } from './theme';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AuthScreen } from './screens/AuthScreen';
 import { HomeScreen } from './screens/HomeScreen';
+import PhoneVerificationScreen from './screens/PhoneVerificationScreen';
 
 // Enable screens before any navigation setup
 enableScreens();
 
-const Stack = createNativeStackNavigator();
-
-// Create a type for our navigation parameters
 type RootStackParamList = {
   Auth: undefined;
+  PhoneVerification: undefined;
   Home: undefined;
 };
 
-const Navigation = () => {
+const Stack = createNativeStackNavigator<RootStackParamList>();
+
+function Navigation() {
   const { isAuthenticated, isLoading } = useAuth();
-  const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
+  console.log('Navigation render:', { isAuthenticated, isLoading });
 
   if (isLoading) {
+    console.log('Showing loading indicator');
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" />
@@ -34,90 +36,44 @@ const Navigation = () => {
     );
   }
 
+  console.log('Rendering navigation stack, isAuthenticated:', isAuthenticated);
   return (
     <Stack.Navigator
-      initialRouteName={isAuthenticated ? "Home" : "Auth"}
       screenOptions={{
         headerShown: false,
-        animation: 'none',
-        headerTintColor: '#000000',
+        animation: 'none', // Disable animations for initial screen
+        presentation: 'transparentModal' // Use modal presentation to prevent slide animation
       }}
     >
-      <Stack.Screen name="Home" component={HomeScreen} />
       <Stack.Screen name="Auth" component={AuthScreen} />
+      <Stack.Screen name="PhoneVerification" component={PhoneVerificationScreen} />
+      <Stack.Screen name="Home" component={HomeScreen} />
     </Stack.Navigator>
   );
-};
+}
 
-export default function App() {
-  const [client, setClient] = useState<ApolloClient<NormalizedCacheObject> | null>(null);
+function AppContent() {
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
 
-  useEffect(() => {
-    const initializeApollo = async () => {
-      try {
-        if (apolloClient) {
-          setClient(apolloClient);
-          console.log('Apollo client initialized successfully');
-        } else {
-          console.error('Apollo client is null');
-        }
-      } catch (error) {
-        console.error('Failed to initialize Apollo client:', error);
-      }
-    };
-
-    initializeApollo();
-  }, []);
-
-  if (!client) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#0000ff" />
-      </View>
+    <NavigationContainer ref={navigationRef}>
+      <AuthProvider 
+        navigationRef={navigationRef as React.RefObject<NavigationContainerRef<RootStackParamList>>}
+      >
+        <Navigation />
+      </AuthProvider>
+    </NavigationContainer>
     );
   }
+
+export default function App() {
+  const [client] = React.useState<ApolloClient<NormalizedCacheObject>>(apolloClient);
+  console.log('App render');
 
   return (
     <ApolloProvider client={client}>
       <ThemeProvider>
-        <AuthProvider navigationRef={navigationRef}>
-          <NavigationContainer
-            ref={navigationRef}
-            theme={{
-              dark: false,
-              colors: {
-                background: '#00000000',
-                card: '#FFFFFF',
-                text: '#000000',
-                border: '#000000',
-                notification: '#000000',
-                primary: '#000000',
-              },
-              fonts: {
-                regular: {
-                  fontFamily: 'System',
-                  fontWeight: '400',
-                },
-                medium: {
-                  fontFamily: 'System',
-                  fontWeight: '500',
-                },
-                bold: {
-                  fontFamily: 'System',
-                  fontWeight: '700',
-                },
-                heavy: {
-                  fontFamily: 'System',
-                  fontWeight: '900',
-                },
-              },
-            }}
-          >
-            <StatusBar barStyle="dark-content" />
-            <Navigation />
-          </NavigationContainer>
-        </AuthProvider>
+        <AppContent />
       </ThemeProvider>
     </ApolloProvider>
   );

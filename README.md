@@ -142,6 +142,7 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── models.py      # User models
 │   ├── schema.py      # GraphQL schema and resolvers
 │   ├── serializers.py # User data serialization
+│   ├── country_codes.py # Country codes mapping [name, code, iso]
 │   └── tests/         # User tests
 ├── manage.py          # Django management script
 ├── requirements.txt   # Python dependencies
@@ -165,7 +166,10 @@ This is a **monolithic repository** containing the full Confío stack:
 │   │   ├── screens/       # Screen components
 │   │   ├── services/      # API and business logic services
 │   │   ├── types/         # TypeScript type definitions
-│   │   └── utils/         # Utility functions
+│   │   ├── utils/         # Utility functions
+│   │   │   ├── countries.ts  # Country codes mapping [name, code, iso, flag]
+│   │   │   └── ...        # Other utility functions
+│   │   └── ...            # Other source files
 │   ├── scripts/           # Build and development scripts
 │   ├── .env               # Environment variables (⚠️ Add to .gitignore)
 │   ├── babel.config.js    # Babel configuration
@@ -316,3 +320,23 @@ The project uses a combination of Django and Whitenoise for static file serving:
   - Zero gas fees for end users
   - Native Sui protocol support
   - Simplified implementation without additional smart contracts
+
+### Country Code Management
+
+The project maintains country code mappings in two locations:
+
+1. **Client-side** (`apps/src/utils/countries.ts`):
+   - Format: `[country_name, country_code, iso_code, flag]`
+   - Used by the React Native app for phone number input
+   - Includes flag emojis for UI display
+   - Helper functions:
+     - `getCountryByIso(iso)`: Get country by ISO code
+     - `getCountryByPhoneCode(code)`: Get country by phone code
+
+2. **Server-side** (`users/country_codes.py`):
+   - Format: `[country_name, country_code, iso_code]`
+   - Used by Django backend for phone number validation
+   - Used in Telegram verification process
+   - Ensures consistent country code handling across the application
+
+Both files maintain the same list of countries and codes, with the client version including additional UI elements (flags) and the server version focusing on validation and formatting.

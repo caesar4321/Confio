@@ -1,7 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, RefObject } from 'react';
 import { AuthService } from '../services/authService';
-import { apolloClient } from '../apollo/client';
-import { gql } from '@apollo/client';
 import { NavigationContainerRef } from '@react-navigation/native';
 
 interface AuthContextType {
@@ -9,21 +7,14 @@ interface AuthContextType {
   isLoading: boolean;
   signOut: () => Promise<void>;
   checkServerSession: () => Promise<boolean>;
+  handleSuccessfulLogin: (isPhoneVerified: boolean) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const CHECK_SESSION = gql`
-  query CheckSession {
-    checkSession {
-      isValid
-      error
-    }
-  }
-`;
-
 type RootStackParamList = {
   Auth: undefined;
+  PhoneVerification: undefined;
   Home: undefined;
 };
 
@@ -35,34 +26,58 @@ interface AuthProviderProps {
 export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isNavigationReady, setIsNavigationReady] = useState(false);
 
+  // Set up navigation ready listener and check auth state
   useEffect(() => {
+    if (navigationRef.current) {
+      console.log('Navigation is ready, checking auth state...');
+      setIsNavigationReady(true);
     checkAuthState();
-  }, []);
-
-  // Effect to handle navigation based on auth state
-  useEffect(() => {
-    if (!isLoading && navigationRef.current) {
-      if (isAuthenticated) {
-        navigationRef.current.reset({
-          index: 0,
-          routes: [{ name: 'Home' }],
-        });
-      } else {
-        navigationRef.current.reset({
-          index: 0,
-          routes: [{ name: 'Auth' }],
-        });
-      }
     }
-  }, [isAuthenticated, isLoading]);
+  }, [navigationRef.current]);
+
+  const navigateToScreen = (screenName: keyof RootStackParamList) => {
+    if (!isNavigationReady || !navigationRef.current) {
+      console.log('Navigation not ready yet, will navigate when ready');
+      return;
+    }
+    
+    console.log(`Navigating to ${screenName}`);
+        navigationRef.current.reset({
+          index: 0,
+      routes: [{ 
+        name: screenName,
+        params: undefined,
+        state: undefined
+      }],
+        });
+  };
+
+  const handleSuccessfulLogin = async (isPhoneVerified: boolean) => {
+    try {
+      console.log('Handling successful login...');
+      setIsAuthenticated(true);
+      if (isPhoneVerified) {
+        console.log('User has verified phone number');
+        navigateToScreen('Home');
+      } else {
+        console.log('User needs phone verification');
+        navigateToScreen('PhoneVerification');
+      }
+    } catch (error) {
+      console.error('Error handling successful login:', error);
+      setIsAuthenticated(false);
+      navigateToScreen('Auth');
+    }
+  };
 
   const checkAuthState = async () => {
     try {
       console.log('Checking auth state...');
       const authService = AuthService.getInstance();
       const zkLoginData = await authService.getStoredZkLoginData();
-      console.log('Has zkLogin data:', !!zkLoginData);
+      console.log('Auth state zkLogin data:', JSON.stringify(zkLoginData, null, 2));
       
       if (zkLoginData) {
         const hasRequiredFields = zkLoginData.zkProof && 
@@ -70,20 +85,26 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                                 zkLoginData.subject && 
                                 zkLoginData.clientId;
         
+        console.log('Has required fields:', hasRequiredFields);
+        
         if (hasRequiredFields) {
-          console.log('Valid zkLogin data found, setting isAuthenticated to true');
+          console.log('Valid zkLogin data found');
           setIsAuthenticated(true);
+          navigateToScreen('Home');
         } else {
           console.log('Invalid zkLogin data, missing required fields');
           setIsAuthenticated(false);
+          navigateToScreen('Auth');
         }
       } else {
         console.log('No zkLogin data found, setting isAuthenticated to false');
         setIsAuthenticated(false);
+        navigateToScreen('Auth');
       }
     } catch (error) {
       console.error('Error checking auth state:', error);
       setIsAuthenticated(false);
+      navigateToScreen('Auth');
     } finally {
       setIsLoading(false);
     }
@@ -108,6 +129,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       const authService = AuthService.getInstance();
       await authService.signOut();
       setIsAuthenticated(false);
+      navigateToScreen('Auth');
     } catch (error) {
       console.error('Error signing out:', error);
       setIsAuthenticated(false);
@@ -130,7 +152,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   }, [isAuthenticated]);
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, signOut, checkServerSession }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, signOut, checkServerSession, handleSuccessfulLogin }}>
       {children}
     </AuthContext.Provider>
   );

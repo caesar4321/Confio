@@ -2,7 +2,8 @@ import graphene
 from graphene_django import DjangoObjectType
 from graphene_django.converter import convert_django_field
 from django.db import models
-from .models import ZkLoginProof, UserProfile
+from .models import ZkLoginProof
+from users.models import UserProfile, User
 from firebase_admin import auth
 from firebase_admin.auth import InvalidIdTokenError
 import os
@@ -23,6 +24,12 @@ from django.db import transaction
 from django.utils import timezone
 import uuid
 from django.contrib.auth import get_user_model
+import graphql_jwt
+from graphql_jwt.middleware import JSONWebTokenMiddleware
+import jwt
+from datetime import datetime, timedelta
+from telegram_verification.schema import validate_country_code, get_country_code
+from telegram_verification.models import TelegramVerification
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -142,6 +149,8 @@ class InitializeZkLogin(graphene.Mutation):
     error = graphene.String()
     maxEpoch = graphene.String()
     randomness = graphene.String()
+    authAccessToken = graphene.String()
+    authRefreshToken = graphene.String()
 
     @staticmethod
     def mutate(root, info, firebaseToken, providerToken, provider):
@@ -159,6 +168,12 @@ class InitializeZkLogin(graphene.Mutation):
                 logger.error(f"Firebase token verification failed: {str(e)}")
                 return InitializeZkLogin(success=False, error="Invalid Firebase token")
 
+            # Validate firebase_uid
+            if not firebase_uid:
+                logger.error("firebase_uid is blank or None! Cannot create or fetch user.")
+                return InitializeZkLogin(success=False, error="firebase_uid is missing from Firebase token.")
+            logger.info(f"Proceeding to get_or_create user with firebase_uid: {firebase_uid}")
+
             # Get or create User
             User = get_user_model()
             
@@ -171,63 +186,82 @@ class InitializeZkLogin(graphene.Mutation):
                     first_name = name_parts[0]
                     last_name = ' '.join(name_parts[1:]) if len(name_parts) > 1 else ''
             
-            user, created = User.objects.get_or_create(
-                username=firebase_uid,
-                defaults={
-                    'email': email,
-                    'first_name': first_name,
-                    'last_name': last_name
-                }
-            )
+            # Generate a unique random UUID for username
+            max_attempts = 5
+            for attempt in range(max_attempts):
+                random_username = f"user_{uuid.uuid4().hex[:8]}"  # Shorter, more readable username
+                if not User.objects.filter(username=random_username).exists():
+                    break
+            else:
+                logger.error("Failed to generate a unique username after multiple attempts.")
+                return InitializeZkLogin(success=False, error="Could not generate a unique username. Please try again.")
 
-            # Get or create user profile
-            user_profile, created = UserProfile.objects.get_or_create(
-                user=user,
-                defaults={}
-            )
-
-            # Verify provider token
-            try:
-                if provider == 'google':
-                    response = requests.get(
-                        f'https://oauth2.googleapis.com/tokeninfo?id_token={providerToken}'
+            with transaction.atomic():
+                # First, try to get the user by firebase_uid
+                try:
+                    user = User.objects.get(firebase_uid=firebase_uid)
+                    logger.info(f"Found existing user: id={user.id}, username={user.username}, auth_token_version={user.auth_token_version}")
+                except User.DoesNotExist:
+                    # If user doesn't exist, create a new one
+                    user = User.objects.create(
+                        username=random_username,
+                        email=email,
+                        first_name=first_name,
+                        last_name=last_name,
+                        firebase_uid=firebase_uid,
+                        is_active=True
                     )
-                    response.raise_for_status()
-                    token_data = response.json()
-                elif provider == 'apple':
-                    parts = providerToken.split('.')
-                    if len(parts) != 3:
-                        raise ValueError("Invalid JWT format")
-                    payload = json.loads(base64.b64decode(parts[1] + '=' * (-len(parts[1]) % 4)).decode('utf-8'))
-                else:
-                    return InitializeZkLogin(success=False, error="Invalid provider")
-                
-                logger.info(f"Provider token verified")
-            except Exception as e:
-                logger.error(f"Provider token verification failed: {str(e)}")
-                return InitializeZkLogin(success=False, error="Invalid provider token")
+                    logger.info(f"Created new user: id={user.id}, username={user.username}")
 
-            # Get current epoch from Sui
-            try:
+                # Generate tokens using JWT directly
+                access_token_payload = {
+                    'user_id': user.id,
+                    'exp': datetime.utcnow() + timedelta(hours=1),  # 1 hour expiration
+                    'origIat': datetime.utcnow().timestamp(),
+                    'type': 'access',
+                    'auth_token_version': user.auth_token_version
+                }
+                token = jwt.encode(
+                    access_token_payload,
+                    settings.SECRET_KEY,
+                    algorithm='HS256'
+                )
+                logger.info(f"Generated access token with expiration: {access_token_payload['exp']}")
+
+                # Create refresh token
+                refresh_token_payload = {
+                    'user_id': user.id,
+                    'exp': datetime.utcnow() + timedelta(days=365),  # One year expiration
+                    'origIat': datetime.utcnow().timestamp(),
+                    'type': 'refresh',
+                    'auth_token_version': user.auth_token_version
+                }
+                refresh_token = jwt.encode(
+                    refresh_token_payload,
+                    settings.SECRET_KEY,
+                    algorithm='HS256'
+                )
+                logger.info(f"Generated refresh token with expiration: {refresh_token_payload['exp']}")
+
+                # Get current epoch
                 current_epoch = get_current_epoch()
-                logger.info(f"Retrieved current epoch: {current_epoch}")
-            except Exception as e:
-                logger.error(f"Failed to get current epoch: {str(e)}")
-                return InitializeZkLogin(success=False, error="Failed to get current epoch")
+                max_epoch = str(current_epoch + 100)  # Set max epoch to 100 epochs from now
 
-            # Generate randomness
-            randomness = secrets.token_bytes(32)
-            randomness_b64 = base64.b64encode(randomness).decode('utf-8')
-            logger.info(f"Generated randomness: {randomness_b64}")
+                # Generate randomness (32 bytes)
+                randomness_bytes = secrets.token_bytes(32)  # Generate 32 random bytes
+                randomness = base64.b64encode(randomness_bytes).decode('utf-8')  # Convert to base64 string
 
             return InitializeZkLogin(
                 success=True,
-                maxEpoch=str(current_epoch + 2),  # Allow for 2 epochs of drift
-                randomness=randomness_b64
+                    maxEpoch=max_epoch,
+                    randomness=randomness,
+                    authAccessToken=token,
+                    authRefreshToken=refresh_token
             )
 
         except Exception as e:
-            logger.error(f"Unexpected error in initialize_zk_login: {str(e)}")
+            logger.error(f"Error in InitializeZkLogin: {str(e)}")
+            logger.error(traceback.format_exc())
             return InitializeZkLogin(success=False, error=str(e))
 
 class FinalizeZkLoginInput(graphene.InputObjectType):
@@ -246,6 +280,7 @@ class FinalizeZkLoginPayload(graphene.ObjectType):
     zkProof = graphene.Field(ProofPointsType)
     suiAddress = graphene.String()
     error = graphene.String()
+    isPhoneVerified = graphene.Boolean()
 
 class FinalizeZkLogin(graphene.Mutation):
     class Arguments:
@@ -267,8 +302,8 @@ def resolve_finalize_zk_login(self, info, input):
             decoded_token = auth.verify_id_token(input.firebaseToken)
             firebase_uid = decoded_token.get('uid')
             
-            # Find the user profile by the user's username (which is set to Firebase UID)
-            profile = UserProfile.objects.get(user__username=firebase_uid)
+            # Find the user profile by firebase_uid field
+            profile = UserProfile.objects.get(user__firebase_uid=firebase_uid)
             logger.info("Found user profile for Firebase UID: %s", firebase_uid)
         except UserProfile.DoesNotExist:
             logger.error("User profile not found for Firebase UID: %s", firebase_uid)
@@ -332,10 +367,20 @@ def resolve_finalize_zk_login(self, info, input):
             profile.save()
             logger.info("Updated user profile with Sui address: %s", result['suiAddress'])
 
+            # Verify the Sui address was saved
+            profile.refresh_from_db()
+            if not profile.sui_address:
+                logger.error("Failed to save Sui address to profile")
+                return FinalizeZkLoginPayload(
+                    success=False,
+                    error="Failed to save Sui address"
+                )
+
             return FinalizeZkLoginPayload(
                 success=True,
                 zkProof=ProofPointsType(**result['proof']),
-                suiAddress=result['suiAddress']
+                suiAddress=profile.sui_address,  # Use the saved address from the profile
+                isPhoneVerified=bool(profile.user.phone_number and profile.user.phone_country)  # Check if both phone number and country code are set
             )
 
         except requests.exceptions.RequestException as e:
@@ -413,9 +458,141 @@ def generate_ephemeral_keypair():
         'public_key': verify_key.encode()
     })
 
+class InitiateTelegramVerification(graphene.Mutation):
+    class Arguments:
+        phoneNumber = graphene.String(required=True)
+        countryCode = graphene.String(required=True)
+
+    class Meta:
+        description = "Initiate Telegram verification process"
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @staticmethod
+    def mutate(root, info, phoneNumber, countryCode):
+        try:
+            # Check if user is authenticated
+            if not info.context.user.is_authenticated:
+                logger.error("User not authenticated")
+                return InitiateTelegramVerification(
+                    success=False,
+                    error="Authentication required"
+                )
+
+            # Log user details from context
+            user = info.context.user
+            logger.info(f"User from context - ID: {user.id}, Username: {user.username}, Is authenticated: {user.is_authenticated}")
+
+            # Validate country code
+            if not validate_country_code(countryCode):
+                logger.error(f"Invalid country code: {countryCode}")
+                return InitiateTelegramVerification(
+                    success=False,
+                    error="Invalid country code"
+                )
+
+            # Get numeric country code
+            numeric_code = get_country_code(countryCode)
+            if not numeric_code:
+                logger.error(f"Could not find numeric code for ISO: {countryCode}")
+                return InitiateTelegramVerification(
+                    success=False,
+                    error="Invalid country code"
+                )
+
+            # Format phone number to E.164
+            formatted_phone = f"+{numeric_code}{phoneNumber}"
+            logger.info(f"Formatted phone number: {formatted_phone}")
+
+            # Check if user exists in database
+            try:
+                db_user = User.objects.get(id=user.id)
+                logger.info(f"Found user in database - ID: {db_user.id}, Username: {db_user.username}")
+                user = db_user  # Use the database user
+            except User.DoesNotExist:
+                logger.error(f"User not found in database: id={user.id}")
+                return InitiateTelegramVerification(
+                    success=False,
+                    error="User not found. Please log in again."
+                )
+
+            # Get Telegram API token from settings
+            TELEGRAM_GATEWAY_TOKEN = settings.TELEGRAM_API_TOKEN
+            logger.info(f"Telegram API Token available: {bool(TELEGRAM_GATEWAY_TOKEN)}")
+            ttl = 600  # 10 minutes
+
+            logger.info(f"Initiating Telegram verification for phone number: {formatted_phone}")
+            logger.info(f"Using Telegram Gateway Token: {TELEGRAM_GATEWAY_TOKEN[:10] if TELEGRAM_GATEWAY_TOKEN else 'None'}...")
+
+            try:
+                request_url = 'https://gatewayapi.telegram.org/sendVerificationMessage'
+                request_headers = {'Authorization': f'Bearer {TELEGRAM_GATEWAY_TOKEN}'}
+                request_data = {
+                    'phone_number': formatted_phone,
+                    'ttl': ttl,
+                    'code_length': 6  # Set code length to 6 digits
+                }
+
+                logger.info('Sending request to Telegram API:')
+                logger.info(f'URL: {request_url}')
+                logger.info(f'Headers: {request_headers}')
+                logger.info(f'Data: {request_data}')
+
+                response = requests.post(
+                    request_url,
+                    headers=request_headers,
+                    json=request_data
+                )
+
+                logger.info(f'Telegram API Response Status Code: {response.status_code}')
+                logger.info(f'Telegram API Response Headers: {dict(response.headers)}')
+                logger.info(f'Telegram API Response Body: {response.text}')
+
+                data = response.json()
+                if not data.get('ok'):
+                    error_msg = data.get('error', 'Unknown error')
+                    logger.error(f'Telegram API error: {error_msg}')
+                    return InitiateTelegramVerification(success=False, error=error_msg)
+
+                request_id = data['result']['request_id']
+                expires_at = timezone.now() + timedelta(seconds=ttl)
+
+                logger.info('Creating TelegramVerification record:')
+                logger.info(f'Request ID: {request_id}')
+                logger.info(f'Expires at: {expires_at}')
+
+                TelegramVerification.objects.create(
+                    user=user,
+                    phone_number=formatted_phone,
+                    request_id=request_id,
+                    expires_at=expires_at
+                )
+
+                logger.info('Telegram verification initiated successfully')
+                return InitiateTelegramVerification(success=True, error=None)
+
+            except Exception as e:
+                logger.exception(f'Failed to send verification: {str(e)}')
+                return InitiateTelegramVerification(
+                    success=False,
+                    error=f"Failed to send verification: {str(e)}"
+                )
+
+        except Exception as e:
+            logger.error(f"Error in initiate_telegram_verification: {str(e)}")
+            return InitiateTelegramVerification(
+                success=False,
+                error=str(e)
+            )
+
 class Mutation(graphene.ObjectType):
     initialize_zk_login = InitializeZkLogin.Field()
     finalize_zk_login = FinalizeZkLogin.Field()
+    token_auth = graphql_jwt.ObtainJSONWebToken.Field()
+    verify_token = graphql_jwt.Verify.Field()
+    refresh_token = graphql_jwt.Refresh.Field()
+    initiate_telegram_verification = InitiateTelegramVerification.Field()
 
 class Query(graphene.ObjectType):
     zk_login_proof = graphene.Field(ZkLoginProofType, id=graphene.ID())
@@ -439,4 +616,12 @@ class Query(graphene.ObjectType):
             logger.error(f"Error getting current epoch: {str(e)}")
             raise Exception("Failed to get current epoch")
 
-schema = graphene.Schema(query=Query, mutation=Mutation) 
+# Create the schema
+schema = graphene.Schema(
+    query=Query,
+    mutation=Mutation,
+    types=[UserProfileType, ZkLoginProofType]
+)
+
+# Add JWT middleware
+schema.middleware = [JSONWebTokenMiddleware()] 

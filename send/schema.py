@@ -42,7 +42,8 @@ class CreateTransaction(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, input):
-        if not info.context.user.is_authenticated:
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
             return CreateTransaction(
                 transaction=None,
                 success=False,
@@ -55,7 +56,7 @@ class CreateTransaction(graphene.Mutation):
             validate_recipient(input.recipient_address)
 
             # Get the sender's Sui address from their profile
-            sender_address = info.context.user.sui_address
+            sender_address = user.sui_address
             if not sender_address:
                 return CreateTransaction(
                     transaction=None,
@@ -71,7 +72,7 @@ class CreateTransaction(graphene.Mutation):
 
             # Create the transaction
             transaction = Transaction.objects.create(
-                sender_user=info.context.user,
+                sender_user=user,
                 recipient_user=recipient_user,
                 sender_address=sender_address,
                 recipient_address=input.recipient_address,
@@ -110,15 +111,21 @@ class Query(graphene.ObjectType):
 
     def resolve_transaction(self, info, id):
         # Ensure users can only view their own transactions
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return None
         return Transaction.objects.get(
             id=id,
-            sender_user=info.context.user
+            sender_user=user
         )
 
     def resolve_transactions(self, info):
         # Users can only view their own transactions
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return []
         return Transaction.objects.filter(
-            sender_user=info.context.user
+            sender_user=user
         )
 
 class Mutation(graphene.ObjectType):
