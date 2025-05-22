@@ -25,6 +25,31 @@ Confío helps people access stable dollars, send remittances, and pay each other
 - ⚡️ Enjoy gasless (sponsored) transactions
 - 🪙 Interact directly with Sui-based smart contracts
 
+## 🔐 Authentication & Security
+
+### Authentication Flow
+1. **Social Sign-In**
+   - Sign in with Google or Apple
+   - Firebase Authentication handles OAuth flow
+   - Secure token exchange with backend
+
+2. **Phone Verification**
+   - Required for enhanced security
+   - Telegram-based verification system
+   - Country code support for LATAM
+
+3. **zkLogin Integration**
+   - Zero-knowledge proof authentication
+   - Secure key derivation and storage
+   - Automatic proof refresh before expiration
+
+### Security Features
+- 🔒 Secure credential storage using Keychain
+- 🔄 Automatic token refresh and rotation
+- 🧹 Complete data cleanup on sign out
+- 🔐 JWT-based API authentication
+- 🛡️ Protection against replay attacks
+
 ---
 
 ## 🧱 Tech Stack
@@ -117,12 +142,25 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── schema.py      # Root GraphQL schema
 │   ├── celery.py      # Celery configuration
 │   └── views.py       # View functions
-├── credentials/       # Encrypted credentials (git-crypt)
+
+├── auth/             # Authentication module
+│   ├── models.py     # Auth-related models
+│   ├── schema.py     # Auth GraphQL schema
+│   ├── jwt.py        # JWT token handling
+│   └── middleware.py # Auth middleware
+
+├── telegram_verification/  # Phone verification system
+│   ├── models.py     # Verification models
+│   ├── schema.py     # Verification GraphQL schema
+│   ├── views.py      # Verification endpoints
+│   └── country_codes.py # Country codes mapping
+
 ├── prover/            # Server-side proof verification
 │   ├── models.py      # Database models for storing proof verification results
 │   ├── schema.py      # GraphQL schema and resolvers for proof verification endpoints
 │   ├── serializers.py # Data serialization for proof verification
 │   └── tests/         # Test cases for proof verification
+
 ├── prover-service/    # Standalone service for proof generation and verification
 │   ├── index.js      # Main entry point for the prover service
 │   ├── prover.js     # Core proof generation and verification logic
@@ -138,15 +176,15 @@ This is a **monolithic repository** containing the full Confío stack:
 │           ├── start: Run the service
 │           ├── test: Run tests
 │           └── lint: Run the linter
+
 ├── users/             # User authentication and management
 │   ├── models.py      # User models
 │   ├── schema.py      # GraphQL schema and resolvers
 │   ├── serializers.py # User data serialization
 │   ├── country_codes.py # Country codes mapping [name, code, iso]
+│   ├── jwt.py         # JWT token management
+│   ├── middleware.py  # User authentication middleware
 │   └── tests/         # User tests
-├── manage.py          # Django management script
-├── requirements.txt   # Python dependencies
-└── celery.py         # Celery worker configuration
 
 ├── apps/                    # React Native mobile application
 │   ├── android/            # Android-specific native code and configurations
@@ -160,11 +198,18 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── src/                # React Native source code
 │   │   ├── apollo/        # GraphQL client configuration and queries
 │   │   ├── assets/        # Static assets (images, fonts, etc.)
+│   │   │   └── svg/       # SVG assets (logos, icons)
 │   │   ├── components/    # Reusable React components
 │   │   ├── config/        # Application configuration
+│   │   ├── contexts/      # React contexts (Auth, etc.)
 │   │   ├── hooks/         # Custom React hooks
 │   │   ├── screens/       # Screen components
+│   │   │   ├── AuthScreen.tsx        # Authentication screen
+│   │   │   ├── PhoneVerificationScreen.tsx  # Phone verification
+│   │   │   └── HomeScreen.tsx        # Main app screen
 │   │   ├── services/      # API and business logic services
+│   │   │   ├── authService.ts    # Authentication service
+│   │   │   └── ...        # Other services
 │   │   ├── types/         # TypeScript type definitions
 │   │   ├── utils/         # Utility functions
 │   │   │   ├── countries.ts  # Country codes mapping [name, code, iso, flag]
@@ -176,6 +221,7 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── firebase.json      # Firebase configuration
 │   ├── metro.config.js    # Metro bundler configuration
 │   └── package.json       # Node.js dependencies
+
 ├── contracts/    # Sui Move smart contracts
 │   ├── cusd/     # CUSD stablecoin implementation
 │   │   ├── sources/  # Move source files
@@ -189,7 +235,10 @@ This is a **monolithic repository** containing the full Confío stack:
 │       │   └── confio.move            # CONFIO governance token implementation
 │       ├── Move.toml # Package configuration
 │       └── Move.lock # Dependency lock file
-└── README.md
+
+├── manage.py          # Django management script
+├── requirements.txt   # Python dependencies
+└── celery.py         # Celery worker configuration
 ```
 
 ## 🚀 Development Setup
