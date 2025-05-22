@@ -22,3 +22,4 @@ python-dotenv==1.0.0
 psycopg[binary]==3.2.6
 python-decouple==3.8
 whitenoise==6.9.0
+django-graphql-jwt

@@ -3,6 +3,7 @@ apply plugin: "com.android.application"
 apply plugin: "com.facebook.react"          // ← must come *before* your `react {}` block
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.google.gms.google-services"
+apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
 
 // 2) point at your JS root (where apps/node_modules & package.json live)
 def jsRoot = file("$projectDir/../..")

@@ -1,3 +1,9 @@
+import os
+
+# Ensure the logs directory exists
+LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+os.makedirs(LOGS_DIR, exist_ok=True)
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -19,7 +25,7 @@ LOGGING = {
         },
         'file': {
             'class': 'logging.FileHandler',
-            'filename': 'django-debug.log',
+            'filename': os.path.join(LOGS_DIR, 'django-debug.log'),
             'formatter': 'verbose',
             'level': 'DEBUG',
         },
@@ -28,11 +34,12 @@ LOGGING = {
         '': {  # Root logger
             'handlers': ['console', 'file'],
             'level': 'DEBUG',
+            'propagate': True,
         },
         'django': {
             'handlers': ['console', 'file'],
             'level': 'DEBUG',
-            'propagate': False,
+            'propagate': True,
         },
         'django.db.backends': {
             'handlers': ['console'],
@@ -42,7 +49,12 @@ LOGGING = {
         'graphene': {
             'handlers': ['console', 'file'],
             'level': 'DEBUG',
-            'propagate': False,
+            'propagate': True,
+        },
+        'telegram_verification': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+            'propagate': True,
         },
     },
 } 

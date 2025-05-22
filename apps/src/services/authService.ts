@@ -36,8 +36,11 @@ interface StoredZkLogin {
   initJwt: string;       // original JWT from sign-in
 }
 
-const KEYCHAIN_SERVICE = 'com.confio.zklogin';
-const KEYCHAIN_USERNAME = 'zkLoginData';
+export const ZKLOGIN_KEYCHAIN_SERVICE = 'com.confio.zklogin';
+export const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
+const ZKLOGIN_KEYCHAIN_USERNAME = 'zkLoginData';
+export const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
+export const REFRESH_KEYCHAIN_USERNAME = 'refresh_tokens';
 
 export class AuthService {
   private static instance: AuthService;
@@ -208,6 +211,24 @@ export class AuthService {
       await this.storeSensitiveData(fin, salt, decodedJwt.sub, GOOGLE_CLIENT_IDS.production.web, maxEpochNum, init.randomness, idToken);
       console.log('Sensitive data stored successfully');
 
+      // Store Django JWT tokens for authenticated requests using Keychain
+      if (init.auth_access_token) {
+        await Keychain.setGenericPassword(AUTH_KEYCHAIN_USERNAME, init.auth_access_token, {
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME,
+          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+        });
+        console.log('Stored access token in Keychain');
+      }
+      if (init.auth_refresh_token) {
+        await Keychain.setGenericPassword(AUTH_KEYCHAIN_USERNAME, init.auth_refresh_token, {
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: REFRESH_KEYCHAIN_USERNAME,
+          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+        });
+        console.log('Stored refresh token in Keychain');
+      }
+
       // Split display name into first and last name
       const [firstName, ...lastNameParts] = user.displayName?.split(' ') || [];
       const lastName = lastNameParts.join(' ');
@@ -220,7 +241,11 @@ export class AuthService {
           lastName: lastName || '',
           photoURL: user.photoURL 
         },
-        zkLoginData: { zkProof: fin.zkProof, suiAddress: fin.suiAddress }
+        zkLoginData: { 
+          zkProof: fin.zkProof, 
+          suiAddress: fin.suiAddress,
+          isPhoneVerified: fin.isPhoneVerified 
+        }
       };
       console.log('Sign-in process completed successfully:', result);
       return result;
@@ -238,7 +263,7 @@ export class AuthService {
   async getStoredZkLoginData() {
     try {
       const credentials = await Keychain.getGenericPassword({
-        service: KEYCHAIN_SERVICE
+        service: ZKLOGIN_KEYCHAIN_SERVICE
       });
 
       if (!credentials) {
@@ -255,7 +280,7 @@ export class AuthService {
   async clearZkLoginData() {
     try {
       await Keychain.resetGenericPassword({
-        service: KEYCHAIN_SERVICE,
+        service: ZKLOGIN_KEYCHAIN_SERVICE,
       });
     } catch (error) {
       console.error('Error clearing zkLogin data:', error);
@@ -364,6 +389,22 @@ export class AuthService {
         identityToken
       );
 
+      // Store Django JWT tokens for authenticated requests using Keychain
+      if (finalizeData.finalizeZkLogin.auth_access_token) {
+        await Keychain.setGenericPassword(AUTH_KEYCHAIN_USERNAME, finalizeData.finalizeZkLogin.auth_access_token, {
+          service: AUTH_KEYCHAIN_SERVICE,
+          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+        });
+        console.log('Stored access token in Keychain');
+      }
+      if (finalizeData.finalizeZkLogin.auth_refresh_token) {
+        await Keychain.setGenericPassword(AUTH_KEYCHAIN_USERNAME, finalizeData.finalizeZkLogin.auth_refresh_token, {
+          service: AUTH_KEYCHAIN_SERVICE,
+          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+        });
+        console.log('Stored refresh token in Keychain');
+      }
+
       // Split display name into first and last name
       const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
       const lastName = lastNameParts.join(' ');
@@ -377,7 +418,8 @@ export class AuthService {
         },
         zkLoginData: {
           zkProof: finalizeData.finalizeZkLogin.zkProof,
-          suiAddress: finalizeData.finalizeZkLogin.suiAddress
+          suiAddress: finalizeData.finalizeZkLogin.suiAddress,
+          isPhoneVerified: finalizeData.finalizeZkLogin.isPhoneVerified
         }
       };
     } catch (error) {
@@ -457,7 +499,7 @@ export class AuthService {
   private async rehydrateZkLoginData() {
     try {
       const credentials = await Keychain.getGenericPassword({
-        service: KEYCHAIN_SERVICE,
+        service: ZKLOGIN_KEYCHAIN_SERVICE,
       });
 
       if (!credentials) {
@@ -583,32 +625,37 @@ export class AuthService {
       throw new Error('Sui keypair not initialized');
     }
 
+    // Log the incoming proof structure
+    console.log('Incoming proof structure:', {
+      hasZkProof: !!proof.zkProof,
+      hasSuiAddress: !!proof.suiAddress,
+      success: proof.success,
+      error: proof.error,
+      proof: proof
+    });
+
+    // Check for server-side errors
+    if (!proof.success) {
+      throw new Error(proof.error || 'Server error during zkLogin finalization');
+    }
+
     // Get the private key (first 32 bytes of the secret key)
     const secretKey = this.suiKeypair.getSecretKey().slice(0, 32);
     const secretKeyB64 = btoa(String.fromCharCode.apply(null, Array.from(secretKey).map(Number)));
 
-    console.log('Storing secret key:', {
-      originalLength: secretKey.length,
-      base64Length: secretKeyB64.length,
-      firstFewBytes: Array.from(secretKey.slice(0, 4))
-    });
-
-    // Log the incoming proof structure
-    console.log('Storing proof with structure:', {
-      hasZkProof: !!proof.zkProof,
-      bPointsType: typeof proof.zkProof?.b,
-      isArray: Array.isArray(proof.zkProof?.b),
-      firstPoint: proof.zkProof?.b?.[0],
-      firstPointType: typeof proof.zkProof?.b?.[0],
-      suiAddress: proof.suiAddress
-    });
+    // Ensure we have a valid Sui address
+    if (!proof.suiAddress) {
+      throw new Error('No Sui address provided in proof');
+    }
 
     // Structure the zkProof data with only required fields
     const structuredProof = {
       zkProof: proof.zkProof,
       subject,
       clientId,
-      suiAddress: proof.suiAddress
+      suiAddress: proof.suiAddress,  // Store the Sui address at the top level
+      extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
+      userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0)))
     };
 
     // Store the proof with proper structure
@@ -623,30 +670,11 @@ export class AuthService {
       initJwt
     };
 
-    // Log the final structure being saved to Keychain
-    console.log('Final structure being saved to Keychain:', {
-      hasSalt: !!toSave.salt,
-      hasSubject: !!toSave.subject,
-      hasClientId: !!toSave.clientId,
-      hasMaxEpoch: !!toSave.maxEpoch,
-      hasZkProof: !!toSave.zkProof,
-      hasSecretKey: !!toSave.secretKey,
-      hasInitRandomness: !!toSave.initRandomness,
-      hasInitJwt: !!toSave.initJwt,
-      secretKeyLength: toSave.secretKey.length,
-      zkProofStructure: {
-        hasZkProof: !!toSave.zkProof.zkProof,
-        hasSubject: !!toSave.zkProof.subject,
-        hasClientId: !!toSave.zkProof.clientId,
-        hasSuiAddress: !!toSave.zkProof.suiAddress
-      }
-    });
-
     await Keychain.setGenericPassword(
-      KEYCHAIN_USERNAME,
+      ZKLOGIN_KEYCHAIN_USERNAME,
       JSON.stringify(toSave),
       {
-        service: KEYCHAIN_SERVICE,
+        service: ZKLOGIN_KEYCHAIN_SERVICE,
         accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
       }
     );
@@ -656,7 +684,7 @@ export class AuthService {
   private async loadSensitiveData() {
     try {
       const credentials = await Keychain.getGenericPassword({
-        service: 'com.Confio.Confio.zkLogin',
+        service: ZKLOGIN_KEYCHAIN_SERVICE,
       });
 
       if (credentials) {
@@ -730,11 +758,32 @@ export class AuthService {
       this.firebaseIsInitialized = false;
       console.log('Local state cleared');
       
-      // 4. Clear stored credentials
-      await Keychain.resetGenericPassword({
-        service: KEYCHAIN_SERVICE,
-      });
-      console.log('Stored credentials cleared');
+      // 4. Clear all stored credentials from Keychain
+      try {
+        // Clear zkLogin data
+        await Keychain.resetGenericPassword({
+          service: ZKLOGIN_KEYCHAIN_SERVICE,
+          username: ZKLOGIN_KEYCHAIN_USERNAME
+        });
+        console.log('Cleared zkLogin data from Keychain');
+
+        // Clear auth tokens
+        await Keychain.resetGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME
+        });
+        console.log('Cleared auth tokens from Keychain');
+
+        // Clear refresh tokens
+        await Keychain.resetGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: REFRESH_KEYCHAIN_USERNAME
+        });
+        console.log('Cleared refresh tokens from Keychain');
+      } catch (keychainError) {
+        console.error('Error clearing Keychain:', keychainError);
+        // Continue with sign out even if Keychain clearing fails
+      }
       
       console.log('Sign out process completed successfully');
     } catch (error) {
@@ -749,12 +798,22 @@ export class AuthService {
       this.maxEpoch = null;
       this.firebaseIsInitialized = false;
       
+      // Attempt to clear all Keychain data even if previous operations failed
       try {
         await Keychain.resetGenericPassword({
-          service: KEYCHAIN_SERVICE,
+          service: ZKLOGIN_KEYCHAIN_SERVICE,
+          username: ZKLOGIN_KEYCHAIN_USERNAME
+        });
+        await Keychain.resetGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME
+        });
+        await Keychain.resetGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: REFRESH_KEYCHAIN_USERNAME
         });
       } catch (keychainError) {
-        console.error('Error clearing Keychain:', keychainError);
+        console.error('Error clearing Keychain during error recovery:', keychainError);
       }
     }
   }
@@ -796,7 +855,7 @@ export class AuthService {
     try {
       // Get stored data to access initJwt and initRandomness
       const credentials = await Keychain.getGenericPassword({
-        service: KEYCHAIN_SERVICE
+        service: ZKLOGIN_KEYCHAIN_SERVICE
       });
 
       if (!credentials) {

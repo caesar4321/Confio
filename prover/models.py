@@ -7,18 +7,6 @@ from django.contrib.auth import get_user_model
 def generate_proof_id():
     return uuid.uuid4().hex
 
-class UserProfile(models.Model):
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='zk_profile'
-    )
-    sui_address = models.CharField(max_length=255, null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return str(self.user)
-
 class ZkLoginProof(models.Model):
     proof_id = models.CharField(
         max_length=32,

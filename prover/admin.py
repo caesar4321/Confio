@@ -9,6 +9,5 @@ class UserProfileAdmin(admin.ModelAdmin):
 
 @admin.register(ZkLoginProof)
 class ZkLoginProofAdmin(admin.ModelAdmin):
-    list_display = ('proof_id', 'profile', 'max_epoch', 'created_at')
-    search_fields = ('proof_id', 'profile__user__username')
-    readonly_fields = ('created_at',)
+    list_display = ('id',)  # Minimal display for debugging
+    # search_fields and readonly_fields can be added back after debugging

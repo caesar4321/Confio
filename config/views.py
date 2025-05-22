@@ -57,7 +57,13 @@ def graphql_view(request):
 		except json.JSONDecodeError as e:
 			logger.error(f"Failed to parse request body: {str(e)}")
 			return JsonResponse({
-				'errors': [{'message': 'Invalid JSON in request body'}]
+				'errors': [{
+					'message': 'Invalid JSON in request body',
+					'extensions': {
+						'code': 'INVALID_JSON',
+						'details': str(e)
+					}
+				}]
 			}, status=400)
 		
 		# Process the request
@@ -160,30 +166,36 @@ def generate_zk_proof(request):
 		}, status=500)
 
 class DebugGraphQLView(GraphQLView):
-	def dispatch(self, request, *args, **kwargs):
-		try:
-			if request.content_type == "application/json":
-				data = json.loads(request.body)
-				logger.info(f"GraphQL Request Body: {json.dumps(data, indent=2)}")
-				if 'variables' in data:
-					logger.info(f"GraphQL Variables: {json.dumps(data['variables'], indent=2)}")
-			
-			result = super().dispatch(request, *args, **kwargs)
-			
-			if hasattr(result, 'content'):
-				try:
-					content = json.loads(result.content)
-					logger.info(f"GraphQL Response: {json.dumps(content, indent=2)}")
-				except json.JSONDecodeError:
-					logger.info(f"Raw Response Content: {result.content}")
-			
-			return result
-			
-		except Exception as e:
-			logger.error(f"GraphQL View Error: {str(e)}", exc_info=True)
-			return JsonResponse({
-				"errors": [{"message": str(e)}]
-			}, status=400)
+	def execute_graphql_request(self, *args, **kwargs):
+		result = super().execute_graphql_request(*args, **kwargs)
+		request = kwargs.get('request')
+		if request:
+			auth_header = request.headers.get('Authorization', 'No Authorization header')
+			logger.info(f"Request Authorization header: {auth_header}")
+			try:
+				body = json.loads(request.body.decode('utf-8'))
+				logger.info(f"Request body: {json.dumps(body, indent=2)}")
+				if body.get('query'):
+					is_allowed = any(
+						mutation in body['query']
+						for mutation in settings.GRAPHQL_JWT['JWT_ALLOW_ANY_CLASSES']
+					)
+					if is_allowed:
+						logger.info("This is an allowed mutation, skipping user check")
+						return result
+			except Exception as e:
+				logger.info(f"Could not parse request body as JSON: {e}")
+			user = getattr(request, 'user', None)
+			if user is None:
+				logger.info("No user found in request")
+				# Instead of returning result, raise an error for debugging
+				raise Exception("No user found in request. Debug mode: revealing error.")
+			is_authenticated = getattr(user, 'is_authenticated', False)
+			is_anonymous = getattr(user, 'is_anonymous', True)
+			logger.info(f"Request user: {user}")
+			logger.info(f"Request user is_authenticated: {is_authenticated}")
+			logger.info(f"Request user is_anonymous: {is_anonymous}")
+		return result
 
 class LegalPageView(TemplateView):
 	template_name = None

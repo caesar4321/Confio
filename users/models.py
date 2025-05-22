@@ -13,6 +13,7 @@ class User(AbstractUser):
         help_text="User's country ISO code for phone number"
     )
     phone_number = models.CharField(max_length=15, blank=True, null=True, help_text="User's phone number without country code")
+    auth_token_version = models.IntegerField(default=1, help_text="Version number for JWT tokens. Incrementing this invalidates all existing tokens.")
     groups = models.ManyToManyField(
         'auth.Group',
         verbose_name='groups',
@@ -52,6 +53,11 @@ class User(AbstractUser):
             if country[2] == self.phone_country:
                 return country[0]
         return None
+
+    def increment_auth_token_version(self):
+        """Increment the auth token version to invalidate all existing tokens"""
+        self.auth_token_version += 1
+        self.save(update_fields=['auth_token_version'])
 
 class UserProfile(models.Model):
     user = models.OneToOneField(
