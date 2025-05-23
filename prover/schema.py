@@ -376,18 +376,23 @@ def resolve_finalize_zk_login(self, info, input):
                     error="Failed to save Sui address"
                 )
 
+            # Calculate is_phone_verified based on phone_number and phone_country
+            is_phone_verified = bool(profile.user.phone_number and profile.user.phone_country)
+            logger.info(f"Phone verification status: {is_phone_verified} (phone_number: {bool(profile.user.phone_number)}, phone_country: {bool(profile.user.phone_country)})")
+
             return FinalizeZkLoginPayload(
                 success=True,
-                zkProof=ProofPointsType(**result['proof']),
-                suiAddress=profile.sui_address,  # Use the saved address from the profile
-                isPhoneVerified=bool(profile.user.phone_number and profile.user.phone_country)  # Check if both phone number and country code are set
+                zkProof=result['proof'],
+                suiAddress=result['suiAddress'],
+                isPhoneVerified=is_phone_verified
             )
 
-        except requests.exceptions.RequestException as e:
-            logger.error("Prover service request failed: %s", str(e))
+        except Exception as e:
+            logger.error(f"Error in finalize_zk_login: {str(e)}")
+            logger.error(traceback.format_exc())
             return FinalizeZkLoginPayload(
                 success=False,
-                error=f"Prover service request failed: {str(e)}"
+                error=str(e)
             )
 
     except Exception as e:

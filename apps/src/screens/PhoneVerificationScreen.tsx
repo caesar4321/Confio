@@ -23,6 +23,7 @@ import TelegramLogo from '../assets/svg/TelegramLogo.svg';
 import { countries, Country } from '../utils/countries';
 import { useMutation } from '@apollo/client';
 import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE } from '../apollo/queries';
+import { useAuth } from '../contexts/AuthContext';
 
 type RootStackParamList = {
   Auth: undefined;
@@ -34,6 +35,7 @@ type PhoneVerificationScreenNavigationProp = NativeStackNavigationProp<RootStack
 
 const PhoneVerificationScreen = () => {
   const navigation = useNavigation<PhoneVerificationScreenNavigationProp>();
+  const { handleSuccessfulLogin } = useAuth();
   const [phoneNumber, setPhoneNumber] = useState('');
   const [selectedCountry, setSelectedCountry] = useState<Country>(
     countries.find((c: Country) => c[0] === 'Venezuela') || countries[0]
@@ -123,13 +125,13 @@ const PhoneVerificationScreen = () => {
         });
         if (data.verifyTelegramCode.success) {
           Alert.alert('Success', 'Phone number verified!');
-          navigation.navigate('Home');
+          await handleSuccessfulLogin(true);
         } else {
           Alert.alert('Error', data.verifyTelegramCode.error || 'Verification failed');
         }
       } else if (verificationMethod === 'sms') {
         // TODO: Implement SMS verification once the mutation is available
-        navigation.navigate('Home');
+        await handleSuccessfulLogin(true);
       } else {
         Alert.alert('Error', 'Invalid verification method');
       }

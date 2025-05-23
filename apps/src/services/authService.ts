@@ -40,7 +40,6 @@ export const ZKLOGIN_KEYCHAIN_SERVICE = 'com.confio.zklogin';
 export const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const ZKLOGIN_KEYCHAIN_USERNAME = 'zkLoginData';
 export const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
-export const REFRESH_KEYCHAIN_USERNAME = 'refresh_tokens';
 
 export class AuthService {
   private static instance: AuthService;
@@ -164,6 +163,55 @@ export class AuthService {
         throw new Error('No data received from zkLogin initialization');
       }
 
+      // Store Django JWT tokens for authenticated requests using Keychain
+      if (init.authAccessToken) {
+        console.log('About to store tokens in Keychain:', {
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME,
+          hasAccessToken: !!init.authAccessToken,
+          hasRefreshToken: !!init.authRefreshToken,
+          accessTokenLength: init.authAccessToken?.length,
+          refreshTokenLength: init.authRefreshToken?.length
+        });
+
+        try {
+          await Keychain.setGenericPassword(
+            AUTH_KEYCHAIN_USERNAME,
+            JSON.stringify({
+              accessToken: init.authAccessToken,
+              refreshToken: init.authRefreshToken
+            }),
+            {
+              service: AUTH_KEYCHAIN_SERVICE,
+              username: AUTH_KEYCHAIN_USERNAME,
+              accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+            }
+          );
+
+          // Verify token was stored
+          const checkCredentials = await Keychain.getGenericPassword({
+            service: AUTH_KEYCHAIN_SERVICE,
+            username: AUTH_KEYCHAIN_USERNAME
+          });
+
+          console.log('JWT in Keychain right after saving:', {
+            hasCredentials: !!checkCredentials,
+            hasPassword: !!checkCredentials?.password,
+            passwordLength: checkCredentials?.password?.length
+          });
+
+          if (!checkCredentials?.password) {
+            throw new Error('Failed to verify token storage in Keychain');
+          }
+        } catch (error) {
+          console.error('Error storing or verifying tokens:', error);
+          throw error;
+        }
+      } else {
+        console.error('No auth tokens received from initializeZkLogin');
+        throw new Error('No auth tokens received from server');
+      }
+
       const maxEpochNum = Number(init.maxEpoch);
       if (isNaN(maxEpochNum)) {
         throw new Error('Invalid maxEpoch value received from server');
@@ -210,24 +258,6 @@ export class AuthService {
       console.log('Storing sensitive data...');
       await this.storeSensitiveData(fin, salt, decodedJwt.sub, GOOGLE_CLIENT_IDS.production.web, maxEpochNum, init.randomness, idToken);
       console.log('Sensitive data stored successfully');
-
-      // Store Django JWT tokens for authenticated requests using Keychain
-      if (init.auth_access_token) {
-        await Keychain.setGenericPassword(AUTH_KEYCHAIN_USERNAME, init.auth_access_token, {
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: AUTH_KEYCHAIN_USERNAME,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-        });
-        console.log('Stored access token in Keychain');
-      }
-      if (init.auth_refresh_token) {
-        await Keychain.setGenericPassword(AUTH_KEYCHAIN_USERNAME, init.auth_refresh_token, {
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: REFRESH_KEYCHAIN_USERNAME,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-        });
-        console.log('Stored refresh token in Keychain');
-      }
 
       // Split display name into first and last name
       const [firstName, ...lastNameParts] = user.displayName?.split(' ') || [];
@@ -344,6 +374,69 @@ export class AuthService {
         throw new Error('No data received from zkLogin initialization');
       }
 
+      // Store Django JWT tokens for authenticated requests using Keychain
+      if (initData.initializeZkLogin.authAccessToken) {
+        console.log('About to store tokens in Keychain (Apple):', {
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME,
+          hasAccessToken: !!initData.initializeZkLogin.authAccessToken,
+          hasRefreshToken: !!initData.initializeZkLogin.authRefreshToken,
+          accessTokenLength: initData.initializeZkLogin.authAccessToken?.length,
+          refreshTokenLength: initData.initializeZkLogin.authRefreshToken?.length
+        });
+
+        try {
+          await Keychain.setGenericPassword(
+            AUTH_KEYCHAIN_USERNAME,
+            JSON.stringify({
+              accessToken: initData.initializeZkLogin.authAccessToken,
+              refreshToken: initData.initializeZkLogin.authRefreshToken
+            }),
+            {
+              service: AUTH_KEYCHAIN_SERVICE,
+              username: AUTH_KEYCHAIN_USERNAME,
+              accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+            }
+          );
+
+          // Verify token was stored
+          const checkCredentials = await Keychain.getGenericPassword({
+            service: AUTH_KEYCHAIN_SERVICE,
+            username: AUTH_KEYCHAIN_USERNAME
+          });
+
+          console.log('JWT in Keychain right after saving (Apple):', {
+            hasCredentials: !!checkCredentials,
+            hasPassword: !!checkCredentials?.password,
+            passwordLength: checkCredentials?.password?.length,
+            rawCredentials: checkCredentials
+          });
+
+          if (!checkCredentials?.password) {
+            throw new Error('Failed to verify token storage in Keychain');
+          }
+
+          // Parse and verify the stored tokens
+          const storedTokens = JSON.parse(checkCredentials.password);
+          console.log('Stored tokens verification:', {
+            hasAccessToken: !!storedTokens.accessToken,
+            hasRefreshToken: !!storedTokens.refreshToken,
+            accessTokenLength: storedTokens.accessToken?.length,
+            refreshTokenLength: storedTokens.refreshToken?.length
+          });
+
+          if (!storedTokens.accessToken || !storedTokens.refreshToken) {
+            throw new Error('Invalid token format in stored data');
+          }
+        } catch (error) {
+          console.error('Error storing or verifying tokens:', error);
+          throw error;
+        }
+      } else {
+        console.error('No auth tokens received from initializeZkLogin');
+        throw new Error('No auth tokens received from server');
+      }
+
       const { maxEpoch, randomness: serverRandomness } = initData.initializeZkLogin;
       
       // Generate salt on client side
@@ -388,22 +481,6 @@ export class AuthService {
         serverRandomness,
         identityToken
       );
-
-      // Store Django JWT tokens for authenticated requests using Keychain
-      if (finalizeData.finalizeZkLogin.auth_access_token) {
-        await Keychain.setGenericPassword(AUTH_KEYCHAIN_USERNAME, finalizeData.finalizeZkLogin.auth_access_token, {
-          service: AUTH_KEYCHAIN_SERVICE,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-        });
-        console.log('Stored access token in Keychain');
-      }
-      if (finalizeData.finalizeZkLogin.auth_refresh_token) {
-        await Keychain.setGenericPassword(AUTH_KEYCHAIN_USERNAME, finalizeData.finalizeZkLogin.auth_refresh_token, {
-          service: AUTH_KEYCHAIN_SERVICE,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-        });
-        console.log('Stored refresh token in Keychain');
-      }
 
       // Split display name into first and last name
       const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
@@ -675,6 +752,7 @@ export class AuthService {
       JSON.stringify(toSave),
       {
         service: ZKLOGIN_KEYCHAIN_SERVICE,
+        username: ZKLOGIN_KEYCHAIN_USERNAME,
         accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
       }
     );
@@ -760,6 +838,17 @@ export class AuthService {
       
       // 4. Clear all stored credentials from Keychain
       try {
+        // Check tokens before clearing
+        const preReset = await Keychain.getGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME
+        });
+        console.log('JWT before reset:', {
+          hasCredentials: !!preReset,
+          hasPassword: !!preReset?.password,
+          passwordLength: preReset?.password?.length
+        });
+
         // Clear zkLogin data
         await Keychain.resetGenericPassword({
           service: ZKLOGIN_KEYCHAIN_SERVICE,
@@ -774,12 +863,20 @@ export class AuthService {
         });
         console.log('Cleared auth tokens from Keychain');
 
-        // Clear refresh tokens
-        await Keychain.resetGenericPassword({
+        // Verify tokens are cleared
+        const postReset = await Keychain.getGenericPassword({
           service: AUTH_KEYCHAIN_SERVICE,
-          username: REFRESH_KEYCHAIN_USERNAME
+          username: AUTH_KEYCHAIN_USERNAME
         });
-        console.log('Cleared refresh tokens from Keychain');
+        console.log('JWT after reset:', {
+          hasCredentials: !!postReset,
+          hasPassword: !!postReset?.password,
+          passwordLength: postReset?.password?.length
+        });
+
+        if (postReset?.password) {
+          throw new Error('Failed to clear tokens from Keychain');
+        }
       } catch (keychainError) {
         console.error('Error clearing Keychain:', keychainError);
         // Continue with sign out even if Keychain clearing fails
@@ -801,16 +898,13 @@ export class AuthService {
       // Attempt to clear all Keychain data even if previous operations failed
       try {
         await Keychain.resetGenericPassword({
-          service: ZKLOGIN_KEYCHAIN_SERVICE,
-          username: ZKLOGIN_KEYCHAIN_USERNAME
+          service: ZKLOGIN_KEYCHAIN_SERVICE
         });
         await Keychain.resetGenericPassword({
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: AUTH_KEYCHAIN_USERNAME
+          service: AUTH_KEYCHAIN_SERVICE
         });
         await Keychain.resetGenericPassword({
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: REFRESH_KEYCHAIN_USERNAME
+          service: AUTH_KEYCHAIN_SERVICE
         });
       } catch (keychainError) {
         console.error('Error clearing Keychain during error recovery:', keychainError);
