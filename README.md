@@ -25,7 +25,18 @@ Confío helps people access stable dollars, send remittances, and pay each other
 - ⚡️ Enjoy gasless (sponsored) transactions
 - 🪙 Interact directly with Sui-based smart contracts
 
-## 🔐 Authentication & Security
+## 🧱 Tech Stack
+
+| Layer         | Stack                         |
+|---------------|-------------------------------|
+| Frontend      | React Native (no Expo)        |
+| Auth          | Firebase Authentication       |
+| Blockchain    | [Sui](https://sui.io)         |
+| Smart Contracts | Move language               |
+| Backend API   | Django + GraphQL              |
+| CI/CD         | Cloudflare Pages              |
+
+## 🔒 Authentication & Security
 
 ### Authentication Flow
 1. **Social Sign-In**
@@ -67,21 +78,6 @@ Confío helps people access stable dollars, send remittances, and pay each other
 - 🧹 Complete data cleanup on sign out
 - 🔐 JWT-based API authentication
 - 🛡️ Protection against replay attacks
-
----
-
-## 🧱 Tech Stack
-
-| Layer         | Stack                         |
-|---------------|-------------------------------|
-| Frontend      | React Native (no Expo)        |
-| Auth          | Firebase Authentication       |
-| Blockchain    | [Sui](https://sui.io)         |
-| Smart Contracts | Move language               |
-| Backend API   | Django + GraphQL              |
-| CI/CD         | Cloudflare Pages              |
-
----
 
 ## 🔒 What Confío Is Not
 
