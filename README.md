@@ -36,56 +36,11 @@ Confío helps people access stable dollars, send remittances, and pay each other
 | Backend API   | Django + GraphQL              |
 | CI/CD         | Cloudflare Pages              |
 
-## 🔒 Authentication & Security
-
-### Authentication Flow
-1. **Social Sign-In**
-   - Sign in with Google or Apple
-   - Firebase Authentication handles OAuth flow
-   - Secure token exchange with backend
-
-2. **Phone Verification**
-   - Required for enhanced security
-   - Telegram-based verification system
-   - Country code support for LATAM
-
-3. **zkLogin Integration**
-   - Zero-knowledge proof authentication
-   - Secure key derivation and storage
-   - Automatic proof refresh before expiration
-
-### Token Management
-1. **Access Token**
-   - Short-lived (1 hour) for security
-   - Automatically refreshed using refresh token
-   - Stored securely in device Keychain
-
-2. **Refresh Token**
-   - Long-lived (1 year) for persistent sessions
-   - Used to obtain new access tokens
-   - Stored securely in device Keychain
-
-3. **Token Refresh Mechanism**
-   - Proactive refresh: Checks token expiration before requests
-   - Reactive refresh: Handles expired token errors
-   - Request queue management during refresh
-   - Automatic retry of failed requests after refresh
-   - Secure token storage and cleanup
-
-### Security Features
-- 🔒 Secure credential storage using Keychain
-- 🔄 Automatic token refresh and rotation
-- 🧹 Complete data cleanup on sign out
-- 🔐 JWT-based API authentication
-- 🛡️ Protection against replay attacks
-
 ## 🔒 What Confío Is Not
 
 - ❌ Not a custodial wallet — we never store user funds
 - ❌ No backend "tricks" — money logic lives entirely on-chain
 - ❌ No crypto knowledge required — users sign in with Google or Apple
-
----
 
 ## 💬 Join the Community
 
@@ -97,20 +52,14 @@ Come build the future with us:
 🔗 Telegram (Community): [t.me/FansDeJulian](https://t.me/FansDeJulian)  
 📱 TikTok (Latinoamérica): [@JulianMoonLuna](https://tiktok.com/@JulianMoonLuna)
 
----
-
 ## 📜 License
 
 MIT License — build freely, fork proudly, remix for your country.
-
----
 
 ## 🙏 Credits
 
 Confío is led by Julian Moon,
 a Korean builder based in Latin America, inspired by the dream of a trustworthy, borderless financial inclusion for everyone. 
-
----
 
 ## 🧠 Project Structure
 
@@ -254,6 +203,49 @@ This is a **monolithic repository** containing the full Confío stack:
 ├── requirements.txt   # Python dependencies
 └── celery.py         # Celery worker configuration
 ```
+
+## 🔒 Authentication & Security
+
+### Authentication Flow
+1. **Social Sign-In**
+   - Sign in with Google or Apple
+   - Firebase Authentication handles OAuth flow
+   - Secure token exchange with backend
+
+2. **Phone Verification**
+   - Required for enhanced security
+   - Telegram-based verification system
+   - Country code support for LATAM
+
+3. **zkLogin Integration**
+   - Zero-knowledge proof authentication
+   - Secure key derivation and storage
+   - Automatic proof refresh before expiration
+
+### Token Management
+1. **Access Token**
+   - Short-lived (1 hour) for security
+   - Automatically refreshed using refresh token
+   - Stored securely in device Keychain
+
+2. **Refresh Token**
+   - Long-lived (1 year) for persistent sessions
+   - Used to obtain new access tokens
+   - Stored securely in device Keychain
+
+3. **Token Refresh Mechanism**
+   - Proactive refresh: Checks token expiration before requests
+   - Reactive refresh: Handles expired token errors
+   - Request queue management during refresh
+   - Automatic retry of failed requests after refresh
+   - Secure token storage and cleanup
+
+### Security Features
+- 🔒 Secure credential storage using Keychain
+- 🔄 Automatic token refresh and rotation
+- 🧹 Complete data cleanup on sign out
+- 🔐 JWT-based API authentication
+- 🛡️ Protection against replay attacks
 
 ## 🚀 Development Setup
 
