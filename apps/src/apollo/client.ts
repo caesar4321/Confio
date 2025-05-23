@@ -66,14 +66,19 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
               try {
                 const credentials = await Keychain.getGenericPassword({
                   service: AUTH_KEYCHAIN_SERVICE,
-                  accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+                  username: AUTH_KEYCHAIN_USERNAME
                 });
                 
                 if (!credentials) {
                   throw new Error('No refresh token found');
                 }
 
-                const refreshToken = credentials.password;
+                // Parse tokens from JSON
+                const tokens = JSON.parse(credentials.password);
+                if (!tokens.refreshToken) {
+                  throw new Error('No refresh token found in stored data');
+                }
+                const refreshToken = tokens.refreshToken;
                 const decoded = jwtDecode<CustomJwtPayload>(refreshToken);
                 
                 if (decoded.type !== 'refresh') {
@@ -89,23 +94,37 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
                   // Store new access token
                   await Keychain.setGenericPassword(
                     AUTH_KEYCHAIN_USERNAME,
-                    data.refreshToken.auth_access_token,
+                    JSON.stringify({
+                      accessToken: data.refreshToken.auth_access_token,
+                      refreshToken // Keep the same refresh token
+                    }),
                     {
                       service: AUTH_KEYCHAIN_SERVICE,
+                      username: AUTH_KEYCHAIN_USERNAME,
                       accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
                     }
                   );
                   
+                  // Add the first request to the queue and process all requests
+                  pendingRequests.push((token: string | null) => {
+                    if (token) {
+                      forward(operation).subscribe(observer);
+                    } else {
+                      observer.error(new Error('Token refresh failed'));
+                    }
+                  });
                   processQueue(null, data.refreshToken.auth_access_token);
-                  forward(operation).subscribe(observer);
                 } else {
                   throw new Error(data?.refreshToken?.error || 'Failed to refresh token');
                 }
               } catch (error) {
                 processQueue(error);
                 // Clear tokens and return to login
-                await Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE });
-                forward(operation).subscribe(observer);
+                await Keychain.resetGenericPassword({ 
+                  service: AUTH_KEYCHAIN_SERVICE,
+                  username: AUTH_KEYCHAIN_USERNAME
+                });
+                observer.error(error);
               } finally {
                 isRefreshing = false;
               }
@@ -118,7 +137,7 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
               if (token) {
                 forward(operation).subscribe(observer);
               } else {
-                forward(operation).subscribe(observer);
+                observer.error(new Error('Token refresh failed'));
               }
             });
           });
@@ -144,11 +163,18 @@ const authLink = setContext(async (operation, { headers }) => {
     console.log('Attempting to retrieve tokens from Keychain:', {
       service: AUTH_KEYCHAIN_SERVICE,
       username: AUTH_KEYCHAIN_USERNAME
-  });
+    });
 
     const credentials = await Keychain.getGenericPassword({
       service: AUTH_KEYCHAIN_SERVICE,
-      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+      username: AUTH_KEYCHAIN_USERNAME
+    });
+
+    console.log('Fetched credentials at authLink:', {
+      hasCredentials: !!credentials,
+      hasPassword: !!credentials?.password,
+      passwordLength: credentials?.password?.length,
+      operation: operation.operationName
     });
 
     if (!credentials) {
@@ -181,7 +207,10 @@ const authLink = setContext(async (operation, { headers }) => {
       refreshToken = tokens.refreshToken;
     } catch (error) {
       console.error('Error parsing tokens:', error);
-      await Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE });
+      await Keychain.resetGenericPassword({ 
+        service: AUTH_KEYCHAIN_SERVICE,
+        username: AUTH_KEYCHAIN_USERNAME
+      });
       return { headers };
     }
 
@@ -221,16 +250,17 @@ const authLink = setContext(async (operation, { headers }) => {
                 }),
                 {
                   service: AUTH_KEYCHAIN_SERVICE,
+                  username: AUTH_KEYCHAIN_USERNAME,
                   accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
                 }
               );
               
               // Use the new token for this request
-    return {
-      headers: {
-        ...headers,
-                  Authorization: `JWT ${data.refreshToken.authAccessToken}`,
-                },
+              return {
+                headers: {
+                  ...headers,
+                  Authorization: `JWT ${data.refreshToken.authAccessToken}`
+                }
               };
             } else {
               throw new Error(data?.refreshToken?.error || 'Failed to refresh token');
@@ -238,7 +268,10 @@ const authLink = setContext(async (operation, { headers }) => {
           } catch (error) {
             console.error('Token refresh failed:', error);
             // Clear tokens and return to login
-            await Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE });
+            await Keychain.resetGenericPassword({ 
+              service: AUTH_KEYCHAIN_SERVICE,
+              username: AUTH_KEYCHAIN_USERNAME
+            });
             return { headers };
           } finally {
             isRefreshing = false;
@@ -251,8 +284,8 @@ const authLink = setContext(async (operation, { headers }) => {
                 resolve({
                   headers: {
                     ...headers,
-                    Authorization: `JWT ${token}`,
-                  },
+                    Authorization: `JWT ${token}`
+                  }
                 });
               } else {
                 resolve({ headers });
@@ -268,7 +301,10 @@ const authLink = setContext(async (operation, { headers }) => {
           hasUserId: !!decoded.user_id,
           type: decoded.type
         });
-        await Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE });
+        await Keychain.resetGenericPassword({ 
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME
+        });
         return { headers };
       }
 
@@ -277,30 +313,33 @@ const authLink = setContext(async (operation, { headers }) => {
       return {
         headers: {
           ...headers,
-          Authorization: `JWT ${token}`,
-        },
+          Authorization: `JWT ${token}`
+        }
       };
-    } catch (e) {
-      console.error('Error decoding token:', e);
-      await Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE });
+    } catch (error) {
+      console.error('Error decoding token:', error);
+      await Keychain.resetGenericPassword({ 
+        service: AUTH_KEYCHAIN_SERVICE,
+        username: AUTH_KEYCHAIN_USERNAME
+      });
       return { headers };
     }
   } catch (error) {
-    console.error('Error retrieving token:', error);
+    console.error('Error in authLink:', error);
     return { headers };
   }
 });
 
 export const apolloClient = new ApolloClient({
-  link: from([errorLink, authLink, httpLink]),
-    cache: new InMemoryCache(),
-    defaultOptions: {
-      watchQuery: {
-        fetchPolicy: 'network-only',
-      },
+  link: from([authLink, errorLink, httpLink]),
+  cache: new InMemoryCache(),
+  defaultOptions: {
+    watchQuery: {
+      fetchPolicy: 'network-only',
     },
-  }); 
+  },
+});
 
-  console.log('Apollo client initialized successfully');
+console.log('Apollo client initialized successfully');
 
-export default apolloClient; 
+export default apolloClient;

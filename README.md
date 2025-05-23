@@ -43,6 +43,24 @@ Confío helps people access stable dollars, send remittances, and pay each other
    - Secure key derivation and storage
    - Automatic proof refresh before expiration
 
+### Token Management
+1. **Access Token**
+   - Short-lived (1 hour) for security
+   - Automatically refreshed using refresh token
+   - Stored securely in device Keychain
+
+2. **Refresh Token**
+   - Long-lived (1 year) for persistent sessions
+   - Used to obtain new access tokens
+   - Stored securely in device Keychain
+
+3. **Token Refresh Mechanism**
+   - Proactive refresh: Checks token expiration before requests
+   - Reactive refresh: Handles expired token errors
+   - Request queue management during refresh
+   - Automatic retry of failed requests after refresh
+   - Secure token storage and cleanup
+
 ### Security Features
 - 🔒 Secure credential storage using Keychain
 - 🔄 Automatic token refresh and rotation

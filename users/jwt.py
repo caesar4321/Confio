@@ -33,7 +33,7 @@ def jwt_payload_handler(user):
         'username': username,
         'origIat': int(now.timestamp()),  # Convert to timestamp
         'auth_token_version': auth_token_version,
-        'exp': int((now + timedelta(days=7)).timestamp()),  # 7 days for access token
+        'exp': int((now + timedelta(hours=1)).timestamp()),  # 1 hour for access token
         'type': 'access'  # Indicate this is an access token
     }
     logger.info(f"Generated JWT payload: {payload}")
