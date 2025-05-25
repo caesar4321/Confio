@@ -97,13 +97,15 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
                 });
 
                 if (data?.refreshToken?.token) {
-                  // Store new access token
+                  // Store new access token while keeping the existing refresh token
+                  const newTokens = {
+                    accessToken: data.refreshToken.token,
+                    refreshToken: refreshToken
+                  };
+                  
                   await Keychain.setGenericPassword(
                     AUTH_KEYCHAIN_USERNAME,
-                    JSON.stringify({
-                      accessToken: data.refreshToken.token,
-                      refreshToken: refreshToken // Keep the same refresh token since we don't get a new one
-                    }),
+                    JSON.stringify(newTokens),
                     {
                       service: AUTH_KEYCHAIN_SERVICE,
                       username: AUTH_KEYCHAIN_USERNAME,
@@ -259,7 +261,7 @@ const authLink = setContext(async (operation, { headers }) => {
                 AUTH_KEYCHAIN_USERNAME,
                 JSON.stringify({
                   accessToken: data.refreshToken.token,
-                  refreshToken: data.refreshToken.refreshToken // Use the new refresh token
+                  refreshToken: refreshToken // Keep the existing refresh token
                 }),
                 {
                   service: AUTH_KEYCHAIN_SERVICE,
