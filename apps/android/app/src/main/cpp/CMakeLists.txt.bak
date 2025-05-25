@@ -1,0 +1,25 @@
+cmake_minimum_required(VERSION 3.13)
+
+# Define the project name
+project(Confio)
+
+# Set C++ standard
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Find required packages
+find_package(ReactAndroid REQUIRED CONFIG)
+
+# Add react-native-worklets-core
+find_package(rnworklets REQUIRED CONFIG)
+
+# Add your source files
+add_library(confio SHARED
+    confio.cpp
+)
+
+# Link against required libraries
+target_link_libraries(confio
+    ReactAndroid::jsi
+    rnworklets::rnworklets
+) 

@@ -13,6 +13,7 @@ import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
 import com.swmansion.rnscreens.RNScreensPackage
 import com.th3rdwave.safeareacontext.SafeAreaContextPackage
+import com.mrousavy.camera.react.CameraPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -23,6 +24,7 @@ class MainApplication : Application(), ReactApplication {
               // Add required packages manually
               add(RNScreensPackage())
               add(SafeAreaContextPackage())
+              add(CameraPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

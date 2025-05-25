@@ -65,10 +65,16 @@ android {
     namespace "com.Confio.Confio"
     defaultConfig {
         applicationId "com.Confio.Confio"
-        minSdkVersion 24
+        minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", rootProject.ext.newArchEnabled.toString()
+        if (rootProject.ext.newArchEnabled) {
+            buildConfigField "boolean", "IS_TURBOMODULE_ENABLED", "true"
+        } else {
+            buildConfigField "boolean", "IS_TURBOMODULE_ENABLED", "false"
+        }
 
         externalNativeBuild {
             cmake {
@@ -145,4 +151,8 @@ dependencies {
 
     // Add Google Sign-In dependencies
     implementation 'com.google.android.gms:play-services-auth:20.7.0'
+
+    implementation "com.facebook.react:react-native:+" // From node_modules
+    implementation project(':react-native-vision-camera')
+    implementation project(':react-native-worklets-core')
 }

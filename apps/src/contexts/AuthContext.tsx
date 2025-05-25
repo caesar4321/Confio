@@ -15,7 +15,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 type RootStackParamList = {
   Auth: undefined;
   PhoneVerification: undefined;
-  Home: undefined;
+  Main: undefined;
 };
 
 interface AuthProviderProps {
@@ -60,7 +60,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       setIsAuthenticated(true);
       if (isPhoneVerified) {
         console.log('User has verified phone number');
-        navigateToScreen('Home');
+        navigateToScreen('Main');
       } else {
         console.log('User needs phone verification');
         navigateToScreen('PhoneVerification');
@@ -90,7 +90,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         if (hasRequiredFields) {
           console.log('Valid zkLogin data found');
           setIsAuthenticated(true);
-          navigateToScreen('Home');
+          navigateToScreen('Main');
         } else {
           console.log('Invalid zkLogin data, missing required fields');
           setIsAuthenticated(false);

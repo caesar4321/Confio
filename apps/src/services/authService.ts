@@ -63,6 +63,7 @@ export class AuthService {
   private auth = auth();
   private firebaseIsInitialized = false;
   private apolloClient: ApolloClient<any> | null = null;
+  private token: string | null = null;
 
   private constructor() {
     this.suiClient = new SuiClient({ url: 'https://fullnode.devnet.sui.io' });
@@ -1215,6 +1216,51 @@ export class AuthService {
     } catch (error) {
       console.error('Error retrieving tokens:', error);
       return null;
+    }
+  }
+
+  public async getToken(): Promise<string | null> {
+    try {
+      const credentials = await Keychain.getGenericPassword({
+        service: AUTH_KEYCHAIN_SERVICE,
+        username: AUTH_KEYCHAIN_USERNAME
+      });
+
+      if (credentials === false) {
+        return null;
+      }
+
+      const tokens = JSON.parse(credentials.password);
+      return tokens.accessToken || null;
+    } catch (error) {
+      console.error('Error getting token:', error);
+      return null;
+    }
+  }
+
+  public async signIn(email: string, password: string): Promise<void> {
+    try {
+      // TODO: Replace with actual API call
+      const response = await fetch('YOUR_API_ENDPOINT/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Login failed');
+      }
+
+      const data = await response.json();
+      await this.storeTokens({
+        accessToken: data.token,
+        refreshToken: data.refreshToken
+      });
+    } catch (error) {
+      console.error('Sign in error:', error);
+      throw error;
     }
   }
 } 
