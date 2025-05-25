@@ -9,7 +9,7 @@ import { View, ActivityIndicator } from 'react-native';
 import { ThemeProvider } from './theme';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AuthScreen } from './screens/AuthScreen';
-import { HomeScreen } from './screens/HomeScreen';
+import { BottomTabNavigator } from './navigation/BottomTabNavigator';
 import PhoneVerificationScreen from './screens/PhoneVerificationScreen';
 
 // Enable screens before any navigation setup
@@ -18,7 +18,7 @@ enableScreens();
 type RootStackParamList = {
   Auth: undefined;
   PhoneVerification: undefined;
-  Home: undefined;
+  Main: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -47,7 +47,7 @@ function Navigation() {
     >
       <Stack.Screen name="Auth" component={AuthScreen} />
       <Stack.Screen name="PhoneVerification" component={PhoneVerificationScreen} />
-      <Stack.Screen name="Home" component={HomeScreen} />
+      <Stack.Screen name="Main" component={BottomTabNavigator} />
     </Stack.Navigator>
   );
 }

@@ -8,9 +8,12 @@ import { useAuth } from '../contexts/AuthContext';
 import cUSDLogo from '../assets/png/cUSD.png';
 import USDCLogo from '../assets/png/USDC.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import Icon from 'react-native-vector-icons/Feather';
 import * as Keychain from 'react-native-keychain';
 import { getApiUrl } from '../config/env';
 import { jwtDecode } from 'jwt-decode';
+import { RootStackParamList } from '../types/navigation';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
@@ -24,12 +27,7 @@ interface CustomJwtPayload {
   type: 'access' | 'refresh';
 }
 
-type RootStackParamList = {
-  Auth: undefined;
-  Home: undefined;
-};
-
-type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
+type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Main'>;
 
 export const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
@@ -37,6 +35,8 @@ export const HomeScreen = () => {
   const [suiAddress, setSuiAddress] = React.useState<string>('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [accountType, setAccountType] = useState("personal");
   
   // Mock balances - replace with real data later
   const mockBalances = {
@@ -189,126 +189,109 @@ export const HomeScreen = () => {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F3F4F6' }}>
-      {/* Header Section */}
-      <View style={styles.headerBox}>
-        <View style={styles.headerTopRow}>
-          <Text style={styles.headerTitle}>Confío</Text>
-          <View style={styles.headerButtons}>
-            <TouchableOpacity style={styles.headerCircleButton}>
-              <Text style={styles.headerButtonText}>🔍</Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#F3F4F6' }}>
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={{
+          backgroundColor: '#34d399',
+          borderBottomLeftRadius: 32,
+          borderBottomRightRadius: 32,
+          overflow: 'hidden',
+          paddingTop: 32,
+          paddingBottom: 32,
+          paddingHorizontal: 20,
+        }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+            <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#fff' }}>Confío</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={{ padding: 8, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 }}>
+                <Icon name="bell" size={20} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={{ padding: 8, backgroundColor: '#fff', borderRadius: 20 }}>
+                <Icon name="user" size={20} color="#34d399" />
+              </TouchableOpacity>
+            </View>
+          </View>
+          <Text style={{ fontSize: 15, color: '#fff', opacity: 0.8 }}>Tu saldo en:</Text>
+          <Text style={{ fontSize: 15, color: '#fff', opacity: 0.8, marginBottom: 4 }}>Dólares estadounidenses</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Text style={{ fontSize: 32, fontWeight: 'bold', color: '#fff' }}>${mockBalances.cusd}</Text>
+            <TouchableOpacity style={{
+              marginLeft: 8,
+              backgroundColor: 'rgba(255,255,255,0.2)',
+              borderRadius: 16,
+              paddingHorizontal: 12,
+              paddingVertical: 4,
+            }}>
+              <Text style={{ color: '#fff', fontSize: 12 }}>Ver en Bs. 5.000.000,00</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.headerCircleButton}>
-              <Text style={styles.headerButtonText}>🔔</Text>
-            </TouchableOpacity>
           </View>
         </View>
-        <Text style={styles.balanceLabel}>Dólares estadounidenses</Text>
-        <Text style={styles.balanceAmount}>${mockBalances.cusd}</Text>
-        <TouchableOpacity 
-          style={styles.currencyToggle}
-          onPress={() => setShowLocalCurrency(!showLocalCurrency)}
-        >
-          {showLocalCurrency && (
-            <Text style={styles.localCurrency}>
-              {mockLocalCurrency.symbol} {(Number(mockBalances.cusd.replace(',', '')) * mockLocalCurrency.rate).toLocaleString()}
-            </Text>
-          )}
-          <Text style={styles.toggleText}>
-            {showLocalCurrency ? 'Ocultar moneda local' : 'Mostrar en moneda local'}
-          </Text>
-        </TouchableOpacity>
+
+        {/* Wallets */}
+        <ScrollView style={styles.content} contentContainerStyle={{ paddingHorizontal: 0 }} horizontal={false} showsHorizontalScrollIndicator={false}>
+          <View style={styles.walletsHeader}>
+            <Text style={styles.walletsTitle}>Mis Cuentas</Text>
+          </View>
+
+          <View style={{ ...styles.walletsContainer, width: '100%' }}>
+            <View style={{ ...styles.walletCard, width: '100%' }}>
+              <View style={styles.walletLogoContainer}>
+                <Image source={cUSDLogo} style={styles.walletLogo} />
+              </View>
+              <View style={styles.walletInfo}>
+                <Text style={styles.walletName}>Confío Dollar</Text>
+                <Text style={styles.walletSymbol}>$cUSD</Text>
+              </View>
+              <View style={styles.walletBalance}>
+                <Text style={styles.walletBalanceText}>${mockBalances.cusd}</Text>
+              </View>
+            </View>
+            <View style={{ ...styles.walletCard, width: '100%' }}>
+              <View style={styles.walletLogoContainer}>
+                <Image source={USDCLogo} style={styles.walletLogo} />
+              </View>
+              <View style={styles.walletInfo}>
+                <Text style={styles.walletName}>USD Coin</Text>
+                <Text style={styles.walletSymbol}>$USDC</Text>
+              </View>
+              <View style={styles.walletBalance}>
+                <Text style={styles.walletBalanceText}>${mockBalances.usdc}</Text>
+              </View>
+            </View>
+            <View style={{ ...styles.walletCard, width: '100%' }}>
+              <View style={styles.walletLogoContainer}>
+                <Image source={CONFIOLogo} style={styles.walletLogo} />
+              </View>
+              <View style={styles.walletInfo}>
+                <Text style={styles.walletName}>Confío</Text>
+                <Text style={styles.walletSymbol}>$CONFIO</Text>
+              </View>
+              <View style={styles.walletBalance}>
+                <Text style={styles.walletBalanceText}>{mockBalances.confio}</Text>
+              </View>
+            </View>
+          </View>
+        </ScrollView>
       </View>
-
-      {/* Wallets Section */}
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 12 }}>
-        <View style={styles.assetsHeaderRow}>
-          <Text style={styles.assetsTitle}>Mis Activos</Text>
-        </View>
-        <View style={styles.walletsContainer}>
-          <View style={styles.assetCard}>
-            <Image source={cUSDLogo} style={styles.assetLogo} />
-            <View style={styles.assetInfo}>
-              <Text style={styles.assetName}>Confío Dollar</Text>
-              <Text style={styles.assetSymbol}>$cUSD</Text>
-            </View>
-            <View style={styles.assetValueBlock}>
-              <Text style={styles.assetValue}>${mockBalances.cusd}</Text>
-            </View>
-          </View>
-          <View style={styles.assetCard}>
-            <Image source={USDCLogo} style={styles.assetLogo} />
-            <View style={styles.assetInfo}>
-              <Text style={styles.assetName}>USD Coin</Text>
-              <Text style={styles.assetSymbol}>$USDC</Text>
-            </View>
-            <View style={styles.assetValueBlock}>
-              <Text style={styles.assetValue}>${mockBalances.usdc}</Text>
-            </View>
-          </View>
-          <View style={styles.assetCard}>
-            <Image source={CONFIOLogo} style={styles.assetLogo} />
-            <View style={styles.assetInfo}>
-              <Text style={styles.assetName}>Confío</Text>
-              <Text style={styles.assetSymbol}>$CONFIO</Text>
-            </View>
-            <View style={styles.assetValueBlock}>
-              <Text style={styles.assetValue}>{mockBalances.confio}</Text>
-            </View>
-          </View>
-        </View>
-      </ScrollView>
-
-      {/* Temporary Sign Out Button for Testing */}
-      <View style={{ padding: 20 }}>
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#EF4444',
-            paddingVertical: 14,
-            borderRadius: 10,
-            alignItems: 'center',
-            marginBottom: 12,
-          }}
-          onPress={handleSignOut}
-        >
-          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Sign Out (Test)</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={{
-            backgroundColor: '#3B82F6',
-            paddingVertical: 14,
-            borderRadius: 10,
-            alignItems: 'center',
-          }}
-          onPress={handleRefreshToken}
-        >
-          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Refresh Token (Test)</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1F2937',
+    backgroundColor: '#F3F4F6',
   },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    fontSize: 18,
-    color: '#FFFFFF',
-    textAlign: 'center',
-  },
-  headerBox: {
-    backgroundColor: '#72D9BC',
+  header: {
+    paddingTop: 56,
+    paddingBottom: 32,
+    paddingHorizontal: 20,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
+    width: '100%',
+  },
+  headerInner: {
     paddingTop: 56,
     paddingBottom: 32,
     paddingHorizontal: 20,
@@ -335,91 +318,106 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 8,
   },
-  headerButtonText: {
-    color: '#FFFFFF',
-    fontSize: 20,
+  balanceSection: {
+    marginTop: 8,
   },
   balanceLabel: {
     fontSize: 15,
     color: '#FFFFFF',
     opacity: 0.8,
-    marginBottom: 4,
+  },
+  balanceSubLabel: {
+    fontSize: 15,
+    color: '#FFFFFF',
+    opacity: 0.8,
+    marginTop: 4,
+  },
+  balanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    width: '100%',
   },
   balanceAmount: {
     fontSize: 32,
     fontWeight: 'bold',
     color: '#FFFFFF',
-    marginBottom: 20,
   },
   currencyToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#FFFFFF',
+    marginLeft: 12,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 16,
+    flexShrink: 1,
+    maxWidth: 140,
   },
-  localCurrency: {
+  currencyToggleText: {
     color: '#FFFFFF',
-    fontSize: 14,
-    marginRight: 8,
+    fontSize: 12,
   },
-  toggleText: {
-    color: '#FFFFFF',
-    fontSize: 14,
+  content: {
+    flex: 1,
   },
-  assetsHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  walletsHeader: {
     paddingHorizontal: 20,
-    marginBottom: 8,
+    paddingVertical: 16,
   },
-  assetsTitle: {
+  walletsTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#1F2937',
   },
   walletsContainer: {
-    gap: 14,
     paddingHorizontal: 12,
   },
-  assetCard: {
+  walletCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F8FAFC',
     borderRadius: 16,
     padding: 16,
-    marginBottom: 6,
+    marginBottom: 12,
   },
-  assetLogo: {
+  walletLogoContainer: {
     width: 40,
     height: 40,
     borderRadius: 20,
     marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  assetInfo: {
+  walletLogo: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  walletInfo: {
     flex: 1,
   },
-  assetName: {
+  walletName: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#1F2937',
   },
-  assetSymbol: {
+  walletSymbol: {
     fontSize: 13,
     color: '#64748B',
     marginTop: 2,
   },
-  assetValueBlock: {
+  walletBalance: {
     alignItems: 'flex-end',
-    minWidth: 90,
   },
-  assetValue: {
+  walletBalanceText: {
     fontSize: 17,
     fontWeight: 'bold',
     color: '#1F2937',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 18,
+    textAlign: 'center',
+    marginTop: 40,
   },
 }); 
