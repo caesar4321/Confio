@@ -116,15 +116,15 @@ const PhoneVerificationScreen = () => {
         // Format phone number: remove any spaces, dashes, or other separators
         const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
         
-        const { data } = await verifyTelegramCode({ 
-          variables: { 
+      const { data } = await verifyTelegramCode({ 
+        variables: { 
             phoneNumber: cleanPhoneNumber,
             countryCode: selectedCountry[2], // ISO country code
             code: verificationCode.join('') // Join the code array into a single string
-          } 
-        });
-        if (data.verifyTelegramCode.success) {
-          Alert.alert('Success', 'Phone number verified!');
+        } 
+      });
+      if (data.verifyTelegramCode.success) {
+        Alert.alert('Success', 'Phone number verified!');
           await handleSuccessfulLogin(true);
         } else {
           Alert.alert('Error', data.verifyTelegramCode.error || 'Verification failed');

@@ -594,9 +594,6 @@ class InitiateTelegramVerification(graphene.Mutation):
 class Mutation(graphene.ObjectType):
     initialize_zk_login = InitializeZkLogin.Field()
     finalize_zk_login = FinalizeZkLogin.Field()
-    token_auth = graphql_jwt.ObtainJSONWebToken.Field()
-    verify_token = graphql_jwt.Verify.Field()
-    refresh_token = graphql_jwt.Refresh.Field()
     initiate_telegram_verification = InitiateTelegramVerification.Field()
 
 class Query(graphene.ObjectType):

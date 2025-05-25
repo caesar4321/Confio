@@ -7,6 +7,7 @@ class Query(users_schema.Query, graphene.ObjectType):
 	pass
 
 class Mutation(
+	users_schema.Mutation,
 	prover_schema.Mutation,
 	telegram_verification_schema.Mutation,
 	graphene.ObjectType

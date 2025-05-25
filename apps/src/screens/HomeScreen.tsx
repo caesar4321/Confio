@@ -8,6 +8,21 @@ import { useAuth } from '../contexts/AuthContext';
 import cUSDLogo from '../assets/png/cUSD.png';
 import USDCLogo from '../assets/png/USDC.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import * as Keychain from 'react-native-keychain';
+import { getApiUrl } from '../config/env';
+import { jwtDecode } from 'jwt-decode';
+
+const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
+const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
+
+interface CustomJwtPayload {
+  user_id: number;
+  username: string;
+  exp: number;
+  origIat: number;
+  auth_token_version: number;
+  type: 'access' | 'refresh';
+}
 
 type RootStackParamList = {
   Auth: undefined;
@@ -78,6 +93,83 @@ export const HomeScreen = () => {
       Alert.alert(
         'Error al cerrar sesión',
         'Hubo un error al cerrar la sesión. Por favor intente de nuevo.'
+      );
+    }
+  };
+
+  const handleRefreshToken = async () => {
+    try {
+      const authService = AuthService.getInstance();
+      const credentials = await Keychain.getGenericPassword({
+        service: AUTH_KEYCHAIN_SERVICE,
+        username: AUTH_KEYCHAIN_USERNAME
+      });
+      
+      if (!credentials) {
+        throw new Error('No refresh token found');
+      }
+
+      const tokens = JSON.parse(credentials.password);
+      if (!tokens.refreshToken) {
+        throw new Error('No refresh token found in stored data');
+      }
+
+      // Decode the refresh token to verify its type
+      const decoded = jwtDecode<CustomJwtPayload>(tokens.refreshToken);
+      if (decoded.type !== 'refresh') {
+        throw new Error('Invalid refresh token type');
+      }
+
+      const response = await fetch(getApiUrl(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: `
+            mutation RefreshToken($refreshToken: String!) {
+              refreshToken(refreshToken: $refreshToken) {
+                token
+                payload
+                refreshExpiresIn
+              }
+            }
+          `,
+          variables: {
+            refreshToken: tokens.refreshToken
+          }
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.errors) {
+        throw new Error(result.errors[0].message);
+      }
+
+      if (result.data?.refreshToken?.token) {
+        // Store the new access token and keep the same refresh token
+        await Keychain.setGenericPassword(
+          AUTH_KEYCHAIN_USERNAME,
+          JSON.stringify({
+            accessToken: result.data.refreshToken.token,
+            refreshToken: tokens.refreshToken // Keep the same refresh token
+          }),
+          {
+            service: AUTH_KEYCHAIN_SERVICE,
+            username: AUTH_KEYCHAIN_USERNAME,
+            accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+          }
+        );
+        Alert.alert('Success', 'Token refreshed successfully');
+      } else {
+        throw new Error('Failed to refresh token');
+      }
+    } catch (error) {
+      console.error('Error refreshing token:', error);
+      Alert.alert(
+        'Error refreshing token',
+        error instanceof Error ? error.message : 'There was an error refreshing the token. Please try again.'
       );
     }
   };
@@ -175,10 +267,23 @@ export const HomeScreen = () => {
             paddingVertical: 14,
             borderRadius: 10,
             alignItems: 'center',
+            marginBottom: 12,
           }}
           onPress={handleSignOut}
         >
           <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Sign Out (Test)</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={{
+            backgroundColor: '#3B82F6',
+            paddingVertical: 14,
+            borderRadius: 10,
+            alignItems: 'center',
+          }}
+          onPress={handleRefreshToken}
+        >
+          <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Refresh Token (Test)</Text>
         </TouchableOpacity>
       </View>
     </View>

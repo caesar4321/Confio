@@ -20,9 +20,9 @@ interface CustomJwtPayload {
 const REFRESH_TOKEN = gql`
   mutation RefreshToken($refreshToken: String!) {
     refreshToken(refreshToken: $refreshToken) {
-      success
-      error
-      authAccessToken
+      token
+      payload
+      refreshExpiresIn
     }
   }
 `;
@@ -56,8 +56,8 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
         operation: operation.operationName
       });
 
-      if (err.message === 'Signature has expired') {
-        // Token has expired, try to refresh
+      if (err.message === 'Signature has expired' || err.message === 'Invalid payload') {
+        // Token has expired or is invalid, try to refresh
         if (!isRefreshing) {
           isRefreshing = true;
           
@@ -85,18 +85,24 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
                   throw new Error('Invalid refresh token type');
                 }
 
+                // Check if refresh token is expired
+                const currentTime = Date.now() / 1000;
+                if (decoded.exp && decoded.exp < currentTime) {
+                  throw new Error('Refresh token expired');
+                }
+
                 const { data } = await apolloClient.mutate({
                   mutation: REFRESH_TOKEN,
-                  variables: { refreshToken }
+                  variables: { refreshToken: refreshToken }
                 });
 
-                if (data?.refreshToken?.success && data?.refreshToken?.auth_access_token) {
+                if (data?.refreshToken?.token) {
                   // Store new access token
                   await Keychain.setGenericPassword(
                     AUTH_KEYCHAIN_USERNAME,
                     JSON.stringify({
-                      accessToken: data.refreshToken.auth_access_token,
-                      refreshToken // Keep the same refresh token
+                      accessToken: data.refreshToken.token,
+                      refreshToken: refreshToken // Keep the same refresh token since we don't get a new one
                     }),
                     {
                       service: AUTH_KEYCHAIN_SERVICE,
@@ -113,17 +119,24 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
                       observer.error(new Error('Token refresh failed'));
                     }
                   });
-                  processQueue(null, data.refreshToken.auth_access_token);
+                  processQueue(null, data.refreshToken.token);
                 } else {
-                  throw new Error(data?.refreshToken?.error || 'Failed to refresh token');
+                  throw new Error('Failed to refresh token');
                 }
               } catch (error) {
                 processQueue(error);
-                // Clear tokens and return to login
-                await Keychain.resetGenericPassword({ 
-                  service: AUTH_KEYCHAIN_SERVICE,
-                  username: AUTH_KEYCHAIN_USERNAME
-                });
+                // Only clear tokens if refresh token is expired or invalid
+                if (error instanceof Error && 
+                    (error.message === 'Refresh token expired' || 
+                     error.message === 'Invalid refresh token type' ||
+                     error.message === 'No refresh token found' ||
+                     error.message.includes('Invalid refresh token') ||
+                     error.message === 'Invalid payload')) {
+                  await Keychain.resetGenericPassword({ 
+                    service: AUTH_KEYCHAIN_SERVICE,
+                    username: AUTH_KEYCHAIN_USERNAME
+                  });
+                }
                 observer.error(error);
               } finally {
                 isRefreshing = false;
@@ -237,16 +250,16 @@ const authLink = setContext(async (operation, { headers }) => {
           try {
             const { data } = await apolloClient.mutate({
               mutation: REFRESH_TOKEN,
-              variables: { refreshToken }
+              variables: { refreshToken: refreshToken }
             });
 
-            if (data?.refreshToken?.success && data?.refreshToken?.authAccessToken) {
+            if (data?.refreshToken?.token) {
               // Store new tokens in JSON format
               await Keychain.setGenericPassword(
                 AUTH_KEYCHAIN_USERNAME,
                 JSON.stringify({
-                  accessToken: data.refreshToken.authAccessToken,
-                  refreshToken // Keep the same refresh token
+                  accessToken: data.refreshToken.token,
+                  refreshToken: data.refreshToken.refreshToken // Use the new refresh token
                 }),
                 {
                   service: AUTH_KEYCHAIN_SERVICE,
@@ -259,19 +272,25 @@ const authLink = setContext(async (operation, { headers }) => {
               return {
                 headers: {
                   ...headers,
-                  Authorization: `JWT ${data.refreshToken.authAccessToken}`
+                  Authorization: `JWT ${data.refreshToken.token}`
                 }
               };
             } else {
-              throw new Error(data?.refreshToken?.error || 'Failed to refresh token');
+              throw new Error('Failed to refresh token');
             }
           } catch (error) {
             console.error('Token refresh failed:', error);
-            // Clear tokens and return to login
-            await Keychain.resetGenericPassword({ 
-              service: AUTH_KEYCHAIN_SERVICE,
-              username: AUTH_KEYCHAIN_USERNAME
-            });
+            // Only clear tokens if refresh token is expired or invalid
+            if (error instanceof Error && 
+                (error.message === 'Refresh token expired' || 
+                 error.message === 'Invalid refresh token type' ||
+                 error.message === 'No refresh token found' ||
+                 error.message.includes('Invalid refresh token'))) {
+              await Keychain.resetGenericPassword({ 
+                service: AUTH_KEYCHAIN_SERVICE,
+                username: AUTH_KEYCHAIN_USERNAME
+              });
+            }
             return { headers };
           } finally {
             isRefreshing = false;
