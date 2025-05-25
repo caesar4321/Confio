@@ -20,6 +20,18 @@ console.log('Environment variables loaded:');
 console.log('GOOGLE_CLIENT_IDS:', GOOGLE_CLIENT_IDS);
 console.log('API_URL:', API_URL);
 
+// Type for storing JWT tokens
+type TokenStorage = {
+  accessToken: string;
+  refreshToken: string;
+};
+
+// Type for decoded JWT payloads
+type CustomJwtPayload = {
+  type: string;
+  [key: string]: any;
+};
+
 interface StoredZkLogin {
   salt: string;           // init.salt (base64)
   subject: string;        // sub
@@ -194,14 +206,18 @@ export class AuthService {
             username: AUTH_KEYCHAIN_USERNAME
           });
 
-          console.log('JWT in Keychain right after saving:', {
-            hasCredentials: !!checkCredentials,
-            hasPassword: !!checkCredentials?.password,
-            passwordLength: checkCredentials?.password?.length
-          });
-
-          if (!checkCredentials?.password) {
+          if (checkCredentials === false) {
+            console.log('JWT in Keychain right after saving: No credentials');
             throw new Error('Failed to verify token storage in Keychain');
+          } else {
+            console.log('JWT in Keychain right after saving:', {
+              hasCredentials: true,
+              hasPassword: !!checkCredentials.password,
+              passwordLength: checkCredentials.password.length
+            });
+            if (!checkCredentials.password) {
+              throw new Error('Failed to verify token storage in Keychain');
+            }
           }
         } catch (error) {
           console.error('Error storing or verifying tokens:', error);
@@ -296,7 +312,7 @@ export class AuthService {
         service: ZKLOGIN_KEYCHAIN_SERVICE
       });
 
-      if (!credentials) {
+      if (credentials === false) {
         return null;
       }
 
@@ -405,28 +421,40 @@ export class AuthService {
             username: AUTH_KEYCHAIN_USERNAME
           });
 
-          console.log('JWT in Keychain right after saving (Apple):', {
-            hasCredentials: !!checkCredentials,
-            hasPassword: !!checkCredentials?.password,
-            passwordLength: checkCredentials?.password?.length,
-            rawCredentials: checkCredentials
-          });
-
-          if (!checkCredentials?.password) {
+          if (checkCredentials === false) {
+            console.log('JWT in Keychain right after saving (Apple): No credentials');
             throw new Error('Failed to verify token storage in Keychain');
+          } else {
+            console.log('JWT in Keychain right after saving (Apple):', {
+              hasCredentials: true,
+              hasPassword: !!checkCredentials.password,
+              passwordLength: checkCredentials.password.length,
+              rawCredentials: checkCredentials
+            });
+            if (!checkCredentials.password) {
+              throw new Error('Failed to verify token storage in Keychain');
+            }
           }
 
           // Parse and verify the stored tokens
-          const storedTokens = JSON.parse(checkCredentials.password);
-          console.log('Stored tokens verification:', {
-            hasAccessToken: !!storedTokens.accessToken,
-            hasRefreshToken: !!storedTokens.refreshToken,
-            accessTokenLength: storedTokens.accessToken?.length,
-            refreshTokenLength: storedTokens.refreshToken?.length
+          const stored = await Keychain.getGenericPassword({
+            service: AUTH_KEYCHAIN_SERVICE,
+            username: AUTH_KEYCHAIN_USERNAME
           });
 
-          if (!storedTokens.accessToken || !storedTokens.refreshToken) {
-            throw new Error('Invalid token format in stored data');
+          if (stored === false) {
+            throw new Error('Failed to verify token storage');
+          } else {
+            const storedTokens = JSON.parse(stored.password);
+            if (!storedTokens.accessToken || !storedTokens.refreshToken) {
+              throw new Error('Invalid token format in storage');
+            }
+            console.log('Tokens stored and verified successfully:', {
+              hasAccessToken: !!storedTokens.accessToken,
+              hasRefreshToken: !!storedTokens.refreshToken,
+              accessTokenLength: storedTokens.accessToken.length,
+              refreshTokenLength: storedTokens.refreshToken.length
+            });
           }
         } catch (error) {
           console.error('Error storing or verifying tokens:', error);
@@ -579,7 +607,7 @@ export class AuthService {
         service: ZKLOGIN_KEYCHAIN_SERVICE,
       });
 
-      if (!credentials) {
+      if (credentials === false) {
         console.log('No stored credentials found');
         return;
       }
@@ -843,11 +871,15 @@ export class AuthService {
           service: AUTH_KEYCHAIN_SERVICE,
           username: AUTH_KEYCHAIN_USERNAME
         });
-        console.log('JWT before reset:', {
-          hasCredentials: !!preReset,
-          hasPassword: !!preReset?.password,
-          passwordLength: preReset?.password?.length
-        });
+        if (preReset === false) {
+          console.log('JWT before reset: No credentials');
+        } else {
+          console.log('JWT before reset:', {
+            hasCredentials: true,
+            hasPassword: !!preReset.password,
+            passwordLength: preReset.password.length
+          });
+        }
 
         // Clear zkLogin data
         await Keychain.resetGenericPassword({
@@ -868,14 +900,17 @@ export class AuthService {
           service: AUTH_KEYCHAIN_SERVICE,
           username: AUTH_KEYCHAIN_USERNAME
         });
-        console.log('JWT after reset:', {
-          hasCredentials: !!postReset,
-          hasPassword: !!postReset?.password,
-          passwordLength: postReset?.password?.length
-        });
-
-        if (postReset?.password) {
-          throw new Error('Failed to clear tokens from Keychain');
+        if (postReset === false) {
+          console.log('JWT after reset: No credentials');
+        } else {
+          console.log('JWT after reset:', {
+            hasCredentials: true,
+            hasPassword: !!postReset.password,
+            passwordLength: postReset.password.length
+          });
+          if (postReset.password) {
+            throw new Error('Failed to clear tokens from Keychain');
+          }
         }
       } catch (keychainError) {
         console.error('Error clearing Keychain:', keychainError);
@@ -952,7 +987,7 @@ export class AuthService {
         service: ZKLOGIN_KEYCHAIN_SERVICE
       });
 
-      if (!credentials) {
+      if (credentials === false) {
         throw new Error("No stored zkLogin data found");
       }
 
@@ -1056,5 +1091,130 @@ export class AuthService {
     ]);
     const saltHash = sha256(saltInput);
     return bytesToBase64(saltHash);
+  }
+
+  private async storeTokens(tokens: TokenStorage): Promise<void> {
+    try {
+      console.log('Storing tokens:', {
+        hasAccessToken: !!tokens.accessToken,
+        hasRefreshToken: !!tokens.refreshToken,
+        accessTokenLength: tokens.accessToken?.length,
+        refreshTokenLength: tokens.refreshToken?.length
+      });
+
+      // First verify the tokens before storing
+      if (!tokens.accessToken || !tokens.refreshToken) {
+        throw new Error('Invalid token format: missing access or refresh token');
+      }
+
+      // Verify token types
+      try {
+        const accessDecoded = jwtDecode<CustomJwtPayload>(tokens.accessToken);
+        const refreshDecoded = jwtDecode<CustomJwtPayload>(tokens.refreshToken);
+
+        if (accessDecoded.type !== 'access' || refreshDecoded.type !== 'refresh') {
+          throw new Error('Invalid token types');
+        }
+      } catch (error) {
+        console.error('Error verifying token types:', error);
+        throw new Error('Invalid token format or type');
+      }
+
+      // Store the tokens
+      const result = await Keychain.setGenericPassword(
+        AUTH_KEYCHAIN_USERNAME,
+        JSON.stringify(tokens),
+        {
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME,
+          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+        }
+      );
+
+      console.log('Token storage result:', result);
+
+      // Verify the tokens were stored correctly
+      const stored = await Keychain.getGenericPassword({
+        service: AUTH_KEYCHAIN_SERVICE,
+        username: AUTH_KEYCHAIN_USERNAME
+      });
+
+      if (stored === false) {
+        throw new Error('Failed to verify token storage');
+      } else {
+        const storedTokens = JSON.parse(stored.password);
+        if (!storedTokens.accessToken || !storedTokens.refreshToken) {
+          throw new Error('Invalid token format in storage');
+        }
+        console.log('Tokens stored and verified successfully:', {
+          hasAccessToken: !!storedTokens.accessToken,
+          hasRefreshToken: !!storedTokens.refreshToken,
+          accessTokenLength: storedTokens.accessToken.length,
+          refreshTokenLength: storedTokens.refreshToken.length
+        });
+      }
+    } catch (error) {
+      console.error('Error storing tokens:', error);
+      throw error;
+    }
+  }
+
+  private async getStoredTokens(): Promise<TokenStorage | null> {
+    try {
+      console.log('Attempting to retrieve tokens from Keychain');
+      
+      const credentials = await Keychain.getGenericPassword({
+        service: AUTH_KEYCHAIN_SERVICE,
+        username: AUTH_KEYCHAIN_USERNAME
+      });
+
+      if (credentials === false) {
+        console.log('No credentials found in Keychain');
+        return null;
+      } else {
+        const { password } = credentials;
+        console.log('Found credentials in Keychain:', {
+          hasPassword: !!password,
+          passwordLength: password.length
+        });
+
+        const tokens = JSON.parse(password);
+        
+        console.log('Parsed tokens:', {
+          hasAccessToken: !!tokens.accessToken,
+          hasRefreshToken: !!tokens.refreshToken,
+          accessTokenLength: tokens.accessToken?.length,
+          refreshTokenLength: tokens.refreshToken?.length
+        });
+
+        if (!tokens.accessToken || !tokens.refreshToken) {
+          console.error('Invalid token format: missing access or refresh token');
+          return null;
+        }
+
+        // Verify token types
+        try {
+          const accessDecoded = jwtDecode<CustomJwtPayload>(tokens.accessToken);
+          const refreshDecoded = jwtDecode<CustomJwtPayload>(tokens.refreshToken);
+
+          if (accessDecoded.type !== 'access' || refreshDecoded.type !== 'refresh') {
+            console.error('Invalid token types:', {
+              accessType: accessDecoded.type,
+              refreshType: refreshDecoded.type
+            });
+            return null;
+          }
+
+          console.log('Tokens verified successfully');
+          return tokens;
+        } catch (error) {
+          console.error('Error verifying token types:', error);
+          return null;
+        }
+      }
+    } catch (error) {
+      console.error('Error retrieving tokens:', error);
+      return null;
+    }
   }
 } 
