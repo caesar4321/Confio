@@ -6,8 +6,10 @@ from .country_codes import COUNTRY_CODES
 from graphql_jwt.utils import jwt_encode, jwt_decode
 from graphql_jwt.shortcuts import create_refresh_token
 from datetime import datetime, timedelta
+import logging
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 def jwt_payload_handler(user):
 	"""Add auth_token_version to the JWT payload"""
@@ -114,41 +116,51 @@ class RefreshToken(graphene.Mutation):
 	class Arguments:
 		refreshToken = graphene.String(required=True)
 
-	success = graphene.Boolean()
-	error = graphene.String()
-	authAccessToken = graphene.String()
+	token = graphene.String()
+	payload = graphene.JSONString()
+	refreshExpiresIn = graphene.Int()
+
+	def __init__(self, *args, **kwargs):
+		print('RefreshToken mutation class constructed')
+		super().__init__(*args, **kwargs)
 
 	@classmethod
 	def mutate(cls, root, info, refreshToken):
+		logger.info("RefreshToken mutation called")
 		try:
+			logger.info("Received refreshToken: %s", refreshToken)
 			# Verify the refresh token
 			payload = jwt_decode(refreshToken)
+			logger.info("Decoded payload: %s", payload)
 			user_id = payload.get('user_id')
 			token_version = payload.get('auth_token_version')
 			
 			if not user_id or not token_version:
-				return RefreshToken(success=False, error="Invalid refresh token")
+				raise Exception("Invalid refresh token")
 			
 			User = get_user_model()
 			try:
 				user = User.objects.get(id=user_id)
 			except User.DoesNotExist:
-				return RefreshToken(success=False, error="User not found")
+				raise Exception("User not found")
 			
 			# Verify token version
 			if user.auth_token_version != token_version:
-				return RefreshToken(success=False, error="Token version mismatch")
+				raise Exception("Token version mismatch")
 			
 			# Generate new access token
 			new_access_token = jwt_encode(jwt_payload_handler(user))
 			
+			# Calculate refresh expiration
+			refresh_exp = int((datetime.utcnow() + timedelta(days=365)).timestamp())
+			
 			return RefreshToken(
-				success=True,
-				error=None,
-				authAccessToken=new_access_token
+				token=new_access_token,
+				payload=jwt_payload_handler(user),
+				refreshExpiresIn=refresh_exp
 			)
 		except Exception as e:
-			return RefreshToken(success=False, error=str(e))
+			raise Exception(str(e))
 
 class Mutation(graphene.ObjectType):
 	update_phone_number = UpdatePhoneNumber.Field()
