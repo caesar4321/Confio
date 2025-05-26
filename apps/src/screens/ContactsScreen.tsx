@@ -20,10 +20,6 @@ export const ContactsScreen = () => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Contactos</Text>
-      </View>
-
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <Icon name="search" size={16} color="#6B7280" />
@@ -103,7 +99,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F3F4F6',
-    padding: 16,
+    paddingHorizontal: 16,
   },
   header: {
     marginBottom: 24,

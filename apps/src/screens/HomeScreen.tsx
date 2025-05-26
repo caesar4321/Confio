@@ -13,7 +13,6 @@ import * as Keychain from 'react-native-keychain';
 import { getApiUrl } from '../config/env';
 import { jwtDecode } from 'jwt-decode';
 import { RootStackParamList } from '../types/navigation';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
@@ -97,83 +96,6 @@ export const HomeScreen = () => {
     }
   };
 
-  const handleRefreshToken = async () => {
-    try {
-      const authService = AuthService.getInstance();
-      const credentials = await Keychain.getGenericPassword({
-        service: AUTH_KEYCHAIN_SERVICE,
-        username: AUTH_KEYCHAIN_USERNAME
-      });
-      
-      if (!credentials) {
-        throw new Error('No refresh token found');
-      }
-
-      const tokens = JSON.parse(credentials.password);
-      if (!tokens.refreshToken) {
-        throw new Error('No refresh token found in stored data');
-      }
-
-      // Decode the refresh token to verify its type
-      const decoded = jwtDecode<CustomJwtPayload>(tokens.refreshToken);
-      if (decoded.type !== 'refresh') {
-        throw new Error('Invalid refresh token type');
-      }
-
-      const response = await fetch(getApiUrl(), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: `
-            mutation RefreshToken($refreshToken: String!) {
-              refreshToken(refreshToken: $refreshToken) {
-                token
-                payload
-                refreshExpiresIn
-              }
-            }
-          `,
-          variables: {
-            refreshToken: tokens.refreshToken
-          }
-        })
-      });
-
-      const result = await response.json();
-
-      if (result.errors) {
-        throw new Error(result.errors[0].message);
-      }
-
-      if (result.data?.refreshToken?.token) {
-        // Store the new access token and keep the same refresh token
-        await Keychain.setGenericPassword(
-          AUTH_KEYCHAIN_USERNAME,
-          JSON.stringify({
-            accessToken: result.data.refreshToken.token,
-            refreshToken: tokens.refreshToken // Keep the same refresh token
-          }),
-          {
-            service: AUTH_KEYCHAIN_SERVICE,
-            username: AUTH_KEYCHAIN_USERNAME,
-            accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-          }
-        );
-        Alert.alert('Success', 'Token refreshed successfully');
-      } else {
-        throw new Error('Failed to refresh token');
-      }
-    } catch (error) {
-      console.error('Error refreshing token:', error);
-      Alert.alert(
-        'Error refreshing token',
-        error instanceof Error ? error.message : 'There was an error refreshing the token. Please try again.'
-      );
-    }
-  };
-
   if (isLoading) {
     return (
       <Gradient
@@ -189,92 +111,77 @@ export const HomeScreen = () => {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#F3F4F6' }}>
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={{
-          backgroundColor: '#34d399',
-          borderBottomLeftRadius: 32,
-          borderBottomRightRadius: 32,
-          overflow: 'hidden',
-          paddingTop: 32,
-          paddingBottom: 32,
-          paddingHorizontal: 20,
-        }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-            <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#fff' }}>Confío</Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <TouchableOpacity style={{ padding: 8, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20 }}>
-                <Icon name="bell" size={20} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity style={{ padding: 8, backgroundColor: '#fff', borderRadius: 20 }}>
-                <Icon name="user" size={20} color="#34d399" />
-              </TouchableOpacity>
+    <View style={{ flex: 1, backgroundColor: '#F3F4F6' }}>
+      {/* Balance Card Section - mint background, rounded bottom border */}
+      <View style={{
+        backgroundColor: '#34d399',
+        paddingTop: 12,
+        paddingBottom: 32,
+        paddingHorizontal: 20,
+        borderBottomLeftRadius: 32,
+        borderBottomRightRadius: 32,
+      }}>
+        <Text style={{ fontSize: 15, color: '#fff', opacity: 0.8 }}>Tu saldo en:</Text>
+        <Text style={{ fontSize: 15, color: '#fff', opacity: 0.8, marginBottom: 4 }}>Dólares estadounidenses</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Text style={{ fontSize: 32, fontWeight: 'bold', color: '#fff' }}>${mockBalances.cusd}</Text>
+          <TouchableOpacity style={{
+            marginLeft: 8,
+            backgroundColor: 'rgba(255,255,255,0.2)',
+            borderRadius: 16,
+            paddingHorizontal: 12,
+            paddingVertical: 4,
+          }}>
+            <Text style={{ color: '#fff', fontSize: 12 }}>Ver en Bs. 5.000.000,00</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Wallets Section - light grey background */}
+      <ScrollView style={{ flex: 1, backgroundColor: '#F3F4F6' }} contentContainerStyle={{ paddingHorizontal: 0 }} showsHorizontalScrollIndicator={false}>
+        <View style={styles.walletsHeader}>
+          <Text style={styles.walletsTitle}>Mis Cuentas</Text>
+        </View>
+        <View style={{ ...styles.walletsContainer, width: '100%' }}>
+          <View style={{ ...styles.walletCard, width: '100%' }}>
+            <View style={styles.walletLogoContainer}>
+              <Image source={cUSDLogo} style={styles.walletLogo} />
+            </View>
+            <View style={styles.walletInfo}>
+              <Text style={styles.walletName}>Confío Dollar</Text>
+              <Text style={styles.walletSymbol}>$cUSD</Text>
+            </View>
+            <View style={styles.walletBalance}>
+              <Text style={styles.walletBalanceText}>${mockBalances.cusd}</Text>
             </View>
           </View>
-          <Text style={{ fontSize: 15, color: '#fff', opacity: 0.8 }}>Tu saldo en:</Text>
-          <Text style={{ fontSize: 15, color: '#fff', opacity: 0.8, marginBottom: 4 }}>Dólares estadounidenses</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Text style={{ fontSize: 32, fontWeight: 'bold', color: '#fff' }}>${mockBalances.cusd}</Text>
-            <TouchableOpacity style={{
-              marginLeft: 8,
-              backgroundColor: 'rgba(255,255,255,0.2)',
-              borderRadius: 16,
-              paddingHorizontal: 12,
-              paddingVertical: 4,
-            }}>
-              <Text style={{ color: '#fff', fontSize: 12 }}>Ver en Bs. 5.000.000,00</Text>
-            </TouchableOpacity>
+          <View style={{ ...styles.walletCard, width: '100%' }}>
+            <View style={styles.walletLogoContainer}>
+              <Image source={USDCLogo} style={styles.walletLogo} />
+            </View>
+            <View style={styles.walletInfo}>
+              <Text style={styles.walletName}>USD Coin</Text>
+              <Text style={styles.walletSymbol}>$USDC</Text>
+            </View>
+            <View style={styles.walletBalance}>
+              <Text style={styles.walletBalanceText}>${mockBalances.usdc}</Text>
+            </View>
+          </View>
+          <View style={{ ...styles.walletCard, width: '100%' }}>
+            <View style={styles.walletLogoContainer}>
+              <Image source={CONFIOLogo} style={styles.walletLogo} />
+            </View>
+            <View style={styles.walletInfo}>
+              <Text style={styles.walletName}>Confío</Text>
+              <Text style={styles.walletSymbol}>$CONFIO</Text>
+            </View>
+            <View style={styles.walletBalance}>
+              <Text style={styles.walletBalanceText}>{mockBalances.confio}</Text>
+            </View>
           </View>
         </View>
-
-        {/* Wallets */}
-        <ScrollView style={styles.content} contentContainerStyle={{ paddingHorizontal: 0 }} horizontal={false} showsHorizontalScrollIndicator={false}>
-          <View style={styles.walletsHeader}>
-            <Text style={styles.walletsTitle}>Mis Cuentas</Text>
-          </View>
-
-          <View style={{ ...styles.walletsContainer, width: '100%' }}>
-            <View style={{ ...styles.walletCard, width: '100%' }}>
-              <View style={styles.walletLogoContainer}>
-                <Image source={cUSDLogo} style={styles.walletLogo} />
-              </View>
-              <View style={styles.walletInfo}>
-                <Text style={styles.walletName}>Confío Dollar</Text>
-                <Text style={styles.walletSymbol}>$cUSD</Text>
-              </View>
-              <View style={styles.walletBalance}>
-                <Text style={styles.walletBalanceText}>${mockBalances.cusd}</Text>
-              </View>
-            </View>
-            <View style={{ ...styles.walletCard, width: '100%' }}>
-              <View style={styles.walletLogoContainer}>
-                <Image source={USDCLogo} style={styles.walletLogo} />
-              </View>
-              <View style={styles.walletInfo}>
-                <Text style={styles.walletName}>USD Coin</Text>
-                <Text style={styles.walletSymbol}>$USDC</Text>
-              </View>
-              <View style={styles.walletBalance}>
-                <Text style={styles.walletBalanceText}>${mockBalances.usdc}</Text>
-              </View>
-            </View>
-            <View style={{ ...styles.walletCard, width: '100%' }}>
-              <View style={styles.walletLogoContainer}>
-                <Image source={CONFIOLogo} style={styles.walletLogo} />
-              </View>
-              <View style={styles.walletInfo}>
-                <Text style={styles.walletName}>Confío</Text>
-                <Text style={styles.walletSymbol}>$CONFIO</Text>
-              </View>
-              <View style={styles.walletBalance}>
-                <Text style={styles.walletBalanceText}>{mockBalances.confio}</Text>
-              </View>
-            </View>
-          </View>
-        </ScrollView>
-      </View>
-    </SafeAreaView>
+      </ScrollView>
+    </View>
   );
 };
 

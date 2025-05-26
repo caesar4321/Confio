@@ -6,24 +6,45 @@ import { ContactsScreen } from '../screens/ContactsScreen';
 import { ScanScreen } from '../screens/ScanScreen';
 import { ExchangeScreen } from '../screens/ExchangeScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
+import { Header } from './Header';
 
 const Tab = createBottomTabNavigator();
 
 export const BottomTabNavigator = () => {
   return (
     <Tab.Navigator
-      screenOptions={{
-        tabBarStyle: {
-          backgroundColor: '#FFFFFF',
-          borderTopWidth: 1,
-          borderTopColor: '#E5E7EB',
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 8,
-        },
-        tabBarActiveTintColor: '#72D9BC',
-        tabBarInactiveTintColor: '#6B7280',
-        headerShown: false,
+      screenOptions={({ route }) => {
+        // Determine if this is the Home screen
+        const isHomeScreen = route.name === 'Home';
+        // Set the title and label based on the route
+        let title = 'Confío';
+        let tabBarLabel = '';
+        if (route.name === 'Home') { title = 'Confío'; tabBarLabel = 'Inicio'; }
+        else if (route.name === 'Contacts') { title = 'Contactos'; tabBarLabel = 'Contactos'; }
+        else if (route.name === 'Scan') { title = 'Escanear'; tabBarLabel = 'Escanear'; }
+        else if (route.name === 'Exchange') { title = 'Intercambio P2P'; tabBarLabel = 'Intercambio'; }
+        else if (route.name === 'Profile') { title = 'Mi Perfil'; tabBarLabel = 'Perfil'; }
+        return {
+          header: () => (
+            <Header
+              isHomeScreen={isHomeScreen}
+              title={title}
+              onProfilePress={() => {}}
+              onNotificationPress={() => {}}
+            />
+          ),
+          tabBarLabel,
+          tabBarActiveTintColor: '#8B5CF6', // Violet (secondary)
+          tabBarInactiveTintColor: '#6B7280', // Gray-500
+          tabBarStyle: {
+            backgroundColor: '#FFFFFF', // White background
+            borderTopWidth: 1,
+            borderTopColor: '#E5E7EB', // Gray-200
+            height: 64,
+            paddingBottom: 8,
+            paddingTop: 8,
+          },
+        };
       }}
     >
       <Tab.Screen
@@ -33,6 +54,7 @@ export const BottomTabNavigator = () => {
           tabBarIcon: ({ color, size }) => (
             <Icon name="home" size={size} color={color} />
           ),
+          tabBarLabel: 'Inicio',
         }}
       />
       <Tab.Screen
@@ -42,6 +64,7 @@ export const BottomTabNavigator = () => {
           tabBarIcon: ({ color, size }) => (
             <Icon name="users" size={size} color={color} />
           ),
+          tabBarLabel: 'Contactos',
         }}
       />
       <Tab.Screen
@@ -51,6 +74,7 @@ export const BottomTabNavigator = () => {
           tabBarIcon: ({ color, size }) => (
             <Icon name="maximize" size={size} color={color} />
           ),
+          tabBarLabel: 'Escanear',
         }}
       />
       <Tab.Screen
@@ -60,6 +84,7 @@ export const BottomTabNavigator = () => {
           tabBarIcon: ({ color, size }) => (
             <Icon name="repeat" size={size} color={color} />
           ),
+          tabBarLabel: 'Intercambio',
         }}
       />
       <Tab.Screen
@@ -69,6 +94,7 @@ export const BottomTabNavigator = () => {
           tabBarIcon: ({ color, size }) => (
             <Icon name="user" size={size} color={color} />
           ),
+          tabBarLabel: 'Perfil',
         }}
       />
     </Tab.Navigator>

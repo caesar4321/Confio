@@ -21,10 +21,6 @@ export const ExchangeScreen = () => {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Intercambiar</Text>
-      </View>
-
       <ScrollView style={styles.content}>
         {/* From Currency */}
         <View style={styles.currencyCard}>
@@ -89,18 +85,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F3F4F6',
   },
-  header: {
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
   content: {
     flex: 1,
-    padding: 16,
+    paddingHorizontal: 16,
   },
   currencyCard: {
     backgroundColor: '#FFFFFF',
