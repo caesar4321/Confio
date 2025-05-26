@@ -1,18 +1,13 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { useAuth } from '../contexts/AuthContext';
 
 export const ProfileScreen = () => {
-  const handleSignOut = () => {
-    // Implement sign out logic
-  };
+  const { signOut } = useAuth();
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Perfil</Text>
-      </View>
-
       <ScrollView style={styles.content}>
         {/* Profile Section */}
         <View style={styles.profileSection}>
@@ -74,7 +69,7 @@ export const ProfileScreen = () => {
         </View>
 
         {/* Sign Out Button */}
-        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
+        <TouchableOpacity style={styles.signOutButton} onPress={signOut}>
           <Icon name="log-out" size={20} color="#EF4444" />
           <Text style={styles.signOutText}>Cerrar sesión</Text>
         </TouchableOpacity>
@@ -91,18 +86,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F3F4F6',
   },
-  header: {
-    padding: 16,
-    backgroundColor: '#FFFFFF',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
   content: {
     flex: 1,
-    padding: 16,
+    paddingHorizontal: 16,
   },
   profileSection: {
     alignItems: 'center',

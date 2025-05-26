@@ -1,6 +1,7 @@
 export type RootStackParamList = {
   Auth: undefined;
   Main: undefined;
+  PhoneVerification: undefined;
 };
 
 export type BottomTabParamList = {

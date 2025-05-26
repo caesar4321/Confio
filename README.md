@@ -276,3 +276,123 @@ This is a **monolithic repository** containing the full Confío stack:
    ```bash
    python manage.py runserver
    ```
+   The server will:
+   - Serve the React app at the root URL
+   - Handle static files using Whitenoise
+   - Provide GraphQL API endpoints
+
+4. **Development Workflow**
+   - For React development: `yarn start` (runs on port 3000)
+   - For Django development: `python manage.py runserver` (runs on port 8000)
+   - After making React changes, run `yarn build` to update the Django-served version
+
+### Static File Handling
+
+The project uses a combination of Django and Whitenoise for static file serving:
+
+1. **Development**
+   - Django's development server serves static files
+   - React development server (port 3000) serves files directly
+
+2. **Production**
+   - Whitenoise serves static files efficiently
+   - Files are compressed and cached
+   - No separate web server needed for static files
+
+3. **Build Process**
+   - React build generates hashed filenames for cache busting
+   - `copy-index.js` script syncs the build with Django templates
+   - Static files are collected into Django's static directory
+
+⚠️ **Important**: The following files and directories should be added to `.gitignore` for security:
+
+> - `.env` files (⚠️ **Critical Development Files**):
+>   - Root `.env` (⚠️ **Location**: `/Confio/.env`): Django settings
+>     - `PRODUCTION_HOSTS`: Comma-separated list of production hostnames
+>     - `DEVELOPMENT_HOSTS`: Comma-separated list of development hostnames
+>     - `DB_NAME`: PostgreSQL database name
+>     - `DB_USER`: PostgreSQL database user
+>     - `DB_PASSWORD`: PostgreSQL database password
+>     - `DB_HOST`: PostgreSQL database host
+>     - `DB_PORT`: PostgreSQL database port
+>     - `SECRET_KEY`: Django secret key for cryptographic signing (e.g., '***REMOVED***')
+>     - `PYTHONPATH`: Python path for Django
+>     - `DJANGO_SETTINGS_MODULE`: Django settings module path
+>   - `apps/.env` (⚠️ **Location**: `/Confio/apps/.env`): React Native app settings
+>     - `GOOGLE_WEB_CLIENT_ID`: Google OAuth client ID for web platform
+>     - `GOOGLE_IOS_CLIENT_ID`: Google OAuth client ID for iOS platform
+>     - `GOOGLE_ANDROID_CLIENT_ID`: Google OAuth client ID for Android platform
+>     - `API_URL`: Production backend API URL
+>     - `API_URL_DEV`: Development backend API URL
+>   - `apps/android/.env` (⚠️ **Location**: `/Confio/apps/android/.env`): Android-specific settings
+>     - `KEYSTORE_FILE`: Path to Android keystore file
+>     - `KEYSTORE_PASSWORD`: Keystore password
+>     - `KEY_ALIAS`: Key alias
+>     - `KEY_PASSWORD`: Key password
+>   - `apps/ios/.env` (⚠️ **Location**: `/Confio/apps/ios/.env`): iOS-specific settings
+>     - (No environment variables currently defined)
+> - Firebase Configuration Files (⚠️ **Critical Development Files**):
+>   - `google-services.json` (⚠️ **Location**: `/Confio/apps/android/app/google-services.json`): Android Firebase config
+>   - `GoogleService-Info.plist` (⚠️ **Location**: `/Confio/apps/ios/Confio/GoogleService-Info.plist`): iOS Firebase config
+>   - `service-account.json` (⚠️ **Location**: `/Confio/config/service-account.json`): Firebase Admin SDK service account key
+>     - Required for server-side Firebase operations (e.g., token verification)
+>     - Download from Firebase Console > Project Settings > Service Accounts > Generate New Private Key
+> - `confio.tar.gz` (deployment archive)
+> - `apps/android/gradle.properties` (contains keystore and signing configurations)
+> - Any other files containing sensitive information or credentials
+
+> **Note**: Google OAuth Client IDs are configured in `apps/.env` and accessed through `apps/src/config/env.ts` using `react-native-dotenv`.
+
+## 📜 Smart Contracts
+
+### Confío Dollar ($cUSD)
+- **File**: `contracts/cusd/sources/cusd.move`
+- **Purpose**: Implementation of the $cUSD stablecoin, a gasless stablecoin designed for everyday transactions in Latin America
+- **Key Features**:
+  - 6 decimal places precision for micro-transactions
+  - USD-pegged stablecoin backed by USDC
+  - Gasless transactions enabled through Sui's native sponsored transaction system
+  - Vault system for USDC backing and treasury operations
+
+### Confío ($CONFIO)
+- **File**: `contracts/confio/sources/confio.move`
+- **Purpose**: Governance and utility token for the Confío platform
+- **Key Features**:
+  - Fixed supply of 1 billion tokens
+  - 6 decimal places precision
+  - UTF-8 support for Spanish characters
+  - Custom icon URL
+- **Distribution**:
+  - Initial supply minted to contract deployer
+  - Metadata and treasury cap frozen after initialization
+
+### Gasless Transactions
+- **Implementation**: Handled off-chain through Sui's native sponsored transaction system
+- **Components**:
+  - App server maintains SUI balance for gas sponsorship
+  - Client SDK integrates with Sui's sponsored transaction API
+  - Rate limiting and gas budget controls implemented at the application level
+- **Benefits**:
+  - Zero gas fees for end users
+  - Native Sui protocol support
+  - Simplified implementation without additional smart contracts
+
+### Country Code Management
+
+The project maintains country code mappings in two locations:
+
+1. **Client-side** (`apps/src/utils/countries.ts`):
+   - Format: `[country_name, country_code, iso_code, flag]`
+   - Used by the React Native app for phone number input
+   - Includes flag emojis for UI display
+   - Helper functions:
+     - `getCountryByIso(iso)`: Get country by ISO code
+     - `getCountryByPhoneCode(code)`: Get country by phone code
+
+2. **Server-side** (`users/country_codes.py`):
+   - Format: `[country_name, country_code, iso_code]`
+   - Used by Django backend for phone number validation
+   - Used in Telegram verification process
+   - Ensures consistent country code handling across the application
+
+Both files maintain the same list of countries and codes, with the client version including additional UI elements (flags) and the server version focusing on validation and formatting.

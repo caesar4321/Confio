@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, RefObject } from 'react';
 import { AuthService } from '../services/authService';
 import { NavigationContainerRef } from '@react-navigation/native';
+import { RootStackParamList } from '../types/navigation';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -12,15 +13,9 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-type RootStackParamList = {
-  Auth: undefined;
-  PhoneVerification: undefined;
-  Main: undefined;
-};
-
 interface AuthProviderProps {
   children: React.ReactNode;
-  navigationRef: RefObject<NavigationContainerRef<RootStackParamList>>;
+  navigationRef: RefObject<NavigationContainerRef<RootStackParamList> | null>;
 }
 
 export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => {

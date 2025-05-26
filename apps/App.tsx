@@ -9,36 +9,21 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { AuthScreen } from './src/screens/AuthScreen';
-import { BottomTabNavigator } from './src/navigation/BottomTabNavigator';
-import { AuthProvider, useAuth } from './src/contexts/AuthContext';
+import PhoneVerificationScreen from './src/screens/PhoneVerificationScreen';
+import BottomTabNavigator from './src/navigation/BottomTabNavigator';
 import { RootStackParamList } from './src/types/navigation';
+import { Text } from 'react-native';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-const Navigation = () => {
-  const { isAuthenticated } = useAuth();
-
-  React.useEffect(() => {
-    console.log('Navigation state changed, isAuthenticated:', isAuthenticated);
-  }, [isAuthenticated]);
-
+export default function App() {
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {!isAuthenticated ? (
-          <Stack.Screen name="Auth" component={AuthScreen} />
-        ) : (
-          <Stack.Screen name="Main" component={BottomTabNavigator} />
-        )}
+        <Stack.Screen name="Auth" component={AuthScreen} />
+        <Stack.Screen name="PhoneVerification" component={PhoneVerificationScreen} />
+        <Stack.Screen name="Main" component={BottomTabNavigator} />
       </Stack.Navigator>
     </NavigationContainer>
-  );
-};
-
-export default function App() {
-  return (
-    <AuthProvider>
-      <Navigation />
-    </AuthProvider>
   );
 }
