@@ -1,6 +1,7 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Feather';
+import { View, StyleSheet } from 'react-native';
 import { HomeScreen } from '../screens/HomeScreen';
 import { ContactsScreen } from '../screens/ContactsScreen';
 import { ScanScreen } from '../screens/ScanScreen';
@@ -19,11 +20,12 @@ export const BottomTabNavigator = () => {
         // Set the title and label based on the route
         let title = 'Confío';
         let tabBarLabel = '';
+        let headerBg = undefined;
         if (route.name === 'Home') { title = 'Confío'; tabBarLabel = 'Inicio'; }
-        else if (route.name === 'Contacts') { title = 'Contactos'; tabBarLabel = 'Contactos'; }
+        else if (route.name === 'Contacts') { title = 'Contactos'; tabBarLabel = 'Contactos'; headerBg = '#fff'; }
         else if (route.name === 'Scan') { title = 'Escanear'; tabBarLabel = 'Escanear'; }
-        else if (route.name === 'Exchange') { title = 'Intercambio P2P'; tabBarLabel = 'Intercambio'; }
-        else if (route.name === 'Profile') { title = 'Mi Perfil'; tabBarLabel = 'Perfil'; }
+        else if (route.name === 'Exchange') { title = 'Intercambio P2P'; tabBarLabel = 'Intercambio'; headerBg = '#fff'; }
+        else if (route.name === 'Profile') { title = 'Mi Perfil'; tabBarLabel = 'Perfil'; headerBg = '#34d399'; }
         return {
           header: () => (
             <Header
@@ -31,6 +33,7 @@ export const BottomTabNavigator = () => {
               title={title}
               onProfilePress={() => {}}
               onNotificationPress={() => {}}
+              backgroundColor={headerBg}
             />
           ),
           tabBarLabel,
@@ -44,59 +47,55 @@ export const BottomTabNavigator = () => {
             paddingBottom: 8,
             paddingTop: 8,
           },
+          tabBarIcon: ({ color, size, focused }) => {
+            if (route.name === 'Scan') {
+              return (
+                <View style={styles.scanButton}>
+                  <Icon name="maximize" size={32} color="#fff" />
+                </View>
+              );
+            }
+            
+            let icon;
+            if (route.name === 'Home') {
+              icon = <Icon name="home" size={size} color={color} />;
+            } else if (route.name === 'Contacts') {
+              icon = <Icon name="users" size={size} color={color} />;
+            } else if (route.name === 'Exchange') {
+              icon = <Icon name="repeat" size={size} color={color} />;
+            } else if (route.name === 'Profile') {
+              icon = <Icon name="user" size={size} color={color} />;
+            }
+            return icon;
+          },
         };
       }}
     >
-      <Tab.Screen
-        name="Home"
-        component={HomeScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Icon name="home" size={size} color={color} />
-          ),
-          tabBarLabel: 'Inicio',
-        }}
-      />
-      <Tab.Screen
-        name="Contacts"
-        component={ContactsScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Icon name="users" size={size} color={color} />
-          ),
-          tabBarLabel: 'Contactos',
-        }}
-      />
-      <Tab.Screen
-        name="Scan"
-        component={ScanScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Icon name="maximize" size={size} color={color} />
-          ),
-          tabBarLabel: 'Escanear',
-        }}
-      />
-      <Tab.Screen
-        name="Exchange"
-        component={ExchangeScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Icon name="repeat" size={size} color={color} />
-          ),
-          tabBarLabel: 'Intercambio',
-        }}
-      />
-      <Tab.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <Icon name="user" size={size} color={color} />
-          ),
-          tabBarLabel: 'Perfil',
-        }}
-      />
+      <Tab.Screen name="Home" component={HomeScreen} />
+      <Tab.Screen name="Contacts" component={ContactsScreen} />
+      <Tab.Screen name="Scan" component={ScanScreen} />
+      <Tab.Screen name="Exchange" component={ExchangeScreen} />
+      <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );
-}; 
+};
+
+const styles = StyleSheet.create({
+  scanButton: {
+    backgroundColor: '#34d399', // Emerald color
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: -30,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+}); 

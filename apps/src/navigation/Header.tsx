@@ -9,6 +9,7 @@ interface HeaderProps {
   onNotificationPress: () => void;
   isHomeScreen?: boolean;
   title?: string;
+  backgroundColor?: string;
 }
 
 export function Header({
@@ -16,11 +17,12 @@ export function Header({
   onNotificationPress,
   isHomeScreen = false,
   title = 'Confío',
+  backgroundColor,
 }: HeaderProps) {
   return (
     <View
       style={{
-        backgroundColor: isHomeScreen ? '#34d399' : '#F3F4F6',
+        backgroundColor: backgroundColor ? backgroundColor : (isHomeScreen ? '#34d399' : '#F3F4F6'),
         paddingTop: Platform.OS === 'ios' ? 48 : (StatusBar.currentHeight || 32),
         paddingBottom: 8,
         paddingHorizontal: 20,
@@ -33,7 +35,7 @@ export function Header({
       <Text style={{ 
         fontSize: 24, 
         fontWeight: 'bold', 
-        color: isHomeScreen ? '#fff' : '#1F2937' 
+        color: backgroundColor === '#34d399' ? '#fff' : (isHomeScreen ? '#fff' : '#1F2937')
       }}>
         {title}
       </Text>
