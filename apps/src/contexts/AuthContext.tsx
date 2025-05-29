@@ -28,7 +28,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     if (navigationRef.current) {
       console.log('Navigation is ready, checking auth state...');
       setIsNavigationReady(true);
-    checkAuthState();
+      checkAuthState();
     }
   }, [navigationRef.current]);
 
@@ -39,14 +39,14 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     }
     
     console.log(`Navigating to ${screenName}`);
-        navigationRef.current.reset({
-          index: 0,
+    navigationRef.current.reset({
+      index: 0,
       routes: [{ 
         name: screenName,
         params: undefined,
         state: undefined
       }],
-        });
+    });
   };
 
   const handleSuccessfulLogin = async (isPhoneVerified: boolean) => {
@@ -130,21 +130,6 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       setIsAuthenticated(false);
     }
   };
-
-  // Set up periodic session checks
-  useEffect(() => {
-    if (isAuthenticated) {
-      const checkInterval = setInterval(async () => {
-        const isValid = await checkLocalAuthState();
-        if (!isValid) {
-          setIsAuthenticated(false);
-          clearInterval(checkInterval);
-        }
-      }, 60000); // Check every minute
-
-      return () => clearInterval(checkInterval);
-    }
-  }, [isAuthenticated]);
 
   return (
     <AuthContext.Provider value={{ isAuthenticated, isLoading, signOut, checkLocalAuthState, handleSuccessfulLogin }}>
