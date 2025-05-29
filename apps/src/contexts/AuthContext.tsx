@@ -7,7 +7,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   signOut: () => Promise<void>;
-  checkServerSession: () => Promise<boolean>;
+  checkLocalAuthState: () => Promise<boolean>;
   handleSuccessfulLogin: (isPhoneVerified: boolean) => Promise<void>;
 }
 
@@ -105,7 +105,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     }
   };
 
-  const checkServerSession = async (): Promise<boolean> => {
+  const checkLocalAuthState = async (): Promise<boolean> => {
     try {
       const authService = AuthService.getInstance();
       const hasZkLoginData = await authService.getStoredZkLoginData();
@@ -135,7 +135,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   useEffect(() => {
     if (isAuthenticated) {
       const checkInterval = setInterval(async () => {
-        const isValid = await checkServerSession();
+        const isValid = await checkLocalAuthState();
         if (!isValid) {
           setIsAuthenticated(false);
           clearInterval(checkInterval);
@@ -147,7 +147,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   }, [isAuthenticated]);
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, signOut, checkServerSession, handleSuccessfulLogin }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, signOut, checkLocalAuthState, handleSuccessfulLogin }}>
       {children}
     </AuthContext.Provider>
   );
