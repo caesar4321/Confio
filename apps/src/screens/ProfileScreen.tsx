@@ -1,175 +1,218 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
+
+// Colors from the design
+const colors = {
+  primary: '#34d399', // emerald-400
+  primaryText: '#34d399',
+  primaryLight: '#d1fae5', // emerald-100
+  primaryDark: '#10b981', // emerald-500
+  secondary: '#8b5cf6', // violet-500
+  secondaryText: '#8b5cf6',
+  accent: '#3b82f6', // blue-500
+  accentText: '#3b82f6',
+  neutral: '#f9fafb', // gray-50
+  neutralDark: '#f3f4f6', // gray-100
+  dark: '#111827', // gray-900
+};
 
 export const ProfileScreen = () => {
   const { signOut } = useAuth();
 
+  const profileOptions = [
+    { name: "Verificación", icon: "user-check" },
+    { name: "Seguridad", icon: "shield" },
+    { name: "Notificaciones", icon: "bell" },
+    { name: "Comunidad", icon: "users" },
+    { name: "Términos de Servicio", icon: "file-text" },
+    { name: "Política de Privacidad", icon: "lock" },
+    { name: "Eliminación de Datos", icon: "trash-2" }
+  ];
+
   return (
-    <View style={styles.container}>
-      <ScrollView style={styles.content}>
-        {/* Profile Section */}
-        <View style={styles.profileSection}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+      {/* Header Section */}
+      <View style={styles.header}>
+        <View style={styles.profileInfo}>
           <View style={styles.avatarContainer}>
-            <Text style={styles.avatarText}>JD</Text>
+            <Icon name="user" size={40} color={colors.primary} />
           </View>
-          <Text style={styles.name}>John Doe</Text>
-          <Text style={styles.email}>john.doe@example.com</Text>
+          <Text style={styles.name}>Carlos Mendoza</Text>
+          <Text style={styles.phone}>+58 412 345 6789</Text>
         </View>
+      </View>
 
-        {/* Settings Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Configuración</Text>
-          
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={styles.menuItemLeft}>
-              <View style={[styles.iconContainer, { backgroundColor: '#72D9BC' }]}>
-                <Icon name="user" size={20} color="#FFFFFF" />
-              </View>
-              <Text style={styles.menuItemText}>Información personal</Text>
-            </View>
-            <Icon name="chevron-right" size={20} color="#6B7280" />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={styles.menuItemLeft}>
-              <View style={[styles.iconContainer, { backgroundColor: '#72D9BC' }]}>
-                <Icon name="settings" size={20} color="#FFFFFF" />
-              </View>
-              <Text style={styles.menuItemText}>Preferencias</Text>
-            </View>
-            <Icon name="chevron-right" size={20} color="#6B7280" />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={styles.menuItemLeft}>
-              <View style={[styles.iconContainer, { backgroundColor: '#72D9BC' }]}>
-                <Icon name="shield" size={20} color="#FFFFFF" />
-              </View>
-              <Text style={styles.menuItemText}>Seguridad</Text>
-            </View>
-            <Icon name="chevron-right" size={20} color="#6B7280" />
+      {/* Confío Address Card */}
+      <View style={styles.addressCard}>
+        <View style={styles.addressCardContent}>
+          <View style={styles.addressIconContainer}>
+            <Icon name="maximize" size={20} color="#6B7280" />
+          </View>
+          <View style={styles.addressInfo}>
+            <Text style={styles.addressTitle}>Mi dirección de Confío</Text>
+            <Text style={styles.addressValue}>confio.lat/carlosmendoza</Text>
+          </View>
+          <TouchableOpacity style={styles.shareButton}>
+            <Text style={styles.shareButtonText}>Compartir</Text>
           </TouchableOpacity>
         </View>
+      </View>
 
-        {/* Support Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Soporte</Text>
-          
-          <TouchableOpacity style={styles.menuItem}>
-            <View style={styles.menuItemLeft}>
-              <View style={[styles.iconContainer, { backgroundColor: '#72D9BC' }]}>
-                <Icon name="help-circle" size={20} color="#FFFFFF" />
+      {/* Profile Options */}
+      <View style={styles.optionsContainer}>
+        {profileOptions.map((option, index) => (
+          <TouchableOpacity key={index} style={styles.optionItem}>
+            <View style={styles.optionLeft}>
+              <View style={styles.optionIconContainer}>
+                <Icon name={option.icon} size={20} color="#6B7280" />
               </View>
-              <Text style={styles.menuItemText}>Centro de ayuda</Text>
+              <Text style={styles.optionText}>{option.name}</Text>
             </View>
-            <Icon name="chevron-right" size={20} color="#6B7280" />
+            <Icon name="chevron-right" size={20} color="#9CA3AF" />
           </TouchableOpacity>
-        </View>
+        ))}
+      </View>
 
-        {/* Sign Out Button */}
-        <TouchableOpacity style={styles.signOutButton} onPress={signOut}>
-          <Icon name="log-out" size={20} color="#EF4444" />
-          <Text style={styles.signOutText}>Cerrar sesión</Text>
-        </TouchableOpacity>
-
-        {/* App Version */}
-        <Text style={styles.version}>Versión 1.0.0</Text>
-      </ScrollView>
-    </View>
+      {/* Sign Out Button */}
+      <TouchableOpacity style={styles.signOutButton} onPress={signOut}>
+        <Text style={styles.signOutText}>Cerrar Sesión</Text>
+      </TouchableOpacity>
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#fff',
   },
-  content: {
-    flex: 1,
-    paddingHorizontal: 16,
+  scrollContent: {
+    flexGrow: 1,
   },
-  profileSection: {
+  header: {
+    backgroundColor: '#34d399', // emerald-400
+    paddingBottom: 32,
+    paddingHorizontal: 20,
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+  },
+  profileInfo: {
     alignItems: 'center',
-    marginBottom: 24,
   },
   avatarContainer: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#72D9BC',
+    backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
-  },
-  avatarText: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
+    marginBottom: 12,
   },
   name: {
     fontSize: 20,
-    fontWeight: '600',
-    color: '#1F2937',
+    fontWeight: 'bold',
+    color: '#fff',
     marginBottom: 4,
   },
-  email: {
+  phone: {
     fontSize: 14,
-    color: '#6B7280',
+    color: 'rgba(255, 255, 255, 0.8)',
   },
-  section: {
+  addressCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginTop: -16,
+    marginHorizontal: 16,
     marginBottom: 24,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
   },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#6B7280',
-    marginBottom: 12,
-  },
-  menuItem: {
+  addressCardContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
     padding: 16,
-    borderRadius: 12,
-    marginBottom: 8,
   },
-  menuItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  iconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  addressIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.neutralDark,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
-  menuItemText: {
+  addressInfo: {
+    flex: 1,
+  },
+  addressTitle: {
     fontSize: 16,
+    fontWeight: '500',
+    color: '#1F2937',
+    marginBottom: 2,
+  },
+  addressValue: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  shareButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  shareButtonText: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  optionsContainer: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  optionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.neutralDark,
+    padding: 12,
+    borderRadius: 12,
+  },
+  optionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  optionIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  optionText: {
+    fontSize: 16,
+    fontWeight: '500',
     color: '#1F2937',
   },
   signOutButton: {
-    flexDirection: 'row',
+    marginTop: 32,
+    marginBottom: 32,
+    paddingVertical: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
   },
   signOutText: {
-    fontSize: 16,
     color: '#EF4444',
-    marginLeft: 8,
-  },
-  version: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    marginBottom: 16,
+    fontSize: 16,
+    fontWeight: '500',
   },
 }); 

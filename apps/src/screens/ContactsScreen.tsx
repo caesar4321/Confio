@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 
 export const ContactsScreen = () => {
@@ -19,10 +19,10 @@ export const ContactsScreen = () => {
   ];
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
       {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <Icon name="search" size={16} color="#6B7280" />
+      <View style={styles.searchBar}>
+        <Icon name="search" size={18} color="#6B7280" style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
           placeholder="Buscar contactos..."
@@ -30,22 +30,21 @@ export const ContactsScreen = () => {
         />
       </View>
 
-      {/* Send/Receive Bar */}
+      {/* Send/Receive Buttons */}
       <View style={styles.actionButtons}>
         <TouchableOpacity style={styles.actionButton}>
           <View style={styles.actionButtonContent}>
             <View style={styles.actionIconContainer}>
-              <Icon name="send" size={20} color="#FFFFFF" />
+              <Icon name="send" size={20} color="#fff" />
             </View>
             <Text style={styles.actionButtonText}>Enviar con dirección</Text>
           </View>
           <Icon name="chevron-right" size={20} color="#6B7280" />
         </TouchableOpacity>
-
         <TouchableOpacity style={styles.actionButton}>
           <View style={styles.actionButtonContent}>
             <View style={styles.actionIconContainer}>
-              <Icon name="download" size={20} color="#FFFFFF" />
+              <Icon name="download" size={20} color="#fff" />
             </View>
             <Text style={styles.actionButtonText}>Recibir con dirección</Text>
           </View>
@@ -56,15 +55,15 @@ export const ContactsScreen = () => {
       {/* Friends Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Amigos</Text>
-        <View style={styles.contactsList}>
+        <View style={styles.friendsList}>
           {friends.map((friend, index) => (
-            <View key={index} style={styles.contactItem}>
+            <View key={index} style={styles.friendItem}>
               <View style={styles.avatarContainer}>
                 <Text style={styles.avatarText}>{friend.avatar}</Text>
               </View>
-              <Text style={styles.contactName}>{friend.name}</Text>
+              <Text style={styles.friendName}>{friend.name}</Text>
               <TouchableOpacity style={styles.sendButton}>
-                <Icon name="send" size={16} color="#FFFFFF" />
+                <Icon name="send" size={16} color="#fff" />
               </TouchableOpacity>
             </View>
           ))}
@@ -77,77 +76,90 @@ export const ContactsScreen = () => {
         <View style={styles.inviteBanner}>
           <Text style={styles.inviteText}>¡Invita a tus amigos a Confío!</Text>
         </View>
-        <View style={styles.contactsList}>
+        <View style={styles.friendsList}>
           {nonConfioFriends.map((friend, index) => (
-            <View key={index} style={styles.contactItem}>
+            <View key={index} style={styles.friendItem}>
               <View style={styles.avatarContainer}>
                 <Text style={styles.avatarText}>{friend.avatar}</Text>
               </View>
-              <Text style={styles.contactName}>{friend.name}</Text>
-              <TouchableOpacity style={styles.inviteButton}>
+              <Text style={styles.friendName}>{friend.name}</Text>
+              <TouchableOpacity style={styles.addButton}>
                 <Icon name="plus" size={16} color="#6B7280" />
               </TouchableOpacity>
             </View>
           ))}
         </View>
       </View>
-    </View>
+    </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#fff',
+  },
+  contentContainer: {
     paddingHorizontal: 16,
+    paddingTop: 0,
+    paddingBottom: 24,
   },
-  header: {
-    marginBottom: 24,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
-  searchContainer: {
+  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 24,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === 'ios' ? 12 : 8,
+    marginBottom: 10,
+  },
+  searchIcon: {
+    marginRight: 8,
   },
   searchInput: {
     flex: 1,
-    marginLeft: 8,
-    fontSize: 14,
+    fontSize: 15,
     color: '#1F2937',
+    paddingVertical: 0,
   },
   actionButtons: {
-    gap: 12,
-    marginBottom: 24,
+    gap: 8,
+    marginBottom: 16,
   },
   actionButton: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    marginBottom: 6,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
   },
   actionButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   actionIconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#72D9BC',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#34d399', // emerald-400
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 14,
   },
   actionButtonText: {
     fontSize: 16,
@@ -155,62 +167,63 @@ const styles = StyleSheet.create({
     color: '#1F2937',
   },
   section: {
-    marginBottom: 24,
+    marginBottom: 16,
   },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '500',
     color: '#6B7280',
-    marginBottom: 12,
+    marginBottom: 10,
   },
-  contactsList: {
-    gap: 12,
+  friendsList: {
+    gap: 8,
   },
-  contactItem: {
+  friendItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 0,
   },
   avatarContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#E5E7EB',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 14,
   },
   avatarText: {
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 17,
+    fontWeight: '600',
     color: '#4B5563',
   },
-  contactName: {
+  friendName: {
     flex: 1,
     fontSize: 16,
     fontWeight: '500',
     color: '#1F2937',
   },
   sendButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#72D9BC',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#34d399',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  inviteButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  addButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: '#E5E7EB',
     justifyContent: 'center',
     alignItems: 'center',
   },
   inviteBanner: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#f3f4f6',
     borderRadius: 12,
     padding: 12,
-    marginBottom: 12,
+    marginBottom: 14,
   },
   inviteText: {
     fontSize: 14,
