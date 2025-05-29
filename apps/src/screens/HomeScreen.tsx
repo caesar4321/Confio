@@ -30,7 +30,6 @@ type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'M
 
 export const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
-  const { signOut, checkServerSession } = useAuth();
   const [suiAddress, setSuiAddress] = React.useState<string>('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
@@ -54,27 +53,11 @@ export const HomeScreen = () => {
   React.useEffect(() => {
     const loadData = async () => {
       try {
-        const isSessionValid = await checkServerSession();
-        if (!isSessionValid) {
-          console.log('Session invalid, returning to auth screen');
-          return;
-        }
-
         const authService = AuthService.getInstance();
-        let zkLoginData = await authService.getStoredZkLoginData();
-        
-        if (!zkLoginData) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          zkLoginData = await authService.getStoredZkLoginData();
-        }
-
-        if (zkLoginData) {
-          const address = await authService.getZkLoginAddress();
-          setSuiAddress(address);
-        }
+        const address = await authService.getZkLoginAddress();
+        setSuiAddress(address);
       } catch (error) {
         console.error('Error loading data:', error);
-        await checkServerSession();
       } finally {
         setIsLoading(false);
       }
@@ -82,19 +65,6 @@ export const HomeScreen = () => {
 
     loadData();
   }, []);
-
-  const handleSignOut = async () => {
-    try {
-      await signOut();
-      setSuiAddress('');
-    } catch (error) {
-      console.error('Error during sign out:', error);
-      Alert.alert(
-        'Error al cerrar sesión',
-        'Hubo un error al cerrar la sesión. Por favor intente de nuevo.'
-      );
-    }
-  };
 
   if (isLoading) {
     return (
