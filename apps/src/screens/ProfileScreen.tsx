@@ -41,8 +41,10 @@ export const ProfileScreen = () => {
 
   const profileOptions = [
     { name: "Verificación", icon: "user-check", onPress: () => {} },
+    /* Temporarily hidden until 2FA and advanced security features are implemented
     { name: "Seguridad", icon: "shield", onPress: () => {} },
     { name: "Notificaciones", icon: "bell", onPress: () => {} },
+    */
     { name: "Comunidad", icon: "users", onPress: handleTelegramPress },
     { name: "Términos de Servicio", icon: "file-text", onPress: () => handleLegalDocumentPress('terms') },
     { name: "Política de Privacidad", icon: "lock", onPress: () => handleLegalDocumentPress('privacy') },
