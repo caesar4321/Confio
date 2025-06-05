@@ -16,19 +16,21 @@ class AuthTokenVersionMiddleware:
         if request.path.startswith('/admin/') or request.path.startswith('/static/') or request.path.startswith('/media/'):
             return self.get_response(request)
 
-        # Skip authentication for refreshToken mutation
+        # Skip authentication for refreshToken mutation and legal document query
         if request.path == '/graphql/' and request.method == 'POST':
             try:
                 import json
                 body = request.body.decode('utf-8')
                 data = json.loads(body)
-                if 'refreshToken' in str(data.get('query', '')):
-                    logger.info("Skipping auth for refreshToken mutation")
+                query = str(data.get('query', ''))
+                if 'refreshToken' in query or 'legalDocument' in query:
+                    logger.info("Skipping auth for refreshToken mutation or legal document query")
                     request.user = AnonymousUser()
                     return self.get_response(request)
             except Exception as e:
-                logger.error(f"Error checking for refreshToken mutation: {e}")
+                logger.error(f"Error checking for refreshToken mutation or legal document query: {e}")
 
+        # For all other requests, proceed with normal authentication
         logger.info("=== AuthTokenVersionMiddleware ===")
         
         # Get the Authorization header directly

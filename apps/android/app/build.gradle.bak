@@ -1,0 +1,157 @@
+// 1) standard Android + RN plugin setup (in exactly this order)
+apply plugin: "com.android.application"
+apply plugin: "com.facebook.react"          // ← must come *before* your `react {}` block
+apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "com.google.gms.google-services"
+apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
+
+// 2) point at your JS root (where apps/node_modules & package.json live)
+def jsRoot = file("$projectDir/../..")
+
+// 3) configure the built-in `react { … }` block
+react {
+  root                   = jsRoot
+  reactNativeDir         = file("$jsRoot/node_modules/react-native")
+  codegenDir             = file("$jsRoot/node_modules/@react-native/codegen")
+  cliFile                = file("$jsRoot/node_modules/react-native/cli.js")
+  nodeExecutableAndArgs  = ["node"]
+  newArchEnabled         = false  // Disable New Architecture
+}
+
+// 4) any other scripts (fonts, etc)
+apply from: file("fonts.gradle")
+
+/**
+ * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
+ */
+def enableProguardInReleaseBuilds = (findProperty('android.enableProguardInReleaseBuilds') ?: false).toBoolean()
+
+/**
+ * The preferred build flavor of JavaScriptCore (JSC)
+ *
+ * For example, to use the international variant, you can use:
+ * `def jscFlavor = 'org.webkit:android-jsc-intl:+'`
+ *
+ * The international variant includes ICU i18n library and necessary data
+ * allowing to use e.g. `Date.toLocaleString` and `String.localeCompare` that
+ * give correct results when using with locales other than en-US. Note that
+ * this variant is about 6MiB larger per architecture than default.
+ */
+def jscFlavor = 'org.webkit:android-jsc:+'
+
+def envProperties = new Properties()
+def envFile = new File(projectDir, "../.env")
+println "Looking for .env at: ${envFile.absolutePath}"
+println "Env file exists: ${envFile.exists()}"
+if (envFile.exists()) {
+    envFile.eachLine { line ->
+        println "Reading line: $line"
+        def matcher = (line =~ /^([^=]+)=(.*)$/)
+        if (matcher.matches()) {
+            def key = matcher.group(1).trim()
+            def value = matcher.group(2).trim()
+            envProperties[key] = value
+            println "Added property: $key = $value"
+        }
+    }
+}
+println "Final properties: $envProperties"
+
+android {
+    ndkVersion "27.1.12297006"
+    buildToolsVersion "35.0.0"  // Update to match AGP requirement
+    compileSdkVersion rootProject.ext.compileSdkVersion
+
+    namespace "com.Confio.Confio"
+    defaultConfig {
+        applicationId "com.Confio.Confio"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+        buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", rootProject.ext.newArchEnabled.toString()
+        if (rootProject.ext.newArchEnabled) {
+            buildConfigField "boolean", "IS_TURBOMODULE_ENABLED", "true"
+        } else {
+            buildConfigField "boolean", "IS_TURBOMODULE_ENABLED", "false"
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++20 -fexceptions -frtti -DANDROID_STL=c++_shared"
+                arguments "-DCMAKE_CXX_STANDARD=20",
+                         "-DCMAKE_CXX_STANDARD_REQUIRED=ON",
+                         "-DCMAKE_CXX_EXTENSIONS=OFF",
+                         "-DANDROID_STL=c++_shared",
+                         "-DANDROID_PLATFORM=android-24",
+                         "-DANDROID_TOOLCHAIN=clang",
+                         "-DREACT_NATIVE_MINOR_VERSION=79",
+                         "-DREACT_NATIVE_DIR=${rootProject.projectDir}/../node_modules/react-native",
+                         "-DJS_RUNTIME=hermes",
+                         "-DJS_RUNTIME_DIR=${rootProject.projectDir}/../node_modules/react-native/sdks/hermes",
+                         "-DIS_NEW_ARCHITECTURE_ENABLED=false",
+                         "-DHERMES_ENABLE_DEBUGGER=1"
+            }
+        }
+    }
+    signingConfigs {
+        debug {
+            storeFile file("${envProperties['KEYSTORE_FILE']}")
+            storePassword "${envProperties['KEYSTORE_PASSWORD']}"
+            keyAlias "${envProperties['KEY_ALIAS']}"
+            keyPassword "${envProperties['KEY_PASSWORD']}"
+        }
+        release {
+            storeFile file("${envProperties['KEYSTORE_FILE']}")
+            storePassword "${envProperties['KEYSTORE_PASSWORD']}"
+            keyAlias "${envProperties['KEY_ALIAS']}"
+            keyPassword "${envProperties['KEY_PASSWORD']}"
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled enableProguardInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+dependencies {
+    // The version of react-native is set by the React Native Gradle Plugin
+    implementation("com.facebook.react:react-android")
+    implementation("com.facebook.react:hermes-android")
+
+    debugImplementation("com.facebook.flipper:flipper:${FLIPPER_VERSION}")
+    debugImplementation("com.facebook.flipper:flipper-network-plugin:${FLIPPER_VERSION}") {
+        exclude group:'com.squareup.okhttp3', module:'okhttp'
+    }
+    debugImplementation("com.facebook.flipper:flipper-fresco-plugin:${FLIPPER_VERSION}")
+
+    if (hermesEnabled.toBoolean()) {
+        implementation("com.facebook.react:hermes-android")
+    } else {
+        implementation jscFlavor
+    }
+
+    // Native modules
+    implementation project(':invertase_react-native-apple-authentication')
+    implementation project(':react-native-firebase_app')
+    implementation project(':react-native-firebase_auth')
+    implementation project(':react-native-google-signin_google-signin')
+    implementation project(':react-native-get-random-values')
+    implementation project(':react-native-keychain')
+    implementation project(':react-native-svg')
+    implementation project(':react-native-vector-icons')
+    implementation project(':react-native-screens')
+    implementation project(':react-native-safe-area-context')
+
+    // Add Google Sign-In dependencies
+    implementation 'com.google.android.gms:play-services-auth:20.7.0'
+
+    implementation "com.facebook.react:react-native:+" // From node_modules
+    implementation project(':react-native-vision-camera')
+}

@@ -54,9 +54,14 @@ const HeroSection = () => {
             <img src={tiktokLogo} alt="TikTok" className={styles.socialIcon} />
             Mira el TikTok de Julian
           </a>
-          <button className={styles.secondaryButton}>
+          <a
+            href="https://vm.tiktok.com/ZMSkc3Lk8/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={styles.secondaryButton}
+          >
             Ver mi historia
-          </button>
+          </a>
         </motion.div>
       </div>
     </section>
