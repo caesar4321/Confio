@@ -1,8 +1,9 @@
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Linking, TouchableOpacity } from 'react-native';
 import { useQuery } from '@apollo/client';
 import gql from 'graphql-tag';
 import { useRoute } from '@react-navigation/native';
+import { Header } from '../navigation/Header';
 
 const GET_LEGAL_DOCUMENT = gql`
   query GetLegalDocument($docType: String!, $language: String) {
@@ -20,6 +21,13 @@ type RouteParams = {
   docType: 'terms' | 'privacy' | 'deletion';
 };
 
+type LegalSection = {
+  title: string;
+  content: string | string[] | Record<string, any>;
+};
+
+type ContentType = string | string[] | Record<string, any>;
+
 const LegalDocumentScreen = () => {
   const route = useRoute();
   const { docType } = route.params as RouteParams;
@@ -27,6 +35,14 @@ const LegalDocumentScreen = () => {
   const { loading, error, data } = useQuery(GET_LEGAL_DOCUMENT, {
     variables: { docType, language: 'es' },
   });
+
+  const handleTelegramPress = async () => {
+    const telegramUrl = 'https://t.me/FansDeJulian/13765';
+    const canOpen = await Linking.canOpenURL(telegramUrl);
+    if (canOpen) {
+      await Linking.openURL(telegramUrl);
+    }
+  };
 
   if (loading) {
     return (
@@ -47,8 +63,15 @@ const LegalDocumentScreen = () => {
 
   const { title, content, version, lastUpdated, language } = data.legalDocument;
 
-  const renderContent = (content: any) => {
+  const renderContent = (content: ContentType) => {
     if (typeof content === 'string') {
+      if (content.includes('t.me/FansDeJulian')) {
+        return (
+          <TouchableOpacity onPress={handleTelegramPress}>
+            <Text style={[styles.paragraph, styles.link]}>t.me/FansDeJulian</Text>
+          </TouchableOpacity>
+        );
+      }
       return <Text style={styles.paragraph}>{content}</Text>;
     }
     if (Array.isArray(content)) {
@@ -73,7 +96,13 @@ const LegalDocumentScreen = () => {
               <Text style={styles.sectionTitle}>
                 {key.replace(/_/g, ' ').toUpperCase()}
               </Text>
-              {renderContent(value)}
+              {key === 'telegram' ? (
+                <TouchableOpacity onPress={handleTelegramPress}>
+                  <Text style={[styles.paragraph, styles.link]}>{value}</Text>
+                </TouchableOpacity>
+              ) : (
+                renderContent(value)
+              )}
             </View>
           ))}
         </View>
@@ -82,31 +111,35 @@ const LegalDocumentScreen = () => {
     return null;
   };
 
+  // Parse the JSON strings in the content array
+  const parsedSections = content.map((section: string) => JSON.parse(section) as LegalSection);
+
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>{title}</Text>
+    <View style={styles.container}>
+      <Header 
+        title={title}
+        backgroundColor="#fff"
+        showBackButton={true}
+        onProfilePress={() => {}}
+        onNotificationPress={() => {}}
+      />
+      <ScrollView style={styles.scrollView}>
         <View style={styles.metaContainer}>
           <Text style={styles.metaText}>Versión: {version}</Text>
           <Text style={styles.metaText}>
             Última actualización: {new Date(lastUpdated).toLocaleDateString('es-ES')}
           </Text>
-          <View style={styles.legallyBindingNotice}>
-            <Text style={styles.legallyBindingText}>
-              ⚠️ Este es el documento legalmente vinculante en español.
-            </Text>
-          </View>
         </View>
-      </View>
-      <View style={styles.content}>
-        {content.map((section: any, index: number) => (
-          <View key={index} style={styles.section}>
-            <Text style={styles.sectionTitle}>{section.title}</Text>
-            {renderContent(section.content)}
-          </View>
-        ))}
-      </View>
-    </ScrollView>
+        <View style={styles.content}>
+          {parsedSections.map((section: LegalSection, index: number) => (
+            <View key={index} style={styles.section}>
+              <Text style={styles.sectionTitle}>{section.title}</Text>
+              {renderContent(section.content)}
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+    </View>
   );
 };
 
@@ -114,6 +147,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  scrollView: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,
@@ -136,48 +172,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
   },
-  header: {
+  metaContainer: {
     padding: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1a1a1a',
-    marginBottom: 10,
-  },
-  metaContainer: {
-    marginTop: 10,
   },
   metaText: {
     fontSize: 14,
     color: '#666',
     marginBottom: 5,
   },
-  legallyBindingNotice: {
-    marginTop: 10,
-    padding: 10,
-    backgroundColor: '#fff3cd',
-    borderWidth: 1,
-    borderColor: '#ffeeba',
-    borderRadius: 4,
-  },
-  legallyBindingText: {
-    color: '#856404',
-    fontWeight: '500',
-  },
   content: {
     padding: 20,
   },
   section: {
     marginBottom: 20,
+    padding: 15,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#2c3e50',
     marginBottom: 10,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#72D9BC',
   },
   paragraph: {
     fontSize: 16,
@@ -195,7 +216,7 @@ const styles = StyleSheet.create({
   bulletPoint: {
     fontSize: 16,
     marginRight: 8,
-    color: '#333',
+    color: '#72D9BC',
   },
   listItemText: {
     flex: 1,
@@ -205,6 +226,10 @@ const styles = StyleSheet.create({
   },
   contentSection: {
     marginVertical: 15,
+  },
+  link: {
+    color: '#34d399',
+    textDecorationLine: 'underline',
   },
 });
 
