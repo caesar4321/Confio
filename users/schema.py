@@ -7,6 +7,9 @@ from graphql_jwt.utils import jwt_encode, jwt_decode
 from graphql_jwt.shortcuts import create_refresh_token
 from datetime import datetime, timedelta
 import logging
+from django.utils.translation import gettext as _
+from .legal.documents import TERMS, PRIVACY, DELETION
+from graphql import GraphQLError
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -47,6 +50,25 @@ class CountryCodeType(graphene.ObjectType):
 	name = graphene.String()
 	flag = graphene.String()
 
+class LegalDocumentType(graphene.ObjectType):
+	title = graphene.String()
+	content = graphene.List(graphene.JSONString)  # This will contain the sections
+	version = graphene.String()
+	last_updated = graphene.String()
+	language = graphene.String()
+	is_legally_binding = graphene.Boolean()
+
+	def resolve_content(self, info):
+		# The content is already a list of sections from the resolver
+		return self.content
+
+class LegalDocumentError(GraphQLError):
+	"""Custom error for legal document related issues"""
+	def __init__(self, message, code=None, params=None):
+		super().__init__(message)
+		self.code = code or 'LEGAL_DOCUMENT_ERROR'
+		self.params = params or {}
+
 class InvalidateAuthTokens(graphene.Mutation):
 	class Arguments:
 		pass  # No arguments needed, uses the authenticated user
@@ -69,6 +91,68 @@ class InvalidateAuthTokens(graphene.Mutation):
 class Query(graphene.ObjectType):
 	me = graphene.Field(UserType)
 	country_codes = graphene.List(CountryCodeType)
+	legalDocument = graphene.Field(
+		LegalDocumentType,
+		docType=graphene.String(required=True)
+	)
+
+	def resolve_legalDocument(self, info, docType):
+		logger.info(f"Legal document query received for docType: {docType}")
+		logger.info(f"Request headers: {info.context.headers}")
+		logger.info(f"Request method: {info.context.method}")
+		
+		try:
+			# Validate docType
+			if not docType:
+				raise LegalDocumentError(
+					"Document type is required",
+					code='DOCUMENT_TYPE_REQUIRED'
+				)
+
+			# Map document types to their content
+			doc_map = {
+				'terms': TERMS,
+				'privacy': PRIVACY,
+				'deletion': DELETION
+			}
+			
+			if docType not in doc_map:
+				logger.error(f"Invalid document type requested: {docType}")
+				raise LegalDocumentError(
+					f"Invalid document type: {docType}",
+					code='INVALID_DOCUMENT_TYPE',
+					params={'valid_types': list(doc_map.keys())}
+				)
+			
+			doc = doc_map[docType]
+			logger.info(f"Found document: {doc['title']}")
+
+			# Validate document structure
+			required_fields = ['title', 'sections', 'version', 'last_updated', 'is_legally_binding']
+			missing_fields = [field for field in required_fields if field not in doc]
+			if missing_fields:
+				raise LegalDocumentError(
+					f"Document is missing required fields: {', '.join(missing_fields)}",
+					code='INVALID_DOCUMENT_STRUCTURE'
+				)
+			
+			return LegalDocumentType(
+				title=doc['title'],
+				content=doc['sections'],
+				version=doc['version'],
+				last_updated=doc['last_updated'],
+				language='es',  # Always return Spanish version
+				is_legally_binding=doc['is_legally_binding']
+			)
+		except LegalDocumentError as e:
+			logger.error(f"Legal document error: {str(e)}", exc_info=True)
+			raise
+		except Exception as e:
+			logger.error(f"Unexpected error resolving legal document: {str(e)}", exc_info=True)
+			raise LegalDocumentError(
+				"An unexpected error occurred while retrieving the legal document",
+				code='INTERNAL_SERVER_ERROR'
+			)
 
 	def resolve_me(self, info):
 		user = getattr(info.context, 'user', None)

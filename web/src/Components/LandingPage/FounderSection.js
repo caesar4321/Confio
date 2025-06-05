@@ -39,9 +39,14 @@ const FounderSection = () => {
             </p>
             <p className={styles.quoteAuthor}>— Julian Moon</p>
           </div>
-          <button className={styles.storyButton}>
+          <a
+            href="https://vm.tiktok.com/ZMSkc3Lk8/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={styles.storyButton}
+          >
             Ver mi historia
-          </button>
+          </a>
         </motion.div>
       </div>
     </section>
