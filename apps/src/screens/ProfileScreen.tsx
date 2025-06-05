@@ -1,7 +1,10 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../types/navigation';
 
 // Colors from the design
 const colors = {
@@ -18,17 +21,32 @@ const colors = {
   dark: '#111827', // gray-900
 };
 
+type ProfileScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Main'>;
+
 export const ProfileScreen = () => {
   const { signOut } = useAuth();
+  const navigation = useNavigation<ProfileScreenNavigationProp>();
+
+  const handleLegalDocumentPress = (docType: 'terms' | 'privacy' | 'deletion') => {
+    navigation.navigate('LegalDocument', { docType });
+  };
+
+  const handleTelegramPress = async () => {
+    const telegramUrl = 'https://t.me/FansDeJulian';
+    const canOpen = await Linking.canOpenURL(telegramUrl);
+    if (canOpen) {
+      await Linking.openURL(telegramUrl);
+    }
+  };
 
   const profileOptions = [
-    { name: "Verificación", icon: "user-check" },
-    { name: "Seguridad", icon: "shield" },
-    { name: "Notificaciones", icon: "bell" },
-    { name: "Comunidad", icon: "users" },
-    { name: "Términos de Servicio", icon: "file-text" },
-    { name: "Política de Privacidad", icon: "lock" },
-    { name: "Eliminación de Datos", icon: "trash-2" }
+    { name: "Verificación", icon: "user-check", onPress: () => {} },
+    { name: "Seguridad", icon: "shield", onPress: () => {} },
+    { name: "Notificaciones", icon: "bell", onPress: () => {} },
+    { name: "Comunidad", icon: "users", onPress: handleTelegramPress },
+    { name: "Términos de Servicio", icon: "file-text", onPress: () => handleLegalDocumentPress('terms') },
+    { name: "Política de Privacidad", icon: "lock", onPress: () => handleLegalDocumentPress('privacy') },
+    { name: "Eliminación de Datos", icon: "trash-2", onPress: () => handleLegalDocumentPress('deletion') }
   ];
 
   return (
@@ -63,7 +81,7 @@ export const ProfileScreen = () => {
       {/* Profile Options */}
       <View style={styles.optionsContainer}>
         {profileOptions.map((option, index) => (
-          <TouchableOpacity key={index} style={styles.optionItem}>
+          <TouchableOpacity key={index} style={styles.optionItem} onPress={option.onPress}>
             <View style={styles.optionLeft}>
               <View style={styles.optionIconContainer}>
                 <Icon name={option.icon} size={20} color="#6B7280" />
