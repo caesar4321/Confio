@@ -1,24 +1,35 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Platform, StatusBar } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../types/navigation';
 
 export const HEADER_HEIGHT = Platform.OS === 'ios' ? 88 : 64;
 
 interface HeaderProps {
-  onProfilePress: () => void;
-  onNotificationPress: () => void;
+  title: string;
+  navigation: NativeStackNavigationProp<RootStackParamList>;
   isHomeScreen?: boolean;
-  title?: string;
+  onProfilePress?: () => void;
+  onNotificationPress?: () => void;
   backgroundColor?: string;
+  isLight?: boolean;
+  showBackButton?: boolean;
 }
 
-export function Header({
+export const Header: React.FC<HeaderProps> = ({
+  title,
+  navigation,
+  isHomeScreen = false,
   onProfilePress,
   onNotificationPress,
-  isHomeScreen = false,
-  title = 'Confío',
   backgroundColor,
-}: HeaderProps) {
+  isLight = false,
+  showBackButton = true,
+}) => {
+  const isLightTheme = isLight || isHomeScreen;
+  const textColor = isLightTheme ? '#FFFFFF' : '#1F2937';
+  
   return (
     <View
       style={{
@@ -32,13 +43,23 @@ export function Header({
         alignItems: 'center',
       }}
     >
-      <Text style={{ 
-        fontSize: 24, 
-        fontWeight: 'bold', 
-        color: backgroundColor === '#34d399' ? '#fff' : (isHomeScreen ? '#fff' : '#1F2937')
-      }}>
-        {title}
-      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        {showBackButton && !isHomeScreen && (
+          <TouchableOpacity 
+            onPress={() => navigation.goBack()}
+            style={{ marginRight: 16 }}
+          >
+            <Icon name="arrow-left" size={24} color={textColor} />
+          </TouchableOpacity>
+        )}
+        <Text style={{ 
+          fontSize: 24, 
+          fontWeight: 'bold', 
+          color: textColor
+        }}>
+          {title}
+        </Text>
+      </View>
       {isHomeScreen && (
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <TouchableOpacity 
@@ -65,4 +86,4 @@ export function Header({
       )}
     </View>
   );
-} 
+}; 
