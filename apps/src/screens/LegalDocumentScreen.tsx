@@ -2,7 +2,9 @@ import React from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Linking, TouchableOpacity } from 'react-native';
 import { useQuery } from '@apollo/client';
 import gql from 'graphql-tag';
-import { useRoute } from '@react-navigation/native';
+import { useRoute, useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
 
 const GET_LEGAL_DOCUMENT = gql`
@@ -30,6 +32,7 @@ type ContentType = string | string[] | Record<string, any>;
 
 const LegalDocumentScreen = () => {
   const route = useRoute();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { docType } = route.params as RouteParams;
 
   const { loading, error, data } = useQuery(GET_LEGAL_DOCUMENT, {
@@ -75,6 +78,20 @@ const LegalDocumentScreen = () => {
       return <Text style={styles.paragraph}>{content}</Text>;
     }
     if (Array.isArray(content)) {
+      // Check if this is a definitions array (array of objects with term and definition)
+      if (content.length > 0 && typeof content[0] === 'object' && 'term' in content[0] && 'definition' in content[0]) {
+        return (
+          <View style={styles.definitionsContainer}>
+            {content.map((item: any, index: number) => (
+              <View key={index} style={styles.definitionItem}>
+                <Text style={styles.termText}>{item.term}:</Text>
+                <Text style={styles.definitionText}>{item.definition}</Text>
+              </View>
+            ))}
+          </View>
+        );
+      }
+      // Regular list rendering
       return (
         <View style={styles.listContainer}>
           {content.map((item, index) => (
@@ -118,10 +135,9 @@ const LegalDocumentScreen = () => {
     <View style={styles.container}>
       <Header 
         title={title}
+        navigation={navigation}
         backgroundColor="#fff"
-        showBackButton={true}
-        onProfilePress={() => {}}
-        onNotificationPress={() => {}}
+        isLight={false}
       />
       <ScrollView style={styles.scrollView}>
         <View style={styles.metaContainer}>
@@ -230,6 +246,24 @@ const styles = StyleSheet.create({
   link: {
     color: '#34d399',
     textDecorationLine: 'underline',
+  },
+  definitionsContainer: {
+    marginVertical: 10,
+  },
+  definitionItem: {
+    marginBottom: 12,
+  },
+  termText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 4,
+  },
+  definitionText: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#333',
+    paddingLeft: 8,
   },
 });
 
