@@ -2,6 +2,9 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Feather';
 import { View, StyleSheet } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../types/navigation';
 import { HomeScreen } from '../screens/HomeScreen';
 import { ContactsScreen } from '../screens/ContactsScreen';
 import { ScanScreen } from '../screens/ScanScreen';
@@ -12,6 +15,8 @@ import { Header } from './Header';
 const Tab = createBottomTabNavigator();
 
 export const BottomTabNavigator = () => {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => {
@@ -29,11 +34,14 @@ export const BottomTabNavigator = () => {
         return {
           header: () => (
             <Header
+              navigation={navigation}
               isHomeScreen={isHomeScreen}
               title={title}
               onProfilePress={() => {}}
               onNotificationPress={() => {}}
               backgroundColor={headerBg}
+              showBackButton={false}
+              isLight={route.name === 'Profile'}
             />
           ),
           tabBarLabel,
