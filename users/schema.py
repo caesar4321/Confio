@@ -52,15 +52,11 @@ class CountryCodeType(graphene.ObjectType):
 
 class LegalDocumentType(graphene.ObjectType):
 	title = graphene.String()
-	content = graphene.List(graphene.JSONString)  # This will contain the sections
+	content = graphene.List(graphene.JSONString)
 	version = graphene.String()
 	last_updated = graphene.String()
 	language = graphene.String()
 	is_legally_binding = graphene.Boolean()
-
-	def resolve_content(self, info):
-		# The content is already a list of sections from the resolver
-		return self.content
 
 class LegalDocumentError(GraphQLError):
 	"""Custom error for legal document related issues"""
@@ -93,66 +89,42 @@ class Query(graphene.ObjectType):
 	country_codes = graphene.List(CountryCodeType)
 	legalDocument = graphene.Field(
 		LegalDocumentType,
-		docType=graphene.String(required=True)
+		docType=graphene.String(required=True),
+		language=graphene.String()
 	)
 
-	def resolve_legalDocument(self, info, docType):
-		logger.info(f"Legal document query received for docType: {docType}")
-		logger.info(f"Request headers: {info.context.headers}")
-		logger.info(f"Request method: {info.context.method}")
+	def resolve_legalDocument(self, info, docType, language=None):
+		logger.info(f"Received legal document request for type: {docType}, language: {language}")
 		
-		try:
-			# Validate docType
-			if not docType:
-				raise LegalDocumentError(
-					"Document type is required",
-					code='DOCUMENT_TYPE_REQUIRED'
-				)
-
-			# Map document types to their content
-			doc_map = {
-				'terms': TERMS,
-				'privacy': PRIVACY,
-				'deletion': DELETION
-			}
-			
-			if docType not in doc_map:
-				logger.error(f"Invalid document type requested: {docType}")
-				raise LegalDocumentError(
-					f"Invalid document type: {docType}",
-					code='INVALID_DOCUMENT_TYPE',
-					params={'valid_types': list(doc_map.keys())}
-				)
-			
-			doc = doc_map[docType]
-			logger.info(f"Found document: {doc['title']}")
-
-			# Validate document structure
-			required_fields = ['title', 'sections', 'version', 'last_updated', 'is_legally_binding']
-			missing_fields = [field for field in required_fields if field not in doc]
-			if missing_fields:
-				raise LegalDocumentError(
-					f"Document is missing required fields: {', '.join(missing_fields)}",
-					code='INVALID_DOCUMENT_STRUCTURE'
-				)
-			
+		# For now, we'll always return Spanish content
+		if docType == 'terms':
 			return LegalDocumentType(
-				title=doc['title'],
-				content=doc['sections'],
-				version=doc['version'],
-				last_updated=doc['last_updated'],
-				language='es',  # Always return Spanish version
-				is_legally_binding=doc['is_legally_binding']
+				title=TERMS['title'],
+				content=TERMS['sections'],
+				version=TERMS['version'],
+				last_updated=TERMS['last_updated'],
+				language='es',
+				is_legally_binding=TERMS['is_legally_binding']
 			)
-		except LegalDocumentError as e:
-			logger.error(f"Legal document error: {str(e)}", exc_info=True)
-			raise
-		except Exception as e:
-			logger.error(f"Unexpected error resolving legal document: {str(e)}", exc_info=True)
-			raise LegalDocumentError(
-				"An unexpected error occurred while retrieving the legal document",
-				code='INTERNAL_SERVER_ERROR'
+		elif docType == 'privacy':
+			return LegalDocumentType(
+				title=PRIVACY['title'],
+				content=PRIVACY['sections'],
+				version=PRIVACY['version'],
+				last_updated=PRIVACY['last_updated'],
+				language='es',
+				is_legally_binding=PRIVACY['is_legally_binding']
 			)
+		elif docType == 'deletion':
+			return LegalDocumentType(
+				title=DELETION['title'],
+				content=DELETION['sections'],
+				version=DELETION['version'],
+				last_updated=DELETION['last_updated'],
+				language='es',
+				is_legally_binding=DELETION['is_legally_binding']
+			)
+		return None
 
 	def resolve_me(self, info):
 		user = getattr(info.context, 'user', None)

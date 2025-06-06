@@ -30,28 +30,28 @@ function App() {
 
   return (
     <ApolloProvider client={client}>
-      <Router>
+    <Router>
         <div className="App">
-          <Routes>
+      <Routes>
             <Route path="/" element={
-              <>
-                <HeroSection />
-                <WhatIsConfio />
-                <HowItWorks />
-                <TokensSection />
-                <WhyTrustSection />
-                <FounderSection />
-                <JoinSection />
-                <FloatingTelegramButton />
-                <Footer />
-              </>
+            <>
+              <HeroSection />
+              <WhatIsConfio />
+              <HowItWorks />
+              <TokensSection />
+              <WhyTrustSection />
+              <FounderSection />
+              <JoinSection />
+              <FloatingTelegramButton />
+              <Footer />
+            </>
             } />
-            <Route path="/terms" element={<TermsPage />} />
-            <Route path="/privacy" element={<PrivacyPage />} />
-            <Route path="/deletion" element={<DeletionPage />} />
-          </Routes>
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/deletion" element={<DeletionPage />} />
+      </Routes>
         </div>
-      </Router>
+    </Router>
     </ApolloProvider>
   );
 }

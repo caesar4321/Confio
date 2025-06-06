@@ -21,11 +21,13 @@ def index(request):
 		'en': 'Confío helps Venezuelans and Argentines protect themselves from hyperinflation by allowing them to pay in stable digital dollars.',
 		'default': 'Confío: Digital payments for Latin America'
 	}
+	og_image = "https://confio.lat/static/images/ConfioApp.jpeg"
 	
 	return render(request, 'index.html', {
 		'lang': lang,
-		'title': title,
-		'ogDescription': og_description.get(lang, og_description['default'])
+		'title': title or titles['default'],
+		'ogDescription': og_description.get(lang, og_description['default']) or og_description['default'],
+		'ogImage': og_image
 	})
 
 class LegalPageView(TemplateView):

@@ -21,7 +21,7 @@ const colors = {
   dark: '#111827', // gray-900
 };
 
-type ProfileScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Main'>;
+type ProfileScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export const ProfileScreen = () => {
   const { signOut } = useAuth();
@@ -40,7 +40,7 @@ export const ProfileScreen = () => {
   };
 
   const profileOptions = [
-    { name: "Verificación", icon: "user-check", onPress: () => {} },
+    { name: "Verificación", icon: "user-check", onPress: () => navigation.navigate('Verification') },
     /* Temporarily hidden until 2FA and advanced security features are implemented
     { name: "Seguridad", icon: "shield", onPress: () => {} },
     { name: "Notificaciones", icon: "bell", onPress: () => {} },
