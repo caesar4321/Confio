@@ -1,14 +1,14 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Platform, StatusBar } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { NavigationProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
 
 export const HEADER_HEIGHT = Platform.OS === 'ios' ? 88 : 64;
 
 interface HeaderProps {
   title: string;
-  navigation: NativeStackNavigationProp<RootStackParamList>;
+  navigation: NavigationProp<RootStackParamList>;
   isHomeScreen?: boolean;
   onProfilePress?: () => void;
   onNotificationPress?: () => void;

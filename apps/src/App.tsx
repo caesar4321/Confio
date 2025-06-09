@@ -6,24 +6,12 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, ActivityIndicator } from 'react-native';
 import apolloClient from './apollo/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { AuthScreen } from './screens/AuthScreen';
-import { BottomTabNavigator } from './navigation/BottomTabNavigator';
-import PhoneVerificationScreen from './screens/PhoneVerificationScreen';
-import LegalDocumentScreen from './screens/LegalDocumentScreen';
-import VerificationScreen from './screens/VerificationScreen';
+import { AuthNavigator } from './navigation/AuthNavigator';
+import { MainNavigator } from './navigation/MainNavigator';
+import { RootStackParamList } from './types/navigation';
 
 // Enable screens before any navigation setup
 enableScreens();
-
-type RootStackParamList = {
-  Auth: undefined;
-  PhoneVerification: undefined;
-  Main: undefined;
-  LegalDocument: {
-    docType: 'terms' | 'privacy' | 'deletion';
-  };
-  Verification: undefined;
-};
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -49,23 +37,11 @@ const Navigation: React.FC = () => {
         presentation: 'transparentModal'
       }}
     >
-      <Stack.Screen name="Auth" component={AuthScreen} />
-      <Stack.Screen name="PhoneVerification" component={PhoneVerificationScreen} />
-      <Stack.Screen name="Main" component={BottomTabNavigator} />
-      <Stack.Screen 
-        name="LegalDocument" 
-        component={LegalDocumentScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen 
-        name="Verification" 
-        component={VerificationScreen}
-        options={{
-          headerShown: false,
-        }}
-      />
+      {!isAuthenticated ? (
+        <Stack.Screen name="Auth" component={AuthNavigator} />
+      ) : (
+        <Stack.Screen name="Main" component={MainNavigator} />
+      )}
     </Stack.Navigator>
   );
 };
