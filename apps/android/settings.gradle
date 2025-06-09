@@ -74,3 +74,9 @@ project(':react-native-vision-camera').projectDir = new File(rootProject.project
 
 include ':react-native-worklets-core'
 project(':react-native-worklets-core').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-worklets-core/android')
+
+include ':react-native-view-shot'
+project(':react-native-view-shot').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-view-shot/android')
+
+include ':react-native-cameraroll'
+project(':react-native-cameraroll').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-camera-roll/camera-roll/android')
