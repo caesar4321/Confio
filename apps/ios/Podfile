@@ -1,4 +1,4 @@
-platform :ios, '16.0'
+platform :ios, "15.1"
 
 # bring in RN's own pod helpers (this will include autolinking)
 require_relative "../node_modules/react-native/scripts/react_native_pods"
@@ -20,7 +20,6 @@ target 'Confio' do
 
   # (You do NOT need to manually pod RNFBApp & RNFBAuth here;
   #  react-native-firebase will auto-link for you.)
-  pod 'GoogleSignIn', '~> 7.0'
 end
 
 post_install do |installer|

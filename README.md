@@ -304,6 +304,16 @@ The project uses a combination of Django and Whitenoise for static file serving:
    - `copy-index.js` script syncs the build with Django templates
    - Static files are collected into Django's static directory
 
+### Known Patches
+
+The project uses `patch-package` to maintain fixes for third-party dependencies. These patches are automatically applied after `yarn install` via the `postinstall` script.
+
+#### Vision Camera Patch
+- **File**: `apps/patches/react-native-vision-camera+4.6.4.patch`
+- **Purpose**: Fixes CMake configuration for proper linking with react-native-worklets-core
+- **Issue**: Vision Camera's CMake configuration needs to be updated to correctly link with the worklets library
+- **Solution**: The patch updates the CMake configuration to use the correct build directory for the worklets library
+
 ⚠️ **Important**: The following files and directories should be added to `.gitignore` for security:
 
 > - `.env` files (⚠️ **Critical Development Files**):

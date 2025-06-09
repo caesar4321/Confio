@@ -104,16 +104,11 @@ export class AuthService {
   private async configureGoogleSignIn() {
     try {
       const clientIds = GOOGLE_CLIENT_IDS[__DEV__ ? 'development' : 'production'];
-      const config: any = {
+      const config = {
         webClientId: clientIds.web,
         offlineAccess: true,
         scopes: ['profile', 'email']
       };
-
-      // Only add Android client ID since iOS client ID is handled by native SDK
-      if (Platform.OS === 'android') {
-        config.androidClientId = clientIds.android;
-      }
 
       await GoogleSignin.configure(config);
       console.log('Google Sign-In configuration successful');

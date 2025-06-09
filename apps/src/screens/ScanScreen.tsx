@@ -1,6 +1,6 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
-import { Camera, useCameraDevice, useCodeScanner } from 'react-native-vision-camera';
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Alert, Platform, Linking } from 'react-native';
+import { Camera, useCameraDevice, useCodeScanner, CameraPermissionStatus } from 'react-native-vision-camera';
 import type { Code } from 'react-native-vision-camera';
 import Icon from 'react-native-vector-icons/Feather';
 
@@ -9,12 +9,37 @@ export const ScanScreen = () => {
   const [isFlashOn, setIsFlashOn] = useState(false);
   const device = useCameraDevice('back');
 
-  React.useEffect(() => {
-    (async () => {
-      const status = await Camera.requestCameraPermission();
-      setHasPermission(status === 'granted');
-    })();
+  useEffect(() => {
+    checkPermission();
   }, []);
+
+  const checkPermission = async () => {
+    const permission = await Camera.getCameraPermissionStatus();
+    if (permission === 'granted') {
+      setHasPermission(true);
+    } else if (permission === 'denied') {
+      Alert.alert(
+        'Camera Permission Required',
+        'Please enable camera access in your device settings to use the QR code scanner.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: openSettings }
+        ]
+      );
+      setHasPermission(false);
+    } else {
+      const newPermission = await Camera.requestCameraPermission();
+      setHasPermission(newPermission === 'granted');
+    }
+  };
+
+  const openSettings = () => {
+    if (Platform.OS === 'ios') {
+      Linking.openURL('app-settings:');
+    } else {
+      Linking.openSettings();
+    }
+  };
 
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
@@ -31,12 +56,20 @@ export const ScanScreen = () => {
   }, []);
 
   if (hasPermission === null) {
-    return <View style={styles.container} />;
+    return (
+      <View style={styles.container}>
+        <Text style={styles.text}>Requesting camera permission...</Text>
+      </View>
+    );
   }
+
   if (hasPermission === false) {
     return (
       <View style={styles.container}>
         <Text style={styles.text}>No access to camera</Text>
+        <TouchableOpacity style={styles.button} onPress={checkPermission}>
+          <Text style={styles.buttonText}>Grant Permission</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -57,6 +90,7 @@ export const ScanScreen = () => {
         isActive={true}
         codeScanner={codeScanner}
         torch={isFlashOn ? 'on' : 'off'}
+        enableZoomGesture
       >
         <View style={styles.overlay}>
           <View style={styles.header}>
@@ -71,7 +105,7 @@ export const ScanScreen = () => {
 
           <View style={styles.footer}>
             <TouchableOpacity style={styles.flashButton} onPress={toggleFlash}>
-              <Icon name="zap" size={24} color="#FFFFFF" />
+              <Icon name={isFlashOn ? "zap-off" : "zap"} size={24} color="#FFFFFF" />
             </TouchableOpacity>
             <Text style={styles.instructions}>
               Escanea un código QR para enviar o recibir
@@ -90,13 +124,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000000',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   camera: {
     flex: 1,
+    width: '100%',
   },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
+    width: '100%',
   },
   header: {
     padding: 16,
@@ -145,5 +183,16 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     textAlign: 'center',
+    marginBottom: 16,
+  },
+  button: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
   },
 }); 
