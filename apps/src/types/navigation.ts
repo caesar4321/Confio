@@ -1,21 +1,31 @@
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { NavigatorScreenParams } from '@react-navigation/native';
 
-export type RootStackParamList = {
-  Auth: undefined;
-  Main: undefined;
+// Auth Stack - Handles authentication flow
+export type AuthStackParamList = {
+  Login: undefined;
   PhoneVerification: undefined;
-  LegalDocument: {
-    docType: 'terms' | 'privacy' | 'deletion';
-  };
-  Verification: undefined;
+  Registration: undefined;
 };
 
+// Bottom Tab Navigator - Main app tabs
 export type BottomTabParamList = {
   Home: undefined;
   Contacts: undefined;
   Scan: undefined;
   Exchange: undefined;
   Profile: undefined;
-}; 
+};
 
-export type RootStackNavigationProp = NativeStackNavigationProp<RootStackParamList>; 
+// Main Stack - Handles main app navigation including modals
+export type MainStackParamList = {
+  BottomTabs: NavigatorScreenParams<BottomTabParamList>;
+  LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
+  Verification: undefined;
+  ConfioAddress: undefined;
+};
+
+// Root Stack - Top level navigation
+export type RootStackParamList = {
+  Auth: NavigatorScreenParams<AuthStackParamList>;
+  Main: NavigatorScreenParams<MainStackParamList>;
+}; 

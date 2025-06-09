@@ -1,10 +1,10 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Feather';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../types/navigation';
+import { NavigationProp } from '@react-navigation/native';
+import { MainStackParamList, BottomTabParamList, RootStackParamList } from '../types/navigation';
 import { HomeScreen } from '../screens/HomeScreen';
 import { ContactsScreen } from '../screens/ContactsScreen';
 import { ScanScreen } from '../screens/ScanScreen';
@@ -12,10 +12,12 @@ import { ExchangeScreen } from '../screens/ExchangeScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { Header } from './Header';
 
-const Tab = createBottomTabNavigator();
+const Tab = createBottomTabNavigator<BottomTabParamList>();
+
+type TabNavigatorNavigationProp = NavigationProp<RootStackParamList>;
 
 export const BottomTabNavigator = () => {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<TabNavigatorNavigationProp>();
 
   return (
     <Tab.Navigator
@@ -90,20 +92,23 @@ export const BottomTabNavigator = () => {
 
 const styles = StyleSheet.create({
   scanButton: {
-    backgroundColor: '#34d399', // Emerald color
     width: 56,
     height: 56,
     borderRadius: 28,
+    backgroundColor: '#34d399',
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: -30,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    marginBottom: 40,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+      },
+      android: {
+        elevation: 5,
+      },
+    }),
   },
 }); 

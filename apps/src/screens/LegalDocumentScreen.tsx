@@ -40,10 +40,20 @@ const LegalDocumentScreen = () => {
   });
 
   const handleTelegramPress = async () => {
-    const telegramUrl = 'https://t.me/FansDeJulian/13765';
-    const canOpen = await Linking.canOpenURL(telegramUrl);
-    if (canOpen) {
-      await Linking.openURL(telegramUrl);
+    const telegramUrl = 'tg://resolve?domain=FansDeJulian';
+    const webUrl = 'https://t.me/FansDeJulian/13765';
+    try {
+      const canOpen = await Linking.canOpenURL(telegramUrl);
+      if (canOpen) {
+        await Linking.openURL(telegramUrl);
+      } else {
+        // Fallback to t.me URL
+        await Linking.openURL(webUrl);
+      }
+    } catch (error) {
+      console.error('Error opening Telegram link:', error);
+      // Fallback to t.me URL
+      await Linking.openURL(webUrl);
     }
   };
 

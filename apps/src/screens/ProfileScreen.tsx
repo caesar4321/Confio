@@ -32,10 +32,20 @@ export const ProfileScreen = () => {
   };
 
   const handleTelegramPress = async () => {
-    const telegramUrl = 'https://t.me/FansDeJulian';
-    const canOpen = await Linking.canOpenURL(telegramUrl);
-    if (canOpen) {
-      await Linking.openURL(telegramUrl);
+    const telegramUrl = 'tg://resolve?domain=FansDeJulian';
+    const webUrl = 'https://t.me/FansDeJulian';
+    try {
+      const canOpen = await Linking.canOpenURL(telegramUrl);
+      if (canOpen) {
+        await Linking.openURL(telegramUrl);
+      } else {
+        // Fallback to t.me URL
+        await Linking.openURL(webUrl);
+      }
+    } catch (error) {
+      console.error('Error opening Telegram link:', error);
+      // Fallback to t.me URL
+      await Linking.openURL(webUrl);
     }
   };
 
@@ -59,25 +69,26 @@ export const ProfileScreen = () => {
           <View style={styles.avatarContainer}>
             <Icon name="user" size={40} color={colors.primary} />
           </View>
-          <Text style={styles.name}>Carlos Mendoza</Text>
+          <Text style={styles.name}>Julian Moon</Text>
           <Text style={styles.phone}>+58 412 345 6789</Text>
         </View>
       </View>
 
       {/* Confío Address Card */}
       <View style={styles.addressCard}>
-        <View style={styles.addressCardContent}>
+        <TouchableOpacity 
+          style={styles.addressCardContent}
+          onPress={() => navigation.navigate('ConfioAddress')}
+        >
           <View style={styles.addressIconContainer}>
             <Icon name="maximize" size={20} color="#6B7280" />
           </View>
           <View style={styles.addressInfo}>
             <Text style={styles.addressTitle}>Mi dirección de Confío</Text>
-            <Text style={styles.addressValue}>confio.lat/carlosmendoza</Text>
+            <Text style={styles.addressValue}>confio.lat/julianmoonluna</Text>
           </View>
-          <TouchableOpacity style={styles.shareButton}>
-            <Text style={styles.shareButtonText}>Compartir</Text>
-          </TouchableOpacity>
-        </View>
+          <Icon name="chevron-right" size={20} color="#9CA3AF" />
+        </TouchableOpacity>
       </View>
 
       {/* Profile Options */}
@@ -184,15 +195,6 @@ const styles = StyleSheet.create({
   addressValue: {
     fontSize: 12,
     color: '#6B7280',
-  },
-  shareButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  shareButtonText: {
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '500',
   },
   optionsContainer: {
     paddingHorizontal: 16,

@@ -521,12 +521,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   requiredIcon: {
-    marginRight: 8,
+    marginRight: 12,
+  },
+  requiredTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#92400E', // amber-800
+    marginBottom: 8,
+    flex: 1,
   },
   requiredText: {
     fontSize: 14,
     color: '#92400E', // amber-800
-    fontWeight: '500',
+    marginBottom: 4,
+    flex: 1,
   },
   featuresList: {
     gap: 8,
@@ -659,23 +667,27 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FDE68A', // amber-200
     borderRadius: 8,
-    padding: 12,
+    padding: 20,
     marginBottom: 24,
     flexDirection: 'row',
   },
   warningIcon: {
-    marginRight: 8,
+    marginRight: 12,
     marginTop: 2,
   },
   warningTitle: {
     fontSize: 14,
     fontWeight: '600',
     color: '#92400E', // amber-800
-    marginBottom: 4,
+    marginBottom: 8,
+    flex: 1,
   },
   warningText: {
     fontSize: 14,
     color: '#92400E', // amber-800
+    marginBottom: 4,
+    flex: 1,
+    paddingRight: 8,
   },
   cameraPreview: {
     backgroundColor: '#F3F4F6', // gray-100
