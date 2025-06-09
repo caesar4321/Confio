@@ -8,7 +8,6 @@ module.exports = {
       whitelist: null,
       safe: false,
       allowUndefined: true,
-    }],
-    'babel-plugin-syntax-hermes-parser'
+    }]
   ]
 };
