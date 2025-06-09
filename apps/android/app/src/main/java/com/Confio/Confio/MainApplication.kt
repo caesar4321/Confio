@@ -14,6 +14,8 @@ import com.facebook.soloader.SoLoader
 import com.swmansion.rnscreens.RNScreensPackage
 import com.th3rdwave.safeareacontext.SafeAreaContextPackage
 import com.mrousavy.camera.react.CameraPackage
+import fr.greweb.reactnativeviewshot.RNViewShotPackage
+import com.reactnativecommunity.cameraroll.CameraRollPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -25,6 +27,8 @@ class MainApplication : Application(), ReactApplication {
               add(RNScreensPackage())
               add(SafeAreaContextPackage())
               add(CameraPackage())
+              add(RNViewShotPackage())
+              add(CameraRollPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"
