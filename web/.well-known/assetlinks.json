@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.Confio.Confio",
+      "sha256_cert_fingerprints": [
+        "45:68:2D:3B:95:1F:5F:BE:A7:7E:9A:14:ED:F4:AC:B2:C8:AB:06:11:40:11:46:F2:6D:37:38:60:59:CF:89:78"
+      ]
+    }
+  }
+] 
