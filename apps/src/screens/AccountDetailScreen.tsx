@@ -14,7 +14,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
-import { RootStackParamList } from '../types/navigation';
+import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -39,8 +39,8 @@ const colors = {
   },
 };
 
-type AccountDetailScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'AccountDetail'>;
-type AccountDetailScreenRouteProp = RouteProp<RootStackParamList, 'AccountDetail'>;
+type AccountDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList, 'AccountDetail'>;
+type AccountDetailScreenRouteProp = RouteProp<MainStackParamList, 'AccountDetail'>;
 
 interface Transaction {
   type: 'received' | 'sent' | 'exchange' | 'payment';
@@ -393,7 +393,10 @@ export const AccountDetailScreen = () => {
               </View>
 
               <View style={styles.usdcActions}>
-                <TouchableOpacity style={styles.usdcActionButton}>
+                <TouchableOpacity 
+                  style={styles.usdcActionButton}
+                  onPress={() => navigation.navigate('USDCDeposit')}
+                >
                   <Text style={styles.usdcActionButtonText}>Depositar USDC</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
