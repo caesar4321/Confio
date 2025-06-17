@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,12 +10,15 @@ import {
   Clipboard,
   Alert,
   StatusBar,
+  Image,
 } from 'react-native';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
 import Icon from 'react-native-vector-icons/Feather';
 import QRCode from 'react-native-qrcode-svg';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { Header } from '../navigation/Header';
+import ViewShot from 'react-native-view-shot';
 
 const colors = {
   primary: '#00d4aa',
@@ -37,6 +40,7 @@ export const ConfioAddressScreen = () => {
   const [hasSharedBefore, setHasSharedBefore] = useState(false);
   const username = '@julianmoonluna';
   const addressUrl = 'https://confio.lat/@julianmoonluna';
+  const qrRef = useRef<ViewShot>(null);
 
   const handleShare = async () => {
     if (!hasSharedBefore) {
@@ -78,9 +82,22 @@ export const ConfioAddressScreen = () => {
     Alert.alert('Dirección copiada');
   };
 
-  const handleSaveQR = () => {
-    // TODO: Implement QR code saving functionality
-    Alert.alert('QR guardado en galería');
+  const handleSaveQR = async () => {
+    try {
+      const qrNode = qrRef.current;
+      if (!qrNode) {
+        throw new Error('QR code reference not found');
+      }
+      if (typeof qrNode.capture !== 'function') {
+        throw new Error('QR code capture method not found');
+      }
+      const uri = await qrNode.capture();
+      await CameraRoll.save(uri, { type: 'photo' });
+      Alert.alert('Éxito', 'QR guardado en galería');
+    } catch (error) {
+      console.error('Error saving QR:', error);
+      Alert.alert('Error', 'No se pudo guardar el QR. Por favor, intenta de nuevo.');
+    }
   };
 
   return (
@@ -94,47 +111,52 @@ export const ConfioAddressScreen = () => {
       />
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
-        <View style={styles.qrSection}>
-          <View style={styles.qrCode}>
-            <View style={styles.qrCodeInner}>
-              <QRCode
-                value={addressUrl}
-                size={170}
-                color={colors.primary}
-                backgroundColor={colors.white}
-              />
+        <ViewShot ref={qrRef} options={{ format: 'png', quality: 1 }}>
+          <View style={{ alignItems: 'center', marginBottom: 16 }}>
+            <Image
+              source={require('../assets/png/CONFIO.png')}
+              style={{ width: 64, height: 64, resizeMode: 'contain', marginBottom: 4 }}
+            />
+            <Text style={{ color: '#00b894', fontWeight: 'bold', fontSize: 16 }}>confio.lat</Text>
+          </View>
+          <View style={styles.addressSection}>
+            <Text style={styles.addressLabel}>Tu dirección personal</Text>
+            <View style={styles.addressDisplay}>
+              <Text style={styles.addressText}>{username}</Text>
+              <TouchableOpacity style={styles.copyBtn} onPress={handleCopyAddress}>
+                <Text style={styles.copyBtnText}>Copiar</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.infoSection}>
+              <Text style={styles.infoText}>
+                {'✅ Esta es tu dirección personal para recibir dinero\n✅ Envíos entre personas = gratis\n✅ Funciona desde cualquier navegador'}
+              </Text>
             </View>
           </View>
 
-          <View style={styles.actions}>
-            <TouchableOpacity style={styles.btnPrimary} onPress={handleShare}>
-              <Icon name="share-2" size={20} color={colors.white} />
-              <Text style={styles.btnPrimaryText}>Compartir</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.btnSecondary} onPress={handleSaveQR}>
-              <Icon name="download" size={20} color={colors.text} />
-              <Text style={styles.btnSecondaryText}>Guardar QR</Text>
-            </TouchableOpacity>
+          <View style={styles.qrSection}>
+            <View style={styles.qrCode}>
+              <View style={styles.qrCodeInner}>
+                <QRCode
+                  value={addressUrl}
+                  size={170}
+                  color={colors.primary}
+                  backgroundColor={colors.white}
+                />
+              </View>
+            </View>
+            <View style={styles.actions}>
+              <TouchableOpacity style={styles.btnPrimary} onPress={handleShare}>
+                <Icon name="share-2" size={20} color={colors.white} />
+                <Text style={styles.btnPrimaryText}>Compartir</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.btnSecondary} onPress={handleSaveQR}>
+                <Icon name="download" size={20} color={colors.text} />
+                <Text style={styles.btnSecondaryText}>Guardar QR</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-
-        <View style={styles.addressSection}>
-          <Text style={styles.addressLabel}>Tu dirección personal</Text>
-          <View style={styles.addressDisplay}>
-            <Text style={styles.addressText}>{username}</Text>
-            <TouchableOpacity style={styles.copyBtn} onPress={handleCopyAddress}>
-              <Text style={styles.copyBtnText}>Copiar</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.infoSection}>
-            <Text style={styles.infoText}>
-              ✅ Esta es tu dirección personal para recibir dinero{'\n'}
-              ✅ Envíos entre personas = gratis{'\n'}
-              ✅ Funciona desde cualquier navegador
-            </Text>
-          </View>
-        </View>
+        </ViewShot>
 
         <View style={styles.warning}>
           <View style={styles.warningHeader}>

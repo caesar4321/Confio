@@ -85,6 +85,6 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>We need access to your microphone for video recording</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>We need access to your photo library to save QR code images</string>
+	<string>We need access to save QR codes to your photo library</string>
 </dict>
 </plist>
