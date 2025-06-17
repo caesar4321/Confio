@@ -7,6 +7,7 @@ import VerificationScreen from '../screens/VerificationScreen';
 import { ConfioAddressScreen } from '../screens/ConfioAddressScreen';
 import { AccountDetailScreen } from '../screens/AccountDetailScreen';
 import USDCDepositScreen from '../screens/USDCDepositScreen';
+import USDCManageScreen from '../screens/USDCManageScreen';
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
@@ -54,6 +55,11 @@ export const MainNavigator = () => {
         options={{
           headerShown: false,
         }}
+      />
+      <Stack.Screen
+        name="USDCManage"
+        component={USDCManageScreen}
+        options={{ headerShown: false }}
       />
     </Stack.Navigator>
   );
