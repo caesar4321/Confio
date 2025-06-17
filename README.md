@@ -72,6 +72,9 @@ This is a **monolithic repository** containing the full Confío stack:
 │   │   ├── index.html # Base HTML template
 │   │   ├── manifest.json # Web app manifest
 │   │   └── images/    # Public images
+│   ├── .well-known/   # App verification files
+│   │   ├── apple-app-site-association # iOS app verification
+│   │   └── assetlinks.json # Android app verification
 │   ├── src/           # React source code
 │   │   ├── components/    # React components
 │   │   ├── pages/        # Page components
@@ -406,3 +409,40 @@ The project maintains country code mappings in two locations:
    - Ensures consistent country code handling across the application
 
 Both files maintain the same list of countries and codes, with the client version including additional UI elements (flags) and the server version focusing on validation and formatting.
+
+## 📱 App Verification: `.well-known` Directory & nginx Configuration
+
+To enable iOS and Android app verification (for deep linking and app association), you must:
+
+1. **Copy the `.well-known` directory**
+   - The directory `web/.well-known/` contains:
+     - `apple-app-site-association` (for iOS Universal Links)
+     - `assetlinks.json` (for Android App Links)
+   - Copy this directory to the web root served by nginx. If deploying, ensure it is present at the top-level of your public/static files (e.g., `/var/www/html/.well-known/` or your Django static root if using Whitenoise).
+
+2. **nginx Configuration**
+   - Add the following block to your `nginx.conf` to serve `.well-known` files with the correct content type:
+
+```nginx
+location ^~ /.well-known/ {
+    alias /path/to/your/project/web/.well-known/;
+    default_type application/json;
+    add_header Access-Control-Allow-Origin *;
+    try_files $uri =404;
+}
+```
+- Replace `/path/to/your/project/web/.well-known/` with the absolute path to your `.well-known` directory.
+- If you use Whitenoise or Django static files, ensure `.well-known` is included in your static collection and not ignored by `.gitignore` or static file settings.
+
+3. **Reload nginx**
+   - After updating the config, reload nginx:
+     ```bash
+     sudo nginx -s reload
+     ```
+
+4. **Verify**
+   - Visit `https://yourdomain.com/.well-known/apple-app-site-association` and `https://yourdomain.com/.well-known/assetlinks.json` in your browser. You should see the raw JSON, not an HTML error page.
+
+**Note:**
+- The `default_type application/json;` ensures the correct content-type for verification files.
+- If you use a different static file server, adapt the config accordingly.

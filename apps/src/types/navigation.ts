@@ -22,10 +22,22 @@ export type MainStackParamList = {
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
   Verification: undefined;
   ConfioAddress: undefined;
+  AccountDetail: {
+    accountType: 'cusd' | 'confio';
+    accountName: string;
+    accountSymbol: string;
+    accountBalance: string;
+  };
 };
 
 // Root Stack - Top level navigation
 export type RootStackParamList = {
   Auth: NavigatorScreenParams<AuthStackParamList>;
   Main: NavigatorScreenParams<MainStackParamList>;
+  AccountDetail: {
+    accountType: 'cusd' | 'confio';
+    accountName: string;
+    accountSymbol: string;
+    accountBalance: string;
+  };
 }; 

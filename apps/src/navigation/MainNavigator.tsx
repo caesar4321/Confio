@@ -5,6 +5,7 @@ import { BottomTabNavigator } from './BottomTabNavigator';
 import LegalDocumentScreen from '../screens/LegalDocumentScreen';
 import VerificationScreen from '../screens/VerificationScreen';
 import { ConfioAddressScreen } from '../screens/ConfioAddressScreen';
+import { AccountDetailScreen } from '../screens/AccountDetailScreen';
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
@@ -35,6 +36,13 @@ export const MainNavigator = () => {
       <Stack.Screen 
         name="ConfioAddress" 
         component={ConfioAddressScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen 
+        name="AccountDetail" 
+        component={AccountDetailScreen}
         options={{
           headerShown: false,
         }}

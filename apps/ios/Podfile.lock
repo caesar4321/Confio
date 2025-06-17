@@ -1419,6 +1419,30 @@ PODS:
     - React-Core
   - react-native-safe-area-context (5.4.1):
     - React-Core
+  - react-native-view-shot (4.0.3):
+    - DoubleConversion
+    - glog
+    - hermes-engine
+    - RCT-Folly (= 2024.11.18.00)
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-hermes
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - Yoga
   - react-native-worklets-core (1.5.0):
     - DoubleConversion
     - glog
@@ -2038,6 +2062,7 @@ DEPENDENCIES:
   - "react-native-cameraroll (from `../node_modules/@react-native-camera-roll/camera-roll`)"
   - react-native-get-random-values (from `../node_modules/react-native-get-random-values`)
   - react-native-safe-area-context (from `../node_modules/react-native-safe-area-context`)
+  - react-native-view-shot (from `../node_modules/react-native-view-shot`)
   - react-native-worklets-core (from `../node_modules/react-native-worklets-core`)
   - React-NativeModulesApple (from `../node_modules/react-native/ReactCommon/react/nativemodule/core/platform/ios`)
   - React-oscompat (from `../node_modules/react-native/ReactCommon/oscompat`)
@@ -2184,6 +2209,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-get-random-values"
   react-native-safe-area-context:
     :path: "../node_modules/react-native-safe-area-context"
+  react-native-view-shot:
+    :path: "../node_modules/react-native-view-shot"
   react-native-worklets-core:
     :path: "../node_modules/react-native-worklets-core"
   React-NativeModulesApple:
@@ -2327,6 +2354,7 @@ SPEC CHECKSUMS:
   react-native-cameraroll: 0c3468369abfd7fc451a894e6ff3e5a2091a4cf9
   react-native-get-random-values: d16467cf726c618e9c7a8c3c39c31faa2244bbba
   react-native-safe-area-context: dde2052b903c11d677c320b599c3244021c34ce8
+  react-native-view-shot: ba0ecb57bf0407e034cb39f4b6677743e2dcfa4a
   react-native-worklets-core: 7c54fedad83c44e351d30bd81c09c338cb5a9d0b
   React-NativeModulesApple: 579cac2962d42ffee0d8aae48752f30c4e498bb9
   React-oscompat: f26aa2a4adc84c34212ab12c07988fe19e9cf16a

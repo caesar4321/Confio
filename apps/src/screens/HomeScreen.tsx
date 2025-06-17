@@ -6,13 +6,12 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
 import cUSDLogo from '../assets/png/cUSD.png';
-import USDCLogo from '../assets/png/USDC.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import Icon from 'react-native-vector-icons/Feather';
 import * as Keychain from 'react-native-keychain';
 import { getApiUrl } from '../config/env';
 import { jwtDecode } from 'jwt-decode';
-import { RootStackParamList } from '../types/navigation';
+import { RootStackParamList, MainStackParamList } from '../types/navigation';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
@@ -26,7 +25,7 @@ interface CustomJwtPayload {
   type: 'access' | 'refresh';
 }
 
-type HomeScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Main'>;
+type HomeScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 export const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
@@ -39,7 +38,6 @@ export const HomeScreen = () => {
   // Mock balances - replace with real data later
   const mockBalances = {
     cusd: "1,234.56",
-    usdc: "789.10",
     confio: "1,000.00"
   };
 
@@ -114,40 +112,48 @@ export const HomeScreen = () => {
         </View>
         <View style={{ ...styles.walletsContainer, width: '100%' }}>
           <View style={{ ...styles.walletCard, width: '100%' }}>
-            <View style={styles.walletLogoContainer}>
-              <Image source={cUSDLogo} style={styles.walletLogo} />
-            </View>
-            <View style={styles.walletInfo}>
-              <Text style={styles.walletName}>Confío Dollar</Text>
-              <Text style={styles.walletSymbol}>$cUSD</Text>
-            </View>
-            <View style={styles.walletBalance}>
-              <Text style={styles.walletBalanceText}>${mockBalances.cusd}</Text>
-            </View>
+            <TouchableOpacity 
+              style={styles.walletCardContent}
+              onPress={() => navigation.navigate('AccountDetail', { 
+                accountType: 'cusd',
+                accountName: 'Confío Dollar',
+                accountSymbol: '$cUSD',
+                accountBalance: mockBalances.cusd
+              })}
+            >
+              <View style={styles.walletLogoContainer}>
+                <Image source={cUSDLogo} style={styles.walletLogo} />
+              </View>
+              <View style={styles.walletInfo}>
+                <Text style={styles.walletName}>Confío Dollar</Text>
+                <Text style={styles.walletSymbol}>$cUSD</Text>
+              </View>
+              <View style={styles.walletBalance}>
+                <Text style={styles.walletBalanceText}>${mockBalances.cusd}</Text>
+              </View>
+            </TouchableOpacity>
           </View>
           <View style={{ ...styles.walletCard, width: '100%' }}>
-            <View style={styles.walletLogoContainer}>
-              <Image source={USDCLogo} style={styles.walletLogo} />
-            </View>
-            <View style={styles.walletInfo}>
-              <Text style={styles.walletName}>USD Coin</Text>
-              <Text style={styles.walletSymbol}>$USDC</Text>
-            </View>
-            <View style={styles.walletBalance}>
-              <Text style={styles.walletBalanceText}>${mockBalances.usdc}</Text>
-            </View>
-          </View>
-          <View style={{ ...styles.walletCard, width: '100%' }}>
-            <View style={styles.walletLogoContainer}>
-              <Image source={CONFIOLogo} style={styles.walletLogo} />
-            </View>
-            <View style={styles.walletInfo}>
-              <Text style={styles.walletName}>Confío</Text>
-              <Text style={styles.walletSymbol}>$CONFIO</Text>
-            </View>
-            <View style={styles.walletBalance}>
-              <Text style={styles.walletBalanceText}>{mockBalances.confio}</Text>
-            </View>
+            <TouchableOpacity 
+              style={styles.walletCardContent}
+              onPress={() => navigation.navigate('AccountDetail', { 
+                accountType: 'confio',
+                accountName: 'Confío',
+                accountSymbol: '$CONFIO',
+                accountBalance: mockBalances.confio
+              })}
+            >
+              <View style={styles.walletLogoContainer}>
+                <Image source={CONFIOLogo} style={styles.walletLogo} />
+              </View>
+              <View style={styles.walletInfo}>
+                <Text style={styles.walletName}>Confío</Text>
+                <Text style={styles.walletSymbol}>$CONFIO</Text>
+              </View>
+              <View style={styles.walletBalance}>
+                <Text style={styles.walletBalanceText}>{mockBalances.confio}</Text>
+              </View>
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>
@@ -296,5 +302,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     textAlign: 'center',
     marginTop: 40,
+  },
+  walletCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
   },
 }); 
