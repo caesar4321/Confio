@@ -6,6 +6,7 @@ import LegalDocumentScreen from '../screens/LegalDocumentScreen';
 import VerificationScreen from '../screens/VerificationScreen';
 import { ConfioAddressScreen } from '../screens/ConfioAddressScreen';
 import { AccountDetailScreen } from '../screens/AccountDetailScreen';
+import USDCDepositScreen from '../screens/USDCDepositScreen';
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
@@ -43,6 +44,13 @@ export const MainNavigator = () => {
       <Stack.Screen 
         name="AccountDetail" 
         component={AccountDetailScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen 
+        name="USDCDeposit" 
+        component={USDCDepositScreen}
         options={{
           headerShown: false,
         }}
