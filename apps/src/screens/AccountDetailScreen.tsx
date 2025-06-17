@@ -14,7 +14,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
-import { RootStackParamList, MainStackParamList } from '../types/navigation';
+import { MainStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -39,7 +39,7 @@ const colors = {
   },
 };
 
-type AccountDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList, 'AccountDetail'>;
+type AccountDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type AccountDetailScreenRouteProp = RouteProp<MainStackParamList, 'AccountDetail'>;
 
 interface Transaction {
@@ -82,7 +82,6 @@ export const AccountDetailScreen = () => {
     symbol: "USDC",
     balance: "458.22",
     balanceHidden: "•••••••",
-    address: "0xabcd...efgh",
     description: "Para usuarios avanzados - depósito directo vía Sui Blockchain"
   } : null;
 
@@ -382,16 +381,6 @@ export const AccountDetailScreen = () => {
                 </View>
               </View>
 
-              <View style={styles.usdcAddressContainer}>
-                <Text style={styles.usdcAddressLabel}>Dirección USDC:</Text>
-                <View style={styles.usdcAddressRow}>
-                  <Text style={styles.usdcAddressText}>{usdcAccount.address}</Text>
-                  <TouchableOpacity>
-                    <Icon name="copy" size={14} color={colors.accent} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-
               <View style={styles.usdcActions}>
                 <TouchableOpacity 
                   style={styles.usdcActionButton}
@@ -401,6 +390,7 @@ export const AccountDetailScreen = () => {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.usdcActionButton, { backgroundColor: colors.accent }]}
+                  onPress={() => navigation.navigate('USDCManage')}
                 >
                   <Text style={[styles.usdcActionButtonText, { color: '#ffffff' }]}>
                     Gestionar

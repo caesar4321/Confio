@@ -29,6 +29,7 @@ export type MainStackParamList = {
     accountBalance: string;
   };
   USDCDeposit: undefined;
+  USDCManage: undefined;
 };
 
 // Root Stack - Top level navigation
