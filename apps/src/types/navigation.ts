@@ -28,7 +28,7 @@ export type MainStackParamList = {
     accountSymbol: string;
     accountBalance: string;
   };
-  USDCDeposit: undefined;
+  USDCDeposit: { tokenType?: 'usdc' | 'cusd' | 'confio' };
   USDCManage: undefined;
 };
 
