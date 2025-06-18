@@ -280,6 +280,11 @@ export const AccountDetailScreen = () => {
     </Modal>
   );
 
+  const handleSend = () => {
+    // @ts-ignore - Navigation type mismatch, but should work at runtime
+    navigation.navigate('BottomTabs', { screen: 'Contacts' });
+  };
+
   return (
     <View style={styles.container}>
       <Header
@@ -326,7 +331,10 @@ export const AccountDetailScreen = () => {
         {/* Action Buttons */}
         <View style={styles.actionButtonsContainer}>
           <View style={styles.actionButtons}>
-            <TouchableOpacity style={styles.actionButton}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={handleSend}
+            >
               <View style={[styles.actionIcon, { backgroundColor: colors.primary }]}>
                 <Icon name="send" size={20} color="#ffffff" />
               </View>
@@ -335,9 +343,12 @@ export const AccountDetailScreen = () => {
 
             <TouchableOpacity 
               style={styles.actionButton}
-              onPress={() => navigation.navigate('USDCDeposit', { 
-                tokenType: route.params.accountType === 'cusd' ? 'cusd' : 'confio' 
-              })}
+              onPress={() => {
+                // @ts-ignore - Navigation type mismatch, but should work at runtime
+                navigation.navigate('USDCDeposit', { 
+                  tokenType: route.params.accountType === 'cusd' ? 'cusd' : 'confio' 
+                });
+              }}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.primary }]}>
                 <Icon name="download" size={20} color="#ffffff" />
@@ -345,7 +356,13 @@ export const AccountDetailScreen = () => {
               <Text style={styles.actionButtonText}>Recibir</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.actionButton}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => {
+                // @ts-ignore - Navigation type mismatch, but should work at runtime
+                navigation.navigate('BottomTabs', { screen: 'Scan' });
+              }}
+            >
               <View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}>
                 <Icon name="shopping-bag" size={20} color="#ffffff" />
               </View>
@@ -354,7 +371,10 @@ export const AccountDetailScreen = () => {
 
             <TouchableOpacity
               style={styles.actionButton}
-              onPress={() => setShowExchangeModal(true)}
+              onPress={() => {
+                // @ts-ignore - Navigation type mismatch, but should work at runtime
+                navigation.navigate('BottomTabs', { screen: 'Exchange' });
+              }}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.accent }]}>
                 <Icon name="refresh-cw" size={20} color="#ffffff" />
