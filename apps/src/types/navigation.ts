@@ -30,6 +30,7 @@ export type MainStackParamList = {
   };
   USDCDeposit: { tokenType?: 'usdc' | 'cusd' | 'confio' };
   USDCManage: undefined;
+  Send: { tokenType: 'cusd' | 'confio' };
 };
 
 // Root Stack - Top level navigation

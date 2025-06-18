@@ -12,6 +12,7 @@ type ContactsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList
 export const ContactsScreen = () => {
   const navigation = useNavigation<ContactsScreenNavigationProp>();
   const [showTokenSelection, setShowTokenSelection] = useState(false);
+  const [showSendTokenSelection, setShowSendTokenSelection] = useState(false);
   
   // Mock data
   const friends = [
@@ -35,6 +36,15 @@ export const ContactsScreen = () => {
   const handleTokenSelection = (tokenType: 'cusd' | 'confio') => {
     setShowTokenSelection(false);
     navigation.navigate('USDCDeposit', { tokenType });
+  };
+
+  const handleSendWithAddress = () => {
+    setShowSendTokenSelection(true);
+  };
+
+  const handleSendTokenSelection = (tokenType: 'cusd' | 'confio') => {
+    setShowSendTokenSelection(false);
+    navigation.navigate('Send', { tokenType });
   };
 
   const TokenSelectionModal = () => (
@@ -104,6 +114,63 @@ export const ContactsScreen = () => {
     </Modal>
   );
 
+  const SendTokenSelectionModal = () => (
+    <Modal
+      visible={showSendTokenSelection}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setShowSendTokenSelection(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Selecciona el token</Text>
+            <TouchableOpacity onPress={() => setShowSendTokenSelection(false)}>
+              <Icon name="x" size={24} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.modalSubtitle}>¿Qué token quieres enviar?</Text>
+          <View style={styles.tokenOptions}>
+            <TouchableOpacity 
+              style={styles.tokenOption}
+              onPress={() => handleSendTokenSelection('cusd')}
+            >
+              <View style={styles.tokenInfo}>
+                <Image source={cUSDLogo} style={styles.tokenLogo} />
+                <View style={styles.tokenDetails}>
+                  <Text style={styles.tokenName}>Confío Dollar</Text>
+                  <Text style={styles.tokenSymbol}>$cUSD</Text>
+                  <Text style={styles.tokenDescription}>Moneda estable para pagos diarios</Text>
+                </View>
+              </View>
+              <Icon name="chevron-right" size={20} color="#6B7280" />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.tokenOption}
+              onPress={() => handleSendTokenSelection('confio')}
+            >
+              <View style={styles.tokenInfo}>
+                <Image source={CONFIOLogo} style={styles.tokenLogo} />
+                <View style={styles.tokenDetails}>
+                  <Text style={styles.tokenName}>Confío Token</Text>
+                  <Text style={styles.tokenSymbol}>$CONFIO</Text>
+                  <Text style={styles.tokenDescription}>Token de gobernanza y utilidad</Text>
+                </View>
+              </View>
+              <Icon name="chevron-right" size={20} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity 
+            style={styles.cancelButton}
+            onPress={() => setShowSendTokenSelection(false)}
+          >
+            <Text style={styles.cancelButtonText}>Cancelar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
       {/* Search Bar */}
@@ -118,7 +185,7 @@ export const ContactsScreen = () => {
 
       {/* Send/Receive Buttons */}
       <View style={styles.actionButtons}>
-        <TouchableOpacity style={styles.actionButton}>
+        <TouchableOpacity style={styles.actionButton} onPress={handleSendWithAddress}>
           <View style={styles.actionButtonContent}>
             <View style={styles.actionIconContainer}>
               <Icon name="send" size={20} color="#fff" />
@@ -178,6 +245,7 @@ export const ContactsScreen = () => {
       </View>
 
       <TokenSelectionModal />
+      <SendTokenSelectionModal />
     </ScrollView>
   );
 };

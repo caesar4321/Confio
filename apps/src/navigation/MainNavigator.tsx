@@ -8,6 +8,7 @@ import { ConfioAddressScreen } from '../screens/ConfioAddressScreen';
 import { AccountDetailScreen } from '../screens/AccountDetailScreen';
 import DepositScreen from '../screens/DepositScreen';
 import USDCManageScreen from '../screens/USDCManageScreen';
+import { SendScreen } from '../screens/SendScreen';
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
@@ -59,6 +60,11 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="USDCManage"
         component={USDCManageScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Send"
+        component={SendScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>
