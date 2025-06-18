@@ -31,6 +31,10 @@ export type MainStackParamList = {
   USDCDeposit: { tokenType?: 'usdc' | 'cusd' | 'confio' };
   USDCManage: undefined;
   Send: { tokenType: 'cusd' | 'confio' };
+  TransactionDetail: {
+    transactionType: 'received' | 'sent' | 'exchange' | 'payment';
+    transactionData?: any; // You can make this more specific based on your data structure
+  };
 };
 
 // Root Stack - Top level navigation

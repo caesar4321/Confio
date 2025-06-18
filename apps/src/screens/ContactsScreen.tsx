@@ -47,6 +47,11 @@ export const ContactsScreen = () => {
     navigation.navigate('Send', { tokenType });
   };
 
+  // Demo function to navigate to transaction detail
+  const handleDemoTransaction = (type: 'received' | 'sent' | 'exchange' | 'payment') => {
+    navigation.navigate('TransactionDetail', { transactionType: type });
+  };
+
   const TokenSelectionModal = () => (
     <Modal
       visible={showTokenSelection}
