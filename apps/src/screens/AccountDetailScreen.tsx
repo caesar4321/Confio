@@ -333,7 +333,12 @@ export const AccountDetailScreen = () => {
               <Text style={styles.actionButtonText}>Enviar</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.actionButton}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => navigation.navigate('USDCDeposit', { 
+                tokenType: route.params.accountType === 'cusd' ? 'cusd' : 'confio' 
+              })}
+            >
               <View style={[styles.actionIcon, { backgroundColor: colors.primary }]}>
                 <Icon name="download" size={20} color="#ffffff" />
               </View>
@@ -384,7 +389,7 @@ export const AccountDetailScreen = () => {
               <View style={styles.usdcActions}>
                 <TouchableOpacity 
                   style={styles.usdcActionButton}
-                  onPress={() => navigation.navigate('USDCDeposit')}
+                  onPress={() => navigation.navigate('USDCDeposit', { tokenType: 'usdc' })}
                 >
                   <Text style={styles.usdcActionButtonText}>Depositar USDC</Text>
                 </TouchableOpacity>

@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Clipboard, Image } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import QRCode from 'react-native-qrcode-svg';
 import USDCLogo from '../assets/png/USDC.png';
+import cUSDLogo from '../assets/png/cUSD.png';
+import CONFIOLogo from '../assets/png/CONFIO.png';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -22,14 +24,138 @@ const colors = {
   },
 };
 
-const USDCDepositScreen = () => {
+type TokenType = 'usdc' | 'cusd' | 'confio';
+
+interface RouteParams {
+  tokenType?: TokenType;
+}
+
+interface TokenConfig {
+  name: string;
+  fullName: string;
+  logo: any;
+  color: string;
+  description: string;
+  subtitle: string;
+  warning: string;
+  instructions: Array<{
+    step: string;
+    title: string;
+    description: string;
+  }>;
+}
+
+// Token configuration
+const tokenConfig: Record<TokenType, TokenConfig> = {
+  usdc: {
+    name: 'USDC',
+    fullName: 'USD Coin',
+    logo: USDCLogo,
+    color: colors.accent,
+    description: 'Recibe USDC desde cualquier wallet',
+    subtitle: 'Envía USDC desde tu wallet externo a esta dirección',
+    warning: 'Solo envía USDC en la red Sui. Otros tokens o redes resultarán en pérdida permanente de fondos.',
+    instructions: [
+      {
+        step: '1',
+        title: 'Abre tu wallet externo',
+        description: 'Sui Wallet, Binance, KuCoin, etc.'
+      },
+      {
+        step: '2',
+        title: 'Selecciona enviar USDC',
+        description: 'Asegúrate de estar en la red Sui'
+      },
+      {
+        step: '3',
+        title: 'Pega la dirección de arriba',
+        description: 'O escanea el código QR'
+      },
+      {
+        step: '4',
+        title: 'Confirma la transacción',
+        description: 'El USDC aparecerá en 1-3 minutos'
+      }
+    ]
+  },
+  cusd: {
+    name: 'cUSD',
+    fullName: 'Confío Dollar',
+    logo: cUSDLogo,
+    color: colors.primary,
+    description: 'Recibe cUSD desde cualquier wallet',
+    subtitle: 'Envía cUSD desde tu wallet externo a esta dirección',
+    warning: 'Solo envía cUSD en la red Sui. Otros tokens o redes resultarán en pérdida permanente de fondos.',
+    instructions: [
+      {
+        step: '1',
+        title: 'Abre tu wallet externo',
+        description: 'Sui Wallet, Binance, KuCoin, etc.'
+      },
+      {
+        step: '2',
+        title: 'Selecciona enviar cUSD',
+        description: 'Asegúrate de estar en la red Sui'
+      },
+      {
+        step: '3',
+        title: 'Pega la dirección de arriba',
+        description: 'O escanea el código QR'
+      },
+      {
+        step: '4',
+        title: 'Confirma la transacción',
+        description: 'El cUSD aparecerá en 1-3 minutos'
+      }
+    ]
+  },
+  confio: {
+    name: 'CONFIO',
+    fullName: 'Confío Token',
+    logo: CONFIOLogo,
+    color: colors.secondary,
+    description: 'Recibe CONFIO desde cualquier wallet',
+    subtitle: 'Envía CONFIO desde tu wallet externo a esta dirección',
+    warning: 'Solo envía CONFIO en la red Sui. Otros tokens o redes resultarán en pérdida permanente de fondos.',
+    instructions: [
+      {
+        step: '1',
+        title: 'Abre tu wallet externo',
+        description: 'Sui Wallet, Binance, KuCoin, etc.'
+      },
+      {
+        step: '2',
+        title: 'Selecciona enviar CONFIO',
+        description: 'Asegúrate de estar en la red Sui'
+      },
+      {
+        step: '3',
+        title: 'Pega la dirección de arriba',
+        description: 'O escanea el código QR'
+      },
+      {
+        step: '4',
+        title: 'Confirma la transacción',
+        description: 'El CONFIO aparecerá en 1-3 minutos'
+      }
+    ]
+  }
+};
+
+const DepositScreen = () => {
   const navigation = useNavigation();
+  const route = useRoute();
   const [copied, setCopied] = useState(false);
   
-  const usdcAddress = "0x1a2b3c4d5e6f7890abcdef1234567890abcdef12";
+  // Get token type from route params, default to 'usdc' for backward compatibility
+  const tokenType: TokenType = (route.params as RouteParams)?.tokenType || 'usdc';
+  const config = tokenConfig[tokenType];
+  
+  // This is the same Sui address for all tokens
+  const depositAddress = "0x1a2b3c4d5e6f7890abcdef1234567890abcdef12";
 
   const handleCopy = async () => {
-    await Clipboard.setString(usdcAddress);
+    await Clipboard.setString(depositAddress);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -37,21 +163,21 @@ const USDCDepositScreen = () => {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.accent }]}>
+      <View style={[styles.header, { backgroundColor: config.color }]}>
         <View style={styles.headerContent}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Icon name="arrow-left" size={24} color="#ffffff" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Depositar USDC</Text>
+          <Text style={styles.headerTitle}>Depositar {config.name}</Text>
           <View style={styles.placeholder} />
         </View>
         
         <View style={styles.headerInfo}>
           <View style={styles.logoContainer}>
-            <Image source={USDCLogo} style={styles.logo} />
+            <Image source={config.logo} style={styles.logo} />
           </View>
-          <Text style={styles.headerSubtitle}>Recibe USDC desde cualquier wallet</Text>
-          <Text style={styles.headerDescription}>Envía USDC desde tu wallet externo a esta dirección</Text>
+          <Text style={styles.headerSubtitle}>{config.description}</Text>
+          <Text style={styles.headerDescription}>{config.subtitle}</Text>
         </View>
       </View>
 
@@ -61,19 +187,19 @@ const USDCDepositScreen = () => {
         <View style={styles.warningContent}>
           <Text style={styles.warningTitle}>¡Importante!</Text>
           <Text style={styles.warningText}>
-            Solo envía USDC en la red Sui. Otros tokens o redes resultarán en pérdida permanente de fondos.
+            {config.warning}
           </Text>
         </View>
       </View>
 
       {/* Address Section */}
       <View style={styles.addressCard}>
-        <Text style={styles.addressTitle}>Tu dirección USDC</Text>
+        <Text style={styles.addressTitle}>Tu dirección {config.name}</Text>
         
         {/* QR Code */}
         <View style={styles.qrContainer}>
           <QRCode
-            value={usdcAddress}
+            value={depositAddress}
             size={192}
             backgroundColor="white"
             color="black"
@@ -84,7 +210,7 @@ const USDCDepositScreen = () => {
         <View style={styles.addressContainer}>
           <Text style={styles.addressLabel}>Dirección de depósito:</Text>
           <View style={styles.addressRow}>
-            <Text style={styles.addressText}>{usdcAddress}</Text>
+            <Text style={styles.addressText}>{depositAddress}</Text>
             <TouchableOpacity 
               onPress={handleCopy}
               style={[styles.copyButton, copied && styles.copiedButton]}
@@ -98,7 +224,7 @@ const USDCDepositScreen = () => {
           </View>
         </View>
         
-        <TouchableOpacity style={styles.shareButton}>
+        <TouchableOpacity style={[styles.shareButton, { backgroundColor: config.color }]}>
           <Text style={styles.shareButtonText}>Compartir dirección</Text>
         </TouchableOpacity>
       </View>
@@ -107,30 +233,9 @@ const USDCDepositScreen = () => {
       <View style={styles.instructionsCard}>
         <Text style={styles.instructionsTitle}>Pasos para depositar</Text>
         
-        {[
-          {
-            step: '1',
-            title: 'Abre tu wallet externo',
-            description: 'Sui Wallet, Binance, KuCoin, etc.'
-          },
-          {
-            step: '2',
-            title: 'Selecciona enviar USDC',
-            description: 'Asegúrate de estar en la red Sui'
-          },
-          {
-            step: '3',
-            title: 'Pega la dirección de arriba',
-            description: 'O escanea el código QR'
-          },
-          {
-            step: '4',
-            title: 'Confirma la transacción',
-            description: 'El USDC aparecerá en 1-3 minutos'
-          }
-        ].map((instruction, index) => (
+        {config.instructions.map((instruction, index) => (
           <View key={index} style={styles.instructionStep}>
-            <View style={styles.stepNumber}>
+            <View style={[styles.stepNumber, { backgroundColor: config.color }]}>
               <Text style={styles.stepNumberText}>{instruction.step}</Text>
             </View>
             <View style={styles.stepContent}>
@@ -353,4 +458,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default USDCDepositScreen; 
+export default DepositScreen; 

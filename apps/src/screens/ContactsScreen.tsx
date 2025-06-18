@@ -1,8 +1,18 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Platform } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Platform, Modal, Image } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { MainStackParamList } from '../types/navigation';
 import Icon from 'react-native-vector-icons/Feather';
+import cUSDLogo from '../assets/png/cUSD.png';
+import CONFIOLogo from '../assets/png/CONFIO.png';
+
+type ContactsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 export const ContactsScreen = () => {
+  const navigation = useNavigation<ContactsScreenNavigationProp>();
+  const [showTokenSelection, setShowTokenSelection] = useState(false);
+  
   // Mock data
   const friends = [
     { name: "Evelyn", isOnConfio: true, avatar: "E" },
@@ -17,6 +27,82 @@ export const ContactsScreen = () => {
     { name: "Juan", avatar: "J" },
     { name: "Yadira", avatar: "Y" }
   ];
+
+  const handleReceiveWithAddress = () => {
+    setShowTokenSelection(true);
+  };
+
+  const handleTokenSelection = (tokenType: 'cusd' | 'confio') => {
+    setShowTokenSelection(false);
+    navigation.navigate('USDCDeposit', { tokenType });
+  };
+
+  const TokenSelectionModal = () => (
+    <Modal
+      visible={showTokenSelection}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setShowTokenSelection(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Selecciona el token</Text>
+            <TouchableOpacity onPress={() => setShowTokenSelection(false)}>
+              <Icon name="x" size={24} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
+          
+          <Text style={styles.modalSubtitle}>
+            ¿Qué token quieres recibir?
+          </Text>
+
+          <View style={styles.tokenOptions}>
+            <TouchableOpacity 
+              style={styles.tokenOption}
+              onPress={() => handleTokenSelection('cusd')}
+            >
+              <View style={styles.tokenInfo}>
+                <Image source={cUSDLogo} style={styles.tokenLogo} />
+                <View style={styles.tokenDetails}>
+                  <Text style={styles.tokenName}>Confío Dollar</Text>
+                  <Text style={styles.tokenSymbol}>$cUSD</Text>
+                  <Text style={styles.tokenDescription}>
+                    Moneda estable para pagos diarios
+                  </Text>
+                </View>
+              </View>
+              <Icon name="chevron-right" size={20} color="#6B7280" />
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.tokenOption}
+              onPress={() => handleTokenSelection('confio')}
+            >
+              <View style={styles.tokenInfo}>
+                <Image source={CONFIOLogo} style={styles.tokenLogo} />
+                <View style={styles.tokenDetails}>
+                  <Text style={styles.tokenName}>Confío Token</Text>
+                  <Text style={styles.tokenSymbol}>$CONFIO</Text>
+                  <Text style={styles.tokenDescription}>
+                    Token de gobernanza y utilidad
+                  </Text>
+                </View>
+              </View>
+              <Icon name="chevron-right" size={20} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity 
+            style={styles.cancelButton}
+            onPress={() => setShowTokenSelection(false)}
+          >
+            <Text style={styles.cancelButtonText}>Cancelar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
@@ -41,7 +127,7 @@ export const ContactsScreen = () => {
           </View>
           <Icon name="chevron-right" size={20} color="#6B7280" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton}>
+        <TouchableOpacity style={styles.actionButton} onPress={handleReceiveWithAddress}>
           <View style={styles.actionButtonContent}>
             <View style={styles.actionIconContainer}>
               <Icon name="download" size={20} color="#fff" />
@@ -90,6 +176,8 @@ export const ContactsScreen = () => {
           ))}
         </View>
       </View>
+
+      <TokenSelectionModal />
     </ScrollView>
   );
 };
@@ -229,5 +317,104 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#4B5563',
     textAlign: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  tokenOptions: {
+    gap: 12,
+    marginBottom: 8,
+  },
+  tokenOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  tokenInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  tokenLogo: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 16,
+  },
+  tokenDetails: {
+    flex: 1,
+  },
+  tokenName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginBottom: 2,
+  },
+  tokenSymbol: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  tokenDescription: {
+    fontSize: 12,
+    color: '#6B7280',
+    lineHeight: 16,
+  },
+  cancelButton: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#6B7280',
   },
 }); 
