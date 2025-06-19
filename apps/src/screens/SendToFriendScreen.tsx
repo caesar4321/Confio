@@ -85,8 +85,8 @@ export const SendToFriendScreen = () => {
     console.log('SendToFriendScreen: Navigating to TransactionProcessing');
     // Navigate to processing screen
     try {
-      // Try navigating to TransactionProcessing directly
-      (navigation as any).navigate('TransactionProcessing', {
+      // Use replace instead of navigate to prevent going back to SendScreen
+      (navigation as any).replace('TransactionProcessing', {
         transactionData: {
           type: 'sent',
           amount: amount,
