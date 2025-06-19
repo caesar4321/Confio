@@ -4,6 +4,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -50,9 +51,10 @@ const tokenConfig = {
   },
 };
 
-export const SendScreen = () => {
+export const SendWithAddressScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
+  const insets = useSafeAreaInsets();
   const tokenType: TokenType = (route.params as any)?.tokenType || 'cusd';
   const config = tokenConfig[tokenType];
 
@@ -65,6 +67,7 @@ export const SendScreen = () => {
   const handleQuickAmount = (val: string) => setAmount(val);
 
   const handleSend = () => {
+    console.log('SendWithAddressScreen: handleSend called');
     if (!amount || parseFloat(amount) < config.minSend) {
       setErrorMessage(`El mínimo para enviar es ${config.minSend} ${config.name}`);
       setShowError(true);
@@ -75,35 +78,41 @@ export const SendScreen = () => {
       setShowError(true);
       return;
     }
-    setShowSuccess(true);
-    setTimeout(() => {
-      setShowSuccess(false);
-      setAmount('');
-      setDestination('');
-    }, 2000);
+    
+    console.log('SendWithAddressScreen: Navigating to TransactionProcessing');
+    // Navigate to processing screen
+    (navigation as any).navigate('TransactionProcessing', {
+      transactionData: {
+        type: 'sent',
+        amount: amount,
+        currency: config.name,
+        recipient: destination.substring(0, 10) + '...',
+        action: 'Enviando'
+      }
+    });
   };
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: config.color }]}> 
-        <View style={styles.headerContent}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="arrow-left" size={24} color="#ffffff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Enviar {config.name}</Text>
-          <View style={styles.placeholder} />
-        </View>
-        <View style={styles.headerInfo}>
-          <View style={styles.logoContainer}>
-            <Image source={config.logo} style={styles.logo} />
-          </View>
-          <Text style={styles.headerSubtitle}>{config.fullName}</Text>
-          <Text style={styles.headerDescription}>{config.description}</Text>
-        </View>
-      </View>
-
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: config.color, paddingTop: insets.top + 8 }]}> 
+          <View style={styles.headerContent}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <Icon name="arrow-left" size={24} color="#ffffff" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Enviar {config.name}</Text>
+            <View style={styles.placeholder} />
+          </View>
+          <View style={styles.headerInfo}>
+            <View style={styles.logoContainer}>
+              <Image source={config.logo} style={styles.logo} />
+            </View>
+            <Text style={styles.headerSubtitle}>{config.fullName}</Text>
+            <Text style={styles.headerDescription}>{config.description}</Text>
+          </View>
+        </View>
+
         {/* Available Balance */}
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Saldo disponible</Text>
@@ -165,7 +174,10 @@ export const SendScreen = () => {
           <View style={styles.feeBreakdown}>
             <View style={styles.feeRow}>
               <Text style={styles.feeLabel}>Comisión de red</Text>
-              <Text style={styles.feeValue}>~${config.fee.toFixed(2)}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={styles.feeValueFree}>Gratis</Text>
+                <Text style={styles.feeValueNote}>• Cubierto por Confío</Text>
+              </View>
             </View>
             <View style={styles.feeRow}>
               <Text style={styles.feeLabel}>Tiempo estimado</Text>
@@ -178,7 +190,25 @@ export const SendScreen = () => {
             <View style={styles.feeRow}>
               <Text style={styles.feeTotalLabel}>Total a enviar</Text>
               <Text style={styles.feeTotalValue}>
-                {amount ? (parseFloat(amount) + config.fee).toFixed(2) : '0.00'} {config.name}
+                {amount ? parseFloat(amount).toFixed(2) : '0.00'} {config.name}
+              </Text>
+            </View>
+          </View>
+
+          {/* Confío Value Proposition */}
+          <View style={styles.valuePropositionOuter}>
+            <View style={styles.valueRow}>
+              <Icon name="check-circle" size={20} color={colors.primary} style={styles.valueIcon} />
+              <Text style={styles.valueTitle}>Transferencias 100% gratuitas</Text>
+            </View>
+            <Text style={styles.valueDescription}>
+              Enviarás este dinero sin pagar comisiones
+            </Text>
+            <View style={styles.valueHighlightBox}>
+              <Text style={styles.valueHighlightText}>
+                💡 <Text style={styles.bold}>Confío: 0% comisión</Text>{'\n'}
+                vs. remesadoras tradicionales <Text style={styles.bold}>(5%-20%)</Text>{'\n'}
+                Apoyamos a los venezolanos 🇻🇪 con transferencias gratuitas
               </Text>
             </View>
           </View>
@@ -221,9 +251,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   header: {
-    paddingTop: 48,
     paddingBottom: 32,
     paddingHorizontal: 16,
+    marginBottom: 16,
   },
   headerContent: {
     flexDirection: 'row',
@@ -275,13 +305,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    padding: 16,
+    flexGrow: 1,
     paddingBottom: 32,
   },
   balanceCard: {
     backgroundColor: '#ffffff',
     borderRadius: 16,
     padding: 16,
+    marginHorizontal: 16,
     marginBottom: 16,
     ...Platform.select({
       ios: {
@@ -314,6 +345,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 16,
     padding: 24,
+    marginHorizontal: 16,
     marginBottom: 16,
     ...Platform.select({
       ios: {
@@ -502,5 +534,53 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginTop: 8,
     fontSize: 14,
+  },
+  feeValueFree: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#10b981',
+  },
+  feeValueNote: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginLeft: 4,
+  },
+  valuePropositionOuter: {
+    backgroundColor: '#A7F3D0', // emerald-200
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+    marginHorizontal: 0,
+  },
+  valueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  valueIcon: {
+    marginRight: 8,
+  },
+  valueTitle: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    color: '#059669',
+  },
+  valueDescription: {
+    fontSize: 14,
+    color: '#059669',
+    marginBottom: 12,
+  },
+  valueHighlightBox: {
+    backgroundColor: '#D1FAE5', // emerald-100
+    borderRadius: 12,
+    padding: 14,
+  },
+  valueHighlightText: {
+    fontSize: 14,
+    color: '#065F46',
+    lineHeight: 20,
+  },
+  bold: {
+    fontWeight: 'bold',
   },
 }); 

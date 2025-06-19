@@ -30,10 +30,38 @@ export type MainStackParamList = {
   };
   USDCDeposit: { tokenType?: 'usdc' | 'cusd' | 'confio' };
   USDCManage: undefined;
-  Send: { tokenType: 'cusd' | 'confio' };
+  SendWithAddress: { tokenType: 'cusd' | 'confio' };
+  SendToFriend: { 
+    friend: { name: string; avatar: string; isOnConfio: boolean; phone: string };
+    tokenType?: 'cusd' | 'confio';
+  };
   TransactionDetail: {
     transactionType: 'received' | 'sent' | 'exchange' | 'payment';
     transactionData?: any; // You can make this more specific based on your data structure
+  };
+  TransactionProcessing: {
+    transactionData: {
+      type: 'sent' | 'payment';
+      amount: string;
+      currency: string;
+      recipient?: string;
+      merchant?: string;
+      action: string;
+    };
+  };
+  TransactionSuccess: {
+    transactionData: {
+      type: 'sent' | 'payment';
+      amount: string;
+      currency: string;
+      recipient?: string;
+      merchant?: string;
+      recipientAddress?: string;
+      merchantAddress?: string;
+      message?: string;
+      location?: string;
+      terminal?: string;
+    };
   };
 };
 

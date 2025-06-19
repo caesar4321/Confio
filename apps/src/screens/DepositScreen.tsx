@@ -163,217 +163,217 @@ const DepositScreen = () => {
   };
 
   // Move styles inside the component to use insets
-  const styles = StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
     content: {
       flex: 1,
     },
-    contentContainer: {
-      paddingBottom: 32,
-    },
-    header: {
+  contentContainer: {
+    paddingBottom: 32,
+  },
+  header: {
       paddingTop: insets.top + 8,
-      paddingBottom: 32,
-      paddingHorizontal: 16,
-    },
-    headerContent: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: 24,
-    },
-    backButton: {
-      padding: 8,
-    },
-    headerTitle: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      color: '#ffffff',
-    },
-    placeholder: {
-      width: 40,
-    },
-    headerInfo: {
-      alignItems: 'center',
-    },
-    logoContainer: {
-      width: 64,
-      height: 64,
-      borderRadius: 32,
-      backgroundColor: '#ffffff',
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginBottom: 16,
-      padding: 8,
-    },
-    logo: {
-      width: '100%',
-      height: '100%',
-      resizeMode: 'contain',
-    },
-    headerSubtitle: {
-      fontSize: 20,
-      fontWeight: 'bold',
-      color: '#ffffff',
-      marginBottom: 8,
-    },
-    headerDescription: {
-      fontSize: 14,
-      color: '#ffffff',
-      opacity: 0.8,
-    },
-    warningContainer: {
-      backgroundColor: colors.warning.background,
-      borderWidth: 1,
-      borderColor: colors.warning.border,
-      borderRadius: 12,
-      padding: 16,
-      marginHorizontal: 16,
-      marginTop: 16,
-      marginBottom: 16,
-      flexDirection: 'row',
-    },
-    warningIcon: {
-      marginRight: 12,
-      marginTop: 2,
-    },
-    warningContent: {
-      flex: 1,
-    },
-    warningTitle: {
-      fontSize: 16,
-      fontWeight: 'bold',
-      color: colors.warning.text,
-      marginBottom: 4,
-    },
-    warningText: {
-      fontSize: 14,
-      color: colors.warning.text,
-    },
-    addressCard: {
-      backgroundColor: '#ffffff',
-      borderRadius: 16,
-      padding: 24,
-      marginHorizontal: 16,
-      marginBottom: 16,
-      ...Platform.select({
-        ios: {
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-        },
-        android: {
-          elevation: 2,
-        },
-      }),
-    },
-    addressTitle: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      color: colors.text.primary,
-      marginBottom: 16,
-    },
-    qrContainer: {
-      alignItems: 'center',
-      marginBottom: 24,
-    },
-    addressContainer: {
-      marginBottom: 16,
-    },
-    addressLabel: {
-      fontSize: 14,
-      color: colors.text.secondary,
-      marginBottom: 8,
-    },
-    addressRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    addressText: {
-      flex: 1,
-      fontSize: 14,
-      color: colors.text.primary,
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    },
-    copyButton: {
-      padding: 8,
-      marginLeft: 8,
-    },
-    copiedButton: {
-      backgroundColor: colors.primary + '20',
-      borderRadius: 8,
-    },
-    shareButton: {
-      backgroundColor: colors.accent,
-      paddingVertical: 12,
-      borderRadius: 8,
-      alignItems: 'center',
-    },
-    shareButtonText: {
-      color: '#ffffff',
-      fontSize: 16,
-      fontWeight: '500',
-    },
-    instructionsCard: {
-      backgroundColor: '#ffffff',
-      borderRadius: 16,
-      padding: 24,
-      marginHorizontal: 16,
-      marginBottom: 32,
-      ...Platform.select({
-        ios: {
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 4,
-        },
-        android: {
-          elevation: 2,
-        },
-      }),
-    },
-    instructionsTitle: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      color: colors.text.primary,
-      marginBottom: 16,
-    },
-    instructionStep: {
-      flexDirection: 'row',
-      marginBottom: 16,
-    },
-    stepNumber: {
-      width: 24,
-      height: 24,
-      borderRadius: 12,
-      backgroundColor: colors.accent,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginRight: 12,
-    },
-    stepNumberText: {
-      color: '#ffffff',
-      fontSize: 14,
-      fontWeight: 'bold',
-    },
-    stepContent: {
-      flex: 1,
-    },
-    stepTitle: {
-      fontSize: 16,
-      fontWeight: '500',
-      color: colors.text.primary,
-      marginBottom: 4,
-    },
-    stepDescription: {
-      fontSize: 14,
-      color: colors.text.secondary,
-    },
-  });
+    paddingBottom: 32,
+    paddingHorizontal: 16,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  placeholder: {
+    width: 40,
+  },
+  headerInfo: {
+    alignItems: 'center',
+  },
+  logoContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+    padding: 8,
+  },
+  logo: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'contain',
+  },
+  headerSubtitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 8,
+  },
+  headerDescription: {
+    fontSize: 14,
+    color: '#ffffff',
+    opacity: 0.8,
+  },
+  warningContainer: {
+    backgroundColor: colors.warning.background,
+    borderWidth: 1,
+    borderColor: colors.warning.border,
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 16,
+    flexDirection: 'row',
+  },
+  warningIcon: {
+    marginRight: 12,
+    marginTop: 2,
+  },
+  warningContent: {
+    flex: 1,
+  },
+  warningTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: colors.warning.text,
+    marginBottom: 4,
+  },
+  warningText: {
+    fontSize: 14,
+    color: colors.warning.text,
+  },
+  addressCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 24,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  addressTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.text.primary,
+    marginBottom: 16,
+  },
+  qrContainer: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  addressContainer: {
+    marginBottom: 16,
+  },
+  addressLabel: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    marginBottom: 8,
+  },
+  addressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  addressText: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.text.primary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  copyButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  copiedButton: {
+    backgroundColor: colors.primary + '20',
+    borderRadius: 8,
+  },
+  shareButton: {
+    backgroundColor: colors.accent,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  shareButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  instructionsCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 24,
+    marginHorizontal: 16,
+    marginBottom: 32,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  instructionsTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.text.primary,
+    marginBottom: 16,
+  },
+  instructionStep: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  stepNumber: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  stepNumberText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  stepContent: {
+    flex: 1,
+  },
+  stepTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: colors.text.primary,
+    marginBottom: 4,
+  },
+  stepDescription: {
+    fontSize: 14,
+    color: colors.text.secondary,
+  },
+});
 
   return (
     <View style={styles.container}>

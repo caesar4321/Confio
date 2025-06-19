@@ -13,20 +13,22 @@ export const ContactsScreen = () => {
   const navigation = useNavigation<ContactsScreenNavigationProp>();
   const [showTokenSelection, setShowTokenSelection] = useState(false);
   const [showSendTokenSelection, setShowSendTokenSelection] = useState(false);
+  const [showFriendTokenSelection, setShowFriendTokenSelection] = useState(false);
+  const [selectedFriend, setSelectedFriend] = useState<any>(null);
   
   // Mock data
   const friends = [
-    { name: "Evelyn", isOnConfio: true, avatar: "E" },
-    { name: "Julian", isOnConfio: true, avatar: "J" },
-    { name: "Olivia", isOnConfio: true, avatar: "O" },
-    { name: "Susy", isOnConfio: true, avatar: "S" }
+    { name: "Evelyn", isOnConfio: true, avatar: "E", phone: "+58 412-123-4567" },
+    { name: "Julian", isOnConfio: true, avatar: "J", phone: "+58 414-987-6543" },
+    { name: "Olivia", isOnConfio: true, avatar: "O", phone: "+58 416-555-1234" },
+    { name: "Susy", isOnConfio: true, avatar: "S", phone: "+58 418-777-8888" }
   ];
 
   const nonConfioFriends = [
-    { name: "Borris", avatar: "B" },
-    { name: "Jeffrey", avatar: "J" },
-    { name: "Juan", avatar: "J" },
-    { name: "Yadira", avatar: "Y" }
+    { name: "Borris", avatar: "B", phone: "+58 412-111-2222" },
+    { name: "Jeffrey", avatar: "J", phone: "+58 414-333-4444" },
+    { name: "Juan", avatar: "J", phone: "+58 416-555-6666" },
+    { name: "Yadira", avatar: "Y", phone: "+58 418-777-9999" }
   ];
 
   const handleReceiveWithAddress = () => {
@@ -44,7 +46,17 @@ export const ContactsScreen = () => {
 
   const handleSendTokenSelection = (tokenType: 'cusd' | 'confio') => {
     setShowSendTokenSelection(false);
-    navigation.navigate('Send', { tokenType });
+    navigation.navigate('SendWithAddress', { tokenType });
+  };
+
+  const handleSendToFriend = (friend: any) => {
+    setSelectedFriend(friend);
+    setShowFriendTokenSelection(true);
+  };
+
+  const handleFriendTokenSelection = (tokenType: 'cusd' | 'confio') => {
+    setShowFriendTokenSelection(false);
+    navigation.navigate('SendToFriend', { friend: selectedFriend, tokenType });
   };
 
   // Demo function to navigate to transaction detail
@@ -176,6 +188,63 @@ export const ContactsScreen = () => {
     </Modal>
   );
 
+  const FriendTokenSelectionModal = () => (
+    <Modal
+      visible={showFriendTokenSelection}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setShowFriendTokenSelection(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Selecciona el token</Text>
+            <TouchableOpacity onPress={() => setShowFriendTokenSelection(false)}>
+              <Icon name="x" size={24} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.modalSubtitle}>¿Qué token quieres enviar a {selectedFriend?.name}?</Text>
+          <View style={styles.tokenOptions}>
+            <TouchableOpacity 
+              style={styles.tokenOption}
+              onPress={() => handleFriendTokenSelection('cusd')}
+            >
+              <View style={styles.tokenInfo}>
+                <Image source={cUSDLogo} style={styles.tokenLogo} />
+                <View style={styles.tokenDetails}>
+                  <Text style={styles.tokenName}>Confío Dollar</Text>
+                  <Text style={styles.tokenSymbol}>$cUSD</Text>
+                  <Text style={styles.tokenDescription}>Moneda estable para pagos diarios</Text>
+                </View>
+              </View>
+              <Icon name="chevron-right" size={20} color="#6B7280" />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.tokenOption}
+              onPress={() => handleFriendTokenSelection('confio')}
+            >
+              <View style={styles.tokenInfo}>
+                <Image source={CONFIOLogo} style={styles.tokenLogo} />
+                <View style={styles.tokenDetails}>
+                  <Text style={styles.tokenName}>Confío Token</Text>
+                  <Text style={styles.tokenSymbol}>$CONFIO</Text>
+                  <Text style={styles.tokenDescription}>Token de gobernanza y utilidad</Text>
+                </View>
+              </View>
+              <Icon name="chevron-right" size={20} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity 
+            style={styles.cancelButton}
+            onPress={() => setShowFriendTokenSelection(false)}
+          >
+            <Text style={styles.cancelButtonText}>Cancelar</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
       {/* Search Bar */}
@@ -215,15 +284,22 @@ export const ContactsScreen = () => {
         <Text style={styles.sectionTitle}>Amigos</Text>
         <View style={styles.friendsList}>
           {friends.map((friend, index) => (
-            <View key={index} style={styles.friendItem}>
+            <TouchableOpacity 
+              key={index} 
+              style={styles.friendItem}
+              onPress={() => handleSendToFriend(friend)}
+            >
               <View style={styles.avatarContainer}>
                 <Text style={styles.avatarText}>{friend.avatar}</Text>
               </View>
-              <Text style={styles.friendName}>{friend.name}</Text>
-              <TouchableOpacity style={styles.sendButton}>
+              <View style={styles.friendInfo}>
+                <Text style={styles.friendName}>{friend.name}</Text>
+                <Text style={styles.friendPhone}>{friend.phone}</Text>
+              </View>
+              <View style={styles.sendButton}>
                 <Icon name="send" size={16} color="#fff" />
-              </TouchableOpacity>
-            </View>
+              </View>
+            </TouchableOpacity>
           ))}
         </View>
       </View>
@@ -240,7 +316,10 @@ export const ContactsScreen = () => {
               <View style={styles.avatarContainer}>
                 <Text style={styles.avatarText}>{friend.avatar}</Text>
               </View>
-              <Text style={styles.friendName}>{friend.name}</Text>
+              <View style={styles.friendInfo}>
+                <Text style={styles.friendName}>{friend.name}</Text>
+                <Text style={styles.friendPhone}>{friend.phone}</Text>
+              </View>
               <TouchableOpacity style={styles.addButton}>
                 <Icon name="plus" size={16} color="#6B7280" />
               </TouchableOpacity>
@@ -251,6 +330,7 @@ export const ContactsScreen = () => {
 
       <TokenSelectionModal />
       <SendTokenSelectionModal />
+      <FriendTokenSelectionModal />
     </ScrollView>
   );
 };
@@ -358,11 +438,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#4B5563',
   },
-  friendName: {
+  friendInfo: {
     flex: 1,
+  },
+  friendName: {
     fontSize: 16,
     fontWeight: '500',
     color: '#1F2937',
+  },
+  friendPhone: {
+    fontSize: 14,
+    color: '#6B7280',
   },
   sendButton: {
     width: 36,
