@@ -8,12 +8,19 @@ import { ConfioAddressScreen } from '../screens/ConfioAddressScreen';
 import { AccountDetailScreen } from '../screens/AccountDetailScreen';
 import DepositScreen from '../screens/DepositScreen';
 import USDCManageScreen from '../screens/USDCManageScreen';
-import { SendScreen } from '../screens/SendScreen';
+import { SendWithAddressScreen } from '../screens/SendWithAddressScreen';
+import { SendToFriendScreen } from '../screens/SendToFriendScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
+import { TransactionProcessingScreen } from '../screens/TransactionProcessingScreen';
+import { TransactionSuccessScreen } from '../screens/TransactionSuccessScreen';
+
+console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
+console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
 export const MainNavigator = () => {
+  console.log('MainNavigator: Component rendering');
   return (
     <Stack.Navigator
       screenOptions={{
@@ -64,14 +71,43 @@ export const MainNavigator = () => {
         options={{ headerShown: false }}
       />
       <Stack.Screen
-        name="Send"
-        component={SendScreen}
+        name="SendWithAddress"
+        component={SendWithAddressScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="SendToFriend"
+        component={SendToFriendScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
         name="TransactionDetail"
         component={TransactionDetailScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="TransactionProcessing"
+        component={TransactionProcessingScreen}
+        options={{ 
+          headerShown: false,
+          gestureEnabled: false, // Prevent back gesture
+          animation: 'slide_from_right'
+        }}
+        listeners={{
+          focus: () => console.log('MainNavigator: TransactionProcessing screen focused'),
+        }}
+      />
+      <Stack.Screen
+        name="TransactionSuccess"
+        component={TransactionSuccessScreen}
+        options={{ 
+          headerShown: false,
+          gestureEnabled: false, // Prevent back gesture
+          animation: 'slide_from_right'
+        }}
+        listeners={{
+          focus: () => console.log('MainNavigator: TransactionSuccess screen focused'),
+        }}
       />
     </Stack.Navigator>
   );
