@@ -81,7 +81,7 @@ export const SendWithAddressScreen = () => {
     
     console.log('SendWithAddressScreen: Navigating to TransactionProcessing');
     // Navigate to processing screen
-    (navigation as any).navigate('TransactionProcessing', {
+    (navigation as any).replace('TransactionProcessing', {
       transactionData: {
         type: 'sent',
         amount: amount,

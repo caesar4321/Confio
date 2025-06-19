@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Platform, Animated, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Platform, Animated, ScrollView, BackHandler } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -75,16 +75,21 @@ export const TransactionProcessingScreen = () => {
     }
   ];
 
-  // Prevent back navigation
+  // Prevent back navigation during processing
   useFocusEffect(
     React.useCallback(() => {
       const onBackPress = () => {
-        // Prevent back navigation during processing
-        return true;
+        // Block back navigation during processing to prevent transaction interruption
+        return true; // Return true to prevent default back behavior
       };
 
-      // In a real app, you'd use navigation.setOptions to disable back button
-      return () => {};
+      // Add event listener for hardware back button
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+
+      // Cleanup function to remove event listener
+      return () => {
+        subscription.remove();
+      };
     }, [])
   );
 
