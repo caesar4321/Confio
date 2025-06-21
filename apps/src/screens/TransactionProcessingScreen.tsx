@@ -28,6 +28,7 @@ interface TransactionData {
   recipient?: string;
   merchant?: string;
   action: string;
+  isOnConfio?: boolean;
 }
 
 export const TransactionProcessingScreen = () => {
@@ -41,7 +42,8 @@ export const TransactionProcessingScreen = () => {
     amount: '125.50',
     currency: 'cUSD',
     recipient: 'María González',
-    action: 'Enviando'
+    action: 'Enviando',
+    isOnConfio: true
   };
 
   const [currentStep, setCurrentStep] = useState(0);

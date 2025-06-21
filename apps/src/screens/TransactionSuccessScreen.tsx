@@ -32,6 +32,7 @@ interface TransactionData {
   message?: string;
   location?: string;
   terminal?: string;
+  isOnConfio?: boolean;
 }
 
 export const TransactionSuccessScreen = () => {
@@ -46,7 +47,8 @@ export const TransactionSuccessScreen = () => {
     currency: 'cUSD',
     recipient: 'María González',
     recipientAddress: '0x1a2b3c4d...7890abcd',
-    message: 'Pago por almuerzo'
+    message: 'Pago por almuerzo',
+    isOnConfio: true
   };
 
   const [copied, setCopied] = useState(false);
@@ -86,6 +88,34 @@ export const TransactionSuccessScreen = () => {
 
   const handleShareReceipt = () => {
     Alert.alert('Compartir Comprobante', 'Función de compartir en desarrollo');
+  };
+
+  const handleShareInvitation = () => {
+    // Share invitation for non-Confío friends
+    const invitationMessage = `¡Hola ${transactionData.recipient}! Te envié $${transactionData.amount} ${transactionData.currency} a través de Confío. 
+
+Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 días:
+
+📱 Descarga Confío: https://confio.lat
+💰 Monto: $${transactionData.amount} ${transactionData.currency}
+⏰ Válido hasta: ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('es-ES')}
+
+¡Confío - Transferencias gratuitas para Latinoamérica! 🇻🇪`;
+
+    Alert.alert(
+      'Compartir Invitación',
+      '¿Quieres compartir la invitación con ' + transactionData.recipient + '?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { 
+          text: 'Compartir', 
+          onPress: () => {
+            // In a real app, this would use the Share API
+            Alert.alert('Invitación Compartida', 'La invitación se ha compartido exitosamente. Tu amigo tiene 7 días para reclamar el dinero.');
+          }
+        }
+      ]
+    );
   };
 
   const handleViewTechnicalDetails = () => {
@@ -241,6 +271,58 @@ export const TransactionSuccessScreen = () => {
             </View>
           </View>
         </View>
+
+        {/* Remittance Invitation Section - Only for non-Confío friends */}
+        {transactionData.type === 'sent' && !transactionData.isOnConfio && (
+          <View style={styles.remittanceContainer}>
+            <Text style={styles.sectionTitle}>Invitación de Remesa</Text>
+            
+            <View style={styles.remittanceContent}>
+              <View style={styles.remittanceHeader}>
+                <View style={styles.remittanceIconContainer}>
+                  <Icon name="gift" size={24} color={colors.secondary} />
+                </View>
+                <View style={styles.remittanceInfo}>
+                  <Text style={styles.remittanceTitle}>¡Dinero enviado con invitación!</Text>
+                  <Text style={styles.remittanceSubtitle}>
+                    {transactionData.recipient} recibirá una invitación para reclamar ${transactionData.amount} {transactionData.currency}
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.remittanceDetails}>
+                <View style={styles.remittanceDetailRow}>
+                  <Icon name="clock" size={16} color={colors.warning} />
+                  <Text style={styles.remittanceDetailText}>
+                    <Text style={styles.remittanceBold}>7 días</Text> para reclamar el dinero
+                  </Text>
+                </View>
+                <View style={styles.remittanceDetailRow}>
+                  <Icon name="smartphone" size={16} color={colors.accent} />
+                  <Text style={styles.remittanceDetailText}>
+                    Debe descargar Confío y crear una cuenta
+                  </Text>
+                </View>
+                <View style={styles.remittanceDetailRow}>
+                  <Icon name="check-circle" size={16} color={colors.success} />
+                  <Text style={styles.remittanceDetailText}>
+                    Transferencia <Text style={styles.remittanceBold}>100% gratuita</Text>
+                  </Text>
+                </View>
+              </View>
+              
+              <TouchableOpacity 
+                style={[styles.actionButton, { backgroundColor: colors.secondary }]}
+                onPress={handleShareInvitation}
+              >
+                <Icon name="share" size={16} color="#ffffff" />
+                <Text style={styles.actionButtonText}>
+                  Compartir invitación con {transactionData.recipient}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Confío Value Proposition */}
         <View style={styles.valueContainer}>
@@ -678,5 +760,66 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#ffffff',
     marginLeft: 8,
+  },
+  remittanceContainer: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 24,
+    marginBottom: 24,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  remittanceContent: {
+    gap: 16,
+  },
+  remittanceHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  remittanceIconContainer: {
+    width: 48,
+    height: 48,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  remittanceInfo: {
+    flex: 1,
+  },
+  remittanceTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: colors.text.primary,
+    marginBottom: 8,
+  },
+  remittanceSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  remittanceDetails: {
+    gap: 12,
+  },
+  remittanceDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  remittanceDetailText: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginLeft: 8,
+  },
+  remittanceBold: {
+    fontWeight: 'bold',
   },
 }); 

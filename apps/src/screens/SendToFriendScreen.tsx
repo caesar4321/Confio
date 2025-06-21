@@ -92,7 +92,8 @@ export const SendToFriendScreen = () => {
           amount: amount,
           currency: config.name,
           recipient: friend.name,
-          action: 'Enviando'
+          action: 'Enviando',
+          isOnConfio: friend.isOnConfio
         }
       });
       console.log('SendToFriendScreen: Navigation call completed');
@@ -174,7 +175,7 @@ export const SendToFriendScreen = () => {
               <Text style={styles.feeLabel}>Tiempo estimado</Text>
               <View style={styles.timeContainer}>
                 <Icon name="clock" size={12} color={config.color} style={styles.timeIcon} />
-                <Text style={styles.timeText}>1-3 minutos</Text>
+                <Text style={styles.timeText}>3-5 segundos</Text>
               </View>
             </View>
             <View style={styles.feeDivider} />
