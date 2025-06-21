@@ -12,7 +12,10 @@ import {
   Modal,
   TouchableWithoutFeedback,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
+import { MainStackParamList } from '../types/navigation';
 
 // Colors from the design
 const colors = {
@@ -350,9 +353,8 @@ export const ExchangeScreen = () => {
   const lastScrollY = useRef(0);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
-  const [currentScreen, setCurrentScreen] = useState<keyof typeof screens>('main');
-  const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
   const [activeList, setActiveList] = useState<'offers' | 'trades'>('offers');
+  const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
 
   // Calculate local amount based on crypto amount and rate
   const calculateLocalAmount = (cryptoAmount: string, rate: string) => {
@@ -410,9 +412,46 @@ export const ExchangeScreen = () => {
     setPaymentModalVisible(false);
   };
 
-  const handleSelectOffer = (offer: Offer, screen: keyof typeof screens) => {
-    setSelectedOffer(offer);
-    setCurrentScreen(screen);
+  const handleSelectOffer = (offer: Offer, action: 'profile' | 'trade') => {
+    if (action === 'profile') {
+      // Navigate to TraderProfile screen
+      navigation.navigate('TraderProfile', { 
+        offer: {
+          id: offer.id.toString(),
+          name: offer.name,
+          rate: offer.rate + ' Bs.',
+          limit: offer.limit,
+          available: offer.available,
+          paymentMethods: offer.paymentMethods,
+          responseTime: offer.responseTime,
+          completedTrades: offer.completedTrades,
+          successRate: offer.successRate,
+          verified: offer.verified,
+          isOnline: offer.isOnline,
+          lastSeen: offer.lastSeen,
+        }, 
+        crypto: selectedCrypto 
+      });
+    } else if (action === 'trade') {
+      // Navigate to TradeConfirm screen
+      navigation.navigate('TradeConfirm', { 
+        offer: {
+          id: offer.id.toString(),
+          name: offer.name,
+          rate: offer.rate + ' Bs.',
+          limit: offer.limit,
+          available: offer.available,
+          paymentMethods: offer.paymentMethods,
+          responseTime: offer.responseTime,
+          completedTrades: offer.completedTrades,
+          successRate: offer.successRate,
+          verified: offer.verified,
+          isOnline: offer.isOnline,
+          lastSeen: offer.lastSeen,
+        }, 
+        crypto: selectedCrypto 
+      });
+    }
   };
 
   // Enhanced Offer Card Component
@@ -461,13 +500,13 @@ export const ExchangeScreen = () => {
       <View style={styles.offerActions}>
         <TouchableOpacity 
             style={styles.detailsButton}
-            onPress={() => handleSelectOffer(offer, 'offerDetails')}
+            onPress={() => handleSelectOffer(offer, 'profile')}
         >
           <Text style={styles.detailsButtonText}>Ver Perfil</Text>
         </TouchableOpacity>
         <TouchableOpacity 
             style={styles.buyButton}
-            onPress={() => handleSelectOffer(offer, 'tradeConfirm')}
+            onPress={() => handleSelectOffer(offer, 'trade')}
         >
           <Text style={styles.buyButtonText}>{activeTab === 'buy' ? 'Comprar' : 'Vender'}</Text>
         </TouchableOpacity>
@@ -715,10 +754,34 @@ export const ExchangeScreen = () => {
             )}
         </Animated.View>
     );
-  }
+  };
 
-  const renderMainScreen = () => (
-    <>
+  const renderContent = () => {
+    if (activeList === 'offers') {
+      return (
+        <View style={[styles.offersList, { padding: 16 }]}>
+          {mockOffers[selectedCrypto].map((offer) => (
+            <OfferCard key={offer.id} offer={offer} crypto={selectedCrypto} />
+          ))}
+        </View>
+      );
+    }
+    
+    if (activeList === 'trades') {
+      return (
+        <View style={[styles.offersList, { padding: 16 }]}>
+          {activeTrades.map((trade) => (
+            <ActiveTradeCard key={trade.id} trade={trade} />
+          ))}
+        </View>
+      );
+    }
+    
+    return null;
+  };
+
+  return (
+    <View style={styles.container}>
       <Header />
       
       <Modal
@@ -751,7 +814,7 @@ export const ExchangeScreen = () => {
 
       <Animated.ScrollView 
         style={styles.content} 
-        contentContainerStyle={{ paddingTop: headerHeight }}
+        contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: 100 }}
         onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             { useNativeDriver: true }
@@ -759,73 +822,8 @@ export const ExchangeScreen = () => {
         scrollEventThrottle={16}
         bounces={false}
       >
-        {activeList === 'offers' ? (
-            <View style={[styles.offersList, { padding: 16 }]}>
-                {mockOffers[selectedCrypto].map((offer) => (
-                    <OfferCard key={offer.id} offer={offer} crypto={selectedCrypto} />
-                ))}
-            </View>
-        ) : (
-            <View style={[styles.offersList, { padding: 16 }]}>
-                {activeTrades.map((trade) => (
-                    <ActiveTradeCard key={trade.id} trade={trade} />
-                ))}
-            </View>
-        )}
+        {renderContent()}
       </Animated.ScrollView>
-    </>
-  );
-
-  const renderOfferDetails = () => (
-    <View style={styles.screenContainer}>
-      <View style={styles.pageHeader}>
-        <TouchableOpacity onPress={() => setCurrentScreen('main')} style={styles.backButton}>
-          <Icon name="arrow-left" size={24} color="#1F2937" />
-        </TouchableOpacity>
-        <Text style={styles.pageTitle}>Perfil del Comerciante</Text>
-      </View>
-      <ScrollView style={styles.screenContent}>
-        <View style={styles.profileCard}>
-            <View style={styles.avatarContainer}>
-              <Text style={styles.avatarText}>{selectedOffer?.name.charAt(0)}</Text>
-            </View>
-            <Text style={styles.profileName}>{selectedOffer?.name}</Text>
-            {/* Add more profile details here */}
-            <Text style={styles.placeholderText}>Más detalles del perfil próximamente.</Text>
-        </View>
-      </ScrollView>
-    </View>
-  );
-
-  const renderTradeConfirm = () => (
-    <View style={styles.screenContainer}>
-        <View style={styles.pageHeader}>
-            <TouchableOpacity onPress={() => setCurrentScreen('main')} style={styles.backButton}>
-                <Icon name="arrow-left" size={24} color="#1F2937" />
-            </TouchableOpacity>
-            <Text style={styles.pageTitle}>Confirmar Intercambio</Text>
-        </View>
-        <ScrollView style={styles.screenContent}>
-            <View style={styles.summaryCard}>
-                <Text style={styles.summaryTitle}>Resumen del Intercambio</Text>
-                <Text style={styles.placeholderText}>Detalles de la confirmación próximamente.</Text>
-                <TouchableOpacity style={styles.confirmButton}>
-                    <Text style={styles.confirmButtonText}>Confirmar y Comenzar</Text>
-                </TouchableOpacity>
-            </View>
-        </ScrollView>
-    </View>
-  );
-
-  const screens = {
-    main: renderMainScreen,
-    offerDetails: renderOfferDetails,
-    tradeConfirm: renderTradeConfirm,
-  };
-
-  return (
-    <View style={styles.container}>
-      {screens[currentScreen]()}
     </View>
   );
 };
@@ -1283,10 +1281,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    paddingTop: 60, // For status bar
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    paddingTop: 60,
   },
   backButton: {
     marginRight: 16,
@@ -1470,6 +1465,138 @@ const styles = StyleSheet.create({
   },
   continueButtonText: {
     color: '#fff',
+    fontWeight: 'bold',
+  },
+  detailsCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  profileAvatarContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.neutralDark,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+    position: 'relative',
+  },
+  profileAvatarText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#4B5563',
+  },
+  onlineIndicatorLarge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#10B981',
+    borderWidth: 3,
+    borderColor: '#fff',
+  },
+  lastSeenText: {
+    color: '#6B7280',
+    fontSize: 14,
+  },
+  profileStatsText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    gap: 16,
+    marginBottom: 16,
+  },
+  statBox: {
+    flex: 1,
+    backgroundColor: colors.neutral,
+    padding: 12,
+    borderRadius: 8,
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  paymentMethodRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.neutral,
+    padding: 8,
+    borderRadius: 8,
+  },
+  paymentMethodIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: colors.accent,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  paymentMethodIconText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  paymentMethodName: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  infoBox: {
+    backgroundColor: '#eff6ff', // blue-50
+    padding: 12,
+    borderRadius: 8,
+    flexDirection: 'row',
+  },
+  infoBoxTitle: {
+    color: '#1e40af', // blue-800
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  infoBoxText: {
+    color: '#1d4ed8', // blue-700
+    fontSize: 14,
+  },
+  detailValueBold: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  bottomButtonContainer: {
+    padding: 16,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  bottomButton: {
+    backgroundColor: colors.primary,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  bottomButtonText: {
+    color: '#fff',
+    fontSize: 18,
     fontWeight: 'bold',
   },
 }); 

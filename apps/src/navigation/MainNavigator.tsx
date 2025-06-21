@@ -13,6 +13,8 @@ import { SendToFriendScreen } from '../screens/SendToFriendScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
 import { TransactionProcessingScreen } from '../screens/TransactionProcessingScreen';
 import { TransactionSuccessScreen } from '../screens/TransactionSuccessScreen';
+import { TraderProfileScreen } from '../screens/TraderProfileScreen';
+import { TradeConfirmScreen } from '../screens/TradeConfirmScreen';
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
 console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
@@ -47,6 +49,20 @@ export const MainNavigator = () => {
       <Stack.Screen 
         name="ConfioAddress" 
         component={ConfioAddressScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen 
+        name="TraderProfile" 
+        component={TraderProfileScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen 
+        name="TradeConfirm" 
+        component={TradeConfirmScreen}
         options={{
           headerShown: false,
         }}
