@@ -22,6 +22,40 @@ export type MainStackParamList = {
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
   Verification: undefined;
   ConfioAddress: undefined;
+  TraderProfile: {
+    offer: {
+      id: string;
+      name: string;
+      rate: string;
+      limit: string;
+      available: string;
+      paymentMethods: string[];
+      responseTime: string;
+      completedTrades: number;
+      successRate: number;
+      verified: boolean;
+      isOnline: boolean;
+      lastSeen: string;
+    };
+    crypto: 'cUSD' | 'CONFIO';
+  };
+  TradeConfirm: {
+    offer: {
+      id: string;
+      name: string;
+      rate: string;
+      limit: string;
+      available: string;
+      paymentMethods: string[];
+      responseTime: string;
+      completedTrades: number;
+      successRate: number;
+      verified: boolean;
+      isOnline: boolean;
+      lastSeen: string;
+    };
+    crypto: 'cUSD' | 'CONFIO';
+  };
   AccountDetail: {
     accountType: 'cusd' | 'confio';
     accountName: string;
