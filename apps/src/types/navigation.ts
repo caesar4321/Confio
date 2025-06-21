@@ -47,6 +47,7 @@ export type MainStackParamList = {
       recipient?: string;
       merchant?: string;
       action: string;
+      isOnConfio?: boolean;
     };
   };
   TransactionSuccess: {
@@ -61,6 +62,7 @@ export type MainStackParamList = {
       message?: string;
       location?: string;
       terminal?: string;
+      isOnConfio?: boolean;
     };
   };
 };

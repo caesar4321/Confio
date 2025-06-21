@@ -834,7 +834,7 @@ const styles = StyleSheet.create({
                   <Text style={styles.feeLabel}>Tiempo estimado</Text>
                   <View style={styles.timeContainer}>
                     <Icon name="clock" size={12} color={colors.accent} style={styles.timeIcon} />
-                    <Text style={styles.timeText}>1-3 minutos</Text>
+                    <Text style={styles.timeText}>3-5 segundos</Text>
                   </View>
                 </View>
                 <View style={styles.feeDivider} />
@@ -1002,7 +1002,7 @@ const styles = StyleSheet.create({
                   <View style={styles.timeContainer}>
                     <Icon name="clock" size={12} color={colors.accent} style={styles.timeIcon} />
                     <Text style={styles.timeText}>
-                      {isUSDCToCUSD ? '~30 seg' : '2-5 min'}
+                      {isUSDCToCUSD ? '3-5 segundos' : '2-5 min'}
                     </Text>
                   </View>
                 </View>

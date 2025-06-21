@@ -9,8 +9,26 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 
 type ContactsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
+const colors = {
+  primary: '#34d399', // emerald-400
+  primaryText: '#34d399',
+  primaryLight: '#d1fae5',
+  primaryDark: '#059669',
+  secondary: '#8b5cf6',
+  secondaryText: '#8b5cf6',
+  accent: '#3b82f6',
+  accentText: '#3b82f6',
+  violet: '#8b5cf6',
+  violetText: '#8b5cf6',
+  violetLight: '#f5f3ff',
+  neutral: '#f9fafb',
+  neutralDark: '#f3f4f6',
+  dark: '#111827',
+};
+
 export const ContactsScreen = () => {
   const navigation = useNavigation<ContactsScreenNavigationProp>();
+  const [searchTerm, setSearchTerm] = useState('');
   const [showTokenSelection, setShowTokenSelection] = useState(false);
   const [showSendTokenSelection, setShowSendTokenSelection] = useState(false);
   const [showFriendTokenSelection, setShowFriendTokenSelection] = useState(false);
@@ -25,10 +43,10 @@ export const ContactsScreen = () => {
   ];
 
   const nonConfioFriends = [
-    { name: "Borris", avatar: "B", phone: "+58 412-111-2222" },
+    { name: "Boris", avatar: "B", phone: "+58 412-111-2222" },
     { name: "Jeffrey", avatar: "J", phone: "+58 414-333-4444" },
     { name: "Juan", avatar: "J", phone: "+58 416-555-6666" },
-    { name: "Yadira", avatar: "Y", phone: "+58 418-777-9999" }
+    { name: "Yadira", avatar: "Y", phone: "+58 418-999-0000" }
   ];
 
   const handleReceiveWithAddress = () => {
@@ -50,19 +68,73 @@ export const ContactsScreen = () => {
   };
 
   const handleSendToFriend = (friend: any) => {
+    console.log('ContactsScreen: handleSendToFriend called with friend:', friend.name);
     setSelectedFriend(friend);
     setShowFriendTokenSelection(true);
   };
 
   const handleFriendTokenSelection = (tokenType: 'cusd' | 'confio') => {
+    console.log('ContactsScreen: handleFriendTokenSelection called with tokenType:', tokenType);
+    console.log('ContactsScreen: selectedFriend:', selectedFriend);
     setShowFriendTokenSelection(false);
     navigation.navigate('SendToFriend', { friend: selectedFriend, tokenType });
   };
 
-  // Demo function to navigate to transaction detail
-  const handleDemoTransaction = (type: 'received' | 'sent' | 'exchange' | 'payment') => {
-    navigation.navigate('TransactionDetail', { transactionType: type });
+  const handleInviteFriend = (friend: any) => {
+    console.log('ContactsScreen: handleInviteFriend called with friend:', friend.name);
+    // For non-Confío friends, we can still send them money with an invitation
+    setSelectedFriend(friend);
+    setShowFriendTokenSelection(true);
   };
+
+  // Filter friends based on search term
+  const filteredConfioFriends = friends.filter(friend =>
+    friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    friend.phone.includes(searchTerm)
+  );
+
+  const filteredNonConfioFriends = nonConfioFriends.filter(friend =>
+    friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    friend.phone.includes(searchTerm)
+  );
+
+  const ContactCard = ({ contact, isOnConfio = false }: { contact: any; isOnConfio?: boolean }) => (
+    <View style={styles.contactCard}>
+      <View style={[
+        styles.avatarContainer,
+        { backgroundColor: isOnConfio ? colors.primaryLight : '#e5e7eb' }
+      ]}>
+        <Text style={[
+          styles.avatarText,
+          { color: isOnConfio ? colors.primaryDark : '#6b7280' }
+        ]}>
+          {contact.avatar}
+        </Text>
+      </View>
+      
+      <View style={styles.contactInfo}>
+        <Text style={styles.contactName}>{contact.name}</Text>
+        <Text style={styles.contactPhone}>{contact.phone}</Text>
+      </View>
+      
+      {isOnConfio ? (
+        <TouchableOpacity
+          style={styles.sendButton}
+          onPress={() => handleSendToFriend(contact)}
+        >
+          <Icon name="send" size={20} color="#fff" />
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity
+          style={styles.inviteButton}
+          onPress={() => handleInviteFriend(contact)}
+        >
+          <Icon name="gift" size={16} color="#fff" style={{ marginRight: 6 }} />
+          <Text style={styles.inviteButtonText}>Enviar & Invitar</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 
   const TokenSelectionModal = () => (
     <Modal
@@ -246,87 +318,126 @@ export const ContactsScreen = () => {
   );
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} keyboardShouldPersistTaps="handled">
+    <ScrollView 
+      style={styles.container} 
+      keyboardShouldPersistTaps="handled"
+      contentContainerStyle={{ paddingBottom: 24 }}
+    >
       {/* Search Bar */}
-      <View style={styles.searchBar}>
-        <Icon name="search" size={18} color="#6B7280" style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Buscar contactos..."
-          placeholderTextColor="#6B7280"
-        />
+      <View style={styles.searchSection}>
+        <View style={styles.searchBar}>
+          <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
+          <TextInput 
+            style={styles.searchInput}
+            placeholder="Buscar contactos..." 
+            placeholderTextColor="#6b7280"
+            value={searchTerm}
+            onChangeText={setSearchTerm}
+          />
+        </View>
       </View>
 
-      {/* Send/Receive Buttons */}
-      <View style={styles.actionButtons}>
-        <TouchableOpacity style={styles.actionButton} onPress={handleSendWithAddress}>
-          <View style={styles.actionButtonContent}>
-            <View style={styles.actionIconContainer}>
-              <Icon name="send" size={20} color="#fff" />
+      {/* Send/Receive Options */}
+      <View style={styles.actionSection}>
+        <View style={styles.actionButtons}>
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={handleSendWithAddress}
+          >
+            <View style={styles.actionButtonContent}>
+              <View style={styles.actionIconContainer}>
+                <Icon name="send" size={20} color="#fff" />
+              </View>
+              <View style={styles.actionTextContainer}>
+                <Text style={styles.actionButtonTitle}>Enviar con dirección</Text>
+                <Text style={styles.actionButtonSubtitle}>Envía a cualquier wallet</Text>
+              </View>
             </View>
-            <Text style={styles.actionButtonText}>Enviar con dirección</Text>
+            <Icon name="chevron-right" size={20} color="#9ca3af" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={handleReceiveWithAddress}
+          >
+            <View style={styles.actionButtonContent}>
+              <View style={styles.actionIconContainer}>
+                <Icon name="download" size={20} color="#fff" />
+              </View>
+              <View style={styles.actionTextContainer}>
+                <Text style={styles.actionButtonTitle}>Recibir con dirección</Text>
+                <Text style={styles.actionButtonSubtitle}>Comparte tu dirección</Text>
+              </View>
+            </View>
+            <Icon name="chevron-right" size={20} color="#9ca3af" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Friends on Confío */}
+      {filteredConfioFriends.length > 0 && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Amigos en Confío</Text>
+            <View style={styles.sectionCount}>
+              <Text style={styles.sectionCountText}>{filteredConfioFriends.length}</Text>
+            </View>
           </View>
-          <Icon name="chevron-right" size={20} color="#6B7280" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.actionButton} onPress={handleReceiveWithAddress}>
-          <View style={styles.actionButtonContent}>
-            <View style={styles.actionIconContainer}>
-              <Icon name="download" size={20} color="#fff" />
-            </View>
-            <Text style={styles.actionButtonText}>Recibir con dirección</Text>
+          
+          <View style={styles.contactsList}>
+            {filteredConfioFriends.map((friend, index) => (
+              <ContactCard key={index} contact={friend} isOnConfio={true} />
+            ))}
           </View>
-          <Icon name="chevron-right" size={20} color="#6B7280" />
-        </TouchableOpacity>
-      </View>
-
-      {/* Friends Section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Amigos</Text>
-        <View style={styles.friendsList}>
-          {friends.map((friend, index) => (
-            <TouchableOpacity 
-              key={index} 
-              style={styles.friendItem}
-              onPress={() => handleSendToFriend(friend)}
-            >
-              <View style={styles.avatarContainer}>
-                <Text style={styles.avatarText}>{friend.avatar}</Text>
-              </View>
-              <View style={styles.friendInfo}>
-                <Text style={styles.friendName}>{friend.name}</Text>
-                <Text style={styles.friendPhone}>{friend.phone}</Text>
-              </View>
-              <View style={styles.sendButton}>
-                <Icon name="send" size={16} color="#fff" />
-              </View>
-            </TouchableOpacity>
-          ))}
         </View>
-      </View>
+      )}
 
-      {/* Non-Confío Friends */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Amigos que no están en Confío</Text>
-        <View style={styles.inviteBanner}>
-          <Text style={styles.inviteText}>¡Invita a tus amigos a Confío!</Text>
-        </View>
-        <View style={styles.friendsList}>
-          {nonConfioFriends.map((friend, index) => (
-            <View key={index} style={styles.friendItem}>
-              <View style={styles.avatarContainer}>
-                <Text style={styles.avatarText}>{friend.avatar}</Text>
-              </View>
-              <View style={styles.friendInfo}>
-                <Text style={styles.friendName}>{friend.name}</Text>
-                <Text style={styles.friendPhone}>{friend.phone}</Text>
-              </View>
-              <TouchableOpacity style={styles.addButton}>
-                <Icon name="plus" size={16} color="#6B7280" />
-              </TouchableOpacity>
+      {/* Friends not on Confío */}
+      {filteredNonConfioFriends.length > 0 && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Invita a tus amigos</Text>
+            <View style={styles.sectionCount}>
+              <Text style={styles.sectionCountText}>{filteredNonConfioFriends.length}</Text>
             </View>
-          ))}
+          </View>
+          
+          {/* Info Card */}
+          <View style={styles.infoCard}>
+            <View style={styles.infoCardContent}>
+              <View style={styles.infoIconContainer}>
+                <Icon name="clock" size={16} color="#fff" />
+              </View>
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoTitle}>Envío con invitación</Text>
+                <Text style={styles.infoDescription}>
+                  Envía dinero y tu amigo recibirá una invitación por WhatsApp. 
+                  Tendrá <Text style={styles.infoBold}>7 días</Text> para crear su cuenta y reclamar el dinero.
+                </Text>
+              </View>
+            </View>
+          </View>
+          
+          <View style={styles.contactsList}>
+            {filteredNonConfioFriends.map((friend, index) => (
+              <ContactCard key={index} contact={friend} isOnConfio={false} />
+            ))}
+          </View>
         </View>
-      </View>
+      )}
+
+      {/* Empty State */}
+      {filteredConfioFriends.length === 0 && filteredNonConfioFriends.length === 0 && searchTerm && (
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIconContainer}>
+            <Icon name="users" size={32} color="#9ca3af" />
+          </View>
+          <Text style={styles.emptyTitle}>No se encontraron contactos</Text>
+          <Text style={styles.emptyDescription}>
+            No hay contactos que coincidan con "{searchTerm}"
+          </Text>
+        </View>
+      )}
 
       <TokenSelectionModal />
       <SendTokenSelectionModal />
@@ -340,142 +451,211 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
-  contentContainer: {
+  searchSection: {
     paddingHorizontal: 16,
-    paddingTop: 0,
-    paddingBottom: 24,
+    paddingTop: 24,
+    paddingBottom: 12,
+    backgroundColor: '#fff',
   },
   searchBar: {
+    backgroundColor: '#f9fafb',
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: Platform.OS === 'ios' ? 12 : 8,
-    marginBottom: 10,
   },
   searchIcon: {
-    marginRight: 8,
+    marginRight: 12,
   },
   searchInput: {
     flex: 1,
-    fontSize: 15,
-    color: '#1F2937',
-    paddingVertical: 0,
+    fontSize: 16,
+    color: '#1f2937',
+  },
+  actionSection: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
   },
   actionButtons: {
     gap: 8,
-    marginBottom: 16,
   },
   actionButton: {
     width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#fff',
+    backgroundColor: '#f9fafb',
     borderRadius: 16,
     paddingVertical: 16,
     paddingHorizontal: 16,
-    marginBottom: 6,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.06,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
   },
   actionButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   actionIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#34d399', // emerald-400
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
+    backgroundColor: colors.primary,
+    padding: 12,
+    borderRadius: 999,
+    marginRight: 16,
   },
-  actionButtonText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#1F2937',
-  },
-  section: {
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#6B7280',
-    marginBottom: 10,
-  },
-  friendsList: {
-    gap: 8,
-  },
-  friendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 0,
-  },
-  avatarContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
-  },
-  avatarText: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: '#4B5563',
-  },
-  friendInfo: {
+  actionTextContainer: {
     flex: 1,
   },
-  friendName: {
-    fontSize: 16,
+  actionButtonTitle: {
     fontWeight: '500',
-    color: '#1F2937',
+    color: '#1f2937',
+    fontSize: 16,
   },
-  friendPhone: {
-    fontSize: 14,
-    color: '#6B7280',
+  actionButtonSubtitle: {
+    fontSize: 13,
+    color: '#6b7280',
+  },
+  section: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6b7280',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  sectionCount: {
+    backgroundColor: '#f3f4f6',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 999,
+  },
+  sectionCountText: {
+    fontSize: 11,
+    color: '#9ca3af',
+  },
+  contactsList: {
+    gap: 2,
+  },
+  contactCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  avatarContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    fontWeight: '500',
+    fontSize: 18,
+  },
+  contactInfo: {
+    flex: 1,
+  },
+  contactName: {
+    fontWeight: '500',
+    color: '#1f2937',
+    fontSize: 16,
+  },
+  contactPhone: {
+    fontSize: 13,
+    color: '#6b7280',
   },
   sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#34d399',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  addButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  inviteBanner: {
-    backgroundColor: '#f3f4f6',
-    borderRadius: 12,
+    backgroundColor: colors.primary,
     padding: 12,
-    marginBottom: 14,
+    borderRadius: 999,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
-  inviteText: {
+  inviteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.violet,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  inviteButtonText: {
+    color: '#fff',
+    fontWeight: '500',
     fontSize: 14,
-    color: '#4B5563',
+  },
+  infoCard: {
+    backgroundColor: colors.violetLight,
+    borderColor: colors.violet,
+    borderWidth: 1,
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 12,
+  },
+  infoCardContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  infoIconContainer: {
+    backgroundColor: colors.violet,
+    padding: 8,
+    borderRadius: 999,
+    marginRight: 12,
+    marginTop: 2,
+  },
+  infoTextContainer: {
+    flex: 1,
+  },
+  infoTitle: {
+    fontWeight: '500',
+    color: '#6d28d9',
+    marginBottom: 4,
+  },
+  infoDescription: {
+    fontSize: 13,
+    color: '#7c3aed',
+    lineHeight: 18,
+  },
+  infoBold: {
+    fontWeight: 'bold',
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 40,
+  },
+  emptyIconContainer: {
+    width: 64,
+    height: 64,
+    backgroundColor: '#f3f4f6',
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontWeight: '500',
+    color: '#1f2937',
+    marginBottom: 8,
+    fontSize: 16,
+  },
+  emptyDescription: {
+    fontSize: 13,
+    color: '#6b7280',
     textAlign: 'center',
+    maxWidth: 240,
   },
   modalOverlay: {
     flex: 1,

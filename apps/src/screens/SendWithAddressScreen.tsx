@@ -183,7 +183,7 @@ export const SendWithAddressScreen = () => {
               <Text style={styles.feeLabel}>Tiempo estimado</Text>
               <View style={styles.timeContainer}>
                 <Icon name="clock" size={12} color={config.color} style={styles.timeIcon} />
-                <Text style={styles.timeText}>1-3 minutos</Text>
+                <Text style={styles.timeText}>3-5 segundos</Text>
               </View>
             </View>
             <View style={styles.feeDivider} />
