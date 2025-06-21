@@ -291,6 +291,39 @@ const mockOffers = {
   ],
 };
 
+const activeTrades = [
+    {
+      id: 't1',
+      trader: {
+        name: "Maria L.",
+        verified: true,
+      },
+      amount: "100.00",
+      crypto: "cUSD",
+      totalBs: "3,610.00",
+      step: 2,
+      totalSteps: 4,
+      timeRemaining: 754, // seconds
+      status: "waiting_confirmation",
+      paymentMethod: "Banco Venezuela",
+    },
+    {
+      id: 't2',
+      trader: {
+        name: "Carlos F.",
+        verified: true,
+      },
+      amount: "50.00",
+      crypto: "cUSD",
+      totalBs: "1,802.50",
+      step: 3,
+      totalSteps: 4,
+      timeRemaining: 525, // seconds
+      status: "verifying_payment",
+      paymentMethod: "Pago Móvil",
+    }
+];
+
 const paymentMethods = [
   'Todos los métodos',
   'Banco Venezuela',
@@ -301,6 +334,9 @@ const paymentMethods = [
   'Zelle',
   'PayPal',
 ];
+
+type Offer = typeof mockOffers.cUSD[0];
+type ActiveTrade = typeof activeTrades[0];
 
 export const ExchangeScreen = () => {
   const [activeTab, setActiveTab] = useState<'buy' | 'sell'>('buy');
@@ -314,6 +350,9 @@ export const ExchangeScreen = () => {
   const lastScrollY = useRef(0);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
+  const [currentScreen, setCurrentScreen] = useState<keyof typeof screens>('main');
+  const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
+  const [activeList, setActiveList] = useState<'offers' | 'trades'>('offers');
 
   // Calculate local amount based on crypto amount and rate
   const calculateLocalAmount = (cryptoAmount: string, rate: string) => {
@@ -371,8 +410,13 @@ export const ExchangeScreen = () => {
     setPaymentModalVisible(false);
   };
 
+  const handleSelectOffer = (offer: Offer, screen: keyof typeof screens) => {
+    setSelectedOffer(offer);
+    setCurrentScreen(screen);
+  };
+
   // Enhanced Offer Card Component
-  const OfferCard = ({ offer, crypto }: { offer: typeof mockOffers.cUSD[0], crypto: 'cUSD' | 'CONFIO' }) => (
+  const OfferCard = ({ offer, crypto }: { offer: Offer, crypto: 'cUSD' | 'CONFIO' }) => (
     <View style={styles.offerCard}>
       <View style={styles.offerHeader}>
         <View style={styles.offerUser}>
@@ -415,15 +459,62 @@ export const ExchangeScreen = () => {
       </View>
 
       <View style={styles.offerActions}>
-        <TouchableOpacity style={styles.detailsButton}>
+        <TouchableOpacity 
+            style={styles.detailsButton}
+            onPress={() => handleSelectOffer(offer, 'offerDetails')}
+        >
           <Text style={styles.detailsButtonText}>Ver Perfil</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.buyButton}>
+        <TouchableOpacity 
+            style={styles.buyButton}
+            onPress={() => handleSelectOffer(offer, 'tradeConfirm')}
+        >
           <Text style={styles.buyButtonText}>{activeTab === 'buy' ? 'Comprar' : 'Vender'}</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
+
+  const ActiveTradeCard = ({ trade }: { trade: ActiveTrade }) => {
+    const formatTime = (seconds: number) => {
+        const minutes = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    const getStepText = (step: number) => {
+        const steps: { [key: number]: string } = { 1: "Realizar pago", 2: "Confirmar pago", 3: "Esperando verificación", 4: "Completado" };
+        return steps[step] || "En proceso";
+    };
+
+    return (
+        <View style={styles.activeTradeCard}>
+            <View style={styles.tradeHeader}>
+                <View style={styles.tradeUser}>
+                    <View style={styles.avatarContainer}>
+                        <Text style={styles.avatarText}>{trade.trader.name.charAt(0)}</Text>
+                    </View>
+                    <View>
+                        <Text style={styles.userName}>{trade.trader.name}</Text>
+                        <Text style={styles.tradeDetails}>{trade.amount} {trade.crypto} por {trade.totalBs} Bs.</Text>
+                    </View>
+                </View>
+                <View style={styles.timerBadge}>
+                    <Text style={styles.timerText}>{formatTime(trade.timeRemaining)}</Text>
+                </View>
+            </View>
+            <View style={styles.progressContainer}>
+                <Text style={styles.stepText}>Paso {trade.step}/{trade.totalSteps}: {getStepText(trade.step)}</Text>
+                <View style={styles.progressBar}>
+                    <View style={[styles.progressFill, { width: `${(trade.step / trade.totalSteps) * 100}%` }]} />
+                </View>
+            </View>
+            <TouchableOpacity style={styles.continueButton}>
+                <Text style={styles.continueButtonText}>Continuar</Text>
+            </TouchableOpacity>
+        </View>
+    );
+  };
 
   // Header component
   const Header = () => {
@@ -450,143 +541,184 @@ export const ExchangeScreen = () => {
                 }
             ]}
         >
-            {/* Buy/Sell Toggle */}
-            <View style={styles.tabContainer}>
-              <TouchableOpacity
-                style={[styles.tab, activeTab === 'buy' && styles.activeTab]}
-                onPress={() => setActiveTab('buy')}
-              >
-                <Text style={[styles.tabText, activeTab === 'buy' && styles.activeTabText]}>Comprar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.tab, activeTab === 'sell' && styles.activeTab]}
-                onPress={() => setActiveTab('sell')}
-              >
-                <Text style={[styles.tabText, activeTab === 'sell' && styles.activeTabText]}>Vender</Text>
-              </TouchableOpacity>
-            </View>
-            
-            {/* Crypto Selection */}
-            <View style={styles.cryptoSelector}>
-              <TouchableOpacity
-                style={[styles.cryptoButton, selectedCrypto === 'cUSD' && styles.selectedCryptoButton]}
-                onPress={() => setSelectedCrypto('cUSD')}
-              >
-                <Text style={[styles.cryptoButtonText, selectedCrypto === 'cUSD' && styles.selectedCryptoButtonText]}>
-                  Confío Dollar ($cUSD)
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.cryptoButton, selectedCrypto === 'CONFIO' && styles.selectedCryptoButton]}
-                onPress={() => setSelectedCrypto('CONFIO')}
-              >
-                <Text style={[styles.cryptoButtonText, selectedCrypto === 'CONFIO' && styles.selectedCryptoButtonText]}>
-                  Confío ($CONFIO)
-                </Text>
-              </TouchableOpacity>
-            </View>
-            
-            {/* Amount, Payment Method, and Search */}
-            <View style={styles.searchContainer}>
-              <View style={styles.amountInputContainer}>
-                <TextInput 
-                  style={styles.amountInput}
-                  value={amount}
-                  onChangeText={handleAmountChange}
-                  placeholder="Cantidad"
-                  keyboardType="decimal-pad"
-                />
-                <Text style={styles.currencyLabel}>{selectedCrypto}</Text>
-              </View>
-              
-              <View style={styles.paymentMethodContainer}>
-                <TouchableOpacity
-                  style={styles.paymentMethodInput}
-                  onPress={() => setPaymentModalVisible(true)}
-                >
-                  <Text style={styles.paymentMethodInputText} numberOfLines={1}>
-                    {selectedPaymentMethod}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-              
-              <TouchableOpacity style={styles.searchButton}>
-                <Icon name="search" size={16} color="#fff" />
-              </TouchableOpacity>
-            </View>
-            
-            {/* Rate and Filter Controls */}
-            <View style={styles.rateFilterContainer}>
-              <Text style={styles.averageRate}>
-                {selectedCrypto === 'cUSD' ? '36.00' : '3.60'} Bs. promedio
-              </Text>
-              <View style={styles.filterControls}>
+            {activeTrades.length > 0 && (
                 <TouchableOpacity 
-                  style={[styles.filterButton, showAdvancedFilters && styles.activeFilterButton]}
-                  onPress={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                    style={styles.activeTradesAlert}
+                    onPress={() => setActiveList('trades')}
                 >
-                  <Icon 
-                    name="filter" 
-                    size={12} 
-                    color={showAdvancedFilters ? colors.primary : '#6B7280'} 
-                  />
+                    <Icon name="alert-triangle" size={16} color={colors.primary} />
+                    <Text style={styles.activeTradesText}>
+                        {activeTrades.length} intercambio{activeTrades.length > 1 ? 's' : ''} activo{activeTrades.length > 1 ? 's' : ''}
+                    </Text>
+                    <Icon name="chevron-right" size={16} color={colors.primary} />
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.refreshButton}>
-                  <Icon name="refresh-cw" size={12} color="#6B7280" />
+            )}
+
+            <View style={styles.mainTabsContainer}>
+                <TouchableOpacity
+                    style={[styles.mainTab, activeList === 'offers' && styles.activeMainTab]}
+                    onPress={() => setActiveList('offers')}
+                >
+                    <Text style={[styles.mainTabText, activeList === 'offers' && styles.activeMainTabText]}>
+                        Ofertas
+                    </Text>
                 </TouchableOpacity>
-              </View>
+                <TouchableOpacity
+                    style={[styles.mainTab, activeList === 'trades' && styles.activeMainTab]}
+                    onPress={() => setActiveList('trades')}
+                >
+                    <Text style={[styles.mainTabText, activeList === 'trades' && styles.activeMainTabText]}>
+                        Mis Intercambios
+                    </Text>
+                    {activeTrades.length > 0 && (
+                        <View style={styles.notificationBadge}>
+                            <Text style={styles.notificationText}>{activeTrades.length}</Text>
+                        </View>
+                    )}
+                </TouchableOpacity>
             </View>
-            
-            {/* Advanced Filters */}
-            {showAdvancedFilters && (
-              <View style={styles.advancedFilters}>
-                <View style={styles.filterInputs}>
-                  <TextInput 
-                    style={styles.filterInput}
-                    placeholder="Tasa min."
-                    keyboardType="decimal-pad"
-                  />
-                  <TextInput 
-                    style={styles.filterInput}
-                    placeholder="Tasa max."
-                    keyboardType="decimal-pad"
-                  />
-                </View>
-                
-                <View style={styles.filterCheckboxes}>
-                  <TouchableOpacity style={styles.checkboxItem}>
-                    <View style={styles.checkbox} />
-                    <Text style={styles.checkboxLabel}>Verificados</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.checkboxItem}>
-                    <View style={styles.checkbox} />
-                    <Text style={styles.checkboxLabel}>En línea</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.checkboxItem}>
-                    <View style={styles.checkbox} />
-                    <Text style={styles.checkboxLabel}>+100 ops</Text>
-                  </TouchableOpacity>
-                </View>
-                
-                <View style={styles.filterActions}>
-                  <TouchableOpacity style={styles.applyButton}>
-                    <Text style={styles.applyButtonText}>Aplicar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.closeButton}
-                    onPress={() => setShowAdvancedFilters(false)}
-                  >
-                    <Icon name="x" size={12} color="#6B7280" />
-                  </TouchableOpacity>
-                </View>
-              </View>
+
+            {activeList === 'offers' && (
+                <>
+                    {/* Buy/Sell Toggle */}
+                    <View style={styles.tabContainer}>
+                        <TouchableOpacity
+                            style={[styles.tab, activeTab === 'buy' && styles.activeTab]}
+                            onPress={() => setActiveTab('buy')}
+                        >
+                            <Text style={[styles.tabText, activeTab === 'buy' && styles.activeTabText]}>Comprar</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.tab, activeTab === 'sell' && styles.activeTab]}
+                            onPress={() => setActiveTab('sell')}
+                        >
+                            <Text style={[styles.tabText, activeTab === 'sell' && styles.activeTabText]}>Vender</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Crypto Selection */}
+                    <View style={styles.cryptoSelector}>
+                        <TouchableOpacity
+                            style={[styles.cryptoButton, selectedCrypto === 'cUSD' && styles.selectedCryptoButton]}
+                            onPress={() => setSelectedCrypto('cUSD')}
+                        >
+                            <Text style={[styles.cryptoButtonText, selectedCrypto === 'cUSD' && styles.selectedCryptoButtonText]}>
+                                Confío Dollar ($cUSD)
+                            </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.cryptoButton, selectedCrypto === 'CONFIO' && styles.selectedCryptoButton]}
+                            onPress={() => setSelectedCrypto('CONFIO')}
+                        >
+                            <Text style={[styles.cryptoButtonText, selectedCrypto === 'CONFIO' && styles.selectedCryptoButtonText]}>
+                                Confío ($CONFIO)
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Amount, Payment Method, and Search */}
+                    <View style={styles.searchContainer}>
+                        <View style={styles.amountInputContainer}>
+                            <TextInput
+                                style={styles.amountInput}
+                                value={amount}
+                                onChangeText={handleAmountChange}
+                                placeholder="Cantidad"
+                                keyboardType="decimal-pad"
+                            />
+                            <Text style={styles.currencyLabel}>{selectedCrypto}</Text>
+                        </View>
+
+                        <View style={styles.paymentMethodContainer}>
+                            <TouchableOpacity
+                                style={styles.paymentMethodInput}
+                                onPress={() => setPaymentModalVisible(true)}
+                            >
+                                <Text style={styles.paymentMethodInputText} numberOfLines={1}>
+                                    {selectedPaymentMethod}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <TouchableOpacity style={styles.searchButton}>
+                            <Icon name="search" size={16} color="#fff" />
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Rate and Filter Controls */}
+                    <View style={styles.rateFilterContainer}>
+                        <Text style={styles.averageRate}>
+                            {selectedCrypto === 'cUSD' ? '36.00' : '3.60'} Bs. promedio
+                        </Text>
+                        <View style={styles.filterControls}>
+                            <TouchableOpacity
+                                style={[styles.filterButton, showAdvancedFilters && styles.activeFilterButton]}
+                                onPress={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                            >
+                                <Icon
+                                    name="filter"
+                                    size={12}
+                                    color={showAdvancedFilters ? colors.primary : '#6B7280'}
+                                />
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.refreshButton}>
+                                <Icon name="refresh-cw" size={12} color="#6B7280" />
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+
+                    {/* Advanced Filters */}
+                    {showAdvancedFilters && (
+                        <View style={styles.advancedFilters}>
+                            <View style={styles.filterInputs}>
+                                <TextInput
+                                    style={styles.filterInput}
+                                    placeholder="Tasa min."
+                                    keyboardType="decimal-pad"
+                                />
+                                <TextInput
+                                    style={styles.filterInput}
+                                    placeholder="Tasa max."
+                                    keyboardType="decimal-pad"
+                                />
+                            </View>
+
+                            <View style={styles.filterCheckboxes}>
+                                <TouchableOpacity style={styles.checkboxItem}>
+                                    <View style={styles.checkbox} />
+                                    <Text style={styles.checkboxLabel}>Verificados</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.checkboxItem}>
+                                    <View style={styles.checkbox} />
+                                    <Text style={styles.checkboxLabel}>En línea</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.checkboxItem}>
+                                    <View style={styles.checkbox} />
+                                    <Text style={styles.checkboxLabel}>+100 ops</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.filterActions}>
+                                <TouchableOpacity style={styles.applyButton}>
+                                    <Text style={styles.applyButtonText}>Aplicar</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.closeButton}
+                                    onPress={() => setShowAdvancedFilters(false)}
+                                >
+                                    <Icon name="x" size={12} color="#6B7280" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )}
+                </>
             )}
         </Animated.View>
     );
   }
 
-  return (
-    <View style={styles.container}>
+  const renderMainScreen = () => (
+    <>
       <Header />
       
       <Modal
@@ -627,12 +759,73 @@ export const ExchangeScreen = () => {
         scrollEventThrottle={16}
         bounces={false}
       >
-        <View style={[styles.offersList, { padding: 16 }]}>
-          {mockOffers[selectedCrypto].map((offer) => (
-            <OfferCard key={offer.id} offer={offer} crypto={selectedCrypto} />
-          ))}
-        </View>
+        {activeList === 'offers' ? (
+            <View style={[styles.offersList, { padding: 16 }]}>
+                {mockOffers[selectedCrypto].map((offer) => (
+                    <OfferCard key={offer.id} offer={offer} crypto={selectedCrypto} />
+                ))}
+            </View>
+        ) : (
+            <View style={[styles.offersList, { padding: 16 }]}>
+                {activeTrades.map((trade) => (
+                    <ActiveTradeCard key={trade.id} trade={trade} />
+                ))}
+            </View>
+        )}
       </Animated.ScrollView>
+    </>
+  );
+
+  const renderOfferDetails = () => (
+    <View style={styles.screenContainer}>
+      <View style={styles.pageHeader}>
+        <TouchableOpacity onPress={() => setCurrentScreen('main')} style={styles.backButton}>
+          <Icon name="arrow-left" size={24} color="#1F2937" />
+        </TouchableOpacity>
+        <Text style={styles.pageTitle}>Perfil del Comerciante</Text>
+      </View>
+      <ScrollView style={styles.screenContent}>
+        <View style={styles.profileCard}>
+            <View style={styles.avatarContainer}>
+              <Text style={styles.avatarText}>{selectedOffer?.name.charAt(0)}</Text>
+            </View>
+            <Text style={styles.profileName}>{selectedOffer?.name}</Text>
+            {/* Add more profile details here */}
+            <Text style={styles.placeholderText}>Más detalles del perfil próximamente.</Text>
+        </View>
+      </ScrollView>
+    </View>
+  );
+
+  const renderTradeConfirm = () => (
+    <View style={styles.screenContainer}>
+        <View style={styles.pageHeader}>
+            <TouchableOpacity onPress={() => setCurrentScreen('main')} style={styles.backButton}>
+                <Icon name="arrow-left" size={24} color="#1F2937" />
+            </TouchableOpacity>
+            <Text style={styles.pageTitle}>Confirmar Intercambio</Text>
+        </View>
+        <ScrollView style={styles.screenContent}>
+            <View style={styles.summaryCard}>
+                <Text style={styles.summaryTitle}>Resumen del Intercambio</Text>
+                <Text style={styles.placeholderText}>Detalles de la confirmación próximamente.</Text>
+                <TouchableOpacity style={styles.confirmButton}>
+                    <Text style={styles.confirmButtonText}>Confirmar y Comenzar</Text>
+                </TouchableOpacity>
+            </View>
+        </ScrollView>
+    </View>
+  );
+
+  const screens = {
+    main: renderMainScreen,
+    offerDetails: renderOfferDetails,
+    tradeConfirm: renderTradeConfirm,
+  };
+
+  return (
+    <View style={styles.container}>
+      {screens[currentScreen]()}
     </View>
   );
 };
@@ -1081,5 +1274,202 @@ const styles = StyleSheet.create({
   modalItemText: {
     fontSize: 16,
     textAlign: 'center',
+  },
+  screenContainer: {
+    flex: 1,
+    backgroundColor: colors.neutral,
+  },
+  pageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    paddingTop: 60, // For status bar
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  backButton: {
+    marginRight: 16,
+  },
+  pageTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  screenContent: {
+    flex: 1,
+    padding: 16,
+  },
+  profileCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 24,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  profileName: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginVertical: 12,
+  },
+  summaryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 24,
+    marginBottom: 16,
+  },
+  summaryTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  placeholderText: {
+    fontSize: 16,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginVertical: 20,
+  },
+  confirmButton: {
+    backgroundColor: colors.primary,
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  confirmButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  pageHeaderTitleContainer: {
+    paddingBottom: 16,
+  },
+  activeTradesAlert: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.primaryLight,
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  activeTradesText: {
+    color: colors.primary,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  mainTabsContainer: {
+    flexDirection: 'row',
+    backgroundColor: colors.neutralDark,
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 16,
+  },
+  mainTab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  activeMainTab: {
+    backgroundColor: '#fff',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  mainTabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  activeMainTabText: {
+    color: '#1F2937',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#ef4444', // red-500
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  activeTradeCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+  },
+  tradeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  tradeUser: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  tradeDetails: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  timerBadge: {
+    backgroundColor: colors.primaryLight,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  timerText: {
+    color: colors.primary,
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  progressContainer: {
+    marginBottom: 12,
+  },
+  stepText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: colors.neutralDark,
+    borderRadius: 4,
+  },
+  progressFill: {
+    height: 8,
+    backgroundColor: colors.primary,
+    borderRadius: 4,
+  },
+  continueButton: {
+    backgroundColor: colors.primary,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  continueButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
 }); 
