@@ -1,5 +1,0 @@
-apply plugin: "com.android.application"
-apply plugin: "com.facebook.react"
- 
-// Add this line for vector icons
-apply from: "../../node_modules/react-native-vector-icons/fonts.gradle" 

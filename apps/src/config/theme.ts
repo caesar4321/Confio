@@ -10,4 +10,5 @@ export const colors = {
   neutral: '#F9FAFB', // gray-50
   neutralDark: '#F3F4F6', // gray-100
   dark: '#111827', // gray-900
+  success: '#10B981', // emerald-500
 }; 

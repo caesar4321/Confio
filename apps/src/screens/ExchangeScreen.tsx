@@ -299,7 +299,10 @@ const activeTrades = [
       id: 't1',
       trader: {
         name: "Maria L.",
+        isOnline: true,
         verified: true,
+        lastSeen: "Activo ahora",
+        responseTime: "2 min",
       },
       amount: "100.00",
       crypto: "cUSD",
@@ -309,12 +312,17 @@ const activeTrades = [
       timeRemaining: 754, // seconds
       status: "waiting_confirmation",
       paymentMethod: "Banco Venezuela",
+      rate: "36.10",
+      tradeType: "buy" as const,
     },
     {
       id: 't2',
       trader: {
         name: "Carlos F.",
+        isOnline: false,
         verified: true,
+        lastSeen: "Hace 5 min",
+        responseTime: "5 min",
       },
       amount: "50.00",
       crypto: "cUSD",
@@ -324,6 +332,8 @@ const activeTrades = [
       timeRemaining: 525, // seconds
       status: "verifying_payment",
       paymentMethod: "Pago Móvil",
+      rate: "36.05",
+      tradeType: "sell" as const,
     }
 ];
 
@@ -449,7 +459,8 @@ export const ExchangeScreen = () => {
           isOnline: offer.isOnline,
           lastSeen: offer.lastSeen,
         }, 
-        crypto: selectedCrypto 
+        crypto: selectedCrypto,
+        tradeType: activeTab as 'buy' | 'sell'
       });
     }
   };
@@ -548,7 +559,31 @@ export const ExchangeScreen = () => {
                     <View style={[styles.progressFill, { width: `${(trade.step / trade.totalSteps) * 100}%` }]} />
                 </View>
             </View>
-            <TouchableOpacity style={styles.continueButton}>
+            <TouchableOpacity 
+                style={styles.continueButton}
+                onPress={() => {
+                    navigation.navigate('ActiveTrade', {
+                        trade: {
+                            id: trade.id,
+                            trader: {
+                                name: trade.trader.name,
+                                isOnline: trade.trader.isOnline,
+                                verified: trade.trader.verified,
+                                lastSeen: trade.trader.lastSeen,
+                                responseTime: trade.trader.responseTime,
+                            },
+                            amount: trade.amount,
+                            crypto: trade.crypto,
+                            totalBs: trade.totalBs,
+                            paymentMethod: trade.paymentMethod,
+                            rate: trade.rate,
+                            step: trade.step,
+                            timeRemaining: trade.timeRemaining,
+                            tradeType: trade.tradeType,
+                        }
+                    });
+                }}
+            >
                 <Text style={styles.continueButtonText}>Continuar</Text>
             </TouchableOpacity>
         </View>
@@ -587,7 +622,7 @@ export const ExchangeScreen = () => {
                 >
                     <Icon name="alert-triangle" size={16} color={colors.primary} />
                     <Text style={styles.activeTradesText}>
-                        {activeTrades.length} intercambio{activeTrades.length > 1 ? 's' : ''} activo{activeTrades.length > 1 ? 's' : ''}
+                        {activeTrades.length} intercambio{activeTrades.length > 1 ? 's' : ''} activo{activeTrades.length > 1 ? 's' : ''} - Toca para continuar
                     </Text>
                     <Icon name="chevron-right" size={16} color={colors.primary} />
                 </TouchableOpacity>
@@ -770,9 +805,29 @@ export const ExchangeScreen = () => {
     if (activeList === 'trades') {
       return (
         <View style={[styles.offersList, { padding: 16 }]}>
-          {activeTrades.map((trade) => (
-            <ActiveTradeCard key={trade.id} trade={trade} />
-          ))}
+          {activeTrades.length > 0 ? (
+            <>
+              <View style={styles.welcomeCard}>
+                <Icon name="clock" size={24} color={colors.primary} style={styles.welcomeIcon} />
+                <Text style={styles.welcomeTitle}>Tus Intercambios Activos</Text>
+                <Text style={styles.welcomeText}>
+                  Aquí puedes ver y continuar con tus intercambios en progreso. 
+                  Haz clic en "Continuar" para reanudar cualquier intercambio.
+                </Text>
+              </View>
+              {activeTrades.map((trade) => (
+                <ActiveTradeCard key={trade.id} trade={trade} />
+              ))}
+            </>
+          ) : (
+            <View style={styles.emptyState}>
+              <Icon name="inbox" size={48} color="#9CA3AF" style={styles.emptyIcon} />
+              <Text style={styles.emptyTitle}>No hay intercambios activos</Text>
+              <Text style={styles.emptyText}>
+                Cuando inicies un intercambio, aparecerá aquí para que puedas darle seguimiento.
+              </Text>
+            </View>
+          )}
         </View>
       );
     }
@@ -1598,5 +1653,40 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  welcomeCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  welcomeIcon: {
+    marginBottom: 12,
+  },
+  welcomeTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  welcomeText: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyIcon: {
+    marginBottom: 12,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: '#6B7280',
   },
 }); 

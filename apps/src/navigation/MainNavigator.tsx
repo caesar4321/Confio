@@ -15,6 +15,9 @@ import { TransactionProcessingScreen } from '../screens/TransactionProcessingScr
 import { TransactionSuccessScreen } from '../screens/TransactionSuccessScreen';
 import { TraderProfileScreen } from '../screens/TraderProfileScreen';
 import { TradeConfirmScreen } from '../screens/TradeConfirmScreen';
+import { TradeChatScreen } from '../screens/TradeChatScreen';
+import { ActiveTradeScreen } from '../screens/ActiveTradeScreen';
+import { TraderRatingScreen } from '../screens/TraderRatingScreen';
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
 console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
@@ -63,6 +66,13 @@ export const MainNavigator = () => {
       <Stack.Screen 
         name="TradeConfirm" 
         component={TradeConfirmScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen 
+        name="TradeChat" 
+        component={TradeChatScreen}
         options={{
           headerShown: false,
         }}
@@ -124,6 +134,16 @@ export const MainNavigator = () => {
         listeners={{
           focus: () => console.log('MainNavigator: TransactionSuccess screen focused'),
         }}
+      />
+      <Stack.Screen
+        name="ActiveTrade"
+        component={ActiveTradeScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="TraderRating"
+        component={TraderRatingScreen}
+        options={{ headerShown: false }}
       />
     </Stack.Navigator>
   );
