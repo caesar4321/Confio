@@ -55,6 +55,46 @@ export type MainStackParamList = {
       lastSeen: string;
     };
     crypto: 'cUSD' | 'CONFIO';
+    tradeType: 'buy' | 'sell';
+  };
+  TradeChat: {
+    offer: {
+      id: string;
+      name: string;
+      rate: string;
+      limit: string;
+      available: string;
+      paymentMethods: string[];
+      responseTime: string;
+      completedTrades: number;
+      successRate: number;
+      verified: boolean;
+      isOnline: boolean;
+      lastSeen: string;
+    };
+    crypto: 'cUSD' | 'CONFIO';
+    amount: string;
+    tradeType: 'buy' | 'sell';
+  };
+  ActiveTrade: {
+    trade: {
+      id: string;
+      trader: {
+        name: string;
+        isOnline: boolean;
+        verified: boolean;
+        lastSeen: string;
+        responseTime: string;
+      };
+      amount: string;
+      crypto: string;
+      totalBs: string;
+      paymentMethod: string;
+      rate: string;
+      step: number;
+      timeRemaining: number;
+      tradeType: 'buy' | 'sell';
+    };
   };
   AccountDetail: {
     accountType: 'cusd' | 'confio';
@@ -97,6 +137,22 @@ export type MainStackParamList = {
       location?: string;
       terminal?: string;
       isOnConfio?: boolean;
+    };
+  };
+  TraderRating: {
+    trader: {
+      name: string;
+      verified: boolean;
+      completedTrades: number;
+      successRate: number;
+    };
+    tradeDetails: {
+      amount: string;
+      crypto: string;
+      totalPaid: string;
+      method: string;
+      date: string;
+      duration: string;
     };
   };
 };

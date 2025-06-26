@@ -23,7 +23,7 @@ type TradeConfirmNavigationProp = NativeStackNavigationProp<MainStackParamList, 
 export const TradeConfirmScreen: React.FC = () => {
   const navigation = useNavigation<TradeConfirmNavigationProp>();
   const route = useRoute<TradeConfirmRouteProp>();
-  const { offer, crypto } = route.params;
+  const { offer, crypto, tradeType } = route.params;
   
   const [amount, setAmount] = useState('100.00');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(offer.paymentMethods[0] || '');
@@ -39,9 +39,26 @@ export const TradeConfirmScreen: React.FC = () => {
       return;
     }
     
-    // Here you would typically navigate to a processing screen
-    Alert.alert('Éxito', 'Intercambio iniciado correctamente');
-    navigation.goBack();
+    // Navigate to TradeChatScreen with the trade details
+    navigation.navigate('TradeChat', { 
+      offer: {
+        id: offer.id,
+        name: offer.name,
+        rate: offer.rate,
+        limit: offer.limit,
+        available: offer.available,
+        paymentMethods: offer.paymentMethods,
+        responseTime: offer.responseTime,
+        completedTrades: offer.completedTrades,
+        successRate: offer.successRate,
+        verified: offer.verified,
+        isOnline: offer.isOnline,
+        lastSeen: offer.lastSeen,
+      },
+      crypto: crypto,
+      amount: amount,
+      tradeType: tradeType
+    });
   };
 
   const handlePaymentMethodSelect = (method: string) => {
