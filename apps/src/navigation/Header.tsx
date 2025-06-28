@@ -15,6 +15,8 @@ interface HeaderProps {
   backgroundColor?: string;
   isLight?: boolean;
   showBackButton?: boolean;
+  unreadNotifications?: number;
+  currentAccountAvatar?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -26,6 +28,8 @@ export const Header: React.FC<HeaderProps> = ({
   backgroundColor,
   isLight = false,
   showBackButton = true,
+  unreadNotifications = 0,
+  currentAccountAvatar = 'U',
 }) => {
   const isLightTheme = isLight || isHomeScreen;
   const textColor = isLightTheme ? '#FFFFFF' : '#1F2937';
@@ -64,23 +68,65 @@ export const Header: React.FC<HeaderProps> = ({
         <View style={{ flexDirection: 'row', gap: 12 }}>
           <TouchableOpacity 
             style={{ 
-              padding: 8, 
+              width: 40,
+              height: 40,
+              borderRadius: 20,
               backgroundColor: 'rgba(255,255,255,0.2)', 
-              borderRadius: 20 
+              justifyContent: 'center',
+              alignItems: 'center',
+              position: 'relative',
             }} 
             onPress={onNotificationPress}
           >
             <Icon name="bell" size={20} color="#fff" />
+            {unreadNotifications > 0 && (
+              <View style={{
+                position: 'absolute',
+                top: -2,
+                right: -2,
+                backgroundColor: '#EF4444',
+                borderRadius: 10,
+                minWidth: 20,
+                height: 20,
+                justifyContent: 'center',
+                alignItems: 'center',
+                paddingHorizontal: 4,
+              }}>
+                <Text style={{
+                  color: '#FFFFFF',
+                  fontSize: 10,
+                  fontWeight: 'bold',
+                }}>
+                  {unreadNotifications}
+                </Text>
+              </View>
+            )}
           </TouchableOpacity>
           <TouchableOpacity 
             style={{ 
-              padding: 8, 
+              width: 36,
+              height: 36,
+              borderRadius: 18,
               backgroundColor: '#fff', 
-              borderRadius: 20 
+              justifyContent: 'center',
+              alignItems: 'center',
+              overflow: 'hidden',
             }} 
-            onPress={onProfilePress}
+            onPress={() => {
+              console.log('Header: Profile button pressed, onProfilePress:', !!onProfilePress);
+              if (onProfilePress) {
+                onProfilePress();
+              }
+            }}
+            activeOpacity={0.7}
           >
-            <Icon name="user" size={20} color="#34d399" />
+            <Text style={{
+              fontSize: 16,
+              fontWeight: 'bold',
+              color: '#34d399',
+            }}>
+              {currentAccountAvatar}
+            </Text>
           </TouchableOpacity>
         </View>
       )}

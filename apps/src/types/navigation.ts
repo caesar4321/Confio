@@ -22,6 +22,7 @@ export type MainStackParamList = {
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
   Verification: undefined;
   ConfioAddress: undefined;
+  Notification: undefined;
   TraderProfile: {
     offer: {
       id: string;

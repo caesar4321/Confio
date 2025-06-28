@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Alert, ScrollView, Image } from 'react-native';
 import { Gradient } from '../components/common/Gradient';
 import { AuthService } from '../services/authService';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
+import { useHeader } from '../contexts/HeaderContext';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import Icon from 'react-native-vector-icons/Feather';
@@ -12,6 +13,7 @@ import * as Keychain from 'react-native-keychain';
 import { getApiUrl } from '../config/env';
 import { jwtDecode } from 'jwt-decode';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
+import { ProfileMenu } from '../components/ProfileMenu';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
@@ -25,20 +27,59 @@ interface CustomJwtPayload {
   type: 'access' | 'refresh';
 }
 
+interface Account {
+  id: string;
+  name: string;
+  type: 'personal' | 'business';
+  phone?: string;
+  category?: string;
+  avatar: string;
+}
+
 type HomeScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 export const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
+  const { setCurrentAccountAvatar, profileMenu } = useHeader();
   const [suiAddress, setSuiAddress] = React.useState<string>('');
   const [isLoading, setIsLoading] = React.useState(true);
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [accountType, setAccountType] = useState("personal");
+  const [selectedAccount, setSelectedAccount] = useState("personal");
   
+  // Debug initial state
+  console.log('HomeScreen initial render:', { showProfileMenu: profileMenu.showProfileMenu, selectedAccount });
+  
+  // Mock accounts - replace with real data later
+  const accounts: Account[] = [
+    { 
+      id: "personal", 
+      name: "Julian Moon", 
+      type: "personal", 
+      phone: "+58 412 345 6789",
+      avatar: "J"
+    },
+    { 
+      id: "restaurant", 
+      name: "El Sabor de Chicha", 
+      type: "business", 
+      category: "Restaurante",
+      avatar: "E"
+    },
+    { 
+      id: "consulting", 
+      name: "Novio coreano 🤭", 
+      type: "business", 
+      category: "Consultoria",
+      avatar: "N"
+    }
+  ];
+
+  const currentAccount = accounts.find(acc => acc.id === selectedAccount);
+
   // Mock balances - replace with real data later
   const mockBalances = {
-    cusd: "1,234.56",
-    confio: "1,000.00"
+    cusd: "3,542.75",
+    confio: "234.18"
   };
 
   // Mock exchange rates - replace with real data later
@@ -63,6 +104,29 @@ export const HomeScreen = () => {
 
     loadData();
   }, []);
+
+  // Update header when account changes
+  useEffect(() => {
+    if (currentAccount) {
+      setCurrentAccountAvatar(currentAccount.avatar);
+    }
+  }, [currentAccount, setCurrentAccountAvatar]);
+
+  // Debug log when showProfileMenu changes
+  useEffect(() => {
+    console.log('showProfileMenu changed to:', profileMenu.showProfileMenu);
+  }, [profileMenu.showProfileMenu]);
+
+  const handleAccountSwitch = (accountId: string) => {
+    setSelectedAccount(accountId);
+    profileMenu.closeProfileMenu();
+  };
+
+  const handleCreateBusinessAccount = () => {
+    profileMenu.closeProfileMenu();
+    // Navigate to business account creation screen
+    Alert.alert('Crear cuenta de negocio', 'Funcionalidad en desarrollo');
+  };
 
   if (isLoading) {
     return (
@@ -157,6 +221,16 @@ export const HomeScreen = () => {
           </View>
         </View>
       </ScrollView>
+
+      {/* Profile Menu */}
+      <ProfileMenu
+        visible={profileMenu.showProfileMenu}
+        onClose={profileMenu.closeProfileMenu}
+        accounts={accounts}
+        selectedAccount={selectedAccount}
+        onAccountSwitch={handleAccountSwitch}
+        onCreateBusinessAccount={handleCreateBusinessAccount}
+      />
     </View>
   );
 };
@@ -178,29 +252,6 @@ const styles = StyleSheet.create({
     paddingTop: 56,
     paddingBottom: 32,
     paddingHorizontal: 20,
-  },
-  headerTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  headerButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  headerCircleButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   balanceSection: {
     marginTop: 8,
