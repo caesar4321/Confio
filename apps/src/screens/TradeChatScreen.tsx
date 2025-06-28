@@ -11,6 +11,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -179,7 +180,14 @@ export const TradeChatScreen: React.FC = () => {
     navigation.navigate('BottomTabs', { screen: 'Exchange' });
   };
 
+  const [showConfirmPaidModal, setShowConfirmPaidModal] = useState(false);
+
   const handleMarkAsPaid = () => {
+    setShowConfirmPaidModal(true);
+  };
+
+  const confirmMarkAsPaid = () => {
+    setShowConfirmPaidModal(false);
     if (currentTradeStep === 1) {
       setCurrentTradeStep(2);
       const systemMessage: Message = {
@@ -187,7 +195,7 @@ export const TradeChatScreen: React.FC = () => {
         sender: 'system',
         text: 'Usuario marcó el pago como completado',
         timestamp: new Date(),
-        type: 'system'
+        type: 'system',
       };
       setMessages(prev => [...prev, systemMessage]);
     }
@@ -425,6 +433,38 @@ export const TradeChatScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Confirmation Modal for Marcar como pagado */}
+      <Modal
+        visible={showConfirmPaidModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowConfirmPaidModal(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, width: '80%', alignItems: 'center' }}>
+            <Icon name="alert-triangle" size={32} color="#F59E42" style={{ marginBottom: 12 }} />
+            <Text style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 8 }}>¿Confirmar que realizaste el pago?</Text>
+            <Text style={{ color: '#6B7280', textAlign: 'center', marginBottom: 20 }}>
+              Solo marca como pagado si ya realizaste la transferencia. Falsos reportes pueden resultar en suspensión de tu cuenta.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity
+                style={{ backgroundColor: '#F3F4F6', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8, marginRight: 8 }}
+                onPress={() => setShowConfirmPaidModal(false)}
+              >
+                <Text style={{ color: '#374151', fontWeight: '600' }}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ backgroundColor: colors.primary, paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8 }}
+                onPress={confirmMarkAsPaid}
+              >
+                <Text style={{ color: '#fff', fontWeight: '600' }}>Sí, ya pagué</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };

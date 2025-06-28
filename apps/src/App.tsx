@@ -6,6 +6,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, ActivityIndicator } from 'react-native';
 import apolloClient from './apollo/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { HeaderProvider } from './contexts/HeaderContext';
 import { AuthNavigator } from './navigation/AuthNavigator';
 import { MainNavigator } from './navigation/MainNavigator';
 import { RootStackParamList } from './types/navigation';
@@ -54,7 +55,9 @@ const AppContent: React.FC = () => {
       <AuthProvider 
         navigationRef={navigationRef as React.RefObject<NavigationContainerRef<RootStackParamList>>}
       >
-        <Navigation />
+        <HeaderProvider>
+          <Navigation />
+        </HeaderProvider>
       </AuthProvider>
     </NavigationContainer>
   );
