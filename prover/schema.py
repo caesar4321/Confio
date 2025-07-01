@@ -3,7 +3,7 @@ from graphene_django import DjangoObjectType
 from graphene_django.converter import convert_django_field
 from django.db import models
 from .models import ZkLoginProof
-from users.models import UserProfile, User
+from users.models import Account, User
 from firebase_admin import auth
 from firebase_admin.auth import InvalidIdTokenError
 import os
@@ -113,15 +113,15 @@ def get_current_epoch():
             return 1000
         raise Exception(f"Failed to get current epoch: {str(e)}")
 
-class UserProfileType(DjangoObjectType):
+class AccountType(DjangoObjectType):
     class Meta:
-        model = UserProfile
+        model = Account
         exclude = ('user_salt',)
 
 class ZkLoginProofType(DjangoObjectType):
     class Meta:
         model = ZkLoginProof
-        fields = ('proof_id', 'profile', 'max_epoch', 'proof_data', 'created_at')
+        fields = ('proof_id', 'account', 'max_epoch', 'proof_data', 'created_at')
 
 class ProofPointsType(graphene.ObjectType):
     a = graphene.List(graphene.String)
@@ -201,6 +201,17 @@ class InitializeZkLogin(graphene.Mutation):
                 try:
                     user = User.objects.get(firebase_uid=firebase_uid)
                     logger.info(f"Found existing user: id={user.id}, username={user.username}, auth_token_version={user.auth_token_version}")
+                    
+                    # Check if user has any accounts, create default if none exist
+                    from users.models import Account
+                    if not Account.objects.filter(user=user).exists():
+                        default_account = Account.objects.create(
+                            user=user,
+                            account_type='personal',
+                            account_index=0
+                        )
+                        logger.info(f"Created default personal account for existing user: id={default_account.id}")
+                        
                 except User.DoesNotExist:
                     # If user doesn't exist, create a new one
                     user = User.objects.create(
@@ -212,6 +223,15 @@ class InitializeZkLogin(graphene.Mutation):
                         is_active=True
                     )
                     logger.info(f"Created new user: id={user.id}, username={user.username}")
+                    
+                    # Create default personal account for the new user
+                    from users.models import Account
+                    default_account = Account.objects.create(
+                        user=user,
+                        account_type='personal',
+                        account_index=0
+                    )
+                    logger.info(f"Created default personal account: id={default_account.id}")
 
                 # Generate tokens using JWT directly
                 access_token_payload = {
@@ -301,15 +321,24 @@ def resolve_finalize_zk_login(self, info, input):
             # Get the Firebase UID from the Firebase token
             decoded_token = auth.verify_id_token(input.firebaseToken)
             firebase_uid = decoded_token.get('uid')
+            logger.info("Looking for account with Firebase UID: %s", firebase_uid)
             
-            # Find the user profile by firebase_uid field
-            profile = UserProfile.objects.get(user__firebase_uid=firebase_uid)
-            logger.info("Found user profile for Firebase UID: %s", firebase_uid)
-        except UserProfile.DoesNotExist:
-            logger.error("User profile not found for Firebase UID: %s", firebase_uid)
+            # Find the user account by firebase_uid field
+            account = Account.objects.get(user__firebase_uid=firebase_uid)
+            logger.info("Found user account for Firebase UID: %s, account_id: %s", firebase_uid, account.id)
+        except Account.DoesNotExist:
+            logger.error("User account not found for Firebase UID: %s", firebase_uid)
+            # Log available accounts for debugging
+            from users.models import User
+            try:
+                user = User.objects.get(firebase_uid=firebase_uid)
+                user_accounts = Account.objects.filter(user=user)
+                logger.error("User exists but has no accounts. User ID: %s, Accounts count: %s", user.id, user_accounts.count())
+            except User.DoesNotExist:
+                logger.error("User not found for Firebase UID: %s", firebase_uid)
             return FinalizeZkLoginPayload(
                 success=False,
-                error="User profile not found"
+                error="User account not found"
             )
 
         # Prepare prover payload
@@ -353,7 +382,7 @@ def resolve_finalize_zk_login(self, info, input):
 
             # Create ZkLoginProof record
             proof = ZkLoginProof.objects.create(
-                profile=profile,
+                account=account,
                 max_epoch=int(input.maxEpoch),
                 randomness=base64.b64decode(input.randomness),
                 extended_ephemeral_public_key=base64.b64decode(input.extendedEphemeralPublicKey),
@@ -363,22 +392,22 @@ def resolve_finalize_zk_login(self, info, input):
             logger.info("Created ZkLoginProof record: %s", proof.id)
 
             # Update user's Sui address
-            profile.sui_address = result['suiAddress']
-            profile.save()
-            logger.info("Updated user profile with Sui address: %s", result['suiAddress'])
+            account.sui_address = result['suiAddress']
+            account.save()
+            logger.info("Updated user account with Sui address: %s", result['suiAddress'])
 
             # Verify the Sui address was saved
-            profile.refresh_from_db()
-            if not profile.sui_address:
-                logger.error("Failed to save Sui address to profile")
+            account.refresh_from_db()
+            if not account.sui_address:
+                logger.error("Failed to save Sui address to account")
                 return FinalizeZkLoginPayload(
                     success=False,
                     error="Failed to save Sui address"
                 )
 
             # Calculate is_phone_verified based on phone_number and phone_country
-            is_phone_verified = bool(profile.user.phone_number and profile.user.phone_country)
-            logger.info(f"Phone verification status: {is_phone_verified} (phone_number: {bool(profile.user.phone_number)}, phone_country: {bool(profile.user.phone_country)})")
+            is_phone_verified = bool(account.user.phone_number and account.user.phone_country)
+            logger.info(f"Phone verification status: {is_phone_verified} (phone_number: {bool(account.user.phone_number)}, phone_country: {bool(account.user.phone_country)})")
 
             return FinalizeZkLoginPayload(
                 success=True,
@@ -622,7 +651,7 @@ class Query(graphene.ObjectType):
 schema = graphene.Schema(
     query=Query,
     mutation=Mutation,
-    types=[UserProfileType, ZkLoginProofType]
+    types=[AccountType, ZkLoginProofType]
 )
 
 # Add JWT middleware

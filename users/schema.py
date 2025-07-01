@@ -1,7 +1,7 @@
 import graphene
 from graphene_django import DjangoObjectType
 from django.contrib.auth import get_user_model
-from .models import User, UserProfile
+from .models import User, Account
 from .country_codes import COUNTRY_CODES
 from graphql_jwt.utils import jwt_encode, jwt_decode
 from graphql_jwt.shortcuts import create_refresh_token
@@ -40,15 +40,19 @@ class UserType(DjangoObjectType):
 		model = User
 		fields = ('id', 'username', 'email', 'first_name', 'last_name', 'phone_country', 'phone_number')
 
-class UserProfileType(DjangoObjectType):
+class AccountType(DjangoObjectType):
 	class Meta:
-		model = UserProfile
-		fields = ('id', 'user', 'sui_address', 'created_at', 'last_login_at')
+		model = Account
+		fields = ('id', 'user', 'account_type', 'account_index', 'account_id', 'business', 'sui_address', 'created_at', 'last_login_at')
 
 class CountryCodeType(graphene.ObjectType):
 	code = graphene.String()
 	name = graphene.String()
 	flag = graphene.String()
+
+class BusinessCategoryType(graphene.ObjectType):
+	id = graphene.String()
+	name = graphene.String()
 
 class LegalDocumentType(graphene.ObjectType):
 	title = graphene.String()
@@ -87,6 +91,7 @@ class InvalidateAuthTokens(graphene.Mutation):
 class Query(graphene.ObjectType):
 	me = graphene.Field(UserType)
 	country_codes = graphene.List(CountryCodeType)
+	business_categories = graphene.List(BusinessCategoryType)
 	legalDocument = graphene.Field(
 		LegalDocumentType,
 		docType=graphene.String(required=True),
@@ -134,6 +139,10 @@ class Query(graphene.ObjectType):
 
 	def resolve_country_codes(self, info):
 		return [CountryCodeType(code=code[1], name=code[0], flag=code[3]) for code in COUNTRY_CODES]
+
+	def resolve_business_categories(self, info):
+		from .models import Business
+		return [BusinessCategoryType(id=choice[0], name=choice[1]) for choice in Business.BUSINESS_CATEGORY_CHOICES]
 
 class UpdatePhoneNumber(graphene.Mutation):
 	class Arguments:
