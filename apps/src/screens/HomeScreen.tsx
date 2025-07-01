@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, Alert, ScrollView, Image } from 'react-native';
 import { Gradient } from '../components/common/Gradient';
 import { AuthService } from '../services/authService';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
 import { useHeader } from '../contexts/HeaderContext';
@@ -14,6 +14,7 @@ import { getApiUrl } from '../config/env';
 import { jwtDecode } from 'jwt-decode';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { ProfileMenu } from '../components/ProfileMenu';
+import { useAccountManager } from '../hooks/useAccountManager';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
@@ -41,16 +42,36 @@ type HomeScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 export const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const { setCurrentAccountAvatar, profileMenu } = useHeader();
+  const { signOut } = useAuth();
   const [suiAddress, setSuiAddress] = React.useState<string>('');
-  const [isLoading, setIsLoading] = React.useState(true);
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
-  const [selectedAccount, setSelectedAccount] = useState("personal");
+  
+  // Use account manager hook
+  const {
+    activeAccount,
+    accounts,
+    isLoading: accountsLoading,
+    switchAccount,
+    createAccount,
+    refreshAccounts,
+  } = useAccountManager();
+  
+  // Only show loading for initial data load, not for account loading
+  const isLoading = false; // accountsLoading;
   
   // Debug initial state
-  console.log('HomeScreen initial render:', { showProfileMenu: profileMenu.showProfileMenu, selectedAccount });
+  console.log('HomeScreen initial render:', { 
+    showProfileMenu: profileMenu.showProfileMenu, 
+    activeAccount: activeAccount?.id,
+    activeAccountType: activeAccount?.type,
+    activeAccountIndex: activeAccount?.index,
+    accountsCount: accounts.length,
+    accounts: accounts,
+    isLoading: accountsLoading
+  });
   
-  // Mock accounts - replace with real data later
-  const accounts: Account[] = [
+  // Fallback to mock accounts if no stored accounts exist
+  const mockAccounts: Account[] = [
     { 
       id: "personal", 
       name: "Julian Moon", 
@@ -74,7 +95,41 @@ export const HomeScreen = () => {
     }
   ];
 
-  const currentAccount = accounts.find(acc => acc.id === selectedAccount);
+  // Convert stored accounts to the format expected by ProfileMenu
+  const accountMenuItems = accounts.map(acc => ({
+    id: acc.id,
+    name: acc.name,
+    type: acc.type,
+    phone: acc.phone,
+    category: acc.category,
+    avatar: acc.avatar,
+  }));
+
+  // Only use stored accounts - no mock accounts
+  const displayAccounts = accountMenuItems;
+
+  const currentAccount = activeAccount ? {
+    id: activeAccount.id,
+    name: activeAccount.name,
+    type: activeAccount.type,
+    phone: activeAccount.phone,
+    category: activeAccount.category,
+    avatar: activeAccount.avatar,
+  } : (displayAccounts.length > 0 ? displayAccounts[0] : null); // Only use first account if accounts exist
+  
+  // Debug display accounts
+  console.log('HomeScreen - Display accounts:', {
+    accountsLength: accounts.length,
+    accountMenuItemsLength: accountMenuItems.length,
+    displayAccountsLength: displayAccounts.length,
+    displayAccounts: displayAccounts,
+    usingMockAccounts: accounts.length === 0,
+    currentAccountType: currentAccount?.type,
+    currentAccountIndex: currentAccount?.id ? currentAccount.id.split('_')[1] : undefined,
+    activeAccountId: activeAccount?.id,
+    activeAccountType: activeAccount?.type,
+    activeAccountIndex: activeAccount?.index
+  });
 
   // Mock balances - replace with real data later
   const mockBalances = {
@@ -90,19 +145,35 @@ export const HomeScreen = () => {
   };
 
   React.useEffect(() => {
+    console.log('HomeScreen - useEffect triggered for data loading');
+    
     const loadData = async () => {
       try {
+        console.log('HomeScreen - Starting data load');
         const authService = AuthService.getInstance();
+        
+        console.log('HomeScreen - Got AuthService instance, calling initialize');
+        
+        // Ensure AuthService is initialized
+        await authService.initialize();
+        
+        console.log('HomeScreen - AuthService initialized, getting zkLogin address');
+        
         const address = await authService.getZkLoginAddress();
         setSuiAddress(address);
+        
+        console.log('HomeScreen - Data load completed, address:', address);
       } catch (error) {
-        console.error('Error loading data:', error);
-      } finally {
-        setIsLoading(false);
+        console.error('HomeScreen - Error loading data:', error);
       }
     };
 
     loadData();
+  }, []);
+
+  // Add a simple useEffect to test if useEffect is working at all
+  React.useEffect(() => {
+    console.log('HomeScreen - Component mounted');
   }, []);
 
   // Update header when account changes
@@ -117,16 +188,50 @@ export const HomeScreen = () => {
     console.log('showProfileMenu changed to:', profileMenu.showProfileMenu);
   }, [profileMenu.showProfileMenu]);
 
-  const handleAccountSwitch = (accountId: string) => {
-    setSelectedAccount(accountId);
-    profileMenu.closeProfileMenu();
+  // Refresh accounts when screen comes into focus (e.g., after creating a business account)
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('HomeScreen - Screen focused, refreshing accounts');
+      refreshAccounts();
+    }, [refreshAccounts])
+  );
+
+  const handleAccountSwitch = async (accountId: string) => {
+    try {
+      console.log('HomeScreen - handleAccountSwitch called with:', accountId);
+      
+      // Check if this is a mock account (not stored in our system)
+      const isMockAccount = mockAccounts.some(acc => acc.id === accountId);
+      
+      console.log('HomeScreen - Account type check:', {
+        accountId: accountId,
+        isMockAccount: isMockAccount,
+        mockAccountIds: mockAccounts.map(acc => acc.id),
+        storedAccountIds: accounts.map(acc => acc.id)
+      });
+      
+      if (isMockAccount) {
+        // For mock accounts, just close the menu (no actual switching)
+        console.log('HomeScreen - Mock account selected:', accountId);
+        profileMenu.closeProfileMenu();
+      } else {
+        // For real accounts, perform the actual switch
+        console.log('HomeScreen - Real account selected, switching to:', accountId);
+        await switchAccount(accountId);
+        profileMenu.closeProfileMenu();
+      }
+    } catch (error) {
+      console.error('Error switching account:', error);
+    }
   };
 
   const handleCreateBusinessAccount = () => {
     profileMenu.closeProfileMenu();
     // Navigate to business account creation screen
-    Alert.alert('Crear cuenta de negocio', 'Funcionalidad en desarrollo');
+    navigation.navigate('CreateBusiness');
   };
+
+
 
   if (isLoading) {
     return (
@@ -171,6 +276,7 @@ export const HomeScreen = () => {
 
       {/* Wallets Section - light grey background */}
       <ScrollView style={{ flex: 1, backgroundColor: '#F3F4F6' }} contentContainerStyle={{ paddingHorizontal: 0 }} showsHorizontalScrollIndicator={false}>
+        
         <View style={styles.walletsHeader}>
           <Text style={styles.walletsTitle}>Mis Cuentas</Text>
         </View>
@@ -226,8 +332,8 @@ export const HomeScreen = () => {
       <ProfileMenu
         visible={profileMenu.showProfileMenu}
         onClose={profileMenu.closeProfileMenu}
-        accounts={accounts}
-        selectedAccount={selectedAccount}
+        accounts={displayAccounts}
+        selectedAccount={activeAccount?.id || displayAccounts[0]?.id || ''}
         onAccountSwitch={handleAccountSwitch}
         onCreateBusinessAccount={handleCreateBusinessAccount}
       />
