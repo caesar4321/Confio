@@ -170,16 +170,20 @@ This is a **monolithic repository** containing the full Confío stack:
 │   │   ├── config/        # Application configuration
 │   │   ├── contexts/      # React contexts (Auth, etc.)
 │   │   ├── hooks/         # Custom React hooks
+│   │   │   └── useAccountManager.ts  # Multi-account management hook
 │   │   ├── screens/       # Screen components
 │   │   │   ├── AuthScreen.tsx        # Authentication screen
 │   │   │   ├── PhoneVerificationScreen.tsx  # Phone verification
-│   │   │   └── HomeScreen.tsx        # Main app screen
+│   │   │   ├── HomeScreen.tsx        # Main app screen
+│   │   │   └── CreateBusinessScreen.tsx     # Business account creation
 │   │   ├── services/      # API and business logic services
-│   │   │   ├── authService.ts    # Authentication service
+│   │   │   ├── authService.ts    # Authentication service with multi-account support
 │   │   │   └── ...        # Other services
 │   │   ├── types/         # TypeScript type definitions
 │   │   ├── utils/         # Utility functions
+│   │   │   ├── accountManager.ts # Multi-account storage and management
 │   │   │   ├── countries.ts  # Country codes mapping [name, code, iso, flag]
+│   │   │   ├── zkLogin.ts   # zkLogin utilities with multi-account salt generation
 │   │   │   └── ...        # Other utility functions
 │   │   └── ...            # Other source files
 │   ├── scripts/           # Build and development scripts
@@ -225,6 +229,83 @@ This is a **monolithic repository** containing the full Confío stack:
    - Zero-knowledge proof authentication
    - Secure key derivation and storage
    - Automatic proof refresh before expiration
+
+### Multi-Account System
+
+Confío supports multiple accounts per user, allowing separate wallets for personal and business use cases.
+
+#### Account Types
+- **Personal Accounts**: Individual wallets for personal transactions
+- **Business Accounts**: Dedicated wallets for business operations
+
+#### Salt Formula
+The multi-account system uses deterministic salt generation:
+```
+salt = SHA256(issuer | subject | audience | account_type | account_index)
+```
+
+Where:
+- `issuer`: JWT issuer (e.g., "https://accounts.google.com")
+- `subject`: JWT subject (user's unique ID)
+- `audience`: OAuth client ID
+- `account_type`: Either "personal" or "business"
+- `account_index`: Numeric index (0, 1, 2, etc.)
+
+#### Default Behavior
+- **New users**: Automatically get `personal_0` as their default account
+- **Existing users**: Continue using their current salt (equivalent to `personal_0`)
+- **Account switching**: Each account type/index combination generates a unique Sui address
+
+#### Security Model
+1. **Deterministic**: Same OAuth identity + account context = same Sui address
+2. **Isolated**: Each account has its own private key and Sui address
+3. **Non-custodial**: Private keys are never stored on servers
+4. **Stateless**: Server doesn't track active accounts, client manages state
+
+#### Implementation Components
+
+**Account Manager** (`apps/src/utils/accountManager.ts`)
+- Manages account storage and retrieval using React Native Keychain
+- Handles account creation, switching, and context management
+
+**Auth Service Integration** (`apps/src/services/authService.ts`)
+- Automatically uses active account context for salt generation
+- Provides account switching and creation methods
+
+**React Hook** (`apps/src/hooks/useAccountManager.ts`)
+- Provides easy access to account management in React components
+- Handles account state and operations
+
+#### Usage Examples
+
+**Creating a Business Account**
+```typescript
+const businessAccount = await authService.createAccount(
+  'business',
+  'El Sabor de Chicha',
+  'E',
+  undefined,
+  'Restaurante'
+);
+await authService.switchAccount(businessAccount.id);
+```
+
+**Switching Between Accounts**
+```typescript
+await authService.switchAccount('personal_0'); // Personal account
+await authService.switchAccount('business_0'); // Business account
+```
+
+**Multiple Personal Accounts**
+```typescript
+const personal2 = await authService.createAccount(
+  'personal',
+  'Personal Savings',
+  'S',
+  '+1234567890'
+);
+await authService.switchAccount('personal_1'); // Savings account
+```
 
 ### Token Management
 1. **Access Token**
@@ -288,6 +369,37 @@ This is a **monolithic repository** containing the full Confío stack:
    - For React development: `yarn start` (runs on port 3000)
    - For Django development: `python manage.py runserver` (runs on port 8000)
    - After making React changes, run `yarn build` to update the Django-served version
+
+### Mobile Application (React Native)
+
+1. **Install Dependencies**
+   ```bash
+   cd apps
+   yarn install
+   ```
+
+2. **iOS Setup**
+   ```bash
+   cd ios
+   bundle install
+   bundle exec pod install
+   cd ..
+   ```
+
+3. **Run the App**
+   ```bash
+   # iOS
+   yarn ios
+   
+   # Android
+   yarn android
+   ```
+
+4. **Multi-Account Features**
+   - Account creation and switching
+   - Personal and business account support
+   - Deterministic Sui address generation
+   - Secure account storage using Keychain
 
 ### Static File Handling
 

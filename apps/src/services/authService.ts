@@ -14,6 +14,8 @@ import { Buffer } from 'buffer';
 import { sha256 } from '@noble/hashes/sha256';
 import { base64ToBytes, bytesToBase64, stringToUtf8Bytes, bufferToHex } from '../utils/encoding';
 import { ApolloClient } from '@apollo/client';
+import { AccountManager, AccountContext } from '../utils/accountManager';
+import { generateZkLoginSalt as generateZkLoginSaltUtil } from '../utils/zkLogin';
 
 // Debug logging for environment variables
 console.log('Environment variables loaded:');
@@ -78,16 +80,29 @@ export class AuthService {
 
   public async initialize(): Promise<void> {
     try {
+      console.log('AuthService - initialize() called');
+      
       // Only initialize Firebase once
       if (!this.firebaseIsInitialized) {
+        console.log('AuthService - Initializing Firebase');
         await this.initializeFirebase();
         this.firebaseIsInitialized = true;
+        console.log('AuthService - Firebase initialized');
+      } else {
+        console.log('AuthService - Firebase already initialized');
       }
       
       // Always rehydrate zkLogin data
+      console.log('AuthService - Rehydrating zkLogin data');
       await this.rehydrateZkLoginData();
+      console.log('AuthService - zkLogin data rehydrated');
+      
+      // Check if we need to initialize a default account
+      console.log('AuthService - Checking for default account initialization');
+      await this.initializeDefaultAccountIfNeeded();
+      console.log('AuthService - Default account check completed');
     } catch (error) {
-      console.error('Failed to initialize AuthService:', error);
+      console.error('AuthService - Failed to initialize:', error);
       throw error;
     }
   }
@@ -236,8 +251,17 @@ export class AuthService {
       }
 
       // Generate salt on client side
-      const salt = this.generateZkLoginSalt(decodedJwt.iss, decodedJwt.sub, GOOGLE_CLIENT_IDS.production.web);
+      const salt = await this.generateZkLoginSalt(decodedJwt.iss, decodedJwt.sub, GOOGLE_CLIENT_IDS.production.web);
       console.log('Generated client-side salt:', salt);
+      
+      // Get current account context for logging
+      const accountManager = AccountManager.getInstance();
+      const accountContext = await accountManager.getActiveAccountContext();
+      console.log('Account context for salt generation:', {
+        accountType: accountContext.type,
+        accountIndex: accountContext.index,
+        accountId: accountManager.generateAccountId(accountContext.type, accountContext.index)
+      });
 
       // 6) Derive ephemeral keypair
       this.suiKeypair = this.deriveEphemeralKeypair(salt, decodedJwt.sub, GOOGLE_CLIENT_IDS.production.web);
@@ -271,11 +295,51 @@ export class AuthService {
       await this.storeSensitiveData(fin, salt, decodedJwt.sub, GOOGLE_CLIENT_IDS.production.web, maxEpochNum, init.randomness, idToken);
       console.log('Sensitive data stored successfully');
 
+      // 9) Automatically create default personal account after successful zkLogin
+      console.log('Creating default personal account...');
+      try {
+        const accountManager = AccountManager.getInstance();
+        const storedAccounts = await accountManager.getStoredAccounts();
+        
+        if (storedAccounts.length === 0) {
+          // Create default personal account with user data
+          const [firstName, ...lastNameParts] = user.displayName?.split(' ') || [];
+          const lastName = lastNameParts.join(' ');
+          const displayName = user.displayName || user.email || 'Mi Cuenta';
+          
+                     const defaultAccount = await accountManager.createAccount(
+             'personal',
+             displayName,
+             firstName || displayName.charAt(0).toUpperCase(),
+             user.phoneNumber || undefined,
+             undefined
+           );
+          
+          // Set as active account
+          await accountManager.setActiveAccountContext({
+            type: 'personal',
+            index: 0
+          });
+          
+          console.log('Default personal account created successfully:', {
+            accountId: defaultAccount.id,
+            accountName: defaultAccount.name,
+            accountType: defaultAccount.type,
+            accountIndex: defaultAccount.index
+          });
+        } else {
+          console.log('Accounts already exist, skipping default account creation');
+        }
+      } catch (accountError) {
+        console.error('Error creating default account:', accountError);
+        // Don't throw here - account creation failure shouldn't break the sign-in flow
+      }
+
       // Split display name into first and last name
       const [firstName, ...lastNameParts] = user.displayName?.split(' ') || [];
       const lastName = lastNameParts.join(' ');
 
-      // 9) Return user info and zkLogin data
+      // 10) Return user info and zkLogin data
       const result = {
         userInfo: { 
           email: user.email, 
@@ -464,8 +528,17 @@ export class AuthService {
       const { maxEpoch, randomness: serverRandomness } = initData.initializeZkLogin;
       
       // Generate salt on client side
-      const salt = this.generateZkLoginSalt(decodedAppleJwt.iss, appleSub, 'apple');
+      const salt = await this.generateZkLoginSalt(decodedAppleJwt.iss, appleSub, 'apple');
       console.log('Generated client-side salt:', salt);
+      
+      // Get current account context for logging
+      const accountManager = AccountManager.getInstance();
+      const accountContext = await accountManager.getActiveAccountContext();
+      console.log('Account context for salt generation (Apple):', {
+        accountType: accountContext.type,
+        accountIndex: accountContext.index,
+        accountId: accountManager.generateAccountId(accountContext.type, accountContext.index)
+      });
 
       // Derive the single, deterministic ephemeral keypair
       this.suiKeypair = this.deriveEphemeralKeypair(salt, appleSub, 'apple');
@@ -505,6 +578,46 @@ export class AuthService {
         serverRandomness,
         identityToken
       );
+
+      // Automatically create default personal account after successful zkLogin
+      console.log('Creating default personal account (Apple)...');
+      try {
+        const accountManager = AccountManager.getInstance();
+        const storedAccounts = await accountManager.getStoredAccounts();
+        
+        if (storedAccounts.length === 0) {
+          // Create default personal account with user data
+          const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
+          const lastName = lastNameParts.join(' ');
+          const displayName = userCredential.user.displayName || userCredential.user.email || 'Mi Cuenta';
+          
+          const defaultAccount = await accountManager.createAccount(
+            'personal',
+            displayName,
+            firstName || displayName.charAt(0).toUpperCase(),
+            userCredential.user.phoneNumber || undefined,
+            undefined
+          );
+          
+          // Set as active account
+          await accountManager.setActiveAccountContext({
+            type: 'personal',
+            index: 0
+          });
+          
+          console.log('Default personal account created successfully (Apple):', {
+            accountId: defaultAccount.id,
+            accountName: defaultAccount.name,
+            accountType: defaultAccount.type,
+            accountIndex: defaultAccount.index
+          });
+        } else {
+          console.log('Accounts already exist, skipping default account creation (Apple)');
+        }
+      } catch (accountError) {
+        console.error('Error creating default account (Apple):', accountError);
+        // Don't throw here - account creation failure shouldn't break the sign-in flow
+      }
 
       // Split display name into first and last name
       const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
@@ -814,20 +927,52 @@ export class AuthService {
       throw new Error('No zkLogin data stored');
     }
 
-    // Log the stored data structure for debugging
-    console.log('Stored zkLogin data structure:', {
-      hasZkProof: !!storedData.zkProof,
-      hasSubject: !!storedData.subject,
-      hasClientId: !!storedData.clientId,
-      data: storedData
+    // Get current account context
+    const accountManager = AccountManager.getInstance();
+    const accountContext = await accountManager.getActiveAccountContext();
+    const accountId = accountManager.generateAccountId(accountContext.type, accountContext.index);
+
+    console.log('Getting zkLogin address for account context:', {
+      accountType: accountContext.type,
+      accountIndex: accountContext.index,
+      accountId: accountId
     });
 
-    // Return the stored Sui address from the zkProof
-    if (!storedData.zkProof || !storedData.zkProof.suiAddress) {
-      throw new Error('No Sui address found in stored data');
+    // Get the original JWT issuer from the stored data
+    const decodedJwt = jwtDecode(storedData.initJwt);
+    const originalIssuer = decodedJwt.iss;
+    
+    if (!originalIssuer) {
+      throw new Error('No issuer found in stored JWT');
     }
+    
+    // Generate the deterministic salt for the current account context
+    const currentSalt = await this.generateZkLoginSalt(
+      originalIssuer, 
+      storedData.subject, 
+      storedData.clientId, 
+      accountContext
+    );
 
-    return storedData.zkProof.suiAddress;
+    // Derive the keypair for the current account context using the deterministic salt
+    const currentKeypair = this.deriveEphemeralKeypair(
+      currentSalt, 
+      storedData.subject, 
+      storedData.clientId
+    );
+
+    // Get the Sui address for the current account context
+    const currentSuiAddress = currentKeypair.getPublicKey().toSuiAddress();
+
+    console.log('Generated deterministic Sui address:', {
+      accountType: accountContext.type,
+      accountIndex: accountContext.index,
+      accountId: accountId,
+      suiAddress: currentSuiAddress,
+      note: 'Address derived from deterministic salt for current account context'
+    });
+
+    return currentSuiAddress;
   }
 
   // Sign out
@@ -852,7 +997,14 @@ export class AuthService {
         console.log('Google sign out skipped or failed:', error);
       }
       
-      // 3. Clear local state
+      // 3. Clear zkLogin data
+      await this.clearZkLoginData();
+      
+      // 4. Clear account data
+      const accountManager = AccountManager.getInstance();
+      await accountManager.clearAllAccounts();
+      
+      // 5. Clear local state
       this.suiKeypair = null;
       this.userSalt = null;
       this.zkProof = null;
@@ -1079,14 +1231,22 @@ export class AuthService {
     await this.fetchNewProof(this.apolloClient);
   }
 
-  private generateZkLoginSalt(iss: string, sub: string, clientId: string): string {
-    const saltInput = new Uint8Array([
-      ...stringToUtf8Bytes(iss),
-      ...stringToUtf8Bytes(sub),
-      ...stringToUtf8Bytes(clientId)
-    ]);
-    const saltHash = sha256(saltInput);
-    return bytesToBase64(saltHash);
+  private async generateZkLoginSalt(iss: string, sub: string, clientId: string, accountContext?: AccountContext): Promise<string> {
+    const accountManager = AccountManager.getInstance();
+    
+    // If no account context provided, get the active one
+    if (!accountContext) {
+      accountContext = await accountManager.getActiveAccountContext();
+    }
+    
+    console.log('Generating zkLogin salt:', {
+      accountType: accountContext.type,
+      accountIndex: accountContext.index,
+      note: accountContext.type === 'personal' ? 'Personal account (index 0)' : `Business account (index ${accountContext.index})`
+    });
+    
+    // Use the updated salt generation function with account type and index
+    return generateZkLoginSaltUtil(iss, sub, clientId, accountContext.type, accountContext.index);
   }
 
   private async storeTokens(tokens: TokenStorage): Promise<void> {
@@ -1230,6 +1390,167 @@ export class AuthService {
     } catch (error) {
       console.error('Error getting token:', error);
       return null;
+    }
+  }
+
+  // Account Management Methods
+
+  /**
+   * Get the currently active account context
+   */
+  public async getActiveAccountContext(): Promise<AccountContext> {
+    const accountManager = AccountManager.getInstance();
+    try {
+      return await accountManager.getActiveAccountContext();
+    } catch (error) {
+      console.error('Error getting active account context, resetting to default:', error);
+      // Reset corrupted active account data
+      try {
+        await accountManager.resetActiveAccount();
+      } catch (resetError) {
+        console.error('Error resetting active account:', resetError);
+      }
+      // Return default context
+      return accountManager.getDefaultAccountContext();
+    }
+  }
+
+  /**
+   * Set the active account context
+   */
+  public async setActiveAccountContext(context: AccountContext): Promise<void> {
+    const accountManager = AccountManager.getInstance();
+    await accountManager.setActiveAccountContext(context);
+  }
+
+  /**
+   * Get all stored accounts
+   */
+  public async getStoredAccounts(): Promise<any[]> {
+    const accountManager = AccountManager.getInstance();
+    return await accountManager.getStoredAccounts();
+  }
+
+  /**
+   * Create a new account
+   * Automatically determines account type: personal if no accounts exist, business otherwise
+   */
+  public async createAccount(
+    name: string,
+    avatar: string,
+    phone?: string,
+    category?: string
+  ): Promise<any> {
+    const accountManager = AccountManager.getInstance();
+    
+    console.log('Creating new account:', {
+      name: name,
+      avatar: avatar,
+      phone: phone,
+      category: category
+    });
+    
+    const newAccount = await accountManager.createAccount('business', name, avatar, phone, category);
+    
+    console.log('Account created successfully:', {
+      accountId: newAccount.id,
+      accountType: newAccount.type,
+      accountIndex: newAccount.index,
+      name: newAccount.name,
+      note: newAccount.type === 'personal' ? 'First account (personal)' : 'Additional account (business)'
+    });
+    
+    return newAccount;
+  }
+
+  /**
+   * Switch to a different account
+   * Note: zkLogin data is user-level, not account-level, so we don't clear it
+   */
+  public async switchAccount(accountId: string): Promise<void> {
+    const accountManager = AccountManager.getInstance();
+    
+    console.log('AuthService - switchAccount called with accountId:', accountId);
+    
+    const accountContext = accountManager.parseAccountId(accountId);
+    
+    console.log('AuthService - Parsed account context:', {
+      accountId: accountId,
+      accountType: accountContext.type,
+      accountIndex: accountContext.index,
+      note: accountContext.type === 'personal' ? 'Personal account (index 0)' : `Business account (index ${accountContext.index})`
+    });
+    
+    // Set the new active account context
+    await accountManager.setActiveAccountContext(accountContext);
+    
+    console.log('AuthService - Active account context set');
+    
+    // Note: We do NOT clear zkLogin data because:
+    // 1. zkLogin authentication is user-level, not account-level
+    // 2. The same user can have multiple accounts (personal + business)
+    // 3. All accounts share the same zkLogin authentication
+    // 4. Only the salt generation changes based on account context
+    
+    // Verify that the Sui address changes for the new account context
+    try {
+      const newSuiAddress = await this.getZkLoginAddress();
+      console.log('AuthService - Account switch completed with new Sui address:', {
+        accountId: accountId,
+        accountType: accountContext.type,
+        accountIndex: accountContext.index,
+        suiAddress: newSuiAddress,
+        note: accountContext.type === 'personal' ? 'Personal account (index 0)' : `Business account (index ${accountContext.index})`
+      });
+    } catch (error) {
+      console.error('AuthService - Error getting new Sui address after account switch:', error);
+    }
+  }
+
+  /**
+   * Initialize default account if no accounts exist
+   */
+  public async initializeDefaultAccount(): Promise<any> {
+    const accountManager = AccountManager.getInstance();
+    return await accountManager.initializeDefaultAccount();
+  }
+
+  /**
+   * Check if we need to initialize a default account and create one if needed
+   * This should only be called after proper zkLogin authentication
+   */
+  private async initializeDefaultAccountIfNeeded(): Promise<void> {
+    try {
+      const accountManager = AccountManager.getInstance();
+      const storedAccounts = await accountManager.getStoredAccounts();
+      
+      console.log('AuthService - Checking if default account initialization is needed:', {
+        storedAccountsCount: storedAccounts.length,
+        storedAccounts: storedAccounts.map(acc => ({ id: acc.id, type: acc.type, index: acc.index }))
+      });
+      
+      // Also check if there's an active account context that might indicate an account exists
+      try {
+        const activeContext = await accountManager.getActiveAccountContext();
+        console.log('AuthService - Current active account context:', {
+          activeContextType: activeContext.type,
+          activeContextIndex: activeContext.index,
+          activeAccountId: accountManager.generateAccountId(activeContext.type, activeContext.index)
+        });
+      } catch (error) {
+        console.log('AuthService - No active account context found');
+      }
+      
+      if (storedAccounts.length === 0) {
+        console.log('AuthService - No accounts found, but not creating default account');
+        console.log('AuthService - Note: Accounts should only be created after proper zkLogin authentication');
+        return;
+      } else {
+        console.log('AuthService - Accounts already exist, no default initialization needed');
+      }
+    } catch (error) {
+      console.error('AuthService - Error checking default account initialization:', error);
+      // Don't throw error, just log it
     }
   }
 

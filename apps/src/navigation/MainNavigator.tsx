@@ -6,6 +6,7 @@ import LegalDocumentScreen from '../screens/LegalDocumentScreen';
 import VerificationScreen from '../screens/VerificationScreen';
 import { ConfioAddressScreen } from '../screens/ConfioAddressScreen';
 import { NotificationScreen } from '../screens/NotificationScreen';
+import { CreateBusinessScreen } from '../screens/CreateBusinessScreen';
 import { AccountDetailScreen } from '../screens/AccountDetailScreen';
 import DepositScreen from '../screens/DepositScreen';
 import USDCManageScreen from '../screens/USDCManageScreen';
@@ -60,6 +61,13 @@ export const MainNavigator = () => {
       <Stack.Screen 
         name="Notification" 
         component={NotificationScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen 
+        name="CreateBusiness" 
+        component={CreateBusinessScreen}
         options={{
           headerShown: false,
         }}

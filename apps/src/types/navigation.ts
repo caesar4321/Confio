@@ -23,6 +23,7 @@ export type MainStackParamList = {
   Verification: undefined;
   ConfioAddress: undefined;
   Notification: undefined;
+  CreateBusiness: undefined;
   TraderProfile: {
     offer: {
       id: string;
