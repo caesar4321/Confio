@@ -307,13 +307,13 @@ export class AuthService {
           const lastName = lastNameParts.join(' ');
           const displayName = user.displayName || user.email || 'Mi Cuenta';
           
-                     const defaultAccount = await accountManager.createAccount(
-             'personal',
-             displayName,
-             firstName || displayName.charAt(0).toUpperCase(),
-             user.phoneNumber || undefined,
-             undefined
-           );
+          const defaultAccount = await accountManager.createAccount(
+            'personal',
+            displayName,
+            displayName.charAt(0).toUpperCase(),
+            user.phoneNumber || undefined,
+            undefined
+          );
           
           // Set as active account
           await accountManager.setActiveAccountContext({
@@ -594,7 +594,7 @@ export class AuthService {
           const defaultAccount = await accountManager.createAccount(
             'personal',
             displayName,
-            firstName || displayName.charAt(0).toUpperCase(),
+            displayName.charAt(0).toUpperCase(),
             userCredential.user.phoneNumber || undefined,
             undefined
           );

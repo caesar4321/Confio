@@ -1,6 +1,6 @@
 from django.db import models
 import uuid
-from users.models import UserProfile
+from users.models import Account
 from django.conf import settings
 from django.contrib.auth import get_user_model
 
@@ -14,10 +14,11 @@ class ZkLoginProof(models.Model):
         default=generate_proof_id,
         editable=False
     )
-    profile = models.ForeignKey(
-        UserProfile,
+    account = models.ForeignKey(
+        Account,
         on_delete=models.CASCADE,
         related_name="zk_proofs",
+        help_text="Account for this specific zkLogin proof"
     )
 
     # —————————————————————————————
@@ -39,4 +40,4 @@ class ZkLoginProof(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"Proof {self.proof_id} for {self.profile.user}"
+        return f"Proof {self.proof_id} for {self.account.account_id}"

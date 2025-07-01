@@ -21,8 +21,9 @@ class Mutation(
 # Register all types
 types = [
 	users_schema.UserType,
-	users_schema.UserProfileType,
+	users_schema.AccountType,
 	users_schema.CountryCodeType,
+	users_schema.BusinessCategoryType,
 	users_schema.LegalDocumentType,
 ]
 
