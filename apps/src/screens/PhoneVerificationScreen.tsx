@@ -22,7 +22,7 @@ import Feather from 'react-native-vector-icons/Feather';
 import TelegramLogo from '../assets/svg/TelegramLogo.svg';
 import { countries, Country } from '../utils/countries';
 import { useMutation } from '@apollo/client';
-import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE } from '../apollo/queries';
+import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE, UPDATE_PHONE_NUMBER } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
 
 type RootStackParamList = {
@@ -35,7 +35,7 @@ type PhoneVerificationScreenNavigationProp = NativeStackNavigationProp<RootStack
 
 const PhoneVerificationScreen = () => {
   const navigation = useNavigation<PhoneVerificationScreenNavigationProp>();
-  const { handleSuccessfulLogin } = useAuth();
+  const { handleSuccessfulLogin, userProfile, refreshUserProfile } = useAuth();
   const [phoneNumber, setPhoneNumber] = useState('');
   const [selectedCountry, setSelectedCountry] = useState<Country>(
     countries.find((c: Country) => c[0] === 'Venezuela') || countries[0]
@@ -51,6 +51,7 @@ const PhoneVerificationScreen = () => {
 
   const [initiateTelegramVerification, { loading: loadingInitiate }] = useMutation(INITIATE_TELEGRAM_VERIFICATION);
   const [verifyTelegramCode, { loading: loadingVerify }] = useMutation(VERIFY_TELEGRAM_CODE);
+  const [updatePhoneNumber] = useMutation(UPDATE_PHONE_NUMBER);
 
   // Colors from the design
   const colors = {
@@ -116,16 +117,50 @@ const PhoneVerificationScreen = () => {
         // Format phone number: remove any spaces, dashes, or other separators
         const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
         
-      const { data } = await verifyTelegramCode({ 
-        variables: { 
-            phoneNumber: cleanPhoneNumber,
-            countryCode: selectedCountry[2], // ISO country code
-            code: verificationCode.join('') // Join the code array into a single string
-        } 
-      });
-      if (data.verifyTelegramCode.success) {
-        Alert.alert('Success', 'Phone number verified!');
-          await handleSuccessfulLogin(true);
+        const { data } = await verifyTelegramCode({ 
+          variables: { 
+              phoneNumber: cleanPhoneNumber,
+              countryCode: selectedCountry[2], // ISO country code
+              code: verificationCode.join('') // Join the code array into a single string
+          } 
+        });
+        
+        if (data.verifyTelegramCode.success) {
+          // Check if we're in the profile update flow (user is already authenticated)
+          const isProfileUpdateFlow = !!userProfile;
+          
+          if (isProfileUpdateFlow) {
+            // Update the user's phone number in the database
+            const { data: updateData } = await updatePhoneNumber({
+              variables: {
+                countryCode: selectedCountry[1], // Phone code (e.g., '+58')
+                phoneNumber: cleanPhoneNumber,
+              },
+            });
+            
+            if (updateData?.updatePhoneNumber?.success) {
+              Alert.alert(
+                'Éxito', 
+                'Número de teléfono actualizado correctamente',
+                [
+                  {
+                    text: 'OK',
+                    onPress: () => {
+                      // Refresh user profile and go back
+                      refreshUserProfile();
+                      navigation.goBack();
+                    }
+                  }
+                ]
+              );
+            } else {
+              Alert.alert('Error', updateData?.updatePhoneNumber?.error || 'Failed to update phone number');
+            }
+          } else {
+            // Auth flow - proceed with login
+            Alert.alert('Success', 'Phone number verified!');
+            await handleSuccessfulLogin(true);
+          }
         } else {
           Alert.alert('Error', data.verifyTelegramCode.error || 'Verification failed');
         }
@@ -154,14 +189,21 @@ const PhoneVerificationScreen = () => {
     </TouchableOpacity>
   );
 
-  const renderPhoneScreen = () => (
+  const renderPhoneScreen = () => {
+    const isProfileUpdateFlow = !!userProfile;
+    const title = isProfileUpdateFlow ? 'Cambiar número de teléfono' : 'Ingresa tu número de teléfono';
+    const subtitle = isProfileUpdateFlow 
+      ? 'Ingresa tu nuevo número de teléfono para actualizar tu perfil'
+      : 'Necesitamos verificar tu identidad para proteger tu cuenta';
+    
+    return (
     <View style={styles.screenContainer}>
       <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
         <Feather name="arrow-left" size={24} color={colors.darkGray} />
       </TouchableOpacity>
 
-      <Text style={styles.title}>Ingresa tu número de teléfono</Text>
-      <Text style={styles.subtitle}>Necesitamos verificar tu identidad para proteger tu cuenta</Text>
+      <Text style={styles.title}>{title}</Text>
+      <Text style={styles.subtitle}>{subtitle}</Text>
       
       <Text style={styles.label}>País</Text>
       <TouchableOpacity
@@ -202,20 +244,34 @@ const PhoneVerificationScreen = () => {
       </TouchableOpacity>
 
       <Text style={styles.supportingText}>
-        Tu número de teléfono se utilizará para verificación y para permitir que tus amigos te envíen dinero. No será compartido con terceros.
+        {isProfileUpdateFlow 
+          ? 'Tu nuevo número de teléfono se utilizará para verificación y para permitir que tus amigos te envíen dinero.'
+          : 'Tu número de teléfono se utilizará para verificación y para permitir que tus amigos te envíen dinero. No será compartido con terceros.'
+        }
       </Text>
     </View>
-  );
+    );
+  };
 
-  const renderVerificationMethodScreen = () => (
+  const renderVerificationMethodScreen = () => {
+    const isProfileUpdateFlow = !!userProfile;
+    const title = isProfileUpdateFlow ? 'Verifica tu nuevo número' : 'Verifica tu número';
+    const subtitle = isProfileUpdateFlow 
+      ? `Selecciona cómo quieres verificar tu nuevo número\n<Text style={styles.phoneNumber}>${selectedCountry[1]} ${phoneNumber}</Text>`
+      : `Selecciona cómo quieres verificar tu número\n<Text style={styles.phoneNumber}>${selectedCountry[1]} ${phoneNumber}</Text>`;
+    
+    return (
     <View style={styles.screenContainer}>
       <TouchableOpacity style={styles.backButton} onPress={handleBack}>
         <Feather name="arrow-left" size={24} color={colors.darkGray} />
       </TouchableOpacity>
 
-      <Text style={styles.title}>Verifica tu número</Text>
+      <Text style={styles.title}>{title}</Text>
       <Text style={styles.subtitle}>
-        Selecciona cómo quieres verificar tu número{'\n'}
+        {isProfileUpdateFlow 
+          ? `Selecciona cómo quieres verificar tu nuevo número\n`
+          : `Selecciona cómo quieres verificar tu número\n`
+        }
         <Text style={styles.phoneNumber}>{selectedCountry[1]} {phoneNumber}</Text>
       </Text>
 
@@ -253,17 +309,25 @@ const PhoneVerificationScreen = () => {
         <Feather name="arrow-right" size={16} color="#6B7280" />
       </TouchableOpacity>
     </View>
-  );
+    );
+  };
 
-  const renderVerificationCodeScreen = () => (
+  const renderVerificationCodeScreen = () => {
+    const isProfileUpdateFlow = !!userProfile;
+    const title = isProfileUpdateFlow ? 'Verifica tu nuevo número' : 'Ingresa el código';
+    const subtitle = isProfileUpdateFlow 
+      ? `${verificationMethod === 'telegram' ? 'Enviamos un código a tu Telegram' : 'Enviamos un código por SMS'} para verificar tu nuevo número\n`
+      : `${verificationMethod === 'telegram' ? 'Enviamos un código a tu Telegram' : 'Enviamos un código por SMS'} al número\n`;
+    
+    return (
     <View style={styles.screenContainer}>
       <TouchableOpacity style={styles.backButton} onPress={handleBack}>
         <Feather name="arrow-left" size={24} color={colors.darkGray} />
       </TouchableOpacity>
 
-      <Text style={styles.title}>Ingresa el código</Text>
+      <Text style={styles.title}>{title}</Text>
       <Text style={styles.subtitle}>
-        {verificationMethod === 'telegram' ? 'Enviamos un código a tu Telegram' : 'Enviamos un código por SMS'} al número{"\n"}
+        {subtitle}
         <Text style={styles.phoneNumber}>{selectedCountry[1]} {phoneNumber}</Text>
       </Text>
 
@@ -307,7 +371,8 @@ const PhoneVerificationScreen = () => {
         <Text style={[styles.resendButtonText, { color: colors.confioGreen }]}>Reenviar código</Text>
       </TouchableOpacity>
     </View>
-  );
+    );
+  };
 
   return (
     <KeyboardAvoidingView

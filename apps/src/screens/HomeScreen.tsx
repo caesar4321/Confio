@@ -42,7 +42,7 @@ type HomeScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 export const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const { setCurrentAccountAvatar, profileMenu } = useHeader();
-  const { signOut } = useAuth();
+  const { signOut, userProfile } = useAuth();
   const [suiAddress, setSuiAddress] = React.useState<string>('');
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
   
@@ -96,25 +96,42 @@ export const HomeScreen = () => {
   ];
 
   // Convert stored accounts to the format expected by ProfileMenu
-  const accountMenuItems = accounts.map(acc => ({
-    id: acc.id,
-    name: acc.name,
-    type: acc.type,
-    phone: acc.phone,
-    category: acc.category,
-    avatar: acc.avatar,
-  }));
+  // For personal accounts, override with userProfile data
+  const accountMenuItems = accounts.map(acc => {
+    if (acc.type === 'personal' && userProfile) {
+      return {
+        id: acc.id,
+        name: userProfile.firstName || userProfile.username,
+        type: acc.type,
+        phone: acc.phone,
+        category: acc.category,
+        avatar: (userProfile.firstName || userProfile.username || '').charAt(0).toUpperCase(),
+      };
+    }
+    return {
+      id: acc.id,
+      name: acc.name,
+      type: acc.type,
+      phone: acc.phone,
+      category: acc.category,
+      avatar: acc.avatar,
+    };
+  });
 
   // Only use stored accounts - no mock accounts
   const displayAccounts = accountMenuItems;
 
   const currentAccount = activeAccount ? {
     id: activeAccount.id,
-    name: activeAccount.name,
+    name: activeAccount.type === 'personal' && userProfile 
+      ? (userProfile.firstName || userProfile.username)
+      : activeAccount.name,
     type: activeAccount.type,
     phone: activeAccount.phone,
     category: activeAccount.category,
-    avatar: activeAccount.avatar,
+    avatar: activeAccount.type === 'personal' && userProfile
+      ? (userProfile.firstName || userProfile.username || '').charAt(0).toUpperCase()
+      : activeAccount.avatar,
   } : (displayAccounts.length > 0 ? displayAccounts[0] : null); // Only use first account if accounts exist
   
   // Debug display accounts
@@ -176,12 +193,12 @@ export const HomeScreen = () => {
     console.log('HomeScreen - Component mounted');
   }, []);
 
-  // Update header when account changes
+  // Update header when account changes or user profile updates
   useEffect(() => {
     if (currentAccount) {
       setCurrentAccountAvatar(currentAccount.avatar);
     }
-  }, [currentAccount, setCurrentAccountAvatar]);
+  }, [currentAccount, setCurrentAccountAvatar, userProfile]);
 
   // Debug log when showProfileMenu changes
   useEffect(() => {

@@ -4,7 +4,24 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../types/navigation';
+import { RootStackParamList, MainStackParamList } from '../types/navigation';
+import { getCountryByIso } from '../utils/countries';
+
+// Utility function to format phone number with country code
+const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
+  if (!phoneNumber) return '';
+  
+  // If we have a country code, format it
+  if (phoneCountry) {
+    const country = getCountryByIso(phoneCountry);
+    if (country) {
+      const countryCode = country[1]; // country[1] is the phone code (e.g., '+54')
+      return `${countryCode} ${phoneNumber}`;
+    }
+  }
+  
+  return phoneNumber;
+};
 
 // Colors from the design
 const colors = {
@@ -21,10 +38,10 @@ const colors = {
   dark: '#111827', // gray-900
 };
 
-type ProfileScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
+type ProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 export const ProfileScreen = () => {
-  const { signOut } = useAuth();
+  const { signOut, userProfile, isUserProfileLoading } = useAuth();
   const navigation = useNavigation<ProfileScreenNavigationProp>();
 
   const handleLegalDocumentPress = (docType: 'terms' | 'privacy' | 'deletion') => {
@@ -66,11 +83,25 @@ export const ProfileScreen = () => {
       {/* Header Section */}
       <View style={styles.header}>
         <View style={styles.profileInfo}>
-          <View style={styles.avatarContainer}>
+          <TouchableOpacity 
+            style={styles.avatarContainer}
+            onPress={() => navigation.navigate('EditProfile')}
+          >
             <Icon name="user" size={40} color={colors.primary} />
-          </View>
-          <Text style={styles.name}>Julian Moon</Text>
-          <Text style={styles.phone}>+58 412 345 6789</Text>
+            <View style={styles.editIconContainer}>
+              <Icon name="edit-2" size={12} color="#fff" />
+            </View>
+          </TouchableOpacity>
+          {isUserProfileLoading ? (
+            <Text style={styles.name}>Cargando...</Text>
+          ) : userProfile ? (
+            <>
+              <Text style={styles.name}>{userProfile.firstName || userProfile.username}</Text>
+              <Text style={styles.phone}>{formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry)}</Text>
+            </>
+          ) : (
+            <Text style={styles.name}>Sin perfil</Text>
+          )}
         </View>
       </View>
 
@@ -85,7 +116,9 @@ export const ProfileScreen = () => {
           </View>
           <View style={styles.addressInfo}>
             <Text style={styles.addressTitle}>Mi dirección de Confío</Text>
-            <Text style={styles.addressValue}>confio.lat/julianmoonluna</Text>
+            <Text style={styles.addressValue}>
+              {userProfile?.username ? `confio.lat/@${userProfile.username}` : 'confio.lat/@usuario'}
+            </Text>
           </View>
           <Icon name="chevron-right" size={20} color="#9CA3AF" />
         </TouchableOpacity>
@@ -140,6 +173,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
+    position: 'relative',
+  },
+  editIconContainer: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   name: {
     fontSize: 20,

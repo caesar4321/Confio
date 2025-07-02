@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
+import { useAuth } from '../contexts/AuthContext';
 import Icon from 'react-native-vector-icons/Feather';
 import QRCode from 'react-native-qrcode-svg';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
@@ -37,9 +38,10 @@ const colors = {
 
 export const ConfioAddressScreen = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const { userProfile } = useAuth();
   const [hasSharedBefore, setHasSharedBefore] = useState(false);
-  const username = '@julianmoonluna';
-  const addressUrl = 'https://confio.lat/@julianmoonluna';
+  const username = userProfile?.username ? `@${userProfile.username}` : '@usuario';
+  const addressUrl = userProfile?.username ? `https://confio.lat/@${userProfile.username}` : 'https://confio.lat/@usuario';
   const qrRef = useRef<ViewShot>(null);
 
   const handleShare = async () => {

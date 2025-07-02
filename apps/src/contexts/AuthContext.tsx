@@ -2,6 +2,21 @@ import React, { createContext, useContext, useState, useEffect, RefObject } from
 import { AuthService } from '../services/authService';
 import { NavigationContainerRef } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
+import { useApolloClient } from '@apollo/client';
+import { GET_USER_PROFILE } from '../apollo/queries';
+
+interface UserProfile {
+  id: string;
+  username: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  phoneCountry?: string;
+  phoneNumber?: string;
+  isIdentityVerified?: boolean;
+  lastVerifiedDate?: string;
+  verificationStatus?: string;
+}
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -9,6 +24,9 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   checkLocalAuthState: () => Promise<boolean>;
   handleSuccessfulLogin: (isPhoneVerified: boolean) => Promise<void>;
+  userProfile: UserProfile | null;
+  isUserProfileLoading: boolean;
+  refreshUserProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -22,6 +40,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isNavigationReady, setIsNavigationReady] = useState(false);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [isUserProfileLoading, setIsUserProfileLoading] = useState(false);
+  const apolloClient = useApolloClient();
 
   // Set up navigation ready listener and check auth state
   useEffect(() => {
@@ -49,20 +70,60 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     });
   };
 
+  // Fetch user profile from server
+  const refreshUserProfile = async () => {
+    setIsUserProfileLoading(true);
+    try {
+      const { data } = await apolloClient.query({
+        query: GET_USER_PROFILE,
+        fetchPolicy: 'network-only',
+      });
+      setUserProfile(data?.me || null);
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+      setUserProfile(null);
+    } finally {
+      setIsUserProfileLoading(false);
+    }
+  };
+
+  // Fetch user profile after login
+  useEffect(() => {
+    if (isAuthenticated) {
+      refreshUserProfile();
+    } else {
+      setUserProfile(null);
+    }
+  }, [isAuthenticated]);
+
   const handleSuccessfulLogin = async (isPhoneVerified: boolean) => {
     try {
       console.log('Handling successful login...');
       setIsAuthenticated(true);
+      await refreshUserProfile();
       if (isPhoneVerified) {
         console.log('User has verified phone number');
         navigateToScreen('Main');
       } else {
         console.log('User needs phone verification');
-        navigateToScreen('PhoneVerification');
+        if (isNavigationReady && navigationRef.current) {
+          navigationRef.current.reset({
+            index: 0,
+            routes: [
+              {
+                name: 'Auth',
+                params: {
+                  screen: 'PhoneVerification',
+                },
+              },
+            ],
+          });
+        }
       }
     } catch (error) {
       console.error('Error handling successful login:', error);
       setIsAuthenticated(false);
+      setUserProfile(null);
       navigateToScreen('Auth');
     }
   };
@@ -124,15 +185,17 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       const authService = AuthService.getInstance();
       await authService.signOut();
       setIsAuthenticated(false);
+      setUserProfile(null);
       navigateToScreen('Auth');
     } catch (error) {
       console.error('Error signing out:', error);
       setIsAuthenticated(false);
+      setUserProfile(null);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, signOut, checkLocalAuthState, handleSuccessfulLogin }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, signOut, checkLocalAuthState, handleSuccessfulLogin, userProfile, isUserProfileLoading, refreshUserProfile }}>
       {children}
     </AuthContext.Provider>
   );
