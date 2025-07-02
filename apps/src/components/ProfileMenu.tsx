@@ -48,14 +48,12 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
 }) => {
   const { userProfile, isUserProfileLoading } = useAuth();
 
-  // For personal account, override with userProfile data
+  // For personal accounts, only format phone number with country code
   const displayAccounts = accounts.map(acc => {
     if (acc.type === 'personal' && userProfile) {
       return {
         ...acc,
-        name: userProfile.firstName || userProfile.username,
         phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
-        avatar: (userProfile.firstName || userProfile.username || '').charAt(0).toUpperCase(),
       };
     }
     return acc;
@@ -67,7 +65,10 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
     visible, 
     selectedAccount, 
     currentAccount: !!currentAccount,
-    accountsCount: accounts.length 
+    currentAccountName: currentAccount?.name,
+    currentAccountAvatar: currentAccount?.avatar,
+    accountsCount: accounts.length,
+    accounts: displayAccounts.map(acc => ({ id: acc.id, name: acc.name, avatar: acc.avatar, type: acc.type }))
   });
 
   if (!currentAccount) {
@@ -97,9 +98,9 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
               <View style={styles.accountDetails}>
                 <Text style={styles.accountName}>{currentAccount.name}</Text>
                 <Text style={styles.accountType}>
-                  {currentAccount.type === "personal" 
-                    ? currentAccount.phone 
-                    : currentAccount.category}
+                  {currentAccount.type.toLowerCase() === "personal" 
+                    ? "Personal"
+                    : "Negocio"}
                 </Text>
               </View>
             </View>
@@ -130,7 +131,7 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
                   <View style={styles.accountItemInfo}>
                     <Text style={styles.accountItemName}>{account.name}</Text>
                     <Text style={styles.accountItemType}>
-                      {account.type === "personal" ? "Personal" : account.category}
+                      {account.type.toLowerCase() === "personal" ? "Personal" : "Negocio"}
                     </Text>
                   </View>
                   {selectedAccount === account.id && (

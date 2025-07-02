@@ -67,12 +67,15 @@ export class AccountManager {
     const [type, indexStr] = accountId.split('_');
     const index = parseInt(indexStr, 10);
     
-    if (!type || isNaN(index) || (type !== 'personal' && type !== 'business')) {
+    // Convert type to lowercase for comparison
+    const normalizedType = type.toLowerCase();
+    
+    if (!type || isNaN(index) || (normalizedType !== 'personal' && normalizedType !== 'business')) {
       throw new Error(`Invalid account ID format: "${accountId}" (expected format: "personal_0" or "business_0")`);
     }
     
     return {
-      type: type as AccountType,
+      type: normalizedType as AccountType,
       index
     };
   }
@@ -188,14 +191,9 @@ export class AccountManager {
               console.log(`AccountManager - Raw data: "${credentials.password}"`);
               
               // Remove the corrupted entry
-              await Keychain.setGenericPassword(
-                'account_data',
-                '',
-                {
-                  service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`,
-                  accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-                }
-              );
+              await Keychain.resetGenericPassword({
+                service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`
+              });
             }
           }
         } catch (error) {
@@ -252,14 +250,9 @@ export class AccountManager {
               console.log(`AccountManager - Raw data: "${credentials.password}"`);
               
               // Remove the corrupted entry
-              await Keychain.setGenericPassword(
-                'account_data',
-                '',
-                {
-                  service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`,
-                  accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-                }
-              );
+              await Keychain.resetGenericPassword({
+                service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`
+              });
               
               index++;
               continue;
@@ -270,14 +263,9 @@ export class AccountManager {
               console.log(`AccountManager - Invalid account data for ${accountId}, removing:`, account);
               
               // Remove the invalid entry
-              await Keychain.setGenericPassword(
-                'account_data',
-                '',
-                {
-                  service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`,
-                  accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-                }
-              );
+              await Keychain.resetGenericPassword({
+                service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`
+              });
               
               index++;
               continue;
@@ -315,6 +303,69 @@ export class AccountManager {
     } catch (error) {
       console.error('Error getting stored accounts:', error);
       return [];
+    }
+  }
+
+  /**
+   * Sync server accounts with local storage
+   * This method updates local account storage with server data
+   */
+  public async syncServerAccounts(serverAccounts: any[]): Promise<void> {
+    try {
+      console.log('AccountManager - syncServerAccounts: syncing with server data', {
+        serverAccountsCount: serverAccounts.length,
+        serverAccounts: serverAccounts.map(acc => ({ 
+          id: acc.accountId, 
+          type: acc.accountType, 
+          index: acc.accountIndex,
+          businessName: acc.business?.name 
+        }))
+      });
+      
+      // Clear existing accounts
+      await this.clearAllAccounts();
+      
+      // Store server accounts locally
+      for (const serverAccount of serverAccounts) {
+        const account: StoredAccount = {
+          id: serverAccount.accountId,
+          type: serverAccount.accountType,
+          index: serverAccount.accountIndex,
+          name: serverAccount.business?.name || `Account ${serverAccount.accountIndex}`,
+          avatar: serverAccount.business?.name?.charAt(0).toUpperCase() || 'A',
+          category: serverAccount.business?.category,
+          suiAddress: serverAccount.suiAddress,
+          createdAt: serverAccount.createdAt,
+          isActive: false
+        };
+        
+        await this.storeAccount(account);
+        console.log(`AccountManager - Synced server account: ${account.id}`, {
+          type: account.type,
+          index: account.index,
+          name: account.name
+        });
+      }
+      
+      // Set the first account as active if no active account exists
+      if (serverAccounts.length > 0) {
+        try {
+          await this.getActiveAccountContext();
+        } catch (error) {
+          // No active account, set the first one
+          const firstAccount = serverAccounts[0];
+          await this.setActiveAccountContext({
+            type: firstAccount.accountType,
+            index: firstAccount.accountIndex
+          });
+          console.log('AccountManager - Set first account as active:', firstAccount.accountId);
+        }
+      }
+      
+      console.log('AccountManager - syncServerAccounts completed successfully');
+    } catch (error) {
+      console.error('Error syncing server accounts:', error);
+      throw error;
     }
   }
 
@@ -416,7 +467,8 @@ export class AccountManager {
 
   /**
    * Create a new account
-   * Automatically determines account type: personal if no accounts exist, business otherwise
+   * NOTE: This method is deprecated. Account creation should be done through server mutations.
+   * This method is kept for backward compatibility but should not be used for new accounts.
    */
   public async createAccount(
     type: AccountType,
@@ -425,33 +477,21 @@ export class AccountManager {
     phone?: string,
     category?: string
   ): Promise<StoredAccount> {
-    const accounts = await this.getStoredAccounts();
+    console.warn('AccountManager.createAccount is deprecated. Use server mutations for account creation.');
     
-    // If no accounts exist, force type to be personal
-    if (accounts.length === 0) {
-      type = 'personal';
-    } else {
-      // If accounts exist, force type to be business
-      type = 'business';
-    }
-    
-    const index = await this.getNextAvailableIndex(type);
-    const id = this.generateAccountId(type, index);
-    
-    const account: StoredAccount = {
-      id,
-      type,
-      index,
-      name,
-      avatar,
-      phone,
-      category,
+    // For backward compatibility, return a mock account
+    // This should not be used for actual account creation
+    return {
+      id: 'deprecated_method',
+      type: type,
+      index: 0,
+      name: name,
+      avatar: avatar,
+      phone: phone,
+      category: category,
       createdAt: new Date().toISOString(),
       isActive: false
     };
-
-    await this.storeAccount(account);
-    return account;
   }
 
   /**
@@ -476,15 +516,10 @@ export class AccountManager {
     try {
       console.log('AccountManager - deleteAccount: deleting account:', accountId);
       
-      // Delete the specific account by setting it to empty string
-      await Keychain.setGenericPassword(
-        'account_data',
-        '',
-        {
-          service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-        }
-      );
+      // Delete the specific account using resetGenericPassword (works on both iOS and Android)
+      await Keychain.resetGenericPassword({
+        service: `${ACCOUNT_KEYCHAIN_SERVICE}_${accountId}`
+      });
       
       console.log('AccountManager - deleteAccount: account deleted successfully:', accountId);
     } catch (error) {
@@ -500,15 +535,10 @@ export class AccountManager {
     try {
       console.log('AccountManager - clearAllAccounts: starting cleanup');
       
-      // Clear active account context
-      await Keychain.setGenericPassword(
-        'account_data',
-        '',
-        {
-          service: `${ACCOUNT_KEYCHAIN_SERVICE}_active`,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-        }
-      );
+      // Clear active account context using resetGenericPassword
+      await Keychain.resetGenericPassword({
+        service: `${ACCOUNT_KEYCHAIN_SERVICE}_active`
+      });
       
       // Clear all stored accounts by iterating through them
       const accounts = await this.getStoredAccounts();
@@ -533,15 +563,10 @@ export class AccountManager {
     try {
       console.log('AccountManager - resetActiveAccount: resetting active account');
       
-      // Set empty string to clear the active account
-      await Keychain.setGenericPassword(
-        'account_data',
-        '',
-        {
-          service: `${ACCOUNT_KEYCHAIN_SERVICE}_active`,
-          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-        }
-      );
+      // Clear the active account using resetGenericPassword
+      await Keychain.resetGenericPassword({
+        service: `${ACCOUNT_KEYCHAIN_SERVICE}_active`
+      });
       
       console.log('AccountManager - resetActiveAccount: active account reset successfully');
     } catch (error) {

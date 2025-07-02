@@ -294,6 +294,8 @@ class FinalizeZkLoginInput(graphene.InputObjectType):
     audience = graphene.String(required=True)
     firebaseToken = graphene.String(required=True)
     salt = graphene.String(required=True)
+    accountType = graphene.String(required=True)
+    accountIndex = graphene.Int(required=True)
 
 class FinalizeZkLoginPayload(graphene.ObjectType):
     success = graphene.Boolean()
@@ -316,29 +318,50 @@ def resolve_finalize_zk_login(self, info, input):
     try:
         logger.info("Starting finalize_zk_login with input: %s", input)
         
-        # Find user profile by Firebase UID
+        # Find user profile by Firebase UID and account type/index
         try:
             # Get the Firebase UID from the Firebase token
             decoded_token = auth.verify_id_token(input.firebaseToken)
             firebase_uid = decoded_token.get('uid')
-            logger.info("Looking for account with Firebase UID: %s", firebase_uid)
+            logger.info("Looking for account with Firebase UID: %s, account type: %s, index: %s", firebase_uid, input.accountType, input.accountIndex)
             
-            # Find the user account by firebase_uid field
-            account = Account.objects.get(user__firebase_uid=firebase_uid)
-            logger.info("Found user account for Firebase UID: %s, account_id: %s", firebase_uid, account.id)
-        except Account.DoesNotExist:
-            logger.error("User account not found for Firebase UID: %s", firebase_uid)
-            # Log available accounts for debugging
+            # Get the user
             from users.models import User
             try:
                 user = User.objects.get(firebase_uid=firebase_uid)
-                user_accounts = Account.objects.filter(user=user)
-                logger.error("User exists but has no accounts. User ID: %s, Accounts count: %s", user.id, user_accounts.count())
             except User.DoesNotExist:
                 logger.error("User not found for Firebase UID: %s", firebase_uid)
+                return FinalizeZkLoginPayload(
+                    success=False,
+                    error="User not found"
+                )
+            
+            # Find the specific account by type and index
+            try:
+                account = Account.objects.get(
+                    user=user,
+                    account_type=input.accountType,
+                    account_index=input.accountIndex
+                )
+                logger.info("Found account: %s (%s_%s)", account.id, account.account_type, account.account_index)
+            except Account.DoesNotExist:
+                logger.error("Account not found for user %s with type %s and index %s", user.id, input.accountType, input.accountIndex)
+                # Log available accounts for debugging
+                user_accounts = Account.objects.filter(user=user)
+                logger.error("Available accounts for user %s:", user.id)
+                for user_account in user_accounts:
+                    logger.error("  Account %s (%s_%s)", user_account.id, user_account.account_type, user_account.account_index)
+                return FinalizeZkLoginPayload(
+                    success=False,
+                    error=f"Account not found for type {input.accountType} and index {input.accountIndex}"
+                )
+            
+            logger.info("Found user account for Firebase UID: %s, account_id: %s (%s_%s)", firebase_uid, account.id, account.account_type, account.account_index)
+        except Exception as e:
+            logger.error("Error finding user account: %s", str(e))
             return FinalizeZkLoginPayload(
                 success=False,
-                error="User account not found"
+                error="Error finding user account"
             )
 
         # Prepare prover payload

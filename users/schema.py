@@ -1,7 +1,7 @@
 import graphene
 from graphene_django import DjangoObjectType
 from django.contrib.auth import get_user_model
-from .models import User, Account, IdentityVerification
+from .models import User, Account, IdentityVerification, Business
 from .country_codes import COUNTRY_CODES
 from graphql_jwt.utils import jwt_encode, jwt_decode
 from graphql_jwt.shortcuts import create_refresh_token
@@ -59,9 +59,16 @@ class IdentityVerificationType(DjangoObjectType):
 		model = IdentityVerification
 		fields = ('id', 'user', 'verified_first_name', 'verified_last_name', 'verified_date_of_birth', 'verified_nationality', 'verified_address', 'verified_city', 'verified_state', 'verified_country', 'verified_postal_code', 'document_type', 'document_number', 'document_issuing_country', 'document_expiry_date', 'status', 'verified_by', 'verified_at', 'rejected_reason', 'created_at', 'updated_at')
 
+class BusinessType(DjangoObjectType):
+	class Meta:
+		model = Business
+		fields = ('id', 'name', 'description', 'category', 'business_registration_number', 'address', 'created_at', 'updated_at')
+
 class AccountType(DjangoObjectType):
-	# Define computed field explicitly
+	# Define computed fields explicitly
 	account_id = graphene.String()
+	display_name = graphene.String()
+	avatar_letter = graphene.String()
 	
 	class Meta:
 		model = Account
@@ -69,6 +76,12 @@ class AccountType(DjangoObjectType):
 	
 	def resolve_account_id(self, info):
 		return self.account_id
+	
+	def resolve_display_name(self, info):
+		return self.display_name
+	
+	def resolve_avatar_letter(self, info):
+		return self.avatar_letter
 
 class CountryCodeType(graphene.ObjectType):
 	code = graphene.String()
@@ -118,6 +131,7 @@ class Query(graphene.ObjectType):
 	country_codes = graphene.List(CountryCodeType)
 	business_categories = graphene.List(BusinessCategoryType)
 	user_verifications = graphene.List(IdentityVerificationType, user_id=graphene.ID())
+	user_accounts = graphene.List(AccountType)
 	legalDocument = graphene.Field(
 		LegalDocumentType,
 		docType=graphene.String(required=True),
@@ -183,6 +197,23 @@ class Query(graphene.ObjectType):
 		
 		# If no user_id provided, return current user's verifications
 		return IdentityVerification.objects.filter(user=user)
+
+	def resolve_user_accounts(self, info):
+		user = getattr(info.context, 'user', None)
+		print(f"resolve_user_accounts - user: {user}")
+		print(f"resolve_user_accounts - user authenticated: {user and getattr(user, 'is_authenticated', False)}")
+		
+		if not (user and getattr(user, 'is_authenticated', False)):
+			print("resolve_user_accounts - returning empty list (not authenticated)")
+			return []
+		
+		accounts = Account.objects.filter(user=user).select_related('business')
+		print(f"resolve_user_accounts - found {accounts.count()} accounts for user {user.id}")
+		for account in accounts:
+			print(f"  Account: {account.id} ({account.account_type}_{account.account_index}) - business: {account.business}")
+		
+		# Return accounts sorted by custom ordering: personal first, then business by index
+		return sorted(accounts, key=lambda acc: acc.get_ordering_key())
 
 class UpdatePhoneNumber(graphene.Mutation):
 	class Arguments:
@@ -401,6 +432,132 @@ class RejectIdentityVerification(graphene.Mutation):
 		except Exception as e:
 			return RejectIdentityVerification(success=False, error=str(e), verification=None)
 
+class CreateBusiness(graphene.Mutation):
+	class Arguments:
+		name = graphene.String(required=True)
+		description = graphene.String()
+		category = graphene.String(required=True)
+		business_registration_number = graphene.String()
+		address = graphene.String()
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	business = graphene.Field(BusinessType)
+	account = graphene.Field(AccountType)
+
+	@classmethod
+	def mutate(cls, root, info, name, category, description=None, business_registration_number=None, address=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return CreateBusiness(success=False, error="Authentication required")
+
+		try:
+			# Validate business name
+			if not name.strip():
+				return CreateBusiness(success=False, error="El nombre del negocio es requerido")
+
+			# Validate category
+			valid_categories = [choice[0] for choice in Business.BUSINESS_CATEGORY_CHOICES]
+			if category not in valid_categories:
+				return CreateBusiness(success=False, error="Categoría de negocio inválida")
+
+			# Rate limiting: Check if user has created a business in the last 30 seconds
+			from django.utils import timezone
+			from datetime import timedelta
+			
+			recent_business = Business.objects.filter(
+				accounts__user=user,
+				created_at__gte=timezone.now() - timedelta(seconds=30)
+			).first()
+			
+			if recent_business:
+				return CreateBusiness(
+					success=False, 
+					error="Has intentado crear un negocio muy recientemente. Por favor, espera unos segundos antes de intentar de nuevo."
+				)
+
+			# Check for duplicate business name for this user
+			existing_business = Business.objects.filter(
+				accounts__user=user,
+				name__iexact=name.strip()
+			).first()
+			
+			if existing_business:
+				return CreateBusiness(
+					success=False, 
+					error=f"Ya tienes un negocio con el nombre '{name.strip()}'. Por favor, usa un nombre diferente."
+				)
+
+			# Create the business
+			business = Business.objects.create(
+				name=name.strip(),
+				description=description.strip() if description else None,
+				category=category,
+				business_registration_number=business_registration_number.strip() if business_registration_number else None,
+				address=address.strip() if address else None
+			)
+
+			# Get the next available business account index for this user
+			# Include soft-deleted accounts to prevent index reuse
+			next_index = Account.all_objects.filter(
+				user=user,
+				account_type='business'
+			).count()
+
+			# Create the business account
+			account = Account.objects.create(
+				user=user,
+				account_type='business',
+				account_index=next_index,
+				business=business
+			)
+
+			return CreateBusiness(
+				success=True,
+				error=None,
+				business=business,
+				account=account
+			)
+
+		except Exception as e:
+			logger.error(f"Error creating business: {str(e)}")
+			return CreateBusiness(success=False, error="Error interno del servidor")
+
+class UpdateAccountSuiAddress(graphene.Mutation):
+	class Arguments:
+		account_id = graphene.ID(required=True)
+		sui_address = graphene.String(required=True)
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	account = graphene.Field(AccountType)
+
+	@classmethod
+	def mutate(cls, root, info, account_id, sui_address):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return UpdateAccountSuiAddress(success=False, error="Authentication required")
+
+		try:
+			# Get the account and verify it belongs to the user
+			account = Account.objects.get(id=account_id, user=user)
+			
+			# Update the Sui address
+			account.sui_address = sui_address
+			account.save()
+			
+			return UpdateAccountSuiAddress(
+				success=True,
+				error=None,
+				account=account
+			)
+
+		except Account.DoesNotExist:
+			return UpdateAccountSuiAddress(success=False, error="Cuenta no encontrada")
+		except Exception as e:
+			logger.error(f"Error updating account Sui address: {str(e)}")
+			return UpdateAccountSuiAddress(success=False, error="Error interno del servidor")
+
 class RefreshToken(graphene.Mutation):
 	class Arguments:
 		refreshToken = graphene.String(required=True)
@@ -460,3 +617,5 @@ class Mutation(graphene.ObjectType):
 	submit_identity_verification = SubmitIdentityVerification.Field()
 	approve_identity_verification = ApproveIdentityVerification.Field()
 	reject_identity_verification = RejectIdentityVerification.Field()
+	create_business = CreateBusiness.Field()
+	update_account_sui_address = UpdateAccountSuiAddress.Field()

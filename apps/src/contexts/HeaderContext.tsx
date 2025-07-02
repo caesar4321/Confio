@@ -17,7 +17,7 @@ interface HeaderProviderProps {
 
 export const HeaderProvider: React.FC<HeaderProviderProps> = ({ children }) => {
   const [unreadNotifications, setUnreadNotifications] = useState(3);
-  const [currentAccountAvatar, setCurrentAccountAvatar] = useState('J');
+  const [currentAccountAvatar, setCurrentAccountAvatar] = useState('');
   const profileMenu = useProfileMenu();
 
   return (
