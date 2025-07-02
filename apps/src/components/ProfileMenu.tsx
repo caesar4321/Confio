@@ -1,6 +1,24 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { useAuth } from '../contexts/AuthContext';
+import { getCountryByIso } from '../utils/countries';
+
+// Utility function to format phone number with country code
+const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
+  if (!phoneNumber) return '';
+  
+  // If we have a country code, format it
+  if (phoneCountry) {
+    const country = getCountryByIso(phoneCountry);
+    if (country) {
+      const countryCode = country[1]; // country[1] is the phone code (e.g., '+54')
+      return `${countryCode} ${phoneNumber}`;
+    }
+  }
+  
+  return phoneNumber;
+};
 
 interface Account {
   id: string;
@@ -28,7 +46,21 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
   onAccountSwitch,
   onCreateBusinessAccount,
 }) => {
-  const currentAccount = accounts.find(acc => acc.id === selectedAccount);
+  const { userProfile, isUserProfileLoading } = useAuth();
+
+  // For personal account, override with userProfile data
+  const displayAccounts = accounts.map(acc => {
+    if (acc.type === 'personal' && userProfile) {
+      return {
+        ...acc,
+        name: userProfile.firstName || userProfile.username,
+        phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
+        avatar: (userProfile.firstName || userProfile.username || '').charAt(0).toUpperCase(),
+      };
+    }
+    return acc;
+  });
+  const currentAccount = displayAccounts.find(acc => acc.id === selectedAccount);
 
   // Debug logging
   console.log('ProfileMenu render:', { 
@@ -80,29 +112,33 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
           <View style={styles.accountList}>
             <Text style={styles.sectionTitle}>Cambiar cuenta</Text>
             
-            {accounts.map((account) => (
-              <TouchableOpacity
-                key={account.id}
-                style={[
-                  styles.accountItem,
-                  selectedAccount === account.id && styles.selectedAccount
-                ]}
-                onPress={() => onAccountSwitch(account.id)}
-              >
-                <View style={styles.accountItemAvatar}>
-                  <Text style={styles.accountItemAvatarText}>{account.avatar}</Text>
-                </View>
-                <View style={styles.accountItemInfo}>
-                  <Text style={styles.accountItemName}>{account.name}</Text>
-                  <Text style={styles.accountItemType}>
-                    {account.type === "personal" ? "Personal" : account.category}
-                  </Text>
-                </View>
-                {selectedAccount === account.id && (
-                  <View style={styles.selectedIndicator} />
-                )}
-              </TouchableOpacity>
-            ))}
+            {isUserProfileLoading ? (
+              <Text style={{ padding: 16 }}>Cargando perfil...</Text>
+            ) : (
+              displayAccounts.map((account) => (
+                <TouchableOpacity
+                  key={account.id}
+                  style={[
+                    styles.accountItem,
+                    selectedAccount === account.id && styles.selectedAccount
+                  ]}
+                  onPress={() => onAccountSwitch(account.id)}
+                >
+                  <View style={styles.accountItemAvatar}>
+                    <Text style={styles.accountItemAvatarText}>{account.avatar}</Text>
+                  </View>
+                  <View style={styles.accountItemInfo}>
+                    <Text style={styles.accountItemName}>{account.name}</Text>
+                    <Text style={styles.accountItemType}>
+                      {account.type === "personal" ? "Personal" : account.category}
+                    </Text>
+                  </View>
+                  {selectedAccount === account.id && (
+                    <View style={styles.selectedIndicator} />
+                  )}
+                </TouchableOpacity>
+              ))
+            )}
 
             {/* Create Business Account Button */}
             <TouchableOpacity 

@@ -1,7 +1,7 @@
 import graphene
 from graphene_django import DjangoObjectType
 from django.contrib.auth import get_user_model
-from .models import User, Account
+from .models import User, Account, IdentityVerification
 from .country_codes import COUNTRY_CODES
 from graphql_jwt.utils import jwt_encode, jwt_decode
 from graphql_jwt.shortcuts import create_refresh_token
@@ -36,14 +36,39 @@ def jwt_payload_handler(user):
 	return payload
 
 class UserType(DjangoObjectType):
+	# Define computed fields explicitly
+	is_identity_verified = graphene.Boolean()
+	last_verified_date = graphene.DateTime()
+	verification_status = graphene.String()
+	
 	class Meta:
 		model = User
 		fields = ('id', 'username', 'email', 'first_name', 'last_name', 'phone_country', 'phone_number')
+	
+	def resolve_is_identity_verified(self, info):
+		return self.is_identity_verified
+	
+	def resolve_last_verified_date(self, info):
+		return self.last_verified_date
+	
+	def resolve_verification_status(self, info):
+		return self.verification_status
+
+class IdentityVerificationType(DjangoObjectType):
+	class Meta:
+		model = IdentityVerification
+		fields = ('id', 'user', 'verified_first_name', 'verified_last_name', 'verified_date_of_birth', 'verified_nationality', 'verified_address', 'verified_city', 'verified_state', 'verified_country', 'verified_postal_code', 'document_type', 'document_number', 'document_issuing_country', 'document_expiry_date', 'status', 'verified_by', 'verified_at', 'rejected_reason', 'created_at', 'updated_at')
 
 class AccountType(DjangoObjectType):
+	# Define computed field explicitly
+	account_id = graphene.String()
+	
 	class Meta:
 		model = Account
-		fields = ('id', 'user', 'account_type', 'account_index', 'account_id', 'business', 'sui_address', 'created_at', 'last_login_at')
+		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'sui_address', 'created_at', 'last_login_at')
+	
+	def resolve_account_id(self, info):
+		return self.account_id
 
 class CountryCodeType(graphene.ObjectType):
 	code = graphene.String()
@@ -92,6 +117,7 @@ class Query(graphene.ObjectType):
 	me = graphene.Field(UserType)
 	country_codes = graphene.List(CountryCodeType)
 	business_categories = graphene.List(BusinessCategoryType)
+	user_verifications = graphene.List(IdentityVerificationType, user_id=graphene.ID())
 	legalDocument = graphene.Field(
 		LegalDocumentType,
 		docType=graphene.String(required=True),
@@ -144,6 +170,20 @@ class Query(graphene.ObjectType):
 		from .models import Business
 		return [BusinessCategoryType(id=choice[0], name=choice[1]) for choice in Business.BUSINESS_CATEGORY_CHOICES]
 
+	def resolve_user_verifications(self, info, user_id=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return []
+		
+		# If user_id is provided, check if current user is admin or the same user
+		if user_id:
+			if not user.is_staff and str(user.id) != user_id:
+				return []
+			return IdentityVerification.objects.filter(user_id=user_id)
+		
+		# If no user_id provided, return current user's verifications
+		return IdentityVerification.objects.filter(user=user)
+
 class UpdatePhoneNumber(graphene.Mutation):
 	class Arguments:
 		country_code = graphene.String(required=True)
@@ -158,24 +198,208 @@ class UpdatePhoneNumber(graphene.Mutation):
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return UpdatePhoneNumber(success=False, error="Authentication required")
 
-		# Validate country code
-		valid_country = False
+		# Validate country code and get ISO code
+		iso_country_code = None
 		for code in COUNTRY_CODES:
-			if code[1] == country_code:
-				valid_country = True
+			if code[1] == country_code:  # code[1] is phone code (e.g., '+58')
+				iso_country_code = code[2]  # code[2] is ISO code (e.g., 'VE')
 				break
 
-		if not valid_country:
+		if not iso_country_code:
 			return UpdatePhoneNumber(success=False, error="Invalid country code")
 
 		# Update user's phone number
 		try:
-			user.phone_country = country_code
+			user.phone_country = iso_country_code  # Store ISO code
 			user.phone_number = phone_number
 			user.save()
 			return UpdatePhoneNumber(success=True, error=None)
 		except Exception as e:
 			return UpdatePhoneNumber(success=False, error=str(e))
+
+class UpdateUsername(graphene.Mutation):
+	class Arguments:
+		username = graphene.String(required=True)
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	user = graphene.Field(UserType)
+
+	@classmethod
+	def mutate(cls, root, info, username):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return UpdateUsername(success=False, error="Authentication required", user=None)
+
+		# Validate input
+		username = username.strip()
+		if not username:
+			return UpdateUsername(success=False, error="Username is required", user=None)
+
+		# Server-side validation for username format and length
+		from .validators import validate_username
+		is_valid, error_message = validate_username(username)
+		if not is_valid:
+			return UpdateUsername(success=False, error=error_message, user=None)
+
+		# Check if username is already taken (case-insensitive)
+		existing_user = User.objects.filter(username__iexact=username).exclude(id=user.id).first()
+		if existing_user:
+			return UpdateUsername(success=False, error="Este nombre de usuario ya está en uso. Intenta con otro nombre.", user=None)
+
+		# Update user's username (preserve case as entered)
+		try:
+			user.username = username
+			user.save()
+			return UpdateUsername(success=True, error=None, user=user)
+		except Exception as e:
+			return UpdateUsername(success=False, error=str(e), user=None)
+
+class UpdateUserProfile(graphene.Mutation):
+	class Arguments:
+		first_name = graphene.String(required=True)
+		last_name = graphene.String(required=True)
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	user = graphene.Field(UserType)
+
+	@classmethod
+	def mutate(cls, root, info, first_name, last_name):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return UpdateUserProfile(success=False, error="Authentication required", user=None)
+
+		# Check if user is verified - if so, don't allow name changes
+		if user.is_identity_verified:
+			return UpdateUserProfile(success=False, error="No se puede modificar el nombre de un usuario verificado", user=None)
+
+		# Validate input
+		if not first_name.strip():
+			return UpdateUserProfile(success=False, error="First name is required", user=None)
+
+		# Update user's profile
+		try:
+			user.first_name = first_name.strip()
+			user.last_name = last_name.strip()
+			user.save()
+			return UpdateUserProfile(success=True, error=None, user=user)
+		except Exception as e:
+			return UpdateUserProfile(success=False, error=str(e), user=None)
+
+
+
+class SubmitIdentityVerification(graphene.Mutation):
+	class Arguments:
+		verified_first_name = graphene.String(required=True)
+		verified_last_name = graphene.String(required=True)
+		verified_date_of_birth = graphene.Date(required=True)
+		verified_nationality = graphene.String(required=True)
+		verified_address = graphene.String(required=True)
+		verified_city = graphene.String(required=True)
+		verified_state = graphene.String(required=True)
+		verified_country = graphene.String(required=True)
+		verified_postal_code = graphene.String()
+		document_type = graphene.String(required=True)
+		document_number = graphene.String(required=True)
+		document_issuing_country = graphene.String(required=True)
+		document_expiry_date = graphene.Date()
+		document_front_image = graphene.String(required=True)  # Base64 encoded
+		document_back_image = graphene.String()  # Base64 encoded
+		selfie_with_document = graphene.String(required=True)  # Base64 encoded
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	verification = graphene.Field(IdentityVerificationType)
+
+	@classmethod
+	def mutate(cls, root, info, **kwargs):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return SubmitIdentityVerification(success=False, error="Authentication required", verification=None)
+
+		try:
+			# Create verification record
+			verification = IdentityVerification.objects.create(
+				user=user,
+				verified_first_name=kwargs['verified_first_name'],
+				verified_last_name=kwargs['verified_last_name'],
+				verified_date_of_birth=kwargs['verified_date_of_birth'],
+				verified_nationality=kwargs['verified_nationality'],
+				verified_address=kwargs['verified_address'],
+				verified_city=kwargs['verified_city'],
+				verified_state=kwargs['verified_state'],
+				verified_country=kwargs['verified_country'],
+				verified_postal_code=kwargs.get('verified_postal_code'),
+				document_type=kwargs['document_type'],
+				document_number=kwargs['document_number'],
+				document_issuing_country=kwargs['document_issuing_country'],
+				document_expiry_date=kwargs.get('document_expiry_date'),
+				# Note: File handling would need to be implemented separately
+				# For now, we'll store the base64 data as text
+				document_front_image=kwargs['document_front_image'],
+				document_back_image=kwargs.get('document_back_image'),
+				selfie_with_document=kwargs['selfie_with_document'],
+			)
+			
+			return SubmitIdentityVerification(success=True, error=None, verification=verification)
+		except Exception as e:
+			return SubmitIdentityVerification(success=False, error=str(e), verification=None)
+
+class ApproveIdentityVerification(graphene.Mutation):
+	class Arguments:
+		verification_id = graphene.ID(required=True)
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	verification = graphene.Field(IdentityVerificationType)
+
+	@classmethod
+	def mutate(cls, root, info, verification_id):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return ApproveIdentityVerification(success=False, error="Authentication required", verification=None)
+
+		# Check if the current user has admin permissions
+		if not user.is_staff:
+			return ApproveIdentityVerification(success=False, error="Permisos insuficientes", verification=None)
+
+		try:
+			verification = IdentityVerification.objects.get(id=verification_id)
+			verification.approve_verification(user)
+			return ApproveIdentityVerification(success=True, error=None, verification=verification)
+		except IdentityVerification.DoesNotExist:
+			return ApproveIdentityVerification(success=False, error="Verificación no encontrada", verification=None)
+		except Exception as e:
+			return ApproveIdentityVerification(success=False, error=str(e), verification=None)
+
+class RejectIdentityVerification(graphene.Mutation):
+	class Arguments:
+		verification_id = graphene.ID(required=True)
+		reason = graphene.String(required=True)
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	verification = graphene.Field(IdentityVerificationType)
+
+	@classmethod
+	def mutate(cls, root, info, verification_id, reason):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return RejectIdentityVerification(success=False, error="Authentication required", verification=None)
+
+		# Check if the current user has admin permissions
+		if not user.is_staff:
+			return RejectIdentityVerification(success=False, error="Permisos insuficientes", verification=None)
+
+		try:
+			verification = IdentityVerification.objects.get(id=verification_id)
+			verification.reject_verification(user, reason)
+			return RejectIdentityVerification(success=True, error=None, verification=verification)
+		except IdentityVerification.DoesNotExist:
+			return RejectIdentityVerification(success=False, error="Verificación no encontrada", verification=None)
+		except Exception as e:
+			return RejectIdentityVerification(success=False, error=str(e), verification=None)
 
 class RefreshToken(graphene.Mutation):
 	class Arguments:
@@ -229,5 +453,10 @@ class RefreshToken(graphene.Mutation):
 
 class Mutation(graphene.ObjectType):
 	update_phone_number = UpdatePhoneNumber.Field()
+	update_username = UpdateUsername.Field()
+	update_user_profile = UpdateUserProfile.Field()
 	invalidate_auth_tokens = InvalidateAuthTokens.Field()
 	refresh_token = RefreshToken.Field()
+	submit_identity_verification = SubmitIdentityVerification.Field()
+	approve_identity_verification = ApproveIdentityVerification.Field()
+	reject_identity_verification = RejectIdentityVerification.Field()

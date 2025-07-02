@@ -72,6 +72,228 @@ class User(AbstractUser):
         self.auth_token_version += 1
         self.save(update_fields=['auth_token_version'])
 
+
+
+    @property
+    def verification_status(self):
+        """Get the current verification status based on verification records"""
+        latest_verification = self.latest_verification
+        if latest_verification and latest_verification.status == 'verified':
+            return 'verified'
+        elif latest_verification and latest_verification.status == 'rejected':
+            return 'rejected'
+        elif latest_verification and latest_verification.status == 'pending':
+            return 'pending'
+        return 'unverified'
+
+    @property
+    def is_identity_verified(self):
+        """Check if user has any verified identity records"""
+        return self.verifications.filter(status='verified').exists()
+
+    @property
+    def last_verified_date(self):
+        """Get the date of the latest verification"""
+        latest_verification = self.latest_verification
+        if latest_verification and latest_verification.status == 'verified':
+            return latest_verification.verified_at
+        return None
+
+
+
+    @property
+    def latest_verification(self):
+        """Get the latest verification record for this user"""
+        return self.verifications.order_by('-verified_at').first()
+
+    @property
+    def is_verified(self):
+        """Check if user has any verified identity records"""
+        return self.verifications.filter(status='verified').exists()
+
+
+class IdentityVerification(models.Model):
+    """Model for storing KYC/AML verification documents and information"""
+    
+    VERIFICATION_STATUS_CHOICES = [
+        ('pending', 'Pendiente'),
+        ('verified', 'Verificado'),
+        ('rejected', 'Rechazado'),
+        ('expired', 'Expirado'),
+    ]
+    
+    DOCUMENT_TYPE_CHOICES = [
+        ('national_id', 'Cédula de Identidad'),
+        ('passport', 'Pasaporte'),
+        ('drivers_license', 'Licencia de Conducir'),
+        ('foreign_id', 'Documento de Identidad Extranjero'),
+    ]
+    
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='verifications',
+        help_text="User being verified"
+    )
+    
+    # Personal Information
+    verified_first_name = models.CharField(
+        max_length=100,
+        help_text="First name as verified from documents"
+    )
+    verified_last_name = models.CharField(
+        max_length=100,
+        help_text="Last name as verified from documents"
+    )
+    verified_date_of_birth = models.DateField(
+        help_text="Date of birth as verified from documents"
+    )
+    verified_nationality = models.CharField(
+        max_length=3,
+        help_text="Nationality ISO code (e.g., VEN, ARG, COL)"
+    )
+    
+    # Address Information
+    verified_address = models.TextField(
+        help_text="Full address as verified from documents"
+    )
+    verified_city = models.CharField(
+        max_length=100,
+        help_text="City as verified from documents"
+    )
+    verified_state = models.CharField(
+        max_length=100,
+        help_text="State/Province as verified from documents"
+    )
+    verified_country = models.CharField(
+        max_length=3,
+        help_text="Country ISO code as verified from documents"
+    )
+    verified_postal_code = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Postal code as verified from documents"
+    )
+    
+    # Document Information
+    document_type = models.CharField(
+        max_length=20,
+        choices=DOCUMENT_TYPE_CHOICES,
+        help_text="Type of identification document"
+    )
+    document_number = models.CharField(
+        max_length=50,
+        help_text="Document number/ID"
+    )
+    document_issuing_country = models.CharField(
+        max_length=3,
+        help_text="Country that issued the document"
+    )
+    document_expiry_date = models.DateField(
+        null=True,
+        blank=True,
+        help_text="Document expiry date if applicable"
+    )
+    
+    # Document Files
+    document_front_image = models.FileField(
+        upload_to='verification_documents/',
+        help_text="Front side of identification document"
+    )
+    document_back_image = models.FileField(
+        upload_to='verification_documents/',
+        null=True,
+        blank=True,
+        help_text="Back side of identification document"
+    )
+    selfie_with_document = models.FileField(
+        upload_to='verification_documents/',
+        help_text="Selfie holding the identification document"
+    )
+    
+    # Verification Details
+    status = models.CharField(
+        max_length=20,
+        choices=VERIFICATION_STATUS_CHOICES,
+        default='pending',
+        help_text="Current verification status"
+    )
+    verified_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='verifications_approved',
+        help_text="Admin user who approved the verification"
+    )
+    verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Date and time when verification was approved"
+    )
+    rejected_reason = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Reason for rejection if verification was rejected"
+    )
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Identity Verification"
+        verbose_name_plural = "Identity Verifications"
+    
+    def __str__(self):
+        return f"Verification for {self.user.username} - {self.get_status_display()}"
+    
+    def approve_verification(self, approved_by):
+        """Approve the verification and sync verified name with user profile"""
+        from django.utils import timezone
+        self.status = 'verified'
+        self.verified_by = approved_by
+        self.verified_at = timezone.now()
+        self.save()
+        
+        # Sync verified name with user profile
+        self.user.first_name = self.verified_first_name
+        self.user.last_name = self.verified_last_name
+        self.user.save(update_fields=['first_name', 'last_name'])
+    
+    def reject_verification(self, rejected_by, reason):
+        """Reject the verification"""
+        self.status = 'rejected'
+        self.verified_by = rejected_by
+        self.verified_at = timezone.now()
+        self.rejected_reason = reason
+        self.save()
+    
+    def is_expired(self):
+        """Check if the verification has expired (e.g., document expired)"""
+        if self.document_expiry_date and self.document_expiry_date < timezone.now().date():
+            return True
+        return False
+    
+    @property
+    def full_name(self):
+        """Get the full verified name"""
+        return f"{self.verified_first_name} {self.verified_last_name}"
+    
+    @property
+    def full_address(self):
+        """Get the full verified address"""
+        address_parts = [
+            self.verified_address,
+            self.verified_city,
+            self.verified_state,
+            self.verified_postal_code,
+            self.verified_country
+        ]
+        return ", ".join(filter(None, address_parts))
+
 class Business(models.Model):
     """Business information for business accounts"""
     
