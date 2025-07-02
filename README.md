@@ -332,6 +332,29 @@ await authService.switchAccount('personal_1'); // Savings account
 - 🔐 JWT-based API authentication
 - 🛡️ Protection against replay attacks
 
+### Soft Delete System (Security & Audit)
+
+Confío uses a **soft delete** system for all critical models, including:
+- User
+- Business
+- Account
+- Transaction
+- IdentityVerification
+- ZkLoginProof
+- TelegramVerification
+
+Instead of permanently deleting records, a `deleted_at` timestamp is set. This ensures:
+- **No index reuse**: Deleted accounts/businesses/users cannot be recreated with the same index, preventing Sui address collisions and key reuse.
+- **Prevents collision of eliminated and newly created accounts**: If an account is deleted, its index is never reused, so a new account cannot be created with the same index and thus cannot generate the same Sui address. This eliminates the risk of a new user accidentally or maliciously taking over the Sui address of a previously deleted account.
+- **Auditability**: All actions are traceable for compliance and security audits.
+- **Data integrity**: Financial and identity records are never truly lost, only flagged as deleted.
+- **Security**: Prevents accidental or malicious recreation of accounts with the same salt, which would result in the same Sui address and potential fund loss or takeover.
+
+All queries for account creation/index assignment include soft-deleted rows to prevent index reuse. Normal queries (default manager) exclude soft-deleted rows, so deleted items are hidden from the UI and API by default.
+
+#### Example: Why Soft Delete?
+If a business account `business_2` is deleted, the next business account will be `business_3`, not `business_2` again. This ensures that the Sui address for `business_2` is never reused, maintaining cryptographic and financial safety.
+
 ## 🚀 Development Setup
 
 ### Web Application (React + Django)

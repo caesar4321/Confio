@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AuthService } from '../services/authService';
 import { AccountManager, AccountContext, StoredAccount } from '../utils/accountManager';
+import { useQuery, useApolloClient } from '@apollo/client';
+import { GET_USER_ACCOUNTS } from '../apollo/queries';
+import { useAuth } from '../contexts/AuthContext';
 
 export interface UseAccountManagerReturn {
   // Account state
@@ -22,6 +25,7 @@ export interface UseAccountManagerReturn {
   // Utility functions
   getActiveAccountContext: () => Promise<AccountContext>;
   refreshAccounts: () => Promise<void>;
+  syncWithServer: (serverAccounts: any[]) => Promise<void>;
 }
 
 export const useAccountManager = (): UseAccountManagerReturn => {
@@ -31,24 +35,110 @@ export const useAccountManager = (): UseAccountManagerReturn => {
 
   const authService = AuthService.getInstance();
   const accountManager = AccountManager.getInstance();
+  const apolloClient = useApolloClient();
+  const { userProfile } = useAuth();
+  
+  // Debug user profile loading
+  console.log('useAccountManager - User profile state:', {
+    userProfileLoaded: !!userProfile,
+    userProfileName: userProfile?.firstName || userProfile?.username,
+    userProfileId: userProfile?.id
+  });
 
-  // Load accounts on mount
+  // Fetch accounts from server using GraphQL
+  const { data: serverAccountsData, loading: serverLoading, error: serverError, refetch: refetchServerAccounts } = useQuery(GET_USER_ACCOUNTS, {
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+  });
+
+  // Load accounts on mount and when server data or user profile changes
   useEffect(() => {
     loadAccounts();
-  }, []);
+  }, [serverAccountsData, userProfile]);
 
   const loadAccounts = useCallback(async () => {
     try {
       setIsLoading(true);
       
-      // Get all stored accounts
-      const storedAccounts = await authService.getStoredAccounts();
-      setAccounts(storedAccounts);
+      // Get server accounts
+      const serverAccounts = serverAccountsData?.userAccounts || [];
+      console.log('useAccountManager - Server accounts data:', {
+        serverAccountsData: !!serverAccountsData,
+        userAccounts: serverAccounts,
+        accountsCount: serverAccounts.length,
+        accountTypes: serverAccounts.map((acc: any) => acc.accountType)
+      });
       
-      // If no accounts exist, that's expected - accounts should only be created after proper zkLogin authentication
-      if (storedAccounts.length === 0) {
-        console.log('useAccountManager - No accounts found - this is expected if no zkLogin authentication has been completed');
-        console.log('useAccountManager - Accounts will be created after proper server-side authentication (InitializeZkLogin/FinalizeZkLogin)');
+      // Convert server accounts to StoredAccount format
+      const convertedAccounts: StoredAccount[] = serverAccounts.map((serverAcc: any) => {
+        // Use server-provided display_name and avatar_letter for all accounts
+        const displayName = serverAcc.displayName || 'Account';
+        const avatar = serverAcc.avatarLetter || displayName.charAt(0).toUpperCase();
+        
+        // Extract the base name without the "Personal -" or "Negocio -" prefix
+        const baseName = displayName.replace(/^(Personal|Negocio) - /, '');
+        
+        console.log('useAccountManager - Account conversion:', {
+          accountId: serverAcc.accountId,
+          accountType: serverAcc.accountType,
+          displayName,
+          baseName,
+          avatar,
+          serverDisplayName: serverAcc.displayName,
+          serverAvatarLetter: serverAcc.avatarLetter
+        });
+        
+        return {
+          id: serverAcc.accountId,
+          name: baseName, // Use the base name without the prefix for display
+          type: serverAcc.accountType,
+          index: serverAcc.accountIndex,
+          phone: serverAcc.accountType.toLowerCase() === 'personal' ? userProfile?.phoneNumber : undefined,
+          category: serverAcc.business?.category,
+          avatar: avatar,
+          suiAddress: serverAcc.suiAddress,
+          createdAt: serverAcc.createdAt,
+        };
+      });
+      
+      // Sort accounts: personal first, then business by index
+      const sortedAccounts = convertedAccounts.sort((a, b) => {
+        // Personal accounts get priority (0), business accounts get lower priority (1)
+        const aPriority = a.type.toLowerCase() === 'personal' ? 0 : 1;
+        const bPriority = b.type.toLowerCase() === 'personal' ? 0 : 1;
+        
+        if (aPriority !== bPriority) {
+          return aPriority - bPriority;
+        }
+        
+        // If same type, sort by index
+        return a.index - b.index;
+      });
+      
+      setAccounts(sortedAccounts);
+      
+      // If no accounts exist, create a default personal account
+      if (convertedAccounts.length === 0) {
+        console.log('useAccountManager - No server accounts found, creating default personal account');
+        
+        // Create a default personal account with user profile data
+        const displayName = userProfile?.firstName || userProfile?.username || 'Personal';
+        const avatar = displayName.charAt(0).toUpperCase();
+        const defaultAccount: StoredAccount = {
+          id: 'personal_0',
+          name: displayName,
+          type: 'personal',
+          index: 0,
+          phone: userProfile?.phoneNumber || undefined,
+          category: undefined,
+          avatar: avatar,
+          suiAddress: '', // Will be set during zkLogin finalization
+          createdAt: new Date().toISOString(),
+          isActive: true,
+        };
+        
+        convertedAccounts.push(defaultAccount);
+        console.log('useAccountManager - Created default personal account:', defaultAccount);
       }
       
       // Get active account context
@@ -59,18 +149,21 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         activeContextType: activeContext.type,
         activeContextIndex: activeContext.index,
         generatedAccountId: activeAccountId,
-        storedAccountsCount: storedAccounts.length,
-        storedAccountIds: storedAccounts.map(acc => acc.id)
+        serverAccountsCount: convertedAccounts.length,
+        serverAccountIds: convertedAccounts.map(acc => acc.id)
       });
       
       // Find the active account
-      const active = storedAccounts.find(acc => acc.id === activeAccountId);
+      const active = convertedAccounts.find(acc => acc.id === activeAccountId);
       
       console.log('loadAccounts - Found active account:', {
         foundActive: !!active,
         activeAccountId: active?.id,
         activeAccountType: active?.type,
-        activeAccountIndex: active?.index
+        activeAccountIndex: active?.index,
+        activeAccountName: active?.name,
+        activeAccountAvatar: active?.avatar,
+        allAccountIds: convertedAccounts.map(acc => acc.id)
       });
       
       setActiveAccount(active || null);
@@ -79,7 +172,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     } finally {
       setIsLoading(false);
     }
-  }, [authService, accountManager]);
+  }, [authService, accountManager, serverAccountsData, userProfile]);
 
   const switchAccount = useCallback(async (accountId: string) => {
     try {
@@ -107,18 +200,12 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     phone?: string,
     category?: string
   ): Promise<StoredAccount> => {
-    try {
-      const newAccount = await authService.createAccount(name, avatar, phone, category);
-      
-      // Reload accounts to include the new one
-      await loadAccounts();
-      
-      return newAccount;
-    } catch (error) {
-      console.error('Error creating account:', error);
-      throw error;
-    }
-  }, [authService, loadAccounts]);
+    throw new Error(
+      'Account creation through useAccountManager is not supported. ' +
+      'Use server mutations (e.g., CREATE_BUSINESS) for account creation. ' +
+      'The client should only manage existing accounts from the server.'
+    );
+  }, []);
 
   const updateAccount = useCallback(async (accountId: string, updates: Partial<StoredAccount>) => {
     try {
@@ -149,18 +236,38 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   }, [authService]);
 
   const refreshAccounts = useCallback(async () => {
-    await loadAccounts();
-  }, [loadAccounts]);
+    try {
+      // Refetch from server
+      await refetchServerAccounts();
+      // loadAccounts will be called automatically when server data changes
+    } catch (error) {
+      console.error('Error refreshing accounts from server:', error);
+    }
+  }, [refetchServerAccounts]);
+
+  const syncWithServer = useCallback(async (serverAccounts: any[]) => {
+    try {
+      // Since we're now fetching directly from the server, we just need to refetch
+      await refetchServerAccounts();
+    } catch (error) {
+      console.error('Error syncing with server:', error);
+      throw error;
+    }
+  }, [refetchServerAccounts]);
+
+  // Combine loading states
+  const combinedLoading = isLoading || serverLoading;
 
   return {
     activeAccount,
     accounts,
-    isLoading,
+    isLoading: combinedLoading,
     switchAccount,
     createAccount,
     updateAccount,
     deleteAccount,
     getActiveAccountContext,
     refreshAccounts,
+    syncWithServer,
   };
 }; 

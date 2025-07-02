@@ -2,6 +2,14 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.conf import settings
 from .country_codes import COUNTRY_CODES
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.utils import timezone
+from django.core.exceptions import ValidationError
+import logging
+import uuid
+
+logger = logging.getLogger(__name__)
 
 # Business category mapping utility
 def get_business_category_display(category_id):
@@ -16,7 +24,53 @@ def get_business_category_display(category_id):
     }
     return BUSINESS_CATEGORIES.get(category_id, category_id)
 
-class User(AbstractUser):
+class SoftDeleteManager(models.Manager):
+    """Manager that filters out soft-deleted objects by default"""
+    
+    def get_queryset(self):
+        return super().get_queryset().filter(deleted_at__isnull=True)
+    
+    def with_deleted(self):
+        """Return queryset including soft-deleted objects"""
+        return super().get_queryset()
+    
+    def only_deleted(self):
+        """Return queryset with only soft-deleted objects"""
+        return super().get_queryset().filter(deleted_at__isnull=False)
+
+class SoftDeleteModel(models.Model):
+    """Base model with soft delete functionality"""
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    deleted_at = models.DateTimeField(null=True, blank=True, help_text="Soft delete timestamp")
+    
+    objects = SoftDeleteManager()
+    all_objects = models.Manager()  # Access to all objects including deleted
+    
+    class Meta:
+        abstract = True
+    
+    def soft_delete(self):
+        """Soft delete the object"""
+        self.deleted_at = timezone.now()
+        self.save(update_fields=['deleted_at'])
+    
+    def restore(self):
+        """Restore a soft-deleted object"""
+        self.deleted_at = None
+        self.save(update_fields=['deleted_at'])
+    
+    def hard_delete(self):
+        """Permanently delete the object"""
+        super().delete()
+    
+    @property
+    def is_deleted(self):
+        """Check if object is soft-deleted"""
+        return self.deleted_at is not None
+
+class User(AbstractUser, SoftDeleteModel):
     firebase_uid = models.CharField(max_length=128, unique=True)
     phone_country = models.CharField(
         max_length=2,
@@ -112,7 +166,7 @@ class User(AbstractUser):
         return self.verifications.filter(status='verified').exists()
 
 
-class IdentityVerification(models.Model):
+class IdentityVerification(SoftDeleteModel):
     """Model for storing KYC/AML verification documents and information"""
     
     VERIFICATION_STATUS_CHOICES = [
@@ -238,9 +292,7 @@ class IdentityVerification(models.Model):
         help_text="Reason for rejection if verification was rejected"
     )
     
-    # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+
     
     class Meta:
         ordering = ['-created_at']
@@ -252,7 +304,6 @@ class IdentityVerification(models.Model):
     
     def approve_verification(self, approved_by):
         """Approve the verification and sync verified name with user profile"""
-        from django.utils import timezone
         self.status = 'verified'
         self.verified_by = approved_by
         self.verified_at = timezone.now()
@@ -294,7 +345,7 @@ class IdentityVerification(models.Model):
         ]
         return ", ".join(filter(None, address_parts))
 
-class Business(models.Model):
+class Business(SoftDeleteModel):
     """Business information for business accounts"""
     
     BUSINESS_CATEGORY_CHOICES = [
@@ -332,10 +383,6 @@ class Business(models.Model):
         null=True,
         help_text="Business address"
     )
-    
-    # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         verbose_name_plural = "Businesses"
@@ -362,7 +409,7 @@ class Business(models.Model):
                 return display_name
         return None
 
-class Account(models.Model):
+class Account(SoftDeleteModel):
     ACCOUNT_TYPE_CHOICES = [
         ('personal', 'Personal'),
         ('business', 'Business'),
@@ -408,12 +455,17 @@ class Account(models.Model):
     # —————————————————————————————
     # audit‑style timestamps
     # —————————————————————————————
-    created_at = models.DateTimeField(auto_now_add=True)
     last_login_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         unique_together = ['user', 'account_type', 'account_index']
         ordering = ['user', 'account_type', 'account_index']
+        
+    def get_ordering_key(self):
+        """Get a key for custom ordering: personal accounts first, then business accounts by index"""
+        # Personal accounts get priority (0), business accounts get lower priority (1)
+        type_priority = 0 if self.account_type == 'personal' else 1
+        return (type_priority, self.account_index)
 
     def __str__(self):
         return f"{self.user.username} {self.account_type.capitalize()} Account {self.account_index}"
@@ -427,13 +479,51 @@ class Account(models.Model):
     def display_name(self):
         """Get the display name for this account"""
         if self.account_type == 'personal':
-            return f"{self.user.first_name} {self.user.last_name}".strip() or self.user.username
+            # Always return a non-empty display name for personal accounts
+            name = f"{self.user.first_name} {self.user.last_name}".strip()
+            base_name = name if name else self.user.username or f"Personal {self.account_index}"
+            return f"Personal - {base_name}"
         else:
             # For business accounts, get the business name
-            return self.business.name if self.business else f"Business {self.account_index}"
+            business_name = self.business.name if self.business else f"Negocio {self.account_index}"
+            return f"Negocio - {business_name}"
+
+    @property
+    def avatar_letter(self):
+        """Get the avatar letter for this account"""
+        if self.account_type == 'personal':
+            # For personal accounts, use the first letter of the user's name
+            name = f"{self.user.first_name} {self.user.last_name}".strip()
+            if name:
+                return name[0].upper()
+            elif self.user.username:
+                return self.user.username[0].upper()
+            else:
+                return 'U'
+        else:
+            # For business accounts, use the first letter of the business name
+            if self.business and self.business.name:
+                return self.business.name[0].upper()
+            else:
+                return 'N'  # Default for business accounts
 
     def get_business_info(self):
         """Get business information for this account if it's a business account"""
         if self.account_type == 'business':
             return self.business
         return None
+
+# --- Signals to sync display name ---
+@receiver(post_save, sender=User)
+def sync_personal_account_display_name(sender, instance, **kwargs):
+    # Update the display name for the user's personal account(s) when the user profile is updated
+    personal_accounts = instance.accounts.filter(account_type='personal')
+    for account in personal_accounts:
+        # This will ensure display_name property always reflects the latest user info
+        account.save(update_fields=["last_login_at"])  # Touch the account to trigger any listeners
+
+@receiver(post_save, sender=Business)
+def sync_business_account_display_name(sender, instance, **kwargs):
+    # Update the display name for all accounts linked to this business when the business is updated
+    for account in instance.accounts.all():
+        account.save(update_fields=["last_login_at"])  # Touch the account to trigger any listeners

@@ -15,9 +15,25 @@ import { jwtDecode } from 'jwt-decode';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { ProfileMenu } from '../components/ProfileMenu';
 import { useAccountManager } from '../hooks/useAccountManager';
+import { getCountryByIso } from '../utils/countries';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
+
+const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
+  if (!phoneNumber) return '';
+  
+  // If we have a country code, format it
+  if (phoneCountry) {
+    const country = getCountryByIso(phoneCountry);
+    if (country) {
+      const countryCode = country[1]; // country[1] is the phone code (e.g., '+54')
+      return `${countryCode} ${phoneNumber}`;
+    }
+  }
+  
+  return phoneNumber;
+};
 
 interface CustomJwtPayload {
   user_id: number;
@@ -65,73 +81,37 @@ export const HomeScreen = () => {
     activeAccount: activeAccount?.id,
     activeAccountType: activeAccount?.type,
     activeAccountIndex: activeAccount?.index,
+    activeAccountName: activeAccount?.name,
+    activeAccountAvatar: activeAccount?.avatar,
     accountsCount: accounts.length,
-    accounts: accounts,
-    isLoading: accountsLoading
+    accounts: accounts.map(acc => ({ id: acc.id, name: acc.name, avatar: acc.avatar, type: acc.type })),
+    isLoading: accountsLoading,
+    userProfileLoaded: !!userProfile,
+    userProfileName: userProfile?.firstName || userProfile?.username
   });
   
-  // Fallback to mock accounts if no stored accounts exist
-  const mockAccounts: Account[] = [
-    { 
-      id: "personal", 
-      name: "Julian Moon", 
-      type: "personal", 
-      phone: "+58 412 345 6789",
-      avatar: "J"
-    },
-    { 
-      id: "restaurant", 
-      name: "El Sabor de Chicha", 
-      type: "business", 
-      category: "Restaurante",
-      avatar: "E"
-    },
-    { 
-      id: "consulting", 
-      name: "Novio coreano 🤭", 
-      type: "business", 
-      category: "Consultoria",
-      avatar: "N"
-    }
-  ];
+  // No more mock accounts - we fetch from server
 
   // Convert stored accounts to the format expected by ProfileMenu
-  // For personal accounts, override with userProfile data
+  // For personal accounts, format phone number with country code
   const accountMenuItems = accounts.map(acc => {
     if (acc.type === 'personal' && userProfile) {
       return {
-        id: acc.id,
-        name: userProfile.firstName || userProfile.username,
-        type: acc.type,
-        phone: acc.phone,
-        category: acc.category,
-        avatar: (userProfile.firstName || userProfile.username || '').charAt(0).toUpperCase(),
+        ...acc,
+        phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry), // Format phone number with country code
       };
     }
-    return {
-      id: acc.id,
-      name: acc.name,
-      type: acc.type,
-      phone: acc.phone,
-      category: acc.category,
-      avatar: acc.avatar,
-    };
+    return acc;
   });
 
   // Only use stored accounts - no mock accounts
   const displayAccounts = accountMenuItems;
 
   const currentAccount = activeAccount ? {
-    id: activeAccount.id,
-    name: activeAccount.type === 'personal' && userProfile 
-      ? (userProfile.firstName || userProfile.username)
-      : activeAccount.name,
-    type: activeAccount.type,
-    phone: activeAccount.phone,
-    category: activeAccount.category,
-    avatar: activeAccount.type === 'personal' && userProfile
-      ? (userProfile.firstName || userProfile.username || '').charAt(0).toUpperCase()
-      : activeAccount.avatar,
+    ...activeAccount,
+    phone: activeAccount.type === 'personal' && userProfile 
+      ? formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry)
+      : activeAccount.phone,
   } : (displayAccounts.length > 0 ? displayAccounts[0] : null); // Only use first account if accounts exist
   
   // Debug display accounts
@@ -139,13 +119,18 @@ export const HomeScreen = () => {
     accountsLength: accounts.length,
     accountMenuItemsLength: accountMenuItems.length,
     displayAccountsLength: displayAccounts.length,
-    displayAccounts: displayAccounts,
-    usingMockAccounts: accounts.length === 0,
+    displayAccounts: displayAccounts.map(acc => ({ id: acc.id, name: acc.name, avatar: acc.avatar, type: acc.type })),
     currentAccountType: currentAccount?.type,
+    currentAccountName: currentAccount?.name,
+    currentAccountAvatar: currentAccount?.avatar,
     currentAccountIndex: currentAccount?.id ? currentAccount.id.split('_')[1] : undefined,
     activeAccountId: activeAccount?.id,
     activeAccountType: activeAccount?.type,
-    activeAccountIndex: activeAccount?.index
+    activeAccountName: activeAccount?.name,
+    activeAccountAvatar: activeAccount?.avatar,
+    activeAccountIndex: activeAccount?.index,
+    userProfileLoaded: !!userProfile,
+    userProfileName: userProfile?.firstName || userProfile?.username
   });
 
   // Mock balances - replace with real data later
@@ -195,6 +180,14 @@ export const HomeScreen = () => {
 
   // Update header when account changes or user profile updates
   useEffect(() => {
+    console.log('HomeScreen - Avatar update effect:', {
+      currentAccountAvatar: currentAccount?.avatar,
+      currentAccountName: currentAccount?.name,
+      currentAccountType: currentAccount?.type,
+      userProfileLoaded: !!userProfile,
+      userProfileName: userProfile?.firstName || userProfile?.username
+    });
+    
     if (currentAccount) {
       setCurrentAccountAvatar(currentAccount.avatar);
     }
@@ -217,26 +210,10 @@ export const HomeScreen = () => {
     try {
       console.log('HomeScreen - handleAccountSwitch called with:', accountId);
       
-      // Check if this is a mock account (not stored in our system)
-      const isMockAccount = mockAccounts.some(acc => acc.id === accountId);
-      
-      console.log('HomeScreen - Account type check:', {
-        accountId: accountId,
-        isMockAccount: isMockAccount,
-        mockAccountIds: mockAccounts.map(acc => acc.id),
-        storedAccountIds: accounts.map(acc => acc.id)
-      });
-      
-      if (isMockAccount) {
-        // For mock accounts, just close the menu (no actual switching)
-        console.log('HomeScreen - Mock account selected:', accountId);
-        profileMenu.closeProfileMenu();
-      } else {
-        // For real accounts, perform the actual switch
-        console.log('HomeScreen - Real account selected, switching to:', accountId);
-        await switchAccount(accountId);
-        profileMenu.closeProfileMenu();
-      }
+      // All accounts are now real accounts from the server
+      console.log('HomeScreen - Switching to account:', accountId);
+      await switchAccount(accountId);
+      profileMenu.closeProfileMenu();
     } catch (error) {
       console.error('Error switching account:', error);
     }

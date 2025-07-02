@@ -1,9 +1,10 @@
 from django.db import models
 from django.conf import settings
+from users.models import SoftDeleteModel
 
 # Create your models here.
 
-class Transaction(models.Model):
+class Transaction(SoftDeleteModel):
     """Model for storing transaction data"""
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
@@ -50,8 +51,6 @@ class Transaction(models.Model):
         help_text="Sui transaction digest (32 bytes, 64 hex characters)"
     )  # Sui transaction hash
     error_message = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['-created_at']

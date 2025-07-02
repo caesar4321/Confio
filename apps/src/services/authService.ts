@@ -281,7 +281,9 @@ export class AuthService {
             userSignature: userSig,
             keyClaimName: 'sub',
             audience: GOOGLE_CLIENT_IDS.production.web,
-            firebaseToken: firebaseToken
+            firebaseToken: firebaseToken,
+            accountType: accountContext.type,
+            accountIndex: accountContext.index
           }
         }
       });
@@ -302,33 +304,16 @@ export class AuthService {
         const storedAccounts = await accountManager.getStoredAccounts();
         
         if (storedAccounts.length === 0) {
-          // Create default personal account with user data
-          const [firstName, ...lastNameParts] = user.displayName?.split(' ') || [];
-          const lastName = lastNameParts.join(' ');
-          const displayName = user.displayName || user.email || 'Mi Cuenta';
-          
-          const defaultAccount = await accountManager.createAccount(
-            'personal',
-            displayName,
-            displayName.charAt(0).toUpperCase(),
-            user.phoneNumber || undefined,
-            undefined
-          );
-          
-          // Set as active account
+          console.log('No local accounts found, but server should have created default personal account during zkLogin initialization');
+          // Set default personal account context (server should have created this)
           await accountManager.setActiveAccountContext({
             type: 'personal',
             index: 0
           });
           
-          console.log('Default personal account created successfully:', {
-            accountId: defaultAccount.id,
-            accountName: defaultAccount.name,
-            accountType: defaultAccount.type,
-            accountIndex: defaultAccount.index
-          });
+          console.log('Set default personal account context (personal_0)');
         } else {
-          console.log('Accounts already exist, skipping default account creation');
+          console.log('Local accounts already exist, skipping default account creation');
         }
       } catch (accountError) {
         console.error('Error creating default account:', accountError);
@@ -559,7 +544,9 @@ export class AuthService {
             userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0))),
             keyClaimName: 'sub',
             audience: 'apple',
-            firebaseToken: firebaseToken
+            firebaseToken: firebaseToken,
+            accountType: accountContext.type,
+            accountIndex: accountContext.index
           }
         }
       });
@@ -586,33 +573,16 @@ export class AuthService {
         const storedAccounts = await accountManager.getStoredAccounts();
         
         if (storedAccounts.length === 0) {
-          // Create default personal account with user data
-          const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
-          const lastName = lastNameParts.join(' ');
-          const displayName = userCredential.user.displayName || userCredential.user.email || 'Mi Cuenta';
-          
-          const defaultAccount = await accountManager.createAccount(
-            'personal',
-            displayName,
-            displayName.charAt(0).toUpperCase(),
-            userCredential.user.phoneNumber || undefined,
-            undefined
-          );
-          
-          // Set as active account
+          console.log('No local accounts found, but server should have created default personal account during zkLogin initialization (Apple)');
+          // Set default personal account context (server should have created this)
           await accountManager.setActiveAccountContext({
             type: 'personal',
             index: 0
           });
           
-          console.log('Default personal account created successfully (Apple):', {
-            accountId: defaultAccount.id,
-            accountName: defaultAccount.name,
-            accountType: defaultAccount.type,
-            accountIndex: defaultAccount.index
-          });
+          console.log('Set default personal account context (personal_0) for Apple sign-in');
         } else {
-          console.log('Accounts already exist, skipping default account creation (Apple)');
+          console.log('Local accounts already exist, skipping default account creation (Apple)');
         }
       } catch (accountError) {
         console.error('Error creating default account (Apple):', accountError);
@@ -1148,6 +1118,10 @@ export class AuthService {
       }
       const firebaseToken = await currentUser.getIdToken();
 
+      // Get current account context for the refresh
+      const accountManager = AccountManager.getInstance();
+      const accountContext = await accountManager.getActiveAccountContext();
+      
       // Get a fresh proof from the server
       const { data } = await apolloClient.mutate({
         mutation: FINALIZE_ZKLOGIN,
@@ -1161,7 +1135,9 @@ export class AuthService {
             userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0))),
             keyClaimName: 'sub',
             audience: this.zkProof.clientId,
-            firebaseToken: firebaseToken
+            firebaseToken: firebaseToken,
+            accountType: accountContext.type,
+            accountIndex: accountContext.index
           }
         }
       });
@@ -1433,7 +1409,8 @@ export class AuthService {
 
   /**
    * Create a new account
-   * Automatically determines account type: personal if no accounts exist, business otherwise
+   * NOTE: This method is deprecated. Account creation should be done through server mutations.
+   * This method is kept for backward compatibility but should not be used for new business accounts.
    */
   public async createAccount(
     name: string,
@@ -1441,26 +1418,19 @@ export class AuthService {
     phone?: string,
     category?: string
   ): Promise<any> {
-    const accountManager = AccountManager.getInstance();
+    console.warn('AuthService.createAccount is deprecated. Use server mutations for account creation.');
     
-    console.log('Creating new account:', {
+    // For backward compatibility, return a mock account
+    // This should not be used for actual account creation
+    return {
+      id: 'deprecated_method',
+      type: 'business',
+      index: 0,
       name: name,
       avatar: avatar,
       phone: phone,
       category: category
-    });
-    
-    const newAccount = await accountManager.createAccount('business', name, avatar, phone, category);
-    
-    console.log('Account created successfully:', {
-      accountId: newAccount.id,
-      accountType: newAccount.type,
-      accountIndex: newAccount.index,
-      name: newAccount.name,
-      note: newAccount.type === 'personal' ? 'First account (personal)' : 'Additional account (business)'
-    });
-    
-    return newAccount;
+    };
   }
 
   /**

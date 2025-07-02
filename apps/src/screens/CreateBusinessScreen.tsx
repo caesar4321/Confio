@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Alert,
   SafeAreaView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
@@ -16,6 +17,9 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList, RootStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
 import { useAccountManager } from '../hooks/useAccountManager';
+import { useMutation, useQuery } from '@apollo/client';
+import { CREATE_BUSINESS, GET_USER_ACCOUNTS, UPDATE_ACCOUNT_SUI_ADDRESS } from '../apollo/queries';
+import { AuthService } from '../services/authService';
 
 type CreateBusinessNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -67,8 +71,13 @@ const businessTypes: BusinessType[] = [
 
 export const CreateBusinessScreen = () => {
   const navigation = useNavigation<CreateBusinessNavigationProp>();
-  const { createAccount } = useAccountManager();
+  const { syncWithServer } = useAccountManager();
+  const [createBusiness] = useMutation(CREATE_BUSINESS);
+  const [updateAccountSuiAddress] = useMutation(UPDATE_ACCOUNT_SUI_ADDRESS);
+  const { refetch: refetchAccounts } = useQuery(GET_USER_ACCOUNTS);
   const [currentStep, setCurrentStep] = useState(1);
+  const [isCreating, setIsCreating] = useState(false);
+  const lastCreateAttempt = useRef<number>(0);
   const [formData, setFormData] = useState({
     businessType: '',
     businessName: '',
@@ -99,44 +108,126 @@ export const CreateBusinessScreen = () => {
   };
 
   const handleCreateBusiness = async () => {
+    // Prevent double-clicks
+    if (isCreating) {
+      console.log('Business creation already in progress, ignoring click');
+      return;
+    }
+
+    // Rate limiting: Prevent rapid successive attempts
+    const now = Date.now();
+    const timeSinceLastAttempt = now - lastCreateAttempt.current;
+    if (timeSinceLastAttempt < 2000) { // 2 seconds minimum between attempts
+      console.log('Rate limiting: Too soon since last attempt, ignoring click');
+      Alert.alert(
+        'Muy rápido',
+        'Por favor, espera unos segundos antes de intentar de nuevo.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    lastCreateAttempt.current = now;
+
     try {
+      setIsCreating(true);
+      console.log('Starting business creation process...');
+      
       // Get the business type name for the category
       const businessType = businessTypes.find(type => type.id === formData.businessType);
-      const category = businessType?.name || formData.businessType;
+      const category = businessType?.id || formData.businessType;
       
-      // Create the business account
-      const newAccount = await createAccount(
-        formData.businessName,
-        formData.businessName.charAt(0).toUpperCase(), // Use first letter as avatar
-        undefined, // No phone for business accounts
-        category
-      );
-      
-      console.log('Business account created successfully:', {
-        accountId: newAccount.id,
-        accountType: newAccount.type,
-        accountIndex: newAccount.index,
-        name: newAccount.name,
-        category: newAccount.category
+      // Create the business on the server
+      const result = await createBusiness({
+        variables: {
+          name: formData.businessName,
+          description: formData.businessDescription || undefined,
+          category: category,
+          businessRegistrationNumber: formData.rif || undefined,
+          address: formData.address || undefined
+        }
       });
       
-      Alert.alert(
-        'Éxito',
-        'Cuenta de negocio creada exitosamente!',
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.goBack()
+      if (result.data?.createBusiness?.success) {
+        const createdAccount = result.data.createBusiness.account;
+        const createdBusiness = result.data.createBusiness.business;
+        
+        console.log('Business created successfully:', {
+          businessId: createdBusiness?.id,
+          accountId: createdAccount?.accountId,
+          accountType: createdAccount?.accountType,
+          accountIndex: createdAccount?.accountIndex,
+          businessName: createdBusiness?.name,
+          category: createdBusiness?.category
+        });
+        
+        // Generate Sui address using the server's account type and index
+        try {
+          const authService = AuthService.getInstance();
+          
+          // Set the active account context to the newly created business account
+          await authService.setActiveAccountContext({
+            type: createdAccount.accountType,
+            index: createdAccount.accountIndex
+          });
+          
+          // Generate the Sui address
+          const suiAddress = await authService.getZkLoginAddress();
+          
+          console.log('Generated Sui address for business account:', {
+            accountId: createdAccount.accountId,
+            accountType: createdAccount.accountType,
+            accountIndex: createdAccount.accountIndex,
+            suiAddress: suiAddress
+          });
+          
+          // Update the account with the Sui address on the server
+          const updateResult = await updateAccountSuiAddress({
+            variables: {
+              accountId: createdAccount.id,
+              suiAddress: suiAddress
+            }
+          });
+          
+          if (updateResult.data?.updateAccountSuiAddress?.success) {
+            console.log('Sui address updated successfully on server');
+          } else {
+            console.error('Failed to update Sui address on server:', updateResult.data?.updateAccountSuiAddress?.error);
           }
-        ]
-      );
+        } catch (error) {
+          console.error('Error generating or updating Sui address:', error);
+        }
+        
+        // Fetch updated accounts from server to get the new business account
+        const { data: accountsData } = await refetchAccounts();
+        
+        // Sync local account manager with server data
+        if (accountsData?.userAccounts) {
+          await syncWithServer(accountsData.userAccounts);
+        }
+        
+        Alert.alert(
+          'Éxito',
+          'Cuenta de negocio creada exitosamente!',
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.goBack()
+            }
+          ]
+        );
+      } else {
+        const error = result.data?.createBusiness?.error || 'Error desconocido';
+        Alert.alert('Error', error);
+      }
     } catch (error) {
-      console.error('Error creating business account:', error);
+      console.error('Error creating business:', error);
       Alert.alert(
         'Error',
         'No se pudo crear la cuenta de negocio. Por favor, inténtalo de nuevo.',
         [{ text: 'OK' }]
       );
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -261,28 +352,31 @@ export const CreateBusinessScreen = () => {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Business Registration Number</Text>
+            <Text style={styles.inputLabel}>Número de Registro del Negocio</Text>
             <TextInput
               style={styles.textInput}
-              placeholder="Optional - if your business is registered"
+              placeholder="Opcional - si tu negocio está registrado"
               value={formData.rif}
               onChangeText={(value) => handleInputChange('rif', value)}
             />
             <Text style={styles.inputHelp}>
-              Tax ID, Business License, or Registration Number (if available)
+              RIF, Licencia Comercial, o Número de Registro (si está disponible)
             </Text>
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Dirección *</Text>
+            <Text style={styles.inputLabel}>Dirección</Text>
             <TextInput
               style={[styles.textInput, styles.textArea]}
-              placeholder="Dirección completa del negocio"
+              placeholder="Dirección del negocio (opcional para negocios online)"
               value={formData.address}
               onChangeText={(value) => handleInputChange('address', value)}
               multiline
               numberOfLines={3}
             />
+            <Text style={styles.inputHelp}>
+              Deja vacío si es un negocio online sin ubicación física
+            </Text>
           </View>
 
           <View style={styles.infoCard}>
@@ -303,21 +397,27 @@ export const CreateBusinessScreen = () => {
           >
             <Text style={styles.backButtonText}>Atrás</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.createButton,
-              (!formData.businessName || !formData.address) && styles.disabledButton
-            ]}
-            onPress={handleCreateBusiness}
-            disabled={!formData.businessName || !formData.address}
-          >
-            <Text style={[
-              styles.createButtonText,
-              (!formData.businessName || !formData.address) && styles.disabledButtonText
-            ]}>
-              Crear Negocio
-            </Text>
-          </TouchableOpacity>
+                      <TouchableOpacity
+              style={[
+                styles.createButton,
+                (!formData.businessName || isCreating) && styles.disabledButton
+              ]}
+              onPress={handleCreateBusiness}
+              disabled={!formData.businessName || isCreating}
+            >
+              {isCreating ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color="#fff" style={styles.loadingSpinner} />
+                  <Text style={[styles.createButtonText, styles.disabledButtonText]}>
+                    Creando...
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.createButtonText}>
+                  Crear Negocio
+                </Text>
+              )}
+            </TouchableOpacity>
         </View>
       </View>
     </View>
@@ -570,5 +670,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#fff',
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingSpinner: {
+    marginRight: 8,
   },
 }); 

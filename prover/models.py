@@ -1,13 +1,13 @@
 from django.db import models
 import uuid
-from users.models import Account
+from users.models import Account, SoftDeleteModel
 from django.conf import settings
 from django.contrib.auth import get_user_model
 
 def generate_proof_id():
     return uuid.uuid4().hex
 
-class ZkLoginProof(models.Model):
+class ZkLoginProof(SoftDeleteModel):
     proof_id = models.CharField(
         max_length=32,
         unique=True,
@@ -33,8 +33,6 @@ class ZkLoginProof(models.Model):
     # per‑proof output
     # —————————————————————————————
     proof_data = models.JSONField()
-
-    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["-created_at"]

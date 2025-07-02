@@ -17,6 +17,30 @@ export const GET_USER_PROFILE = gql`
   }
 `;
 
+export const GET_USER_ACCOUNTS = gql`
+  query GetUserAccounts {
+    userAccounts {
+      id
+      accountId
+      accountType
+      accountIndex
+      suiAddress
+      createdAt
+      displayName
+      avatarLetter
+      business {
+        id
+        name
+        description
+        category
+        businessRegistrationNumber
+        address
+        createdAt
+      }
+    }
+  }
+`;
+
 // ZKLogin Mutations
 export const INITIALIZE_ZKLOGIN = gql`
   mutation InitializeZkLogin($firebaseToken: String!, $providerToken: String!, $provider: String!) {
@@ -202,6 +226,61 @@ export const REJECT_IDENTITY_VERIFICATION = gql`
         id
         status
         rejectedReason
+      }
+    }
+  }
+`;
+
+export const CREATE_BUSINESS = gql`
+  mutation CreateBusiness(
+    $name: String!
+    $description: String
+    $category: String!
+    $businessRegistrationNumber: String
+    $address: String
+  ) {
+    createBusiness(
+      name: $name
+      description: $description
+      category: $category
+      businessRegistrationNumber: $businessRegistrationNumber
+      address: $address
+    ) {
+      success
+      error
+      business {
+        id
+        name
+        description
+        category
+        businessRegistrationNumber
+        address
+        createdAt
+      }
+      account {
+        id
+        accountId
+        accountType
+        accountIndex
+        suiAddress
+        createdAt
+      }
+    }
+  }
+`;
+
+export const UPDATE_ACCOUNT_SUI_ADDRESS = gql`
+  mutation UpdateAccountSuiAddress($accountId: ID!, $suiAddress: String!) {
+    updateAccountSuiAddress(accountId: $accountId, suiAddress: $suiAddress) {
+      success
+      error
+      account {
+        id
+        accountId
+        accountType
+        accountIndex
+        suiAddress
+        createdAt
       }
     }
   }
