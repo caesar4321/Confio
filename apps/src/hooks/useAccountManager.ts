@@ -159,10 +159,12 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         activeAccountIndex: active?.index,
         activeAccountName: active?.name,
         activeAccountAvatar: active?.avatar,
-        allAccountIds: convertedAccounts.map(acc => acc.id)
+        allAccountIds: convertedAccounts.map(acc => acc.id),
+        searchingFor: activeAccountId
       });
       
       setActiveAccount(active || null);
+      console.log('loadAccounts - setActiveAccount called with:', active || null);
     } catch (error) {
       console.error('Error loading accounts:', error);
     } finally {
@@ -180,7 +182,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     if (activeAccountContext) {
       loadAccounts();
     }
-  }, [activeAccountContext, loadAccounts]);
+  }, [activeAccountContext]);
 
   // Load initial active account context on mount
   useEffect(() => {
@@ -206,7 +208,13 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       
       // Get the new active account context
       const newActiveContext = await authService.getActiveAccountContext();
+      console.log('useAccountManager - New active context:', newActiveContext);
+      
+      // Update the active account context state
       setActiveAccountContext(newActiveContext);
+      
+      // Manually reload accounts to ensure immediate update
+      await loadAccounts();
       
       console.log('useAccountManager - switchAccount completed, new context:', newActiveContext);
     } catch (error) {
@@ -215,7 +223,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     } finally {
       setIsLoading(false);
     }
-  }, [authService]);
+  }, [authService, loadAccounts]);
 
   const createAccount = useCallback(async (
     name: string,
