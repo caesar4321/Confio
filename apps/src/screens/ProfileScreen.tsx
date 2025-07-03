@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccountManager } from '../hooks/useAccountManager';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { getCountryByIso } from '../utils/countries';
@@ -43,25 +43,18 @@ type ProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>
 
 export const ProfileScreen = () => {
   const { signOut, userProfile, isUserProfileLoading } = useAuth();
-  const { activeAccount, accounts, isLoading: accountsLoading, refreshAccounts } = useAccountManager();
+  const { activeAccount, accounts, isLoading: accountsLoading } = useAccountManager();
   const navigation = useNavigation<ProfileScreenNavigationProp>();
-  
-  // Track previous active account to avoid unnecessary refreshes
-  const prevActiveAccountIdRef = React.useRef<string | null>(null);
 
-  // Refresh accounts when screen comes into focus, but only if active account changed
-  useFocusEffect(
-    React.useCallback(() => {
-      const currentActiveAccountId = activeAccount?.id || null;
-      
-      // Only refresh if the active account has changed since last focus
-      if (prevActiveAccountIdRef.current !== currentActiveAccountId) {
-        console.log('ProfileScreen - Active account changed, refreshing accounts');
-        refreshAccounts();
-        prevActiveAccountIdRef.current = currentActiveAccountId;
-      }
-    }, [activeAccount?.id, refreshAccounts])
-  );
+  // Debug active account changes to ensure real-time updates
+  React.useEffect(() => {
+    console.log('ProfileScreen - activeAccount changed:', {
+      activeAccountId: activeAccount?.id,
+      activeAccountName: activeAccount?.name,
+      activeAccountType: activeAccount?.type,
+      isLoading: accountsLoading
+    });
+  }, [activeAccount, accountsLoading]);
 
   const handleLegalDocumentPress = (docType: 'terms' | 'privacy' | 'deletion') => {
     navigation.navigate('LegalDocument', { docType });
