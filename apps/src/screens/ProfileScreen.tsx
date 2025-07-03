@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccountManager } from '../hooks/useAccountManager';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { getCountryByIso } from '../utils/countries';
@@ -43,16 +43,8 @@ type ProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>
 
 export const ProfileScreen = () => {
   const { signOut, userProfile, isUserProfileLoading } = useAuth();
-  const { activeAccount, accounts, isLoading: accountsLoading, refreshAccounts } = useAccountManager();
+  const { activeAccount, accounts, isLoading: accountsLoading } = useAccountManager();
   const navigation = useNavigation<ProfileScreenNavigationProp>();
-
-  // Refresh accounts when screen comes into focus (e.g., after switching accounts)
-  useFocusEffect(
-    React.useCallback(() => {
-      console.log('ProfileScreen - Screen focused, refreshing accounts');
-      refreshAccounts();
-    }, [refreshAccounts])
-  );
 
   const handleLegalDocumentPress = (docType: 'terms' | 'privacy' | 'deletion') => {
     navigation.navigate('LegalDocument', { docType });
@@ -90,44 +82,9 @@ export const ProfileScreen = () => {
 
   // Get display information based on active account
   const getDisplayInfo = () => {
-    console.log('ProfileScreen - getDisplayInfo called:', {
-      accountsLoading,
-      isUserProfileLoading,
-      activeAccount: activeAccount ? {
-        id: activeAccount.id,
-        name: activeAccount.name,
-        type: activeAccount.type,
-        category: activeAccount.category,
-        phone: activeAccount.phone
-      } : null,
-      userProfile: userProfile ? {
-        firstName: userProfile.firstName,
-        username: userProfile.username,
-        phoneNumber: userProfile.phoneNumber,
-        phoneCountry: userProfile.phoneCountry
-      } : null
-    });
-
     if (accountsLoading || isUserProfileLoading) {
-      console.log('ProfileScreen - Still loading, showing "Cargando..."');
       return { name: 'Cargando...', subtitle: '', showAccountType: false };
     }
-
-    console.log('ProfileScreen - getDisplayInfo:', {
-      activeAccount: activeAccount ? {
-        id: activeAccount.id,
-        name: activeAccount.name,
-        type: activeAccount.type,
-        category: activeAccount.category,
-        phone: activeAccount.phone
-      } : null,
-      userProfile: userProfile ? {
-        firstName: userProfile.firstName,
-        username: userProfile.username,
-        phoneNumber: userProfile.phoneNumber,
-        phoneCountry: userProfile.phoneCountry
-      } : null
-    });
 
     if (activeAccount) {
       const isPersonal = activeAccount.type.toLowerCase() === 'personal';
@@ -137,7 +94,6 @@ export const ProfileScreen = () => {
         // For personal accounts, show user profile info with phone number (no account type label)
         const displayName = userProfile?.firstName || userProfile?.username || activeAccount.name;
         const phoneNumber = formatPhoneNumber(userProfile?.phoneNumber, userProfile?.phoneCountry);
-        console.log('ProfileScreen - Personal account display:', { displayName, phoneNumber });
         return {
           name: displayName,
           subtitle: phoneNumber,
@@ -146,10 +102,6 @@ export const ProfileScreen = () => {
         };
       } else {
         // For business accounts, show business info with account type only (no category)
-        console.log('ProfileScreen - Business account display:', { 
-          name: activeAccount.name, 
-          accountType 
-        });
         return {
           name: activeAccount.name,
           subtitle: '',
@@ -162,7 +114,6 @@ export const ProfileScreen = () => {
     // Fallback to user profile with phone number (no account type label)
     const displayName = userProfile?.firstName || userProfile?.username || 'Sin perfil';
     const phoneNumber = formatPhoneNumber(userProfile?.phoneNumber, userProfile?.phoneCountry);
-    console.log('ProfileScreen - Fallback display:', { displayName, phoneNumber });
     return {
       name: displayName,
       subtitle: phoneNumber,
