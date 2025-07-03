@@ -211,8 +211,39 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       console.log('useAccountManager - New active context:', newActiveContext);
       
       // Update the active account context state
-      // This will automatically trigger the effect that calls loadAccounts
       setActiveAccountContext(newActiveContext);
+      
+      // Directly update the active account state for immediate UI update
+      const serverAccounts = serverAccountsData?.userAccounts || [];
+      const convertedAccounts: StoredAccount[] = serverAccounts.map((serverAcc: any) => {
+        const displayName = serverAcc.display_name || serverAcc.name || 'Account';
+        const avatar = serverAcc.avatar_letter || (displayName ? displayName.charAt(0).toUpperCase() : 'A');
+        const accountType = serverAcc.account_type || 'personal';
+        
+        return {
+          id: serverAcc.id,
+          name: serverAcc.name || 'Account',
+          type: accountType.toLowerCase(),
+          index: serverAcc.index || 0,
+          phone: serverAcc.phone,
+          category: serverAcc.category,
+          avatar: avatar,
+          suiAddress: serverAcc.sui_address || '',
+          createdAt: serverAcc.created_at || new Date().toISOString(),
+          isActive: true,
+        };
+      });
+      
+      // Find the new active account
+      const newActiveAccount = convertedAccounts.find(acc => acc.id === accountId);
+      if (newActiveAccount) {
+        console.log('useAccountManager - Directly setting active account:', newActiveAccount);
+        setActiveAccount(newActiveAccount);
+        console.log('useAccountManager - setActiveAccount called successfully');
+      } else {
+        console.log('useAccountManager - Could not find account with ID:', accountId);
+        console.log('useAccountManager - Available accounts:', convertedAccounts.map(acc => acc.id));
+      }
       
       console.log('useAccountManager - switchAccount completed, new context:', newActiveContext);
     } catch (error) {
@@ -221,7 +252,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     } finally {
       setIsLoading(false);
     }
-  }, [authService]);
+  }, [authService, serverAccountsData]);
 
   const createAccount = useCallback(async (
     name: string,

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccountManager } from '../hooks/useAccountManager';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { getCountryByIso } from '../utils/countries';
@@ -43,7 +43,7 @@ type ProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>
 
 export const ProfileScreen = () => {
   const { signOut, userProfile, isUserProfileLoading } = useAuth();
-  const { activeAccount, accounts, isLoading: accountsLoading } = useAccountManager();
+  const { activeAccount, accounts, isLoading: accountsLoading, refreshAccounts } = useAccountManager();
   const navigation = useNavigation<ProfileScreenNavigationProp>();
 
   // Debug active account changes to ensure real-time updates
@@ -55,6 +55,14 @@ export const ProfileScreen = () => {
       isLoading: accountsLoading
     });
   }, [activeAccount, accountsLoading]);
+
+  // Force refresh when screen comes into focus to ensure latest state
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('ProfileScreen - Screen focused, refreshing accounts');
+      refreshAccounts();
+    }, [refreshAccounts])
+  );
 
   const handleLegalDocumentPress = (docType: 'terms' | 'privacy' | 'deletion') => {
     navigation.navigate('LegalDocument', { docType });
