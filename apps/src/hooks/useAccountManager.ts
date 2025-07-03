@@ -32,6 +32,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   const [activeAccount, setActiveAccount] = useState<StoredAccount | null>(null);
   const [accounts, setAccounts] = useState<StoredAccount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeAccountContext, setActiveAccountContext] = useState<AccountContext | null>(null);
 
   const authService = AuthService.getInstance();
   const accountManager = AccountManager.getInstance();
@@ -50,11 +51,6 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
   });
-
-  // Load accounts on mount and when server data or user profile changes
-  useEffect(() => {
-    loadAccounts();
-  }, [serverAccountsData, userProfile]);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -174,6 +170,32 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     }
   }, [authService, accountManager, serverAccountsData, userProfile]);
 
+  // Load accounts on mount and when server data or user profile changes
+  useEffect(() => {
+    loadAccounts();
+  }, [serverAccountsData, userProfile]);
+
+  // Reload accounts when active account context changes (for account switching)
+  useEffect(() => {
+    if (activeAccountContext) {
+      loadAccounts();
+    }
+  }, [activeAccountContext, loadAccounts]);
+
+  // Load initial active account context on mount
+  useEffect(() => {
+    const loadInitialContext = async () => {
+      try {
+        const context = await authService.getActiveAccountContext();
+        setActiveAccountContext(context);
+      } catch (error) {
+        console.error('Error loading initial account context:', error);
+      }
+    };
+    
+    loadInitialContext();
+  }, [authService]);
+
   const switchAccount = useCallback(async (accountId: string) => {
     try {
       console.log('useAccountManager - switchAccount called with:', accountId);
@@ -182,17 +204,18 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       // Switch account in auth service
       await authService.switchAccount(accountId);
       
-      console.log('useAccountManager - switchAccount completed, reloading accounts');
+      // Get the new active account context
+      const newActiveContext = await authService.getActiveAccountContext();
+      setActiveAccountContext(newActiveContext);
       
-      // Reload accounts to get updated state
-      await loadAccounts();
+      console.log('useAccountManager - switchAccount completed, new context:', newActiveContext);
     } catch (error) {
       console.error('Error switching account:', error);
       throw error;
     } finally {
       setIsLoading(false);
     }
-  }, [authService, loadAccounts]);
+  }, [authService]);
 
   const createAccount = useCallback(async (
     name: string,
@@ -239,11 +262,12 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     try {
       // Refetch from server
       await refetchServerAccounts();
-      // loadAccounts will be called automatically when server data changes
+      // Also reload local account state to handle account switching
+      await loadAccounts();
     } catch (error) {
       console.error('Error refreshing accounts from server:', error);
     }
-  }, [refetchServerAccounts]);
+  }, [refetchServerAccounts, loadAccounts]);
 
   const syncWithServer = useCallback(async (serverAccounts: any[]) => {
     try {
