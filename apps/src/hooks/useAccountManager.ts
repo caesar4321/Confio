@@ -211,10 +211,8 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       console.log('useAccountManager - New active context:', newActiveContext);
       
       // Update the active account context state
+      // This will automatically trigger the effect that calls loadAccounts
       setActiveAccountContext(newActiveContext);
-      
-      // Manually reload accounts to ensure immediate update
-      await loadAccounts();
       
       console.log('useAccountManager - switchAccount completed, new context:', newActiveContext);
     } catch (error) {
@@ -223,7 +221,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     } finally {
       setIsLoading(false);
     }
-  }, [authService, loadAccounts]);
+  }, [authService]);
 
   const createAccount = useCallback(async (
     name: string,
