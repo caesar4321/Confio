@@ -128,8 +128,6 @@ export const UPDATE_USERNAME = gql`
   }
 `;
 
-
-
 export const GET_USER_VERIFICATIONS = gql`
   query GetUserVerifications($userId: ID) {
     userVerifications(userId: $userId) {
@@ -263,6 +261,38 @@ export const CREATE_BUSINESS = gql`
         accountType
         accountIndex
         suiAddress
+        createdAt
+      }
+    }
+  }
+`;
+
+export const UPDATE_BUSINESS = gql`
+  mutation UpdateBusiness(
+    $businessId: ID!
+    $name: String!
+    $description: String
+    $category: String!
+    $businessRegistrationNumber: String
+    $address: String
+  ) {
+    updateBusiness(
+      businessId: $businessId
+      name: $name
+      description: $description
+      category: $category
+      businessRegistrationNumber: $businessRegistrationNumber
+      address: $address
+    ) {
+      success
+      error
+      business {
+        id
+        name
+        description
+        category
+        businessRegistrationNumber
+        address
         createdAt
       }
     }

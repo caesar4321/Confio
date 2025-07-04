@@ -318,8 +318,6 @@ class UpdateUserProfile(graphene.Mutation):
 		except Exception as e:
 			return UpdateUserProfile(success=False, error=str(e), user=None)
 
-
-
 class SubmitIdentityVerification(graphene.Mutation):
 	class Arguments:
 		verified_first_name = graphene.String(required=True)
@@ -523,6 +521,73 @@ class CreateBusiness(graphene.Mutation):
 			logger.error(f"Error creating business: {str(e)}")
 			return CreateBusiness(success=False, error="Error interno del servidor")
 
+class UpdateBusiness(graphene.Mutation):
+	class Arguments:
+		business_id = graphene.ID(required=True)
+		name = graphene.String(required=True)
+		description = graphene.String()
+		category = graphene.String(required=True)
+		business_registration_number = graphene.String()
+		address = graphene.String()
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	business = graphene.Field(BusinessType)
+
+	@classmethod
+	def mutate(cls, root, info, business_id, name, category, description=None, business_registration_number=None, address=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return UpdateBusiness(success=False, error="Authentication required")
+
+		try:
+			# Get the business and verify it belongs to the user
+			business = Business.objects.get(
+				id=business_id,
+				accounts__user=user
+			)
+			
+			# Validate business name
+			if not name.strip():
+				return UpdateBusiness(success=False, error="El nombre del negocio es requerido")
+
+			# Validate category
+			valid_categories = [choice[0] for choice in Business.BUSINESS_CATEGORY_CHOICES]
+			if category not in valid_categories:
+				return UpdateBusiness(success=False, error="Categoría de negocio inválida")
+
+			# Check for duplicate business name for this user (excluding current business)
+			existing_business = Business.objects.filter(
+				accounts__user=user,
+				name__iexact=name.strip()
+			).exclude(id=business_id).first()
+			
+			if existing_business:
+				return UpdateBusiness(
+					success=False, 
+					error=f"Ya tienes un negocio con el nombre '{name.strip()}'. Por favor, usa un nombre diferente."
+				)
+
+			# Update the business
+			business.name = name.strip()
+			business.description = description.strip() if description else None
+			business.category = category
+			business.business_registration_number = business_registration_number.strip() if business_registration_number else None
+			business.address = address.strip() if address else None
+			business.save()
+
+			return UpdateBusiness(
+				success=True,
+				error=None,
+				business=business
+			)
+
+		except Business.DoesNotExist:
+			return UpdateBusiness(success=False, error="Negocio no encontrado")
+		except Exception as e:
+			logger.error(f"Error updating business: {str(e)}")
+			return UpdateBusiness(success=False, error="Error interno del servidor")
+
 class UpdateAccountSuiAddress(graphene.Mutation):
 	class Arguments:
 		account_id = graphene.ID(required=True)
@@ -618,4 +683,5 @@ class Mutation(graphene.ObjectType):
 	approve_identity_verification = ApproveIdentityVerification.Field()
 	reject_identity_verification = RejectIdentityVerification.Field()
 	create_business = CreateBusiness.Field()
+	update_business = UpdateBusiness.Field()
 	update_account_sui_address = UpdateAccountSuiAddress.Field()

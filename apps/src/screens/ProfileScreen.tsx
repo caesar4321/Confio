@@ -149,7 +149,14 @@ export const ProfileScreen = () => {
         <View style={styles.profileInfo}>
           <TouchableOpacity 
             style={styles.avatarContainer}
-            onPress={() => navigation.navigate('EditProfile')}
+            onPress={() => {
+              const isBusiness = activeAccount?.type.toLowerCase() === 'business';
+              if (isBusiness) {
+                navigation.navigate('EditBusiness');
+              } else {
+                navigation.navigate('EditProfile');
+              }
+            }}
           >
             <Text style={styles.avatarText}>
               {activeAccount?.avatar || (userProfile?.firstName?.charAt(0) || userProfile?.username?.charAt(0) || 'U')}
@@ -168,24 +175,26 @@ export const ProfileScreen = () => {
         </View>
       </View>
 
-      {/* Confío Address Card */}
-      <View style={styles.addressCard}>
-        <TouchableOpacity 
-          style={styles.addressCardContent}
-          onPress={() => navigation.navigate('ConfioAddress')}
-        >
-          <View style={styles.addressIconContainer}>
-            <Icon name="maximize" size={20} color="#6B7280" />
-          </View>
-          <View style={styles.addressInfo}>
-            <Text style={styles.addressTitle}>Mi dirección de Confío</Text>
-            <Text style={styles.addressValue}>
-              {userProfile?.username ? `confio.lat/@${userProfile.username}` : 'confio.lat/@usuario'}
-            </Text>
-          </View>
-          <Icon name="chevron-right" size={20} color="#9CA3AF" />
-        </TouchableOpacity>
-      </View>
+      {/* Confío Address Card - Only show for personal accounts */}
+      {activeAccount?.type.toLowerCase() === 'personal' && (
+        <View style={styles.addressCard}>
+          <TouchableOpacity 
+            style={styles.addressCardContent}
+            onPress={() => navigation.navigate('ConfioAddress')}
+          >
+            <View style={styles.addressIconContainer}>
+              <Icon name="maximize" size={20} color="#6B7280" />
+            </View>
+            <View style={styles.addressInfo}>
+              <Text style={styles.addressTitle}>Mi dirección de Confío</Text>
+              <Text style={styles.addressValue}>
+                {userProfile?.username ? `confio.lat/@${userProfile.username}` : 'confio.lat/@usuario'}
+              </Text>
+            </View>
+            <Icon name="chevron-right" size={20} color="#9CA3AF" />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Profile Options */}
       <View style={styles.optionsContainer}>
@@ -276,7 +285,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginTop: -16,
     marginHorizontal: 16,
-    marginBottom: 24,
+    marginBottom: 8,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -318,6 +327,7 @@ const styles = StyleSheet.create({
   },
   optionsContainer: {
     paddingHorizontal: 16,
+    paddingTop: 16,
     gap: 12,
   },
   optionItem: {

@@ -7,6 +7,7 @@ import VerificationScreen from '../screens/VerificationScreen';
 import { ConfioAddressScreen } from '../screens/ConfioAddressScreen';
 import { NotificationScreen } from '../screens/NotificationScreen';
 import { CreateBusinessScreen } from '../screens/CreateBusinessScreen';
+import { EditBusinessScreen } from '../screens/EditBusinessScreen';
 import { EditProfileScreen } from '../screens/EditProfileScreen';
 import PhoneVerificationScreen from '../screens/PhoneVerificationScreen';
 import { AccountDetailScreen } from '../screens/AccountDetailScreen';
@@ -70,6 +71,13 @@ export const MainNavigator = () => {
       <Stack.Screen 
         name="CreateBusiness" 
         component={CreateBusinessScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen 
+        name="EditBusiness" 
+        component={EditBusinessScreen}
         options={{
           headerShown: false,
         }}
