@@ -18,6 +18,15 @@ export interface StoredAccount {
   suiAddress?: string;
   createdAt: string;
   isActive: boolean;
+  business?: {
+    id: string;
+    name: string;
+    description?: string;
+    category: string;
+    businessRegistrationNumber?: string;
+    address?: string;
+    createdAt: string;
+  };
 }
 
 const ACCOUNT_KEYCHAIN_SERVICE = 'com.confio.accounts';

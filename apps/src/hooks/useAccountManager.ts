@@ -94,6 +94,16 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           avatar: avatar,
           suiAddress: serverAcc.suiAddress,
           createdAt: serverAcc.createdAt,
+          isActive: true,
+          business: serverAcc.business ? {
+            id: serverAcc.business.id,
+            name: serverAcc.business.name,
+            description: serverAcc.business.description,
+            category: serverAcc.business.category,
+            businessRegistrationNumber: serverAcc.business.businessRegistrationNumber,
+            address: serverAcc.business.address,
+            createdAt: serverAcc.business.createdAt,
+          } : undefined,
         };
       });
       
@@ -216,21 +226,33 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       // Directly update the active account state for immediate UI update
       const serverAccounts = serverAccountsData?.userAccounts || [];
       const convertedAccounts: StoredAccount[] = serverAccounts.map((serverAcc: any) => {
-        const displayName = serverAcc.display_name || serverAcc.name || 'Account';
-        const avatar = serverAcc.avatar_letter || (displayName ? displayName.charAt(0).toUpperCase() : 'A');
-        const accountType = serverAcc.account_type || 'personal';
+        const displayName = serverAcc.displayName || 'Account';
+        const avatar = serverAcc.avatarLetter || (displayName ? displayName.charAt(0).toUpperCase() : 'A');
+        const accountType = serverAcc.accountType || 'personal';
+        
+        // Extract the base name without the "Personal -" or "Negocio -" prefix
+        const baseName = displayName.replace(/^(Personal|Negocio) - /, '');
         
         return {
-          id: serverAcc.id,
-          name: serverAcc.name || 'Account',
-          type: accountType.toLowerCase(),
-          index: serverAcc.index || 0,
-          phone: serverAcc.phone,
-          category: serverAcc.category,
+          id: serverAcc.accountId,
+          name: baseName,
+          type: accountType,
+          index: serverAcc.accountIndex || 0,
+          phone: accountType.toLowerCase() === 'personal' ? userProfile?.phoneNumber : undefined,
+          category: serverAcc.business?.category,
           avatar: avatar,
-          suiAddress: serverAcc.sui_address || '',
-          createdAt: serverAcc.created_at || new Date().toISOString(),
+          suiAddress: serverAcc.suiAddress || '',
+          createdAt: serverAcc.createdAt || new Date().toISOString(),
           isActive: true,
+          business: serverAcc.business ? {
+            id: serverAcc.business.id,
+            name: serverAcc.business.name,
+            description: serverAcc.business.description,
+            category: serverAcc.business.category,
+            businessRegistrationNumber: serverAcc.business.businessRegistrationNumber,
+            address: serverAcc.business.address,
+            createdAt: serverAcc.business.createdAt,
+          } : undefined,
         };
       });
       
@@ -252,7 +274,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     } finally {
       setIsLoading(false);
     }
-  }, [authService, serverAccountsData]);
+  }, [authService, serverAccountsData, userProfile]);
 
   const createAccount = useCallback(async (
     name: string,

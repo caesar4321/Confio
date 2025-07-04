@@ -24,6 +24,7 @@ export type MainStackParamList = {
   ConfioAddress: undefined;
   Notification: undefined;
   CreateBusiness: undefined;
+  EditBusiness: undefined;
   EditProfile: undefined;
   PhoneVerification: undefined;
   TraderProfile: {
