@@ -1,111 +1,253 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Confío React Native App
 
-# Getting Started
+This is the React Native mobile application for Confío, a Web3 wallet for Latin America.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+## 🚀 Quick Start
 
-## Step 1: Start Metro
+### Prerequisites
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+- **Node.js** (v18 or higher)
+- **Yarn** package manager
+- **React Native CLI**
+- **Android Studio** (for Android development)
+- **Xcode** (for iOS development, macOS only)
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+### Platform-Specific Setup
 
-```sh
-# Using npm
-npm start
+#### For macOS/Linux Developers
 
-# OR using Yarn
-yarn start
+1. **Run the setup script:**
+   ```bash
+   ./scripts/setup-platform.sh
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   yarn install
+   ```
+
+3. **iOS setup (macOS only):**
+   ```bash
+   cd ios
+   bundle install
+   bundle exec pod install
+   cd ..
+   ```
+
+4. **Run the app:**
+   ```bash
+   # iOS (macOS only)
+   yarn ios
+   
+   # Android
+   yarn android
+   ```
+
+#### For Windows Developers
+
+1. **Run the setup script:**
+   ```cmd
+   scripts\setup-platform.bat
+   ```
+
+2. **Install dependencies:**
+   ```cmd
+   yarn install
+   ```
+
+3. **Run Android app:**
+   ```cmd
+   yarn android
+   ```
+
+4. **For iOS development on Windows:**
+   - Use WSL2 with Ubuntu for limited iOS development
+   - Use a remote macOS machine
+   - Use cloud-based iOS development services
+
+## 🔧 Manual Configuration
+
+If the setup scripts don't work, you can manually configure platform-specific files:
+
+### Android Configuration
+
+1. **Create `android/local.properties`:**
+   ```properties
+   ## This file must *NOT* be checked into Version Control Systems,
+   # as it contains information specific to your local configuration.
+   #
+   # Location of the SDK. This is only used by Gradle.
+   # For customization when using a Version Control System, please read the
+   # header note.
+   
+   # macOS: /Users/YOUR_USERNAME/Library/Android/sdk
+   # Windows: C:\\Users\\YOUR_USERNAME\\AppData\\Local\\Android\\Sdk
+   # Linux: /home/YOUR_USERNAME/Android/Sdk
+   sdk.dir=/path/to/your/android/sdk
+   ```
+
+### iOS Configuration
+
+1. **Create `ios/.xcode.env.local`:**
+   ```bash
+   # macOS (Homebrew): /opt/homebrew/bin/node
+   # macOS (nvm): /Users/YOUR_USERNAME/.nvm/versions/node/VERSION/bin/node
+   # Windows: C:\\Program Files\\nodejs\\node.exe
+   # Linux: /usr/bin/node or /usr/local/bin/node
+   export NODE_BINARY=/path/to/your/node
+   ```
+
+## 🚫 Avoiding Platform Conflicts
+
+### Files That Should NOT Be Committed
+
+The following files contain platform-specific paths and should never be committed to Git:
+
+- `android/local.properties` - Contains Android SDK path
+- `ios/.xcode.env.local` - Contains Node.js path
+- `*.xcworkspace/xcuserdata/` - Xcode user-specific data
+- `*.xcodeproj/xcuserdata/` - Xcode user-specific data
+- `*.xcodeproj/project.xcworkspace/xcuserdata/` - Xcode user-specific data
+- `.env*` files - Environment variables
+
+### Template Files
+
+Use these template files as reference:
+- `android/local.properties.template` - Android SDK configuration template
+- `ios/.xcode.env.template` - iOS Node.js configuration template
+
+### Best Practices
+
+1. **Always run setup scripts** when cloning the repository
+2. **Never commit** platform-specific configuration files
+3. **Use template files** as reference for manual configuration
+4. **Test on both platforms** before merging platform-specific changes
+5. **Document platform differences** in commit messages
+
+## 🏗️ Project Structure
+
+```
+apps/
+├── android/              # Android-specific native code
+├── ios/                  # iOS-specific native code (macOS only)
+├── src/                  # React Native source code
+│   ├── components/       # Reusable components
+│   ├── screens/          # App screens
+│   ├── services/         # API services
+│   ├── utils/            # Utility functions
+│   └── ...
+├── scripts/              # Build and setup scripts
+│   ├── setup-platform.sh # macOS/Linux setup script
+│   └── setup-platform.bat # Windows setup script
+└── ...
 ```
 
-## Step 2: Build and run your app
+## 🔧 Development Workflow
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
+### For Cross-Platform Development
+
+1. **Shared Code Changes:**
+   - All changes in `src/` are shared across platforms
+   - Test on both iOS and Android before committing
+
+2. **Platform-Specific Changes:**
+   - Document platform differences clearly
+   - Use platform-specific files when necessary
+   - Test thoroughly on the target platform
+
+3. **Native Dependencies:**
+   - iOS: Update `ios/Podfile` and run `pod install`
+   - Android: Update `android/app/build.gradle` and sync
+
+### Common Issues and Solutions
+
+#### Android Build Issues
+
+1. **SDK not found:**
+   - Run `./scripts/setup-platform.sh` (macOS/Linux) or `scripts\setup-platform.bat` (Windows)
+   - Verify Android SDK installation
+   - Check `android/local.properties` path
+
+2. **Gradle sync failed:**
+   - Clean project: `cd android && ./gradlew clean`
+   - Invalidate caches in Android Studio
+   - Check Gradle version compatibility
+
+#### iOS Build Issues
+
+1. **Node.js not found:**
+   - Run `./scripts/setup-platform.sh`
+   - Verify Node.js installation
+   - Check `ios/.xcode.env.local` path
+
+2. **Pod install failed:**
+   - Update CocoaPods: `sudo gem install cocoapods`
+   - Clean and reinstall: `cd ios && rm -rf Pods && bundle exec pod install`
+
+## 📱 Multi-Account Features
+
+The app supports multiple accounts per user:
+
+- **Personal Accounts**: Individual wallets for personal transactions
+- **Business Accounts**: Dedicated wallets for business operations
+- **Account Switching**: Seamless switching between accounts
+- **Deterministic Addresses**: Same OAuth identity + account context = same Sui address
+
+## 🔒 Security Features
+
+- **Non-custodial**: Private keys never stored on servers
+- **Secure Storage**: Uses React Native Keychain for sensitive data
+- **zkLogin Integration**: Zero-knowledge proof authentication
+- **Token Management**: Automatic refresh and secure storage
+
+## 🧪 Testing
+
+```bash
+# Run tests
+yarn test
+
+# Run tests with coverage
+yarn test --coverage
+
+# Run specific test file
+yarn test zkLogin.test.ts
+```
+
+## 📦 Building for Production
 
 ### Android
 
-```sh
-# Using npm
-npm run android
+```bash
+# Generate signed APK
+cd android
+./gradlew assembleRelease
 
-# OR using Yarn
-yarn android
+# Generate signed AAB (for Play Store)
+./gradlew bundleRelease
 ```
 
 ### iOS
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
-
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
-
-```sh
-bundle install
-```
-
-Then, and every time you update your native dependencies, run:
-
-```sh
-bundle exec pod install
-```
-
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
-```
-
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Confío
-
-## Troubleshooting
-
-### iOS Build Issues
-
-If you encounter the following error when running `pod install`:
-```
-Invalid `Podfile` file: cannot load such file -- /Users/[username]/[path]/node_modules/@react-native-community/cli-platform-ios/native_modules
-```
-
-The solution is to run:
 ```bash
-npm audit fix
+# Archive for App Store
+# Use Xcode: Product > Archive
 ```
 
-This will update and fix the React Native dependencies, including the required `react_native_pods` file, after which `pod install` should work successfully.
+## 🤝 Contributing
 
-# Learn More
+1. **Fork the repository**
+2. **Create a feature branch**
+3. **Make your changes**
+4. **Test on both platforms** (if applicable)
+5. **Submit a pull request**
 
-To learn more about React Native, take a look at the following resources:
+### Platform-Specific Contributions
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+- **iOS changes**: Test on macOS
+- **Android changes**: Test on your platform
+- **Cross-platform changes**: Test on both platforms
+- **Documentation**: Update README for platform differences
+
+## 📄 License
+
+MIT License - see main repository for details.

@@ -36,6 +36,14 @@ local.properties
 !confio.keystore
 .kotlin/
 
+# Platform-specific files that should not be committed
+# These files contain local paths and configurations
+local.properties
+.xcode.env.local
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+
 # node.js
 #
 node_modules/
@@ -74,3 +82,9 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.production
