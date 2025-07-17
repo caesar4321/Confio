@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import styles from '../../styles/WhatIsConfio.module.css';
-import confioAppImage from '../../images/ConfioApp.jpeg';
+import confioAppImage from '../../images/ConfioApp.png';
 
 const WhatIsConfio = () => {
   return (

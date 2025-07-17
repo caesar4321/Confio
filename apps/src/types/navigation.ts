@@ -11,7 +11,7 @@ export type AuthStackParamList = {
 export type BottomTabParamList = {
   Home: undefined;
   Contacts: undefined;
-  Scan: undefined;
+  Scan: { mode?: 'cobrar' | 'pagar' };
   Exchange: undefined;
   Profile: undefined;
 };
