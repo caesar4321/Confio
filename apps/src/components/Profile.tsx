@@ -1,45 +1,81 @@
 import React from 'react';
-import { useQuery, useMutation } from '@apollo/client';
-import { GET_USER_PROFILE, VERIFY_ZKLOGIN_PROOF } from '../apollo/queries';
-import { View, Text, Button, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator } from 'react-native';
+import { useAuth } from '../contexts/AuthContext';
+import { useAccountManager } from '../hooks/useAccountManager';
 
 const Profile: React.FC = () => {
-  const { loading, error, data } = useQuery(GET_USER_PROFILE);
-  const [verifyProof, { loading: verifying }] = useMutation(VERIFY_ZKLOGIN_PROOF);
+  const { profileData, isProfileLoading } = useAuth();
+  const { activeAccount } = useAccountManager();
 
-  if (loading) return <ActivityIndicator size="large" />;
-  if (error) return <Text>Error: {error.message}</Text>;
+  if (isProfileLoading) return <ActivityIndicator size="large" />;
+  if (!profileData) return <Text>No profile data available</Text>;
 
-  const handleVerifyProof = async () => {
-    try {
-      // TODO: Replace with actual proof data
-      const proofData = "test_proof_data";
-      await verifyProof({ variables: { proofData } });
-    } catch (err) {
-      console.error('Error verifying proof:', err);
-    }
-  };
+  const isBusinessMode = activeAccount?.type === 'business';
+  const userProfile = profileData.userProfile;
+  const businessProfile = profileData.businessProfile;
 
   return (
     <View style={{ padding: 20 }}>
-      <Text style={{ fontSize: 24, marginBottom: 20 }}>Profile</Text>
-      <Text>Email: {data?.me?.email}</Text>
-      <Text>Username: {data?.me?.username}</Text>
+      <Text style={{ fontSize: 24, marginBottom: 20 }}>
+        {isBusinessMode ? 'Business Profile' : 'User Profile'}
+      </Text>
       
-      <Text style={{ marginTop: 20, fontSize: 18 }}>ZK Login Proofs:</Text>
-      {data?.me?.zkLoginProofs?.map((proof: any) => (
-        <View key={proof.id} style={{ marginTop: 10 }}>
-          <Text>ID: {proof.id}</Text>
-          <Text>Verified: {proof.isVerified ? 'Yes' : 'No'}</Text>
-          <Text>Created: {new Date(proof.createdAt).toLocaleDateString()}</Text>
+      {isBusinessMode && businessProfile ? (
+        // Business Profile Display
+        <View>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>
+            {businessProfile.name}
+          </Text>
+          <Text>Business ID: {businessProfile.id}</Text>
+          <Text>Category: {businessProfile.category}</Text>
+          {businessProfile.description && (
+            <Text>Description: {businessProfile.description}</Text>
+          )}
+          {businessProfile.address && (
+            <Text>Address: {businessProfile.address}</Text>
+          )}
+          {businessProfile.businessRegistrationNumber && (
+            <Text>Registration Number: {businessProfile.businessRegistrationNumber}</Text>
+          )}
+          {businessProfile.createdAt && (
+            <Text>Created: {new Date(businessProfile.createdAt).toLocaleDateString()}</Text>
+          )}
         </View>
-      ))}
-
-      <Button
-        title="Verify New Proof"
-        onPress={handleVerifyProof}
-        disabled={verifying}
-      />
+      ) : userProfile ? (
+        // User Profile Display
+        <View>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>
+            {userProfile.firstName && userProfile.lastName 
+              ? `${userProfile.firstName} ${userProfile.lastName}`
+              : userProfile.username
+            }
+          </Text>
+          <Text>User ID: {userProfile.id}</Text>
+          <Text>Email: {userProfile.email}</Text>
+          <Text>Username: {userProfile.username}</Text>
+          {userProfile.firstName && (
+            <Text>First Name: {userProfile.firstName}</Text>
+          )}
+          {userProfile.lastName && (
+            <Text>Last Name: {userProfile.lastName}</Text>
+          )}
+          {userProfile.phoneCountry && (
+            <Text>Phone Country: {userProfile.phoneCountry}</Text>
+          )}
+          {userProfile.phoneNumber && (
+            <Text>Phone Number: {userProfile.phoneNumber}</Text>
+          )}
+          <Text>Identity Verified: {userProfile.isIdentityVerified ? 'Yes' : 'No'}</Text>
+          {userProfile.verificationStatus && (
+            <Text>Verification Status: {userProfile.verificationStatus}</Text>
+          )}
+          {userProfile.lastVerifiedDate && (
+            <Text>Last Verified: {new Date(userProfile.lastVerifiedDate).toLocaleDateString()}</Text>
+          )}
+        </View>
+      ) : (
+        <Text>No profile data available for current account type</Text>
+      )}
     </View>
   );
 };

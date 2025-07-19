@@ -1,18 +1,35 @@
 import { gql } from '@apollo/client';
 
-export const GET_USER_PROFILE = gql`
-  query GetUserProfile {
+// User Queries
+export const GET_ME = gql`
+  query GetMe {
     me {
       id
-      email
       username
+      email
       firstName
       lastName
-      phoneNumber
       phoneCountry
+      phoneNumber
       isIdentityVerified
       lastVerifiedDate
       verificationStatus
+    }
+  }
+`;
+
+// Business Profile Query
+export const GET_BUSINESS_PROFILE = gql`
+  query GetBusinessProfile($businessId: ID!) {
+    business(id: $businessId) {
+      id
+      name
+      description
+      category
+      address
+      businessRegistrationNumber
+      createdAt
+      updatedAt
     }
   }
 `;
@@ -21,22 +38,57 @@ export const GET_USER_ACCOUNTS = gql`
   query GetUserAccounts {
     userAccounts {
       id
-      accountId
       accountType
       accountIndex
       suiAddress
-      createdAt
+      lastLoginAt
       displayName
       avatarLetter
       business {
         id
         name
-        description
         category
-        businessRegistrationNumber
+        description
         address
+        businessRegistrationNumber
         createdAt
+        updatedAt
       }
+    }
+  }
+`;
+
+// Country Codes
+export const GET_COUNTRY_CODES = gql`
+  query GetCountryCodes {
+    countryCodes {
+      name
+      code
+      flag
+    }
+  }
+`;
+
+// Business Categories
+export const GET_BUSINESS_CATEGORIES = gql`
+  query GetBusinessCategories {
+    businessCategories {
+      id
+      name
+    }
+  }
+`;
+
+// Legal Documents
+export const GET_LEGAL_DOCUMENT = gql`
+  query GetLegalDocument($docType: String!, $language: String) {
+    legalDocument(docType: $docType, language: $language) {
+      title
+      content
+      version
+      lastUpdated
+      language
+      isLegallyBinding
     }
   }
 `;
@@ -69,7 +121,7 @@ export const FINALIZE_ZKLOGIN = gql`
   }
 `;
 
-// Telegram Verification Mutations
+// Telegram Verification
 export const INITIATE_TELEGRAM_VERIFICATION = gql`
   mutation InitiateTelegramVerification($phoneNumber: String!, $countryCode: String!) {
     initiateTelegramVerification(phoneNumber: $phoneNumber, countryCode: $countryCode) {
@@ -80,32 +132,15 @@ export const INITIATE_TELEGRAM_VERIFICATION = gql`
 `;
 
 export const VERIFY_TELEGRAM_CODE = gql`
-  mutation VerifyTelegramCode($phoneNumber: String!, $countryCode: String!, $code: String!) {
-    verifyTelegramCode(phoneNumber: $phoneNumber, countryCode: $countryCode, code: $code) {
+  mutation VerifyTelegramCode($requestId: String!, $code: String!) {
+    verifyTelegramCode(requestId: $requestId, code: $code) {
       success
       error
     }
   }
 `;
 
-export const UPDATE_USER_PROFILE = gql`
-  mutation UpdateUserProfile($firstName: String!, $lastName: String!) {
-    updateUserProfile(firstName: $firstName, lastName: $lastName) {
-      success
-      error
-      user {
-        id
-        email
-        username
-        firstName
-        lastName
-        phoneNumber
-        phoneCountry
-      }
-    }
-  }
-`;
-
+// User Profile Mutations
 export const UPDATE_PHONE_NUMBER = gql`
   mutation UpdatePhoneNumber($countryCode: String!, $phoneNumber: String!) {
     updatePhoneNumber(countryCode: $countryCode, phoneNumber: $phoneNumber) {
@@ -120,198 +155,212 @@ export const UPDATE_USERNAME = gql`
     updateUsername(username: $username) {
       success
       error
-      user {
-        id
-        username
-      }
     }
   }
 `;
 
-export const GET_USER_VERIFICATIONS = gql`
-  query GetUserVerifications($userId: ID) {
-    userVerifications(userId: $userId) {
-      id
-      verifiedFirstName
-      verifiedLastName
-      verifiedDateOfBirth
-      verifiedNationality
-      verifiedAddress
-      verifiedCity
-      verifiedState
-      verifiedCountry
-      verifiedPostalCode
-      documentType
-      documentNumber
-      documentIssuingCountry
-      documentExpiryDate
-      status
-      verifiedAt
-      rejectedReason
-      createdAt
-    }
-  }
-`;
-
-export const SUBMIT_IDENTITY_VERIFICATION = gql`
-  mutation SubmitIdentityVerification(
-    $verifiedFirstName: String!
-    $verifiedLastName: String!
-    $verifiedDateOfBirth: Date!
-    $verifiedNationality: String!
-    $verifiedAddress: String!
-    $verifiedCity: String!
-    $verifiedState: String!
-    $verifiedCountry: String!
-    $verifiedPostalCode: String
-    $documentType: String!
-    $documentNumber: String!
-    $documentIssuingCountry: String!
-    $documentExpiryDate: Date
-    $documentFrontImage: String!
-    $documentBackImage: String
-    $selfieWithDocument: String!
-  ) {
-    submitIdentityVerification(
-      verifiedFirstName: $verifiedFirstName
-      verifiedLastName: $verifiedLastName
-      verifiedDateOfBirth: $verifiedDateOfBirth
-      verifiedNationality: $verifiedNationality
-      verifiedAddress: $verifiedAddress
-      verifiedCity: $verifiedCity
-      verifiedState: $verifiedState
-      verifiedCountry: $verifiedCountry
-      verifiedPostalCode: $verifiedPostalCode
-      documentType: $documentType
-      documentNumber: $documentNumber
-      documentIssuingCountry: $documentIssuingCountry
-      documentExpiryDate: $documentExpiryDate
-      documentFrontImage: $documentFrontImage
-      documentBackImage: $documentBackImage
-      selfieWithDocument: $selfieWithDocument
-    ) {
+export const UPDATE_USER_PROFILE = gql`
+  mutation UpdateUserProfile($firstName: String!, $lastName: String!) {
+    updateUserProfile(firstName: $firstName, lastName: $lastName) {
       success
       error
-      verification {
-        id
-        status
-        createdAt
-      }
     }
   }
 `;
 
-export const APPROVE_IDENTITY_VERIFICATION = gql`
-  mutation ApproveIdentityVerification($verificationId: ID!) {
-    approveIdentityVerification(verificationId: $verificationId) {
-      success
-      error
-      verification {
-        id
-        status
-        verifiedAt
-      }
-    }
-  }
-`;
-
-export const REJECT_IDENTITY_VERIFICATION = gql`
-  mutation RejectIdentityVerification($verificationId: ID!, $reason: String!) {
-    rejectIdentityVerification(verificationId: $verificationId, reason: $reason) {
-      success
-      error
-      verification {
-        id
-        status
-        rejectedReason
-      }
-    }
-  }
-`;
-
+// Business Mutations
 export const CREATE_BUSINESS = gql`
-  mutation CreateBusiness(
-    $name: String!
-    $description: String
-    $category: String!
-    $businessRegistrationNumber: String
-    $address: String
-  ) {
-    createBusiness(
-      name: $name
-      description: $description
-      category: $category
-      businessRegistrationNumber: $businessRegistrationNumber
-      address: $address
-    ) {
-      success
-      error
+  mutation CreateBusiness($input: BusinessInput!) {
+    createBusiness(input: $input) {
       business {
         id
         name
-        description
         category
-        businessRegistrationNumber
+        description
         address
+        businessRegistrationNumber
         createdAt
+        updatedAt
       }
-      account {
-        id
-        accountId
-        accountType
-        accountIndex
-        suiAddress
-        createdAt
-      }
+      success
+      error
     }
   }
 `;
 
 export const UPDATE_BUSINESS = gql`
-  mutation UpdateBusiness(
-    $businessId: ID!
-    $name: String!
-    $description: String
-    $category: String!
-    $businessRegistrationNumber: String
-    $address: String
-  ) {
-    updateBusiness(
-      businessId: $businessId
-      name: $name
-      description: $description
-      category: $category
-      businessRegistrationNumber: $businessRegistrationNumber
-      address: $address
-    ) {
-      success
-      error
+  mutation UpdateBusiness($id: ID!, $input: BusinessInput!) {
+    updateBusiness(id: $id, input: $input) {
       business {
         id
         name
-        description
         category
-        businessRegistrationNumber
+        description
         address
+        businessRegistrationNumber
         createdAt
+        updatedAt
       }
+      success
+      error
     }
   }
 `;
 
-export const UPDATE_ACCOUNT_SUI_ADDRESS = gql`
-  mutation UpdateAccountSuiAddress($accountId: ID!, $suiAddress: String!) {
-    updateAccountSuiAddress(accountId: $accountId, suiAddress: $suiAddress) {
-      success
-      error
-      account {
+// Invoice Mutations
+export const CREATE_INVOICE = gql`
+  mutation CreateInvoice($input: InvoiceInput!) {
+    createInvoice(input: $input) {
+      invoice {
         id
-        accountId
-        accountType
-        accountIndex
-        suiAddress
+        invoiceId
+        amount
+        tokenType
+        description
+        status
+        expiresAt
+        createdAt
+        qrCodeData
+        isExpired
+      }
+      success
+      errors
+    }
+  }
+`;
+
+export const GET_INVOICE = gql`
+  mutation GetInvoice($invoiceId: String!) {
+    getInvoice(invoiceId: $invoiceId) {
+      invoice {
+        id
+        invoiceId
+        merchantUser {
+          id
+          username
+          firstName
+          lastName
+        }
+        merchantAccount {
+          id
+          accountType
+          accountIndex
+          suiAddress
+          business {
+            id
+            name
+            category
+          }
+        }
+        amount
+        tokenType
+        description
+        status
+        expiresAt
+        createdAt
+        qrCodeData
+        isExpired
+      }
+      success
+      errors
+    }
+  }
+`;
+
+export const PAY_INVOICE = gql`
+  mutation PayInvoice($invoiceId: String!) {
+    payInvoice(invoiceId: $invoiceId) {
+      invoice {
+        id
+        invoiceId
+        status
+        paidAt
+      }
+      transaction {
+        id
+        amount
+        tokenType
+        memo
+        status
+        transactionHash
         createdAt
       }
+      success
+      errors
+    }
+  }
+`;
+
+// Transaction Mutations
+export const CREATE_TRANSACTION = gql`
+  mutation CreateTransaction($input: TransactionInput!) {
+    createTransaction(input: $input) {
+      transaction {
+        id
+        recipientAddress
+        amount
+        tokenType
+        memo
+        status
+        transactionHash
+        createdAt
+      }
+      success
+      errors
+    }
+  }
+`;
+
+// Queries for transactions and invoices
+export const GET_TRANSACTIONS = gql`
+  query GetTransactions {
+    transactions {
+      id
+      senderUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      recipientUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      senderAddress
+      recipientAddress
+      amount
+      tokenType
+      memo
+      status
+      transactionHash
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_INVOICES = gql`
+  query GetInvoices {
+    invoices {
+      id
+      invoiceId
+      amount
+      tokenType
+      description
+      status
+      paidByUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      paidAt
+      expiresAt
+      createdAt
+      qrCodeData
+      isExpired
     }
   }
 `;

@@ -15,6 +15,10 @@ import { useNavigation } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { BottomTabParamList } from '../types/navigation';
 import { useAccount } from '../contexts/AccountContext';
+import { useMutation } from '@apollo/client';
+import { CREATE_INVOICE } from '../apollo/queries';
+import QRCode from 'react-native-qrcode-svg';
+import { Clipboard } from 'react-native';
 
 // Import currency icons
 const cUSDIcon = require('../assets/png/cUSD.png');
@@ -49,6 +53,11 @@ const ChargeScreen = () => {
   const [description, setDescription] = useState('');
   const [copied, setCopied] = useState(false);
   const [showQRCode, setShowQRCode] = useState(false);
+  const [invoice, setInvoice] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // GraphQL mutation
+  const [createInvoice] = useMutation(CREATE_INVOICE);
 
   // Currency configurations
   const currencies = {
@@ -70,14 +79,49 @@ const ChargeScreen = () => {
 
   const currentCurrency = currencies[selectedCurrency as keyof typeof currencies];
 
-  const handleGenerateQR = () => {
-    if (amount && parseFloat(amount) > 0) {
-      setShowQRCode(true);
+  const handleGenerateQR = async () => {
+    if (!amount || parseFloat(amount) <= 0) {
+      Alert.alert('Error', 'Por favor ingresa un monto válido');
+      return;
+    }
+
+    if (!activeAccount) {
+      Alert.alert('Error', 'No se encontró la cuenta activa');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const { data } = await createInvoice({
+        variables: {
+          input: {
+            amount: amount,
+            tokenType: selectedCurrency,
+            description: description,
+            expiresInHours: 24
+          }
+        }
+      });
+
+      if (data?.createInvoice?.success) {
+        const newInvoice = data.createInvoice.invoice;
+        setInvoice(newInvoice);
+        setShowQRCode(true);
+      } else {
+        const errors = data?.createInvoice?.errors || ['Error desconocido'];
+        Alert.alert('Error', errors.join(', '));
+      }
+    } catch (error) {
+      console.error('Error creating invoice:', error);
+      Alert.alert('Error', 'No se pudo crear la factura. Inténtalo de nuevo.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleCopy = (text: string) => {
-    // In React Native, you'd use Clipboard API
+    Clipboard.setString(text);
     Alert.alert('Copiado', 'Enlace copiado al portapapeles');
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -88,6 +132,7 @@ const ChargeScreen = () => {
     setShowQRCode(false);
     setAmount('');
     setDescription('');
+    setInvoice(null);
   };
 
   const handleScanPress = () => {
@@ -277,12 +322,14 @@ const ChargeScreen = () => {
                   style={[
                     styles.generateButton,
                     { backgroundColor: currentCurrency.color },
-                    (!amount || parseFloat(amount) <= 0) && styles.generateButtonDisabled
+                    (!amount || parseFloat(amount) <= 0 || isLoading) && styles.generateButtonDisabled
                   ]}
                   onPress={handleGenerateQR}
-                  disabled={!amount || parseFloat(amount) <= 0}
+                  disabled={!amount || parseFloat(amount) <= 0 || isLoading}
                 >
-                  <Text style={styles.generateButtonText}>Generar Código QR</Text>
+                  <Text style={styles.generateButtonText}>
+                    {isLoading ? 'Generando...' : 'Generar Código QR'}
+                  </Text>
                 </TouchableOpacity>
 
                 {/* Info */}
@@ -326,10 +373,21 @@ const ChargeScreen = () => {
                     Muestra este código a tu cliente para que pueda pagar
                   </Text>
                   
-                  {/* QR Code Placeholder */}
+                  {/* QR Code */}
                   <View style={styles.qrCodeContainer}>
-                    <Icon name="maximize" size={80} color="#9ca3af" />
-                    <Text style={styles.qrCodeText}>Código QR</Text>
+                    {invoice?.qrCodeData ? (
+                      <QRCode
+                        value={invoice.qrCodeData}
+                        size={200}
+                        color={colors.dark}
+                        backgroundColor="white"
+                      />
+                    ) : (
+                      <>
+                        <Icon name="maximize" size={80} color="#9ca3af" />
+                        <Text style={styles.qrCodeText}>Código QR</Text>
+                      </>
+                    )}
                   </View>
 
                   {/* Payment Details */}
@@ -355,7 +413,7 @@ const ChargeScreen = () => {
                       styles.paymentId,
                       { color: selectedCurrency === 'cUSD' ? colors.primaryDark : colors.secondary }
                     ]}>
-                      ID: PAY{Date.now().toString().slice(-6)}
+                      ID: {invoice?.invoiceId || 'INV' + Date.now().toString().slice(-6)}
                     </Text>
                   </View>
 
@@ -363,7 +421,7 @@ const ChargeScreen = () => {
                   <View style={styles.actionButtons}>
                     <TouchableOpacity 
                       style={styles.actionButton}
-                      onPress={() => handleCopy(`confio://pay/${Date.now()}`)}
+                      onPress={() => handleCopy(invoice?.qrCodeData || `confio://pay/${Date.now()}`)}
                     >
                       <Icon name={copied ? "check-circle" : "copy"} size={16} color="#374151" />
                       <Text style={styles.actionButtonText}>
@@ -390,6 +448,7 @@ const ChargeScreen = () => {
                     setShowQRCode(false);
                     setAmount('');
                     setDescription('');
+                    setInvoice(null);
                   }}
                 >
                   <Icon name="plus" size={16} color="white" />

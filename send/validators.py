@@ -4,15 +4,15 @@ import re
 def validate_transaction_amount(amount: str) -> None:
     """Validate the transaction amount"""
     try:
-        # Convert to integer to validate it's a valid number
-        amount_int = int(amount)
+        # Convert to float to validate it's a valid number (handles decimals)
+        amount_float = float(amount)
         
         # Check if amount is positive
-        if amount_int <= 0:
+        if amount_float <= 0:
             raise ValidationError("Amount must be greater than 0")
             
         # Check if amount is within reasonable limits (e.g., max 1 billion)
-        if amount_int > 1_000_000_000_000_000:  # 1 billion with 6 decimals
+        if amount_float > 1_000_000_000_000_000:  # 1 billion with 6 decimals
             raise ValidationError("Amount exceeds maximum allowed")
             
     except ValueError:
