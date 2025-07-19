@@ -73,7 +73,7 @@ export const AccountDetailScreen = () => {
     exchangeRate: "1 USDC = 1.00 cUSD",
     description: route.params.accountType === 'cusd' 
       ? "Moneda estable respaldada por dólares americanos"
-      : "Token de gobernanza de Confío"
+              : "Moneda de gobernanza de Confío"
   };
 
   // USDC balance data (shown only for cUSD account)

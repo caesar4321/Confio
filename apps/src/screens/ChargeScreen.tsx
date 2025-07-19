@@ -8,12 +8,17 @@ import {
   StyleSheet,
   Alert,
   Dimensions,
+  Image,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { BottomTabParamList } from '../types/navigation';
 import { useAccountManager } from '../hooks/useAccountManager';
+
+// Import currency icons
+const cUSDIcon = require('../assets/png/cUSD.png');
+const CONFIOIcon = require('../assets/png/CONFIO.png');
 
 type ChargeScreenNavigationProp = BottomTabNavigationProp<BottomTabParamList, 'Charge'>;
 
@@ -52,14 +57,14 @@ const ChargeScreen = () => {
       symbol: 'cUSD',
       color: colors.primary,
       textColor: colors.primaryText,
-      icon: 'C'
+      icon: cUSDIcon
     },
     CONFIO: {
       name: 'Confío',
       symbol: 'CONFIO',
       color: colors.secondary,
       textColor: colors.secondaryText,
-      icon: 'F'
+      icon: CONFIOIcon
     }
   };
 
@@ -87,7 +92,7 @@ const ChargeScreen = () => {
 
   const handleScanPress = () => {
     // Navigate to scan screen
-    navigation.navigate('Scan');
+    navigation.navigate('Scan' as any);
   };
 
   const quickAmounts = ['5.00', '10.00', '25.00', '50.00'];
@@ -167,8 +172,8 @@ const ChargeScreen = () => {
                       onPress={() => setSelectedCurrency('cUSD')}
                     >
                       <View style={styles.currencyContent}>
-                        <View style={[styles.currencyIcon, { backgroundColor: currencies.cUSD.color }]}>
-                          <Text style={styles.currencyIconText}>{currencies.cUSD.icon}</Text>
+                        <View style={styles.currencyIcon}>
+                          <Image source={currencies.cUSD.icon} style={styles.currencyIconImage} />
                         </View>
                         <View style={styles.currencyInfo}>
                           <Text style={[
@@ -195,8 +200,8 @@ const ChargeScreen = () => {
                       onPress={() => setSelectedCurrency('CONFIO')}
                     >
                       <View style={styles.currencyContent}>
-                        <View style={[styles.currencyIcon, { backgroundColor: currencies.CONFIO.color }]}>
-                          <Text style={styles.currencyIconText}>{currencies.CONFIO.icon}</Text>
+                        <View style={styles.currencyIcon}>
+                          <Image source={currencies.CONFIO.icon} style={styles.currencyIconImage} />
                         </View>
                         <View style={styles.currencyInfo}>
                           <Text style={[
@@ -555,6 +560,7 @@ const styles = StyleSheet.create({
   currencyContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
   },
   currencyIcon: {
     width: 40,
@@ -563,19 +569,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    backgroundColor: 'transparent',
   },
-  currencyIconText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
+  currencyIconImage: {
+    width: 32,
+    height: 32,
+    resizeMode: 'contain',
   },
   currencyInfo: {
-    flex: 1,
+    alignItems: 'center',
+    minWidth: 80,
   },
   currencyName: {
     fontSize: 14,
     fontWeight: 'bold',
     color: '#1f2937',
+    textAlign: 'center',
   },
   currencyNameSelected: {
     color: colors.primaryDark,
@@ -583,6 +592,7 @@ const styles = StyleSheet.create({
   currencySymbol: {
     fontSize: 12,
     color: '#6b7280',
+    textAlign: 'center',
   },
   currencySymbolSelected: {
     color: colors.primaryDark,

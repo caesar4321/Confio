@@ -146,14 +146,14 @@ export const ContactsScreen = () => {
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Selecciona el token</Text>
+            <Text style={styles.modalTitle}>Selecciona la moneda</Text>
             <TouchableOpacity onPress={() => setShowTokenSelection(false)}>
               <Icon name="x" size={24} color="#6B7280" />
             </TouchableOpacity>
           </View>
           
           <Text style={styles.modalSubtitle}>
-            ¿Qué token quieres recibir?
+            ¿Qué moneda quieres recibir?
           </Text>
 
           <View style={styles.tokenOptions}>
@@ -181,10 +181,10 @@ export const ContactsScreen = () => {
               <View style={styles.tokenInfo}>
                 <Image source={CONFIOLogo} style={styles.tokenLogo} />
                 <View style={styles.tokenDetails}>
-                  <Text style={styles.tokenName}>Confío Token</Text>
+                  <Text style={styles.tokenName}>Confío</Text>
                   <Text style={styles.tokenSymbol}>$CONFIO</Text>
                   <Text style={styles.tokenDescription}>
-                    Token de gobernanza y utilidad
+                    Moneda de gobernanza y utilidad
                   </Text>
                 </View>
               </View>
@@ -213,12 +213,12 @@ export const ContactsScreen = () => {
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Selecciona el token</Text>
+            <Text style={styles.modalTitle}>Selecciona la moneda</Text>
             <TouchableOpacity onPress={() => setShowSendTokenSelection(false)}>
               <Icon name="x" size={24} color="#6B7280" />
             </TouchableOpacity>
           </View>
-          <Text style={styles.modalSubtitle}>¿Qué token quieres enviar?</Text>
+          <Text style={styles.modalSubtitle}>¿Qué moneda quieres enviar?</Text>
           <View style={styles.tokenOptions}>
             <TouchableOpacity 
               style={styles.tokenOption}
@@ -241,9 +241,9 @@ export const ContactsScreen = () => {
               <View style={styles.tokenInfo}>
                 <Image source={CONFIOLogo} style={styles.tokenLogo} />
                 <View style={styles.tokenDetails}>
-                  <Text style={styles.tokenName}>Confío Token</Text>
+                  <Text style={styles.tokenName}>Confío</Text>
                   <Text style={styles.tokenSymbol}>$CONFIO</Text>
-                  <Text style={styles.tokenDescription}>Token de gobernanza y utilidad</Text>
+                  <Text style={styles.tokenDescription}>Moneda de gobernanza y utilidad</Text>
                 </View>
               </View>
               <Icon name="chevron-right" size={20} color="#6B7280" />
@@ -270,12 +270,12 @@ export const ContactsScreen = () => {
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Selecciona el token</Text>
+            <Text style={styles.modalTitle}>Selecciona la moneda</Text>
             <TouchableOpacity onPress={() => setShowFriendTokenSelection(false)}>
               <Icon name="x" size={24} color="#6B7280" />
             </TouchableOpacity>
           </View>
-          <Text style={styles.modalSubtitle}>¿Qué token quieres enviar a {selectedFriend?.name}?</Text>
+          <Text style={styles.modalSubtitle}>¿Qué moneda quieres enviar a {selectedFriend?.name}?</Text>
           <View style={styles.tokenOptions}>
             <TouchableOpacity 
               style={styles.tokenOption}
@@ -298,9 +298,9 @@ export const ContactsScreen = () => {
               <View style={styles.tokenInfo}>
                 <Image source={CONFIOLogo} style={styles.tokenLogo} />
                 <View style={styles.tokenDetails}>
-                  <Text style={styles.tokenName}>Confío Token</Text>
+                  <Text style={styles.tokenName}>Confío</Text>
                   <Text style={styles.tokenSymbol}>$CONFIO</Text>
-                  <Text style={styles.tokenDescription}>Token de gobernanza y utilidad</Text>
+                  <Text style={styles.tokenDescription}>Moneda de gobernanza y utilidad</Text>
                 </View>
               </View>
               <Icon name="chevron-right" size={20} color="#6B7280" />

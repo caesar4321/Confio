@@ -55,7 +55,7 @@ const tokenConfig: Record<TokenType, TokenConfig> = {
     color: colors.accent,
     description: 'Recibe USDC desde cualquier wallet',
     subtitle: 'Envía USDC desde tu wallet externo a esta dirección',
-    warning: 'Solo envía USDC en la red Sui. Otros tokens o redes resultarán en pérdida permanente de fondos.',
+            warning: 'Solo envía USDC en la red Sui. Otras monedas o redes resultarán en pérdida permanente de fondos.',
     instructions: [
       {
         step: '1',
@@ -86,7 +86,7 @@ const tokenConfig: Record<TokenType, TokenConfig> = {
     color: colors.primary,
     description: 'Recibe cUSD desde cualquier wallet',
     subtitle: 'Envía cUSD desde tu wallet externo a esta dirección',
-    warning: 'Solo envía cUSD en la red Sui. Otros tokens o redes resultarán en pérdida permanente de fondos.',
+            warning: 'Solo envía cUSD en la red Sui. Otras monedas o redes resultarán en pérdida permanente de fondos.',
     instructions: [
       {
         step: '1',
@@ -112,12 +112,12 @@ const tokenConfig: Record<TokenType, TokenConfig> = {
   },
   confio: {
     name: 'CONFIO',
-    fullName: 'Confío Token',
+            fullName: 'Confío',
     logo: CONFIOLogo,
     color: colors.secondary,
     description: 'Recibe CONFIO desde cualquier wallet',
     subtitle: 'Envía CONFIO desde tu wallet externo a esta dirección',
-    warning: 'Solo envía CONFIO en la red Sui. Otros tokens o redes resultarán en pérdida permanente de fondos.',
+            warning: 'Solo envía CONFIO en la red Sui. Otras monedas o redes resultarán en pérdida permanente de fondos.',
     instructions: [
       {
         step: '1',

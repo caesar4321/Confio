@@ -40,7 +40,7 @@ const tokenConfig = {
   },
   confio: {
     name: 'CONFIO',
-    fullName: 'Confío Token',
+            fullName: 'Confío',
     logo: CONFIOLogo,
     color: colors.secondary,
     minSend: 1,
