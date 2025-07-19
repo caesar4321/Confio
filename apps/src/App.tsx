@@ -58,7 +58,7 @@ const AppContent: React.FC = () => {
       >
         <HeaderProvider>
           <ScanProvider>
-            <Navigation />
+          <Navigation />
           </ScanProvider>
         </HeaderProvider>
       </AuthProvider>
