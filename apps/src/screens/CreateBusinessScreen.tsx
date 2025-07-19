@@ -16,7 +16,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList, RootStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
-import { useAccountManager } from '../hooks/useAccountManager';
+import { useAccount } from '../contexts/AccountContext';
 import { useMutation, useQuery } from '@apollo/client';
 import { CREATE_BUSINESS, GET_USER_ACCOUNTS, UPDATE_ACCOUNT_SUI_ADDRESS } from '../apollo/queries';
 import { AuthService } from '../services/authService';
@@ -71,7 +71,7 @@ const businessTypes: BusinessType[] = [
 
 export const CreateBusinessScreen = () => {
   const navigation = useNavigation<CreateBusinessNavigationProp>();
-  const { syncWithServer } = useAccountManager();
+  const { syncWithServer } = useAccount();
   const [createBusiness] = useMutation(CREATE_BUSINESS);
   const [updateAccountSuiAddress] = useMutation(UPDATE_ACCOUNT_SUI_ADDRESS);
   const { refetch: refetchAccounts } = useQuery(GET_USER_ACCOUNTS);

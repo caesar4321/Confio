@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
-import { useAccountManager } from '../hooks/useAccountManager';
+import { useAccount } from '../contexts/AccountContext';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
@@ -43,7 +43,7 @@ type ProfileScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>
 
 export const ProfileScreen = () => {
   const { signOut, userProfile, isUserProfileLoading } = useAuth();
-  const { activeAccount, accounts, isLoading: accountsLoading, refreshAccounts } = useAccountManager();
+  const { activeAccount, accounts, isLoading: accountsLoading, refreshAccounts } = useAccount();
   const navigation = useNavigation<ProfileScreenNavigationProp>();
 
   // Debug active account changes to ensure real-time updates
@@ -100,7 +100,11 @@ export const ProfileScreen = () => {
 
   // Get display information based on active account
   const getDisplayInfo = () => {
-    if (accountsLoading || isUserProfileLoading) {
+    // Only show loading when we have no data yet
+    const stillFetching = (accountsLoading && !activeAccount) ||
+                          (isUserProfileLoading && !userProfile);
+
+    if (stillFetching) {
       return { name: 'Cargando...', subtitle: '', showAccountType: false };
     }
 

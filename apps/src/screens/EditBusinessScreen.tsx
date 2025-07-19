@@ -16,7 +16,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
-import { useAccountManager } from '../hooks/useAccountManager';
+import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useMutation, useQuery } from '@apollo/client';
 import { UPDATE_BUSINESS, GET_USER_ACCOUNTS } from '../apollo/queries';
@@ -41,7 +41,7 @@ const colors = {
 
 export const EditBusinessScreen = () => {
   const navigation = useNavigation<EditBusinessScreenNavigationProp>();
-  const { activeAccount } = useAccountManager();
+  const { activeAccount } = useAccount();
   const { userProfile } = useAuth();
   const [updateBusiness] = useMutation(UPDATE_BUSINESS);
   const { refetch: refetchAccounts } = useQuery(GET_USER_ACCOUNTS);

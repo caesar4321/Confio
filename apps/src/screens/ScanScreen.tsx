@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Alert, Platform, 
 import { Camera, useCameraDevice, useCodeScanner, CameraPermissionStatus } from 'react-native-vision-camera';
 import type { Code } from 'react-native-vision-camera';
 import Icon from 'react-native-vector-icons/Feather';
-import { useAccountManager } from '../hooks/useAccountManager';
+import { useAccount } from '../contexts/AccountContext';
 import { useRoute, RouteProp } from '@react-navigation/native';
 import { BottomTabParamList } from '../types/navigation';
 
@@ -13,7 +13,7 @@ export const ScanScreen = () => {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isFlashOn, setIsFlashOn] = useState(false);
   const device = useCameraDevice('back');
-  const { activeAccount } = useAccountManager();
+  const { activeAccount } = useAccount();
   const route = useRoute<ScanScreenRouteProp>();
   const scanMode = route.params?.mode;
   

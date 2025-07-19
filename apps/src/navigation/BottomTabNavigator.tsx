@@ -13,7 +13,7 @@ import { ExchangeScreen } from '../screens/ExchangeScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { Header } from './Header';
 import { useHeader } from '../contexts/HeaderContext';
-import { useAccountManager } from '../hooks/useAccountManager';
+import { useAccount } from '../contexts/AccountContext';
 import { Text } from 'react-native';
 
 // Single navigator instance
@@ -24,17 +24,19 @@ type TabNavigatorNavigationProp = NavigationProp<RootStackParamList>;
 export const BottomTabNavigator = () => {
   const navigation = useNavigation<TabNavigatorNavigationProp>();
   const { unreadNotifications, currentAccountAvatar, profileMenu } = useHeader();
-  const { activeAccount, isLoading: accountsLoading } = useAccountManager();
+  const { activeAccount, isLoading: accountsLoading } = useAccount();
+
+  // 🔥 Fix: Normalize the account type to lowercase for comparison
+  const accountType = (activeAccount?.type || 'personal').toLowerCase();
+  const isBusiness = accountType === 'business';
 
   console.log('🔍 BottomTabNavigator - Active account:', {
     accountId: activeAccount?.id,
-    accountType: activeAccount?.type,
-    accountName: activeAccount?.name
+    originalType: activeAccount?.type,
+    normalizedType: accountType,
+    accountName: activeAccount?.name,
+    isBusiness
   });
-
-  console.log('activeAccount.type in BottomTabNavigator:', activeAccount?.type);
-
-  const isBusiness = activeAccount?.type === 'business';
 
   const handleNotificationPress = useCallback(() => {
     navigation.navigate('Notification' as any);
@@ -124,6 +126,9 @@ export const BottomTabNavigator = () => {
     />
   ), [navigation]);
 
+  // Check if account is business (using normalized type)
+  const isBusinessAccount = accountType === 'business';
+
   // Memoize tab options to ensure they update when activeAccount changes
   const scanTabOptions = useMemo(() => ({
     header: () => <ScanHeader />,
@@ -136,8 +141,9 @@ export const BottomTabNavigator = () => {
       <View style={styles.scanButton}>
         <Icon name="maximize" size={32} color="#fff" />
       </View>
-    )
-  }), [ScanHeader]);
+    ),
+    tabBarButton: isBusinessAccount ? () => null : undefined, // Hide for business accounts
+  }), [ScanHeader, isBusinessAccount]);
 
   // Charge tab options - only show for business accounts
   const chargeTabOptions = useMemo(() => ({
@@ -151,16 +157,16 @@ export const BottomTabNavigator = () => {
       <View style={styles.scanButton}>
         <Icon name="dollar-sign" size={32} color="#fff" />
       </View>
-    )
-  }), []);
+    ),
+    tabBarButton: !isBusinessAccount ? () => null : undefined, // Hide for personal accounts
+  }), [isBusinessAccount]);
 
-  // Check if account is business
-  const isBusinessAccount = activeAccount?.type === 'business';
+
 
   // Force re-render when activeAccount changes by using a key
   const tabNavigatorKey = useMemo(() => 
-    `tab-navigator-${activeAccount?.id || 'default'}-${activeAccount?.type || 'personal'}`,
-    [activeAccount?.id, activeAccount?.type]
+    `tab-navigator-${activeAccount?.id || 'default'}-${accountType}`,
+    [activeAccount?.id, accountType] // Use normalized accountType
   );
 
   console.log('🔑 TabNavigator Key:', tabNavigatorKey, 'isBusinessAccount:', isBusinessAccount);
