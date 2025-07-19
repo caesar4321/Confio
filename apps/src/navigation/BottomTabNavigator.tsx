@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/Feather';
 import { View, StyleSheet, Platform } from 'react-native';
@@ -8,12 +8,13 @@ import { MainStackParamList, BottomTabParamList, RootStackParamList } from '../t
 import { HomeScreen } from '../screens/HomeScreen';
 import { ContactsScreen } from '../screens/ContactsScreen';
 import ScanTab from '../screens/ScanTab';
+import { ChargeScreen } from '../screens/ChargeScreen';
 import { ExchangeScreen } from '../screens/ExchangeScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { Header } from './Header';
 import { useHeader } from '../contexts/HeaderContext';
 import { useAccountManager } from '../hooks/useAccountManager';
-import { DynamicScanLabel } from '../components/DynamicScanLabel';
+import { Text } from 'react-native';
 
 // Single navigator instance
 const Tabs = createBottomTabNavigator<BottomTabParamList>();
@@ -30,6 +31,10 @@ export const BottomTabNavigator = () => {
     accountType: activeAccount?.type,
     accountName: activeAccount?.name
   });
+
+  console.log('activeAccount.type in BottomTabNavigator:', activeAccount?.type);
+
+  const isBusiness = activeAccount?.type === 'business';
 
   const handleNotificationPress = useCallback(() => {
     navigation.navigate('Notification' as any);
@@ -66,20 +71,28 @@ export const BottomTabNavigator = () => {
     />
   ), [navigation]);
 
-  const ScanHeader = useCallback(() => (
-    <Header
-      navigation={navigation}
-      isHomeScreen={false}
-      title="Escanear"
-      onProfilePress={undefined}
-      onNotificationPress={undefined}
-      backgroundColor={undefined}
-      showBackButton={false}
-      isLight={false}
-      unreadNotifications={0}
-      currentAccountAvatar="U"
-    />
-  ), [navigation]);
+  // Dynamic scan header that updates based on account type
+  const ScanHeader = useCallback(() => {
+    const title = 'Escanear';
+    return (
+      <Header
+        navigation={navigation}
+        isHomeScreen={false}
+        title={title}
+        onProfilePress={undefined}
+        onNotificationPress={undefined}
+        backgroundColor={undefined}
+        showBackButton={false}
+        isLight={false}
+        unreadNotifications={0}
+        currentAccountAvatar="U"
+      />
+    );
+  }, [navigation]);
+
+  // Charge header removed since ChargeScreen has its own header
+
+
 
   const ExchangeHeader = useCallback(() => (
     <Header
@@ -111,9 +124,51 @@ export const BottomTabNavigator = () => {
     />
   ), [navigation]);
 
+  // Memoize tab options to ensure they update when activeAccount changes
+  const scanTabOptions = useMemo(() => ({
+    header: () => <ScanHeader />,
+    tabBarLabel: ({ color }: any) => (
+      <Text style={{ color, fontSize: 12 }}>
+        Escanear
+      </Text>
+    ),
+    tabBarIcon: ({ color, size }: any) => (
+      <View style={styles.scanButton}>
+        <Icon name="maximize" size={32} color="#fff" />
+      </View>
+    )
+  }), [ScanHeader]);
+
+  // Charge tab options - only show for business accounts
+  const chargeTabOptions = useMemo(() => ({
+    headerShown: false, // Remove header entirely since ChargeScreen has its own header
+    tabBarLabel: ({ color }: any) => (
+      <Text style={{ color, fontSize: 12 }}>
+        Cobrar
+      </Text>
+    ),
+    tabBarIcon: ({ color, size }: any) => (
+      <View style={styles.scanButton}>
+        <Icon name="dollar-sign" size={32} color="#fff" />
+      </View>
+    )
+  }), []);
+
+  // Check if account is business
+  const isBusinessAccount = activeAccount?.type === 'business';
+
+  // Force re-render when activeAccount changes by using a key
+  const tabNavigatorKey = useMemo(() => 
+    `tab-navigator-${activeAccount?.id || 'default'}-${activeAccount?.type || 'personal'}`,
+    [activeAccount?.id, activeAccount?.type]
+  );
+
+  console.log('🔑 TabNavigator Key:', tabNavigatorKey, 'isBusinessAccount:', isBusinessAccount);
+
   return (
     <>
       <Tabs.Navigator
+        key={tabNavigatorKey} // This forces re-render when account changes
         screenOptions={{
           tabBarActiveTintColor: '#8B5CF6',
           tabBarInactiveTintColor: '#6B7280',
@@ -145,19 +200,20 @@ export const BottomTabNavigator = () => {
             tabBarIcon: ({ color, size }: any) => <Icon name="users" size={size} color={color} />
           }}
         />
-        <Tabs.Screen 
-          name="Scan" 
-          component={ScanTab}
-          options={{
-            header: () => <ScanHeader />,
-            tabBarLabel: ({ color }) => <DynamicScanLabel color={color} />, // 👈
-            tabBarIcon: ({ color, size }: any) => (
-              <View style={styles.scanButton}>
-                <Icon name="maximize" size={32} color="#fff" />
-              </View>
-            )
-          }}
-        />
+        {!isBusinessAccount && (
+          <Tabs.Screen 
+            name="Scan" 
+            component={ScanTab}
+            options={scanTabOptions}
+          />
+        )}
+        {isBusinessAccount && (
+          <Tabs.Screen 
+            name="Charge" 
+            component={ChargeScreen}
+            options={chargeTabOptions}
+          />
+        )}
         <Tabs.Screen 
           name="Exchange" 
           component={ExchangeScreen}

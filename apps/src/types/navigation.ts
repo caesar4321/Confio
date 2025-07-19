@@ -12,6 +12,7 @@ export type BottomTabParamList = {
   Home: undefined;
   Contacts: undefined;
   Scan: { mode?: 'cobrar' | 'pagar' };
+  Charge: undefined;
   Exchange: undefined;
   Profile: undefined;
 };

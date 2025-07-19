@@ -84,12 +84,16 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           serverAvatarLetter: serverAcc.avatarLetter
         });
         
-        return {
+        // Ensure accountType is properly set and normalized
+        const accountType = serverAcc.accountType || 'personal';
+        const normalizedType = accountType.toLowerCase() as 'personal' | 'business';
+        
+        const convertedAccount = {
           id: serverAcc.accountId,
           name: baseName, // Use the base name without the prefix for display
-          type: serverAcc.accountType,
+          type: normalizedType,
           index: serverAcc.accountIndex,
-          phone: serverAcc.accountType.toLowerCase() === 'personal' ? userProfile?.phoneNumber : undefined,
+          phone: normalizedType === 'personal' ? userProfile?.phoneNumber : undefined,
           category: serverAcc.business?.category,
           avatar: avatar,
           suiAddress: serverAcc.suiAddress,
@@ -105,6 +109,18 @@ export const useAccountManager = (): UseAccountManagerReturn => {
             createdAt: serverAcc.business.createdAt,
           } : undefined,
         };
+        
+        console.log('useAccountManager - Converted account:', {
+          originalAccountType: serverAcc.accountType,
+          normalizedType,
+          convertedAccount: {
+            id: convertedAccount.id,
+            type: convertedAccount.type,
+            name: convertedAccount.name
+          }
+        });
+        
+        return convertedAccount;
       });
       
       // Sort accounts: personal first, then business by index
@@ -175,6 +191,20 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       
       setActiveAccount(active || null);
       console.log('loadAccounts - setActiveAccount called with:', active || null);
+      
+      // Debug the active account state
+      if (active) {
+        console.log('loadAccounts - Active account details:', {
+          id: active.id,
+          type: active.type,
+          name: active.name,
+          typeIsDefined: active.type !== undefined,
+          typeIsString: typeof active.type === 'string',
+          typeValue: active.type
+        });
+      } else {
+        console.log('loadAccounts - No active account found, setting to null');
+      }
     } catch (error) {
       console.error('Error loading accounts:', error);
     } finally {
