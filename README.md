@@ -424,6 +424,18 @@ If a business account `business_2` is deleted, the next business account will be
    - Deterministic Sui address generation
    - Secure account storage using Keychain
 
+5. **AccountContext Architecture**
+   - **Single source of truth** for account state across the entire app
+   - **Eliminates state drift** from multiple hook instances
+   - **Provides shared account context** to all components
+   - **Enables dynamic tab switching** between personal/business modes
+   - **Prevents UI blinks** during account switching and screen focus changes
+   
+   **Key Components:**
+   - `AccountProvider`: Wraps the app and provides shared account state
+   - `useAccount()`: Hook for accessing account data and operations
+   - **Benefits**: Consistent state, better performance, smoother UX
+
 ### Static File Handling
 
 The project uses a combination of Django and Whitenoise for static file serving:
