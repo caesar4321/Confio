@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { AuthService } from '../services/authService';
-import { AccountManager, AccountContext, StoredAccount } from '../utils/accountManager';
-import { useQuery, useApolloClient } from '@apollo/client';
+import React, { useState, useCallback, useEffect } from 'react';
+import { useApolloClient, useQuery } from '@apollo/client';
 import { GET_USER_ACCOUNTS } from '../apollo/queries';
+import { AuthService } from '../services/authService';
+import { AccountManager, StoredAccount, AccountContext } from '../utils/accountManager';
 import { useAuth } from '../contexts/AuthContext';
 
 export interface UseAccountManagerReturn {
@@ -37,13 +37,16 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   const authService = AuthService.getInstance();
   const accountManager = AccountManager.getInstance();
   const apolloClient = useApolloClient();
-  const { userProfile } = useAuth();
+  const { profileData, refreshProfile } = useAuth();
   
-  // Debug user profile loading
-  console.log('useAccountManager - User profile state:', {
-    userProfileLoaded: !!userProfile,
-    userProfileName: userProfile?.firstName || userProfile?.username,
-    userProfileId: userProfile?.id
+  // Debug profile loading
+  console.log('useAccountManager - Profile state:', {
+    profileDataLoaded: !!profileData,
+    currentAccountType: profileData?.currentAccountType,
+    userProfileName: profileData?.userProfile?.firstName || profileData?.userProfile?.username,
+    businessProfileName: profileData?.businessProfile?.name,
+    userProfileId: profileData?.userProfile?.id,
+    businessProfileId: profileData?.businessProfile?.id
   });
 
   // Fetch accounts from server using GraphQL
@@ -62,7 +65,8 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         serverAccountsData: !!serverAccountsData,
         userAccounts: serverAccounts,
         accountsCount: serverAccounts.length,
-        accountTypes: serverAccounts.map((acc: any) => acc.accountType)
+        accountTypes: serverAccounts.map((acc: any) => acc.accountType),
+        rawServerData: JSON.stringify(serverAccountsData, null, 2)
       });
       
       // Convert server accounts to StoredAccount format
@@ -81,7 +85,8 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           baseName,
           avatar,
           serverDisplayName: serverAcc.displayName,
-          serverAvatarLetter: serverAcc.avatarLetter
+          serverAvatarLetter: serverAcc.avatarLetter,
+          rawServerAccount: JSON.stringify(serverAcc, null, 2)
         });
         
         // Ensure accountType is properly set and normalized
@@ -89,11 +94,11 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         const normalizedType = accountType.toLowerCase() as 'personal' | 'business';
         
         const convertedAccount = {
-          id: serverAcc.accountId,
+          id: serverAcc.id, // Use serverAcc.id instead of serverAcc.accountId
           name: baseName, // Use the base name without the prefix for display
           type: normalizedType,
           index: serverAcc.accountIndex,
-          phone: normalizedType === 'personal' ? userProfile?.phoneNumber : undefined,
+          phone: normalizedType === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
           category: serverAcc.business?.category,
           avatar: avatar,
           suiAddress: serverAcc.suiAddress,
@@ -116,7 +121,8 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           convertedAccount: {
             id: convertedAccount.id,
             type: convertedAccount.type,
-            name: convertedAccount.name
+            name: convertedAccount.name,
+            businessId: convertedAccount.business?.id
           }
         });
         
@@ -147,14 +153,14 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         console.log('useAccountManager - No server accounts found AND Keychain says personal, creating default personal account');
         
         // Create a default personal account with user profile data
-        const displayName = userProfile?.firstName || userProfile?.username || 'Personal';
+        const displayName = profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'Personal';
         const avatar = displayName.charAt(0).toUpperCase();
         const defaultAccount: StoredAccount = {
           id: 'personal_0',
           name: displayName,
           type: 'personal',
           index: 0,
-          phone: userProfile?.phoneNumber || undefined,
+          phone: profileData?.userProfile?.phoneNumber || undefined,
           category: undefined,
           avatar: avatar,
           suiAddress: '', // Will be set during zkLogin finalization
@@ -179,8 +185,10 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         serverAccountIds: convertedAccounts.map(acc => acc.id)
       });
       
-      // Find the active account
-      const active = convertedAccounts.find(acc => acc.id === activeAccountId);
+      // Find the active account by matching type and index instead of ID
+      const active = convertedAccounts.find(acc => 
+        acc.type === activeContext.type && acc.index === activeContext.index
+      );
       
       console.log('loadAccounts - Found active account:', {
         foundActive: !!active,
@@ -190,12 +198,21 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         activeAccountName: active?.name,
         activeAccountAvatar: active?.avatar,
         allAccountIds: convertedAccounts.map(acc => acc.id),
-        searchingFor: activeAccountId
+        searchingFor: `${activeContext.type}_${activeContext.index}`
       });
       
       if (active) {
         setActiveAccount(active);
         console.log('loadAccounts - setActiveAccount called with:', active);
+        
+        // Refresh profile based on active account type
+        if (active.type === 'business' && active.business?.id) {
+          console.log('loadAccounts - Refreshing business profile for:', active.business.id);
+          await refreshProfile('business', active.business.id);
+        } else if (active.type === 'personal') {
+          console.log('loadAccounts - Refreshing personal profile');
+          await refreshProfile('personal');
+        }
       } else {
         console.warn(
           '[AccountMgr] Active account ID', activeAccountId,
@@ -223,12 +240,12 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     } finally {
       setIsLoading(false);
     }
-  }, [authService, accountManager, serverAccountsData, userProfile]);
+  }, [authService, accountManager, serverAccountsData, profileData]);
 
   // Load accounts on mount and when server data or user profile changes
   useEffect(() => {
     loadAccounts();
-  }, [serverAccountsData, userProfile]);
+  }, [serverAccountsData, profileData]);
 
   // Reload accounts when active account context changes (for account switching)
   useEffect(() => {
@@ -257,83 +274,91 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       console.log('useAccountManager - switchAccount called with:', accountId);
       setIsLoading(true);
       
-      // Switch account in auth service
-      await authService.switchAccount(accountId);
-      
-      // Get the new active account context
-      const newActiveContext = await authService.getActiveAccountContext();
-      console.log('useAccountManager - New active context:', newActiveContext);
-      
-      // Update the active account context state
-      setActiveAccountContext(newActiveContext);
-      
-          // Directly update the active account state for immediate UI update
-    const serverAccounts = serverAccountsData?.userAccounts || [];
-    const convertedAccounts: StoredAccount[] = serverAccounts.map((serverAcc: any) => {
-      const displayName = serverAcc.displayName || 'Account';
-      const avatar = serverAcc.avatarLetter || (displayName ? displayName.charAt(0).toUpperCase() : 'A');
-      const accountType = serverAcc.accountType || 'personal';
-      
-      // Extract the base name without the "Personal -" or "Negocio -" prefix
-      const baseName = displayName.replace(/^(Personal|Negocio) - /, '');
-      
-      // 🔥 IMPORTANT: Normalize the account type to lowercase
-      const normalizedType = accountType.toLowerCase() as 'personal' | 'business';
-      
-      console.log('🔄 switchAccount - Converting account:', {
-        accountId: serverAcc.accountId,
-        originalType: accountType,
-        normalizedType,
-        baseName
+      // Directly update the active account state for immediate UI update
+      const serverAccounts = serverAccountsData?.userAccounts || [];
+      const convertedAccounts: StoredAccount[] = serverAccounts.map((serverAcc: any) => {
+        const displayName = serverAcc.displayName || 'Account';
+        const avatar = serverAcc.avatarLetter || (displayName ? displayName.charAt(0).toUpperCase() : 'A');
+        const accountType = serverAcc.accountType || 'personal';
+        
+        // Extract the base name without the "Personal -" or "Negocio -" prefix
+        const baseName = displayName.replace(/^(Personal|Negocio) - /, '');
+        
+        // 🔥 IMPORTANT: Normalize the account type to lowercase
+        const normalizedType = accountType.toLowerCase() as 'personal' | 'business';
+        
+        console.log('🔄 switchAccount - Converting account:', {
+          accountId: serverAcc.id, // Use serverAcc.id instead of serverAcc.accountId
+          originalType: accountType,
+          normalizedType,
+          baseName
+        });
+        
+        return {
+          id: serverAcc.id, // Use serverAcc.id instead of serverAcc.accountId
+          name: baseName,
+          type: normalizedType, // 👈 Use normalized type here
+          index: serverAcc.accountIndex || 0,
+          phone: normalizedType === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
+          category: serverAcc.business?.category,
+          avatar: avatar,
+          suiAddress: serverAcc.suiAddress || '',
+          createdAt: serverAcc.createdAt || new Date().toISOString(),
+          isActive: true,
+          business: serverAcc.business ? {
+            id: serverAcc.business.id,
+            name: serverAcc.business.name,
+            description: serverAcc.business.description,
+            category: serverAcc.business.category,
+            businessRegistrationNumber: serverAcc.business.businessRegistrationNumber,
+            address: serverAcc.business.address,
+            createdAt: serverAcc.business.createdAt,
+          } : undefined,
+        };
       });
       
-      return {
-        id: serverAcc.accountId,
-        name: baseName,
-        type: normalizedType, // 👈 Use normalized type here
-        index: serverAcc.accountIndex || 0,
-        phone: normalizedType === 'personal' ? userProfile?.phoneNumber : undefined,
-        category: serverAcc.business?.category,
-        avatar: avatar,
-        suiAddress: serverAcc.suiAddress || '',
-        createdAt: serverAcc.createdAt || new Date().toISOString(),
-        isActive: true,
-        business: serverAcc.business ? {
-          id: serverAcc.business.id,
-          name: serverAcc.business.name,
-          description: serverAcc.business.description,
-          category: serverAcc.business.category,
-          businessRegistrationNumber: serverAcc.business.businessRegistrationNumber,
-          address: serverAcc.business.address,
-          createdAt: serverAcc.business.createdAt,
-        } : undefined,
-      };
-    });
+      // Find the new active account by server ID
+      const newActiveAccount = convertedAccounts.find(acc => acc.id === accountId);
+      if (newActiveAccount) {
+        console.log('✅ useAccountManager - Setting active account with normalized type:', {
+          id: newActiveAccount.id,
+          type: newActiveAccount.type,
+          name: newActiveAccount.name,
+          typeIsLowercase: newActiveAccount.type === newActiveAccount.type.toLowerCase()
+        });
+        setActiveAccount(newActiveAccount);
+        console.log('useAccountManager - setActiveAccount called successfully');
+        
+        // Switch account in auth service with the generated account ID
+        const generatedAccountId = `${newActiveAccount.type}_${newActiveAccount.index}`;
+        await authService.switchAccount(generatedAccountId);
+        
+        // Get the new active account context
+        const newActiveContext = await authService.getActiveAccountContext();
+        console.log('useAccountManager - New active context:', newActiveContext);
+        
+        // Update the active account context state
+        setActiveAccountContext(newActiveContext);
+        
+        // Refresh profile based on account type
+        if (newActiveAccount.type === 'business' && newActiveAccount.business?.id) {
+          await refreshProfile('business', newActiveAccount.business.id);
+        } else {
+          await refreshProfile('personal');
+        }
+      } else {
+        console.log('useAccountManager - Could not find account with ID:', accountId);
+        console.log('useAccountManager - Available accounts:', convertedAccounts.map(acc => acc.id));
+      }
       
-          // Find the new active account
-    const newActiveAccount = convertedAccounts.find(acc => acc.id === accountId);
-    if (newActiveAccount) {
-      console.log('✅ useAccountManager - Setting active account with normalized type:', {
-        id: newActiveAccount.id,
-        type: newActiveAccount.type,
-        name: newActiveAccount.name,
-        typeIsLowercase: newActiveAccount.type === newActiveAccount.type.toLowerCase()
-      });
-      setActiveAccount(newActiveAccount);
-      console.log('useAccountManager - setActiveAccount called successfully');
-    } else {
-      console.log('useAccountManager - Could not find account with ID:', accountId);
-      console.log('useAccountManager - Available accounts:', convertedAccounts.map(acc => acc.id));
-    }
-      
-      console.log('useAccountManager - switchAccount completed, new context:', newActiveContext);
+      console.log('useAccountManager - switchAccount completed');
     } catch (error) {
       console.error('Error switching account:', error);
       throw error;
     } finally {
       setIsLoading(false);
     }
-  }, [authService, serverAccountsData, userProfile]);
+  }, [authService, serverAccountsData, profileData, refreshProfile]);
 
   const createAccount = useCallback(async (
     name: string,

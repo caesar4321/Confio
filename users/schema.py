@@ -128,6 +128,7 @@ class InvalidateAuthTokens(graphene.Mutation):
 
 class Query(graphene.ObjectType):
 	me = graphene.Field(UserType)
+	business = graphene.Field(BusinessType, id=graphene.ID(required=True))
 	country_codes = graphene.List(CountryCodeType)
 	business_categories = graphene.List(BusinessCategoryType)
 	user_verifications = graphene.List(IdentityVerificationType, user_id=graphene.ID())
@@ -176,6 +177,30 @@ class Query(graphene.ObjectType):
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return None
 		return user
+
+	def resolve_business(self, info, id):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return None
+		
+		try:
+			# Check if the user has access to this business through their accounts
+			from .models import Business, Account
+			business = Business.objects.get(id=id)
+			
+			# Verify that the current user has an account linked to this business
+			user_has_access = Account.objects.filter(
+				user=user,
+				business=business,
+				account_type='business'
+			).exists()
+			
+			if user_has_access:
+				return business
+			else:
+				return None
+		except Business.DoesNotExist:
+			return None
 
 	def resolve_country_codes(self, info):
 		return [CountryCodeType(code=code[1], name=code[0], flag=code[3]) for code in COUNTRY_CODES]

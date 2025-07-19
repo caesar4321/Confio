@@ -7,6 +7,7 @@ import { jwtDecode } from 'jwt-decode';
 import { getApiUrl } from '../config/env';
 import { gql } from '@apollo/client';
 import { Observable as ApolloObservable } from '@apollo/client/utilities';
+import { AccountManager } from '../utils/accountManager';
 
 interface CustomJwtPayload {
   user_id: number;
@@ -274,7 +275,9 @@ const authLink = setContext(async (operation, { headers }) => {
               return {
                 headers: {
                   ...headers,
-                  Authorization: `JWT ${data.refreshToken.token}`
+                  Authorization: `JWT ${data.refreshToken.token}`,
+                  'X-Active-Account-Type': 'personal',
+                  'X-Active-Account-Index': '0'
                 }
               };
             } else {
@@ -305,7 +308,9 @@ const authLink = setContext(async (operation, { headers }) => {
                 resolve({
                   headers: {
                     ...headers,
-                    Authorization: `JWT ${token}`
+                    Authorization: `JWT ${token}`,
+                    'X-Active-Account-Type': 'personal',
+                    'X-Active-Account-Index': '0'
                   }
                 });
               } else {
@@ -331,10 +336,30 @@ const authLink = setContext(async (operation, { headers }) => {
 
       // Always include the token in the header for authenticated requests
       console.log('Including JWT token in request header');
+      
+      // Get active account context to include in headers
+      let activeAccountType = 'personal';
+      let activeAccountIndex = 0;
+      
+      try {
+        const accountManager = AccountManager.getInstance();
+        const activeContext = await accountManager.getActiveAccountContext();
+        activeAccountType = activeContext.type;
+        activeAccountIndex = activeContext.index;
+        console.log('Including active account in headers:', {
+          type: activeAccountType,
+          index: activeAccountIndex
+        });
+      } catch (error) {
+        console.log('Could not get active account context, using defaults:', error);
+      }
+      
       return {
         headers: {
           ...headers,
-          Authorization: `JWT ${token}`
+          Authorization: `JWT ${token}`,
+          'X-Active-Account-Type': activeAccountType,
+          'X-Active-Account-Index': activeAccountIndex.toString()
         }
       };
     } catch (error) {

@@ -7,6 +7,34 @@ from django.contrib.auth.models import AnonymousUser
 
 logger = logging.getLogger(__name__)
 
+class ActiveAccountMiddleware:
+    """Middleware to set active account information on the request context"""
+    
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        # Set default values
+        request.active_account_type = 'personal'
+        request.active_account_index = 0
+        
+        # Only process for GraphQL requests
+        if request.path == '/graphql/' and request.method == 'POST':
+            # Read active account headers
+            active_account_type = request.headers.get('X-Active-Account-Type', 'personal')
+            active_account_index_str = request.headers.get('X-Active-Account-Index', '0')
+            
+            try:
+                active_account_index = int(active_account_index_str)
+                request.active_account_type = active_account_type
+                request.active_account_index = active_account_index
+                
+                logger.info(f"Active account set: {active_account_type}_{active_account_index}")
+            except ValueError:
+                logger.warning(f"Invalid active account index: {active_account_index_str}")
+        
+        return self.get_response(request)
+
 class AuthTokenVersionMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response

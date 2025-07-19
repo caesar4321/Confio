@@ -3,7 +3,7 @@ import { AuthService } from '../services/authService';
 import { NavigationContainerRef } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
 import { useApolloClient } from '@apollo/client';
-import { GET_USER_PROFILE } from '../apollo/queries';
+import { GET_ME, GET_BUSINESS_PROFILE } from '../apollo/queries';
 
 interface UserProfile {
   id: string;
@@ -18,15 +18,32 @@ interface UserProfile {
   verificationStatus?: string;
 }
 
+interface BusinessProfile {
+  id: string;
+  name: string;
+  description?: string;
+  category: string;
+  address?: string;
+  businessRegistrationNumber?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+interface ProfileData {
+  userProfile?: UserProfile;
+  businessProfile?: BusinessProfile;
+  currentAccountType: 'personal' | 'business';
+}
+
 interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   signOut: () => Promise<void>;
   checkLocalAuthState: () => Promise<boolean>;
   handleSuccessfulLogin: (isPhoneVerified: boolean) => Promise<void>;
-  userProfile: UserProfile | null;
-  isUserProfileLoading: boolean;
-  refreshUserProfile: () => Promise<void>;
+  profileData: ProfileData | null;
+  isProfileLoading: boolean;
+  refreshProfile: (accountType?: 'personal' | 'business', businessId?: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -40,8 +57,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isNavigationReady, setIsNavigationReady] = useState(false);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [isUserProfileLoading, setIsUserProfileLoading] = useState(false);
+  const [profileData, setProfileData] = useState<ProfileData | null>(null);
+  const [isProfileLoading, setIsProfileLoading] = useState(false);
   const apolloClient = useApolloClient();
 
   // Set up navigation ready listener and check auth state
@@ -70,37 +87,78 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     });
   };
 
-  // Fetch user profile from server
-  const refreshUserProfile = async () => {
-    setIsUserProfileLoading(true);
+  // Fetch profile from server based on account type
+  const refreshProfile = async (accountType: 'personal' | 'business' = 'personal', businessId?: string) => {
+    setIsProfileLoading(true);
     try {
-      const { data } = await apolloClient.query({
-        query: GET_USER_PROFILE,
-        fetchPolicy: 'network-only',
-      });
-      setUserProfile(data?.me || null);
+      if (accountType === 'personal') {
+        // Fetch user profile
+        const { data } = await apolloClient.query({
+          query: GET_ME,
+          fetchPolicy: 'network-only',
+        });
+        setProfileData({
+          userProfile: data?.me || null,
+          businessProfile: undefined,
+          currentAccountType: 'personal'
+        });
+      } else if (accountType === 'business' && businessId) {
+        // Fetch business profile
+        const { data } = await apolloClient.query({
+          query: GET_BUSINESS_PROFILE,
+          variables: { businessId },
+          fetchPolicy: 'network-only',
+        });
+        setProfileData({
+          userProfile: undefined,
+          businessProfile: data?.business || null,
+          currentAccountType: 'business'
+        });
+      }
     } catch (error) {
-      console.error('Error fetching user profile:', error);
-      setUserProfile(null);
+      console.error('Error fetching profile:', error);
+      setProfileData(null);
     } finally {
-      setIsUserProfileLoading(false);
+      setIsProfileLoading(false);
     }
   };
 
-  // Fetch user profile after login
+  // Fetch appropriate profile based on current account type
   useEffect(() => {
-    if (isAuthenticated) {
-      refreshUserProfile();
-    } else {
-      setUserProfile(null);
-    }
+    const loadProfileForCurrentAccount = async () => {
+      if (isAuthenticated) {
+        try {
+          const authService = AuthService.getInstance();
+          const accountContext = await authService.getActiveAccountContext();
+          
+          console.log('AuthContext - Loading profile for account type:', accountContext.type);
+          
+          if (accountContext.type === 'business') {
+            // For business accounts, we need to get the business ID from the server
+            // We'll load the personal profile first, then the business profile will be loaded
+            // when the account manager loads the accounts from the server
+            await refreshProfile('personal');
+          } else {
+            await refreshProfile('personal');
+          }
+        } catch (error) {
+          console.error('Error determining account type for profile loading:', error);
+          // Fallback to personal profile
+          await refreshProfile('personal');
+        }
+      } else {
+        setProfileData(null);
+      }
+    };
+    
+    loadProfileForCurrentAccount();
   }, [isAuthenticated]);
 
   const handleSuccessfulLogin = async (isPhoneVerified: boolean) => {
     try {
       console.log('Handling successful login...');
       setIsAuthenticated(true);
-      await refreshUserProfile();
+      await refreshProfile('personal'); // Refresh personal profile after successful login
       if (isPhoneVerified) {
         console.log('User has verified phone number');
         navigateToScreen('Main');
@@ -123,7 +181,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     } catch (error) {
       console.error('Error handling successful login:', error);
       setIsAuthenticated(false);
-      setUserProfile(null);
+      setProfileData(null);
       navigateToScreen('Auth');
     }
   };
@@ -185,17 +243,17 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       const authService = AuthService.getInstance();
       await authService.signOut();
       setIsAuthenticated(false);
-      setUserProfile(null);
+      setProfileData(null);
       navigateToScreen('Auth');
     } catch (error) {
       console.error('Error signing out:', error);
       setIsAuthenticated(false);
-      setUserProfile(null);
+      setProfileData(null);
     }
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, signOut, checkLocalAuthState, handleSuccessfulLogin, userProfile, isUserProfileLoading, refreshUserProfile }}>
+    <AuthContext.Provider value={{ isAuthenticated, isLoading, signOut, checkLocalAuthState, handleSuccessfulLogin, profileData, isProfileLoading, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

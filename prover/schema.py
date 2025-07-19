@@ -116,7 +116,6 @@ def get_current_epoch():
 class AccountType(DjangoObjectType):
     class Meta:
         model = Account
-        exclude = ('user_salt',)
 
 class ZkLoginProofType(DjangoObjectType):
     class Meta:
