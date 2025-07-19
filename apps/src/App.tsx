@@ -8,6 +8,7 @@ import apolloClient from './apollo/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { HeaderProvider } from './contexts/HeaderContext';
 import { ScanProvider } from './contexts/ScanContext';
+import { AccountProvider } from './contexts/AccountContext';
 import { AuthNavigator } from './navigation/AuthNavigator';
 import { MainNavigator } from './navigation/MainNavigator';
 import { RootStackParamList } from './types/navigation';
@@ -56,11 +57,13 @@ const AppContent: React.FC = () => {
       <AuthProvider 
         navigationRef={navigationRef as React.RefObject<NavigationContainerRef<RootStackParamList>>}
       >
-        <HeaderProvider>
-          <ScanProvider>
-          <Navigation />
-          </ScanProvider>
-        </HeaderProvider>
+        <AccountProvider>
+          <HeaderProvider>
+            <ScanProvider>
+            <Navigation />
+            </ScanProvider>
+          </HeaderProvider>
+        </AccountProvider>
       </AuthProvider>
     </NavigationContainer>
   );

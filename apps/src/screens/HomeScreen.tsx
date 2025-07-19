@@ -14,7 +14,7 @@ import { getApiUrl } from '../config/env';
 import { jwtDecode } from 'jwt-decode';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { ProfileMenu } from '../components/ProfileMenu';
-import { useAccountManager } from '../hooks/useAccountManager';
+import { useAccount } from '../contexts/AccountContext';
 import { getCountryByIso } from '../utils/countries';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
@@ -62,7 +62,7 @@ export const HomeScreen = () => {
   const [suiAddress, setSuiAddress] = React.useState<string>('');
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
   
-  // Use account manager hook
+  // Use account context
   const {
     activeAccount,
     accounts,
@@ -70,7 +70,7 @@ export const HomeScreen = () => {
     switchAccount,
     createAccount,
     refreshAccounts,
-  } = useAccountManager();
+  } = useAccount();
   
   // Only show loading for initial data load, not for account loading
   const isLoading = false; // accountsLoading;

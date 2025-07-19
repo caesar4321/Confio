@@ -14,7 +14,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { BottomTabParamList } from '../types/navigation';
-import { useAccountManager } from '../hooks/useAccountManager';
+import { useAccount } from '../contexts/AccountContext';
 
 // Import currency icons
 const cUSDIcon = require('../assets/png/cUSD.png');
@@ -41,7 +41,7 @@ const colors = {
 
 const ChargeScreen = () => {
   const navigation = useNavigation<ChargeScreenNavigationProp>();
-  const { activeAccount } = useAccountManager();
+  const { activeAccount } = useAccount();
   
   const [mode, setMode] = useState('cobrar');
   const [selectedCurrency, setSelectedCurrency] = useState('cUSD');
