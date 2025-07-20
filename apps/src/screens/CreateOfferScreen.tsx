@@ -16,8 +16,9 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
 import { useMutation, useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
-import { CREATE_P2P_OFFER, GET_P2P_PAYMENT_METHODS, GET_ME } from '../apollo/queries';
-import { countries, Country, getCountryByPhoneCode } from '../utils/countries';
+import { CREATE_P2P_OFFER, GET_P2P_PAYMENT_METHODS } from '../apollo/queries';
+import { countries, Country } from '../utils/countries';
+import { useCountrySelection } from '../hooks/useCountrySelection';
 
 // Colors from the design
 const colors = {
@@ -45,20 +46,22 @@ type PaymentMethod = {
 export const CreateOfferScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   
+  // Use centralized country selection hook
+  const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal } = useCountrySelection();
+  
   // GraphQL queries and mutations
-  const { data: userData } = useQuery(GET_ME);
-  const { data: paymentMethodsData, loading: paymentMethodsLoading } = useQuery(GET_P2P_PAYMENT_METHODS);
+  const { data: paymentMethodsData, loading: paymentMethodsLoading, error: paymentMethodsError } = useQuery(GET_P2P_PAYMENT_METHODS, {
+    variables: { 
+      countryCode: selectedCountry?.[2]
+    },
+    skip: !selectedCountry,
+    fetchPolicy: 'no-cache', // Completely bypass cache
+    errorPolicy: 'all'
+  });
   const [createOffer, { loading: createOfferLoading }] = useMutation(CREATE_P2P_OFFER);
   
-  // Smart country defaulting based on user's phone country
-  const getDefaultCountry = (): Country | null => {
-    if (userData?.me?.phoneCountry) {
-      const countryByPhone = getCountryByPhoneCode(userData.me.phoneCountry);
-      if (countryByPhone) return countryByPhone;
-    }
-    // Fallback to Venezuela if no phone country or not found
-    return countries.find(c => c[0] === 'Venezuela') || null;
-  };
+  // Apollo will automatically refetch when variables change, no manual refetch needed
+  // Removed manual refetch to prevent conflicts with other screens
 
   const [exchangeType, setExchangeType] = useState<'BUY' | 'SELL'>('SELL');
   const [tokenType, setTokenType] = useState<'cUSD' | 'CONFIO'>('cUSD');
@@ -69,20 +72,10 @@ export const CreateOfferScreen = () => {
   const [terms, setTerms] = useState('');
   const [responseTime, setResponseTime] = useState('15');
   const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<string[]>([]);
-  const [selectedCountry, setSelectedCountry] = useState<Country | null>(getDefaultCountry());
-  const [showCountryModal, setShowCountryModal] = useState(false);
 
   const paymentMethods: PaymentMethod[] = paymentMethodsData?.p2pPaymentMethods || [];
+  
 
-  // Update country when user data loads
-  useEffect(() => {
-    if (userData?.me?.phoneCountry) {
-      const countryByPhone = getCountryByPhoneCode(userData.me.phoneCountry);
-      if (countryByPhone && !selectedCountry) {
-        setSelectedCountry(countryByPhone);
-      }
-    }
-  }, [userData?.me?.phoneCountry]);
 
   const togglePaymentMethod = (methodId: string) => {
     setSelectedPaymentMethods(prev => 
@@ -142,6 +135,7 @@ export const CreateOfferScreen = () => {
             maxAmount: parseFloat(maxAmount),
             availableAmount: parseFloat(availableAmount),
             paymentMethodIds: selectedPaymentMethods,
+            countryCode: selectedCountry?.[2], // Pass the country code
             terms: terms.trim(),
             responseTimeMinutes: parseInt(responseTime),
           },
@@ -207,8 +201,8 @@ export const CreateOfferScreen = () => {
           </View>
           <Text style={styles.helpText}>
             {exchangeType === 'BUY' 
-              ? 'Quieres comprar criptomonedas (pagarás con bolívares)'
-              : 'Quieres vender criptomonedas (recibirás bolívares)'
+              ? 'Quieres comprar monedas digitales (pagarás con bolívares)'
+              : 'Quieres vender monedas digitales (recibirás bolívares)'
             }
           </Text>
         </View>
@@ -218,7 +212,7 @@ export const CreateOfferScreen = () => {
           <Text style={styles.sectionTitle}>País de operación</Text>
           <TouchableOpacity
             style={styles.countrySelector}
-            onPress={() => setShowCountryModal(true)}
+            onPress={openCountryModal}
           >
             <View style={styles.countryDisplay}>
               <Text style={styles.countryFlag}>{selectedCountry?.[3] || '🌍'}</Text>
@@ -235,7 +229,7 @@ export const CreateOfferScreen = () => {
 
         {/* Token Type */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Criptomoneda</Text>
+          <Text style={styles.sectionTitle}>Moneda digital</Text>
           <View style={styles.toggleContainer}>
             <TouchableOpacity
               style={[styles.toggleButton, tokenType === 'cUSD' && styles.toggleButtonActive]}
@@ -318,7 +312,7 @@ export const CreateOfferScreen = () => {
             <Text style={styles.inputSuffix}>{tokenType}</Text>
           </View>
           <Text style={styles.helpText}>
-            Cantidad total que tienes disponible para {exchangeType === 'BUY' ? 'comprar' : 'vender'}
+            Cantidad total de {tokenType} que tienes disponible para {exchangeType === 'BUY' ? 'comprar' : 'vender'}
           </Text>
         </View>
 
@@ -327,6 +321,10 @@ export const CreateOfferScreen = () => {
           <Text style={styles.sectionTitle}>Métodos de pago</Text>
           {paymentMethodsLoading ? (
             <Text style={styles.helpText}>Cargando métodos de pago...</Text>
+          ) : paymentMethodsError ? (
+            <Text style={styles.helpText}>Error cargando métodos de pago: {paymentMethodsError.message}</Text>
+          ) : paymentMethods.length === 0 ? (
+            <Text style={styles.helpText}>No hay métodos de pago disponibles</Text>
           ) : (
             <View style={styles.paymentMethodsContainer}>
               {paymentMethods.map((method) => (
@@ -402,11 +400,11 @@ export const CreateOfferScreen = () => {
         animationType="slide"
         transparent={false}
         visible={showCountryModal}
-        onRequestClose={() => setShowCountryModal(false)}
+        onRequestClose={closeCountryModal}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowCountryModal(false)}>
+            <TouchableOpacity onPress={closeCountryModal}>
               <Icon name="x" size={24} color="#1F2937" />
             </TouchableOpacity>
             <Text style={styles.modalTitle}>Seleccionar País</Text>
@@ -421,10 +419,7 @@ export const CreateOfferScreen = () => {
                   styles.countryItem,
                   selectedCountry?.[2] === item[2] && styles.countryItemSelected
                 ]}
-                onPress={() => {
-                  setSelectedCountry(item);
-                  setShowCountryModal(false);
-                }}
+                onPress={() => selectCountry(item)}
               >
                 <Text style={styles.countryFlag}>{item[3]}</Text>
                 <Text style={styles.countryItemName}>{item[0]}</Text>
