@@ -12,14 +12,16 @@ import {
   Modal,
   TouchableWithoutFeedback,
   FlatList,
+  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
-import { MainStackParamList } from '../types/navigation';
-import { countries, Country, getCountryByPhoneCode } from '../utils/countries';
 import { useQuery } from '@apollo/client';
-import { GET_ME } from '../apollo/queries';
+import { MainStackParamList } from '../types/navigation';
+import { countries, Country } from '../utils/countries';
+import { useCountrySelection } from '../hooks/useCountrySelection';
+import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS } from '../apollo/queries';
 
 // Colors from the design
 const colors = {
@@ -341,33 +343,14 @@ const activeTrades = [
     }
 ];
 
-const paymentMethods = [
-  'Todos los métodos',
-  'Banco Venezuela',
-  'Mercantil',
-  'Banesco',
-  'Pago Móvil',
-  'Efectivo',
-  'Zelle',
-  'PayPal',
-];
+// Payment methods will be computed from server data inside the component
 
 type Offer = typeof mockOffers.cUSD[0];
 type ActiveTrade = typeof activeTrades[0];
 
 export const ExchangeScreen = () => {
-  // Get user data to determine default country
-  const { data: userData } = useQuery(GET_ME);
-  
-  // Smart country defaulting based on user's phone country
-  const getDefaultCountry = (): Country | null => {
-    if (userData?.me?.phoneCountry) {
-      const countryByPhone = getCountryByPhoneCode(userData.me.phoneCountry);
-      if (countryByPhone) return countryByPhone;
-    }
-    // Fallback to Venezuela if no phone country or not found
-    return countries.find(c => c[0] === 'Venezuela') || null;
-  };
+  // Use centralized country selection hook
+  const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal } = useCountrySelection();
 
   const [activeTab, setActiveTab] = useState<'buy' | 'sell'>('buy');
   const [selectedCrypto, setSelectedCrypto] = useState<'cUSD' | 'CONFIO'>('cUSD');
@@ -375,26 +358,129 @@ export const ExchangeScreen = () => {
   const [localAmount, setLocalAmount] = useState('3,600.00');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('Todos los métodos');
+  const [minRate, setMinRate] = useState('');
+  const [maxRate, setMaxRate] = useState('');
+  const [filterVerified, setFilterVerified] = useState(false);
+  const [filterOnline, setFilterOnline] = useState(false);
+  const [filterHighVolume, setFilterHighVolume] = useState(false);
   const scrollY = useRef(new Animated.Value(0)).current;
+  const refreshRotation = useRef(new Animated.Value(0)).current;
+
+  // Fetch real P2P offers from database
+  const { data: offersData, loading: offersLoading, error: offersError, refetch } = useQuery(GET_P2P_OFFERS, {
+    variables: {
+      exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY', // If user wants to buy, show sell offers
+      tokenType: selectedCrypto,
+      paymentMethod: null, // Will be properly set in useEffect when we have payment methods data
+      countryCode: selectedCountry?.[2] // Pass the selected country code (e.g., 'AS', 'VE', etc.)
+    },
+    pollInterval: 30000, // Refresh every 30 seconds
+  });
+
+  // Fetch payment methods from server based on selected country
+  const { data: paymentMethodsData, loading: paymentMethodsLoading, refetch: refetchPaymentMethods } = useQuery(GET_P2P_PAYMENT_METHODS, {
+    variables: {
+      countryCode: selectedCountry?.[2]
+    },
+    skip: !selectedCountry,
+    fetchPolicy: 'no-cache', // Completely bypass cache
+    notifyOnNetworkStatusChange: true
+  });
+
+  // Debug country changes - Apollo will automatically refetch when variables change
+  useEffect(() => {
+    if (selectedCountry?.[2]) {
+      console.log('🏴 Country changed to:', selectedCountry[0], 'Code:', selectedCountry[2]);
+      console.log('📡 Apollo will automatically refetch payment methods...');
+    }
+  }, [selectedCountry?.[2]]);
+
+
+
+  // Compute payment methods from server data
+  const paymentMethods = React.useMemo(() => {
+    if (paymentMethodsLoading) {
+      return ['Todos los métodos']; // Show default while loading
+    }
+    
+    if (!paymentMethodsData?.p2pPaymentMethods) {
+      return ['Todos los métodos']; // Default when no data
+    }
+    
+    const serverMethods = paymentMethodsData.p2pPaymentMethods.map((pm: any) => pm.displayName);
+    return ['Todos los métodos', ...serverMethods];
+  }, [paymentMethodsData, selectedCountry, paymentMethodsLoading]);
+
+  // Reset selected payment method if it's not available in the new country's methods
+  useEffect(() => {
+    if (paymentMethods.length > 0 && !paymentMethods.includes(selectedPaymentMethod)) {
+      console.log('Resetting payment method from', selectedPaymentMethod, 'to "Todos los métodos"');
+      setSelectedPaymentMethod('Todos los métodos');
+    }
+  }, [paymentMethods, selectedPaymentMethod]);
+
+  // Refetch when filters change (including country)
+  useEffect(() => {
+    // Only refetch if we have payment methods data (to use the helper function)
+    if (paymentMethodsData || selectedPaymentMethod === 'Todos los métodos') {
+      // Convert display name to internal name inline
+      let paymentMethodName = null;
+      if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
+        const method = paymentMethodsData.p2pPaymentMethods.find((pm: any) => pm.displayName === selectedPaymentMethod);
+        paymentMethodName = method?.name || null;
+      }
+
+      refetch({
+        exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
+        tokenType: selectedCrypto,
+        paymentMethod: paymentMethodName,
+        countryCode: selectedCountry?.[2]
+      });
+    }
+  }, [activeTab, selectedCrypto, selectedPaymentMethod, selectedCountry, refetch, paymentMethodsData]);
+
+  // Note: Payment method name conversion is now done inline in refetch calls to avoid hoisting issues
+
+  // Create ref to store the current animation
+  const currentAnimation = useRef<Animated.CompositeAnimation | null>(null);
+
+  // Animate refresh button when loading
+  useEffect(() => {
+    if (offersLoading) {
+      // Reset to 0 first, then start spinning animation
+      refreshRotation.setValue(0);
+      currentAnimation.current = Animated.loop(
+        Animated.timing(refreshRotation, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: true,
+        })
+      );
+      currentAnimation.current.start();
+    } else {
+      // Stop spinning and reset
+      if (currentAnimation.current) {
+        currentAnimation.current.stop();
+        currentAnimation.current = null;
+      }
+      refreshRotation.stopAnimation();
+      refreshRotation.setValue(0);
+    }
+  }, [offersLoading]);
+
+  // Cleanup animation on unmount
+  useEffect(() => {
+    return () => {
+      refreshRotation.stopAnimation();
+    };
+  }, []);
   const lastScrollY = useRef(0);
   const scrollViewRef = useRef<any>(null);
   const [forceHeaderVisible, setForceHeaderVisible] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [activeList, setActiveList] = useState<'offers' | 'trades'>('offers');
-  const [selectedCountry, setSelectedCountry] = useState<Country | null>(getDefaultCountry());
-  const [countryModalVisible, setCountryModalVisible] = useState(false);
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
-
-  // Update country when user data loads
-  useEffect(() => {
-    if (userData?.me?.phoneCountry) {
-      const countryByPhone = getCountryByPhoneCode(userData.me.phoneCountry);
-      if (countryByPhone && !selectedCountry) {
-        setSelectedCountry(countryByPhone);
-      }
-    }
-  }, [userData?.me?.phoneCountry]);
 
   // Reset header when screen comes into focus
   useEffect(() => {
@@ -471,9 +557,9 @@ export const ExchangeScreen = () => {
     
     if (Math.abs(scrollDifference) > 10) {
       if (scrollDifference > 0 && currentScrollY > 100) {
-        setHeaderVisible(false);
+        setForceHeaderVisible(false);
       } else if (scrollDifference < 0) {
-        setHeaderVisible(true);
+        setForceHeaderVisible(true);
       }
       
       lastScrollY.current = currentScrollY;
@@ -572,33 +658,43 @@ export const ExchangeScreen = () => {
   };
 
   // Enhanced Offer Card Component
-  const OfferCard = ({ offer, crypto }: { offer: Offer, crypto: 'cUSD' | 'CONFIO' }) => (
-    <View style={styles.offerCard}>
-      <View style={styles.offerHeader}>
-        <View style={styles.offerUser}>
-          <View style={styles.avatarContainer}>
-            <Text style={styles.avatarText}>{offer.name.charAt(0)}</Text>
-            {offer.isOnline && <View style={styles.onlineIndicator} />}
-          </View>
-          <View>
-            <View style={styles.userNameContainer}>
-              <Text style={styles.userName}>{offer.name}</Text>
-              {offer.verified && (
-                <Icon name="shield" size={16} color={colors.accent} style={styles.verifiedIcon} />
-              )}
+  const OfferCard = ({ offer, crypto }: { offer: any, crypto: 'cUSD' | 'CONFIO' }) => {
+    // Extract user info from the real offer structure
+    const userName = offer.user ? `${offer.user.firstName} ${offer.user.lastName?.charAt(0)}.` : 'Usuario';
+    const userStats = offer.userStats || {};
+    const completedTrades = userStats.completedTrades || 0;
+    const successRate = userStats.successRate || 0;
+    const responseTime = offer.responseTimeMinutes || 15;
+    const isVerified = userStats.isVerified || false;
+    const isOnline = userStats.lastSeenOnline; // You can add logic to check if recent
+    
+    return (
+      <View style={styles.offerCard}>
+        <View style={styles.offerHeader}>
+          <View style={styles.offerUser}>
+            <View style={styles.avatarContainer}>
+              <Text style={styles.avatarText}>{userName.charAt(0)}</Text>
+              {isOnline && <View style={styles.onlineIndicator} />}
             </View>
-            <View style={styles.userStats}>
-              <Text style={styles.tradeCount}>{offer.completedTrades} operaciones</Text>
-              <Text style={styles.bullet}>•</Text>
-              <Text style={styles.successRate}>{offer.successRate}%</Text>
+            <View>
+              <View style={styles.userNameContainer}>
+                <Text style={styles.userName}>{userName}</Text>
+                {isVerified && (
+                  <Icon name="shield" size={16} color={colors.accent} style={styles.verifiedIcon} />
+                )}
+              </View>
+              <View style={styles.userStats}>
+                <Text style={styles.tradeCount}>{completedTrades} operaciones</Text>
+                <Text style={styles.bullet}>•</Text>
+                <Text style={styles.successRate}>{successRate}%</Text>
+              </View>
             </View>
-          </View>
         </View>
         <View style={styles.offerRateContainer}>
           <Text style={styles.rateValue}>{offer.rate} Bs.</Text>
           <View style={styles.responseTime}>
             <Icon name="clock" size={12} color="#6B7280" />
-            <Text style={styles.responseTimeText}>Resp: {offer.responseTime}</Text>
+            <Text style={styles.responseTimeText}>Resp: {responseTime} min</Text>
           </View>
         </View>
       </View>
@@ -606,11 +702,17 @@ export const ExchangeScreen = () => {
       <View style={styles.offerDetails}>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Límite por operación</Text>
-          <Text style={styles.detailValue}>{offer.limit} {crypto}</Text>
+          <Text style={styles.detailValue}>{offer.minAmount} - {offer.maxAmount} {crypto}</Text>
+        </View>
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Disponible</Text>
+          <Text style={styles.detailValue}>{offer.availableAmount} {crypto}</Text>
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Métodos de pago</Text>
-          <Text style={styles.detailValue}>{offer.paymentMethods.join(', ')}</Text>
+          <Text style={styles.detailValue}>
+            {offer.paymentMethods?.map((pm: any) => pm.displayName).join(', ') || 'N/A'}
+          </Text>
         </View>
       </View>
 
@@ -630,6 +732,7 @@ export const ExchangeScreen = () => {
       </View>
     </View>
   );
+  };
 
   const ActiveTradeCard = ({ trade }: { trade: ActiveTrade }) => {
     const formatTime = (seconds: number) => {
@@ -869,8 +972,41 @@ export const ExchangeScreen = () => {
                                     color={showAdvancedFilters ? colors.primary : '#6B7280'}
                                 />
                             </TouchableOpacity>
-                            <TouchableOpacity style={styles.refreshButton}>
-                                <Icon name="refresh-cw" size={12} color="#6B7280" />
+                            <TouchableOpacity 
+                                style={styles.refreshButton}
+                                onPress={() => {
+                                    // Convert display name to internal name inline
+                                    let paymentMethodName = null;
+                                    if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
+                                        const method = paymentMethodsData.p2pPaymentMethods.find((pm: any) => pm.displayName === selectedPaymentMethod);
+                                        paymentMethodName = method?.name || null;
+                                    }
+
+                                    refetch({
+                                        exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
+                                        tokenType: selectedCrypto,
+                                        paymentMethod: paymentMethodName,
+                                        countryCode: selectedCountry?.[2]
+                                    });
+                                }}
+                                disabled={offersLoading}
+                            >
+                                <Animated.View
+                                    style={{
+                                        transform: [{
+                                            rotate: refreshRotation.interpolate({
+                                                inputRange: [0, 1],
+                                                outputRange: ['0deg', '360deg']
+                                            })
+                                        }]
+                                    }}
+                                >
+                                    <Icon 
+                                        name="refresh-cw" 
+                                        size={12} 
+                                        color={offersLoading ? colors.primary : '#6B7280'} 
+                                    />
+                                </Animated.View>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -886,11 +1022,15 @@ export const ExchangeScreen = () => {
                                     style={styles.filterInput}
                                     placeholder="Tasa min."
                                     keyboardType="decimal-pad"
+                                    value={minRate}
+                                    onChangeText={setMinRate}
                                 />
                                 <TextInput
                                     style={styles.filterInput}
                                     placeholder="Tasa max."
                                     keyboardType="decimal-pad"
+                                    value={maxRate}
+                                    onChangeText={setMaxRate}
                                 />
                             </View>
 
@@ -899,7 +1039,7 @@ export const ExchangeScreen = () => {
                                 <Text style={styles.filterLabel}>País:</Text>
                                 <TouchableOpacity
                                     style={styles.countryFilterSelector}
-                                    onPress={() => setCountryModalVisible(true)}
+                                    onPress={openCountryModal}
                                 >
                                     <Text style={styles.countryFilterFlag}>{selectedCountry?.[3] || '🌍'}</Text>
                                     <Text style={styles.countryFilterName}>
@@ -910,22 +1050,57 @@ export const ExchangeScreen = () => {
                             </View>
 
                             <View style={styles.filterCheckboxes}>
-                                <TouchableOpacity style={styles.checkboxItem}>
-                                    <View style={styles.checkbox} />
+                                <TouchableOpacity 
+                                    style={styles.checkboxItem}
+                                    onPress={() => setFilterVerified(!filterVerified)}
+                                >
+                                    <View style={[styles.checkbox, filterVerified && styles.checkboxChecked]}>
+                                        {filterVerified && <Icon name="check" size={12} color="#fff" />}
+                                    </View>
                                     <Text style={styles.checkboxLabel}>Verificados</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity style={styles.checkboxItem}>
-                                    <View style={styles.checkbox} />
+                                <TouchableOpacity 
+                                    style={styles.checkboxItem}
+                                    onPress={() => setFilterOnline(!filterOnline)}
+                                >
+                                    <View style={[styles.checkbox, filterOnline && styles.checkboxChecked]}>
+                                        {filterOnline && <Icon name="check" size={12} color="#fff" />}
+                                    </View>
                                     <Text style={styles.checkboxLabel}>En línea</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity style={styles.checkboxItem}>
-                                    <View style={styles.checkbox} />
+                                <TouchableOpacity 
+                                    style={styles.checkboxItem}
+                                    onPress={() => setFilterHighVolume(!filterHighVolume)}
+                                >
+                                    <View style={[styles.checkbox, filterHighVolume && styles.checkboxChecked]}>
+                                        {filterHighVolume && <Icon name="check" size={12} color="#fff" />}
+                                    </View>
                                     <Text style={styles.checkboxLabel}>+100 ops</Text>
                                 </TouchableOpacity>
                             </View>
 
                             <View style={styles.filterActions}>
-                                <TouchableOpacity style={styles.applyButton}>
+                                <TouchableOpacity 
+                                    style={styles.applyButton}
+                                    onPress={() => {
+                                        // Apply the advanced filters
+                                        // Convert display name to internal name inline
+                                        let paymentMethodName = null;
+                                        if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
+                                            const method = paymentMethodsData.p2pPaymentMethods.find((pm: any) => pm.displayName === selectedPaymentMethod);
+                                            paymentMethodName = method?.name || null;
+                                        }
+
+                                        refetch({
+                                            exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
+                                            tokenType: selectedCrypto,
+                                            paymentMethod: paymentMethodName,
+                                            countryCode: selectedCountry?.[2]
+                                        });
+                                        // Close the advanced filters menu
+                                        setShowAdvancedFilters(false);
+                                    }}
+                                >
                                     <Text style={styles.applyButtonText}>Aplicar</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
@@ -946,9 +1121,35 @@ export const ExchangeScreen = () => {
 
   const renderContent = () => {
     if (activeList === 'offers') {
+      const offers = offersData?.p2pOffers || [];
+      
+      if (offersLoading) {
+        return (
+          <View style={[styles.offersList, { padding: 16 }]}>
+            <Text style={styles.loadingText}>Cargando ofertas...</Text>
+          </View>
+        );
+      }
+      
+      if (offersError) {
+        return (
+          <View style={[styles.offersList, { padding: 16 }]}>
+            <Text style={styles.errorText}>Error cargando ofertas: {offersError.message}</Text>
+          </View>
+        );
+      }
+      
+      if (offers.length === 0) {
+        return (
+          <View style={[styles.offersList, { padding: 16 }]}>
+            <Text style={styles.emptyText}>No hay ofertas disponibles</Text>
+          </View>
+        );
+      }
+      
       return (
         <View style={[styles.offersList, { padding: 16 }]}>
-          {mockOffers[selectedCrypto].map((offer) => (
+          {offers.map((offer: any) => (
             <OfferCard key={offer.id} offer={offer} crypto={selectedCrypto} />
           ))}
         </View>
@@ -1024,19 +1225,16 @@ export const ExchangeScreen = () => {
       <Modal
         animationType="slide"
         transparent={false}
-        visible={countryModalVisible}
-        onRequestClose={() => setCountryModalVisible(false)}
+        visible={showCountryModal}
+        onRequestClose={closeCountryModal}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalHeaderCountry}>
-            <TouchableOpacity onPress={() => setCountryModalVisible(false)}>
+            <TouchableOpacity onPress={closeCountryModal}>
               <Icon name="x" size={24} color="#1F2937" />
             </TouchableOpacity>
             <Text style={styles.modalTitleCountry}>Filtrar por País</Text>
-            <TouchableOpacity onPress={() => {
-              setSelectedCountry(null);
-              setCountryModalVisible(false);
-            }}>
+            <TouchableOpacity onPress={() => selectCountry(null)}>
               <Text style={styles.clearText}>Limpiar</Text>
             </TouchableOpacity>
           </View>
@@ -1049,10 +1247,7 @@ export const ExchangeScreen = () => {
                   styles.countryModalItem,
                   selectedCountry?.[2] === item[2] && styles.countryModalItemSelected
                 ]}
-                onPress={() => {
-                  setSelectedCountry(item);
-                  setCountryModalVisible(false);
-                }}
+                onPress={() => selectCountry(item)}
               >
                 <Text style={styles.countryModalFlag}>{item[3]}</Text>
                 <Text style={styles.countryModalName}>{item[0]}</Text>
@@ -1921,10 +2116,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 8,
   },
-  emptyText: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
   fab: {
     position: 'absolute',
     bottom: 24,
@@ -2031,5 +2222,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
     marginRight: 8,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 32,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#EF4444',
+    textAlign: 'center',
+    marginTop: 32,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 32,
+  },
+  checkboxChecked: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
 }); 
