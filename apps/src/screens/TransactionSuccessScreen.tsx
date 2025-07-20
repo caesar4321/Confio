@@ -19,19 +19,17 @@ const colors = {
   warning: '#F59E0B', // amber-500
 };
 
-type TransactionType = 'sent' | 'payment';
+type TransactionType = 'sent' | 'received';
 
 interface TransactionData {
   type: TransactionType;
   amount: string;
   currency: string;
   recipient?: string;
-  merchant?: string;
+  sender?: string;
   recipientAddress?: string;
-  merchantAddress?: string;
+  senderAddress?: string;
   message?: string;
-  location?: string;
-  terminal?: string;
   isOnConfio?: boolean;
 }
 
@@ -47,11 +45,19 @@ export const TransactionSuccessScreen = () => {
     currency: 'cUSD',
     recipient: 'María González',
     recipientAddress: '0x1a2b3c4d...7890abcd',
-    message: 'Pago por almuerzo',
+    message: 'Transferencia',
     isOnConfio: true
   };
 
   const [copied, setCopied] = useState(false);
+
+  // Helper function to format currency for display
+  const formatCurrency = (currency: string): string => {
+    if (currency === 'CUSD') return 'cUSD';
+    if (currency === 'CONFIO') return 'CONFIO';
+    if (currency === 'USDC') return 'USDC';
+    return currency; // fallback
+  };
 
   // Prevent back navigation
   useFocusEffect(
@@ -82,9 +88,7 @@ export const TransactionSuccessScreen = () => {
     }
   };
 
-  const handleRequestReceipt = () => {
-    Alert.alert('Solicitar Factura', 'Función de solicitud de factura en desarrollo');
-  };
+
 
   const handleShareReceipt = () => {
     Alert.alert('Compartir Comprobante', 'Función de compartir en desarrollo');
@@ -92,12 +96,12 @@ export const TransactionSuccessScreen = () => {
 
   const handleShareInvitation = () => {
     // Share invitation for non-Confío friends
-    const invitationMessage = `¡Hola ${transactionData.recipient}! Te envié $${transactionData.amount} ${transactionData.currency} a través de Confío. 
+    const invitationMessage = `¡Hola ${transactionData.recipient}! Te envié $${transactionData.amount} ${formatCurrency(transactionData.currency)} a través de Confío. 
 
 Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 días:
 
 📱 Descarga Confío: https://confio.lat
-💰 Monto: $${transactionData.amount} ${transactionData.currency}
+💰 Monto: $${transactionData.amount} ${formatCurrency(transactionData.currency)}
 ⏰ Válido hasta: ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('es-ES')}
 
 ¡Confío - Transferencias gratuitas para Latinoamérica! 🇻🇪`;
@@ -145,17 +149,17 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
           </View>
           
           <Text style={styles.headerTitle}>
-            {transactionData.type === 'sent' ? '¡Enviado con éxito!' : '¡Pago realizado!'}
+            {transactionData.type === 'sent' ? '¡Enviado con éxito!' : '¡Recibido con éxito!'}
           </Text>
           
           <Text style={styles.headerAmount}>
-            -${transactionData.amount} {transactionData.currency}
+            {transactionData.type === 'sent' ? '-' : '+'}${transactionData.amount} {formatCurrency(transactionData.currency)}
           </Text>
           
           <Text style={styles.headerSubtitle}>
             {transactionData.type === 'sent' 
               ? `Enviado a ${transactionData.recipient}`
-              : `Pagado en ${transactionData.merchant}`
+              : `Recibido de ${transactionData.sender}`
             }
           </Text>
         </View>
@@ -174,23 +178,23 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
                 <Text style={styles.participantInitial}>
                   {transactionData.type === 'sent' 
                     ? transactionData.recipient?.charAt(0) 
-                    : transactionData.merchant?.charAt(0)
+                    : transactionData.sender?.charAt(0)
                   }
                 </Text>
               </View>
               <View style={styles.participantInfo}>
                 <Text style={styles.participantName}>
-                  {transactionData.type === 'sent' ? transactionData.recipient : transactionData.merchant}
+                  {transactionData.type === 'sent' ? transactionData.recipient : transactionData.sender}
                 </Text>
                 <Text style={styles.participantDetails}>
                   {transactionData.type === 'sent' 
                     ? transactionData.recipientAddress 
-                    : `${transactionData.location} • ${transactionData.terminal}`
+                    : transactionData.senderAddress
                   }
                 </Text>
               </View>
               <View style={styles.participantIcon}>
-                <Icon name="arrow-up" size={16} color="#EF4444" />
+                <Icon name={transactionData.type === 'sent' ? 'arrow-up' : 'arrow-down'} size={16} color={transactionData.type === 'sent' ? '#EF4444' : '#10B981'} />
               </View>
             </View>
 
@@ -198,10 +202,10 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
             <View style={styles.amountBreakdown}>
               <View style={styles.amountRow}>
                 <Text style={styles.amountLabel}>
-                  {transactionData.type === 'sent' ? 'Monto enviado' : 'Monto pagado'}
+                  {transactionData.type === 'sent' ? 'Monto enviado' : 'Monto recibido'}
                 </Text>
                 <Text style={styles.amountValue}>
-                  ${transactionData.amount} {transactionData.currency}
+                  ${transactionData.amount} {formatCurrency(transactionData.currency)}
                 </Text>
               </View>
               
@@ -219,7 +223,7 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
                   <View style={styles.totalRow}>
                     <Text style={styles.totalLabel}>Total debitado</Text>
                     <Text style={styles.totalValue}>
-                      ${transactionData.amount} {transactionData.currency}
+                      ${transactionData.amount} {formatCurrency(transactionData.currency)}
                     </Text>
                   </View>
                 </>
@@ -285,7 +289,7 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
                 <View style={styles.remittanceInfo}>
                   <Text style={styles.remittanceTitle}>¡Dinero enviado con invitación!</Text>
                   <Text style={styles.remittanceSubtitle}>
-                    {transactionData.recipient} recibirá una invitación para reclamar ${transactionData.amount} {transactionData.currency}
+                    {transactionData.recipient} recibirá una invitación para reclamar ${transactionData.amount} {formatCurrency(transactionData.currency)}
                   </Text>
                 </View>
               </View>
@@ -336,7 +340,7 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
             <Text style={styles.valueDescription}>
               {transactionData.type === 'sent' 
                 ? 'Enviaste este dinero sin pagar comisiones'
-                : 'Pagaste sin comisiones adicionales'
+                : 'Recibiste este dinero sin comisiones'
               }
             </Text>
             <View style={styles.valueHighlight}>
@@ -366,15 +370,7 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
               </TouchableOpacity>
             )}
             
-            {transactionData.type === 'payment' && (
-              <TouchableOpacity 
-                style={[styles.actionButton, { backgroundColor: colors.secondary }]}
-                onPress={handleRequestReceipt}
-              >
-                <Icon name="file-text" size={16} color="#ffffff" />
-                <Text style={styles.actionButtonText}>Solicitar factura</Text>
-              </TouchableOpacity>
-            )}
+
             
             <TouchableOpacity 
               style={[styles.actionButton, { backgroundColor: '#F3F4F6' }]}

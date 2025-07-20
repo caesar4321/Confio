@@ -44,6 +44,9 @@ interface AuthContextType {
   profileData: ProfileData | null;
   isProfileLoading: boolean;
   refreshProfile: (accountType?: 'personal' | 'business', businessId?: string) => Promise<void>;
+  // Direct access to user profile for backward compatibility
+  userProfile?: UserProfile;
+  isUserProfileLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -253,7 +256,18 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, signOut, checkLocalAuthState, handleSuccessfulLogin, profileData, isProfileLoading, refreshProfile }}>
+    <AuthContext.Provider value={{ 
+      isAuthenticated, 
+      isLoading, 
+      signOut, 
+      checkLocalAuthState, 
+      handleSuccessfulLogin, 
+      profileData, 
+      isProfileLoading, 
+      refreshProfile,
+      userProfile: profileData?.userProfile,
+      isUserProfileLoading: isProfileLoading && profileData?.currentAccountType === 'personal'
+    }}>
       {children}
     </AuthContext.Provider>
   );

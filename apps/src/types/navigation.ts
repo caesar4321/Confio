@@ -145,6 +145,109 @@ export type MainStackParamList = {
       isOnConfio?: boolean;
     };
   };
+  PaymentConfirmation: {
+    invoiceData: {
+      id: string;
+      invoiceId: string;
+      amount: string;
+      tokenType: string;
+      description?: string;
+      merchantUser: {
+        id: string;
+        username: string;
+        firstName?: string;
+        lastName?: string;
+      };
+      merchantAccount: {
+        id: string;
+        accountType: string;
+        accountIndex: number;
+        suiAddress: string;
+        business?: {
+          id: string;
+          name: string;
+          category: string;
+          address?: string;
+        };
+      };
+      isExpired: boolean;
+    };
+  };
+  PaymentProcessing: {
+    transactionData: {
+      type: 'payment';
+      amount: string;
+      currency: string;
+      merchant: string;
+      action: string;
+    };
+  };
+  PaymentSuccess: {
+    transactionData: {
+      type: 'payment';
+      amount: string;
+      currency: string;
+      recipient: string;
+      merchant: string;
+      recipientAddress?: string;
+      merchantAddress?: string;
+      message?: string;
+      transactionHash?: string;
+    };
+  };
+  BusinessPaymentSuccess: {
+    paymentData: {
+      id: string;
+      paymentTransactionId: string;
+      amount: string;
+      tokenType: string;
+      description?: string;
+      payerUser: {
+        id: string;
+        username: string;
+        firstName?: string;
+        lastName?: string;
+      };
+      payerAccount?: {
+        id: string;
+        accountType: string;
+        accountIndex: number;
+        suiAddress: string;
+        business?: {
+          id: string;
+          name: string;
+          category: string;
+          address?: string;
+        };
+      };
+      payerAddress: string;
+      merchantUser: {
+        id: string;
+        username: string;
+        firstName?: string;
+        lastName?: string;
+      };
+      merchantAccount?: {
+        id: string;
+        accountType: string;
+        accountIndex: number;
+        suiAddress: string;
+        business?: {
+          id: string;
+          name: string;
+          category: string;
+          address?: string;
+        };
+      };
+      merchantAddress: string;
+      status: string;
+      transactionHash: string;
+      createdAt: string;
+    };
+  };
+  Scan: {
+    mode?: 'pagar' | 'cobrar';
+  };
   TraderRating: {
     trader: {
       name: string;

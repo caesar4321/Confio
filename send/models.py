@@ -4,8 +4,8 @@ from users.models import SoftDeleteModel
 
 # Create your models here.
 
-class Transaction(SoftDeleteModel):
-    """Model for storing transaction data"""
+class SendTransaction(SoftDeleteModel):
+    """Model for storing send transaction data (direct user-to-user transfers)"""
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
         ('SPONSORING', 'Sponsoring'),
@@ -16,7 +16,7 @@ class Transaction(SoftDeleteModel):
     ]
 
     TOKEN_TYPES = [
-        ('CUSD', 'Confío Dollar'),
+        ('cUSD', 'Confío Dollar'),
         ('CONFIO', 'Confío Token'),
         ('USDC', 'USD Coin')
     ]
@@ -36,8 +36,8 @@ class Transaction(SoftDeleteModel):
     )
 
     # Blockchain addresses
-    sender_address = models.CharField(max_length=64)  # Sui addresses are 32 bytes (64 hex chars)
-    recipient_address = models.CharField(max_length=64)  # Sui addresses are 32 bytes (64 hex chars)
+    sender_address = models.CharField(max_length=66)  # Sui addresses are 0x + 32 bytes (66 chars total)
+    recipient_address = models.CharField(max_length=66)  # Sui addresses are 0x + 32 bytes (66 chars total)
 
     # Transaction details
     amount = models.CharField(max_length=32)  # Store as string to handle large numbers
@@ -45,10 +45,10 @@ class Transaction(SoftDeleteModel):
     memo = models.TextField(blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
     transaction_hash = models.CharField(
-        max_length=64, 
+        max_length=66, 
         blank=True,
         unique=True,
-        help_text="Sui transaction digest (32 bytes, 64 hex characters)"
+        help_text="Sui transaction digest (0x + 32 bytes, 66 hex characters total)"
     )  # Sui transaction hash
     error_message = models.TextField(blank=True)
 
@@ -64,4 +64,4 @@ class Transaction(SoftDeleteModel):
         ]
 
     def __str__(self):
-        return f"TX-{self.transaction_hash or 'pending'}: {self.token_type} {self.amount} from {self.sender_user} to {self.recipient_user or self.recipient_address}"
+        return f"SEND-{self.transaction_hash or 'pending'}: {self.token_type} {self.amount} from {self.sender_user} to {self.recipient_user or self.recipient_address}"

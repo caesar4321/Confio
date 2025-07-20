@@ -37,7 +37,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   const authService = AuthService.getInstance();
   const accountManager = AccountManager.getInstance();
   const apolloClient = useApolloClient();
-  const { profileData, refreshProfile } = useAuth();
+  const { profileData } = useAuth();
   
   // Debug profile loading
   console.log('useAccountManager - Profile state:', {
@@ -205,14 +205,8 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         setActiveAccount(active);
         console.log('loadAccounts - setActiveAccount called with:', active);
         
-        // Refresh profile based on active account type
-        if (active.type === 'business' && active.business?.id) {
-          console.log('loadAccounts - Refreshing business profile for:', active.business.id);
-          await refreshProfile('business', active.business.id);
-        } else if (active.type === 'personal') {
-          console.log('loadAccounts - Refreshing personal profile');
-          await refreshProfile('personal');
-        }
+        // Note: Profile refresh is handled by AuthContext, not here
+        // This prevents circular dependencies and unnecessary network requests
       } else {
         console.warn(
           '[AccountMgr] Active account ID', activeAccountId,
@@ -340,12 +334,17 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         // Update the active account context state
         setActiveAccountContext(newActiveContext);
         
-        // Refresh profile based on account type
-        if (newActiveAccount.type === 'business' && newActiveAccount.business?.id) {
-          await refreshProfile('business', newActiveAccount.business.id);
-        } else {
-          await refreshProfile('personal');
+        // Force Apollo client to refresh its headers by clearing the cache
+        // This ensures that subsequent requests use the updated account context
+        try {
+          await apolloClient.resetStore();
+          console.log('useAccountManager - Apollo cache cleared after account switch');
+        } catch (error) {
+          console.log('useAccountManager - Error clearing Apollo cache (non-critical):', error);
         }
+        
+        // Note: Profile refresh is handled by AuthContext, not here
+        // This prevents circular dependencies and unnecessary network requests
       } else {
         console.log('useAccountManager - Could not find account with ID:', accountId);
         console.log('useAccountManager - Available accounts:', convertedAccounts.map(acc => acc.id));
@@ -358,7 +357,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     } finally {
       setIsLoading(false);
     }
-  }, [authService, serverAccountsData, profileData, refreshProfile]);
+  }, [authService, serverAccountsData, profileData]);
 
   const createAccount = useCallback(async (
     name: string,

@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 
 logger = logging.getLogger(__name__)
 
-def jwt_payload_handler(user):
+def jwt_payload_handler(user, context=None):
     """Add auth_token_version to the JWT payload"""
     logger.info(f"jwt_payload_handler called with user: id={user.id}, username={user.username}, auth_token_version={getattr(user, 'auth_token_version', None)}")
     

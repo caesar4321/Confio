@@ -29,8 +29,9 @@ types = [
 	users_schema.CountryCodeType,
 	users_schema.BusinessCategoryType,
 	users_schema.LegalDocumentType,
-	send_schema.TransactionType,
+	send_schema.SendTransactionType,
 	payments_schema.InvoiceType,
+	payments_schema.PaymentTransactionType,
 ]
 
 schema = graphene.Schema(

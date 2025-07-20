@@ -43,7 +43,7 @@ class Command(BaseCommand):
             merchant_user=user,
             merchant_account=account,
             amount='10.50',
-            token_type='CUSD',
+            token_type='cUSD',
             description='Test invoice for admin panel',
             expires_at=timezone.now() + timedelta(hours=24),
             status='PENDING'

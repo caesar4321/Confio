@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
+import { useAccountManager } from '../hooks/useAccountManager';
 import { getCountryByIso } from '../utils/countries';
 
 // Utility function to format phone number with country code
@@ -47,6 +48,7 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
   onCreateBusinessAccount,
 }) => {
   const { userProfile, isUserProfileLoading } = useAuth();
+  const { isLoading: accountsLoading } = useAccountManager();
 
   // For personal accounts, only format phone number with country code
   const displayAccounts = accounts.map(acc => {
@@ -113,8 +115,8 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
           <View style={styles.accountList}>
             <Text style={styles.sectionTitle}>Cambiar cuenta</Text>
             
-            {isUserProfileLoading ? (
-              <Text style={{ padding: 16 }}>Cargando perfil...</Text>
+            {accountsLoading ? (
+              <Text style={{ padding: 16 }}>Cargando cuentas...</Text>
             ) : (
               displayAccounts.map((account) => (
                 <TouchableOpacity
