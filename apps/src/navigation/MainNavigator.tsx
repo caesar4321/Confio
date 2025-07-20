@@ -28,6 +28,7 @@ import { TradeChatScreen } from '../screens/TradeChatScreen';
 import { ActiveTradeScreen } from '../screens/ActiveTradeScreen';
 import { TraderRatingScreen } from '../screens/TraderRatingScreen';
 import { ScanScreen } from '../screens/ScanScreen';
+import { CreateOfferScreen } from '../screens/CreateOfferScreen';
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
 console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
@@ -231,6 +232,11 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="Scan"
         component={ScanScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="CreateOffer"
+        component={CreateOfferScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

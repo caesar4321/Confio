@@ -467,3 +467,308 @@ export const GET_INVOICES = gql`
     }
   }
 `;
+
+// P2P Exchange Queries
+export const GET_P2P_OFFERS = gql`
+  query GetP2POffers($exchangeType: String, $tokenType: String, $paymentMethod: String) {
+    p2pOffers(exchangeType: $exchangeType, tokenType: $tokenType, paymentMethod: $paymentMethod) {
+      id
+      user {
+        id
+        username
+        firstName
+        lastName
+      }
+      exchangeType
+      tokenType
+      rate
+      minAmount
+      maxAmount
+      availableAmount
+      paymentMethods {
+        id
+        name
+        displayName
+        icon
+      }
+      terms
+      responseTimeMinutes
+      status
+      userStats {
+        totalTrades
+        completedTrades
+        successRate
+        avgResponseTime
+        isVerified
+        lastSeenOnline
+      }
+      createdAt
+    }
+  }
+`;
+
+export const GET_MY_P2P_OFFERS = gql`
+  query GetMyP2POffers {
+    myP2pOffers {
+      id
+      exchangeType
+      tokenType
+      rate
+      minAmount
+      maxAmount
+      availableAmount
+      paymentMethods {
+        id
+        name
+        displayName
+        icon
+      }
+      terms
+      responseTimeMinutes
+      status
+      createdAt
+    }
+  }
+`;
+
+export const GET_MY_P2P_TRADES = gql`
+  query GetMyP2PTrades {
+    myP2pTrades {
+      id
+      offer {
+        id
+        exchangeType
+        tokenType
+        user {
+          id
+          username
+          firstName
+          lastName
+        }
+      }
+      buyer {
+        id
+        username
+        firstName
+        lastName
+      }
+      seller {
+        id
+        username
+        firstName
+        lastName
+      }
+      cryptoAmount
+      fiatAmount
+      rateUsed
+      paymentMethod {
+        id
+        name
+        displayName
+        icon
+      }
+      status
+      expiresAt
+      paymentReference
+      paymentNotes
+      cryptoTransactionHash
+      completedAt
+      createdAt
+    }
+  }
+`;
+
+export const GET_P2P_TRADE = gql`
+  query GetP2PTrade($id: ID!) {
+    p2pTrade(id: $id) {
+      id
+      offer {
+        id
+        exchangeType
+        tokenType
+        user {
+          id
+          username
+          firstName
+          lastName
+        }
+        userStats {
+          totalTrades
+          completedTrades
+          successRate
+          avgResponseTime
+          isVerified
+        }
+      }
+      buyer {
+        id
+        username
+        firstName
+        lastName
+      }
+      seller {
+        id
+        username
+        firstName
+        lastName
+      }
+      cryptoAmount
+      fiatAmount
+      rateUsed
+      paymentMethod {
+        id
+        name
+        displayName
+        icon
+      }
+      status
+      expiresAt
+      paymentReference
+      paymentNotes
+      cryptoTransactionHash
+      completedAt
+      disputeReason
+      createdAt
+    }
+  }
+`;
+
+export const GET_P2P_TRADE_MESSAGES = gql`
+  query GetP2PTradeMessages($tradeId: ID!) {
+    p2pTradeMessages(tradeId: $tradeId) {
+      id
+      sender {
+        id
+        username
+        firstName
+        lastName
+      }
+      messageType
+      content
+      attachmentUrl
+      attachmentType
+      isRead
+      readAt
+      createdAt
+    }
+  }
+`;
+
+export const GET_P2P_PAYMENT_METHODS = gql`
+  query GetP2PPaymentMethods {
+    p2pPaymentMethods {
+      id
+      name
+      displayName
+      icon
+      isActive
+    }
+  }
+`;
+
+// P2P Exchange Mutations
+export const CREATE_P2P_OFFER = gql`
+  mutation CreateP2POffer($input: CreateP2POfferInput!) {
+    createP2pOffer(input: $input) {
+      offer {
+        id
+        exchangeType
+        tokenType
+        rate
+        minAmount
+        maxAmount
+        availableAmount
+        status
+        createdAt
+      }
+      success
+      errors
+    }
+  }
+`;
+
+export const CREATE_P2P_TRADE = gql`
+  mutation CreateP2PTrade($input: CreateP2PTradeInput!) {
+    createP2pTrade(input: $input) {
+      trade {
+        id
+        offer {
+          id
+          exchangeType
+          tokenType
+          user {
+            id
+            username
+            firstName
+            lastName
+          }
+        }
+        buyer {
+          id
+          username
+          firstName
+          lastName
+        }
+        seller {
+          id
+          username
+          firstName
+          lastName
+        }
+        cryptoAmount
+        fiatAmount
+        rateUsed
+        paymentMethod {
+          id
+          name
+          displayName
+          icon
+        }
+        status
+        expiresAt
+        createdAt
+      }
+      success
+      errors
+    }
+  }
+`;
+
+export const UPDATE_P2P_TRADE_STATUS = gql`
+  mutation UpdateP2PTradeStatus($input: UpdateP2PTradeStatusInput!) {
+    updateP2pTradeStatus(input: $input) {
+      trade {
+        id
+        status
+        paymentReference
+        paymentNotes
+        completedAt
+      }
+      success
+      errors
+    }
+  }
+`;
+
+export const SEND_P2P_MESSAGE = gql`
+  mutation SendP2PMessage($input: SendP2PMessageInput!) {
+    sendP2pMessage(input: $input) {
+      message {
+        id
+        sender {
+          id
+          username
+          firstName
+          lastName
+        }
+        messageType
+        content
+        attachmentUrl
+        attachmentType
+        createdAt
+      }
+      success
+      errors
+    }
+  }
+`;

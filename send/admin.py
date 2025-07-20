@@ -9,7 +9,7 @@ class SendTransactionAdmin(admin.ModelAdmin):
         'id',
         'sender_user', 
         'recipient_user',
-        'amount', 
+        'amount_display', 
         'token_type', 
         'status', 
         'created_at',
@@ -36,7 +36,8 @@ class SendTransactionAdmin(admin.ModelAdmin):
     readonly_fields = [
         'created_at', 
         'updated_at', 
-        'transaction_hash'
+        'transaction_hash',
+        'amount_display'
     ]
     date_hierarchy = 'created_at'
     ordering = ['-created_at']
@@ -45,7 +46,7 @@ class SendTransactionAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Transaction Information', {
-            'fields': ('sender_user', 'recipient_user', 'amount', 'token_type', 'memo')
+            'fields': ('sender_user', 'recipient_user', 'amount_display', 'amount', 'token_type', 'memo')
         }),
         ('Blockchain Details', {
             'fields': ('sender_address', 'recipient_address', 'transaction_hash'),
@@ -59,6 +60,17 @@ class SendTransactionAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+    
+    def amount_display(self, obj):
+        """Display amount in decimal format"""
+        try:
+            # Convert string amount to decimal and format
+            from decimal import Decimal
+            amount = Decimal(obj.amount)
+            return f"{amount:,.2f} {obj.token_type}"
+        except (ValueError, TypeError):
+            return f"{obj.amount} {obj.token_type}"
+    amount_display.short_description = "Amount"
     
     def transaction_hash_display(self, obj):
         """Display transaction hash with truncation"""

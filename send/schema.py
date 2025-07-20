@@ -14,7 +14,7 @@ User = get_user_model()
 class SendTransactionInput(graphene.InputObjectType):
     """Input type for creating a send transaction"""
     recipient_address = graphene.String(required=True, description="Sui address of the recipient")
-    amount = graphene.String(required=True, description="Amount to send (in smallest unit, e.g., 1000000 for 1 cUSD)")
+    amount = graphene.String(required=True, description="Amount to send (e.g., '10.50')")
     token_type = graphene.String(required=True, description="Type of token to send (e.g., 'cUSD', 'CONFIO')")
     memo = graphene.String(description="Optional memo for the transaction")
 
@@ -83,13 +83,16 @@ class CreateSendTransaction(graphene.Mutation):
             except Account.DoesNotExist:
                 recipient_user = None
 
+            # Use amount as provided by frontend (no automatic conversion)
+            amount_str = str(input.amount)
+            
             # Create the send transaction
             send_transaction = SendTransaction.objects.create(
                 sender_user=user,
                 recipient_user=recipient_user,
                 sender_address=sender_address,
                 recipient_address=input.recipient_address,
-                amount=input.amount,
+                amount=amount_str,
                 token_type=input.token_type,
                 memo=input.memo,
                 status='PENDING'
@@ -101,7 +104,12 @@ class CreateSendTransaction(graphene.Mutation):
             # TEMPORARY: Mark send transaction as CONFIRMED for testing
             # This ensures the UI shows the correct status
             send_transaction.status = 'CONFIRMED'
-            send_transaction.transaction_hash = f"test_send_tx_{send_transaction.id}_{int(timezone.now().timestamp())}"
+            # Generate a unique transaction hash using ID, microsecond timestamp, and UUID
+            import time
+            import uuid
+            microsecond_timestamp = int(time.time() * 1000000)  # Microsecond precision
+            unique_id = str(uuid.uuid4())[:8]  # First 8 characters of UUID
+            send_transaction.transaction_hash = f"test_send_tx_{send_transaction.id}_{microsecond_timestamp}_{unique_id}"
             send_transaction.save()
 
             return CreateSendTransaction(

@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, Modal } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
+import { useMutation } from '@apollo/client';
+import { CREATE_SEND_TRANSACTION } from '../apollo/queries';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -64,6 +66,10 @@ export const SendToFriendScreen = () => {
   const insets = useSafeAreaInsets();
   
   const friend: Friend = (route.params as any)?.friend || { name: 'Friend', avatar: 'F', isOnConfio: true, phone: '' };
+  
+  // Debug log to check friend data
+  console.log('SendToFriendScreen: friend data:', friend);
+  console.log('SendToFriendScreen: friend.isOnConfio:', friend.isOnConfio);
   const [tokenType, setTokenType] = useState<TokenType>((route.params as any)?.tokenType || 'cusd');
   const config = tokenConfig[tokenType];
 
@@ -72,9 +78,12 @@ export const SendToFriendScreen = () => {
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
+  // GraphQL mutation for creating send transaction
+  const [createSendTransaction] = useMutation(CREATE_SEND_TRANSACTION);
+
   const handleQuickAmount = (val: string) => setAmount(val);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     console.log('SendToFriendScreen: handleSend called');
     if (!amount || parseFloat(amount) < config.minSend) {
       setErrorMessage(`El mínimo para enviar es ${config.minSend} ${config.name}`);
@@ -82,23 +91,53 @@ export const SendToFriendScreen = () => {
       return;
     }
     
-    console.log('SendToFriendScreen: Navigating to TransactionProcessing');
-    // Navigate to processing screen
     try {
-      // Use replace instead of navigate to prevent going back to SendScreen
-      (navigation as any).replace('TransactionProcessing', {
-        transactionData: {
-          type: 'sent',
-          amount: amount,
-          currency: config.name,
-          recipient: friend.name,
-          action: 'Enviando',
-          isOnConfio: friend.isOnConfio
+      console.log('SendToFriendScreen: Creating send transaction...');
+      
+      // For now, use a mock Sui address for the friend
+      // In a real implementation, this would come from the friend's profile
+      const friendSuiAddress = friend.isOnConfio 
+        ? '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef' // Mock address
+        : '0x0000000000000000000000000000000000000000000000000000000000000000'; // External address
+      
+      const { data } = await createSendTransaction({
+        variables: {
+          input: {
+            recipientAddress: friendSuiAddress,
+            amount: amount,
+            tokenType: config.name,
+            memo: `Send ${amount} ${config.name} to ${friend.name}${friend.phone ? ` (${friend.phone})` : ''}`
+          }
         }
       });
-      console.log('SendToFriendScreen: Navigation call completed');
+
+      console.log('SendToFriendScreen: Send transaction created:', data);
+
+      if (data?.createSendTransaction?.success) {
+        console.log('SendToFriendScreen: Navigating to TransactionProcessing');
+        // Navigate to processing screen with transaction data
+        (navigation as any).replace('TransactionProcessing', {
+          transactionData: {
+            type: 'sent',
+            amount: amount,
+            currency: config.name,
+            recipient: friend.name,
+            recipientPhone: friend.phone,
+            action: 'Enviando',
+            isOnConfio: friend.isOnConfio,
+            sendTransactionId: data.createSendTransaction.sendTransaction.id,
+            recipientAddress: friendSuiAddress
+          }
+        });
+      } else {
+        const errors = data?.createSendTransaction?.errors || ['Error desconocido'];
+        setErrorMessage(errors.join(', '));
+        setShowError(true);
+      }
     } catch (error) {
-      console.error('SendToFriendScreen: Navigation error:', error);
+      console.error('SendToFriendScreen: Error creating send transaction:', error);
+      setErrorMessage('Error al crear la transacción. Inténtalo de nuevo.');
+      setShowError(true);
     }
   };
 
@@ -119,7 +158,9 @@ export const SendToFriendScreen = () => {
               <Text style={styles.friendAvatarText}>{friend.avatar}</Text>
             </View>
             <Text style={styles.headerSubtitle}>{friend.name}</Text>
-            <Text style={styles.headerPhone}>{friend.phone}</Text>
+            {friend.phone && friend.phone !== friend.name && friend.phone.trim() !== '' && (
+              <Text style={styles.headerPhone}>{friend.phone}</Text>
+            )}
             <Text style={styles.headerDescription}>Enviar {config.name} a tu amigo</Text>
           </View>
         </View>

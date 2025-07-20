@@ -11,9 +11,9 @@ def validate_transaction_amount(amount: str) -> None:
         if amount_float <= 0:
             raise ValidationError("Amount must be greater than 0")
             
-        # Check if amount is within reasonable limits (e.g., max 1 billion)
-        if amount_float > 1_000_000_000_000_000:  # 1 billion with 6 decimals
-            raise ValidationError("Amount exceeds maximum allowed")
+        # Check if amount is within reasonable limits (max 1 million)
+        if amount_float > 1_000_000:
+            raise ValidationError("Amount exceeds maximum allowed (1,000,000)")
             
     except ValueError:
         raise ValidationError("Amount must be a valid number")

@@ -4,6 +4,9 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
+import { useMutation } from '@apollo/client';
+import { PAY_INVOICE } from '../apollo/queries';
+import { AccountManager } from '../utils/accountManager';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -29,6 +32,9 @@ interface TransactionData {
   merchant?: string;
   action: string;
   isOnConfio?: boolean;
+  sendTransactionId?: string;
+  recipientAddress?: string;
+  invoiceId?: string;
 }
 
 export const TransactionProcessingScreen = () => {
@@ -54,6 +60,9 @@ export const TransactionProcessingScreen = () => {
     new Animated.Value(0),
     new Animated.Value(0)
   ]);
+
+  // GraphQL mutation for paying invoice (only used for payment transactions)
+  const [payInvoice] = useMutation(PAY_INVOICE);
 
   // Processing steps
   const processingSteps = [
@@ -106,6 +115,8 @@ export const TransactionProcessingScreen = () => {
           clearInterval(timer);
           // Navigate to success screen after completion
           setTimeout(() => {
+            console.log('TransactionProcessingScreen: Navigating to TransactionSuccess with data:', transactionData);
+            console.log('TransactionProcessingScreen: isOnConfio value:', transactionData.isOnConfio);
             (navigation as any).replace('TransactionSuccess', { transactionData });
           }, 2000);
           return prev;
@@ -115,6 +126,63 @@ export const TransactionProcessingScreen = () => {
 
     return () => clearInterval(timer);
   }, []);
+
+  // Process transaction when screen loads (for payment transactions)
+  useEffect(() => {
+    if (transactionData.type === 'payment' && transactionData.invoiceId) {
+      const processPayment = async () => {
+        try {
+          console.log('TransactionProcessingScreen: Processing payment for invoice:', transactionData.invoiceId);
+          
+          // Debug: Check current active account context before payment
+          try {
+            const accountManager = AccountManager.getInstance();
+            const activeContext = await accountManager.getActiveAccountContext();
+            console.log('TransactionProcessingScreen - Active account context before payment:', {
+              type: activeContext.type,
+              index: activeContext.index,
+              accountId: `${activeContext.type}_${activeContext.index}`
+            });
+          } catch (error) {
+            console.log('TransactionProcessingScreen - Could not get active account context:', error);
+          }
+          
+          // Step 1: Verifying transaction
+          setCurrentStep(0);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Step 2: Processing in blockchain
+          setCurrentStep(1);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          
+          // Step 3: Call the actual payment mutation
+          setCurrentStep(2);
+          console.log('TransactionProcessingScreen: Calling payInvoice mutation...');
+          const { data } = await payInvoice({
+            variables: {
+              invoiceId: transactionData.invoiceId
+            }
+          });
+
+          console.log('TransactionProcessingScreen: Payment mutation response:', data);
+          
+          if (data?.payInvoice?.success) {
+            console.log('TransactionProcessingScreen: Payment successful');
+            // The transaction is already marked as confirmed in the backend
+            // Just wait for the UI to complete
+          } else {
+            console.error('TransactionProcessingScreen: Payment failed:', data?.payInvoice?.errors);
+            // Handle payment failure
+          }
+        } catch (error) {
+          console.error('TransactionProcessingScreen: Error processing payment:', error);
+          // Handle error
+        }
+      };
+
+      processPayment();
+    }
+  }, [transactionData.type, transactionData.invoiceId]);
 
   // Pulse animation for current step
   useEffect(() => {

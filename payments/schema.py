@@ -297,7 +297,12 @@ class PayInvoice(graphene.Mutation):
             # TEMPORARY: Mark payment transaction as CONFIRMED for testing
             # This ensures the UI shows the correct status
             payment_transaction.status = 'CONFIRMED'
-            payment_transaction.transaction_hash = f"test_pay_tx_{payment_transaction.id}_{int(timezone.now().timestamp())}"
+            # Generate a unique transaction hash using ID, microsecond timestamp, and UUID
+            import time
+            import uuid
+            microsecond_timestamp = int(time.time() * 1000000)  # Microsecond precision
+            unique_id = str(uuid.uuid4())[:8]  # First 8 characters of UUID
+            payment_transaction.transaction_hash = f"test_pay_tx_{payment_transaction.id}_{microsecond_timestamp}_{unique_id}"
             payment_transaction.save()
 
             return PayInvoice(
