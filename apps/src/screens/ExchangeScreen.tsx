@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -11,11 +11,15 @@ import {
   Dimensions,
   Modal,
   TouchableWithoutFeedback,
+  FlatList,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
 import { MainStackParamList } from '../types/navigation';
+import { countries, Country, getCountryByPhoneCode } from '../utils/countries';
+import { useQuery } from '@apollo/client';
+import { GET_ME } from '../apollo/queries';
 
 // Colors from the design
 const colors = {
@@ -352,19 +356,80 @@ type Offer = typeof mockOffers.cUSD[0];
 type ActiveTrade = typeof activeTrades[0];
 
 export const ExchangeScreen = () => {
+  // Get user data to determine default country
+  const { data: userData } = useQuery(GET_ME);
+  
+  // Smart country defaulting based on user's phone country
+  const getDefaultCountry = (): Country | null => {
+    if (userData?.me?.phoneCountry) {
+      const countryByPhone = getCountryByPhoneCode(userData.me.phoneCountry);
+      if (countryByPhone) return countryByPhone;
+    }
+    // Fallback to Venezuela if no phone country or not found
+    return countries.find(c => c[0] === 'Venezuela') || null;
+  };
+
   const [activeTab, setActiveTab] = useState<'buy' | 'sell'>('buy');
   const [selectedCrypto, setSelectedCrypto] = useState<'cUSD' | 'CONFIO'>('cUSD');
   const [amount, setAmount] = useState('100.00');
   const [localAmount, setLocalAmount] = useState('3,600.00');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
-  const [headerVisible, setHeaderVisible] = useState(true);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('Todos los métodos');
   const scrollY = useRef(new Animated.Value(0)).current;
   const lastScrollY = useRef(0);
+  const scrollViewRef = useRef<any>(null);
+  const [forceHeaderVisible, setForceHeaderVisible] = useState(false);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [activeList, setActiveList] = useState<'offers' | 'trades'>('offers');
+  const [selectedCountry, setSelectedCountry] = useState<Country | null>(getDefaultCountry());
+  const [countryModalVisible, setCountryModalVisible] = useState(false);
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+
+  // Update country when user data loads
+  useEffect(() => {
+    if (userData?.me?.phoneCountry) {
+      const countryByPhone = getCountryByPhoneCode(userData.me.phoneCountry);
+      if (countryByPhone && !selectedCountry) {
+        setSelectedCountry(countryByPhone);
+      }
+    }
+  }, [userData?.me?.phoneCountry]);
+
+  // Reset header when screen comes into focus
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      // Reset header state when screen is focused
+      setForceHeaderVisible(true);
+      scrollY.stopAnimation();
+      scrollY.setValue(0);
+      scrollY.setOffset(0);
+      lastScrollY.current = 0;
+      
+      // Remove force after a short delay
+      setTimeout(() => {
+        setForceHeaderVisible(false);
+      }, 200);
+    });
+
+    return unsubscribe;
+  }, [navigation]);
+
+  // Initialize header state on mount
+  useEffect(() => {
+    // Ensure header starts in the correct state
+    setForceHeaderVisible(true);
+    scrollY.stopAnimation();
+    scrollY.setValue(0);
+    lastScrollY.current = 0;
+    
+    // Remove force after initialization
+    setTimeout(() => {
+      setForceHeaderVisible(false);
+    }, 100);
+  }, []);
+
+
 
   // Calculate local amount based on crypto amount and rate
   const calculateLocalAmount = (cryptoAmount: string, rate: string) => {
@@ -415,6 +480,47 @@ export const ExchangeScreen = () => {
     }
     
     scrollY.setValue(currentScrollY);
+  };
+
+  // Reset scroll position when switching between tabs
+  const resetScrollPosition = () => {
+    // Force header to be fully visible immediately
+    setForceHeaderVisible(true);
+    
+    // Complete reset of scroll system
+    scrollY.stopAnimation(); // Stop any ongoing animations
+    scrollY.setValue(0);
+    scrollY.setOffset(0);
+    scrollY.flattenOffset(); // Ensure animated value is properly reset
+    lastScrollY.current = 0;
+    
+    // Immediate scroll to top with no animation
+    if (scrollViewRef.current) {
+      scrollViewRef.current.scrollTo({ y: 0, animated: false });
+    }
+    
+    // Ensure complete reset with multiple checkpoints
+    const performReset = () => {
+      scrollY.setValue(0);
+      scrollY.setOffset(0);
+      lastScrollY.current = 0;
+      
+      if (scrollViewRef.current) {
+        scrollViewRef.current.scrollTo({ y: 0, animated: false });
+      }
+    };
+    
+    // Immediate reset
+    performReset();
+    
+    // Additional resets to ensure completeness
+    setTimeout(performReset, 50);
+    setTimeout(performReset, 150);
+    
+    // Remove force after all resets complete
+    setTimeout(() => {
+      setForceHeaderVisible(false);
+    }, 300);
   };
 
   const onSelectPaymentMethod = (method: string) => {
@@ -605,6 +711,7 @@ export const ExchangeScreen = () => {
             onLayout={(event) => {
                 const { height } = event.nativeEvent.layout;
                 if (height > 0 && height !== headerHeight) {
+                    console.log('Header height changed:', { old: headerHeight, new: height });
                     setHeaderHeight(height);
                 }
             }}
@@ -618,7 +725,10 @@ export const ExchangeScreen = () => {
             {activeTrades.length > 0 && (
                 <TouchableOpacity 
                     style={styles.activeTradesAlert}
-                    onPress={() => setActiveList('trades')}
+                    onPress={() => {
+                        setActiveList('trades');
+                        resetScrollPosition();
+                    }}
                 >
                     <Icon name="alert-triangle" size={16} color={colors.primary} />
                     <Text style={styles.activeTradesText}>
@@ -631,7 +741,10 @@ export const ExchangeScreen = () => {
             <View style={styles.mainTabsContainer}>
                 <TouchableOpacity
                     style={[styles.mainTab, activeList === 'offers' && styles.activeMainTab]}
-                    onPress={() => setActiveList('offers')}
+                    onPress={() => {
+                        setActiveList('offers');
+                        resetScrollPosition();
+                    }}
                 >
                     <Text style={[styles.mainTabText, activeList === 'offers' && styles.activeMainTabText]}>
                         Ofertas
@@ -639,7 +752,10 @@ export const ExchangeScreen = () => {
                 </TouchableOpacity>
                 <TouchableOpacity
                     style={[styles.mainTab, activeList === 'trades' && styles.activeMainTab]}
-                    onPress={() => setActiveList('trades')}
+                    onPress={() => {
+                        setActiveList('trades');
+                        resetScrollPosition();
+                    }}
                 >
                     <Text style={[styles.mainTabText, activeList === 'trades' && styles.activeMainTabText]}>
                         Mis Intercambios
@@ -658,13 +774,19 @@ export const ExchangeScreen = () => {
                     <View style={styles.tabContainer}>
                         <TouchableOpacity
                             style={[styles.tab, activeTab === 'buy' && styles.activeTab]}
-                            onPress={() => setActiveTab('buy')}
+                            onPress={() => {
+                                setActiveTab('buy');
+                                resetScrollPosition();
+                            }}
                         >
                             <Text style={[styles.tabText, activeTab === 'buy' && styles.activeTabText]}>Comprar</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={[styles.tab, activeTab === 'sell' && styles.activeTab]}
-                            onPress={() => setActiveTab('sell')}
+                            onPress={() => {
+                                setActiveTab('sell');
+                                resetScrollPosition();
+                            }}
                         >
                             <Text style={[styles.tabText, activeTab === 'sell' && styles.activeTabText]}>Vender</Text>
                         </TouchableOpacity>
@@ -674,7 +796,10 @@ export const ExchangeScreen = () => {
                     <View style={styles.cryptoSelector}>
                         <TouchableOpacity
                             style={[styles.cryptoButton, selectedCrypto === 'cUSD' && styles.selectedCryptoButton]}
-                            onPress={() => setSelectedCrypto('cUSD')}
+                            onPress={() => {
+                                setSelectedCrypto('cUSD');
+                                resetScrollPosition();
+                            }}
                         >
                             <Text style={[styles.cryptoButtonText, selectedCrypto === 'cUSD' && styles.selectedCryptoButtonText]}>
                                 Confío Dollar ($cUSD)
@@ -682,7 +807,10 @@ export const ExchangeScreen = () => {
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={[styles.cryptoButton, selectedCrypto === 'CONFIO' && styles.selectedCryptoButton]}
-                            onPress={() => setSelectedCrypto('CONFIO')}
+                            onPress={() => {
+                                setSelectedCrypto('CONFIO');
+                                resetScrollPosition();
+                            }}
                         >
                             <Text style={[styles.cryptoButtonText, selectedCrypto === 'CONFIO' && styles.selectedCryptoButtonText]}>
                                 Confío ($CONFIO)
@@ -691,7 +819,10 @@ export const ExchangeScreen = () => {
                     </View>
 
                     {/* Amount, Payment Method, and Search */}
-                    <View style={styles.searchContainer}>
+                    <View style={[
+                        styles.searchContainer,
+                        showAdvancedFilters && styles.searchContainerExtended
+                    ]}>
                         <View style={styles.amountInputContainer}>
                             <TextInput
                                 style={styles.amountInput}
@@ -720,7 +851,10 @@ export const ExchangeScreen = () => {
                     </View>
 
                     {/* Rate and Filter Controls */}
-                    <View style={styles.rateFilterContainer}>
+                    <View style={[
+                        styles.rateFilterContainer,
+                        showAdvancedFilters && styles.rateFilterContainerExtended
+                    ]}>
                         <Text style={styles.averageRate}>
                             {selectedCrypto === 'cUSD' ? '36.00' : '3.60'} Bs. promedio
                         </Text>
@@ -743,7 +877,10 @@ export const ExchangeScreen = () => {
 
                     {/* Advanced Filters */}
                     {showAdvancedFilters && (
-                        <View style={styles.advancedFilters}>
+                        <>
+                            {/* Background fill for the gap */}
+                            <View style={styles.filterGapFill} />
+                            <View style={styles.advancedFilters}>
                             <View style={styles.filterInputs}>
                                 <TextInput
                                     style={styles.filterInput}
@@ -755,6 +892,21 @@ export const ExchangeScreen = () => {
                                     placeholder="Tasa max."
                                     keyboardType="decimal-pad"
                                 />
+                            </View>
+
+                            {/* Country Filter */}
+                            <View style={styles.countryFilterContainer}>
+                                <Text style={styles.filterLabel}>País:</Text>
+                                <TouchableOpacity
+                                    style={styles.countryFilterSelector}
+                                    onPress={() => setCountryModalVisible(true)}
+                                >
+                                    <Text style={styles.countryFilterFlag}>{selectedCountry?.[3] || '🌍'}</Text>
+                                    <Text style={styles.countryFilterName}>
+                                        {selectedCountry?.[0] || 'Todos los países'}
+                                    </Text>
+                                    <Icon name="chevron-down" size={16} color="#6B7280" />
+                                </TouchableOpacity>
                             </View>
 
                             <View style={styles.filterCheckboxes}>
@@ -784,6 +936,7 @@ export const ExchangeScreen = () => {
                                 </TouchableOpacity>
                             </View>
                         </View>
+                        </>
                     )}
                 </>
             )}
@@ -867,6 +1020,53 @@ export const ExchangeScreen = () => {
         </TouchableWithoutFeedback>
       </Modal>
 
+      {/* Country Selection Modal */}
+      <Modal
+        animationType="slide"
+        transparent={false}
+        visible={countryModalVisible}
+        onRequestClose={() => setCountryModalVisible(false)}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeaderCountry}>
+            <TouchableOpacity onPress={() => setCountryModalVisible(false)}>
+              <Icon name="x" size={24} color="#1F2937" />
+            </TouchableOpacity>
+            <Text style={styles.modalTitleCountry}>Filtrar por País</Text>
+            <TouchableOpacity onPress={() => {
+              setSelectedCountry(null);
+              setCountryModalVisible(false);
+            }}>
+              <Text style={styles.clearText}>Limpiar</Text>
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={countries}
+            keyExtractor={(item, index) => `${item[2]}-${index}`}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={[
+                  styles.countryModalItem,
+                  selectedCountry?.[2] === item[2] && styles.countryModalItemSelected
+                ]}
+                onPress={() => {
+                  setSelectedCountry(item);
+                  setCountryModalVisible(false);
+                }}
+              >
+                <Text style={styles.countryModalFlag}>{item[3]}</Text>
+                <Text style={styles.countryModalName}>{item[0]}</Text>
+                <Text style={styles.countryModalCode}>{item[1]}</Text>
+                {selectedCountry?.[2] === item[2] && (
+                  <Icon name="check" size={20} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            )}
+            showsVerticalScrollIndicator={false}
+          />
+        </View>
+      </Modal>
+
       <Animated.ScrollView 
         style={styles.content} 
         contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: 100 }}
@@ -879,6 +1079,14 @@ export const ExchangeScreen = () => {
       >
         {renderContent()}
       </Animated.ScrollView>
+
+      {/* Floating Action Button */}
+      <TouchableOpacity 
+        style={styles.fab}
+        onPress={() => navigation.navigate('CreateOffer')}
+      >
+        <Icon name="plus" size={24} color="#fff" />
+      </TouchableOpacity>
     </View>
   );
 };
@@ -934,7 +1142,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: colors.neutralDark,
     borderRadius: 12,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   tab: {
     flex: 1,
@@ -955,7 +1163,7 @@ const styles = StyleSheet.create({
   },
   cryptoSelector: {
     flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: 12,
     backgroundColor: colors.neutralDark,
     borderRadius: 10,
     padding: 2,
@@ -993,8 +1201,16 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
     gap: 8,
+  },
+  searchContainerExtended: {
+    backgroundColor: '#fff', // White background when filters are open
+    marginHorizontal: -12, // Extend to header edges
+    paddingHorizontal: 12, // Restore content padding
+    paddingTop: 8, // Padding above inputs
+    paddingBottom: 20, // Extended padding to reach the filter button area
+    marginBottom: -8, // Overlap with rate filter container
   },
   amountInputContainer: {
     flex: 1,
@@ -1051,6 +1267,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  rateFilterContainerExtended: {
+    backgroundColor: '#fff', // White background when filters are open
+    marginHorizontal: -12, // Extend to header edges
+    paddingHorizontal: 12, // Restore content padding
+    paddingBottom: 16, // Extra padding to fill the gap completely
+    marginBottom: -8, // Overlap with advanced filters margin
+  },
   averageRate: {
     fontSize: 12,
     color: '#6B7280',
@@ -1074,18 +1297,31 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   advancedFilters: {
-    marginTop: 12,
-    paddingTop: 16,
+    marginTop: 4, // Reduced gap between filter button and advanced filters menu
+    paddingTop: 12,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
-    backgroundColor: colors.neutral,
+    backgroundColor: '#fff', // Solid white background
     borderRadius: 8,
-    padding: 12,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
   },
   filterInputs: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   filterInput: {
     flex: 1,
@@ -1099,7 +1335,7 @@ const styles = StyleSheet.create({
   filterCheckboxes: {
     flexDirection: 'row',
     gap: 16,
-    marginBottom: 12,
+    marginBottom: 8,
   },
   checkboxItem: {
     flexDirection: 'row',
@@ -1688,5 +1924,112 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     color: '#6B7280',
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 6,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
+  },
+  filterGapFill: {
+    height: 16, // Increased height to ensure complete coverage
+    backgroundColor: '#fff', // Pure white background to fill the gap
+    marginHorizontal: -16, // Extend beyond header edges to ensure full coverage
+    marginTop: 0, // Start immediately after header content
+    marginBottom: -8, // Overlap with advanced filters margin
+  },
+  countryFilterContainer: {
+    marginBottom: 8,
+  },
+  filterLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#1F2937',
+    marginBottom: 8,
+  },
+  countryFilterSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB', // Slightly different background to distinguish from main background
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minHeight: 36,
+  },
+  countryFilterFlag: {
+    fontSize: 16,
+    marginRight: 6,
+  },
+  countryFilterName: {
+    flex: 1,
+    fontSize: 13,
+    color: '#1F2937',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  modalHeaderCountry: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 50 : 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalTitleCountry: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  clearText: {
+    fontSize: 16,
+    color: colors.primary,
+    fontWeight: '500',
+  },
+  countryModalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  countryModalItemSelected: {
+    backgroundColor: colors.primaryLight,
+  },
+  countryModalFlag: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  countryModalName: {
+    fontSize: 16,
+    color: '#1F2937',
+    flex: 1,
+  },
+  countryModalCode: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginRight: 8,
   },
 }); 

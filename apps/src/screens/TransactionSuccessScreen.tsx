@@ -19,18 +19,23 @@ const colors = {
   warning: '#F59E0B', // amber-500
 };
 
-type TransactionType = 'sent' | 'received';
+type TransactionType = 'sent' | 'received' | 'payment';
 
 interface TransactionData {
   type: TransactionType;
   amount: string;
   currency: string;
   recipient?: string;
+  recipientPhone?: string;
   sender?: string;
   recipientAddress?: string;
   senderAddress?: string;
+  merchantAddress?: string;
   message?: string;
   isOnConfio?: boolean;
+  sendTransactionId?: string;
+  merchant?: string;
+  invoiceId?: string;
 }
 
 export const TransactionSuccessScreen = () => {
@@ -48,6 +53,10 @@ export const TransactionSuccessScreen = () => {
     message: 'Transferencia',
     isOnConfio: true
   };
+
+  // Debug logging
+  console.log('TransactionSuccessScreen: Received transaction data:', transactionData);
+  console.log('TransactionSuccessScreen: isOnConfio value:', transactionData.isOnConfio);
 
   const [copied, setCopied] = useState(false);
 
@@ -79,11 +88,19 @@ export const TransactionSuccessScreen = () => {
 
   const handleSendAgain = () => {
     if (transactionData.type === 'sent' && transactionData.recipient) {
+      const friendData = { 
+        name: transactionData.recipient, 
+        avatar: transactionData.recipient?.charAt(0) || 'F',
+        phone: transactionData.recipientPhone || '', // Use actual phone number from transaction
+        isOnConfio: Boolean(transactionData.isOnConfio) // Ensure proper boolean conversion
+      };
+      
+      console.log('TransactionSuccessScreen: handleSendAgain - friend data:', friendData);
+      console.log('TransactionSuccessScreen: transactionData.isOnConfio:', transactionData.isOnConfio);
+      
       (navigation as any).navigate('SendToFriend', { 
-        friend: { 
-          name: transactionData.recipient, 
-          phone: transactionData.recipientAddress || '' 
-        } 
+        friend: friendData,
+        tokenType: transactionData.currency.toLowerCase() === 'cusd' ? 'cusd' : 'confio' // Use same currency as original transaction
       });
     }
   };
@@ -149,7 +166,8 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
           </View>
           
           <Text style={styles.headerTitle}>
-            {transactionData.type === 'sent' ? '¡Enviado con éxito!' : '¡Recibido con éxito!'}
+            {transactionData.type === 'sent' ? '¡Enviado con éxito!' : 
+             transactionData.type === 'payment' ? '¡Pago realizado!' : '¡Recibido con éxito!'}
           </Text>
           
           <Text style={styles.headerAmount}>
@@ -159,6 +177,8 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
           <Text style={styles.headerSubtitle}>
             {transactionData.type === 'sent' 
               ? `Enviado a ${transactionData.recipient}`
+              : transactionData.type === 'payment'
+              ? `Pagado a ${transactionData.merchant}`
               : `Recibido de ${transactionData.sender}`
             }
           </Text>
@@ -178,23 +198,39 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
                 <Text style={styles.participantInitial}>
                   {transactionData.type === 'sent' 
                     ? transactionData.recipient?.charAt(0) 
+                    : transactionData.type === 'payment'
+                    ? transactionData.merchant?.charAt(0)
                     : transactionData.sender?.charAt(0)
                   }
                 </Text>
               </View>
               <View style={styles.participantInfo}>
                 <Text style={styles.participantName}>
-                  {transactionData.type === 'sent' ? transactionData.recipient : transactionData.sender}
-                </Text>
-                <Text style={styles.participantDetails}>
                   {transactionData.type === 'sent' 
-                    ? transactionData.recipientAddress 
-                    : transactionData.senderAddress
-                  }
+                    ? transactionData.recipient 
+                    : transactionData.type === 'payment'
+                    ? transactionData.merchant
+                    : transactionData.sender}
                 </Text>
+                {/* Show phone number for friend transactions, address for external wallets */}
+                {transactionData.recipient ? (
+                  transactionData.recipientPhone && transactionData.recipientPhone.trim() !== '' && (
+                    <Text style={styles.participantDetails}>
+                      {transactionData.recipientPhone}
+                    </Text>
+                  )
+                ) : (
+                  <Text style={styles.participantDetails}>
+                    {transactionData.recipientAddress} {/* Show wallet address for external transactions */}
+                  </Text>
+                )}
               </View>
               <View style={styles.participantIcon}>
-                <Icon name={transactionData.type === 'sent' ? 'arrow-up' : 'arrow-down'} size={16} color={transactionData.type === 'sent' ? '#EF4444' : '#10B981'} />
+                <Icon 
+                  name={transactionData.type === 'sent' || transactionData.type === 'payment' ? 'arrow-up' : 'arrow-down'} 
+                  size={16} 
+                  color={transactionData.type === 'sent' || transactionData.type === 'payment' ? '#EF4444' : '#10B981'} 
+                />
               </View>
             </View>
 
@@ -277,7 +313,16 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
         </View>
 
         {/* Remittance Invitation Section - Only for non-Confío friends */}
-        {transactionData.type === 'sent' && !transactionData.isOnConfio && (
+        {(() => {
+          const isOnConfio = Boolean(transactionData.isOnConfio);
+          console.log('TransactionSuccessScreen: Checking invitation box condition:', {
+            type: transactionData.type,
+            isOnConfio: transactionData.isOnConfio,
+            isOnConfioBoolean: isOnConfio,
+            shouldShow: transactionData.type === 'sent' && !isOnConfio
+          });
+          return transactionData.type === 'sent' && !isOnConfio;
+        })() && (
           <View style={styles.remittanceContainer}>
             <Text style={styles.sectionTitle}>Invitación de Remesa</Text>
             

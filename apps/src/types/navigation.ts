@@ -128,6 +128,9 @@ export type MainStackParamList = {
       merchant?: string;
       action: string;
       isOnConfio?: boolean;
+      sendTransactionId?: string;
+      recipientAddress?: string;
+      invoiceId?: string;
     };
   };
   TransactionSuccess: {
@@ -143,6 +146,8 @@ export type MainStackParamList = {
       location?: string;
       terminal?: string;
       isOnConfio?: boolean;
+      sendTransactionId?: string;
+      invoiceId?: string;
     };
   };
   PaymentConfirmation: {
@@ -264,6 +269,7 @@ export type MainStackParamList = {
       duration: string;
     };
   };
+  CreateOffer: undefined;
 };
 
 // Root Stack - Top level navigation

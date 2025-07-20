@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
+import { useMutation } from '@apollo/client';
+import { CREATE_SEND_TRANSACTION } from '../apollo/queries';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -64,9 +66,12 @@ export const SendWithAddressScreen = () => {
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
+  // GraphQL mutation for creating send transaction
+  const [createSendTransaction] = useMutation(CREATE_SEND_TRANSACTION);
+
   const handleQuickAmount = (val: string) => setAmount(val);
 
-  const handleSend = () => {
+  const handleSend = async () => {
     console.log('SendWithAddressScreen: handleSend called');
     if (!amount || parseFloat(amount) < config.minSend) {
       setErrorMessage(`El mínimo para enviar es ${config.minSend} ${config.name}`);
@@ -79,17 +84,46 @@ export const SendWithAddressScreen = () => {
       return;
     }
     
-    console.log('SendWithAddressScreen: Navigating to TransactionProcessing');
-    // Navigate to processing screen
-    (navigation as any).replace('TransactionProcessing', {
-      transactionData: {
-        type: 'sent',
-        amount: amount,
-        currency: config.name,
-        recipient: destination.substring(0, 10) + '...',
-        action: 'Enviando'
+    try {
+      console.log('SendWithAddressScreen: Creating send transaction...');
+      
+      const { data } = await createSendTransaction({
+        variables: {
+          input: {
+            recipientAddress: destination,
+            amount: amount,
+            tokenType: config.name,
+            memo: `Send ${amount} ${config.name} to ${destination.substring(0, 10)}...`
+          }
+        }
+      });
+
+      console.log('SendWithAddressScreen: Send transaction created:', data);
+
+      if (data?.createSendTransaction?.success) {
+        console.log('SendWithAddressScreen: Navigating to TransactionProcessing');
+        // Navigate to processing screen with transaction data
+        (navigation as any).replace('TransactionProcessing', {
+          transactionData: {
+            type: 'sent',
+            amount: amount,
+            currency: config.name,
+            recipient: destination.substring(0, 10) + '...',
+            action: 'Enviando',
+            sendTransactionId: data.createSendTransaction.sendTransaction.id,
+            recipientAddress: destination
+          }
+        });
+      } else {
+        const errors = data?.createSendTransaction?.errors || ['Error desconocido'];
+        setErrorMessage(errors.join(', '));
+        setShowError(true);
       }
-    });
+    } catch (error) {
+      console.error('SendWithAddressScreen: Error creating send transaction:', error);
+      setErrorMessage('Error al crear la transacción. Inténtalo de nuevo.');
+      setShowError(true);
+    }
   };
 
   return (
