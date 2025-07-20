@@ -3,7 +3,7 @@ from graphene_django import DjangoObjectType
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from datetime import timedelta
-from .models import Invoice
+from .models import Invoice, PaymentTransaction
 from send.validators import validate_transaction_amount
 from django.conf import settings
 
@@ -14,11 +14,31 @@ class InvoiceInput(graphene.InputObjectType):
     description = graphene.String(description="Optional description for the invoice")
     expires_in_hours = graphene.Int(description="Hours until expiration (default: 24)")
 
+class PaymentTransactionType(DjangoObjectType):
+    """GraphQL type for PaymentTransaction model"""
+    class Meta:
+        model = PaymentTransaction
+        fields = (
+            'id',
+            'payment_transaction_id',
+            'payer_user', 
+            'merchant_user',
+            'payer_account',
+            'merchant_account',
+            'payer_address',
+            'merchant_address', 
+            'amount', 
+            'token_type', 
+            'description', 
+            'status', 
+            'transaction_hash',
+            'error_message',
+            'created_at', 
+            'updated_at'
+        )
+
 class InvoiceType(DjangoObjectType):
     """GraphQL type for Invoice model"""
-    qr_code_data = graphene.String()
-    is_expired = graphene.Boolean()
-    
     class Meta:
         model = Invoice
         fields = (
@@ -32,13 +52,27 @@ class InvoiceType(DjangoObjectType):
             'status',
             'paid_by_user',
             'paid_at',
-            'transaction',
             'expires_at',
             'created_at',
-            'updated_at',
-            'qr_code_data',
-            'is_expired'
+            'updated_at'
         )
+    
+    # Add custom fields
+    is_expired = graphene.Boolean()
+    qr_code_data = graphene.String()
+    payment_transactions = graphene.List(PaymentTransactionType)
+    
+    def resolve_is_expired(self, info):
+        """Resolve is_expired property"""
+        return self.is_expired
+    
+    def resolve_qr_code_data(self, info):
+        """Resolve qr_code_data property"""
+        return self.qr_code_data
+    
+    def resolve_payment_transactions(self, info):
+        """Resolve payment transactions for this invoice"""
+        return self.payment_transactions.all()
 
 class CreateInvoice(graphene.Mutation):
     """Mutation for creating a new invoice"""
@@ -85,7 +119,7 @@ class CreateInvoice(graphene.Mutation):
                 merchant_user=user,
                 merchant_account=active_account,
                 amount=input.amount,
-                token_type=input.token_type.upper(),
+                token_type=input.token_type,
                 description=input.description or '',
                 expires_at=expires_at,
                 status='PENDING'
@@ -162,7 +196,7 @@ class PayInvoice(graphene.Mutation):
         invoice_id = graphene.String(required=True)
 
     invoice = graphene.Field(InvoiceType)
-    transaction = graphene.Field('send.schema.TransactionType')
+    payment_transaction = graphene.Field(PaymentTransactionType)
     success = graphene.Boolean()
     errors = graphene.List(graphene.String)
 
@@ -172,7 +206,7 @@ class PayInvoice(graphene.Mutation):
         if not (user and getattr(user, 'is_authenticated', False)):
             return PayInvoice(
                 invoice=None,
-                transaction=None,
+                payment_transaction=None,
                 success=False,
                 errors=["Authentication required"]
             )
@@ -190,7 +224,7 @@ class PayInvoice(graphene.Mutation):
                 invoice.save()
                 return PayInvoice(
                     invoice=None,
-                    transaction=None,
+                    payment_transaction=None,
                     success=False,
                     errors=["Invoice has expired"]
                 )
@@ -199,21 +233,28 @@ class PayInvoice(graphene.Mutation):
             if invoice.merchant_user == user:
                 return PayInvoice(
                     invoice=None,
-                    transaction=None,
+                    payment_transaction=None,
                     success=False,
                     errors=["Cannot pay your own invoice"]
                 )
 
+            # Debug: Log the active account context being used
+            print(f"PayInvoice - Active account context: {info.context.active_account_type}_{info.context.active_account_index}")
+            print(f"PayInvoice - User ID: {user.id}")
+            print(f"PayInvoice - Available accounts for user: {list(user.accounts.values_list('account_type', 'account_index', 'sui_address'))}")
+            
             # Get the payer's active account
             payer_account = user.accounts.filter(
                 account_type=info.context.active_account_type,
                 account_index=info.context.active_account_index
             ).first()
             
+            print(f"PayInvoice - Found payer account: {payer_account}")
+            
             if not payer_account or not payer_account.sui_address:
                 return PayInvoice(
                     invoice=None,
-                    transaction=None,
+                    payment_transaction=None,
                     success=False,
                     errors=["Payer account not found or missing Sui address"]
                 )
@@ -222,39 +263,46 @@ class PayInvoice(graphene.Mutation):
             if not invoice.merchant_account.sui_address:
                 return PayInvoice(
                     invoice=None,
-                    transaction=None,
+                    payment_transaction=None,
                     success=False,
                     errors=["Merchant account missing Sui address"]
                 )
 
-            # Import Transaction here to avoid circular imports
-            from send.models import Transaction
-
-            # Create the transaction
-            transaction = Transaction.objects.create(
-                sender_user=user,
-                recipient_user=invoice.merchant_user,
-                sender_address=payer_account.sui_address,
-                recipient_address=invoice.merchant_account.sui_address,
+            # Create the payment transaction
+            payment_transaction = PaymentTransaction.objects.create(
+                payer_user=user,
+                merchant_user=invoice.merchant_user,
+                payer_account=payer_account,
+                merchant_account=invoice.merchant_account,
+                payer_address=payer_account.sui_address,
+                merchant_address=invoice.merchant_account.sui_address,
                 amount=invoice.amount,
                 token_type=invoice.token_type,
-                memo=invoice.description,
-                status='PENDING'
+                description=invoice.description,
+                status='PENDING',
+                invoice=invoice
             )
 
             # Update invoice
             invoice.status = 'PAID'
             invoice.paid_by_user = user
             invoice.paid_at = timezone.now()
-            invoice.transaction = transaction
             invoice.save()
 
             # TODO: Implement sponsored transaction logic here
             # This will be handled by a background task
+            # TEMPORARY: For testing, we're marking as PAID immediately
+            # In production, this would wait for blockchain confirmation
+            
+            # TEMPORARY: Mark payment transaction as CONFIRMED for testing
+            # This ensures the UI shows the correct status
+            payment_transaction.status = 'CONFIRMED'
+            payment_transaction.transaction_hash = f"test_pay_tx_{payment_transaction.id}_{int(timezone.now().timestamp())}"
+            payment_transaction.save()
 
             return PayInvoice(
                 invoice=invoice,
-                transaction=transaction,
+                payment_transaction=payment_transaction,
                 success=True,
                 errors=None
             )
@@ -262,14 +310,14 @@ class PayInvoice(graphene.Mutation):
         except Invoice.DoesNotExist:
             return PayInvoice(
                 invoice=None,
-                transaction=None,
+                payment_transaction=None,
                 success=False,
                 errors=["Invoice not found"]
             )
         except Exception as e:
             return PayInvoice(
                 invoice=None,
-                transaction=None,
+                payment_transaction=None,
                 success=False,
                 errors=[str(e)]
             )

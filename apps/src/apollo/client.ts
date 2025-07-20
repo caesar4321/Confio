@@ -54,8 +54,14 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
         locations: err.locations,
         path: err.path,
         extensions: err.extensions,
-        operation: operation.operationName
+        operation: operation.operationName,
+        variables: operation.variables
       });
+
+      // Handle specific error codes
+      if (err.extensions?.code) {
+        console.error(`[GraphQL error code]: ${err.extensions.code}`);
+      }
 
       if (err.message === 'Signature has expired' || err.message === 'Invalid payload') {
         // Token has expired or is invalid, try to refresh
@@ -162,7 +168,27 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
     }
     }
     if (networkError) {
-    console.error('[Network error]:', networkError);
+    console.error('[Network error]:', {
+      message: networkError.message,
+      name: networkError.name,
+      stack: networkError.stack,
+      statusCode: (networkError as any).statusCode,
+      operation: operation.operationName,
+      variables: operation.variables
+    });
+    
+    // Handle specific network error codes
+    if ((networkError as any).statusCode === 400) {
+      console.error('[400 Bad Request]: The server could not understand the request');
+    } else if ((networkError as any).statusCode === 401) {
+      console.error('[401 Unauthorized]: Authentication required');
+    } else if ((networkError as any).statusCode === 403) {
+      console.error('[403 Forbidden]: Access denied');
+    } else if ((networkError as any).statusCode === 404) {
+      console.error('[404 Not Found]: The requested resource was not found');
+    } else if ((networkError as any).statusCode === 500) {
+      console.error('[500 Internal Server Error]: Server error occurred');
+    }
   }
 });
 
@@ -198,9 +224,12 @@ const authLink = setContext(async (operation, { headers }) => {
       return { headers };
     }
 
+    // Type assertion to handle the false | UserCredentials type
+    const userCredentials = credentials as any;
+    
     console.log('Found credentials in Keychain:', {
-      hasPassword: !!credentials.password,
-      passwordLength: credentials.password?.length
+      hasPassword: !!userCredentials.password,
+      passwordLength: userCredentials.password?.length
     });
 
     let token: string;
@@ -208,7 +237,7 @@ const authLink = setContext(async (operation, { headers }) => {
 
     try {
       // Parse tokens from JSON
-      const tokens = JSON.parse(credentials.password);
+      const tokens = JSON.parse(userCredentials.password);
       console.log('Parsed tokens:', {
         hasAccessToken: !!tokens.accessToken,
         hasRefreshToken: !!tokens.refreshToken,
@@ -271,13 +300,30 @@ const authLink = setContext(async (operation, { headers }) => {
                 }
               );
               
+              // Get active account context to include in headers
+              let activeAccountType = 'personal';
+              let activeAccountIndex = 0;
+              
+              try {
+                const accountManager = AccountManager.getInstance();
+                const activeContext = await accountManager.getActiveAccountContext();
+                activeAccountType = activeContext.type;
+                activeAccountIndex = activeContext.index;
+                console.log('Token refresh - Including active account in headers:', {
+                  type: activeAccountType,
+                  index: activeAccountIndex
+                });
+              } catch (error) {
+                console.log('Token refresh - Could not get active account context, using defaults:', error);
+              }
+              
               // Use the new token for this request
               return {
                 headers: {
                   ...headers,
                   Authorization: `JWT ${data.refreshToken.token}`,
-                  'X-Active-Account-Type': 'personal',
-                  'X-Active-Account-Index': '0'
+                  'X-Active-Account-Type': activeAccountType,
+                  'X-Active-Account-Index': activeAccountIndex.toString()
                 }
               };
             } else {
@@ -302,15 +348,32 @@ const authLink = setContext(async (operation, { headers }) => {
           }
         } else {
           // If we're already refreshing, wait for the refresh to complete
-          return new Promise((resolve) => {
+          return new Promise(async (resolve) => {
+            // Get active account context to include in headers
+            let activeAccountType = 'personal';
+            let activeAccountIndex = 0;
+            
+            try {
+              const accountManager = AccountManager.getInstance();
+              const activeContext = await accountManager.getActiveAccountContext();
+              activeAccountType = activeContext.type;
+              activeAccountIndex = activeContext.index;
+              console.log('Pending request - Including active account in headers:', {
+                type: activeAccountType,
+                index: activeAccountIndex
+              });
+            } catch (error) {
+              console.log('Pending request - Could not get active account context, using defaults:', error);
+            }
+            
             pendingRequests.push((token: string | null) => {
               if (token) {
                 resolve({
                   headers: {
                     ...headers,
                     Authorization: `JWT ${token}`,
-                    'X-Active-Account-Type': 'personal',
-                    'X-Active-Account-Index': '0'
+                    'X-Active-Account-Type': activeAccountType,
+                    'X-Active-Account-Index': activeAccountIndex.toString()
                   }
                 });
               } else {

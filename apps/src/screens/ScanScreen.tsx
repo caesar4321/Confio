@@ -4,20 +4,28 @@ import { Camera, useCameraDevice, useCodeScanner, CameraPermissionStatus } from 
 import type { Code } from 'react-native-vision-camera';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAccount } from '../contexts/AccountContext';
-import { useRoute, RouteProp } from '@react-navigation/native';
+import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
 import { BottomTabParamList } from '../types/navigation';
+import { useMutation } from '@apollo/client';
+import { GET_INVOICE } from '../apollo/queries';
 
 type ScanScreenRouteProp = RouteProp<BottomTabParamList, 'Scan'>;
 
 export const ScanScreen = () => {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isFlashOn, setIsFlashOn] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [scannedSuccessfully, setScannedSuccessfully] = useState(false);
   const device = useCameraDevice('back');
   const { activeAccount } = useAccount();
   const route = useRoute<ScanScreenRouteProp>();
+  const navigation = useNavigation();
   const scanMode = route.params?.mode;
   
   const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
+
+  // GraphQL mutations
+  const [getInvoice] = useMutation(GET_INVOICE);
 
   // Debug logging
   console.log('ScanScreen - Account info:', {
@@ -60,28 +68,84 @@ export const ScanScreen = () => {
     }
   };
 
+  const handleQRCodeScanned = async (scannedData: string) => {
+    if (isProcessing) return; // Prevent multiple processing
+    
+    console.log('QR Code scanned:', scannedData);
+    
+    // Show success indicator
+    setScannedSuccessfully(true);
+    
+    // Parse the QR code data
+    const qrMatch = scannedData.match(/^confio:\/\/pay\/(.+)$/);
+    if (!qrMatch || !qrMatch[1]) {
+      Alert.alert(
+        'Invalid QR Code',
+        'This QR code is not a valid Confío payment code.',
+        [{ text: 'OK', style: 'default' }]
+      );
+      setScannedSuccessfully(false);
+      return;
+    }
+
+    const invoiceId = qrMatch[1];
+    console.log('Invoice ID extracted:', invoiceId);
+
+    setIsProcessing(true);
+
+    try {
+      // SECURITY: Cross-check with server - don't trust QR code data
+      // We only use the QR code to get the invoice ID, then fetch real data from server
+      const { data: invoiceData } = await getInvoice({
+        variables: { invoiceId }
+      });
+
+      if (!invoiceData?.getInvoice?.success) {
+        const errors = invoiceData?.getInvoice?.errors || ['Invoice not found'];
+        Alert.alert('Error', errors.join(', '));
+        return;
+      }
+
+      const invoice = invoiceData.getInvoice.invoice;
+      console.log('Invoice details:', invoice);
+
+      // Server-side validations:
+      // 1. Invoice exists and is valid
+      // 2. Invoice hasn't expired (server checks isExpired)
+      // 3. Invoice is still in PENDING status
+      if (invoice.isExpired) {
+        Alert.alert('Invoice Expired', 'This payment request has expired.');
+        return;
+      }
+
+      // Client-side validations:
+      // 1. User isn't paying their own invoice
+      if (invoice.merchantUser?.id === activeAccount?.id) {
+        Alert.alert('Cannot Pay Own Invoice', 'You cannot pay your own invoice.');
+        setScannedSuccessfully(false);
+        return;
+      }
+
+      // Navigate to payment confirmation screen
+      (navigation as any).navigate('PaymentConfirmation', {
+        invoiceData: invoice
+      });
+
+    } catch (error) {
+      console.error('Error processing QR code:', error);
+      Alert.alert('Error', 'Failed to process the QR code. Please try again.');
+    } finally {
+      setIsProcessing(false);
+      setScannedSuccessfully(false);
+    }
+  };
+
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
     onCodeScanned: (codes: Code[]) => {
-      if (codes.length > 0) {
-        // Handle scanned QR code data based on mode
+      if (codes.length > 0 && !isProcessing) {
         const scannedData = codes[0].value;
-        console.log('Scanned:', scannedData);
-        
-        if (activeAccount?.type.toLowerCase() === 'business') {
-          if (scanMode === 'cobrar') {
-            // Handle payment collection
-            console.log('Processing payment collection:', scannedData);
-            // TODO: Implement payment collection logic
-          } else if (scanMode === 'pagar') {
-            // Handle payment to supplier
-            console.log('Processing payment to supplier:', scannedData);
-            // TODO: Implement payment to supplier logic
-          }
-        } else {
-          // Handle personal account scanning (existing logic)
-          console.log('Processing personal account scan:', scannedData);
-        }
+        handleQRCodeScanned(scannedData);
       }
     },
   });
@@ -89,6 +153,10 @@ export const ScanScreen = () => {
   const toggleFlash = useCallback(() => {
     setIsFlashOn((current) => !current);
   }, []);
+
+  const handleClose = () => {
+    navigation.goBack();
+  };
 
   if (hasPermission === null) {
     return (
@@ -131,7 +199,7 @@ export const ScanScreen = () => {
       >
         <View style={styles.overlay}>
           <View style={styles.header}>
-            <TouchableOpacity style={styles.closeButton}>
+            <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
               <Icon name="x" size={24} color="#FFFFFF" />
             </TouchableOpacity>
             {isBusinessAccount && scanMode && (
@@ -145,6 +213,12 @@ export const ScanScreen = () => {
 
           <View style={styles.scanArea}>
             <View style={styles.scanFrame} />
+            {scannedSuccessfully && (
+              <View style={styles.successOverlay}>
+                <Icon name="check-circle" size={60} color="#10B981" />
+                <Text style={styles.successText}>Código QR detectado</Text>
+              </View>
+            )}
           </View>
 
           <View style={styles.footer}>
@@ -152,13 +226,20 @@ export const ScanScreen = () => {
               <Icon name={isFlashOn ? "zap-off" : "zap"} size={24} color="#FFFFFF" />
             </TouchableOpacity>
             <Text style={styles.instructions}>
-              {isBusinessAccount 
-                ? scanMode === 'cobrar' 
-                  ? 'Escanea el código QR del cliente para cobrar'
-                  : 'Escanea el código QR del proveedor para pagar'
-                : 'Escanea un código QR para enviar o recibir'
+              {isProcessing 
+                ? 'Procesando código QR...'
+                : isBusinessAccount 
+                  ? scanMode === 'cobrar' 
+                    ? 'Escanea el código QR del cliente para cobrar'
+                    : 'Escanea el código QR del proveedor para pagar'
+                  : 'Escanea un código QR para enviar o recibir'
               }
             </Text>
+            {isProcessing && (
+              <View style={styles.loadingContainer}>
+                <Text style={styles.loadingText}>Procesando...</Text>
+              </View>
+            )}
           </View>
         </View>
       </Camera>
@@ -255,6 +336,33 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#FFFFFF',
     fontSize: 16,
+  },
+  loadingContainer: {
+    marginTop: 10,
+    padding: 10,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 8,
+  },
+  loadingText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+  },
+  successOverlay: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: [{ translateX: -50 }, { translateY: -50 }],
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+    zIndex: 1,
+  },
+  successText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginTop: 10,
   },
 
 }); 

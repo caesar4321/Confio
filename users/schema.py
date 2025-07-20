@@ -133,6 +133,7 @@ class Query(graphene.ObjectType):
 	business_categories = graphene.List(BusinessCategoryType)
 	user_verifications = graphene.List(IdentityVerificationType, user_id=graphene.ID())
 	user_accounts = graphene.List(AccountType)
+	account_balance = graphene.String(token_type=graphene.String(required=True))
 	legalDocument = graphene.Field(
 		LegalDocumentType,
 		docType=graphene.String(required=True),
@@ -239,6 +240,27 @@ class Query(graphene.ObjectType):
 		
 		# Return accounts sorted by custom ordering: personal first, then business by index
 		return sorted(accounts, key=lambda acc: acc.get_ordering_key())
+
+	def resolve_account_balance(self, info, token_type):
+		"""Resolve account balance for a specific token type"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return "0"
+		
+		# Normalize token type
+		normalized_token_type = token_type.upper()
+		if normalized_token_type == 'CUSD':
+			normalized_token_type = 'cUSD'
+		
+		# For now, return mock balances based on token type
+		# In a real implementation, this would query the blockchain or a balance service
+		mock_balances = {
+			'cUSD': '2850.35',
+			'CONFIO': '234.18',
+			'USDC': '458.22'
+		}
+		
+		return mock_balances.get(normalized_token_type, '0')
 
 class UpdatePhoneNumber(graphene.Mutation):
 	class Arguments:

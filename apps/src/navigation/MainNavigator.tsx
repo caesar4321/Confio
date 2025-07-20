@@ -18,11 +18,16 @@ import { SendToFriendScreen } from '../screens/SendToFriendScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
 import { TransactionProcessingScreen } from '../screens/TransactionProcessingScreen';
 import { TransactionSuccessScreen } from '../screens/TransactionSuccessScreen';
+import { PaymentConfirmationScreen } from '../screens/PaymentConfirmationScreen';
+import { PaymentProcessingScreen } from '../screens/PaymentProcessingScreen';
+import { PaymentSuccessScreen } from '../screens/PaymentSuccessScreen';
+import { BusinessPaymentSuccessScreen } from '../screens/BusinessPaymentSuccessScreen';
 import { TraderProfileScreen } from '../screens/TraderProfileScreen';
 import { TradeConfirmScreen } from '../screens/TradeConfirmScreen';
 import { TradeChatScreen } from '../screens/TradeChatScreen';
 import { ActiveTradeScreen } from '../screens/ActiveTradeScreen';
 import { TraderRatingScreen } from '../screens/TraderRatingScreen';
+import { ScanScreen } from '../screens/ScanScreen';
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
 console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
@@ -176,6 +181,39 @@ export const MainNavigator = () => {
         }}
       />
       <Stack.Screen
+        name="PaymentConfirmation"
+        component={PaymentConfirmationScreen}
+        options={{ 
+          headerShown: false,
+          animation: 'slide_from_bottom'
+        }}
+      />
+      <Stack.Screen
+        name="PaymentProcessing"
+        component={PaymentProcessingScreen}
+        options={{ 
+          headerShown: false,
+          gestureEnabled: false, // Prevent back gesture
+          animation: 'slide_from_right',
+          presentation: 'modal' // Ensure it's treated as a modal
+        }}
+        listeners={{
+          focus: () => console.log('MainNavigator: PaymentProcessing screen focused'),
+          beforeRemove: (e) => {
+            console.log('MainNavigator: PaymentProcessing screen being removed');
+          }
+        }}
+      />
+      <Stack.Screen
+        name="PaymentSuccess"
+        component={PaymentSuccessScreen}
+        options={{ 
+          headerShown: false,
+          gestureEnabled: false, // Prevent back gesture
+          animation: 'slide_from_right'
+        }}
+      />
+      <Stack.Screen
         name="ActiveTrade"
         component={ActiveTradeScreen}
         options={{ headerShown: false }}
@@ -183,6 +221,16 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="TraderRating"
         component={TraderRatingScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="BusinessPaymentSuccess"
+        component={BusinessPaymentSuccessScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Scan"
+        component={ScanScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

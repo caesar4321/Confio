@@ -13,7 +13,7 @@ class Migration(migrations.Migration):
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
         ('users', '0007_add_soft_delete_fields'),
-        ('send', '0001_add_soft_delete_to_transaction'),
+        ('send', '0005_rename_transaction_to_sendtransaction'),
     ]
 
     operations = [
@@ -34,7 +34,7 @@ class Migration(migrations.Migration):
                 ('merchant_account', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='invoices_created', to='users.account')),
                 ('merchant_user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='invoices_created', to=settings.AUTH_USER_MODEL)),
                 ('paid_by_user', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='invoices_paid', to=settings.AUTH_USER_MODEL)),
-                ('transaction', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='invoice', to='send.transaction')),
+                ('transaction', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='invoice', to='send.sendtransaction')),
             ],
             options={
                 'ordering': ['-created_at'],

@@ -30,8 +30,11 @@ class ActiveAccountMiddleware:
                 request.active_account_index = active_account_index
                 
                 logger.info(f"Active account set: {active_account_type}_{active_account_index}")
+                print(f"ActiveAccountMiddleware - Headers received: X-Active-Account-Type={active_account_type}, X-Active-Account-Index={active_account_index_str}")
+                print(f"ActiveAccountMiddleware - Set on request: active_account_type={request.active_account_type}, active_account_index={request.active_account_index}")
             except ValueError:
                 logger.warning(f"Invalid active account index: {active_account_index_str}")
+                print(f"ActiveAccountMiddleware - Invalid active account index: {active_account_index_str}")
         
         return self.get_response(request)
 

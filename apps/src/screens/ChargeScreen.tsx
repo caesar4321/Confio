@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,16 +9,20 @@ import {
   Alert,
   Dimensions,
   Image,
+  Platform,
+  Linking,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { BottomTabParamList } from '../types/navigation';
 import { useAccount } from '../contexts/AccountContext';
-import { useMutation } from '@apollo/client';
-import { CREATE_INVOICE } from '../apollo/queries';
+import { useMutation, useQuery } from '@apollo/client';
+import { CREATE_INVOICE, GET_INVOICES, GET_INVOICE } from '../apollo/queries';
 import QRCode from 'react-native-qrcode-svg';
 import { Clipboard } from 'react-native';
+import { Camera, useCameraDevice, useCodeScanner, CameraPermissionStatus } from 'react-native-vision-camera';
+import type { Code } from 'react-native-vision-camera';
 
 // Import currency icons
 const cUSDIcon = require('../assets/png/cUSD.png');
@@ -55,9 +59,204 @@ const ChargeScreen = () => {
   const [showQRCode, setShowQRCode] = useState(false);
   const [invoice, setInvoice] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'expired'>('pending');
+  const [hasNavigatedToSuccess, setHasNavigatedToSuccess] = useState(false);
+  
+  // Camera states for pagar mode
+  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [scannedSuccessfully, setScannedSuccessfully] = useState(false);
+  const device = useCameraDevice('back');
 
-  // GraphQL mutation
+  // GraphQL mutations and queries
   const [createInvoice] = useMutation(CREATE_INVOICE);
+  const [getInvoice] = useMutation(GET_INVOICE);
+  
+  // Poll for invoice status updates when QR is shown
+  const { data: invoiceData, refetch: refetchInvoice } = useQuery(GET_INVOICES, {
+    skip: !showQRCode || !invoice,
+    pollInterval: 3000, // Poll every 3 seconds for real-time updates
+    fetchPolicy: 'cache-and-network',
+  });
+
+  // Camera permission check
+  useEffect(() => {
+    if (mode === 'pagar') {
+      checkCameraPermission();
+    }
+  }, [mode]);
+
+  const checkCameraPermission = async () => {
+    const permission = await Camera.getCameraPermissionStatus();
+    if (permission === 'granted') {
+      setHasCameraPermission(true);
+    } else if (permission === 'denied') {
+      Alert.alert(
+        'Camera Permission Required',
+        'Please enable camera access in your device settings to use the QR code scanner.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: openSettings }
+        ]
+      );
+      setHasCameraPermission(false);
+    } else {
+      const newPermission = await Camera.requestCameraPermission();
+      setHasCameraPermission(newPermission === 'granted');
+    }
+  };
+
+  const openSettings = () => {
+    if (Platform.OS === 'ios') {
+      Linking.openURL('app-settings:');
+    } else {
+      Linking.openSettings();
+    }
+  };
+
+  // QR Code scanner configuration
+  const codeScanner = useCodeScanner({
+    codeTypes: ['qr'],
+    onCodeScanned: (codes: Code[]) => {
+      if (codes.length > 0 && !isProcessing && codes[0].value) {
+        handleQRCodeScanned(codes[0].value);
+      }
+    },
+  });
+
+  const handleQRCodeScanned = async (scannedData: string) => {
+    if (isProcessing) return; // Prevent multiple processing
+    
+    console.log('QR Code scanned:', scannedData);
+    
+    // Show success indicator
+    setScannedSuccessfully(true);
+    
+    // Parse the QR code data
+    const qrMatch = scannedData.match(/^confio:\/\/pay\/(.+)$/);
+    if (!qrMatch || !qrMatch[1]) {
+      Alert.alert(
+        'Invalid QR Code',
+        'This QR code is not a valid Confío payment code.',
+        [{ text: 'OK', style: 'default' }]
+      );
+      setScannedSuccessfully(false);
+      return;
+    }
+
+    const invoiceId = qrMatch[1]!; // Use non-null assertion since we already checked it exists
+    console.log('Invoice ID extracted:', invoiceId);
+
+    setIsProcessing(true);
+
+    try {
+      // SECURITY: Cross-check with server - don't trust QR code data
+      // We only use the QR code to get the invoice ID, then fetch real data from server
+      const { data: invoiceData } = await getInvoice({
+        variables: { invoiceId }
+      });
+
+      if (!invoiceData?.getInvoice?.success) {
+        const errors = invoiceData?.getInvoice?.errors || ['Invoice not found'];
+        Alert.alert('Error', errors.join(', '));
+        return;
+      }
+
+      const invoice = invoiceData.getInvoice.invoice;
+      console.log('Invoice details:', invoice);
+
+      // Server-side validations:
+      // 1. Invoice exists and is valid
+      // 2. Invoice hasn't expired (server checks isExpired)
+      // 3. Invoice is still in PENDING status
+      if (invoice.isExpired) {
+        Alert.alert('Invoice Expired', 'This payment request has expired.');
+        return;
+      }
+
+      // Client-side validations:
+      // 1. User isn't paying their own invoice
+      if (invoice.merchantUser?.id === activeAccount?.id) {
+        Alert.alert('Cannot Pay Own Invoice', 'You cannot pay your own invoice.');
+        setScannedSuccessfully(false);
+        return;
+      }
+
+      // Navigate to payment confirmation screen
+      (navigation as any).navigate('PaymentConfirmation', {
+        invoiceData: invoice
+      });
+    } catch (error) {
+      console.error('Error processing QR code:', error);
+      Alert.alert('Error', 'Failed to process QR code. Please try again.');
+    } finally {
+      setIsProcessing(false);
+      setScannedSuccessfully(false);
+    }
+  };
+
+  // Check for payment status updates
+  useEffect(() => {
+    if (showQRCode && invoice && invoiceData?.invoices) {
+      console.log('ChargeScreen: Checking for payment status updates...');
+      console.log('ChargeScreen: Current invoice ID:', invoice.invoiceId);
+      console.log('ChargeScreen: Available invoices:', invoiceData.invoices.map((inv: any) => ({ id: inv.invoiceId, status: inv.status })));
+      
+      const currentInvoice = invoiceData.invoices.find((inv: any) => inv.invoiceId === invoice.invoiceId);
+      if (currentInvoice) {
+        console.log('ChargeScreen: Found current invoice:', {
+          id: currentInvoice.invoiceId,
+          status: currentInvoice.status,
+          paidByUser: currentInvoice.paidByUser,
+          transaction: currentInvoice.transaction
+        });
+        
+        if (currentInvoice.status === 'PAID' && !hasNavigatedToSuccess) {
+          console.log('ChargeScreen: Payment confirmed! Navigating to BusinessPaymentSuccess...');
+          setPaymentStatus('paid');
+          setHasNavigatedToSuccess(true);
+          
+          // Automatically navigate to business payment success screen
+          (navigation as any).navigate('BusinessPaymentSuccess', {
+            paymentData: {
+              id: currentInvoice.id,
+              paymentTransactionId: currentInvoice.paymentTransactions?.[0]?.paymentTransactionId || currentInvoice.invoiceId,
+              amount: currentInvoice.amount,
+              tokenType: currentInvoice.tokenType,
+              description: currentInvoice.description,
+              payerUser: currentInvoice.paidByUser || {
+                id: '',
+                username: 'Cliente',
+                firstName: undefined,
+                lastName: undefined
+              },
+              payerAccount: currentInvoice.paymentTransactions?.[0]?.payerAccount,
+              payerAddress: currentInvoice.paymentTransactions?.[0]?.payerAddress || '0x...',
+              merchantUser: {
+                id: activeAccount?.id || '',
+                username: activeAccount?.name || 'Tu Negocio',
+                firstName: undefined,
+                lastName: undefined
+              },
+              merchantAccount: currentInvoice.merchantAccount,
+              merchantAddress: activeAccount?.suiAddress || '0x...',
+              status: currentInvoice.status,
+              transactionHash: currentInvoice.paymentTransactions?.[0]?.transactionHash || 'pending',
+              createdAt: currentInvoice.paidAt || new Date().toISOString()
+            }
+          });
+        } else if (currentInvoice.isExpired) {
+          console.log('ChargeScreen: Invoice expired');
+          setPaymentStatus('expired');
+        } else {
+          console.log('ChargeScreen: Invoice still pending, status:', currentInvoice.status);
+        }
+      } else {
+        console.log('ChargeScreen: Current invoice not found in polled data');
+      }
+    }
+  }, [invoiceData, showQRCode, invoice, navigation, activeAccount]);
 
   // Currency configurations
   const currencies = {
@@ -78,6 +277,13 @@ const ChargeScreen = () => {
   };
 
   const currentCurrency = currencies[selectedCurrency as keyof typeof currencies];
+
+  const formatCurrency = (currency: string): string => {
+    if (currency === 'CUSD') return 'cUSD';
+    if (currency === 'CONFIO') return 'CONFIO';
+    if (currency === 'USDC') return 'USDC';
+    return currency;
+  };
 
   const handleGenerateQR = async () => {
     if (!amount || parseFloat(amount) <= 0) {
@@ -108,6 +314,8 @@ const ChargeScreen = () => {
         const newInvoice = data.createInvoice.invoice;
         setInvoice(newInvoice);
         setShowQRCode(true);
+        setPaymentStatus('pending');
+        setHasNavigatedToSuccess(false);
       } else {
         const errors = data?.createInvoice?.errors || ['Error desconocido'];
         Alert.alert('Error', errors.join(', '));
@@ -133,14 +341,42 @@ const ChargeScreen = () => {
     setAmount('');
     setDescription('');
     setInvoice(null);
+    setPaymentStatus('pending');
+    setHasNavigatedToSuccess(false);
   };
 
-  const handleScanPress = () => {
-    // Navigate to scan screen
-    navigation.navigate('Scan' as any);
-  };
+
 
   const quickAmounts = ['5.00', '10.00', '25.00', '50.00'];
+
+  // Get status display info
+  const getStatusInfo = () => {
+    switch (paymentStatus) {
+      case 'paid':
+        return {
+          text: '¡Pago Confirmado!',
+          color: '#059669',
+          bgColor: '#d1fae5',
+          icon: 'check-circle'
+        };
+      case 'expired':
+        return {
+          text: 'Factura Expirada',
+          color: '#dc2626',
+          bgColor: '#fee2e2',
+          icon: 'clock'
+        };
+      default:
+        return {
+          text: 'Esperando Pago...',
+          color: '#d97706',
+          bgColor: '#fef3c7',
+          icon: 'clock'
+        };
+    }
+  };
+
+  const statusInfo = getStatusInfo();
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -236,7 +472,6 @@ const ChargeScreen = () => {
                         </View>
                       </View>
                     </TouchableOpacity>
-
                     <TouchableOpacity
                       style={[
                         styles.currencyButton,
@@ -267,7 +502,7 @@ const ChargeScreen = () => {
                   </View>
                 </View>
 
-                {/* Amount Input */}
+                {/* Payment Request Form */}
                 <View style={styles.card}>
                   <Text style={styles.cardTitle}>Solicitar Pago</Text>
                   
@@ -304,61 +539,44 @@ const ChargeScreen = () => {
                   </View>
 
                   {/* Quick Amount Buttons */}
-                  <View style={styles.quickAmountsGrid}>
-                    {quickAmounts.map((quickAmount) => (
-                      <TouchableOpacity
-                        key={quickAmount}
-                        style={styles.quickAmountButton}
-                        onPress={() => setAmount(quickAmount)}
-                      >
-                        <Text style={styles.quickAmountText}>${quickAmount}</Text>
-                      </TouchableOpacity>
-                    ))}
+                  <View style={styles.quickAmountsContainer}>
+                    <Text style={styles.quickAmountsLabel}>Montos rápidos:</Text>
+                    <View style={styles.quickAmountsGrid}>
+                      {quickAmounts.map((quickAmount) => (
+                        <TouchableOpacity
+                          key={quickAmount}
+                          style={styles.quickAmountButton}
+                          onPress={() => setAmount(quickAmount)}
+                        >
+                          <Text style={styles.quickAmountText}>${quickAmount}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
                   </View>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.generateButton,
+                      { backgroundColor: currentCurrency.color },
+                      isLoading && styles.generateButtonDisabled
+                    ]}
+                    onPress={handleGenerateQR}
+                    disabled={isLoading}
+                  >
+                    <Text style={styles.generateButtonText}>
+                      {isLoading ? 'Generando...' : 'Generar Código QR'}
+                    </Text>
+                  </TouchableOpacity>
                 </View>
 
-                {/* Generate Button */}
-                <TouchableOpacity
-                  style={[
-                    styles.generateButton,
-                    { backgroundColor: currentCurrency.color },
-                    (!amount || parseFloat(amount) <= 0 || isLoading) && styles.generateButtonDisabled
-                  ]}
-                  onPress={handleGenerateQR}
-                  disabled={!amount || parseFloat(amount) <= 0 || isLoading}
-                >
-                  <Text style={styles.generateButtonText}>
-                    {isLoading ? 'Generando...' : 'Generar Código QR'}
-                  </Text>
-                </TouchableOpacity>
-
-                {/* Info */}
-                <View style={[
-                  styles.infoCard,
-                  { backgroundColor: selectedCurrency === 'cUSD' ? colors.primaryLight : '#f3e8ff' }
-                ]}>
+                {/* Info Card */}
+                <View style={[styles.card, styles.infoCard]}>
                   <View style={styles.infoContent}>
-                    <Icon 
-                      name="maximize" 
-                      size={20} 
-                      color={selectedCurrency === 'cUSD' ? colors.primaryDark : colors.secondary} 
-                      style={styles.infoIcon}
-                    />
+                    <Icon name="info" size={20} color={currentCurrency.color} style={styles.infoIcon} />
                     <View style={styles.infoText}>
-                      <Text style={[
-                        styles.infoTitle,
-                        { color: selectedCurrency === 'cUSD' ? colors.primaryDark : colors.secondary }
-                      ]}>
-                        ¿Cómo funciona?
-                      </Text>
-                      <Text style={[
-                        styles.infoDescription,
-                        { color: selectedCurrency === 'cUSD' ? '#065f46' : '#581c87' }
-                      ]}>
-                        1. Selecciona la moneda y monto{'\n'}
-                        2. Genera el código QR{'\n'}
-                        3. El cliente escanea y paga{'\n'}
-                        4. Recibes el pago instantáneamente
+                      <Text style={styles.infoTitle}>¿Cómo funciona?</Text>
+                      <Text style={styles.infoDescription}>
+                        Genera un código QR único para cada pago. Tu cliente escanea el código y confirma el pago. Recibirás una notificación inmediata cuando se complete la transacción.
                       </Text>
                     </View>
                   </View>
@@ -366,58 +584,46 @@ const ChargeScreen = () => {
               </>
             ) : (
               <>
-                {/* QR Code Display */}
+                {/* QR Code Display with Real-time Status */}
                 <View style={styles.card}>
-                  <Text style={styles.qrTitle}>Código QR Generado</Text>
+                  <Text style={styles.qrTitle}>Código QR de Pago</Text>
                   <Text style={styles.qrSubtitle}>
-                    Muestra este código a tu cliente para que pueda pagar
+                    Comparte este código con tu cliente para recibir el pago
                   </Text>
                   
-                  {/* QR Code */}
+                  {/* Real-time Status Badge */}
+                  <View style={[styles.statusBadge, { backgroundColor: statusInfo.bgColor }]}>
+                    <Icon name={statusInfo.icon as any} size={16} color={statusInfo.color} style={styles.statusIcon} />
+                    <Text style={[styles.statusText, { color: statusInfo.color }]}>
+                      {statusInfo.text}
+                    </Text>
+                  </View>
+
                   <View style={styles.qrCodeContainer}>
-                    {invoice?.qrCodeData ? (
-                      <QRCode
-                        value={invoice.qrCodeData}
-                        size={200}
-                        color={colors.dark}
-                        backgroundColor="white"
-                      />
-                    ) : (
-                      <>
-                        <Icon name="maximize" size={80} color="#9ca3af" />
-                        <Text style={styles.qrCodeText}>Código QR</Text>
-                      </>
-                    )}
+                    <QRCode
+                      value={invoice?.qrCodeData || `confio://pay/${Date.now()}`}
+                      size={200}
+                      color="#000000"
+                      backgroundColor="#FFFFFF"
+                    />
                   </View>
+                  
+                  <Text style={styles.qrCodeText}>
+                    ID: {invoice?.invoiceId || 'Generando...'}
+                  </Text>
 
-                  {/* Payment Details */}
-                  <View style={[
-                    styles.paymentDetails,
-                    { backgroundColor: selectedCurrency === 'cUSD' ? colors.primaryLight : '#f3e8ff' }
-                  ]}>
-                    <Text style={[
-                      styles.paymentAmount,
-                      { color: selectedCurrency === 'cUSD' ? colors.primaryDark : colors.secondary }
-                    ]}>
-                      ${amount} {currentCurrency.symbol}
+                  <View style={[styles.paymentDetails, { backgroundColor: currentCurrency.color + '10' }]}>
+                    <Text style={[styles.paymentAmount, { color: currentCurrency.color }]}>
+                      ${invoice?.amount || amount} {formatCurrency(invoice?.tokenType || selectedCurrency)}
                     </Text>
-                    {description && (
-                      <Text style={[
-                        styles.paymentDescription,
-                        { color: selectedCurrency === 'cUSD' ? '#065f46' : '#581c87' }
-                      ]}>
-                        {description}
-                      </Text>
-                    )}
-                    <Text style={[
-                      styles.paymentId,
-                      { color: selectedCurrency === 'cUSD' ? colors.primaryDark : colors.secondary }
-                    ]}>
-                      ID: {invoice?.invoiceId || 'INV' + Date.now().toString().slice(-6)}
+                    <Text style={styles.paymentDescription}>
+                      {invoice?.description || description || 'Sin descripción'}
+                    </Text>
+                    <Text style={styles.paymentId}>
+                      Válido por 24 horas
                     </Text>
                   </View>
 
-                  {/* Actions */}
                   <View style={styles.actionButtons}>
                     <TouchableOpacity 
                       style={styles.actionButton}
@@ -449,6 +655,7 @@ const ChargeScreen = () => {
                     setAmount('');
                     setDescription('');
                     setInvoice(null);
+                    setPaymentStatus('pending');
                   }}
                 >
                   <Icon name="plus" size={16} color="white" />
@@ -458,50 +665,69 @@ const ChargeScreen = () => {
             )}
           </View>
         ) : (
-          /* Pagar Mode */
           <View style={styles.pagarContent}>
-            {/* Scan Area */}
-            <View style={styles.card}>
-              <Text style={styles.scanTitle}>Escanear Código QR</Text>
-              
-              {/* QR Scanner Placeholder */}
-              <View style={styles.scannerContainer}>
-                <Icon name="maximize" size={48} color={colors.primary} />
-                <View style={styles.scannerFrame} />
+            {hasCameraPermission === null ? (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Solicitando Permiso de Cámara</Text>
+                <Text style={styles.cardSubtitle}>Por favor espera mientras solicitamos acceso a la cámara...</Text>
               </View>
-              
-              <Text style={styles.scanSubtitle}>
-                Enfoca el código QR del comerciante para realizar el pago
-              </Text>
-              
-              <View style={styles.scanButtons}>
-                <TouchableOpacity 
-                  style={[styles.scanButton, { backgroundColor: colors.primary }]}
-                  onPress={handleScanPress}
+            ) : hasCameraPermission === false ? (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Permiso de Cámara Requerido</Text>
+                <Text style={styles.cardSubtitle}>
+                  Necesitamos acceso a la cámara para escanear códigos QR. Por favor habilita el acceso en la configuración de tu dispositivo.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.scanButton, { backgroundColor: colors.primary, marginTop: 16 }]}
+                  onPress={checkCameraPermission}
                 >
-                  <Text style={styles.scanButtonText}>Activar cámara</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity style={styles.scanButtonSecondary}>
-                  <Text style={styles.scanButtonSecondaryText}>Ingresar código manualmente</Text>
+                  <Text style={styles.scanButtonText}>Solicitar Permiso</Text>
                 </TouchableOpacity>
               </View>
-            </View>
-
-            {/* Payment Info */}
-            <View style={[styles.infoCard, { backgroundColor: colors.primaryLight }]}>
-              <View style={styles.infoContent}>
-                <Icon name="maximize" size={20} color={colors.primaryDark} style={styles.infoIcon} />
-                <View style={styles.infoText}>
-                  <Text style={[styles.infoTitle, { color: colors.primaryDark }]}>
-                    Modo Pago
-                  </Text>
-                  <Text style={[styles.infoDescription, { color: '#065f46' }]}>
-                    Escanea códigos QR de otros comerciantes para pagar por productos o servicios
+            ) : !device ? (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Cámara No Disponible</Text>
+                <Text style={styles.cardSubtitle}>No se pudo acceder a la cámara del dispositivo.</Text>
+              </View>
+            ) : (
+              <>
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Escanear Código QR</Text>
+                  <Text style={styles.cardSubtitle}>
+                    Escanea el código QR de un negocio para realizar un pago
                   </Text>
                 </View>
-              </View>
-            </View>
+                
+                <View style={styles.cameraContainer}>
+                  <Camera
+                    style={styles.camera}
+                    device={device}
+                    isActive={true}
+                    codeScanner={codeScanner}
+                    enableZoomGesture
+                  >
+                    <View style={styles.cameraOverlay}>
+                      <View style={styles.scanFrame} />
+                      {scannedSuccessfully && (
+                        <View style={styles.successOverlay}>
+                          <Icon name="check-circle" size={60} color="#10B981" />
+                          <Text style={styles.successText}>Código QR detectado</Text>
+                        </View>
+                      )}
+                    </View>
+                  </Camera>
+                </View>
+                
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Instrucciones</Text>
+                  <Text style={styles.cardSubtitle}>
+                    • Coloca el código QR dentro del marco{'\n'}
+                    • Mantén la cámara estable{'\n'}
+                    • El código se detectará automáticamente
+                  </Text>
+                </View>
+              </>
+            )}
           </View>
         )}
       </View>
@@ -702,6 +928,16 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginTop: 4,
   },
+  quickAmountsContainer: {
+    marginTop: 16,
+    marginBottom: 24,
+  },
+  quickAmountsLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
   quickAmountsGrid: {
     flexDirection: 'row',
     gap: 12,
@@ -887,6 +1123,69 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#374151',
+  },
+  
+  // New styles for camera functionality
+  cardSubtitle: {
+    fontSize: 14,
+    color: '#6b7280',
+    lineHeight: 20,
+  },
+  cameraContainer: {
+    width: '100%',
+    height: 300,
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 24,
+  },
+  camera: {
+    flex: 1,
+  },
+  cameraOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scanFrame: {
+    width: 250,
+    height: 250,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+  },
+  successOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+    marginTop: 16,
+  },
+  
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  statusIcon: {
+    marginRight: 8,
+  },
+  statusText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
 

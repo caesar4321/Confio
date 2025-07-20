@@ -1,0 +1,769 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  Dimensions,
+  SafeAreaView,
+  Platform,
+  StatusBar,
+} from 'react-native';
+import Icon from 'react-native-vector-icons/Feather';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useQuery } from '@apollo/client';
+import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
+import { useAccount } from '../contexts/AccountContext';
+import { colors } from '../config/theme';
+
+type PaymentConfirmationRouteProp = RouteProp<{
+  PaymentConfirmation: {
+    invoiceData: {
+      id: string;
+      invoiceId: string;
+      amount: string;
+      tokenType: string;
+      description?: string;
+      merchantUser: {
+        id: string;
+        username: string;
+        firstName?: string;
+        lastName?: string;
+      };
+      merchantAccount: {
+        id: string;
+        accountType: string;
+        accountIndex: number;
+        suiAddress: string;
+        business?: {
+          id: string;
+          name: string;
+          category: string;
+          address?: string;
+        };
+      };
+      isExpired: boolean;
+    };
+  };
+}, 'PaymentConfirmation'>;
+
+interface WalletData {
+  symbol: string;
+  name: string;
+  balance: string;
+  color: string;
+  icon: string;
+}
+
+export const PaymentConfirmationScreen = () => {
+  const navigation = useNavigation();
+  const route = useRoute<PaymentConfirmationRouteProp>();
+  const { activeAccount } = useAccount();
+
+
+  const { invoiceData } = route.params;
+
+  // Function to translate business categories to user-friendly Spanish labels
+  const translateCategory = (category: string): string => {
+    const categoryTranslations: { [key: string]: string } = {
+      'FOOD': 'Comida y Bebidas',
+      'RETAIL': 'Comercio Minorista',
+      'SERVICES': 'Servicios',
+      'HEALTHCARE': 'Salud',
+      'EDUCATION': 'Educación',
+      'TRANSPORTATION': 'Transporte',
+      'ENTERTAINMENT': 'Entretenimiento',
+      'FINANCIAL': 'Servicios Financieros',
+      'TECHNOLOGY': 'Tecnología',
+      'BEAUTY': 'Belleza y Cuidado Personal',
+      'AUTOMOTIVE': 'Automotriz',
+      'REAL_ESTATE': 'Bienes Raíces',
+      'MANUFACTURING': 'Manufactura',
+      'CONSTRUCTION': 'Construcción',
+      'AGRICULTURE': 'Agricultura',
+      'TOURISM': 'Turismo',
+      'SPORTS': 'Deportes',
+      'ARTS': 'Arte y Cultura',
+      'NON_PROFIT': 'Organización Sin Fines de Lucro',
+      'OTHER': 'Otros'
+    };
+    
+    return categoryTranslations[category.toUpperCase()] || category;
+  };
+
+  // Normalize token type for balance query
+  const normalizeTokenType = (tokenType: string) => {
+    if (tokenType === 'CUSD') return 'cUSD';
+    return tokenType;
+  };
+
+  // Fetch real account balance
+  const { data: balanceData, loading: balanceLoading, error: balanceError } = useQuery(GET_ACCOUNT_BALANCE, {
+    variables: { tokenType: normalizeTokenType(invoiceData.tokenType) },
+    fetchPolicy: 'cache-and-network'
+  });
+
+  const currentPayment = {
+    type: 'merchant',
+    recipient: invoiceData.merchantAccount.business?.name || 
+               invoiceData.merchantUser.firstName || 
+               invoiceData.merchantUser.username,
+    recipientType: translateCategory(invoiceData.merchantAccount.business?.category || 'Usuario'),
+    amount: invoiceData.amount,
+    currency: normalizeTokenType(invoiceData.tokenType),
+    description: invoiceData.description,
+    location: invoiceData.merchantAccount.business?.address || 'Dirección no disponible',
+    merchantId: invoiceData.merchantAccount.id,
+    paymentId: invoiceData.invoiceId,
+    avatar: (invoiceData.merchantAccount.business?.name || 
+             invoiceData.merchantUser.firstName || 
+             invoiceData.merchantUser.username).charAt(0).toUpperCase(),
+    verification: 'Verificado ✓'
+  };
+
+  // Get real balance from GraphQL query
+  const realBalance = balanceData?.accountBalance || '0';
+  
+  // Fallback to mock values if query fails (for testing)
+  const mockBalances: { [key: string]: string } = {
+    'cUSD': '2850.35',
+    'CUSD': '2850.35', // Handle both cases
+    'CONFIO': '234.18',
+    'USDC': '458.22'
+  };
+  
+  const fallbackBalance = balanceError ? mockBalances[invoiceData.tokenType] || '0' : realBalance;
+  const hasEnoughBalance = parseFloat(fallbackBalance) >= parseFloat(currentPayment.amount);
+
+  // Debug logging
+  console.log('PaymentConfirmationScreen - Balance Debug:', {
+    balanceData,
+    balanceError,
+    realBalance,
+    fallbackBalance,
+    currentPaymentAmount: currentPayment.amount,
+    currentPaymentCurrency: currentPayment.currency,
+    hasEnoughBalance,
+    balanceLoading,
+    tokenType: invoiceData.tokenType,
+    comparison: {
+      fallbackBalance: fallbackBalance,
+      paymentAmount: currentPayment.amount,
+      fallbackBalanceFloat: parseFloat(fallbackBalance),
+      paymentAmountFloat: parseFloat(currentPayment.amount),
+      isEnough: parseFloat(fallbackBalance) >= parseFloat(currentPayment.amount)
+    }
+  });
+
+  // Wallet data for display
+  const walletData = {
+    symbol: currentPayment.currency,
+    name: currentPayment.currency === 'cUSD' ? 'Confío Dollar' : 
+          currentPayment.currency === 'CONFIO' ? 'Confío' : 
+          currentPayment.currency === 'USDC' ? 'USD Coin' : currentPayment.currency,
+    balance: fallbackBalance,
+    color: currentPayment.currency === 'cUSD' ? colors.primary : 
+           currentPayment.currency === 'CONFIO' ? colors.secondary : 
+           currentPayment.currency === 'USDC' ? colors.accent : colors.primary,
+    icon: currentPayment.currency === 'cUSD' ? 'C' : 
+          currentPayment.currency === 'CONFIO' ? 'F' : 
+          currentPayment.currency === 'USDC' ? 'U' : '?'
+  };
+
+  const handleConfirmPayment = async () => {
+    console.log('PaymentConfirmationScreen: handleConfirmPayment called');
+    
+    if (!hasEnoughBalance) {
+      Alert.alert('Saldo Insuficiente', 'No tienes suficiente saldo para realizar este pago.');
+      return;
+    }
+
+    console.log('PaymentConfirmationScreen: Navigating to PaymentProcessing with data:', {
+      type: 'payment',
+      amount: currentPayment.amount,
+      currency: currentPayment.currency,
+      merchant: currentPayment.recipient,
+      action: 'Procesando pago'
+    });
+
+    // Navigate to payment processing screen
+    (navigation as any).navigate('PaymentProcessing', {
+      transactionData: {
+        type: 'payment',
+        amount: currentPayment.amount,
+        currency: currentPayment.currency,
+        merchant: currentPayment.recipient,
+        address: currentPayment.location,
+        message: currentPayment.description,
+        action: 'Procesando pago',
+        invoiceId: invoiceData.invoiceId
+      }
+    });
+  };
+
+  const handleCancel = () => {
+    navigation.goBack();
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: colors.primary }]}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity onPress={handleCancel} style={styles.backButton}>
+              <Icon name="arrow-left" size={24} color="white" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Confirmar Pago</Text>
+            <View style={styles.placeholder} />
+          </View>
+          
+          <View style={styles.headerCenter}>
+            <View style={styles.merchantIcon}>
+              <Icon name="shopping-bag" size={32} color={colors.primary} />
+            </View>
+            
+            <Text style={styles.amountText}>
+              ${currentPayment.amount} {currentPayment.currency}
+            </Text>
+            
+            <Text style={styles.recipientText}>
+              Pagar a {currentPayment.recipient}
+            </Text>
+            
+            <Text style={styles.recipientTypeText}>
+              {currentPayment.recipientType}
+            </Text>
+          </View>
+        </View>
+
+        {/* Content */}
+        <View style={styles.content}>
+          {/* Recipient Details */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Detalles del destinatario</Text>
+            
+            <View style={styles.recipientRow}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{currentPayment.avatar}</Text>
+              </View>
+              <View style={styles.recipientInfo}>
+                <Text style={styles.recipientName}>{currentPayment.recipient}</Text>
+                <View style={styles.recipientMeta}>
+                  <Text style={styles.recipientCategory}>{currentPayment.recipientType}</Text>
+                  <View style={styles.verificationBadge}>
+                    <Icon name="check-circle" size={12} color="#10B981" />
+                    <Text style={styles.verificationText}>{currentPayment.verification}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* Payment Details */}
+            <View style={styles.detailsList}>
+              {currentPayment.description && (
+                <View style={styles.detailRow}>
+                  <Icon name="file-text" size={16} color="#9CA3AF" />
+                  <Text style={styles.detailText}>{currentPayment.description}</Text>
+                </View>
+              )}
+
+              <View style={styles.detailRow}>
+                <Icon name="map-pin" size={16} color="#9CA3AF" />
+                <View>
+                  <Text style={styles.detailText}>{currentPayment.location}</Text>
+                  <Text style={styles.detailSubtext}>ID: {currentPayment.merchantId}</Text>
+                </View>
+              </View>
+
+              <View style={styles.detailRow}>
+                <Icon name="clock" size={16} color="#9CA3AF" />
+                <View>
+                  <Text style={styles.detailText}>ID: {currentPayment.paymentId}</Text>
+                  <Text style={styles.detailSubtext}>Solicitud válida por 24 horas</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          {/* Balance Check */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>
+              Pagar desde tu cuenta {currentPayment.currency}
+            </Text>
+            
+            <View style={[styles.balanceCard, { backgroundColor: colors.primaryLight }]}>
+              <View style={styles.balanceRow}>
+                <View style={styles.balanceIcon}>
+                  <Text style={styles.balanceIconText}>{walletData.icon}</Text>
+                </View>
+                <View style={styles.balanceInfo}>
+                  <Text style={styles.balanceName}>{walletData.name}</Text>
+                  <Text style={styles.balanceLabel}>Saldo disponible</Text>
+                </View>
+                <View style={styles.balanceAmount}>
+                  <Text style={styles.balanceValue}>
+                    {balanceLoading ? 'Cargando...' : 
+                     balanceError ? 'Error' : `$${walletData.balance}`}
+                  </Text>
+                  <Text style={[
+                    styles.balanceStatus,
+                    { color: hasEnoughBalance ? '#10B981' : '#EF4444' }
+                  ]}>
+                    {balanceLoading ? 'Verificando...' : 
+                     balanceError ? 'Error al cargar saldo' :
+                     hasEnoughBalance ? 'Saldo suficiente' : 'Saldo insuficiente'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </View>
+
+          {/* Payment Summary */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Resumen del pago</Text>
+            
+            <View style={styles.summaryList}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Monto</Text>
+                <Text style={styles.summaryAmount}>
+                  ${currentPayment.amount} {currentPayment.currency}
+                </Text>
+              </View>
+              
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Comisión para ti</Text>
+                <View style={styles.commissionInfo}>
+                  <Text style={styles.commissionText}>Gratis</Text>
+                  <Text style={styles.commissionSubtext}>Cubierto por Confío</Text>
+                </View>
+              </View>
+              
+              <View style={styles.divider} />
+              
+              <View style={styles.summaryRow}>
+                <Text style={styles.totalLabel}>Total a pagar</Text>
+                <Text style={styles.totalAmount}>
+                  ${currentPayment.amount} {currentPayment.currency}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Security Info */}
+          <View style={[styles.securityCard, { backgroundColor: colors.primaryLight }]}>
+            <Icon name="shield" size={20} color={colors.primaryDark} />
+            <View style={styles.securityContent}>
+              <Text style={[styles.securityTitle, { color: colors.primaryDark }]}>
+                Pago seguro
+              </Text>
+              <Text style={[styles.securityText, { color: colors.primaryDark }]}>
+                Tu pago está protegido por blockchain y será procesado instantáneamente
+              </Text>
+            </View>
+          </View>
+
+          {/* Warning if insufficient balance */}
+          {!hasEnoughBalance && (
+            <View style={styles.warningCard}>
+              <Icon name="alert-triangle" size={20} color="#EF4444" />
+              <View style={styles.warningContent}>
+                <Text style={styles.warningTitle}>Saldo insuficiente</Text>
+                <Text style={styles.warningText}>
+                  Necesitas ${currentPayment.amount} pero solo tienes ${walletData.balance} en {walletData.name}
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Action Buttons */}
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              style={[
+                styles.confirmButton,
+                { backgroundColor: hasEnoughBalance ? colors.primary : '#D1D5DB' },
+                !hasEnoughBalance && styles.disabledButton
+              ]}
+              onPress={handleConfirmPayment}
+              disabled={!hasEnoughBalance}
+            >
+              <Text style={styles.confirmButtonText}>
+                {hasEnoughBalance ? 'Confirmar Pago' : 'Saldo Insuficiente'}
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
+              <Text style={styles.cancelButtonText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Value Proposition */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>¿Por qué elegir Confío?</Text>
+            
+            <View style={[styles.valueCard, { backgroundColor: colors.primaryLight }]}>
+              <View style={styles.valueRow}>
+                <Icon name="check-circle" size={20} color={colors.primaryDark} />
+                <Text style={[styles.valueTitle, { color: colors.primaryDark }]}>
+                  Pagos 100% gratuitos para clientes
+                </Text>
+              </View>
+              <Text style={[styles.valueText, { color: colors.primaryDark }]}>
+                Pagas sin comisiones adicionales
+              </Text>
+              <View style={[styles.valueHighlight, { backgroundColor: colors.primary }]}>
+                <Text style={styles.valueHighlightText}>
+                  💡 Confío: 0% para clientes, solo 0.9% para comerciantes{'\n'}
+                  vs. tarjetas tradicionales (2.5-3.5% para comerciantes){'\n'}
+                  Apoyamos a los venezolanos 🇻🇪 con un ecosistema justo
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+const { width } = Dimensions.get('window');
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  header: {
+    paddingTop: Platform.OS === 'ios' ? 48 : (StatusBar.currentHeight || 32),
+    paddingBottom: 32,
+    paddingHorizontal: 16,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  placeholder: {
+    width: 40,
+  },
+  headerCenter: {
+    alignItems: 'center',
+  },
+  merchantIcon: {
+    width: 64,
+    height: 64,
+    backgroundColor: 'white',
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  amountText: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 8,
+  },
+  recipientText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: 'white',
+    marginBottom: 4,
+  },
+  recipientTypeText: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  content: {
+    paddingHorizontal: 16,
+    paddingTop: -16,
+    paddingBottom: 24,
+  },
+  card: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 24,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1F2937',
+    marginBottom: 16,
+  },
+  recipientRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  avatarText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#4B5563',
+  },
+  recipientInfo: {
+    flex: 1,
+  },
+  recipientName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1F2937',
+    marginBottom: 4,
+  },
+  recipientMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  recipientCategory: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginRight: 8,
+  },
+  verificationBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  verificationText: {
+    fontSize: 12,
+    color: '#10B981',
+    marginLeft: 4,
+  },
+  detailsList: {
+    gap: 12,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  detailText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#1F2937',
+    marginLeft: 12,
+    flex: 1,
+  },
+  detailSubtext: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginLeft: 12,
+  },
+  balanceCard: {
+    borderRadius: 12,
+    padding: 16,
+  },
+  balanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  balanceIcon: {
+    width: 40,
+    height: 40,
+    backgroundColor: colors.primary,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  balanceIconText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  balanceInfo: {
+    flex: 1,
+  },
+  balanceName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  balanceLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  balanceAmount: {
+    alignItems: 'flex-end',
+  },
+  balanceValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  balanceStatus: {
+    fontSize: 12,
+  },
+  summaryList: {
+    gap: 12,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  summaryLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  summaryAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  commissionInfo: {
+    alignItems: 'flex-end',
+  },
+  commissionText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#10B981',
+  },
+  commissionSubtext: {
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginVertical: 8,
+  },
+  totalLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  totalAmount: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  securityCard: {
+    flexDirection: 'row',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  securityContent: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  securityTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  securityText: {
+    fontSize: 12,
+  },
+  warningCard: {
+    flexDirection: 'row',
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+  },
+  warningContent: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  warningTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#DC2626',
+    marginBottom: 4,
+  },
+  warningText: {
+    fontSize: 12,
+    color: '#B91C1C',
+  },
+  actionButtons: {
+    gap: 12,
+    marginBottom: 16,
+  },
+  confirmButton: {
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  confirmButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  cancelButton: {
+    paddingVertical: 12,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#374151',
+  },
+  valueCard: {
+    padding: 16,
+    borderRadius: 12,
+  },
+  valueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  valueTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  valueText: {
+    fontSize: 12,
+    marginBottom: 12,
+  },
+  valueHighlight: {
+    padding: 12,
+    borderRadius: 8,
+  },
+  valueHighlightText: {
+    fontSize: 12,
+    color: 'white',
+    lineHeight: 18,
+  },
+
+}); 

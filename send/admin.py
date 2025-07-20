@@ -1,10 +1,10 @@
 from django.contrib import admin
 from django.contrib import messages
-from .models import Transaction
+from .models import SendTransaction
 
-@admin.register(Transaction)
-class TransactionAdmin(admin.ModelAdmin):
-    """Admin configuration for Transaction model"""
+@admin.register(SendTransaction)
+class SendTransactionAdmin(admin.ModelAdmin):
+    """Admin configuration for SendTransaction model"""
     list_display = [
         'id',
         'sender_user', 
@@ -65,39 +65,24 @@ class TransactionAdmin(admin.ModelAdmin):
         if obj.transaction_hash:
             return f"{obj.transaction_hash[:8]}...{obj.transaction_hash[-8:]}"
         return "Pending"
-    transaction_hash_display.short_description = 'Transaction Hash'
+    transaction_hash_display.short_description = "Transaction Hash"
     
     def retry_failed_transactions(self, request, queryset):
-        """Retry failed transactions by setting status back to PENDING"""
-        updated = queryset.filter(status='FAILED').update(status='PENDING', error_message='')
-        self.message_user(
-            request, 
-            f'Successfully queued {updated} failed transaction(s) for retry.',
-            messages.SUCCESS
-        )
-    retry_failed_transactions.short_description = "Retry failed transactions"
+        """Retry failed send transactions"""
+        updated = queryset.filter(status='FAILED').update(status='PENDING')
+        self.message_user(request, f"{updated} failed send transactions marked for retry.")
+    retry_failed_transactions.short_description = "Retry failed send transactions"
     
     def mark_as_confirmed(self, request, queryset):
-        """Mark selected transactions as confirmed"""
-        updated = queryset.filter(status__in=['PENDING', 'SUBMITTED']).update(status='CONFIRMED')
-        self.message_user(
-            request, 
-            f'Successfully marked {updated} transaction(s) as confirmed.',
-            messages.SUCCESS
-        )
+        """Mark send transactions as confirmed"""
+        updated = queryset.filter(status='PENDING').update(status='CONFIRMED')
+        self.message_user(request, f"{updated} send transactions marked as confirmed.")
     mark_as_confirmed.short_description = "Mark as confirmed"
     
     def mark_as_failed(self, request, queryset):
-        """Mark selected transactions as failed"""
-        updated = queryset.filter(status__in=['PENDING', 'SUBMITTED']).update(
-            status='FAILED', 
-            error_message='Manually marked as failed by admin'
-        )
-        self.message_user(
-            request, 
-            f'Successfully marked {updated} transaction(s) as failed.',
-            messages.SUCCESS
-        )
+        """Mark send transactions as failed"""
+        updated = queryset.filter(status='PENDING').update(status='FAILED')
+        self.message_user(request, f"{updated} send transactions marked as failed.")
     mark_as_failed.short_description = "Mark as failed"
     
     def get_queryset(self, request):

@@ -170,8 +170,8 @@ export const UPDATE_USER_PROFILE = gql`
 
 // Business Mutations
 export const CREATE_BUSINESS = gql`
-  mutation CreateBusiness($input: BusinessInput!) {
-    createBusiness(input: $input) {
+  mutation CreateBusiness($name: String!, $description: String, $category: String!, $businessRegistrationNumber: String, $address: String) {
+    createBusiness(name: $name, description: $description, category: $category, businessRegistrationNumber: $businessRegistrationNumber, address: $address) {
       business {
         id
         name
@@ -181,6 +181,34 @@ export const CREATE_BUSINESS = gql`
         businessRegistrationNumber
         createdAt
         updatedAt
+      }
+      account {
+        id
+        accountId
+        accountType
+        accountIndex
+        suiAddress
+        business {
+          id
+          name
+          category
+        }
+      }
+      success
+      error
+    }
+  }
+`;
+
+export const UPDATE_ACCOUNT_SUI_ADDRESS = gql`
+  mutation UpdateAccountSuiAddress($accountId: ID!, $suiAddress: String!) {
+    updateAccountSuiAddress(accountId: $accountId, suiAddress: $suiAddress) {
+      account {
+        id
+        accountId
+        accountType
+        accountIndex
+        suiAddress
       }
       success
       error
@@ -250,6 +278,7 @@ export const GET_INVOICE = gql`
             id
             name
             category
+            address
           }
         }
         amount
@@ -276,11 +305,12 @@ export const PAY_INVOICE = gql`
         status
         paidAt
       }
-      transaction {
+      paymentTransaction {
         id
+        paymentTransactionId
         amount
         tokenType
-        memo
+        description
         status
         transactionHash
         createdAt
@@ -291,11 +321,11 @@ export const PAY_INVOICE = gql`
   }
 `;
 
-// Transaction Mutations
-export const CREATE_TRANSACTION = gql`
-  mutation CreateTransaction($input: TransactionInput!) {
-    createTransaction(input: $input) {
-      transaction {
+// Send Transaction Mutations
+export const CREATE_SEND_TRANSACTION = gql`
+  mutation CreateSendTransaction($input: SendTransactionInput!) {
+    createSendTransaction(input: $input) {
+      sendTransaction {
         id
         recipientAddress
         amount
@@ -311,10 +341,10 @@ export const CREATE_TRANSACTION = gql`
   }
 `;
 
-// Queries for transactions and invoices
-export const GET_TRANSACTIONS = gql`
-  query GetTransactions {
-    transactions {
+// Queries for send transactions and invoices
+export const GET_SEND_TRANSACTIONS = gql`
+  query GetSendTransactions {
+    sendTransactions {
       id
       senderUser {
         id
@@ -341,6 +371,12 @@ export const GET_TRANSACTIONS = gql`
   }
 `;
 
+export const GET_ACCOUNT_BALANCE = gql`
+  query GetAccountBalance($tokenType: String!) {
+    accountBalance(tokenType: $tokenType)
+  }
+`;
+
 export const GET_INVOICES = gql`
   query GetInvoices {
     invoices {
@@ -359,8 +395,75 @@ export const GET_INVOICES = gql`
       paidAt
       expiresAt
       createdAt
-      qrCodeData
+      updatedAt
       isExpired
+      merchantUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      merchantAccount {
+        id
+        accountType
+        accountIndex
+        suiAddress
+        business {
+          id
+          name
+          category
+          address
+        }
+      }
+      paymentTransactions {
+        id
+        paymentTransactionId
+        payerUser {
+          id
+          username
+          firstName
+          lastName
+        }
+        payerAccount {
+          id
+          accountType
+          accountIndex
+          suiAddress
+          business {
+            id
+            name
+            category
+            address
+          }
+        }
+        merchantUser {
+          id
+          username
+          firstName
+          lastName
+        }
+        merchantAccount {
+          id
+          accountType
+          accountIndex
+          suiAddress
+          business {
+            id
+            name
+            category
+            address
+          }
+        }
+        payerAddress
+        merchantAddress
+        amount
+        tokenType
+        description
+        status
+        transactionHash
+        createdAt
+        updatedAt
+      }
     }
   }
 `;
