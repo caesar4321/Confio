@@ -426,6 +426,48 @@ application = ProtocolTypeRouter({
 })
 ```
 
+#### Hybrid GraphQL + WebSocket Architecture
+
+The P2P chat system uses a **hybrid approach** combining the reliability of GraphQL mutations with the real-time capabilities of WebSocket connections:
+
+**GraphQL Mutations for Sending Messages**
+- Reliable message delivery through structured API
+- Built-in error handling and validation
+- Consistent with the rest of the application architecture
+- Automatic retry mechanisms through Apollo Client
+
+**Raw WebSocket for Real-time Updates**
+- Immediate message delivery to all connected clients
+- Low-latency real-time communication
+- Proven compatibility with Django Channels
+- Direct channel layer broadcasting
+
+```typescript
+// Frontend implementation
+const [sendMessage] = useMutation(SEND_P2P_MESSAGE);
+const websocket = useRef<WebSocket | null>(null);
+
+// Send via GraphQL mutation
+await sendMessage({
+  variables: {
+    input: { tradeId, content: messageContent, messageType: 'TEXT' }
+  }
+});
+
+// Receive via WebSocket
+websocket.current.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  // Handle real-time message updates
+};
+```
+
+**Benefits of Hybrid Approach:**
+- ✅ **Reliable sending**: GraphQL ensures messages are properly stored and validated
+- ✅ **Real-time receiving**: WebSocket provides instant updates to all participants
+- ✅ **Fallback compatibility**: Works with existing WebSocket infrastructure
+- ✅ **Best performance**: Combines strengths of both technologies
+- ✅ **Proven stability**: Avoids complex GraphQL subscription protocol issues
+
 #### Payment Methods
 Country-specific payment methods defined in `p2p_exchange/default_payment_methods.py`:
 
