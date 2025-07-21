@@ -24,6 +24,10 @@ import { MainStackParamList } from '../types/navigation';
 import { useCurrency } from '../hooks/useCurrency';
 import { useAuth } from '../contexts/AuthContext';
 import { SEND_P2P_MESSAGE } from '../apollo/queries';
+import { ExchangeRateDisplay } from '../components/ExchangeRateDisplay';
+import { useSelectedCountryRate } from '../hooks/useExchangeRate';
+import { useCountry } from '../contexts/CountryContext';
+import { getCurrencySymbol, getCurrencyForCountry } from '../utils/currencyMapping';
 
 type TradeChatRouteProp = RouteProp<MainStackParamList, 'TradeChat'>;
 type TradeChatNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeChat'>;
@@ -60,6 +64,13 @@ export const TradeChatScreen: React.FC = () => {
   
   // Currency formatting
   const { formatAmount } = useCurrency();
+  
+  // Get current market exchange rate for comparison (based on selected country)
+  const { rate: marketRate } = useSelectedCountryRate();
+  
+  // Get currency information for selected country
+  const { selectedCountry } = useCountry();
+  const currencyCode = getCurrencyForCountry(selectedCountry);
   
   const [message, setMessage] = useState('');
   const [currentTradeStep, setCurrentTradeStep] = useState(1);
@@ -274,7 +285,7 @@ export const TradeChatScreen: React.FC = () => {
   const trader: Trader = {
     name: offer.name,
     isOnline: offer.isOnline,
-    verified: offer.verified,
+    verified: offer.userStats?.isVerified || false, // Use real verification status from userStats
     lastSeen: offer.lastSeen,
     responseTime: offer.responseTime
   };
@@ -561,6 +572,34 @@ export const TradeChatScreen: React.FC = () => {
                 style={[styles.progressFill, { width: `${(currentTradeStep / 4) * 100}%` }]} 
               />
             </View>
+          </View>
+          
+          {/* Rate Comparison */}
+          <View style={styles.rateComparison}>
+            <View style={styles.rateComparisonRow}>
+              <Text style={styles.rateLabel}>Tasa de este intercambio:</Text>
+              <Text style={styles.rateValue}>{parseFloat(tradeData.rate).toFixed(2)} {currencyCode}/USD</Text>
+            </View>
+            {marketRate && (
+              <View style={styles.rateComparisonRow}>
+                <Text style={styles.rateLabel}>Tasa actual del mercado:</Text>
+                <Text style={[styles.rateValue, styles.marketRate]}>{marketRate.toFixed(2)} {currencyCode}/USD</Text>
+                {(() => {
+                  const tradeRate = parseFloat(tradeData.rate);
+                  const difference = ((tradeRate - marketRate) / marketRate) * 100;
+                  const isGood = tradeType === 'buy' ? difference < 0 : difference > 0;
+                  
+                  if (Math.abs(difference) > 1) { // Only show if difference > 1%
+                    return (
+                      <Text style={[styles.rateDifference, isGood ? styles.goodRate : styles.badRate]}>
+                        {difference > 0 ? '+' : ''}{difference.toFixed(1)}%
+                      </Text>
+                    );
+                  }
+                  return null;
+                })()}
+              </View>
+            )}
           </View>
         </View>
       </TouchableWithoutFeedback>
@@ -1181,5 +1220,46 @@ const styles = StyleSheet.create({
     color: '#EF4444',
     fontSize: 14,
     fontWeight: '600',
+  },
+  rateComparison: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#D1FAE5',
+  },
+  rateComparisonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  rateLabel: {
+    fontSize: 11,
+    color: '#065F46',
+  },
+  rateValue: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#065F46',
+    fontFamily: 'monospace',
+  },
+  marketRate: {
+    color: '#059669',
+  },
+  rateDifference: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginLeft: 8,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  goodRate: {
+    backgroundColor: '#D1FAE5',
+    color: '#065F46',
+  },
+  badRate: {
+    backgroundColor: '#FEE2E2',
+    color: '#DC2626',
   },
 }); 
