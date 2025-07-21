@@ -13,6 +13,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
+import { useCurrency } from '../hooks/useCurrency';
 
 type TraderProfileRouteProp = RouteProp<MainStackParamList, 'TraderProfile'>;
 type TraderProfileNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TraderProfile'>;
@@ -21,6 +22,9 @@ export const TraderProfileScreen: React.FC = () => {
   const navigation = useNavigation<TraderProfileNavigationProp>();
   const route = useRoute<TraderProfileRouteProp>();
   const { offer, crypto } = route.params;
+  
+  // Use currency system based on selected country
+  const { currency, formatAmount } = useCurrency();
 
   const handleBack = () => {
     navigation.goBack();
@@ -93,7 +97,7 @@ export const TraderProfileScreen: React.FC = () => {
             <View style={{flex: 1}}>
               <Text style={styles.infoBoxTitle}>Términos del comerciante</Text>
               <Text style={styles.infoBoxText}>
-                Pago dentro de 15 minutos. Enviar comprobante de pago antes de marcar como pagado.
+                {offer.terms || 'Pago dentro de 15 minutos. Enviar comprobante de pago antes de marcar como pagado.'}
               </Text>
             </View>
           </View>
@@ -104,7 +108,7 @@ export const TraderProfileScreen: React.FC = () => {
           <View style={{gap: 12}}>
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Precio</Text>
-              <Text style={styles.detailValueBold}>{offer.rate} Bs. / {crypto}</Text>
+              <Text style={styles.detailValueBold}>{formatAmount.withCode(offer.rate)} / {crypto}</Text>
             </View>
             <View style={styles.detailRow}>
               <Text style={styles.detailLabel}>Disponible</Text>

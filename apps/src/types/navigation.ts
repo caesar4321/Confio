@@ -42,6 +42,7 @@ export type MainStackParamList = {
       verified: boolean;
       isOnline: boolean;
       lastSeen: string;
+      terms?: string;
     };
     crypto: 'cUSD' | 'CONFIO';
   };

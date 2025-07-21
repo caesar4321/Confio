@@ -24,6 +24,7 @@ import { countries, Country } from '../utils/countries';
 import { useMutation } from '@apollo/client';
 import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE, UPDATE_PHONE_NUMBER } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
+import { useCountrySelection } from '../hooks/useCountrySelection';
 
 type RootStackParamList = {
   Auth: undefined;
@@ -37,10 +38,7 @@ const PhoneVerificationScreen = () => {
   const navigation = useNavigation<PhoneVerificationScreenNavigationProp>();
   const { handleSuccessfulLogin, userProfile, refreshUserProfile } = useAuth();
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [selectedCountry, setSelectedCountry] = useState<Country>(
-    countries.find((c: Country) => c[0] === 'Venezuela') || countries[0]
-  );
-  const [showCountryList, setShowCountryList] = useState(false);
+  const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal, setSelectedCountry } = useCountrySelection();
   const [verificationMethod, setVerificationMethod] = useState<'telegram' | 'sms' | null>(null);
   const [verificationCode, setVerificationCode] = useState<string[]>(['', '', '', '', '', '']);
   const [currentScreen, setCurrentScreen] = useState<'phone' | 'method' | 'code'>('phone');
@@ -85,7 +83,7 @@ const PhoneVerificationScreen = () => {
 
   const handleSendTelegramCode = async () => {
     try {
-      const countryCode = selectedCountry[2]; // ISO country code (e.g., 'VE' for Venezuela)
+      const countryCode = selectedCountry?.[2] || 'VE'; // ISO country code (e.g., 'VE' for Venezuela)
       // Format phone number: remove any spaces, dashes, or other separators
       const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
       console.log('Sending verification with:', { phoneNumber: cleanPhoneNumber, countryCode });
@@ -120,7 +118,7 @@ const PhoneVerificationScreen = () => {
         const { data } = await verifyTelegramCode({ 
           variables: { 
               phoneNumber: cleanPhoneNumber,
-              countryCode: selectedCountry[2], // ISO country code
+              countryCode: selectedCountry?.[2] || 'VE', // ISO country code
               code: verificationCode.join('') // Join the code array into a single string
           } 
         });
@@ -133,7 +131,7 @@ const PhoneVerificationScreen = () => {
             // Update the user's phone number in the database
             const { data: updateData } = await updatePhoneNumber({
               variables: {
-                countryCode: selectedCountry[1], // Phone code (e.g., '+58')
+                countryCode: selectedCountry?.[1] || '+58', // Phone code (e.g., '+58')
                 phoneNumber: cleanPhoneNumber,
               },
             });
@@ -178,10 +176,7 @@ const PhoneVerificationScreen = () => {
   const renderCountryItem = ({ item }: { item: Country }) => (
     <TouchableOpacity
       style={styles.countryItem}
-      onPress={() => {
-        setSelectedCountry(item);
-        setShowCountryList(false);
-      }}
+      onPress={() => selectCountry(item)}
     >
       <Text style={styles.flag}>{item[3]}</Text>
       <Text style={styles.countryName}>{item[0]}</Text>
@@ -208,12 +203,12 @@ const PhoneVerificationScreen = () => {
       <Text style={styles.label}>País</Text>
       <TouchableOpacity
         style={styles.countrySelector}
-        onPress={() => setShowCountryList(true)}
+        onPress={openCountryModal}
         activeOpacity={0.8}
       >
         <View style={styles.countrySelectorContent}>
-          <Text style={styles.flag}>{selectedCountry[3]}</Text>
-          <Text style={styles.countryName}>{selectedCountry[0]}</Text>
+          <Text style={styles.flag}>{selectedCountry?.[3] || '🌍'}</Text>
+          <Text style={styles.countryName}>{selectedCountry?.[0] || 'Seleccionar país'}</Text>
         </View>
         <Feather name="chevron-down" size={22} color={colors.grayText} />
       </TouchableOpacity>
@@ -221,7 +216,7 @@ const PhoneVerificationScreen = () => {
       <Text style={[styles.label, { marginTop: 24 }]}>Número de teléfono</Text>
       <View style={styles.phoneInputContainer}>
         <View style={styles.countryCodeBox}>
-          <Text style={styles.countryCodeText}>{selectedCountry[1]}</Text>
+          <Text style={styles.countryCodeText}>{selectedCountry?.[1] || '+58'}</Text>
         </View>
         <TextInput
           ref={phoneInputRef}
@@ -272,7 +267,7 @@ const PhoneVerificationScreen = () => {
           ? `Selecciona cómo quieres verificar tu nuevo número\n`
           : `Selecciona cómo quieres verificar tu número\n`
         }
-        <Text style={styles.phoneNumber}>{selectedCountry[1]} {phoneNumber}</Text>
+        <Text style={styles.phoneNumber}>{selectedCountry?.[1] || '+58'} {phoneNumber}</Text>
       </Text>
 
       <View style={styles.methodContainer}>
@@ -328,7 +323,7 @@ const PhoneVerificationScreen = () => {
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.subtitle}>
         {subtitle}
-        <Text style={styles.phoneNumber}>{selectedCountry[1]} {phoneNumber}</Text>
+        <Text style={styles.phoneNumber}>{selectedCountry?.[1] || '+58'} {phoneNumber}</Text>
       </Text>
 
       <View style={styles.codeContainer}>
@@ -395,16 +390,16 @@ const PhoneVerificationScreen = () => {
       </SafeAreaView>
 
       <Modal
-        visible={showCountryList}
+        visible={showCountryModal}
         transparent={true}
         animationType="slide"
-        onRequestClose={() => setShowCountryList(false)}
+        onRequestClose={closeCountryModal}
       >
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Selecciona un país</Text>
-              <TouchableOpacity onPress={() => setShowCountryList(false)}>
+              <TouchableOpacity onPress={closeCountryModal}>
                 <Feather name="x" size={24} color={colors.darkGray} />
               </TouchableOpacity>
             </View>

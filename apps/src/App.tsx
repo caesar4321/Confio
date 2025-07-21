@@ -9,6 +9,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { HeaderProvider } from './contexts/HeaderContext';
 import { ScanProvider } from './contexts/ScanContext';
 import { AccountProvider } from './contexts/AccountContext';
+import { CountryProvider } from './contexts/CountryContext';
 import { AuthNavigator } from './navigation/AuthNavigator';
 import { MainNavigator } from './navigation/MainNavigator';
 import { RootStackParamList } from './types/navigation';
@@ -58,11 +59,13 @@ const AppContent: React.FC = () => {
         navigationRef={navigationRef as React.RefObject<NavigationContainerRef<RootStackParamList>>}
       >
         <AccountProvider>
-          <HeaderProvider>
-            <ScanProvider>
-            <Navigation />
-            </ScanProvider>
-          </HeaderProvider>
+          <CountryProvider>
+            <HeaderProvider>
+              <ScanProvider>
+              <Navigation />
+              </ScanProvider>
+            </HeaderProvider>
+          </CountryProvider>
         </AccountProvider>
       </AuthProvider>
     </NavigationContainer>

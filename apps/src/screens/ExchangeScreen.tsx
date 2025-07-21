@@ -13,6 +13,7 @@ import {
   TouchableWithoutFeedback,
   FlatList,
   Alert,
+  type TextInput as TextInputType,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -21,6 +22,7 @@ import { useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { countries, Country } from '../utils/countries';
 import { useCountrySelection } from '../hooks/useCountrySelection';
+import { useCurrency } from '../hooks/useCurrency';
 import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS } from '../apollo/queries';
 
 // Colors from the design
@@ -351,11 +353,13 @@ type ActiveTrade = typeof activeTrades[0];
 export const ExchangeScreen = () => {
   // Use centralized country selection hook
   const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal } = useCountrySelection();
+  
+  // Use currency system based on selected country
+  const { currency, formatAmount, exchangeRate } = useCurrency();
 
   const [activeTab, setActiveTab] = useState<'buy' | 'sell'>('buy');
   const [selectedCrypto, setSelectedCrypto] = useState<'cUSD' | 'CONFIO'>('cUSD');
-  const [amount, setAmount] = useState('100.00');
-  const [localAmount, setLocalAmount] = useState('3,600.00');
+  const [amount, setAmount] = useState('');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('Todos los métodos');
   const [minRate, setMinRate] = useState('');
@@ -374,7 +378,9 @@ export const ExchangeScreen = () => {
       paymentMethod: null, // Will be properly set in useEffect when we have payment methods data
       countryCode: selectedCountry?.[2] // Pass the selected country code (e.g., 'AS', 'VE', etc.)
     },
-    pollInterval: 30000, // Refresh every 30 seconds
+    fetchPolicy: 'cache-and-network', // Use cache while fetching new data
+    notifyOnNetworkStatusChange: false, // Prevent re-renders on network status changes
+    // pollInterval: 30000, // Disabled to prevent re-renders while typing
   });
 
   // Fetch payment methods from server based on selected country
@@ -384,14 +390,15 @@ export const ExchangeScreen = () => {
     },
     skip: !selectedCountry,
     fetchPolicy: 'no-cache', // Completely bypass cache
-    notifyOnNetworkStatusChange: true
+    notifyOnNetworkStatusChange: false // Prevent re-renders on network status changes
   });
 
   // Debug country changes - Apollo will automatically refetch when variables change
   useEffect(() => {
     if (selectedCountry?.[2]) {
-      console.log('🏴 Country changed to:', selectedCountry[0], 'Code:', selectedCountry[2]);
-      console.log('📡 Apollo will automatically refetch payment methods...');
+      // Remove console.log to prevent re-renders
+      // console.log('🏴 Country changed to:', selectedCountry[0], 'Code:', selectedCountry[2]);
+      // console.log('📡 Apollo will automatically refetch payment methods...');
     }
   }, [selectedCountry?.[2]]);
 
@@ -409,12 +416,12 @@ export const ExchangeScreen = () => {
     
     const serverMethods = paymentMethodsData.p2pPaymentMethods.map((pm: any) => pm.displayName);
     return ['Todos los métodos', ...serverMethods];
-  }, [paymentMethodsData, selectedCountry, paymentMethodsLoading]);
+  }, [paymentMethodsData, paymentMethodsLoading]); // Removed selectedCountry dependency
 
   // Reset selected payment method if it's not available in the new country's methods
   useEffect(() => {
     if (paymentMethods.length > 0 && !paymentMethods.includes(selectedPaymentMethod)) {
-      console.log('Resetting payment method from', selectedPaymentMethod, 'to "Todos los métodos"');
+      // console.log('Resetting payment method from', selectedPaymentMethod, 'to "Todos los métodos"');
       setSelectedPaymentMethod('Todos los métodos');
     }
   }, [paymentMethods, selectedPaymentMethod]);
@@ -440,6 +447,158 @@ export const ExchangeScreen = () => {
   }, [activeTab, selectedCrypto, selectedPaymentMethod, selectedCountry, refetch, paymentMethodsData]);
 
   // Note: Payment method name conversion is now done inline in refetch calls to avoid hoisting issues
+
+  // Search function to apply all current filters - memoized to prevent re-renders
+  const handleSearch = React.useCallback(() => {
+    // Convert display name to internal name inline
+    let paymentMethodName = null;
+    if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
+      const method = paymentMethodsData.p2pPaymentMethods.find((pm: any) => pm.displayName === selectedPaymentMethod);
+      paymentMethodName = method?.name || null;
+    }
+
+    // Apply all filters including amount, rate ranges, and other advanced filters
+    refetch({
+      exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
+      tokenType: selectedCrypto,
+      paymentMethod: paymentMethodName,
+      countryCode: selectedCountry?.[2]
+      // Note: Additional filters like amount, minRate, maxRate could be added here
+      // when the backend GraphQL schema supports them
+    });
+  }, [activeTab, selectedCrypto, selectedPaymentMethod, selectedCountry, paymentMethodsData, refetch]);
+
+  // Filter offers client-side by amount and advanced filters
+  const filteredOffers = React.useMemo(() => {
+    const offers = offersData?.p2pOffers || [];
+    
+    // Apply client-side filtering
+    
+    return offers.filter((offer: any) => {
+      // 1. Filter by amount within operation limits
+      if (amount && amount.trim() !== '') {
+        const searchAmount = parseFloat(amount.replace(/,/g, ''));
+        if (!isNaN(searchAmount) && searchAmount > 0) {
+          const minAmount = parseFloat(offer.minAmount?.toString().replace(/,/g, '') || '0');
+          const maxAmount = parseFloat(offer.maxAmount?.toString().replace(/,/g, '') || '0');
+          
+          // Check if search amount falls within the offer's "Límite por operación"
+          if (searchAmount < minAmount || searchAmount > maxAmount) {
+            return false;
+          }
+        }
+      }
+      
+      // 2. Filter by rate range (Tasa min/max)
+      const hasMinRate = minRate && minRate.trim() !== '';
+      const hasMaxRate = maxRate && maxRate.trim() !== '';
+      
+      // Apply rate filtering if specified
+      
+      // Only apply rate filtering if at least one rate filter is provided
+      if (hasMinRate || hasMaxRate) {
+        // Parse the offer rate
+        let offerRate = 0;
+        if (offer.rate !== undefined && offer.rate !== null) {
+          offerRate = parseFloat(offer.rate.toString().replace(/,/g, ''));
+        }
+        
+        // Skip offers without valid rates when rate filters are active
+        if (isNaN(offerRate) || offerRate <= 0) {
+          return false;
+        }
+        
+        // Apply minimum rate filter (if provided)
+        if (hasMinRate) {
+          const minRateValue = parseFloat(minRate.replace(/,/g, ''));
+          if (!isNaN(minRateValue) && offerRate < minRateValue) {
+            return false;
+          }
+        }
+        
+        // Apply maximum rate filter (if provided) 
+        if (hasMaxRate) {
+          const maxRateValue = parseFloat(maxRate.replace(/,/g, ''));
+          if (!isNaN(maxRateValue) && offerRate > maxRateValue) {
+            return false;
+          }
+        }
+      }
+      
+      // 3. Filter by verification status (Verificados)
+      if (filterVerified) {
+        const isVerified = offer.userStats?.isVerified || false;
+        if (!isVerified) {
+          return false;
+        }
+      }
+      
+      // 4. Filter by activity status (En línea -> "Activos hoy")
+      if (filterOnline) {
+        // Consider user "active" if they've been seen within the last 6 hours
+        const lastSeen = offer.userStats?.lastSeenOnline;
+        if (!lastSeen) {
+          return false;
+        }
+        
+        const lastSeenDate = new Date(lastSeen);
+        const now = new Date();
+        const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+        
+        if (lastSeenDate < sixHoursAgo) {
+          return false;
+        }
+      }
+      
+      // 5. Filter by high volume (+100 ops)
+      if (filterHighVolume) {
+        const totalTrades = offer.userStats?.totalTrades || 0;
+        if (totalTrades < 100) {
+          return false;
+        }
+      }
+      
+      return true; // Offer passes all filters
+    });
+  }, [offersData?.p2pOffers, amount, minRate, maxRate, filterVerified, filterOnline, filterHighVolume]);
+
+  // Calculate average rate from filtered offers
+  const averageRate = React.useMemo(() => {
+    if (filteredOffers.length === 0) {
+      return 0;
+    }
+    
+    // Get valid rates and sort to calculate median-based average (reduces outlier impact)
+    const validRates = filteredOffers
+      .map((offer: any) => parseFloat(offer.rate?.toString() || '0'))
+      .filter((rate: number) => rate > 0)
+      .sort((a: number, b: number) => a - b);
+    
+    if (validRates.length === 0) {
+      return 0;
+    }
+    
+    // Use trimmed mean (remove top and bottom 10% to reduce outlier impact)
+    const trimPercent = 0.1;
+    const trimCount = Math.floor(validRates.length * trimPercent);
+    const trimmedRates = validRates.slice(trimCount, validRates.length - trimCount);
+    
+    if (trimmedRates.length === 0) {
+      // If too few rates for trimming, use simple average
+      return validRates.reduce((sum, rate) => sum + rate, 0) / validRates.length;
+    }
+    
+    return trimmedRates.reduce((sum, rate) => sum + rate, 0) / trimmedRates.length;
+  }, [filteredOffers]);
+
+  // Debug: Log final results
+  React.useEffect(() => {
+    const hasMinRate = minRate && minRate.trim() !== '';
+    const hasMaxRate = maxRate && maxRate.trim() !== '';
+    if (hasMinRate || hasMaxRate) {
+      console.log(`📊 Final results: ${filteredOffers.length} offers out of ${offersData?.p2pOffers?.length || 0} total`);
+    }
+  }, [filteredOffers.length, minRate, maxRate, offersData?.p2pOffers?.length]);
 
   // Create ref to store the current animation
   const currentAnimation = useRef<Animated.CompositeAnimation | null>(null);
@@ -476,7 +635,10 @@ export const ExchangeScreen = () => {
   }, []);
   const lastScrollY = useRef(0);
   const scrollViewRef = useRef<any>(null);
-  const [forceHeaderVisible, setForceHeaderVisible] = useState(false);
+  const amountInputRef = useRef<TextInputType>(null);
+  const minRateInputRef = useRef<TextInputType>(null);
+  const maxRateInputRef = useRef<TextInputType>(null);
+  // Removed forceHeaderVisible state as it was causing unnecessary re-renders
   const [headerHeight, setHeaderHeight] = useState(0);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [activeList, setActiveList] = useState<'offers' | 'trades'>('offers');
@@ -486,16 +648,12 @@ export const ExchangeScreen = () => {
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       // Reset header state when screen is focused
-      setForceHeaderVisible(true);
       scrollY.stopAnimation();
       scrollY.setValue(0);
       scrollY.setOffset(0);
       lastScrollY.current = 0;
       
-      // Remove force after a short delay
-      setTimeout(() => {
-        setForceHeaderVisible(false);
-      }, 200);
+      // Removed timeout to prevent re-renders
     });
 
     return unsubscribe;
@@ -504,51 +662,40 @@ export const ExchangeScreen = () => {
   // Initialize header state on mount
   useEffect(() => {
     // Ensure header starts in the correct state
-    setForceHeaderVisible(true);
     scrollY.stopAnimation();
     scrollY.setValue(0);
     lastScrollY.current = 0;
     
-    // Remove force after initialization
-    setTimeout(() => {
-      setForceHeaderVisible(false);
-    }, 100);
+    // Removed timeout to prevent re-renders
   }, []);
 
 
 
-  // Calculate local amount based on crypto amount and rate
-  const calculateLocalAmount = (cryptoAmount: string, rate: string) => {
+  // Calculate local amount based on crypto amount and rate - memoized to prevent re-creation
+  const calculateLocalAmount = React.useCallback((cryptoAmount: string, rate: string) => {
     const numAmount = parseFloat(cryptoAmount.replace(/,/g, ''));
     const numRate = parseFloat(rate);
+    if (isNaN(numAmount) || isNaN(numRate)) return '';
     return (numAmount * numRate).toLocaleString('en-US', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
-  };
+  }, []);
 
-  // Calculate crypto amount based on local amount and rate
-  const calculateCryptoAmount = (localAmount: string, rate: string) => {
+  // Calculate crypto amount based on local amount and rate - memoized to prevent re-creation
+  const calculateCryptoAmount = React.useCallback((localAmount: string, rate: string) => {
     const numAmount = parseFloat(localAmount.replace(/,/g, ''));
     const numRate = parseFloat(rate);
+    if (isNaN(numAmount) || isNaN(numRate)) return '';
     return (numAmount / numRate).toLocaleString('en-US', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
-  };
+  }, []);
 
-  // Handle amount changes
-  const handleAmountChange = (value: string) => {
-    setAmount(value);
-    const rate = selectedCrypto === 'cUSD' ? '36.00' : '3.60';
-    setLocalAmount(calculateLocalAmount(value, rate));
-  };
+  // Removed handleAmountChange - now handled inside AmountInputSection
 
-  const handleLocalAmountChange = (value: string) => {
-    setLocalAmount(value);
-    const rate = selectedCrypto === 'cUSD' ? '36.00' : '3.60';
-    setAmount(calculateCryptoAmount(value, rate));
-  };
+  // Removed handleLocalAmountChange - not used anymore
 
   // Handle scroll for header visibility
   const handleScroll = (event: any) => {
@@ -556,11 +703,7 @@ export const ExchangeScreen = () => {
     const scrollDifference = currentScrollY - lastScrollY.current;
     
     if (Math.abs(scrollDifference) > 10) {
-      if (scrollDifference > 0 && currentScrollY > 100) {
-        setForceHeaderVisible(false);
-      } else if (scrollDifference < 0) {
-        setForceHeaderVisible(true);
-      }
+      // Removed forceHeaderVisible updates to prevent re-renders
       
       lastScrollY.current = currentScrollY;
     }
@@ -571,7 +714,6 @@ export const ExchangeScreen = () => {
   // Reset scroll position when switching between tabs
   const resetScrollPosition = () => {
     // Force header to be fully visible immediately
-    setForceHeaderVisible(true);
     
     // Complete reset of scroll system
     scrollY.stopAnimation(); // Stop any ongoing animations
@@ -603,10 +745,7 @@ export const ExchangeScreen = () => {
     setTimeout(performReset, 50);
     setTimeout(performReset, 150);
     
-    // Remove force after all resets complete
-    setTimeout(() => {
-      setForceHeaderVisible(false);
-    }, 300);
+    // Removed timeout to prevent re-renders
   };
 
   const onSelectPaymentMethod = (method: string) => {
@@ -614,43 +753,76 @@ export const ExchangeScreen = () => {
     setPaymentModalVisible(false);
   };
 
-  const handleSelectOffer = (offer: Offer, action: 'profile' | 'trade') => {
+  // Memoized callbacks for AmountInputSection
+  const handleOpenPaymentModal = React.useCallback(() => {
+    setPaymentModalVisible(true);
+  }, []);
+
+  // Memoized amount update to prevent re-renders
+  const handleAmountUpdate = React.useCallback((value: string) => {
+    setAmount(value);
+  }, []);
+
+  const handleSelectOffer = (offer: any, action: 'profile' | 'trade') => {
+    // Map real GraphQL offer data to navigation format
+    const userName = offer.user ? `${offer.user.firstName} ${offer.user.lastName?.charAt(0)}.` : 'Usuario';
+    const userStats = offer.userStats || {};
+    const completedTrades = userStats.completedTrades || 0;
+    const successRate = parseFloat(userStats.successRate || '0');
+    const isVerified = userStats.isVerified || false;
+    
+    // Calculate activity status for lastSeen
+    const getActivityText = () => {
+      const lastSeen = userStats.lastSeenOnline;
+      if (!lastSeen) return 'Sin actividad reciente';
+      
+      const lastSeenDate = new Date(lastSeen);
+      const hoursAgo = (Date.now() - lastSeenDate.getTime()) / (1000 * 60 * 60);
+      
+      if (hoursAgo < 2) return 'Activo recientemente';
+      if (hoursAgo < 6) return 'Activo hoy';
+      if (hoursAgo < 24) return 'Visto hoy';
+      return 'Inactivo';
+    };
+    
+    // Calculate response time text
+    const getResponseTimeText = () => {
+      const avgResponseMinutes = userStats.avgResponseTime;
+      if (avgResponseMinutes === null || avgResponseMinutes === undefined) {
+        return 'Sin datos';
+      }
+      if (avgResponseMinutes <= 15) return 'Responde rápido';
+      if (avgResponseMinutes <= 60) return 'Responde < 1h';
+      if (avgResponseMinutes <= 240) return 'Responde < 4h';
+      return 'Responde lento';
+    };
+
+    const mappedOffer = {
+      id: offer.id.toString(),
+      name: userName,
+      rate: offer.rate.toString(),
+      limit: `${offer.minAmount} - ${offer.maxAmount}`,
+      available: offer.availableAmount.toString(),
+      paymentMethods: offer.paymentMethods?.map((pm: any) => pm.displayName) || [],
+      responseTime: getResponseTimeText(),
+      completedTrades: completedTrades,
+      successRate: successRate,
+      verified: isVerified,
+      isOnline: userStats.lastSeenOnline && (Date.now() - new Date(userStats.lastSeenOnline).getTime()) < 2 * 60 * 60 * 1000, // Active within 2 hours
+      lastSeen: getActivityText(),
+      terms: offer.terms || '', // Include trader's custom terms
+    };
+
     if (action === 'profile') {
       // Navigate to TraderProfile screen
       navigation.navigate('TraderProfile', { 
-        offer: {
-          id: offer.id.toString(),
-          name: offer.name,
-          rate: offer.rate + ' Bs.',
-          limit: offer.limit,
-          available: offer.available,
-          paymentMethods: offer.paymentMethods,
-          responseTime: offer.responseTime,
-          completedTrades: offer.completedTrades,
-          successRate: offer.successRate,
-          verified: offer.verified,
-          isOnline: offer.isOnline,
-          lastSeen: offer.lastSeen,
-        }, 
+        offer: mappedOffer, 
         crypto: selectedCrypto 
       });
     } else if (action === 'trade') {
       // Navigate to TradeConfirm screen
       navigation.navigate('TradeConfirm', { 
-        offer: {
-          id: offer.id.toString(),
-          name: offer.name,
-          rate: offer.rate + ' Bs.',
-          limit: offer.limit,
-          available: offer.available,
-          paymentMethods: offer.paymentMethods,
-          responseTime: offer.responseTime,
-          completedTrades: offer.completedTrades,
-          successRate: offer.successRate,
-          verified: offer.verified,
-          isOnline: offer.isOnline,
-          lastSeen: offer.lastSeen,
-        }, 
+        offer: mappedOffer, 
         crypto: selectedCrypto,
         tradeType: activeTab as 'buy' | 'sell'
       });
@@ -663,10 +835,25 @@ export const ExchangeScreen = () => {
     const userName = offer.user ? `${offer.user.firstName} ${offer.user.lastName?.charAt(0)}.` : 'Usuario';
     const userStats = offer.userStats || {};
     const completedTrades = userStats.completedTrades || 0;
-    const successRate = userStats.successRate || 0;
+    const successRate = parseFloat(userStats.successRate || '0'); // Convert string to number
     const responseTime = offer.responseTimeMinutes || 15;
     const isVerified = userStats.isVerified || false;
-    const isOnline = userStats.lastSeenOnline; // You can add logic to check if recent
+    
+    // Calculate simple activity status instead of real-time online
+    const getActivityStatus = () => {
+      const lastSeen = userStats.lastSeenOnline;
+      if (!lastSeen) return { text: 'Sin actividad reciente', isActive: false };
+      
+      const lastSeenDate = new Date(lastSeen);
+      const hoursAgo = (Date.now() - lastSeenDate.getTime()) / (1000 * 60 * 60);
+      
+      if (hoursAgo < 2) return { text: 'Activo recientemente', isActive: true };
+      if (hoursAgo < 6) return { text: 'Activo hoy', isActive: true };
+      if (hoursAgo < 24) return { text: 'Visto hoy', isActive: false };
+      return { text: 'Inactivo', isActive: false };
+    };
+    
+    const activityStatus = getActivityStatus();
     
     return (
       <View style={styles.offerCard}>
@@ -674,30 +861,54 @@ export const ExchangeScreen = () => {
           <View style={styles.offerUser}>
             <View style={styles.avatarContainer}>
               <Text style={styles.avatarText}>{userName.charAt(0)}</Text>
-              {isOnline && <View style={styles.onlineIndicator} />}
+              {activityStatus.isActive && <View style={styles.onlineIndicator} />}
             </View>
-            <View>
+            <View style={styles.userInfoContainer}>
               <View style={styles.userNameContainer}>
                 <Text style={styles.userName}>{userName}</Text>
                 {isVerified && (
                   <Icon name="shield" size={16} color={colors.accent} style={styles.verifiedIcon} />
                 )}
               </View>
-              <View style={styles.userStats}>
-                <Text style={styles.tradeCount}>{completedTrades} operaciones</Text>
-                <Text style={styles.bullet}>•</Text>
-                <Text style={styles.successRate}>{successRate}%</Text>
-              </View>
+              <Text style={styles.tradeCount}>
+                {completedTrades === 0 ? 'Nuevo trader' : `${completedTrades} operaciones`}
+              </Text>
+              <Text style={styles.successRate}>
+                {completedTrades === 0 ? 'Sin historial' : `${successRate}% completado`}
+              </Text>
+              <Text style={[styles.activityStatus, activityStatus.isActive && styles.activeStatus]}>
+                {activityStatus.text}
+              </Text>
             </View>
-        </View>
-        <View style={styles.offerRateContainer}>
-          <Text style={styles.rateValue}>{offer.rate} Bs.</Text>
-          <View style={styles.responseTime}>
-            <Icon name="clock" size={12} color="#6B7280" />
-            <Text style={styles.responseTimeText}>Resp: {responseTime} min</Text>
+          </View>
+          <View style={styles.offerRateContainer}>
+            <Text style={styles.rateValue}>{formatAmount.withCode(offer.rate)}</Text>
+            <View style={styles.responseTime}>
+              <Icon name="clock" size={12} color="#6B7280" />
+              <Text style={styles.responseTimeText}>
+                {(() => {
+                  // Use real avgResponseTime from userStats if available
+                  const avgResponseMinutes = offer.userStats?.avgResponseTime || null;
+                  
+                  if (avgResponseMinutes === null || avgResponseMinutes === undefined) {
+                    return 'Sin datos';
+                  }
+                  
+                  // Convert to response categories based on actual data
+                  if (avgResponseMinutes <= 15) {
+                    return 'Responde rápido';
+                  } else if (avgResponseMinutes <= 60) {
+                    return 'Responde < 1h';
+                  } else if (avgResponseMinutes <= 240) {
+                    return 'Responde < 4h';
+                  } else {
+                    return 'Responde lento';
+                  }
+                })()}
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
 
       <View style={styles.offerDetails}>
         <View style={styles.detailRow}>
@@ -710,9 +921,25 @@ export const ExchangeScreen = () => {
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Métodos de pago</Text>
-          <Text style={styles.detailValue}>
-            {offer.paymentMethods?.map((pm: any) => pm.displayName).join(', ') || 'N/A'}
-          </Text>
+          <View style={styles.paymentMethodsContainer}>
+            <Text style={styles.detailValue}>
+              {(() => {
+                const methods = offer.paymentMethods || [];
+                if (methods.length === 0) return 'N/A';
+                
+                const maxVisible = 2; // Show first 2 methods
+                const visibleMethods = methods.slice(0, maxVisible);
+                const remainingCount = methods.length - maxVisible;
+                
+                let text = visibleMethods.map((pm: any) => pm.displayName).join(', ');
+                if (remainingCount > 0) {
+                  text += `, +${remainingCount} más`;
+                }
+                
+                return text;
+              })()}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -755,7 +982,7 @@ export const ExchangeScreen = () => {
                     </View>
                     <View>
                         <Text style={styles.userName}>{trade.trader.name}</Text>
-                        <Text style={styles.tradeDetails}>{trade.amount} {trade.crypto} por {trade.totalBs} Bs.</Text>
+                        <Text style={styles.tradeDetails}>{trade.amount} {trade.crypto} por {formatAmount.withCode(trade.totalBs)}</Text>
                     </View>
                 </View>
                 <View style={styles.timerBadge}>
@@ -799,8 +1026,173 @@ export const ExchangeScreen = () => {
     );
   };
 
-  // Header component
-  const Header = () => {
+  // Create a separate component for the amount input to prevent re-renders
+  const AmountInputSection = React.memo(({ 
+    initialAmount,
+    selectedCrypto, 
+    selectedPaymentMethod,
+    onAmountUpdate,
+    onPaymentMethodPress,
+    onSearchPress
+  }: {
+    initialAmount: string;
+    selectedCrypto: 'cUSD' | 'CONFIO';
+    selectedPaymentMethod: string;
+    onAmountUpdate: (value: string) => void;
+    onPaymentMethodPress: () => void;
+    onSearchPress: () => void;
+  }) => {
+    // Local state for the input to prevent parent re-renders
+    const [localAmount, setLocalAmount] = useState(initialAmount);
+    const inputRef = useRef<TextInputType>(null);
+    
+    // Sync with parent state when needed (e.g., on search or blur)
+    const syncAmount = React.useCallback(() => {
+      if (localAmount !== initialAmount) {
+        onAmountUpdate(localAmount);
+      }
+    }, [localAmount, initialAmount, onAmountUpdate]);
+    
+    // Update local state when typing
+    const handleLocalChange = React.useCallback((value: string) => {
+      setLocalAmount(value);
+    }, []);
+    
+    // Sync when search is pressed
+    const handleSearchPress = React.useCallback(() => {
+      syncAmount();
+      onSearchPress();
+    }, [syncAmount, onSearchPress]);
+    
+    // Update local state if parent state changes externally
+    useEffect(() => {
+      setLocalAmount(initialAmount);
+    }, [initialAmount]);
+    
+    return (
+      <>
+        <View style={styles.amountInputContainer}>
+          <TextInput
+            ref={inputRef}
+            style={styles.amountInput}
+            value={localAmount}
+            onChangeText={handleLocalChange}
+            onBlur={syncAmount}
+            placeholder="Monto mínimo"
+            keyboardType="decimal-pad"
+            autoCorrect={false}
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            returnKeyType="done"
+            blurOnSubmit={false}
+          />
+          <Text style={styles.currencyLabel}>{selectedCrypto}</Text>
+        </View>
+
+        <View style={styles.paymentMethodContainer}>
+          <TouchableOpacity
+            style={styles.paymentMethodInput}
+            onPress={onPaymentMethodPress}
+          >
+            <Text style={styles.paymentMethodInputText} numberOfLines={1}>
+              {selectedPaymentMethod}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity style={styles.searchButton} onPress={handleSearchPress}>
+          <Icon name="search" size={16} color="#fff" />
+        </TouchableOpacity>
+      </>
+    );
+  });
+
+  // Add display name for debugging
+  AmountInputSection.displayName = 'AmountInputSection';
+
+  // Create isolated FilterInput component to prevent keyboard issues
+  const FilterInput = React.memo(React.forwardRef<TextInputType, {
+    placeholder: string;
+    value: string;
+    onChangeText: (value: string) => void;
+  }>(({ placeholder, value, onChangeText }, ref) => {
+    const [localValue, setLocalValue] = useState(value);
+    const inputRef = useRef<TextInputType>(null);
+    const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+    
+    // Use forwarded ref if provided, otherwise use internal ref
+    const actualRef = ref || inputRef;
+    
+    // Sync with parent when input loses focus
+    const syncValue = React.useCallback(() => {
+      // Cancel any pending debounced update
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+        debounceTimer.current = null;
+      }
+      
+      // Immediately sync if there's a difference
+      if (localValue !== value) {
+        onChangeText(localValue);
+      }
+    }, [localValue, value, onChangeText]);
+    
+    // Debounced sync to parent (delays sync to prevent rapid re-renders)
+    const debouncedSync = React.useCallback((text: string) => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+      
+      debounceTimer.current = setTimeout(() => {
+        onChangeText(text);
+      }, 500); // 500ms delay - responsive but prevents rapid re-renders
+    }, [onChangeText]);
+    
+    // Update local state when typing and schedule debounced sync
+    const handleLocalChange = React.useCallback((text: string) => {
+      setLocalValue(text);
+      debouncedSync(text);
+    }, [debouncedSync]);
+    
+    // Update local state if parent value changes externally
+    useEffect(() => {
+      setLocalValue(value);
+    }, [value]);
+    
+    // Cleanup timer on unmount
+    useEffect(() => {
+      return () => {
+        if (debounceTimer.current) {
+          clearTimeout(debounceTimer.current);
+        }
+      };
+    }, []);
+    
+    return (
+      <TextInput
+        ref={actualRef}
+        style={styles.filterInput}
+        placeholder={placeholder}
+        keyboardType="decimal-pad"
+        value={localValue}
+        onChangeText={handleLocalChange}
+        onBlur={syncValue}
+        autoCorrect={false}
+        autoComplete="off"
+        autoCapitalize="none"
+        spellCheck={false}
+        returnKeyType="done"
+        blurOnSubmit={false}
+      />
+    );
+  }));
+
+  // Add display name for debugging
+  FilterInput.displayName = 'FilterInput';
+
+  // Header component - memoized to prevent re-renders
+  const Header = React.memo(() => {
     const scrollYClamped = Animated.diffClamp(scrollY, 0, headerHeight);
 
     const headerTranslateY = scrollYClamped.interpolate({
@@ -814,7 +1206,7 @@ export const ExchangeScreen = () => {
             onLayout={(event) => {
                 const { height } = event.nativeEvent.layout;
                 if (height > 0 && height !== headerHeight) {
-                    console.log('Header height changed:', { old: headerHeight, new: height });
+                    // console.log('Header height changed:', { old: headerHeight, new: height });
                     setHeaderHeight(height);
                 }
             }}
@@ -926,31 +1318,14 @@ export const ExchangeScreen = () => {
                         styles.searchContainer,
                         showAdvancedFilters && styles.searchContainerExtended
                     ]}>
-                        <View style={styles.amountInputContainer}>
-                            <TextInput
-                                style={styles.amountInput}
-                                value={amount}
-                                onChangeText={handleAmountChange}
-                                placeholder="Cantidad"
-                                keyboardType="decimal-pad"
-                            />
-                            <Text style={styles.currencyLabel}>{selectedCrypto}</Text>
-                        </View>
-
-                        <View style={styles.paymentMethodContainer}>
-                            <TouchableOpacity
-                                style={styles.paymentMethodInput}
-                                onPress={() => setPaymentModalVisible(true)}
-                            >
-                                <Text style={styles.paymentMethodInputText} numberOfLines={1}>
-                                    {selectedPaymentMethod}
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        <TouchableOpacity style={styles.searchButton}>
-                            <Icon name="search" size={16} color="#fff" />
-                        </TouchableOpacity>
+                        <AmountInputSection
+                            initialAmount={amount}
+                            selectedCrypto={selectedCrypto}
+                            selectedPaymentMethod={selectedPaymentMethod}
+                            onAmountUpdate={handleAmountUpdate}
+                            onPaymentMethodPress={handleOpenPaymentModal}
+                            onSearchPress={handleSearch}
+                        />
                     </View>
 
                     {/* Rate and Filter Controls */}
@@ -959,19 +1334,49 @@ export const ExchangeScreen = () => {
                         showAdvancedFilters && styles.rateFilterContainerExtended
                     ]}>
                         <Text style={styles.averageRate}>
-                            {selectedCrypto === 'cUSD' ? '36.00' : '3.60'} Bs. promedio
+                            {averageRate > 0 ? formatAmount.withCode(averageRate) : 'Sin datos'} promedio
                         </Text>
                         <View style={styles.filterControls}>
                             <TouchableOpacity
-                                style={[styles.filterButton, showAdvancedFilters && styles.activeFilterButton]}
+                                style={[
+                                    styles.filterButton, 
+                                    (showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume) && styles.activeFilterButton
+                                ]}
                                 onPress={() => setShowAdvancedFilters(!showAdvancedFilters)}
                             >
                                 <Icon
                                     name="filter"
                                     size={12}
-                                    color={showAdvancedFilters ? colors.primary : '#6B7280'}
+                                    color={(showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume) ? colors.primary : '#6B7280'}
                                 />
+                                {(minRate || maxRate || filterVerified || filterOnline || filterHighVolume) && (
+                                    <View style={styles.filterIndicator} />
+                                )}
                             </TouchableOpacity>
+                            
+                            {/* Quick clear filters button - only show when filters are active */}
+                            {(amount || minRate || maxRate || filterVerified || filterOnline || filterHighVolume || selectedPaymentMethod !== 'Todos los métodos') && (
+                                <TouchableOpacity 
+                                    style={styles.quickClearButton}
+                                    onPress={() => {
+                                        // Clear all filter values
+                                        setAmount('');
+                                        setMinRate('');
+                                        setMaxRate('');
+                                        setFilterVerified(false);
+                                        setFilterOnline(false);
+                                        setFilterHighVolume(false);
+                                        setSelectedPaymentMethod('Todos los métodos');
+                                        
+                                        // Also clear the filter inputs
+                                        minRateInputRef.current?.clear();
+                                        maxRateInputRef.current?.clear();
+                                    }}
+                                >
+                                    <Icon name="x-circle" size={12} color="#ef4444" />
+                                </TouchableOpacity>
+                            )}
+                            
                             <TouchableOpacity 
                                 style={styles.refreshButton}
                                 onPress={() => {
@@ -1018,17 +1423,15 @@ export const ExchangeScreen = () => {
                             <View style={styles.filterGapFill} />
                             <View style={styles.advancedFilters}>
                             <View style={styles.filterInputs}>
-                                <TextInput
-                                    style={styles.filterInput}
+                                <FilterInput
+                                    ref={minRateInputRef}
                                     placeholder="Tasa min."
-                                    keyboardType="decimal-pad"
                                     value={minRate}
                                     onChangeText={setMinRate}
                                 />
-                                <TextInput
-                                    style={styles.filterInput}
+                                <FilterInput
+                                    ref={maxRateInputRef}
                                     placeholder="Tasa max."
-                                    keyboardType="decimal-pad"
                                     value={maxRate}
                                     onChangeText={setMaxRate}
                                 />
@@ -1066,7 +1469,7 @@ export const ExchangeScreen = () => {
                                     <View style={[styles.checkbox, filterOnline && styles.checkboxChecked]}>
                                         {filterOnline && <Icon name="check" size={12} color="#fff" />}
                                     </View>
-                                    <Text style={styles.checkboxLabel}>En línea</Text>
+                                    <Text style={styles.checkboxLabel}>Activos hoy</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity 
                                     style={styles.checkboxItem}
@@ -1081,9 +1484,37 @@ export const ExchangeScreen = () => {
 
                             <View style={styles.filterActions}>
                                 <TouchableOpacity 
+                                    style={styles.clearAllButton}
+                                    onPress={() => {
+                                        // Clear all filter values
+                                        setAmount('');
+                                        setMinRate('');
+                                        setMaxRate('');
+                                        setFilterVerified(false);
+                                        setFilterOnline(false);
+                                        setFilterHighVolume(false);
+                                        setSelectedPaymentMethod('Todos los métodos');
+                                        
+                                        // Also clear the filter inputs
+                                        minRateInputRef.current?.clear();
+                                        maxRateInputRef.current?.clear();
+                                    }}
+                                >
+                                    <Icon name="refresh-ccw" size={12} color="#6B7280" />
+                                    <Text style={styles.clearAllButtonText}>Limpiar Todo</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity 
                                     style={styles.applyButton}
                                     onPress={() => {
-                                        // Apply the advanced filters
+                                        // Force sync of filter input values by blurring them
+                                        // This ensures any typed values are captured before applying filters
+                                        minRateInputRef.current?.blur();
+                                        maxRateInputRef.current?.blur();
+                                        
+                                        // Close the advanced filters menu
+                                        setShowAdvancedFilters(false);
+                                        
+                                        // Optional: Also refresh the base data from server
                                         // Convert display name to internal name inline
                                         let paymentMethodName = null;
                                         if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
@@ -1097,8 +1528,6 @@ export const ExchangeScreen = () => {
                                             paymentMethod: paymentMethodName,
                                             countryCode: selectedCountry?.[2]
                                         });
-                                        // Close the advanced filters menu
-                                        setShowAdvancedFilters(false);
                                     }}
                                 >
                                     <Text style={styles.applyButtonText}>Aplicar</Text>
@@ -1117,11 +1546,14 @@ export const ExchangeScreen = () => {
             )}
         </Animated.View>
     );
-  };
+  });
+
+  // Add display name for debugging
+  Header.displayName = 'Header';
 
   const renderContent = () => {
     if (activeList === 'offers') {
-      const offers = offersData?.p2pOffers || [];
+      const offers = filteredOffers; // Use filtered offers instead of raw data
       
       if (offersLoading) {
         return (
@@ -1140,9 +1572,35 @@ export const ExchangeScreen = () => {
       }
       
       if (offers.length === 0) {
+        // Show different message based on active filters
+        const hasAmount = amount && amount.trim() !== '';
+        const hasRateFilters = (minRate && minRate.trim() !== '') || (maxRate && maxRate.trim() !== '');
+        const hasAdvancedFilters = filterVerified || filterOnline || filterHighVolume;
+        const hasAnyFilters = hasAmount || hasRateFilters || hasAdvancedFilters;
+        
+        let emptyMessage = 'No hay ofertas disponibles';
+        if (hasAnyFilters) {
+          emptyMessage = 'No hay ofertas que coincidan con los filtros aplicados';
+        }
+        
         return (
           <View style={[styles.offersList, { padding: 16 }]}>
-            <Text style={styles.emptyText}>No hay ofertas disponibles</Text>
+            <Text style={styles.emptyText}>{emptyMessage}</Text>
+            {hasAnyFilters && (
+              <TouchableOpacity 
+                style={styles.clearFiltersButton}
+                onPress={() => {
+                  setAmount('');
+                  setMinRate('');
+                  setMaxRate('');
+                  setFilterVerified(false);
+                  setFilterOnline(false);
+                  setFilterHighVolume(false);
+                }}
+              >
+                <Text style={styles.clearFiltersText}>Limpiar filtros</Text>
+              </TouchableOpacity>
+            )}
           </View>
         );
       }
@@ -1482,9 +1940,24 @@ const styles = StyleSheet.create({
     padding: 6,
     backgroundColor: colors.neutralDark,
     borderRadius: 8,
+    position: 'relative',
   },
   activeFilterButton: {
     backgroundColor: colors.primaryLight,
+  },
+  filterIndicator: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#ef4444', // red-500
+  },
+  quickClearButton: {
+    padding: 6,
+    backgroundColor: '#fee2e2', // red-100
+    borderRadius: 8,
   },
   refreshButton: {
     padding: 6,
@@ -1552,6 +2025,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
+  clearAllButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    padding: 8,
+    backgroundColor: '#f3f4f6', // gray-100
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb', // gray-200
+  },
+  clearAllButtonText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
   applyButton: {
     flex: 1,
     padding: 8,
@@ -1578,6 +2068,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
+    paddingVertical: 18, // Slightly more vertical padding for better spacing
     borderWidth: 1,
     borderColor: '#E5E7EB',
     ...Platform.select({
@@ -1599,7 +2090,8 @@ const styles = StyleSheet.create({
   },
   offerUser: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start', // Changed from 'center' to allow proper height
+    flex: 1,
   },
   avatarContainer: {
     width: 40,
@@ -1639,14 +2131,21 @@ const styles = StyleSheet.create({
   verifiedIcon: {
     marginLeft: 4,
   },
+  userInfoContainer: {
+    flex: 1,
+    marginLeft: 12,
+    justifyContent: 'space-around',
+    minHeight: 50,
+  },
   userStats: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 2,
   },
   tradeCount: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#6B7280',
+    fontWeight: '400',
   },
   bullet: {
     fontSize: 12,
@@ -1654,8 +2153,17 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   successRate: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#10B981',
+    fontWeight: '500',
+  },
+  activityStatus: {
+    fontSize: 11,
+    color: '#9CA3AF', // gray-400 for inactive
+    fontWeight: '400',
+  },
+  activeStatus: {
+    color: '#10B981', // green for active
     fontWeight: '500',
   },
   offerRateContainer: {
@@ -1682,16 +2190,25 @@ const styles = StyleSheet.create({
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 4,
+    alignItems: 'flex-start',
+    marginBottom: 6,
   },
   detailLabel: {
     fontSize: 12,
     color: '#6B7280',
+    marginRight: 12,
+    minWidth: 80,
   },
   detailValue: {
     fontSize: 12,
     fontWeight: '500',
     color: '#1F2937',
+    flex: 1,
+    textAlign: 'right',
+  },
+  paymentMethodsContainer: {
+    flex: 1,
+    alignItems: 'flex-end',
   },
   offerActions: {
     flexDirection: 'row',
@@ -2244,5 +2761,19 @@ const styles = StyleSheet.create({
   checkboxChecked: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
+  },
+  clearFiltersButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    alignSelf: 'center',
+    marginTop: 16,
+  },
+  clearFiltersText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
   },
 }); 
