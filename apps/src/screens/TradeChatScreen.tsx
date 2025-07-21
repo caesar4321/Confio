@@ -91,11 +91,31 @@ export const TradeChatScreen: React.FC = () => {
       return;
     }
 
-    const connectWebSocket = () => {
-      // Use localhost for development, replace with your production domain
-      const wsUrl = `ws://localhost:8000/ws/trade/${tradeId}/`;
-      
+    const connectWebSocket = async () => {
       try {
+        // Get JWT token from Keychain
+        const Keychain = require('react-native-keychain');
+        const { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } = require('../services/authService');
+        
+        const credentials = await Keychain.getGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME
+        });
+        
+        let token = '';
+        if (credentials) {
+          try {
+            const tokens = JSON.parse(credentials.password);
+            token = tokens.accessToken || '';
+          } catch (error) {
+            console.error('Error parsing tokens for WebSocket:', error);
+          }
+        }
+        
+        // Include token in WebSocket URL as query parameter
+        const wsUrl = `ws://localhost:8000/ws/trade/${tradeId}/?token=${encodeURIComponent(token)}`;
+        console.log('Connecting to WebSocket:', wsUrl.replace(token, 'TOKEN_HIDDEN'));
+        
         websocket.current = new WebSocket(wsUrl);
         
         websocket.current.onopen = () => {

@@ -13,8 +13,15 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
         self.trade_id = self.scope['url_route']['kwargs']['trade_id']
         self.room_group_name = f'trade_chat_{self.trade_id}'
         
+        # For development: accept connection first, then check access
+        await self.accept()
+        
         # Check if user is authenticated and has access to this trade
         if not await self.check_user_access():
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': 'Access denied or user not authenticated'
+            }))
             await self.close()
             return
         
@@ -23,8 +30,6 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
             self.room_group_name,
             self.channel_name
         )
-        
-        await self.accept()
         
         # Send chat history when user connects
         await self.send_chat_history()
@@ -160,12 +165,31 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
         """Check if the current user has access to this trade"""
         try:
             user = self.scope['user']
-            if not user.is_authenticated:
+            print(f"DEBUG: WebSocket user: {user}, authenticated: {user.is_authenticated if hasattr(user, 'is_authenticated') else 'Unknown'}")
+            
+            if not hasattr(user, 'is_authenticated') or not user.is_authenticated:
+                print(f"DEBUG: User not authenticated")
                 return False
                 
             trade = P2PTrade.objects.get(id=self.trade_id)
-            return trade.buyer == user or trade.seller == user
+            print(f"DEBUG: Trade found: {trade.id}, buyer_user: {trade.buyer_user}, seller_user: {trade.seller_user}")
+            
+            # Check if user has access to this trade using new direct relationships
+            has_access = (
+                trade.buyer_user == user or 
+                trade.seller_user == user or
+                # Also check business relationships
+                (trade.buyer_business and trade.buyer_business.accounts.filter(user=user).exists()) or
+                (trade.seller_business and trade.seller_business.accounts.filter(user=user).exists()) or
+                # Fallback to old system for backward compatibility
+                trade.buyer == user or 
+                trade.seller == user
+            )
+            
+            print(f"DEBUG: User {user.id} has access to trade {self.trade_id}: {has_access}")
+            return has_access
         except P2PTrade.DoesNotExist:
+            print(f"DEBUG: Trade {self.trade_id} does not exist")
             return False
 
     @database_sync_to_async
@@ -175,12 +199,29 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
             user = self.scope['user']
             trade = P2PTrade.objects.get(id=self.trade_id)
             
-            message = P2PMessage.objects.create(
-                trade=trade,
-                sender=user,
-                content=content,
-                message_type='TEXT'
-            )
+            # Determine sender entity based on trade context
+            message_kwargs = {
+                'trade': trade,
+                'content': content,
+                'message_type': 'TEXT',
+                # Keep old field for backward compatibility
+                'sender': user,
+            }
+            
+            # Check if user is participating as a business or personal account
+            if trade.buyer_user == user:
+                message_kwargs['sender_user'] = user
+            elif trade.buyer_business and trade.buyer_business.accounts.filter(user=user).exists():
+                message_kwargs['sender_business'] = trade.buyer_business
+            elif trade.seller_user == user:
+                message_kwargs['sender_user'] = user
+            elif trade.seller_business and trade.seller_business.accounts.filter(user=user).exists():
+                message_kwargs['sender_business'] = trade.seller_business
+            else:
+                # Default to personal user
+                message_kwargs['sender_user'] = user
+            
+            message = P2PMessage.objects.create(**message_kwargs)
             return message
         except Exception as e:
             print(f"Error saving message: {e}")
