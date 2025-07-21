@@ -470,8 +470,8 @@ export const GET_INVOICES = gql`
 
 // P2P Exchange Queries
 export const GET_P2P_OFFERS = gql`
-  query GetP2POffers($exchangeType: String, $tokenType: String, $paymentMethod: String) {
-    p2pOffers(exchangeType: $exchangeType, tokenType: $tokenType, paymentMethod: $paymentMethod) {
+  query GetP2POffers($exchangeType: String, $tokenType: String, $paymentMethod: String, $countryCode: String) {
+    p2pOffers(exchangeType: $exchangeType, tokenType: $tokenType, paymentMethod: $paymentMethod, countryCode: $countryCode) {
       id
       user {
         id
@@ -485,6 +485,7 @@ export const GET_P2P_OFFERS = gql`
       minAmount
       maxAmount
       availableAmount
+      countryCode
       paymentMethods {
         id
         name
@@ -517,6 +518,7 @@ export const GET_MY_P2P_OFFERS = gql`
       minAmount
       maxAmount
       availableAmount
+      countryCode
       paymentMethods {
         id
         name
@@ -655,8 +657,8 @@ export const GET_P2P_TRADE_MESSAGES = gql`
 `;
 
 export const GET_P2P_PAYMENT_METHODS = gql`
-  query GetP2PPaymentMethods {
-    p2pPaymentMethods {
+  query GetP2PPaymentMethods($countryCode: String) {
+    p2pPaymentMethods(countryCode: $countryCode) {
       id
       name
       displayName

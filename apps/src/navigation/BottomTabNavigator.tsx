@@ -30,13 +30,13 @@ export const BottomTabNavigator = () => {
   const accountType = (activeAccount?.type || 'personal').toLowerCase();
   const isBusiness = accountType === 'business';
 
-  console.log('🔍 BottomTabNavigator - Active account:', {
-    accountId: activeAccount?.id,
-    originalType: activeAccount?.type,
-    normalizedType: accountType,
-    accountName: activeAccount?.name,
-    isBusiness
-  });
+  // console.log('🔍 BottomTabNavigator - Active account:', {
+  //   accountId: activeAccount?.id,
+  //   originalType: activeAccount?.type,
+  //   normalizedType: accountType,
+  //   accountName: activeAccount?.name,
+  //   isBusiness
+  // });
 
   const handleNotificationPress = useCallback(() => {
     navigation.navigate('Notification' as any);
@@ -163,18 +163,19 @@ export const BottomTabNavigator = () => {
 
 
 
-  // Force re-render when activeAccount changes by using a key
-  const tabNavigatorKey = useMemo(() => 
-    `tab-navigator-${activeAccount?.id || 'default'}-${accountType}`,
-    [activeAccount?.id, accountType] // Use normalized accountType
-  );
+  // Remove dynamic key to prevent re-renders that cause keyboard dismissal
+  // The conditional rendering of tabs is sufficient for account type changes
+  // const tabNavigatorKey = useMemo(() => 
+  //   `tab-navigator-${activeAccount?.id || 'default'}-${accountType}`,
+  //   [activeAccount?.id, accountType] // Use normalized accountType
+  // );
 
-  console.log('🔑 TabNavigator Key:', tabNavigatorKey, 'isBusinessAccount:', isBusinessAccount);
+  // console.log('🔑 TabNavigator Key:', tabNavigatorKey, 'isBusinessAccount:', isBusinessAccount);
 
   return (
     <>
       <Tabs.Navigator
-        key={tabNavigatorKey} // This forces re-render when account changes
+        // Removed key prop to prevent re-renders
         screenOptions={{
           tabBarActiveTintColor: '#8B5CF6',
           tabBarInactiveTintColor: '#6B7280',

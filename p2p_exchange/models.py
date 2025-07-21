@@ -5,12 +5,14 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 
 class P2PPaymentMethod(SoftDeleteModel):
     """Payment methods available for P2P trading"""
-    name = models.CharField(max_length=50, unique=True)
+    name = models.CharField(max_length=50)
     display_name = models.CharField(max_length=100)
     is_active = models.BooleanField(default=True)
     icon = models.CharField(max_length=50, blank=True)  # For frontend icon reference
+    country_code = models.CharField(max_length=2, blank=True, null=True, help_text="ISO country code (e.g., 'VE', 'US'). Leave empty for global methods.")
     
     class Meta:
+        unique_together = ['name', 'country_code']
         ordering = ['display_name']
     
     def __str__(self):
@@ -54,6 +56,9 @@ class P2POffer(SoftDeleteModel):
     
     # Payment methods accepted
     payment_methods = models.ManyToManyField(P2PPaymentMethod, related_name='offers')
+    
+    # Country where this offer is available
+    country_code = models.CharField(max_length=2, help_text="ISO country code (e.g., 'VE', 'US', 'AS')")
     
     # Terms and conditions
     terms = models.TextField(blank=True)

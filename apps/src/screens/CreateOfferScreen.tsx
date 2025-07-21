@@ -19,6 +19,7 @@ import { MainStackParamList } from '../types/navigation';
 import { CREATE_P2P_OFFER, GET_P2P_PAYMENT_METHODS } from '../apollo/queries';
 import { countries, Country } from '../utils/countries';
 import { useCountrySelection } from '../hooks/useCountrySelection';
+import { useCurrency } from '../hooks/useCurrency';
 
 // Colors from the design
 const colors = {
@@ -49,6 +50,9 @@ export const CreateOfferScreen = () => {
   // Use centralized country selection hook
   const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal } = useCountrySelection();
   
+  // Use currency system based on selected country
+  const { currency, formatAmount, inputFormatting } = useCurrency();
+  
   // GraphQL queries and mutations
   const { data: paymentMethodsData, loading: paymentMethodsLoading, error: paymentMethodsError } = useQuery(GET_P2P_PAYMENT_METHODS, {
     variables: { 
@@ -70,7 +74,6 @@ export const CreateOfferScreen = () => {
   const [maxAmount, setMaxAmount] = useState('');
   const [availableAmount, setAvailableAmount] = useState('');
   const [terms, setTerms] = useState('');
-  const [responseTime, setResponseTime] = useState('15');
   const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<string[]>([]);
 
   const paymentMethods: PaymentMethod[] = paymentMethodsData?.p2pPaymentMethods || [];
@@ -137,7 +140,6 @@ export const CreateOfferScreen = () => {
             paymentMethodIds: selectedPaymentMethods,
             countryCode: selectedCountry?.[2], // Pass the country code
             terms: terms.trim(),
-            responseTimeMinutes: parseInt(responseTime),
           },
         },
       });
@@ -252,16 +254,16 @@ export const CreateOfferScreen = () => {
 
         {/* Rate */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Tasa de cambio (Bs. por {tokenType})</Text>
+          <Text style={styles.sectionTitle}>Tasa de cambio ({currency.code} por {tokenType})</Text>
           <View style={styles.inputContainer}>
             <TextInput
               style={styles.textInput}
               value={rate}
               onChangeText={setRate}
-              placeholder="35.50"
+              placeholder={inputFormatting.getPlaceholder(35.50)}
               keyboardType="decimal-pad"
             />
-            <Text style={styles.inputSuffix}>Bs.</Text>
+            <Text style={styles.inputSuffix}>{currency.code}</Text>
           </View>
         </View>
 
@@ -351,23 +353,6 @@ export const CreateOfferScreen = () => {
           )}
         </View>
 
-        {/* Response Time */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Tiempo de respuesta (minutos)</Text>
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.textInput}
-              value={responseTime}
-              onChangeText={setResponseTime}
-              placeholder="15"
-              keyboardType="number-pad"
-            />
-            <Text style={styles.inputSuffix}>min</Text>
-          </View>
-          <Text style={styles.helpText}>
-            Tiempo promedio en que respondes a las solicitudes de intercambio
-          </Text>
-        </View>
 
         {/* Terms */}
         <View style={styles.section}>

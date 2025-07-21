@@ -13,13 +13,16 @@ from .models import (
     P2PUserStats, 
     P2PEscrow
 )
+from .default_payment_methods import get_payment_methods_for_country
 
 User = get_user_model()
 
-class P2PPaymentMethodType(DjangoObjectType):
-    class Meta:
-        model = P2PPaymentMethod
-        fields = ('id', 'name', 'display_name', 'is_active', 'icon')
+class P2PPaymentMethodType(graphene.ObjectType):
+    id = graphene.ID()
+    name = graphene.String()
+    display_name = graphene.String()
+    icon = graphene.String()
+    is_active = graphene.Boolean()
 
 class P2PUserStatsType(DjangoObjectType):
     class Meta:
@@ -38,7 +41,7 @@ class P2POfferType(DjangoObjectType):
         model = P2POffer
         fields = (
             'id', 'user', 'exchange_type', 'token_type', 'rate', 'min_amount',
-            'max_amount', 'available_amount', 'payment_methods', 'terms',
+            'max_amount', 'available_amount', 'payment_methods', 'country_code', 'terms',
             'response_time_minutes', 'status', 'auto_complete_enabled',
             'auto_complete_time_minutes', 'created_at', 'updated_at'
         )
@@ -46,6 +49,28 @@ class P2POfferType(DjangoObjectType):
     def resolve_user_stats(self, info):
         stats, created = P2PUserStats.objects.get_or_create(user=self.user)
         return stats
+    
+    def resolve_payment_methods(self, info):
+        """Resolve payment methods for this offer, converting DB records to our GraphQL type"""
+        try:
+            db_payment_methods = self.payment_methods.all()
+            payment_methods = []
+            
+            for i, db_method in enumerate(db_payment_methods):
+                # Create a simple object that matches P2PPaymentMethodType fields
+                payment_method = type('PaymentMethod', (), {
+                    'id': str(i + 1),  # Simple sequential ID
+                    'name': db_method.name,
+                    'display_name': db_method.display_name,
+                    'icon': db_method.icon,
+                    'is_active': db_method.is_active
+                })()
+                payment_methods.append(payment_method)
+            
+            return payment_methods
+        except Exception as e:
+            # Return empty list if there's any issue with payment methods
+            return []
 
 class P2PTradeType(DjangoObjectType):
     class Meta:
@@ -74,6 +99,7 @@ class CreateP2POfferInput(graphene.InputObjectType):
     max_amount = graphene.Decimal(required=True)
     available_amount = graphene.Decimal(required=True)
     payment_method_ids = graphene.List(graphene.ID, required=True)
+    country_code = graphene.String(required=True)  # Required country code for the offer
     terms = graphene.String()
     response_time_minutes = graphene.Int()
 
@@ -130,12 +156,73 @@ class CreateP2POffer(graphene.Mutation):
                     errors=["Invalid token type"]
                 )
 
-            # Validate payment methods
-            payment_methods = P2PPaymentMethod.objects.filter(
-                id__in=input.payment_method_ids,
-                is_active=True
-            )
-            if not payment_methods.exists():
+            # For SELL offers, validate the user has enough balance
+            if input.exchange_type == 'SELL':
+                # Get user's current balance for the token they want to sell
+                user_balance = _get_user_balance(user, input.token_type)
+                
+                if user_balance < input.available_amount:
+                    return CreateP2POffer(
+                        offer=None,
+                        success=False,
+                        errors=[f"Saldo insuficiente. Tienes {user_balance} {input.token_type} pero intentas vender {input.available_amount}"]
+                    )
+
+            # Validate and get/create payment methods for database storage
+            if not input.payment_method_ids:
+                return CreateP2POffer(
+                    offer=None,
+                    success=False,
+                    errors=["No payment methods provided"]
+                )
+            
+            # Get all available payment methods from hardcoded data to validate
+            all_country_methods = []
+            for country_code in ['VE', 'US', 'AS', 'AR', 'CO', 'PE', 'MX', '']:  # Include global methods
+                all_country_methods.extend(get_payment_methods_for_country(country_code))
+            
+            # Create a lookup of valid method names
+            valid_methods_lookup = {method['name']: method for method in all_country_methods}
+            
+            # Validate payment method IDs and get or create database records
+            payment_methods = []
+            for method_id in input.payment_method_ids:
+                try:
+                    # Convert ID to index (IDs are 1-based, convert to 0-based)
+                    method_index = int(method_id) - 1
+                    
+                    # Get the method data by index from the same list we serve to frontend
+                    # Use the country code from the input to get the exact same list
+                    all_methods_data = get_payment_methods_for_country(input.country_code or '')
+                    
+                    if method_index < 0 or method_index >= len(all_methods_data):
+                        return CreateP2POffer(
+                            offer=None,
+                            success=False,
+                            errors=[f"ID de método de pago inválido: {method_id}. País: {input.country_code or 'global'}, métodos disponibles: {len(all_methods_data)}"]
+                        )
+                    
+                    method_data = all_methods_data[method_index]
+                    
+                    # Get or create the payment method in database for offer linking
+                    payment_method, created = P2PPaymentMethod.objects.get_or_create(
+                        name=method_data['name'],
+                        defaults={
+                            'display_name': method_data['display_name'],
+                            'icon': method_data['icon'],
+                            'is_active': method_data['is_active'],
+                        }
+                    )
+                    payment_methods.append(payment_method)
+                    
+                except (ValueError, IndexError):
+                    return CreateP2POffer(
+                        offer=None,
+                        success=False,
+                        errors=[f"Invalid payment method ID: {method_id}"]
+                    )
+            
+            if not payment_methods:
                 return CreateP2POffer(
                     offer=None,
                     success=False,
@@ -151,6 +238,7 @@ class CreateP2POffer(graphene.Mutation):
                 min_amount=input.min_amount,
                 max_amount=input.max_amount,
                 available_amount=input.available_amount,
+                country_code=input.country_code,
                 terms=input.terms or '',
                 response_time_minutes=input.response_time_minutes or 15
             )
@@ -169,6 +257,24 @@ class CreateP2POffer(graphene.Mutation):
                 success=False,
                 errors=[str(e)]
             )
+    
+def _get_user_balance(user, token_type):
+    """Get user's balance for a specific token type"""
+    # Normalize token type
+    normalized_token_type = token_type.upper()
+    if normalized_token_type == 'CUSD':
+        normalized_token_type = 'cUSD'
+    
+    # For now, return mock balances based on token type
+    # In a real implementation, this would query the blockchain or a balance service
+    mock_balances = {
+        'cUSD': '2850.35',
+        'CONFIO': '234.18',
+        'USDC': '458.22'
+    }
+    
+    balance_str = mock_balances.get(normalized_token_type, '0')
+    return float(balance_str)
 
 class CreateP2PTrade(graphene.Mutation):
     class Arguments:
@@ -405,16 +511,17 @@ class Query(graphene.ObjectType):
         P2POfferType,
         exchange_type=graphene.String(),
         token_type=graphene.String(),
-        payment_method=graphene.String()
+        payment_method=graphene.String(),
+        country_code=graphene.String()
     )
     p2p_offer = graphene.Field(P2POfferType, id=graphene.ID(required=True))
     my_p2p_offers = graphene.List(P2POfferType)
     my_p2p_trades = graphene.List(P2PTradeType)
     p2p_trade = graphene.Field(P2PTradeType, id=graphene.ID(required=True))
     p2p_trade_messages = graphene.List(P2PMessageType, trade_id=graphene.ID(required=True))
-    p2p_payment_methods = graphene.List(P2PPaymentMethodType)
+    p2p_payment_methods = graphene.List(P2PPaymentMethodType, country_code=graphene.String())
 
-    def resolve_p2p_offers(self, info, exchange_type=None, token_type=None, payment_method=None):
+    def resolve_p2p_offers(self, info, exchange_type=None, token_type=None, payment_method=None, country_code=None):
         queryset = P2POffer.objects.filter(status='ACTIVE').select_related('user')
         
         if exchange_type:
@@ -423,6 +530,10 @@ class Query(graphene.ObjectType):
             queryset = queryset.filter(token_type=token_type)
         if payment_method:
             queryset = queryset.filter(payment_methods__name=payment_method)
+        
+        # Filter by country: only show offers created for that specific country
+        if country_code:
+            queryset = queryset.filter(country_code=country_code)
         
         return queryset.order_by('-created_at')
 
@@ -477,8 +588,43 @@ class Query(graphene.ObjectType):
         except P2PTrade.DoesNotExist:
             return []
 
-    def resolve_p2p_payment_methods(self, info):
-        return P2PPaymentMethod.objects.filter(is_active=True)
+    def resolve_p2p_payment_methods(self, info, country_code=None):
+        import datetime
+        import random
+        request_id = random.randint(1000, 9999)
+        print(f"🔍 DEBUG [{datetime.datetime.now()}] REQ-{request_id}: resolve_p2p_payment_methods called with country_code: '{country_code}'")
+        
+        # Force fresh import to avoid caching issues
+        import importlib
+        from . import default_payment_methods
+        importlib.reload(default_payment_methods)
+        
+        # Get payment methods directly from Python file (hardcoded data)
+        methods_data = default_payment_methods.get_payment_methods_for_country(country_code or '')
+        print(f"📋 DEBUG REQ-{request_id}: get_payment_methods_for_country('{country_code or ''}') returned {len(methods_data)} methods:")
+        for method in methods_data:
+            print(f"   - {method['display_name']} ({method['name']})")
+        
+        # Convert to GraphQL objects with simple sequential IDs
+        payment_methods = []
+        for i, method_data in enumerate(methods_data):
+            # Create a simple object that matches P2PPaymentMethodType fields
+            payment_method = type('PaymentMethod', (), {
+                'id': str(i + 1),  # Simple sequential ID
+                'name': method_data['name'],
+                'display_name': method_data['display_name'],
+                'icon': method_data['icon'],
+                'is_active': method_data['is_active']
+            })()
+            payment_methods.append(payment_method)
+        
+        print(f"✅ DEBUG REQ-{request_id}: Returning {len(payment_methods)} payment methods to GraphQL")
+        print(f"🚀 DEBUG REQ-{request_id}: Final GraphQL objects being returned:")
+        for i, pm in enumerate(payment_methods):
+            print(f"   {i+1}. {pm.display_name} ({pm.name}) - ID: {pm.id}")
+        
+        # Don't sort to maintain consistent IDs - sorting changes the order and breaks ID mapping
+        return payment_methods
 
 # Mutations
 class Mutation(graphene.ObjectType):
