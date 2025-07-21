@@ -21,10 +21,19 @@ class PaymentTransactionType(DjangoObjectType):
         fields = (
             'id',
             'payment_transaction_id',
+            # Legacy user fields
             'payer_user', 
             'merchant_user',
             'payer_account',
             'merchant_account',
+            # NEW: Business fields
+            'payer_business',
+            'merchant_business',
+            'payer_type',
+            'merchant_type',
+            'payer_display_name',
+            'merchant_display_name',
+            # Transaction details
             'payer_address',
             'merchant_address', 
             'amount', 
@@ -44,13 +53,20 @@ class InvoiceType(DjangoObjectType):
         fields = (
             'id',
             'invoice_id',
+            # Legacy user fields
             'merchant_user',
             'merchant_account',
+            'paid_by_user',
+            # NEW: Business fields
+            'merchant_business',
+            'merchant_type',
+            'merchant_display_name',
+            'paid_by_business',
+            # Invoice details
             'amount',
             'token_type',
             'description',
             'status',
-            'paid_by_user',
             'paid_at',
             'expires_at',
             'created_at',
@@ -114,10 +130,28 @@ class CreateInvoice(graphene.Mutation):
             expires_in_hours = input.expires_in_hours or 24
             expires_at = timezone.now() + timedelta(hours=expires_in_hours)
 
+            # Determine merchant type and business details
+            merchant_business = None
+            merchant_type = 'user'  # default to personal
+            merchant_display_name = f"{user.first_name} {user.last_name}".strip() or user.username
+            
+            if active_account.account_type == 'business' and active_account.business:
+                merchant_business = active_account.business
+                merchant_type = 'business'
+                merchant_display_name = active_account.business.name
+
             # Create the invoice
             invoice = Invoice.objects.create(
+                # Legacy user fields (kept for compatibility)
                 merchant_user=user,
                 merchant_account=active_account,
+                
+                # NEW: Business fields based on account type
+                merchant_business=merchant_business,
+                merchant_type=merchant_type,
+                merchant_display_name=merchant_display_name,
+                
+                # Invoice details
                 amount=input.amount,
                 token_type=input.token_type,
                 description=input.description or '',
@@ -268,12 +302,43 @@ class PayInvoice(graphene.Mutation):
                     errors=["Merchant account missing Sui address"]
                 )
 
+            # Determine payer type and business details
+            payer_business = None
+            payer_type = 'user'  # default to personal
+            payer_display_name = f"{user.first_name} {user.last_name}".strip() or user.username
+            
+            if payer_account.account_type == 'business' and payer_account.business:
+                payer_business = payer_account.business
+                payer_type = 'business'
+                payer_display_name = payer_account.business.name
+            
+            # Determine merchant type and business details  
+            merchant_business = None
+            merchant_type = 'user'  # default to personal
+            merchant_display_name = f"{invoice.merchant_user.first_name} {invoice.merchant_user.last_name}".strip() or invoice.merchant_user.username
+            
+            if invoice.merchant_account.account_type == 'business' and invoice.merchant_account.business:
+                merchant_business = invoice.merchant_account.business
+                merchant_type = 'business'
+                merchant_display_name = invoice.merchant_account.business.name
+
             # Create the payment transaction
             payment_transaction = PaymentTransaction.objects.create(
+                # Legacy user fields (kept for compatibility)
                 payer_user=user,
                 merchant_user=invoice.merchant_user,
                 payer_account=payer_account,
                 merchant_account=invoice.merchant_account,
+                
+                # NEW: Business fields based on account type
+                payer_business=payer_business,
+                merchant_business=merchant_business,
+                payer_type=payer_type,
+                merchant_type=merchant_type,
+                payer_display_name=payer_display_name,
+                merchant_display_name=merchant_display_name,
+                
+                # Transaction details
                 payer_address=payer_account.sui_address,
                 merchant_address=invoice.merchant_account.sui_address,
                 amount=invoice.amount,
@@ -283,9 +348,10 @@ class PayInvoice(graphene.Mutation):
                 invoice=invoice
             )
 
-            # Update invoice
+            # Update invoice with proper paid_by fields
             invoice.status = 'PAID'
             invoice.paid_by_user = user
+            invoice.paid_by_business = payer_business  # Set if payer is business
             invoice.paid_at = timezone.now()
             invoice.save()
 

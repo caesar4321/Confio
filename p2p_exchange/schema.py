@@ -92,7 +92,8 @@ class P2POfferType(DjangoObjectType):
     def resolve_payment_methods(self, info):
         """Resolve payment methods for this offer, converting DB records to our GraphQL type"""
         try:
-            db_payment_methods = self.payment_methods.all()
+            # Only return active payment methods
+            db_payment_methods = self.payment_methods.filter(is_active=True)
             payment_methods = []
             
             for i, db_method in enumerate(db_payment_methods):
@@ -448,7 +449,7 @@ class CreateP2PTrade(graphene.Mutation):
             # The frontend sends sequential IDs (1, 2, 3) but we need actual DB IDs
             try:
                 payment_method_index = int(input.paymentMethodId) - 1  # Convert to 0-based index
-                offer_payment_methods = list(offer.payment_methods.all())
+                offer_payment_methods = list(offer.payment_methods.filter(is_active=True))
                 
                 if payment_method_index < 0 or payment_method_index >= len(offer_payment_methods):
                     return CreateP2PTrade(
@@ -818,34 +819,46 @@ class Query(graphene.ObjectType):
         if not (user and getattr(user, 'is_authenticated', False)):
             return []
         
+        print(f"[P2P] resolve_my_p2p_trades - account_id: {account_id}, user: {user.username if user else 'None'}")
+        
         if account_id:
             # Filter trades for a specific account context
             from users.models import Account
             try:
                 account = Account.objects.get(id=account_id, user=user)
+                print(f"[P2P] Found account: {account.id}, type: {account.account_type}, business: {account.business.id if account.business else 'None'}")
+                
                 if account.account_type == 'business' and account.business:
                     # Show only business trades for this specific business
-                    return P2PTrade.objects.filter(
+                    trades = P2PTrade.objects.filter(
                         models.Q(buyer_business=account.business) | models.Q(seller_business=account.business)
                     ).order_by('-created_at')
+                    print(f"[P2P] Filtering business trades for business_id: {account.business.id}, found: {trades.count()} trades")
+                    return trades
                 else:
                     # Show only personal trades for this user
-                    return P2PTrade.objects.filter(
+                    trades = P2PTrade.objects.filter(
                         models.Q(buyer_user=user) | models.Q(seller_user=user)
                     ).order_by('-created_at')
+                    print(f"[P2P] Filtering personal trades for user_id: {user.id}, found: {trades.count()} trades")
+                    return trades
             except Account.DoesNotExist:
+                print(f"[P2P] Account not found: account_id={account_id}, user_id={user.id}")
                 return []
         else:
             # No account filter - show all trades for this user (all accounts)
+            print(f"[P2P] No account_id provided - returning ALL trades for user")
             from users.models import Business
             user_businesses = Business.objects.filter(accounts__user=user)
             
             # Find trades where user is involved as a person OR through their businesses
             # NEW: Use direct relationships for cleaner semantics
-            return P2PTrade.objects.filter(
+            trades = P2PTrade.objects.filter(
                 models.Q(buyer_user=user) | models.Q(seller_user=user) |
                 models.Q(buyer_business__in=user_businesses) | models.Q(seller_business__in=user_businesses)
             ).order_by('-created_at')
+            print(f"[P2P] Found {trades.count()} total trades across all accounts")
+            return trades
 
     def resolve_p2p_trade(self, info, id):
         user = getattr(info.context, 'user', None)

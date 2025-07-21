@@ -36,6 +36,13 @@ export const ScanScreen = () => {
     scanMode
   });
 
+  console.log('ScanScreen - Debug info:', {
+    hasPermission,
+    device: device ? 'found' : 'not found',
+    scanFrameSize,
+    isFlashOn
+  });
+
   useEffect(() => {
     checkPermission();
   }, []);
@@ -196,35 +203,55 @@ export const ScanScreen = () => {
         codeScanner={codeScanner}
         torch={isFlashOn ? 'on' : 'off'}
         enableZoomGesture
-      >
-        <View style={styles.overlay}>
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-              <Icon name="x" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-            {isBusinessAccount && scanMode && (
-              <View style={styles.modeIndicator}>
-                <Text style={styles.modeIndicatorText}>
-                  {scanMode === 'cobrar' ? 'Cobrar' : 'Pagar'}
-                </Text>
-              </View>
-            )}
+      />
+      
+      {/* Move overlay outside Camera component */}
+      <View style={styles.overlayAbsolute}>
+          {/* Top overlay area with integrated header */}
+          <View style={styles.topOverlay}>
+            <View style={styles.headerControls}>
+              <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+                <Icon name="x" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+              {isBusinessAccount && scanMode && (
+                <View style={styles.modeIndicator}>
+                  <Text style={styles.modeIndicatorText}>
+                    {scanMode === 'cobrar' ? 'Cobrar' : 'Pagar'}
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
-
-          <View style={styles.scanArea}>
-            <View style={styles.scanFrame} />
-            {scannedSuccessfully && (
-              <View style={styles.successOverlay}>
-                <Icon name="check-circle" size={60} color="#10B981" />
-                <Text style={styles.successText}>Código QR detectado</Text>
-              </View>
-            )}
+          
+          {/* Middle area with scan frame */}
+          <View style={styles.middleRow}>
+            <View style={styles.sideOverlay} />
+            
+            <View style={styles.scanFrame}>
+              {/* Corner brackets for better visual indication */}
+              <View style={styles.cornerBracket} />
+              <View style={styles.cornerBracketTopRight} />
+              <View style={styles.cornerBracketBottomLeft} />
+              <View style={styles.cornerBracketBottomRight} />
+              
+              {scannedSuccessfully && (
+                <View style={styles.successOverlay}>
+                  <Icon name="check-circle" size={60} color="#10B981" />
+                  <Text style={styles.successText}>Código QR detectado</Text>
+                </View>
+              )}
+            </View>
+            
+            <View style={styles.sideOverlay} />
           </View>
-
-          <View style={styles.footer}>
-            <TouchableOpacity style={styles.flashButton} onPress={toggleFlash}>
-              <Icon name={isFlashOn ? "zap-off" : "zap"} size={24} color="#FFFFFF" />
-            </TouchableOpacity>
+          
+          {/* Bottom overlay area */}
+          <View style={styles.bottomOverlay}>
+            {/* Scanning instruction */}
+            <View style={styles.scanInstruction}>
+              <Text style={styles.scanInstructionText}>Posiciona el código QR aquí</Text>
+            </View>
+            
             <Text style={styles.instructions}>
               {isProcessing 
                 ? 'Procesando código QR...'
@@ -232,9 +259,14 @@ export const ScanScreen = () => {
                   ? scanMode === 'cobrar' 
                     ? 'Escanea el código QR del cliente para cobrar'
                     : 'Escanea el código QR del proveedor para pagar'
-                  : 'Escanea un código QR para enviar o recibir'
+                  : 'Escanea un código QR de pago'
               }
             </Text>
+            
+            <TouchableOpacity style={styles.flashButton} onPress={toggleFlash}>
+              <Icon name={isFlashOn ? "zap-off" : "zap"} size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+            
             {isProcessing && (
               <View style={styles.loadingContainer}>
                 <Text style={styles.loadingText}>Procesando...</Text>
@@ -242,7 +274,6 @@ export const ScanScreen = () => {
             )}
           </View>
         </View>
-      </Camera>
     </View>
   );
 };
@@ -263,14 +294,17 @@ const styles = StyleSheet.create({
   },
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     width: '100%',
   },
-  header: {
-    padding: 16,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  overlayAbsolute: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flex: 1,
+    width: '100%',
+    height: '100%',
   },
   closeButton: {
     width: 40,
@@ -291,35 +325,113 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  scanArea: {
-    flex: 1,
-    justifyContent: 'center',
+  topOverlay: {
+    flex: 0.7,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-start',
+    paddingTop: 50, // Account for status bar
+  },
+  headerControls: {
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  middleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  sideOverlay: {
+    flex: 1,
+    height: scanFrameSize,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  bottomOverlay: {
+    flex: 1.3,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 15,
+    paddingBottom: 20,
   },
   scanFrame: {
     width: scanFrameSize,
     height: scanFrameSize,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    borderRadius: 16,
-  },
-  footer: {
-    padding: 24,
+    position: 'relative',
+    justifyContent: 'center',
     alignItems: 'center',
+  },
+  cornerBracket: {
+    position: 'absolute',
+    width: 35,
+    height: 35,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+    borderTopColor: '#00FF88',
+    borderLeftColor: '#00FF88',
+    top: -2,
+    left: -2,
+  },
+  cornerBracketTopRight: {
+    position: 'absolute',
+    width: 35,
+    height: 35,
+    borderTopWidth: 4,
+    borderRightWidth: 4,
+    borderTopColor: '#00FF88',
+    borderRightColor: '#00FF88',
+    top: -2,
+    right: -2,
+  },
+  cornerBracketBottomLeft: {
+    position: 'absolute',
+    width: 35,
+    height: 35,
+    borderBottomWidth: 4,
+    borderLeftWidth: 4,
+    borderBottomColor: '#00FF88',
+    borderLeftColor: '#00FF88',
+    bottom: -2,
+    left: -2,
+  },
+  cornerBracketBottomRight: {
+    position: 'absolute',
+    width: 35,
+    height: 35,
+    borderBottomWidth: 4,
+    borderRightWidth: 4,
+    borderBottomColor: '#00FF88',
+    borderRightColor: '#00FF88',
+    bottom: -2,
+    right: -2,
+  },
+  scanInstruction: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    borderRadius: 20,
+    marginBottom: 20,
+  },
+  scanInstructionText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   flashButton: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.8)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
+    marginTop: 15,
   },
   instructions: {
     color: '#FFFFFF',
     fontSize: 16,
     textAlign: 'center',
+    paddingHorizontal: 20,
   },
   text: {
     color: '#FFFFFF',

@@ -21,7 +21,7 @@ class SendTransaction(SoftDeleteModel):
         ('USDC', 'USD Coin')
     ]
 
-    # User references (from our database)
+    # User references (from our database) - LEGACY
     sender_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -33,6 +33,53 @@ class SendTransaction(SoftDeleteModel):
         null=True,
         blank=True,
         related_name='received_transactions'
+    )
+
+    # NEW: Direct User/Business relationship fields
+    sender_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        related_name='sent_transactions',
+        null=True,
+        blank=True,
+        help_text='Business that sent the transaction (if sent by business)'
+    )
+    recipient_business = models.ForeignKey(
+        'users.Business', 
+        on_delete=models.CASCADE,
+        related_name='received_transactions',
+        null=True,
+        blank=True,
+        help_text='Business that received the transaction (if received by business)'
+    )
+
+    # Computed fields for GraphQL
+    ACCOUNT_TYPE_CHOICES = [
+        ('user', 'Personal'),
+        ('business', 'Business'),
+    ]
+    
+    sender_type = models.CharField(
+        max_length=10,
+        choices=ACCOUNT_TYPE_CHOICES,
+        default='user',
+        help_text='Type of sender (user or business)'
+    )
+    recipient_type = models.CharField(
+        max_length=10,
+        choices=ACCOUNT_TYPE_CHOICES,
+        default='user',
+        help_text='Type of recipient (user or business)'
+    )
+    sender_display_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Display name for the sender'
+    )
+    recipient_display_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Display name for the recipient'
     )
 
     # Blockchain addresses
@@ -58,6 +105,8 @@ class SendTransaction(SoftDeleteModel):
             models.Index(fields=['transaction_hash']),
             models.Index(fields=['sender_user', 'status']),
             models.Index(fields=['recipient_user', 'status']),
+            models.Index(fields=['sender_business', 'status']),
+            models.Index(fields=['recipient_business', 'status']),
             models.Index(fields=['sender_address']),
             models.Index(fields=['recipient_address']),
             models.Index(fields=['created_at']),

@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.contrib import messages
+from django.utils.html import format_html
 from .models import SendTransaction
 
 @admin.register(SendTransaction)
@@ -7,8 +8,8 @@ class SendTransactionAdmin(admin.ModelAdmin):
     """Admin configuration for SendTransaction model"""
     list_display = [
         'id',
-        'sender_user', 
-        'recipient_user',
+        'sender_display',
+        'recipient_display', 
         'amount_display', 
         'token_type', 
         'status', 
@@ -17,7 +18,9 @@ class SendTransactionAdmin(admin.ModelAdmin):
     ]
     list_filter = [
         'status', 
-        'token_type', 
+        'token_type',
+        'sender_type',
+        'recipient_type', 
         'created_at', 
         'updated_at',
         'sender_user__is_active',
@@ -27,11 +30,15 @@ class SendTransactionAdmin(admin.ModelAdmin):
         'transaction_hash',
         'sender_user__username', 
         'sender_user__email',
+        'sender_business__name',
         'recipient_user__username',
         'recipient_user__email',
+        'recipient_business__name',
         'sender_address',
         'recipient_address',
-        'memo'
+        'memo',
+        'sender_display_name',
+        'recipient_display_name'
     ]
     readonly_fields = [
         'created_at', 
@@ -46,7 +53,15 @@ class SendTransactionAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Transaction Information', {
-            'fields': ('sender_user', 'recipient_user', 'amount_display', 'amount', 'token_type', 'memo')
+            'fields': ('amount_display', 'amount', 'token_type', 'memo')
+        }),
+        ('Sender Details', {
+            'fields': ('sender_type', 'sender_user', 'sender_business', 'sender_display_name'),
+            'description': 'Either sender_user (personal) OR sender_business (business) should be set'
+        }),
+        ('Recipient Details', {
+            'fields': ('recipient_type', 'recipient_user', 'recipient_business', 'recipient_display_name'),
+            'description': 'Either recipient_user (personal) OR recipient_business (business) should be set'
         }),
         ('Blockchain Details', {
             'fields': ('sender_address', 'recipient_address', 'transaction_hash'),
@@ -60,6 +75,48 @@ class SendTransactionAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+    
+    def sender_display(self, obj):
+        """Display sender with type indicator and colored badge"""
+        if obj.sender_business:
+            return format_html(
+                '<span style="background-color: #3B82F6; color: white; padding: 2px 6px; '
+                'border-radius: 4px; font-size: 11px; margin-right: 4px;">BUSINESS</span>'
+                '<strong>{}</strong>',
+                obj.sender_business.name
+            )
+        elif obj.sender_user:
+            return format_html(
+                '<span style="background-color: #10B981; color: white; padding: 2px 6px; '
+                'border-radius: 4px; font-size: 11px; margin-right: 4px;">PERSONAL</span>'
+                '{} {}',
+                obj.sender_user.first_name or obj.sender_user.username,
+                obj.sender_user.last_name or ''
+            )
+        return "Unknown Sender"
+    sender_display.short_description = "Sender"
+    sender_display.admin_order_field = 'sender_user__username'
+    
+    def recipient_display(self, obj):
+        """Display recipient with type indicator and colored badge"""
+        if obj.recipient_business:
+            return format_html(
+                '<span style="background-color: #3B82F6; color: white; padding: 2px 6px; '
+                'border-radius: 4px; font-size: 11px; margin-right: 4px;">BUSINESS</span>'
+                '<strong>{}</strong>',
+                obj.recipient_business.name
+            )
+        elif obj.recipient_user:
+            return format_html(
+                '<span style="background-color: #10B981; color: white; padding: 2px 6px; '
+                'border-radius: 4px; font-size: 11px; margin-right: 4px;">PERSONAL</span>'
+                '{} {}',
+                obj.recipient_user.first_name or obj.recipient_user.username,
+                obj.recipient_user.last_name or ''
+            )
+        return "Unknown Recipient"
+    recipient_display.short_description = "Recipient"
+    recipient_display.admin_order_field = 'recipient_user__username'
     
     def amount_display(self, obj):
         """Display amount in decimal format"""

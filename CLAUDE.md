@@ -40,6 +40,11 @@
 5. **Consider Latin American context** for financial features
 6. **Test with Venezuelan payment methods** as primary use case
 
+### Development Environment
+- **Python Virtual Environment**: Always use `myvenv/bin/python` for Python commands
+- **Django Commands**: Use `myvenv/bin/python manage.py [command]`
+- **Package Installation**: Use `myvenv/bin/pip install [package]`
+
 ### Security Notes
 - Never store private keys or sensitive data
 - Use soft-delete for all critical models
