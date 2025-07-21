@@ -25,6 +25,10 @@ import { useCountrySelection } from '../hooks/useCountrySelection';
 import { useCurrency } from '../hooks/useCurrency';
 import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS, GET_MY_P2P_TRADES } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
+import { useCountry } from '../contexts/CountryContext';
+import { ExchangeRateDisplay } from '../components/ExchangeRateDisplay';
+import { useSelectedCountryRate } from '../hooks/useExchangeRate';
+import { getCurrencySymbol, getCurrencyForCountry } from '../utils/currencyMapping';
 
 // Colors from the design
 const colors = {
@@ -336,8 +340,15 @@ export const ExchangeScreen = () => {
   // Use currency system based on selected country
   const { currency, formatAmount, exchangeRate } = useCurrency();
   
+  // Get real market exchange rate for selected country
+  const { rate: marketRate, loading: marketRateLoading } = useSelectedCountryRate();
+  
   // Get current account context
   const { activeAccount } = useAccount();
+  
+  // Get currency information for selected country (from context, same as exchange rate hook)
+  const { selectedCountry: contextSelectedCountry, userCountry } = useCountry();
+  const currencyCode = getCurrencyForCountry(contextSelectedCountry);
 
   const [activeTab, setActiveTab] = useState<'buy' | 'sell'>('buy');
   const [selectedCrypto, setSelectedCrypto] = useState<'cUSD' | 'CONFIO'>('cUSD');
@@ -432,14 +443,47 @@ export const ExchangeScreen = () => {
           }
         };
 
+        // Get user stats for the other party (if available)
+        const otherPartyStats = trade.offer?.userStats;
+        
+        // Calculate if user is "online" (active within last 6 hours)
+        const isOnline = otherPartyStats?.lastSeenOnline ? (() => {
+          const lastSeen = new Date(otherPartyStats.lastSeenOnline);
+          const now = new Date();
+          const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+          return lastSeen > sixHoursAgo;
+        })() : false;
+        
+        // Format last seen time
+        const formatLastSeen = (lastSeenOnline: string | null): string => {
+          if (!lastSeenOnline) return "Desconocido";
+          
+          const lastSeen = new Date(lastSeenOnline);
+          const now = new Date();
+          const diffMs = now.getTime() - lastSeen.getTime();
+          const diffHours = diffMs / (1000 * 60 * 60);
+          
+          if (diffHours < 1) return "Activo ahora";
+          if (diffHours < 24) return `Hace ${Math.floor(diffHours)} horas`;
+          if (diffHours < 168) return `Hace ${Math.floor(diffHours / 24)} días`;
+          return "Hace mucho tiempo";
+        };
+        
+        // Format response time from minutes
+        const formatResponseTime = (avgResponseTimeMinutes: number | null): string => {
+          if (!avgResponseTimeMinutes) return "N/A";
+          if (avgResponseTimeMinutes < 60) return `${Math.round(avgResponseTimeMinutes)} min`;
+          return `${Math.round(avgResponseTimeMinutes / 60)} horas`;
+        };
+
         return {
           id: trade.id,
           trader: {
             name: otherPartyName,
-            isOnline: true, // TODO: Get real online status
-            verified: true, // TODO: Get real verification status
-            lastSeen: "Activo ahora", // TODO: Get real last seen
-            responseTime: "5 min", // TODO: Get real response time
+            isOnline: isOnline,
+            verified: otherPartyStats?.isVerified || false,
+            lastSeen: formatLastSeen(otherPartyStats?.lastSeenOnline || null),
+            responseTime: formatResponseTime(otherPartyStats?.avgResponseTime || null),
           },
           amount: trade.cryptoAmount.toString(),
           crypto: trade.offer?.tokenType || 'cUSD',
@@ -624,34 +668,7 @@ export const ExchangeScreen = () => {
     });
   }, [offersData?.p2pOffers, amount, minRate, maxRate, filterVerified, filterOnline, filterHighVolume]);
 
-  // Calculate average rate from filtered offers
-  const averageRate = React.useMemo(() => {
-    if (filteredOffers.length === 0) {
-      return 0;
-    }
-    
-    // Get valid rates and sort to calculate median-based average (reduces outlier impact)
-    const validRates = filteredOffers
-      .map((offer: any) => parseFloat(offer.rate?.toString() || '0'))
-      .filter((rate: number) => rate > 0)
-      .sort((a: number, b: number) => a - b);
-    
-    if (validRates.length === 0) {
-      return 0;
-    }
-    
-    // Use trimmed mean (remove top and bottom 10% to reduce outlier impact)
-    const trimPercent = 0.1;
-    const trimCount = Math.floor(validRates.length * trimPercent);
-    const trimmedRates = validRates.slice(trimCount, validRates.length - trimCount);
-    
-    if (trimmedRates.length === 0) {
-      // If too few rates for trimming, use simple average
-      return validRates.reduce((sum, rate) => sum + rate, 0) / validRates.length;
-    }
-    
-    return trimmedRates.reduce((sum, rate) => sum + rate, 0) / trimmedRates.length;
-  }, [filteredOffers]);
+  // Note: Replaced calculated average with real market rate for better user experience
 
   // Debug: Log final results
   React.useEffect(() => {
@@ -944,7 +961,33 @@ export const ExchangeScreen = () => {
             </View>
           </View>
           <View style={styles.offerRateContainer}>
-            <Text style={styles.rateValue}>{formatAmount.withCode(offer.rate)}</Text>
+            <View style={styles.rateSection}>
+              <Text style={styles.rateValue}>{formatAmount.withCode(offer.rate)}</Text>
+              {/* Market Rate Comparison */}
+              {marketRate && (() => {
+                const offerRate = parseFloat(offer.rate);
+                const difference = ((offerRate - marketRate) / marketRate) * 100;
+                const isGoodDeal = activeTab === 'buy' ? difference < 0 : difference > 0;
+                
+                // Only show if difference is significant (> 0.5%)
+                if (Math.abs(difference) > 0.5) {
+                  return (
+                    <View style={[
+                      styles.rateComparison, 
+                      isGoodDeal ? styles.goodDeal : styles.badDeal
+                    ]}>
+                      <Text style={[
+                        styles.rateComparisonText,
+                        isGoodDeal ? styles.goodDealText : styles.badDealText
+                      ]}>
+                        {difference > 0 ? '+' : ''}{difference.toFixed(1)}%
+                      </Text>
+                    </View>
+                  );
+                }
+                return null;
+              })()}
+            </View>
             <View style={styles.responseTime}>
               <Icon name="clock" size={12} color="#6B7280" />
               <Text style={styles.responseTimeText}>
@@ -1395,9 +1438,13 @@ export const ExchangeScreen = () => {
                         styles.rateFilterContainer,
                         showAdvancedFilters && styles.rateFilterContainerExtended
                     ]}>
-                        <Text style={styles.averageRate}>
-                            {averageRate > 0 ? formatAmount.withCode(averageRate) : 'Sin datos'} promedio
-                        </Text>
+                        <View style={styles.marketRateContainer}>
+                            <Icon name="trending-up" size={12} color="#059669" style={styles.marketRateIcon} />
+                            <Text style={styles.marketRateText}>
+                                {marketRateLoading ? 'Cargando...' : 
+                                 marketRate ? `${marketRate.toFixed(2)} ${currencyCode}/USD mercado` : 'Sin datos de mercado'}
+                            </Text>
+                        </View>
                         <View style={styles.filterControls}>
                             <TouchableOpacity
                                 style={[
@@ -1746,8 +1793,8 @@ export const ExchangeScreen = () => {
               <Icon name="x" size={24} color="#1F2937" />
             </TouchableOpacity>
             <Text style={styles.modalTitleCountry}>Filtrar por País</Text>
-            <TouchableOpacity onPress={() => selectCountry(null)}>
-              <Text style={styles.clearText}>Limpiar</Text>
+            <TouchableOpacity onPress={() => selectCountry(userCountry)}>
+              <Text style={styles.clearText}>Mi País</Text>
             </TouchableOpacity>
           </View>
           <FlatList
@@ -1981,9 +2028,17 @@ const styles = StyleSheet.create({
     paddingBottom: 16, // Extra padding to fill the gap completely
     marginBottom: -8, // Overlap with advanced filters margin
   },
-  averageRate: {
+  marketRateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  marketRateIcon: {
+    marginRight: 4,
+  },
+  marketRateText: {
     fontSize: 12,
-    color: '#6B7280',
+    color: '#059669',
+    fontWeight: '600',
   },
   filterControls: {
     flexDirection: 'row',
@@ -2223,10 +2278,36 @@ const styles = StyleSheet.create({
   offerRateContainer: {
     alignItems: 'flex-end',
   },
+  rateSection: {
+    alignItems: 'flex-end',
+  },
   rateValue: {
     fontSize: 18,
     fontWeight: '700',
     color: '#1F2937',
+  },
+  rateComparison: {
+    marginTop: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    alignSelf: 'flex-end',
+  },
+  goodDeal: {
+    backgroundColor: '#D1FAE5', // green background
+  },
+  badDeal: {
+    backgroundColor: '#FEE2E2', // red background
+  },
+  rateComparisonText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  goodDealText: {
+    color: '#065F46', // green text
+  },
+  badDealText: {
+    color: '#DC2626', // red text
   },
   responseTime: {
     flexDirection: 'row',

@@ -659,6 +659,7 @@ export const GET_P2P_TRADE = gql`
           successRate
           avgResponseTime
           isVerified
+          lastSeenOnline
         }
       }
       buyer {
@@ -849,6 +850,44 @@ export const TRADE_CHAT_MESSAGE_SUBSCRIPTION = gql`
         createdAt
         isRead
       }
+    }
+  }
+`;
+
+// Exchange Rates Queries
+export const GET_CURRENT_EXCHANGE_RATE = gql`
+  query GetCurrentExchangeRate($sourceCurrency: String, $targetCurrency: String, $rateType: String) {
+    currentExchangeRate(sourceCurrency: $sourceCurrency, targetCurrency: $targetCurrency, rateType: $rateType)
+  }
+`;
+
+export const GET_EXCHANGE_RATE_WITH_FALLBACK = gql`
+  query GetExchangeRateWithFallback($sourceCurrency: String, $targetCurrency: String) {
+    exchangeRateWithFallback(sourceCurrency: $sourceCurrency, targetCurrency: $targetCurrency)
+  }
+`;
+
+export const GET_EXCHANGE_RATES = gql`
+  query GetExchangeRates($sourceCurrency: String, $targetCurrency: String, $rateType: String, $limit: Int) {
+    exchangeRates(sourceCurrency: $sourceCurrency, targetCurrency: $targetCurrency, rateType: $rateType, limit: $limit) {
+      id
+      sourceCurrency
+      targetCurrency
+      rate
+      rateType
+      source
+      fetchedAt
+      isActive
+    }
+  }
+`;
+
+export const REFRESH_EXCHANGE_RATES = gql`
+  mutation RefreshExchangeRates {
+    refreshExchangeRates {
+      success
+      message
+      sources
     }
   }
 `;

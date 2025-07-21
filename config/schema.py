@@ -4,12 +4,13 @@ from telegram_verification import schema as telegram_verification_schema
 from send import schema as send_schema
 from payments import schema as payments_schema
 from p2p_exchange import schema as p2p_exchange_schema
+from exchange_rates import schema as exchange_rates_schema
 import graphene
 import logging
 
 logger = logging.getLogger(__name__)
 
-class Query(users_schema.Query, send_schema.Query, payments_schema.Query, p2p_exchange_schema.Query, graphene.ObjectType):
+class Query(users_schema.Query, send_schema.Query, payments_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, graphene.ObjectType):
 	# Override the legalDocument field to make it public
 	legalDocument = users_schema.Query.legalDocument
 
@@ -20,6 +21,7 @@ class Mutation(
 	send_schema.Mutation,
 	payments_schema.Mutation,
 	p2p_exchange_schema.Mutation,
+	exchange_rates_schema.Mutation,
 	graphene.ObjectType
 ):
 	pass
@@ -45,6 +47,7 @@ types = [
 	p2p_exchange_schema.P2PMessageType,
 	p2p_exchange_schema.P2PPaymentMethodType,
 	p2p_exchange_schema.P2PUserStatsType,
+	exchange_rates_schema.ExchangeRateType,
 ]
 
 schema = graphene.Schema(

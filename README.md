@@ -571,6 +571,218 @@ query TradeMessages($tradeId: ID!) {
 }
 ```
 
+## 💱 Exchange Rate System
+
+Confío includes a comprehensive multi-currency exchange rate system that provides real-time market rates for P2P trading across Latin America and global markets.
+
+### Supported Currencies
+
+The system supports **25 currencies** with specialized sources for accurate market rates:
+
+#### **Latin America (10 currencies)**
+- **VES** - Venezuela (Bolívar)
+- **ARS** - Argentina (Peso) 
+- **COP** - Colombia (Peso)
+- **PEN** - Peru (Sol)
+- **CLP** - Chile (Peso)
+- **BOB** - Bolivia (Boliviano)
+- **UYU** - Uruguay (Peso)
+- **PYG** - Paraguay (Guaraní)
+- **BRL** - Brazil (Real)
+- **MXN** - Mexico (Peso)
+
+#### **North America & Oceania (3 currencies)**
+- **USD** - United States (Dollar) - *base currency*
+- **CAD** - Canada (Dollar)
+- **AUD** - Australia (Dollar)
+
+#### **Europe (2 currencies)**
+- **EUR** - Europe (Euro)
+- **GBP** - United Kingdom (Pound)
+
+#### **Asia Pacific (10 currencies)**
+- **JPY** - Japan (Yen)
+- **CNY** - China (Yuan)
+- **KRW** - South Korea (Won)
+- **INR** - India (Rupee)
+- **SGD** - Singapore (Dollar)
+- **THB** - Thailand (Baht)
+- **PHP** - Philippines (Peso)
+- **MYR** - Malaysia (Ringgit)
+- **IDR** - Indonesia (Rupiah)
+- **VND** - Vietnam (Dong)
+
+| Region | Count | Sources |
+|--------|-------|---------|
+| **Latin America** | 10 currencies | Country-specific APIs + global APIs |
+| **North America & Oceania** | 3 currencies | Global APIs |
+| **Europe** | 2 currencies | Global APIs |
+| **Asia Pacific** | 10 currencies | Global APIs |
+| **Total** | **25 currencies** | Multiple specialized sources |
+
+### Exchange Rate Sources
+
+#### Global Multi-Currency Sources
+- **ExchangeRate-API** (`exchangerate_api`)
+  - **Coverage**: 24+ global currencies
+  - **Rate Type**: Official exchange rates
+  - **Reliability**: ⭐⭐⭐⭐⭐ High
+  - **Update Frequency**: Real-time
+  - **Status**: ✅ Active
+
+- **Yadio** (`yadio`)
+  - **Coverage**: Limited currencies including VES
+  - **Rate Type**: Market rates
+  - **Reliability**: ⭐⭐⭐⭐ Good
+  - **Purpose**: VES backup source
+  - **Status**: ✅ Active
+
+- **CurrencyLayer** (`currencylayer`)
+  - **Coverage**: Various currencies (limited free tier)
+  - **Rate Type**: Official rates
+  - **Reliability**: ⭐⭐⭐ Medium
+  - **Purpose**: Additional coverage when available
+  - **Status**: 🟡 Partial (limited coverage)
+
+#### Argentina-Specific Sources (ARS)
+Argentina requires specialized sources due to multiple official rates and significant parallel market ("blue dollar") premium:
+
+- **Bluelytics** (`bluelytics`)
+  - **API**: `https://api.bluelytics.com.ar/v2/latest`
+  - **Coverage**: ARS official + blue dollar rates
+  - **Rate Types**: 
+    - `official`: Government rate (~1,283 ARS/USD)
+    - `parallel`: Blue dollar rate (~1,305 ARS/USD)
+  - **Reliability**: ⭐⭐⭐⭐⭐ Excellent
+  - **Purpose**: True parallel market rates for P2P trading
+  - **Status**: ✅ Active
+
+- **DolarAPI** (`dolarapi`)
+  - **API**: `https://dolarapi.com/v1/dolares`
+  - **Coverage**: Multiple ARS rate types
+  - **Rate Types**:
+    - `oficial`: Official government rate
+    - `blue`: Blue dollar (parallel market)
+    - `bolsa`: Stock market rate
+    - `contadoconliqui`: CCL rate
+  - **Reliability**: ⭐⭐⭐⭐⭐ Excellent
+  - **Purpose**: Comprehensive Argentine market rates
+  - **Status**: ✅ Active
+
+#### Historical Sources (Deprecated)
+- **DolarToday** (`dolartoday`) - ❌ **REMOVED**
+  - **Issue**: S3 bucket no longer exists (404 error)
+  - **Was**: Venezuelan parallel market specialist
+  - **Replacement**: Yadio + ExchangeRate-API for VES rates
+
+### Rate Types
+
+The system categorizes rates into different types based on their source and market context:
+
+| Rate Type | Description | Use Case | Countries |
+|-----------|-------------|----------|-----------|
+| `official` | Government/bank rates | Stable economies | BOB, USD, EUR, etc. |
+| `parallel` | Black/blue market rates | P2P trading | ARS (blue dollar), VES |
+| `average` | Averaged market rates | Reference rates | ARS (bolsa, CCL) |
+
+### Architecture
+
+#### Backend Components (`exchange_rates/`)
+- **Models** (`models.py`): `ExchangeRate`, `RateFetchLog` with soft delete support
+- **Services** (`services.py`): Multi-source fetching with error handling and logging
+- **Admin** (`admin.py`): Visual admin interface with colored badges and rate comparison
+- **Tasks** (`tasks.py`): Celery-based periodic rate fetching
+- **Currency Mapping** (`currency_mapping.py`): Country-to-currency mappings
+
+#### Frontend Integration (`apps/src/`)
+- **Hooks** (`hooks/useExchangeRate.ts`):
+  - `useSelectedCountryRate()`: Dynamic rate based on selected country
+  - `useExchangeRate()`: Generic currency pair rates
+  - `useCryptoToFiatCalculator()`: Crypto-to-fiat conversion utilities
+- **Components** (`components/ExchangeRateDisplay.tsx`): Real-time rate display with currency codes
+- **Currency Utilities** (`utils/currencyMapping.ts`): Country-to-currency mapping functions
+
+#### GraphQL API (`exchange_rates/schema.py`)
+```graphql
+type Query {
+  exchangeRateWithFallback(sourceCurrency: String!, targetCurrency: String!): String
+  currentExchangeRate(sourceCurrency: String!, targetCurrency: String!, rateType: String!): String
+}
+```
+
+### Country-Specific Exchange Rate Examples
+
+#### Venezuela (VES)
+- **Challenge**: Economic instability, multiple rate tiers
+- **Sources**: Yadio (market rates) + ExchangeRate-API (official rates)
+- **Current Rate**: ~119 VES/USD
+- **Note**: Parallel market rates significantly higher than official rates
+
+#### Argentina (ARS)
+- **Challenge**: Multiple official rates, blue dollar premium
+- **Sources**: Bluelytics + DolarAPI (specialized Argentine APIs)
+- **Rate Examples**:
+  - Official: ~1,283 ARS/USD
+  - Blue Dollar: ~1,305 ARS/USD (what people actually use)
+- **Accuracy**: ⭐⭐⭐⭐⭐ Excellent (true parallel market rates)
+
+#### Bolivia (BOB)
+- **Status**: Economically stable, recent inflation
+- **Sources**: ExchangeRate-API (official rates sufficient)
+- **Current Rate**: ~6.9 BOB/USD
+- **Note**: Official rates still reflect market reality
+
+#### Colombia (COP)
+- **Status**: Stable currency with official rate accuracy
+- **Sources**: ExchangeRate-API
+- **Current Rate**: ~4,013 COP/USD
+- **Note**: No parallel market premium
+
+### Automatic Updates
+
+The system fetches rates automatically via Celery tasks:
+
+```python
+# config/settings.py
+CELERY_BEAT_SCHEDULE = {
+    'fetch-exchange-rates': {
+        'task': 'exchange_rates.tasks.fetch_all_rates',
+        'schedule': crontab(minute='*/15'),  # Every 15 minutes
+    },
+}
+```
+
+### Error Handling & Monitoring
+
+- **Comprehensive Logging**: All API calls logged with response times and success/failure status
+- **Fallback Logic**: Multiple sources with priority: specialized → general → fallback
+- **Rate Fetch Logs**: `RateFetchLog` model tracks all fetching attempts for debugging
+- **Admin Interface**: Visual indicators for source reliability and rate freshness
+
+### Usage in P2P Trading
+
+The exchange rate system integrates seamlessly with P2P trading:
+
+1. **Market Rate Display**: Shows current rates like "1,305 ARS/USD mercado" in the UI
+2. **Rate Comparison**: P2P offers show percentage difference from market rate
+3. **Country-Specific**: Automatically uses appropriate currency based on user's country
+4. **Real-time Updates**: Rates update every 15 minutes for accurate pricing
+
+### Development Commands
+
+```bash
+# Manual rate fetching
+python manage.py fetch_rates
+
+# Check current rates
+python manage.py shell -c "from exchange_rates.models import ExchangeRate; print(ExchangeRate.objects.filter(source_currency='ARS').order_by('-fetched_at')[:5])"
+
+# View rate fetch logs
+# Admin interface: /admin/exchange_rates/ratefetchlog/
+```
+
+This multi-currency system ensures that Confío users across Latin America have access to accurate, real-time exchange rates for fair P2P trading regardless of their local economic conditions.
+
 ## 🚀 Development Setup
 
 ### Prerequisites
