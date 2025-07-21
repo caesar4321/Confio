@@ -20,11 +20,12 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 django_asgi_app = get_asgi_application()
 
 from p2p_exchange.routing import websocket_urlpatterns
+from p2p_exchange.middleware import JWTAuthMiddleware
 
 application = ProtocolTypeRouter({
     "http": django_asgi_app,
     "websocket": AllowedHostsOriginValidator(
-        AuthMiddlewareStack(
+        JWTAuthMiddleware(
             URLRouter(
                 websocket_urlpatterns
             )
