@@ -13,9 +13,13 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useMutation } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
+import { CREATE_P2P_TRADE } from '../apollo/queries';
+import { useCurrency } from '../hooks/useCurrency';
+import { useAccount } from '../contexts/AccountContext';
 
 type TradeConfirmRouteProp = RouteProp<MainStackParamList, 'TradeConfirm'>;
 type TradeConfirmNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeConfirm'>;
@@ -25,59 +29,85 @@ export const TradeConfirmScreen: React.FC = () => {
   const route = useRoute<TradeConfirmRouteProp>();
   const { offer, crypto, tradeType } = route.params;
   
-  const [amount, setAmount] = useState('100.00');
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(offer.paymentMethods[0] || '');
+  // Currency formatting
+  const { formatAmount } = useCurrency();
+  
+  // Account context
+  const { activeAccount } = useAccount();
+  
+  // GraphQL mutation
+  const [createP2PTrade, { loading: createTradeLoading }] = useMutation(CREATE_P2P_TRADE);
+  
+  const [amount, setAmount] = useState('');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(offer.paymentMethods[0] || null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
 
   const handleBack = () => {
     navigation.goBack();
   };
 
-  const handleConfirmTrade = () => {
+  const handleConfirmTrade = async () => {
     if (!amount || !selectedPaymentMethod) {
       Alert.alert('Error', 'Por favor completa todos los campos');
       return;
     }
     
-    // Navigate to TradeChatScreen with the trade details
-    navigation.navigate('TradeChat', { 
-      offer: {
-        id: offer.id,
-        name: offer.name,
-        rate: offer.rate,
-        limit: offer.limit,
-        available: offer.available,
-        paymentMethods: offer.paymentMethods,
-        responseTime: offer.responseTime,
-        completedTrades: offer.completedTrades,
-        successRate: offer.successRate,
-        verified: offer.verified,
-        isOnline: offer.isOnline,
-        lastSeen: offer.lastSeen,
-      },
-      crypto: crypto,
-      amount: amount,
-      tradeType: tradeType
-    });
+    const cryptoAmount = parseFloat(amount);
+    if (isNaN(cryptoAmount) || cryptoAmount <= 0) {
+      Alert.alert('Error', 'Por favor ingresa un monto válido');
+      return;
+    }
+    
+    try {
+      // Create the trade in the database
+      const { data } = await createP2PTrade({
+        variables: {
+          input: {
+            offerId: offer.id,
+            cryptoAmount: cryptoAmount,
+            paymentMethodId: selectedPaymentMethod.id,
+            accountId: activeAccount?.id, // Pass the current account ID
+          },
+        },
+      });
+
+      if (data?.createP2pTrade?.success) {
+        const createdTrade = data.createP2pTrade.trade;
+        
+        // Navigate to TradeChatScreen with the actual trade data
+        navigation.navigate('TradeChat', { 
+          offer: offer,
+          crypto: crypto,
+          amount: amount,
+          tradeType: tradeType,
+          tradeId: createdTrade.id, // Pass the actual trade ID
+        });
+      } else {
+        const errorMessage = data?.createP2pTrade?.errors?.join(', ') || 'Error desconocido';
+        Alert.alert('Error', errorMessage);
+      }
+    } catch (error) {
+      console.error('Error creating trade:', error);
+      Alert.alert('Error', 'Ocurrió un error al crear el intercambio. Por favor intenta de nuevo.');
+    }
   };
 
-  const handlePaymentMethodSelect = (method: string) => {
+  const handlePaymentMethodSelect = (method: any) => {
     setSelectedPaymentMethod(method);
     setShowPaymentModal(false);
   };
 
   const calculateTotal = () => {
     const numAmount = parseFloat(amount) || 0;
-    const rate = parseFloat(offer.rate.replace(' Bs.', '')) || 0;
-    return (numAmount * rate).toLocaleString('es-VE', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    const rate = parseFloat(offer.rate) || 0;
+    return formatAmount.withCode(numAmount * rate);
   };
 
-  const getPaymentMethodDescription = (method: string) => {
-    if (method.includes('Efectivo')) return 'Pago en efectivo';
-    if (method.includes('Pago Móvil')) return 'Pago móvil';
+  const getPaymentMethodDescription = (method: any) => {
+    if (!method) return 'Método de pago';
+    const name = method.displayName || method.name || '';
+    if (name.includes('Efectivo')) return 'Pago en efectivo';
+    if (name.includes('Pago Móvil')) return 'Pago móvil';
     return 'Transferencia bancaria';
   };
 
@@ -117,7 +147,7 @@ export const TradeConfirmScreen: React.FC = () => {
             
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Pagarás</Text>
-              <Text style={styles.totalAmount}>{calculateTotal()} Bs.</Text>
+              <Text style={styles.totalAmount}>{calculateTotal()}</Text>
             </View>
             
             <View style={styles.summaryRow}>
@@ -156,7 +186,9 @@ export const TradeConfirmScreen: React.FC = () => {
               style={styles.paymentDropdown}
               onPress={() => setShowPaymentModal(true)}
             >
-              <Text style={styles.paymentDropdownText}>{selectedPaymentMethod}</Text>
+              <Text style={styles.paymentDropdownText}>
+                {selectedPaymentMethod?.displayName || selectedPaymentMethod?.name || 'Seleccionar método'}
+              </Text>
               <Icon name="chevron-down" size={20} color="#6B7280" />
             </TouchableOpacity>
           </View>
@@ -164,11 +196,13 @@ export const TradeConfirmScreen: React.FC = () => {
           <View style={styles.paymentMethodContainer}>
             <View style={styles.paymentMethodIcon}>
               <Text style={styles.paymentMethodIconText}>
-                {selectedPaymentMethod.charAt(0)}
+                {(selectedPaymentMethod?.displayName || selectedPaymentMethod?.name || 'M').charAt(0)}
               </Text>
             </View>
             <View style={styles.paymentMethodInfo}>
-              <Text style={styles.paymentMethodName}>{selectedPaymentMethod}</Text>
+              <Text style={styles.paymentMethodName}>
+                {selectedPaymentMethod?.displayName || selectedPaymentMethod?.name || 'Método de pago'}
+              </Text>
               <Text style={styles.paymentMethodDescription}>
                 {getPaymentMethodDescription(selectedPaymentMethod)}
               </Text>
@@ -180,10 +214,13 @@ export const TradeConfirmScreen: React.FC = () => {
       {/* Action Button */}
       <View style={styles.bottomButtonContainer}>
         <TouchableOpacity 
-          style={styles.confirmButton} 
+          style={[styles.confirmButton, createTradeLoading && styles.confirmButtonDisabled]} 
           onPress={handleConfirmTrade}
+          disabled={createTradeLoading}
         >
-          <Text style={styles.confirmButtonText}>Confirmar y Comenzar</Text>
+          <Text style={styles.confirmButtonText}>
+            {createTradeLoading ? 'Creando intercambio...' : 'Confirmar y Comenzar'}
+          </Text>
         </TouchableOpacity>
       </View>
 
@@ -210,20 +247,24 @@ export const TradeConfirmScreen: React.FC = () => {
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
               {offer.paymentMethods.map((method, index) => (
                 <TouchableOpacity
-                  key={index}
+                  key={method.id || index}
                   style={styles.paymentOption}
                   onPress={() => handlePaymentMethodSelect(method)}
                 >
                   <View style={styles.paymentOptionIcon}>
-                    <Text style={styles.paymentOptionIconText}>{method.charAt(0)}</Text>
+                    <Text style={styles.paymentOptionIconText}>
+                      {(method.displayName || method.name || 'M').charAt(0)}
+                    </Text>
                   </View>
                   <View style={styles.paymentOptionInfo}>
-                    <Text style={styles.paymentOptionText}>{method}</Text>
+                    <Text style={styles.paymentOptionText}>
+                      {method.displayName || method.name}
+                    </Text>
                     <Text style={styles.paymentOptionDescription}>
                       {getPaymentMethodDescription(method)}
                     </Text>
                   </View>
-                  {selectedPaymentMethod === method && (
+                  {selectedPaymentMethod?.id === method.id && (
                     <Icon name="check" size={20} color={colors.primary} />
                   )}
                 </TouchableOpacity>
@@ -458,6 +499,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 12,
     alignItems: 'center',
+  },
+  confirmButtonDisabled: {
+    backgroundColor: '#9CA3AF',
   },
   confirmButtonText: {
     color: '#fff',

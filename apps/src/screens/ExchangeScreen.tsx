@@ -23,7 +23,8 @@ import { MainStackParamList } from '../types/navigation';
 import { countries, Country } from '../utils/countries';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { useCurrency } from '../hooks/useCurrency';
-import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS } from '../apollo/queries';
+import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS, GET_MY_P2P_TRADES } from '../apollo/queries';
+import { useAccount } from '../contexts/AccountContext';
 
 // Colors from the design
 const colors = {
@@ -302,53 +303,31 @@ const mockOffers = {
   ],
 };
 
-const activeTrades = [
-    {
-      id: 't1',
-      trader: {
-        name: "Maria L.",
-        isOnline: true,
-        verified: true,
-        lastSeen: "Activo ahora",
-        responseTime: "2 min",
-      },
-      amount: "100.00",
-      crypto: "cUSD",
-      totalBs: "3,610.00",
-      step: 2,
-      totalSteps: 4,
-      timeRemaining: 754, // seconds
-      status: "waiting_confirmation",
-      paymentMethod: "Banco Venezuela",
-      rate: "36.10",
-      tradeType: "buy" as const,
-    },
-    {
-      id: 't2',
-      trader: {
-        name: "Carlos F.",
-        isOnline: false,
-        verified: true,
-        lastSeen: "Hace 5 min",
-        responseTime: "5 min",
-      },
-      amount: "50.00",
-      crypto: "cUSD",
-      totalBs: "1,802.50",
-      step: 3,
-      totalSteps: 4,
-      timeRemaining: 525, // seconds
-      status: "verifying_payment",
-      paymentMethod: "Pago Móvil",
-      rate: "36.05",
-      tradeType: "sell" as const,
-    }
-];
-
 // Payment methods will be computed from server data inside the component
 
 type Offer = typeof mockOffers.cUSD[0];
-type ActiveTrade = typeof activeTrades[0];
+
+// Define the trade type based on the GraphQL schema
+interface ActiveTrade {
+  id: string;
+  trader: {
+    name: string;
+    isOnline: boolean;
+    verified: boolean;
+    lastSeen: string;
+    responseTime: string;
+  };
+  amount: string;
+  crypto: string;
+  totalBs: string;
+  step: number;
+  totalSteps: number;
+  timeRemaining: number; // seconds
+  status: string;
+  paymentMethod: string;
+  rate: string;
+  tradeType: 'buy' | 'sell';
+}
 
 export const ExchangeScreen = () => {
   // Use centralized country selection hook
@@ -356,6 +335,9 @@ export const ExchangeScreen = () => {
   
   // Use currency system based on selected country
   const { currency, formatAmount, exchangeRate } = useCurrency();
+  
+  // Get current account context
+  const { activeAccount } = useAccount();
 
   const [activeTab, setActiveTab] = useState<'buy' | 'sell'>('buy');
   const [selectedCrypto, setSelectedCrypto] = useState<'cUSD' | 'CONFIO'>('cUSD');
@@ -392,6 +374,86 @@ export const ExchangeScreen = () => {
     fetchPolicy: 'no-cache', // Completely bypass cache
     notifyOnNetworkStatusChange: false // Prevent re-renders on network status changes
   });
+
+  // Fetch user's active trades filtered by current account context
+  const { data: myTradesData, loading: tradesLoading, error: tradesError, refetch: refetchTrades } = useQuery(GET_MY_P2P_TRADES, {
+    variables: {
+      accountId: activeAccount?.id // Filter trades by current account context
+    },
+    fetchPolicy: 'cache-and-network', // Allow cache but also fetch fresh data
+    notifyOnNetworkStatusChange: false,
+    skip: !activeAccount // Skip query if no active account
+  });
+
+  // Transform real trades data into UI format
+  const activeTrades: ActiveTrade[] = React.useMemo(() => {
+    if (!myTradesData?.myP2pTrades) return [];
+    
+    return myTradesData.myP2pTrades
+      .filter((trade: any) => trade.status !== 'COMPLETED' && trade.status !== 'CANCELLED')
+      .map((trade: any) => {
+        // NEW: Use the computed helper fields from GraphQL for cleaner logic
+        const buyerDisplayName = trade.buyerDisplayName || 'Unknown Buyer';
+        const sellerDisplayName = trade.sellerDisplayName || 'Unknown Seller';
+        const buyerType = trade.buyerType || 'user';
+        const sellerType = trade.sellerType || 'user';
+        
+        // Determine if current account is buyer or seller
+        // Since we're filtering by account context, we know this trade involves the current account
+        let tradeType, otherPartyName;
+        
+        if (activeAccount?.type === 'business') {
+          // Current account is business
+          const currentBusinessId = activeAccount.business?.id;
+          const isBuyer = trade.buyerBusiness?.id === currentBusinessId;
+          
+          tradeType = isBuyer ? 'buy' : 'sell';
+          otherPartyName = isBuyer ? sellerDisplayName : buyerDisplayName;
+        } else {
+          // Current account is personal
+          const currentUserId = activeAccount?.id; // This might need to be adjusted based on account structure
+          const isBuyer = trade.buyerUser?.id === currentUserId;
+          
+          tradeType = isBuyer ? 'buy' : 'sell';
+          otherPartyName = isBuyer ? sellerDisplayName : buyerDisplayName;
+        }
+        
+        // Calculate time remaining (mock for now)
+        const timeRemaining = 900; // 15 minutes default
+        
+        // Map status to step
+        const getStepFromStatus = (status: string) => {
+          switch (status) {
+            case 'PENDING': return 1;
+            case 'PAYMENT_PENDING': return 2;
+            case 'PAYMENT_SENT': return 3;
+            case 'PAYMENT_CONFIRMED': return 4;
+            default: return 1;
+          }
+        };
+
+        return {
+          id: trade.id,
+          trader: {
+            name: otherPartyName,
+            isOnline: true, // TODO: Get real online status
+            verified: true, // TODO: Get real verification status
+            lastSeen: "Activo ahora", // TODO: Get real last seen
+            responseTime: "5 min", // TODO: Get real response time
+          },
+          amount: trade.cryptoAmount.toString(),
+          crypto: trade.offer?.tokenType || 'cUSD',
+          totalBs: formatAmount.withCode(trade.fiatAmount),
+          step: getStepFromStatus(trade.status),
+          totalSteps: 4,
+          timeRemaining,
+          status: trade.status.toLowerCase(),
+          paymentMethod: trade.paymentMethod?.displayName || trade.paymentMethod?.name || 'N/A',
+          rate: trade.rateUsed.toString(),
+          tradeType,
+        };
+      });
+  }, [myTradesData, formatAmount, activeAccount]);
 
   // Debug country changes - Apollo will automatically refetch when variables change
   useEffect(() => {
@@ -803,7 +865,7 @@ export const ExchangeScreen = () => {
       rate: offer.rate.toString(),
       limit: `${offer.minAmount} - ${offer.maxAmount}`,
       available: offer.availableAmount.toString(),
-      paymentMethods: offer.paymentMethods?.map((pm: any) => pm.displayName) || [],
+      paymentMethods: offer.paymentMethods || [],
       responseTime: getResponseTimeText(),
       completedTrades: completedTrades,
       successRate: successRate,
@@ -1619,14 +1681,6 @@ export const ExchangeScreen = () => {
         <View style={[styles.offersList, { padding: 16 }]}>
           {activeTrades.length > 0 ? (
             <>
-              <View style={styles.welcomeCard}>
-                <Icon name="clock" size={24} color={colors.primary} style={styles.welcomeIcon} />
-                <Text style={styles.welcomeTitle}>Tus Intercambios Activos</Text>
-                <Text style={styles.welcomeText}>
-                  Aquí puedes ver y continuar con tus intercambios en progreso. 
-                  Haz clic en "Continuar" para reanudar cualquier intercambio.
-                </Text>
-              </View>
               {activeTrades.map((trade) => (
                 <ActiveTradeCard key={trade.id} trade={trade} />
               ))}

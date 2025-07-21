@@ -35,7 +35,7 @@ export type MainStackParamList = {
       rate: string;
       limit: string;
       available: string;
-      paymentMethods: string[];
+      paymentMethods: Array<{id: string; name: string; displayName: string; icon?: string}>;
       responseTime: string;
       completedTrades: number;
       successRate: number;
@@ -53,7 +53,7 @@ export type MainStackParamList = {
       rate: string;
       limit: string;
       available: string;
-      paymentMethods: string[];
+      paymentMethods: Array<{id: string; name: string; displayName: string; icon?: string}>;
       responseTime: string;
       completedTrades: number;
       successRate: number;
@@ -71,7 +71,7 @@ export type MainStackParamList = {
       rate: string;
       limit: string;
       available: string;
-      paymentMethods: string[];
+      paymentMethods: Array<{id: string; name: string; displayName: string; icon?: string}>;
       responseTime: string;
       completedTrades: number;
       successRate: number;
@@ -82,6 +82,7 @@ export type MainStackParamList = {
     crypto: 'cUSD' | 'CONFIO';
     amount: string;
     tradeType: 'buy' | 'sell';
+    tradeId?: string;
   };
   ActiveTrade: {
     trade: {

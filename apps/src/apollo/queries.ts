@@ -534,8 +534,8 @@ export const GET_MY_P2P_OFFERS = gql`
 `;
 
 export const GET_MY_P2P_TRADES = gql`
-  query GetMyP2PTrades {
-    myP2pTrades {
+  query GetMyP2PTrades($accountId: ID) {
+    myP2pTrades(accountId: $accountId) {
       id
       offer {
         id
@@ -547,7 +547,46 @@ export const GET_MY_P2P_TRADES = gql`
           firstName
           lastName
         }
+        account {
+          id
+          accountType
+          displayName
+          business {
+            id
+            name
+            category
+          }
+        }
       }
+      # NEW: Direct relationship fields
+      buyerUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      buyerBusiness {
+        id
+        name
+        category
+      }
+      sellerUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      sellerBusiness {
+        id
+        name
+        category
+      }
+      # NEW: Computed helper fields
+      buyerType
+      sellerType
+      buyerDisplayName
+      sellerDisplayName
+      # OLD: Keep for backward compatibility during transition
       buyer {
         id
         username
@@ -559,6 +598,26 @@ export const GET_MY_P2P_TRADES = gql`
         username
         firstName
         lastName
+      }
+      buyerAccount {
+        id
+        accountType
+        displayName
+        business {
+          id
+          name
+          category
+        }
+      }
+      sellerAccount {
+        id
+        accountType
+        displayName
+        business {
+          id
+          name
+          category
+        }
       }
       cryptoAmount
       fiatAmount
@@ -720,12 +779,6 @@ export const CREATE_P2P_TRADE = gql`
         cryptoAmount
         fiatAmount
         rateUsed
-        paymentMethod {
-          id
-          name
-          displayName
-          icon
-        }
         status
         expiresAt
         createdAt

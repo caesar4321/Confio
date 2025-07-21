@@ -18,6 +18,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
+import { useCurrency } from '../hooks/useCurrency';
 
 type TradeChatRouteProp = RouteProp<MainStackParamList, 'TradeChat'>;
 type TradeChatNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeChat'>;
@@ -49,49 +50,157 @@ interface TradeData {
 export const TradeChatScreen: React.FC = () => {
   const navigation = useNavigation<TradeChatNavigationProp>();
   const route = useRoute<TradeChatRouteProp>();
-  const { offer, crypto, amount, tradeType } = route.params;
+  const { offer, crypto, amount, tradeType, tradeId } = route.params;
+  
+  // Currency formatting
+  const { formatAmount } = useCurrency();
   
   const [message, setMessage] = useState('');
   const [currentTradeStep, setCurrentTradeStep] = useState(1);
   const [timeRemaining, setTimeRemaining] = useState(900); // 15 minutes in seconds
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 1,
-      sender: 'system',
-      text: 'Intercambio iniciado. Tienes 15 minutos para completar el pago.',
-      timestamp: new Date(Date.now() - 300000),
-      type: 'system'
-    },
-    {
-      id: 2,
-      sender: tradeType === 'buy' ? 'trader' : 'user',
-      text: tradeType === 'buy' 
-        ? '¡Hola! Gracias por elegir mi oferta. Te envío los datos para el pago.'
-        : '¡Hola! Gracias por elegir mi oferta. Te envío mis datos para el pago.',
-      timestamp: new Date(Date.now() - 270000),
-      type: 'text'
-    },
-    {
-      id: 3,
-      sender: tradeType === 'buy' ? 'trader' : 'user',
-      text: tradeType === 'buy'
-        ? `Banco Venezuela\nTitular: ${offer.name}\nCédula: V-12.345.678\nCuenta: 0102-1234-56789012345\nMonto: ${(parseFloat(amount) * parseFloat(offer.rate.replace(' Bs.', ''))).toLocaleString('es-VE', { minimumFractionDigits: 2 })} Bs.`
-        : `Banco Venezuela\nTitular: Mi Nombre\nCédula: V-98.765.432\nCuenta: 0102-9876-54321098765\nMonto: ${(parseFloat(amount) * parseFloat(offer.rate.replace(' Bs.', ''))).toLocaleString('es-VE', { minimumFractionDigits: 2 })} Bs.`,
-      timestamp: new Date(Date.now() - 240000),
-      type: 'payment_info'
-    },
-    {
-      id: 4,
-      sender: tradeType === 'buy' ? 'user' : 'trader',
-      text: tradeType === 'buy'
-        ? 'Perfecto, ya tengo los datos. Procedo con la transferencia.'
-        : 'Perfecto, ya tengo los datos. Procedo con la transferencia.',
-      timestamp: new Date(Date.now() - 180000),
-      type: 'text'
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [typingUser, setTypingUser] = useState<string | null>(null);
 
   const messagesEndRef = useRef<ScrollView>(null);
+  const websocket = useRef<WebSocket | null>(null);
+
+  // WebSocket connection
+  useEffect(() => {
+    if (!tradeId) {
+      // Fallback to mock data if no tradeId (for development/testing)
+      console.warn('No tradeId provided, using mock data');
+      setMessages([
+        {
+          id: 1,
+          sender: 'system',
+          text: 'Intercambio iniciado. Tienes 15 minutos para completar el pago.',
+          timestamp: new Date(Date.now() - 300000),
+          type: 'system'
+        },
+        {
+          id: 2,
+          sender: tradeType === 'buy' ? 'trader' : 'user',
+          text: '¡Hola! Gracias por elegir mi oferta. Te envío los datos para el pago.',
+          timestamp: new Date(Date.now() - 270000),
+          type: 'text'
+        }
+      ]);
+      setIsConnected(false);
+      return;
+    }
+
+    const connectWebSocket = () => {
+      // Use localhost for development, replace with your production domain
+      const wsUrl = `ws://localhost:8000/ws/trade/${tradeId}/`;
+      
+      try {
+        websocket.current = new WebSocket(wsUrl);
+        
+        websocket.current.onopen = () => {
+          console.log('WebSocket connected');
+          setIsConnected(true);
+        };
+        
+        websocket.current.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          handleWebSocketMessage(data);
+        };
+        
+        websocket.current.onclose = (event) => {
+          console.log('WebSocket disconnected:', event.code, event.reason);
+          setIsConnected(false);
+          
+          // Attempt to reconnect after 3 seconds
+          setTimeout(() => {
+            if (!websocket.current || websocket.current.readyState === WebSocket.CLOSED) {
+              connectWebSocket();
+            }
+          }, 3000);
+        };
+        
+        websocket.current.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          setIsConnected(false);
+        };
+        
+      } catch (error) {
+        console.error('Failed to create WebSocket connection:', error);
+        Alert.alert('Error de conexión', 'No se pudo conectar al chat. Intenta de nuevo.');
+      }
+    };
+
+    connectWebSocket();
+
+    // Cleanup on unmount
+    return () => {
+      if (websocket.current) {
+        websocket.current.close();
+      }
+    };
+  }, [tradeId]);
+
+  // Handle WebSocket messages
+  const handleWebSocketMessage = (data: any) => {
+    switch (data.type) {
+      case 'chat_history':
+        setMessages(data.messages.map((msg: any) => ({
+          id: msg.id,
+          sender: msg.sender.id === 'current_user_id' ? 'user' : 'trader', // TODO: Get current user ID
+          text: msg.content,
+          timestamp: new Date(msg.createdAt),
+          type: msg.messageType.toLowerCase()
+        })));
+        break;
+        
+      case 'chat_message':
+        const newMessage: Message = {
+          id: data.message.id,
+          sender: data.message.sender.id === 'current_user_id' ? 'user' : 'trader', // TODO: Get current user ID
+          text: data.message.content,
+          timestamp: new Date(data.message.createdAt),
+          type: data.message.messageType.toLowerCase()
+        };
+        setMessages(prev => [...prev, newMessage]);
+        break;
+        
+      case 'typing_indicator':
+        if (data.user_id !== 'current_user_id') { // TODO: Get current user ID
+          setTypingUser(data.is_typing ? data.username : null);
+        }
+        break;
+        
+      case 'trade_status_update':
+        // Handle trade status updates
+        console.log('Trade status updated:', data.status);
+        break;
+        
+      case 'error':
+        Alert.alert('Error', data.message);
+        break;
+    }
+  };
+
+  // Send message via WebSocket
+  const sendWebSocketMessage = (content: string) => {
+    if (websocket.current && websocket.current.readyState === WebSocket.OPEN) {
+      websocket.current.send(JSON.stringify({
+        type: 'chat_message',
+        message: content
+      }));
+    }
+  };
+
+  // Send typing indicator
+  const sendTypingIndicator = (isTyping: boolean) => {
+    if (websocket.current && websocket.current.readyState === WebSocket.OPEN) {
+      websocket.current.send(JSON.stringify({
+        type: 'typing',
+        isTyping: isTyping
+      }));
+    }
+  };
 
   // Trader data from route params
   const trader: Trader = {
@@ -106,9 +215,9 @@ export const TradeChatScreen: React.FC = () => {
   const tradeData: TradeData = {
     amount: amount,
     crypto: crypto,
-    totalBs: (parseFloat(amount) * parseFloat(offer.rate.replace(' Bs.', ''))).toLocaleString('es-VE', { minimumFractionDigits: 2 }),
-    paymentMethod: offer.paymentMethods[0] || 'Banco Venezuela',
-    rate: offer.rate.replace(' Bs.', '')
+    totalBs: formatAmount.withCode(parseFloat(amount) * parseFloat(offer.rate)),
+    paymentMethod: (offer.paymentMethods[0]?.displayName || offer.paymentMethods[0]?.name) || 'Banco Venezuela',
+    rate: offer.rate
   };
 
   // Timer effect
@@ -202,36 +311,14 @@ export const TradeChatScreen: React.FC = () => {
   };
 
   const handleSendMessage = () => {
-    if (message.trim()) {
-      const newMessage: Message = {
-        id: messages.length + 1,
-        sender: 'user',
-        text: message.trim(),
-        timestamp: new Date(),
-        type: 'text'
-      };
-      setMessages([...messages, newMessage]);
+    if (message.trim() && isConnected) {
+      sendWebSocketMessage(message.trim());
       setMessage('');
       
-      // Simulate trader response after a delay
-      setTimeout(() => {
-        const responses = [
-          "Gracias por tu mensaje. Te respondo en un momento.",
-          "Entendido, verificando ahora.",
-          "Perfecto, todo se ve bien.",
-          "¡Excelente! Procediendo con la operación."
-        ];
-        const randomResponse = responses[Math.floor(Math.random() * responses.length)];
-        
-        const traderMessage: Message = {
-          id: Date.now(),
-          sender: 'trader',
-          text: randomResponse,
-          timestamp: new Date(),
-          type: 'text'
-        };
-        setMessages(prev => [...prev, traderMessage]);
-      }, 1500);
+      // Stop typing indicator
+      sendTypingIndicator(false);
+    } else if (!isConnected) {
+      Alert.alert('Sin conexión', 'No hay conexión al chat. Intenta de nuevo.');
     }
   };
 
@@ -316,8 +403,18 @@ export const TradeChatScreen: React.FC = () => {
                 )}
               </View>
               <View style={styles.traderStatus}>
-                <Icon name="clock" size={12} color="#6B7280" style={styles.statusIcon} />
-                <Text style={styles.statusText}>{trader.lastSeen}</Text>
+                <Icon 
+                  name={isConnected ? "wifi" : "wifi-off"} 
+                  size={12} 
+                  color={isConnected ? "#10B981" : "#EF4444"} 
+                  style={styles.statusIcon} 
+                />
+                <Text style={styles.statusText}>
+                  {isConnected ? 'Chat conectado' : 'Conectando...'}
+                </Text>
+                {typingUser && (
+                  <Text style={styles.typingText}>• {typingUser} está escribiendo...</Text>
+                )}
               </View>
             </View>
           </View>
@@ -412,7 +509,24 @@ export const TradeChatScreen: React.FC = () => {
             <TextInput
               style={styles.textInput}
               value={message}
-              onChangeText={setMessage}
+              onChangeText={(text) => {
+                setMessage(text);
+                
+                // Send typing indicator
+                if (text.trim() && !isTyping) {
+                  setIsTyping(true);
+                  sendTypingIndicator(true);
+                  
+                  // Stop typing after 2 seconds of no typing
+                  setTimeout(() => {
+                    setIsTyping(false);
+                    sendTypingIndicator(false);
+                  }, 2000);
+                } else if (!text.trim() && isTyping) {
+                  setIsTyping(false);
+                  sendTypingIndicator(false);
+                }
+              }}
               placeholder="Escribe un mensaje..."
               placeholderTextColor="#9CA3AF"
               multiline
@@ -548,6 +662,12 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 12,
     color: '#6B7280',
+  },
+  typingText: {
+    fontSize: 12,
+    color: '#10B981',
+    fontStyle: 'italic',
+    marginLeft: 8,
   },
   viewTradeButton: {
     backgroundColor: colors.primary,
