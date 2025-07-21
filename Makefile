@@ -1,4 +1,4 @@
-.PHONY: runserver migrate makemigrations shell test clean db-setup db-migrate db-reset collectstatic
+.PHONY: runserver runserver-dev runserver-wsgi migrate makemigrations shell test clean db-setup db-migrate db-reset collectstatic
 
 # Virtual environment path
 VENV_PATH = ./myvenv
@@ -10,8 +10,16 @@ collectstatic:
 	$(PYTHON) manage.py collectstatic --noinput
 	@echo "Static files collected successfully!"
 
-# Run development server
+# Run development server with Django Channels (ASGI)
 runserver:
+	DEBUG=True $(PYTHON) -m daphne -b 0.0.0.0 -p 8000 config.asgi:application
+
+# Run Django development server with ASGI support (alternative)
+runserver-dev:
+	DEBUG=True DJANGO_SETTINGS_MODULE=config.settings $(PYTHON) -m uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload
+
+# Run standard Django server (WSGI) - for comparison/fallback
+runserver-wsgi:
 	DEBUG=True $(PYTHON) manage.py runserver 0.0.0.0:8000
 
 # Run migrations
@@ -45,7 +53,7 @@ createsuperuser:
 
 # Run with full path (alternative to runserver)
 run:
-	./myvenv/bin/python manage.py runserver 0.0.0.0:8000
+	DEBUG=True ./myvenv/bin/python -m daphne -b 0.0.0.0 -p 8000 config.asgi:application
 
 # Database setup
 db-setup:

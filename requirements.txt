@@ -2,6 +2,9 @@ wheel==0.45.1
 celery==5.5.1
 Django==5.2
 django-redis==5.4.0
+channels==4.0.0
+channels-redis==4.2.0
+daphne==4.1.2
 firebase-admin==6.7.0
 graphene==3.4.3
 graphene-django==3.2.3

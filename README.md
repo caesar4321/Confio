@@ -24,17 +24,25 @@ Confío helps people access stable dollars, send remittances, and pay each other
 - 📲 Receive money through WhatsApp links
 - ⚡️ Enjoy gasless (sponsored) transactions
 - 🪙 Interact directly with Sui-based smart contracts
+- 🏪 P2P Trading: Buy and sell crypto with local payment methods
+- 💬 Real-time chat for P2P trades with WebSocket support
+- 🏢 Business accounts for commercial operations
 
 ## 🧱 Tech Stack
 
-| Layer         | Stack                         |
-|---------------|-------------------------------|
-| Frontend      | React Native (no Expo)        |
-| Auth          | Firebase Authentication       |
-| Blockchain    | [Sui](https://sui.io)         |
-| Smart Contracts | Move language               |
-| Backend API   | Django + GraphQL              |
-| CI/CD         | Cloudflare Pages              |
+| Layer           | Stack                         |
+|-----------------|-------------------------------|
+| Frontend        | React Native (no Expo)        |
+| Web App         | React + TypeScript            |
+| Auth            | Firebase Authentication       |
+| Blockchain      | [Sui](https://sui.io)         |
+| Smart Contracts | Move language                 |
+| Backend API     | Django + GraphQL              |
+| Real-time       | Django Channels + WebSocket   |
+| Cache/Sessions  | Redis                         |
+| Database        | PostgreSQL                    |
+| ASGI Server     | Daphne                        |
+| CI/CD           | Cloudflare Pages              |
 
 ## 🔒 What Confío Is Not
 
@@ -105,6 +113,7 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── settings.py    # Django settings
 │   ├── urls.py        # URL routing
 │   ├── wsgi.py        # WSGI configuration
+│   ├── asgi.py        # ASGI configuration for Django Channels
 │   ├── schema.py      # Root GraphQL schema
 │   ├── celery.py      # Celery configuration
 │   └── views.py       # View functions
@@ -120,6 +129,25 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── schema.py     # Verification GraphQL schema
 │   ├── views.py      # Verification endpoints
 │   └── country_codes.py # Country codes mapping
+
+├── p2p_exchange/      # P2P trading platform
+│   ├── models.py      # P2P trading models (Offers, Trades, Messages, UserStats, Escrow)
+│   ├── schema.py      # P2P GraphQL schema and mutations
+│   ├── admin.py       # Enhanced admin interface with visual indicators
+│   ├── consumers.py   # WebSocket consumers for real-time chat
+│   ├── routing.py     # WebSocket URL routing
+│   ├── default_payment_methods.py # Country-specific payment methods
+│   └── migrations/    # Database migrations for P2P models
+
+├── payments/          # Payment processing system
+│   ├── models.py      # Payment transaction models
+│   ├── schema.py      # Payment GraphQL schema
+│   └── management/    # Payment management commands
+
+├── send/              # Send transaction system
+│   ├── models.py      # Send transaction models
+│   ├── schema.py      # Send GraphQL schema
+│   └── validators.py  # Transaction validation
 
 ├── prover/            # Server-side proof verification
 │   ├── models.py      # Database models for storing proof verification results
@@ -355,13 +383,181 @@ All queries for account creation/index assignment include soft-deleted rows to p
 #### Example: Why Soft Delete?
 If a business account `business_2` is deleted, the next business account will be `business_3`, not `business_2` again. This ensures that the Sui address for `business_2` is never reused, maintaining cryptographic and financial safety.
 
+## 🏪 P2P Trading Platform
+
+Confío includes a comprehensive peer-to-peer trading platform that allows users to buy and sell cryptocurrency using local payment methods.
+
+### Key Features
+
+- **Multi-Currency Support**: Trade cUSD and CONFIO tokens
+- **Local Payment Methods**: Support for country-specific payment methods (bank transfers, digital wallets, cash)
+- **Real-time Chat**: WebSocket-powered messaging system for trade coordination
+- **Account Context**: Separate trading for personal and business accounts
+- **Admin Interface**: Enhanced admin panel with visual indicators for trade management
+
+### Architecture
+
+#### Direct Relationship Model
+The P2P platform uses a **direct foreign key architecture** for cleaner semantics:
+
+- **P2POffer**: Links directly to `offer_user` or `offer_business`
+- **P2PTrade**: Links directly to `buyer_user`/`buyer_business` and `seller_user`/`seller_business`
+- **P2PMessage**: Links directly to `sender_user` or `sender_business`
+- **P2PUserStats**: Links directly to `stats_user` or `stats_business`
+
+This eliminates confusing Account indirection and provides:
+- ✅ **Clearer semantics**: Direct relationships are self-explanatory
+- ✅ **Better performance**: Fewer database joins required
+- ✅ **Account context filtering**: Trades filter correctly by user vs business context
+- ✅ **Visual admin interface**: 👤 for users, 🏢 for businesses
+
+#### WebSocket Integration
+Real-time features powered by Django Channels:
+
+```python
+# ASGI Configuration (config/asgi.py)
+application = ProtocolTypeRouter({
+    "http": django_asgi_app,
+    "websocket": AllowedHostsOriginValidator(
+        AuthMiddlewareStack(
+            URLRouter(websocket_urlpatterns)
+        )
+    ),
+})
+```
+
+#### Payment Methods
+Country-specific payment methods defined in `p2p_exchange/default_payment_methods.py`:
+
+- **Venezuela**: Pago Móvil, Zelle, Binance Pay, PayPal
+- **Argentina**: Mercado Pago, Transferencia Bancaria, Ualá, Brubank
+- **Colombia**: Nequi, Daviplata, Bancolombia, PSE
+- **Global**: USDT TRC20, Bitcoin, Ethereum, PayPal
+
+### Database Models
+
+#### P2POffer
+```python
+class P2POffer(SoftDeleteModel):
+    # Direct relationships
+    offer_user = models.ForeignKey(User, ...)
+    offer_business = models.ForeignKey(Business, ...)
+    
+    # Trading details
+    exchange_type = models.CharField(choices=['BUY', 'SELL'])
+    token_type = models.CharField(choices=['cUSD', 'CONFIO'])
+    rate = models.DecimalField(...)
+    payment_methods = models.ManyToManyField(P2PPaymentMethod)
+```
+
+#### P2PTrade
+```python
+class P2PTrade(SoftDeleteModel):
+    # Direct relationships
+    buyer_user = models.ForeignKey(User, ...)
+    buyer_business = models.ForeignKey(Business, ...)
+    seller_user = models.ForeignKey(User, ...)
+    seller_business = models.ForeignKey(Business, ...)
+    
+    # Trade details
+    crypto_amount = models.DecimalField(...)
+    fiat_amount = models.DecimalField(...)
+    status = models.CharField(choices=STATUS_CHOICES)
+```
+
+#### P2PMessage
+```python
+class P2PMessage(SoftDeleteModel):
+    trade = models.ForeignKey(P2PTrade, ...)
+    
+    # Direct relationships
+    sender_user = models.ForeignKey(User, ...)
+    sender_business = models.ForeignKey(Business, ...)
+    
+    content = models.TextField()
+    message_type = models.CharField(choices=MESSAGE_TYPES)
+```
+
+### GraphQL API
+
+The P2P platform exposes a comprehensive GraphQL API:
+
+#### Queries
+- `p2pOffers`: List available offers with filtering
+- `myP2pTrades(accountId)`: User's trades filtered by account context
+- `p2pTradeMessages(tradeId)`: Real-time trade chat messages
+- `p2pPaymentMethods(countryCode)`: Country-specific payment methods
+
+#### Mutations
+- `createP2POffer`: Create new trading offers
+- `createP2PTrade`: Initiate trades with offers
+- `updateP2PTradeStatus`: Update trade status (payment sent, confirmed, etc.)
+- `sendP2PMessage`: Send messages in trade chat
+
+### Usage Examples
+
+#### Creating an Offer
+```graphql
+mutation CreateOffer {
+  createP2pOffer(input: {
+    exchangeType: "SELL"
+    tokenType: "cUSD"
+    rate: 36.50
+    minAmount: 10.00
+    maxAmount: 1000.00
+    availableAmount: 500.00
+    paymentMethodIds: ["1", "2"]
+    countryCode: "VE"
+    accountId: "business_0"
+  }) {
+    success
+    offer { id rate availableAmount }
+  }
+}
+```
+
+#### Real-time Trade Messages
+```graphql
+query TradeMessages($tradeId: ID!) {
+  p2pTradeMessages(tradeId: $tradeId) {
+    id
+    content
+    senderType
+    senderDisplayName
+    createdAt
+  }
+}
+```
+
 ## 🚀 Development Setup
 
-### Web Application (React + Django)
+### Prerequisites
+
+1. **Redis Server** (required for Django Channels)
+   ```bash
+   # macOS
+   brew install redis
+   brew services start redis
+   
+   # Ubuntu/Debian
+   sudo apt-get install redis-server
+   sudo systemctl start redis-server
+   
+   # Or use Docker
+   docker run -d -p 6379:6379 redis:alpine
+   ```
+
+2. **PostgreSQL Database**
+   ```bash
+   # Create database and user
+   make db-setup
+   ```
+
+### Web Application (React + Django + Channels)
 
 1. **Install Dependencies**
    ```bash
-   # Install Python dependencies
+   # Install Python dependencies (includes Django Channels, Redis, Daphne)
    pip install -r requirements.txt
 
    # Install Node.js dependencies
@@ -379,18 +575,28 @@ If a business account `business_2` is deleted, the next business account will be
    - Automatically copy the new `index.html` to Django's templates directory
    - Generate static files with unique hashes for cache busting
 
-3. **Run Django Development Server**
+3. **Run Database Migrations**
    ```bash
-   python manage.py runserver
+   make migrate
+   ```
+
+4. **Run Django Channels Development Server**
+   ```bash
+   # Primary option: Django Channels with Daphne (supports WebSockets)
+   make runserver
+   
+   # Alternative options:
+   make runserver-wsgi    # Standard Django server (no WebSocket support)
    ```
    The server will:
    - Serve the React app at the root URL
    - Handle static files using Whitenoise
    - Provide GraphQL API endpoints
+   - Support WebSocket connections for real-time P2P chat
 
-4. **Development Workflow**
+5. **Development Workflow**
    - For React development: `yarn start` (runs on port 3000)
-   - For Django development: `python manage.py runserver` (runs on port 8000)
+   - For Django development: `make runserver` (runs on port 8000 with WebSocket support)
    - After making React changes, run `yarn build` to update the Django-served version
 
 ### Mobile Application (React Native)
@@ -424,7 +630,13 @@ If a business account `business_2` is deleted, the next business account will be
    - Deterministic Sui address generation
    - Secure account storage using Keychain
 
-5. **AccountContext Architecture**
+5. **P2P Trading Features**
+   - Create and browse trading offers
+   - Real-time trade chat with WebSocket connection
+   - Account-specific trade filtering
+   - Local payment method integration
+
+6. **AccountContext Architecture**
    - **Single source of truth** for account state across the entire app
    - **Eliminates state drift** from multiple hook instances
    - **Provides shared account context** to all components
@@ -475,6 +687,7 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
 >     - `DB_PASSWORD`: PostgreSQL database password
 >     - `DB_HOST`: PostgreSQL database host
 >     - `DB_PORT`: PostgreSQL database port
+>     - `REDIS_URL`: Redis connection URL (e.g., 'redis://localhost:6379/0')
 >     - `SECRET_KEY`: Django secret key for cryptographic signing (e.g., '***REMOVED***')
 >     - `PYTHONPATH`: Python path for Django
 >     - `DJANGO_SETTINGS_MODULE`: Django settings module path

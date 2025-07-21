@@ -82,11 +82,15 @@ export const TraderProfileScreen: React.FC = () => {
             <Text style={styles.sectionTitle}>Métodos de pago aceptados</Text>
             <View style={{gap: 8}}>
               {offer.paymentMethods.map((method, index) => (
-                <View key={index} style={styles.paymentMethodRow}>
+                <View key={method.id || index} style={styles.paymentMethodRow}>
                   <View style={styles.paymentMethodIcon}>
-                    <Text style={styles.paymentMethodIconText}>{method.charAt(0)}</Text>
+                    <Text style={styles.paymentMethodIconText}>
+                      {(method.displayName || method.name || 'M').charAt(0)}
+                    </Text>
                   </View>
-                  <Text style={styles.paymentMethodName}>{method}</Text>
+                  <Text style={styles.paymentMethodName}>
+                    {method.displayName || method.name}
+                  </Text>
                 </View>
               ))}
             </View>
