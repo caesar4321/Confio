@@ -72,6 +72,39 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
         message = await self.save_message(message_content)
         
         if message:
+            # Determine sender info based on new direct relationships
+            sender_info = {}
+            if message.sender_user:
+                sender_info = {
+                    'id': str(message.sender_user.id),
+                    'username': message.sender_user.username,
+                    'firstName': message.sender_user.first_name,
+                    'lastName': message.sender_user.last_name,
+                    'type': 'user'
+                }
+            elif message.sender_business:
+                # For business, we need to get the user who sent the message
+                # Since we know the user from scope, use that
+                user = self.scope['user']
+                sender_info = {
+                    'id': str(user.id),
+                    'username': user.username,
+                    'firstName': user.first_name,
+                    'lastName': user.last_name,
+                    'type': 'business',
+                    'businessName': message.sender_business.name,
+                    'businessId': str(message.sender_business.id)
+                }
+            else:
+                # Fallback to old sender field
+                sender_info = {
+                    'id': str(message.sender.id),
+                    'username': message.sender.username,
+                    'firstName': message.sender.first_name,
+                    'lastName': message.sender.last_name,
+                    'type': 'user'
+                }
+            
             # Send message to room group
             await self.channel_layer.group_send(
                 self.room_group_name,
@@ -79,12 +112,7 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
                     'type': 'chat_message',
                     'message': {
                         'id': message.id,
-                        'sender': {
-                            'id': str(message.sender.id),
-                            'username': message.sender.username,
-                            'firstName': message.sender.first_name,
-                            'lastName': message.sender.last_name,
-                        },
+                        'sender': sender_info,
                         'content': message.content,
                         'messageType': message.message_type,
                         'createdAt': message.created_at.isoformat(),
@@ -259,14 +287,54 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
             
             history = []
             for message in messages:
-                history.append({
-                    'id': message.id,
-                    'sender': {
+                # Determine sender info based on new direct relationships
+                sender_info = {}
+                if message.sender_user:
+                    sender_info = {
+                        'id': str(message.sender_user.id),
+                        'username': message.sender_user.username,
+                        'firstName': message.sender_user.first_name,
+                        'lastName': message.sender_user.last_name,
+                        'type': 'user'
+                    }
+                elif message.sender_business:
+                    # For business messages, we still need to identify the user who sent it
+                    # We'll use the account relationship to find the user
+                    business_account = message.sender_business.accounts.first()
+                    if business_account:
+                        sender_info = {
+                            'id': str(business_account.user.id),
+                            'username': business_account.user.username,
+                            'firstName': business_account.user.first_name,
+                            'lastName': business_account.user.last_name,
+                            'type': 'business',
+                            'businessName': message.sender_business.name,
+                            'businessId': str(message.sender_business.id)
+                        }
+                    else:
+                        # Fallback if no account found
+                        sender_info = {
+                            'id': str(message.sender_business.id),
+                            'username': message.sender_business.name,
+                            'firstName': message.sender_business.name,
+                            'lastName': '',
+                            'type': 'business',
+                            'businessName': message.sender_business.name,
+                            'businessId': str(message.sender_business.id)
+                        }
+                else:
+                    # Fallback to old sender field
+                    sender_info = {
                         'id': str(message.sender.id),
                         'username': message.sender.username,
                         'firstName': message.sender.first_name,
                         'lastName': message.sender.last_name,
-                    },
+                        'type': 'user'
+                    }
+                
+                history.append({
+                    'id': message.id,
+                    'sender': sender_info,
                     'content': message.content,
                     'messageType': message.message_type,
                     'createdAt': message.created_at.isoformat(),

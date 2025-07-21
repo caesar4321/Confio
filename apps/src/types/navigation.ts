@@ -82,7 +82,7 @@ export type MainStackParamList = {
     crypto: 'cUSD' | 'CONFIO';
     amount: string;
     tradeType: 'buy' | 'sell';
-    tradeId?: string;
+    tradeId: string;
   };
   ActiveTrade: {
     trade: {
