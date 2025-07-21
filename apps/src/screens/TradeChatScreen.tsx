@@ -17,12 +17,13 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useMutation } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
 import { useCurrency } from '../hooks/useCurrency';
-import { getApiUrl } from '../config/env';
 import { useAuth } from '../contexts/AuthContext';
+import { SEND_P2P_MESSAGE } from '../apollo/queries';
 
 type TradeChatRouteProp = RouteProp<MainStackParamList, 'TradeChat'>;
 type TradeChatNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeChat'>;
@@ -70,12 +71,152 @@ export const TradeChatScreen: React.FC = () => {
   const [isSecurityNoticeDismissed, setIsSecurityNoticeDismissed] = useState(false);
 
   const messagesEndRef = useRef<ScrollView>(null);
+  
+  // GraphQL mutation for sending messages
+  const [sendMessage, { loading: sendingMessage }] = useMutation(SEND_P2P_MESSAGE);
+  
+  // WebSocket reference for real-time features
   const websocket = useRef<WebSocket | null>(null);
 
-  // WebSocket connection
+  // WebSocket connection for real-time updates
   useEffect(() => {
     if (!tradeId) {
-      // Fallback to mock data if no tradeId (for development/testing)
+      return;
+    }
+
+    const connectWebSocket = async () => {
+      try {
+        console.log('🔄 Connecting to WebSocket for real-time updates...');
+        
+        // Get JWT token from Keychain
+        const Keychain = require('react-native-keychain');
+        const { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } = require('../services/authService');
+        
+        const credentials = await Keychain.getGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME
+        });
+        
+        let token = '';
+        if (credentials) {
+          try {
+            const tokens = JSON.parse(credentials.password);
+            token = tokens.accessToken || '';
+          } catch (error) {
+            console.error('❌ Error parsing tokens for WebSocket:', error);
+          }
+        }
+        
+        if (!token) {
+          console.error('❌ No JWT token available');
+          setIsConnected(false);
+          return;
+        }
+        
+        // Use the raw WebSocket endpoint for real-time updates
+        const apiUrl = require('../config/env').getApiUrl();
+        const wsBaseUrl = apiUrl.replace('http://', 'ws://').replace('https://', 'wss://').replace('/graphql/', '/');
+        const wsUrl = `${wsBaseUrl}ws/trade/${tradeId}/?token=${encodeURIComponent(token)}`;
+        
+        websocket.current = new WebSocket(wsUrl);
+        
+        websocket.current.onopen = () => {
+          console.log('✅ WebSocket connected');
+          setIsConnected(true);
+        };
+        
+        websocket.current.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            handleWebSocketMessage(data);
+          } catch (error) {
+            console.error('❌ Error parsing WebSocket message:', error);
+          }
+        };
+        
+        websocket.current.onclose = (event) => {
+          console.log('❌ WebSocket disconnected:', event.code, event.reason);
+          setIsConnected(false);
+          
+          // Reconnect if not a deliberate close
+          if (event.code !== 1000) {
+            setTimeout(() => {
+              if (!websocket.current || websocket.current.readyState === WebSocket.CLOSED) {
+                connectWebSocket();
+              }
+            }, 3000);
+          }
+        };
+        
+        websocket.current.onerror = (error) => {
+          console.error('❌ WebSocket error:', error);
+          setIsConnected(false);
+        };
+        
+      } catch (error) {
+        console.error('Failed to create WebSocket connection:', error);
+      }
+    };
+
+    connectWebSocket();
+
+    // Cleanup on unmount
+    return () => {
+      if (websocket.current) {
+        websocket.current.close();
+      }
+    };
+  }, [tradeId]);
+
+  // Handle WebSocket messages  
+  const handleWebSocketMessage = (data: any) => {
+    switch (data.type) {
+      case 'chat_history':
+        setMessages(data.messages.map((msg: any) => ({
+          id: msg.id,
+          sender: msg.sender.id === userProfile?.id ? 'user' : 'trader',
+          text: msg.content,
+          timestamp: new Date(msg.createdAt),
+          type: msg.messageType.toLowerCase()
+        })));
+        break;
+        
+      case 'chat_message':
+        const newMessage: Message = {
+          id: data.message.id,
+          sender: data.message.sender.id === userProfile?.id ? 'user' : 'trader',
+          text: data.message.content,
+          timestamp: new Date(data.message.createdAt),
+          type: data.message.messageType.toLowerCase()
+        };
+        
+        setMessages(prev => {
+          // Check if message already exists (prevent duplicates)
+          const exists = prev.some(msg => msg.id === newMessage.id);
+          if (exists) return prev;
+          return [...prev, newMessage];
+        });
+        break;
+        
+      case 'typing_indicator':
+        if (data.user_id !== userProfile?.id) {
+          setTypingUser(data.is_typing ? data.username : null);
+        }
+        break;
+        
+      case 'trade_status_update':
+        console.log('Trade status updated:', data.status);
+        break;
+        
+      case 'error':
+        console.error('WebSocket error:', data.message);
+        break;
+    }
+  };
+  
+  // Mock data for development when no tradeId
+  useEffect(() => {
+    if (!tradeId) {
       console.warn('No tradeId provided, using mock data');
       setMessages([
         {
@@ -115,192 +256,10 @@ export const TradeChatScreen: React.FC = () => {
         }
       ]);
       setIsConnected(false);
-      return;
     }
-
-    const connectWebSocket = async () => {
-      try {
-        console.log('🔄 Attempting WebSocket connection...');
-        
-        // Get JWT token from Keychain
-        const Keychain = require('react-native-keychain');
-        const { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } = require('../services/authService');
-        
-        console.log('🔑 Retrieving token from Keychain...');
-        const credentials = await Keychain.getGenericPassword({
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: AUTH_KEYCHAIN_USERNAME
-        });
-        
-        let token = '';
-        if (credentials) {
-          try {
-            const tokens = JSON.parse(credentials.password);
-            token = tokens.accessToken || '';
-            console.log('✅ Token retrieved successfully:', token ? 'Token found' : 'No token');
-          } catch (error) {
-            console.error('❌ Error parsing tokens for WebSocket:', error);
-          }
-        } else {
-          console.log('⚠️ No credentials found in Keychain');
-        }
-        
-        if (!token) {
-          console.error('❌ No JWT token available, WebSocket connection may fail');
-          setIsConnected(false);
-          return;
-        }
-        
-        // Convert HTTP API URL to WebSocket URL
-        const apiUrl = getApiUrl();
-        console.log('🔧 Original API URL:', apiUrl);
-        // Remove /graphql/ path and convert protocol
-        const wsBaseUrl = apiUrl.replace('http://', 'ws://').replace('https://', 'wss://').replace('/graphql/', '/');
-        const wsUrl = `${wsBaseUrl}ws/trade/${tradeId}/?token=${encodeURIComponent(token)}`;
-        console.log('🌐 Connecting to WebSocket:', `${wsBaseUrl}ws/trade/${tradeId}/?token=TOKEN_HIDDEN`);
-        console.log('🔍 Full WebSocket URL (sanitized):', wsUrl.replace(token, 'TOKEN_HIDDEN'));
-        
-        websocket.current = new WebSocket(wsUrl);
-        
-        websocket.current.onopen = () => {
-          console.log('✅ WebSocket connected successfully');
-          setIsConnected(true);
-        };
-        
-        websocket.current.onmessage = (event) => {
-          console.log('📨 WebSocket message received:', event.data);
-          try {
-            const data = JSON.parse(event.data);
-            handleWebSocketMessage(data);
-          } catch (error) {
-            console.error('❌ Error parsing WebSocket message:', error);
-          }
-        };
-        
-        websocket.current.onclose = (event) => {
-          console.log('❌ WebSocket disconnected:', event.code, event.reason);
-          console.log('📊 Close event details:', {
-            code: event.code,
-            reason: event.reason,
-            wasClean: event.wasClean,
-            type: event.type
-          });
-          setIsConnected(false);
-          
-          // Only reconnect if it wasn't a deliberate close
-          if (event.code !== 1000) {
-            console.log('🔄 Attempting to reconnect in 3 seconds...');
-            setTimeout(() => {
-              if (!websocket.current || websocket.current.readyState === WebSocket.CLOSED) {
-                connectWebSocket();
-              }
-            }, 3000);
-          }
-        };
-        
-        websocket.current.onerror = (error) => {
-          console.error('❌ WebSocket error:', error);
-          console.log('🐛 Error details:', {
-            message: error.message,
-            type: error.type,
-            target: error.target
-          });
-          setIsConnected(false);
-        };
-        
-      } catch (error) {
-        console.error('Failed to create WebSocket connection:', error);
-        Alert.alert('Error de conexión', 'No se pudo conectar al chat. Intenta de nuevo.');
-      }
-    };
-
-    connectWebSocket();
-
-    // Cleanup on unmount
-    return () => {
-      if (websocket.current) {
-        websocket.current.close();
-      }
-    };
   }, [tradeId]);
 
-  // Handle WebSocket messages
-  const handleWebSocketMessage = (data: any) => {
-    switch (data.type) {
-      case 'chat_history':
-        setMessages(data.messages.map((msg: any) => ({
-          id: msg.id,
-          sender: msg.sender.id === userProfile?.id ? 'user' : 'trader',
-          text: msg.content,
-          timestamp: new Date(msg.createdAt),
-          type: msg.messageType.toLowerCase()
-        })));
-        break;
-        
-      case 'chat_message':
-        const newMessage: Message = {
-          id: data.message.id,
-          sender: data.message.sender.id === userProfile?.id ? 'user' : 'trader',
-          text: data.message.content,
-          timestamp: new Date(data.message.createdAt),
-          type: data.message.messageType.toLowerCase()
-        };
-        
-        // Update existing temporary message with server data or add new message
-        setMessages(prev => {
-          // First check if this is a server confirmation of our sent message
-          const tempMessageIndex = prev.findIndex(msg => 
-            msg.sender === newMessage.sender && 
-            msg.text === newMessage.text && 
-            typeof msg.id === 'number' && // Temporary IDs are numbers (timestamp)
-            Math.abs(msg.timestamp.getTime() - newMessage.timestamp.getTime()) < 10000
-          );
-          
-          if (tempMessageIndex >= 0) {
-            // Replace temporary message with server message
-            const updated = [...prev];
-            updated[tempMessageIndex] = newMessage;
-            return updated;
-          }
-          
-          // Check if message already exists (prevent true duplicates)
-          const exists = prev.some(msg => msg.id === newMessage.id);
-          if (exists) {
-            return prev;
-          }
-          
-          return [...prev, newMessage];
-        });
-        break;
-        
-      case 'typing_indicator':
-        if (data.user_id !== userProfile?.id) {
-          setTypingUser(data.is_typing ? data.username : null);
-        }
-        break;
-        
-      case 'trade_status_update':
-        // Handle trade status updates
-        console.log('Trade status updated:', data.status);
-        break;
-        
-      case 'error':
-        Alert.alert('Error', data.message);
-        break;
-    }
-  };
-
-  // Send message via WebSocket
-  const sendWebSocketMessage = (content: string) => {
-    if (websocket.current && websocket.current.readyState === WebSocket.OPEN) {
-      websocket.current.send(JSON.stringify({
-        type: 'chat_message',
-        message: content
-      }));
-    }
-  };
-
-  // Send typing indicator
+  // Send typing indicator via WebSocket
   const sendTypingIndicator = (isTyping: boolean) => {
     if (websocket.current && websocket.current.readyState === WebSocket.OPEN) {
       websocket.current.send(JSON.stringify({
@@ -308,6 +267,7 @@ export const TradeChatScreen: React.FC = () => {
         isTyping: isTyping
       }));
     }
+    setIsTyping(isTyping);
   };
 
   // Trader data from route params
@@ -436,23 +396,34 @@ export const TradeChatScreen: React.FC = () => {
     }
   };
 
-  const handleSendMessage = () => {
-    if (message.trim() && isConnected) {
-      // Immediately add the message to local state for better UX
-      const tempMessage: Message = {
-        id: Date.now(), // Temporary ID
-        sender: 'user',
-        text: message.trim(),
-        timestamp: new Date(),
-        type: 'text'
-      };
-      setMessages(prev => [...prev, tempMessage]);
+  const handleSendMessage = async () => {
+    if (message.trim() && tradeId && !sendingMessage) {
+      const messageContent = message.trim();
+      setMessage(''); // Clear input immediately for better UX
       
-      sendWebSocketMessage(message.trim());
-      setMessage('');
-      
-      // Stop typing indicator
-      sendTypingIndicator(false);
+      try {
+        // Send message via GraphQL mutation
+        await sendMessage({
+          variables: {
+            input: {
+              tradeId: tradeId,
+              content: messageContent,
+              messageType: 'TEXT'
+            }
+          }
+        });
+        
+        // Stop typing indicator
+        sendTypingIndicator(false);
+        
+      } catch (error) {
+        console.error('Error sending message:', error);
+        Alert.alert('Error', 'No se pudo enviar el mensaje. Intenta de nuevo.');
+        // Restore message text if failed
+        setMessage(messageContent);
+      }
+    } else if (!tradeId) {
+      Alert.alert('Error', 'ID de intercambio no encontrado.');
     } else if (!isConnected) {
       Alert.alert('Sin conexión', 'No hay conexión al chat. Intenta de nuevo.');
     }
@@ -702,13 +673,13 @@ export const TradeChatScreen: React.FC = () => {
           
           <TouchableOpacity 
             onPress={handleSendMessage}
-            disabled={!message.trim()}
-            style={[styles.sendButton, !message.trim() && styles.sendButtonDisabled]}
+            disabled={!message.trim() || sendingMessage}
+            style={[styles.sendButton, (!message.trim() || sendingMessage) && styles.sendButtonDisabled]}
           >
             <Icon 
-              name="send" 
+              name={sendingMessage ? "loader" : "send"} 
               size={20} 
-              color={message.trim() ? '#ffffff' : '#9CA3AF'} 
+              color={(message.trim() && !sendingMessage) ? '#ffffff' : '#9CA3AF'} 
             />
           </TouchableOpacity>
         </View>

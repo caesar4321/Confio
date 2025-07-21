@@ -28,9 +28,9 @@ const REFRESH_TOKEN = gql`
   }
 `;
   
-  const httpLink = createHttpLink({
+const httpLink = createHttpLink({
   uri: getApiUrl(),
-  });
+});
 
 let isRefreshing = false;
 let pendingRequests: any[] = [];
