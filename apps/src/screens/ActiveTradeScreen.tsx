@@ -138,7 +138,8 @@ export const ActiveTradeScreen: React.FC = () => {
       },
       crypto: trade.crypto as 'cUSD' | 'CONFIO',
       amount: trade.amount,
-      tradeType: trade.tradeType
+      tradeType: trade.tradeType,
+      tradeId: trade.id
     });
   };
 

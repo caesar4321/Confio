@@ -12,6 +12,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -19,6 +21,8 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
 import { useCurrency } from '../hooks/useCurrency';
+import { getApiUrl } from '../config/env';
+import { useAuth } from '../contexts/AuthContext';
 
 type TradeChatRouteProp = RouteProp<MainStackParamList, 'TradeChat'>;
 type TradeChatNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeChat'>;
@@ -51,6 +55,7 @@ export const TradeChatScreen: React.FC = () => {
   const navigation = useNavigation<TradeChatNavigationProp>();
   const route = useRoute<TradeChatRouteProp>();
   const { offer, crypto, amount, tradeType, tradeId } = route.params;
+  const { userProfile } = useAuth();
   
   // Currency formatting
   const { formatAmount } = useCurrency();
@@ -62,6 +67,7 @@ export const TradeChatScreen: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [typingUser, setTypingUser] = useState<string | null>(null);
+  const [isSecurityNoticeDismissed, setIsSecurityNoticeDismissed] = useState(false);
 
   const messagesEndRef = useRef<ScrollView>(null);
   const websocket = useRef<WebSocket | null>(null);
@@ -81,9 +87,30 @@ export const TradeChatScreen: React.FC = () => {
         },
         {
           id: 2,
-          sender: tradeType === 'buy' ? 'trader' : 'user',
+          sender: 'trader',
           text: '¡Hola! Gracias por elegir mi oferta. Te envío los datos para el pago.',
           timestamp: new Date(Date.now() - 270000),
+          type: 'text'
+        },
+        {
+          id: 3,
+          sender: 'user',
+          text: 'Perfecto, estoy listo para hacer el pago.',
+          timestamp: new Date(Date.now() - 240000),
+          type: 'text'
+        },
+        {
+          id: 4,
+          sender: 'trader',
+          text: 'Te envío los datos bancarios por aquí.',
+          timestamp: new Date(Date.now() - 210000),
+          type: 'text'
+        },
+        {
+          id: 5,
+          sender: 'user',
+          text: 'Recibido, procesando el pago ahora.',
+          timestamp: new Date(Date.now() - 180000),
           type: 'text'
         }
       ]);
@@ -93,10 +120,13 @@ export const TradeChatScreen: React.FC = () => {
 
     const connectWebSocket = async () => {
       try {
+        console.log('🔄 Attempting WebSocket connection...');
+        
         // Get JWT token from Keychain
         const Keychain = require('react-native-keychain');
         const { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } = require('../services/authService');
         
+        console.log('🔑 Retrieving token from Keychain...');
         const credentials = await Keychain.getGenericPassword({
           service: AUTH_KEYCHAIN_SERVICE,
           username: AUTH_KEYCHAIN_USERNAME
@@ -107,41 +137,74 @@ export const TradeChatScreen: React.FC = () => {
           try {
             const tokens = JSON.parse(credentials.password);
             token = tokens.accessToken || '';
+            console.log('✅ Token retrieved successfully:', token ? 'Token found' : 'No token');
           } catch (error) {
-            console.error('Error parsing tokens for WebSocket:', error);
+            console.error('❌ Error parsing tokens for WebSocket:', error);
           }
+        } else {
+          console.log('⚠️ No credentials found in Keychain');
         }
         
-        // Include token in WebSocket URL as query parameter
-        const wsUrl = `ws://localhost:8000/ws/trade/${tradeId}/?token=${encodeURIComponent(token)}`;
-        console.log('Connecting to WebSocket:', wsUrl.replace(token, 'TOKEN_HIDDEN'));
+        if (!token) {
+          console.error('❌ No JWT token available, WebSocket connection may fail');
+          setIsConnected(false);
+          return;
+        }
+        
+        // Convert HTTP API URL to WebSocket URL
+        const apiUrl = getApiUrl();
+        console.log('🔧 Original API URL:', apiUrl);
+        // Remove /graphql/ path and convert protocol
+        const wsBaseUrl = apiUrl.replace('http://', 'ws://').replace('https://', 'wss://').replace('/graphql/', '/');
+        const wsUrl = `${wsBaseUrl}ws/trade/${tradeId}/?token=${encodeURIComponent(token)}`;
+        console.log('🌐 Connecting to WebSocket:', `${wsBaseUrl}ws/trade/${tradeId}/?token=TOKEN_HIDDEN`);
+        console.log('🔍 Full WebSocket URL (sanitized):', wsUrl.replace(token, 'TOKEN_HIDDEN'));
         
         websocket.current = new WebSocket(wsUrl);
         
         websocket.current.onopen = () => {
-          console.log('WebSocket connected');
+          console.log('✅ WebSocket connected successfully');
           setIsConnected(true);
         };
         
         websocket.current.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          handleWebSocketMessage(data);
+          console.log('📨 WebSocket message received:', event.data);
+          try {
+            const data = JSON.parse(event.data);
+            handleWebSocketMessage(data);
+          } catch (error) {
+            console.error('❌ Error parsing WebSocket message:', error);
+          }
         };
         
         websocket.current.onclose = (event) => {
-          console.log('WebSocket disconnected:', event.code, event.reason);
+          console.log('❌ WebSocket disconnected:', event.code, event.reason);
+          console.log('📊 Close event details:', {
+            code: event.code,
+            reason: event.reason,
+            wasClean: event.wasClean,
+            type: event.type
+          });
           setIsConnected(false);
           
-          // Attempt to reconnect after 3 seconds
-          setTimeout(() => {
-            if (!websocket.current || websocket.current.readyState === WebSocket.CLOSED) {
-              connectWebSocket();
-            }
-          }, 3000);
+          // Only reconnect if it wasn't a deliberate close
+          if (event.code !== 1000) {
+            console.log('🔄 Attempting to reconnect in 3 seconds...');
+            setTimeout(() => {
+              if (!websocket.current || websocket.current.readyState === WebSocket.CLOSED) {
+                connectWebSocket();
+              }
+            }, 3000);
+          }
         };
         
         websocket.current.onerror = (error) => {
-          console.error('WebSocket error:', error);
+          console.error('❌ WebSocket error:', error);
+          console.log('🐛 Error details:', {
+            message: error.message,
+            type: error.type,
+            target: error.target
+          });
           setIsConnected(false);
         };
         
@@ -167,7 +230,7 @@ export const TradeChatScreen: React.FC = () => {
       case 'chat_history':
         setMessages(data.messages.map((msg: any) => ({
           id: msg.id,
-          sender: msg.sender.id === 'current_user_id' ? 'user' : 'trader', // TODO: Get current user ID
+          sender: msg.sender.id === userProfile?.id ? 'user' : 'trader',
           text: msg.content,
           timestamp: new Date(msg.createdAt),
           type: msg.messageType.toLowerCase()
@@ -177,16 +240,41 @@ export const TradeChatScreen: React.FC = () => {
       case 'chat_message':
         const newMessage: Message = {
           id: data.message.id,
-          sender: data.message.sender.id === 'current_user_id' ? 'user' : 'trader', // TODO: Get current user ID
+          sender: data.message.sender.id === userProfile?.id ? 'user' : 'trader',
           text: data.message.content,
           timestamp: new Date(data.message.createdAt),
           type: data.message.messageType.toLowerCase()
         };
-        setMessages(prev => [...prev, newMessage]);
+        
+        // Update existing temporary message with server data or add new message
+        setMessages(prev => {
+          // First check if this is a server confirmation of our sent message
+          const tempMessageIndex = prev.findIndex(msg => 
+            msg.sender === newMessage.sender && 
+            msg.text === newMessage.text && 
+            typeof msg.id === 'number' && // Temporary IDs are numbers (timestamp)
+            Math.abs(msg.timestamp.getTime() - newMessage.timestamp.getTime()) < 10000
+          );
+          
+          if (tempMessageIndex >= 0) {
+            // Replace temporary message with server message
+            const updated = [...prev];
+            updated[tempMessageIndex] = newMessage;
+            return updated;
+          }
+          
+          // Check if message already exists (prevent true duplicates)
+          const exists = prev.some(msg => msg.id === newMessage.id);
+          if (exists) {
+            return prev;
+          }
+          
+          return [...prev, newMessage];
+        });
         break;
         
       case 'typing_indicator':
-        if (data.user_id !== 'current_user_id') { // TODO: Get current user ID
+        if (data.user_id !== userProfile?.id) {
           setTypingUser(data.is_typing ? data.username : null);
         }
         break;
@@ -256,9 +344,27 @@ export const TradeChatScreen: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
+  // Debug messages state
+  useEffect(() => {
+    console.log('📨 Messages updated:', messages.length, 'messages');
+    console.log('📨 Current user ID:', userProfile?.id);
+    messages.forEach((msg, index) => {
+      console.log(`📨 Message ${index}:`, {
+        id: msg.id,
+        sender: msg.sender,
+        text: msg.text.substring(0, 30) + '...',
+        isUser: msg.sender === 'user'
+      });
+    });
+  }, [messages]);
+
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    messagesEndRef.current?.scrollToEnd({ animated: true });
+    if (messages.length > 0) {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
   }, [messages]);
 
   const formatTime = (seconds: number) => {
@@ -332,6 +438,16 @@ export const TradeChatScreen: React.FC = () => {
 
   const handleSendMessage = () => {
     if (message.trim() && isConnected) {
+      // Immediately add the message to local state for better UX
+      const tempMessage: Message = {
+        id: Date.now(), // Temporary ID
+        sender: 'user',
+        text: message.trim(),
+        timestamp: new Date(),
+        type: 'text'
+      };
+      setMessages(prev => [...prev, tempMessage]);
+      
       sendWebSocketMessage(message.trim());
       setMessage('');
       
@@ -450,80 +566,110 @@ export const TradeChatScreen: React.FC = () => {
       </View>
 
       {/* Trade Status Banner */}
-      <View style={styles.tradeStatusBanner}>
-        <View style={styles.tradeStatusHeader}>
-          <View style={styles.tradeInfo}>
-            <Icon name="trending-up" size={16} color={colors.primary} style={styles.tradeIcon} />
-            <Text style={styles.tradeAmount}>
-              {tradeType === 'buy' ? `${tradeData.amount} ${tradeData.crypto} por ${tradeData.totalBs} Bs.` : `${tradeData.totalBs} Bs. por ${tradeData.amount} ${tradeData.crypto}`}
-            </Text>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <View style={styles.tradeStatusBanner}>
+          <View style={styles.tradeStatusHeader}>
+            <View style={styles.tradeInfo}>
+              <Icon name="trending-up" size={16} color={colors.primary} style={styles.tradeIcon} />
+              <Text style={styles.tradeAmount}>
+                {tradeType === 'buy' ? `${tradeData.amount} ${tradeData.crypto} por ${tradeData.totalBs} Bs.` : `${tradeData.totalBs} Bs. por ${tradeData.amount} ${tradeData.crypto}`}
+              </Text>
+            </View>
+            <View style={styles.tradeProgress}>
+              <Text style={styles.stepIndicator}>Paso {currentTradeStep}/4</Text>
+              <View style={styles.timerBadge}>
+                <Text style={styles.timerText}>{formatTime(timeRemaining)}</Text>
+              </View>
+            </View>
           </View>
-          <View style={styles.tradeProgress}>
-            <Text style={styles.stepIndicator}>Paso {currentTradeStep}/4</Text>
-            <View style={styles.timerBadge}>
-              <Text style={styles.timerText}>{formatTime(timeRemaining)}</Text>
+          
+          <View style={styles.tradeStatusFooter}>
+            <Text style={styles.stepText}>{getStepText(currentTradeStep)}</Text>
+            <View style={styles.progressBar}>
+              <View 
+                style={[styles.progressFill, { width: `${(currentTradeStep / 4) * 100}%` }]} 
+              />
             </View>
           </View>
         </View>
-        
-        <View style={styles.tradeStatusFooter}>
-          <Text style={styles.stepText}>{getStepText(currentTradeStep)}</Text>
-          <View style={styles.progressBar}>
-            <View 
-              style={[styles.progressFill, { width: `${(currentTradeStep / 4) * 100}%` }]} 
-            />
-          </View>
-        </View>
-      </View>
+      </TouchableWithoutFeedback>
 
       {/* Quick Actions */}
       {currentTradeStep === 1 && (
-        <View style={styles.quickActionsBanner}>
-          <View style={styles.quickActionsContent}>
-            <View style={styles.quickActionsInfo}>
-              <Icon name="alert-triangle" size={16} color="#D97706" style={styles.quickActionsIcon} />
-              <Text style={styles.quickActionsText}>¿Ya realizaste el pago?</Text>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.paymentActionBanner}>
+            <View style={styles.paymentActionContent}>
+              <View style={styles.paymentActionInfo}>
+                <Icon name="credit-card" size={16} color="#2563EB" style={styles.paymentActionIcon} />
+                <Text style={styles.paymentActionText}>¿Ya realizaste el pago?</Text>
+              </View>
+              <TouchableOpacity onPress={handleMarkAsPaid} style={styles.markAsPaidButton}>
+                <Text style={styles.markAsPaidButtonText}>Marcar como pagado</Text>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity onPress={handleMarkAsPaid} style={styles.markAsPaidButton}>
-              <Text style={styles.markAsPaidButtonText}>Marcar como pagado</Text>
-            </TouchableOpacity>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       )}
 
       {/* Security Notice */}
-      <View style={styles.securityNotice}>
-        <View style={styles.securityContent}>
-          <Icon name="alert-triangle" size={16} color="#D97706" style={styles.securityIcon} />
-          <View style={styles.securityTextContainer}>
-            <Text style={styles.securityTitle}>Seguridad:</Text>
-            <Text style={styles.securityText}>• Solo comparte información bancaria en este chat seguro</Text>
-            <Text style={styles.securityText}>• Nunca envíes criptomonedas antes de confirmar el pago</Text>
-            <Text style={styles.securityText}>• No compartas comprobantes por fotos (vulnerables a edición)</Text>
+      {!isSecurityNoticeDismissed && (
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={styles.securityNotice}>
+            <View style={styles.securityContent}>
+              <Icon name="alert-triangle" size={16} color="#D97706" style={styles.securityIcon} />
+              <View style={styles.securityTextContainer}>
+                <Text style={styles.securityTitle}>Seguridad:</Text>
+                <Text style={styles.securityText}>• Solo comparte información bancaria en este chat seguro</Text>
+                <Text style={styles.securityText}>• Nunca envíes criptomonedas antes de confirmar el pago</Text>
+                <Text style={styles.securityText}>• No compartas comprobantes por fotos (vulnerables a edición)</Text>
+              </View>
+            </View>
+            <TouchableOpacity 
+              onPress={() => setIsSecurityNoticeDismissed(true)} 
+              style={styles.securityDismissButton}
+            >
+              <Text style={styles.securityDismissButtonText}>Entiendo</Text>
+            </TouchableOpacity>
           </View>
-        </View>
-      </View>
+        </TouchableWithoutFeedback>
+      )}
 
-      {/* Messages */}
+      {/* Messages and Input Container */}
       <KeyboardAvoidingView 
-        style={styles.messagesContainer} 
+        style={styles.chatContainer} 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        keyboardVerticalOffset={0}
       >
-        <ScrollView 
-          ref={messagesEndRef}
-          style={styles.messagesScroll}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.messagesContent}
-        >
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} msg={msg} />
-          ))}
-        </ScrollView>
-      </KeyboardAvoidingView>
+        {/* Messages Area */}
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <ScrollView 
+            ref={messagesEndRef}
+            style={styles.messagesScroll}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.messagesContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+          >
+          {messages.length === 0 ? (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+              <Text style={{ color: '#6B7280', fontStyle: 'italic' }}>
+                No hay mensajes aún...
+              </Text>
+            </View>
+          ) : (
+            <>
+              <View style={{ flex: 1 }} />
+              {messages.map((msg) => (
+                <MessageBubble key={msg.id} msg={msg} />
+              ))}
+            </>
+          )}
+          </ScrollView>
+        </TouchableWithoutFeedback>
 
-      {/* Message Input */}
-      <View style={styles.inputContainer}>
+        {/* Message Input */}
+        <TouchableWithoutFeedback>
+          <View style={styles.inputContainer}>
         <View style={styles.inputRow}>
           <View style={styles.inputWrapper}>
             <TextInput
@@ -566,7 +712,9 @@ export const TradeChatScreen: React.FC = () => {
             />
           </TouchableOpacity>
         </View>
-      </View>
+        </View>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
 
       {/* Confirmation Modal for Marcar como pagado */}
       <Modal
@@ -787,7 +935,7 @@ const styles = StyleSheet.create({
     color: '#92400E',
   },
   markAsPaidButton: {
-    backgroundColor: '#F59E0B',
+    backgroundColor: '#2563EB',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 8,
@@ -795,6 +943,29 @@ const styles = StyleSheet.create({
   markAsPaidButtonText: {
     color: '#fff',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  paymentActionBanner: {
+    backgroundColor: '#DBEAFE',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#93C5FD',
+  },
+  paymentActionContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  paymentActionInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  paymentActionIcon: {
+    marginRight: 8,
+  },
+  paymentActionText: {
+    fontSize: 14,
+    color: '#1E40AF',
     fontWeight: '600',
   },
   securityNotice: {
@@ -824,6 +995,23 @@ const styles = StyleSheet.create({
     color: '#92400E',
     lineHeight: 16,
   },
+  securityDismissButton: {
+    backgroundColor: '#92400E',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+    alignSelf: 'flex-end',
+    marginTop: 12,
+  },
+  securityDismissButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  chatContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
   messagesContainer: {
     flex: 1,
   },
@@ -832,6 +1020,10 @@ const styles = StyleSheet.create({
   },
   messagesContent: {
     padding: 16,
+    paddingTop: 8,
+    paddingBottom: 8,
+    flexGrow: 1,
+    justifyContent: 'flex-end',
   },
   systemMessageContainer: {
     alignItems: 'center',
@@ -940,8 +1132,17 @@ const styles = StyleSheet.create({
   inputContainer: {
     backgroundColor: '#fff',
     padding: 16,
+    paddingBottom: 16,
     borderTopWidth: 1,
     borderTopColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: -2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 8,
   },
   inputRow: {
     flexDirection: 'row',
@@ -962,6 +1163,9 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     maxHeight: 100,
     textAlignVertical: 'top',
+    minHeight: 40,
+    paddingHorizontal: 0,
+    paddingVertical: Platform.OS === 'android' ? 8 : 12,
   },
   sendButton: {
     backgroundColor: colors.primary,
