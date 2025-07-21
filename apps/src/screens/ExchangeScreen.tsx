@@ -26,6 +26,7 @@ import { useCurrency } from '../hooks/useCurrency';
 import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS, GET_MY_P2P_TRADES } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { useCountry } from '../contexts/CountryContext';
+import { useAuth } from '../contexts/AuthContext';
 import { ExchangeRateDisplay } from '../components/ExchangeRateDisplay';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { getCurrencySymbol, getCurrencyForCountry } from '../utils/currencyMapping';
@@ -345,6 +346,16 @@ export const ExchangeScreen = () => {
   
   // Get current account context
   const { activeAccount } = useAccount();
+  const { profileData } = useAuth();
+  
+  // Debug active account
+  console.log('[ExchangeScreen] Active account:', {
+    activeAccountId: activeAccount?.id,
+    activeAccountType: activeAccount?.type,
+    activeAccountName: activeAccount?.name,
+    isActiveAccountNull: activeAccount === null,
+    isActiveAccountUndefined: activeAccount === undefined
+  });
   
   // Get currency information for selected country (from context, same as exchange rate hook)
   const { selectedCountry: contextSelectedCountry, userCountry } = useCountry();
@@ -387,18 +398,59 @@ export const ExchangeScreen = () => {
   });
 
   // Fetch user's active trades filtered by current account context
-  const { data: myTradesData, loading: tradesLoading, error: tradesError, refetch: refetchTrades } = useQuery(GET_MY_P2P_TRADES, {
-    variables: {
-      accountId: activeAccount?.id // Filter trades by current account context
-    },
-    fetchPolicy: 'cache-and-network', // Allow cache but also fetch fresh data
-    notifyOnNetworkStatusChange: false,
-    skip: !activeAccount // Skip query if no active account
+  const tradesQueryVariables = {
+    accountId: activeAccount?.id // Filter trades by current account context
+  };
+  
+  console.log('[ExchangeScreen] Trades query variables:', {
+    accountId: tradesQueryVariables.accountId,
+    activeAccountType: activeAccount?.type,
+    activeAccountIndex: activeAccount?.index,
+    willSkipQuery: !activeAccount || !activeAccount.id
   });
+  
+  const { data: myTradesData, loading: tradesLoading, error: tradesError, refetch: refetchTrades } = useQuery(GET_MY_P2P_TRADES, {
+    variables: tradesQueryVariables,
+    fetchPolicy: 'network-only', // Always fetch fresh data from server
+    notifyOnNetworkStatusChange: true, // Enable to track network status
+    skip: !activeAccount || !activeAccount.id // Skip if no account or no ID
+  });
+
+  // Force refetch trades when active account changes
+  React.useEffect(() => {
+    if (activeAccount?.id && refetchTrades) {
+      console.log('[ExchangeScreen] Active account changed, refetching trades for account:', {
+        accountId: activeAccount.id,
+        accountType: activeAccount.type,
+        accountName: activeAccount.name
+      });
+      refetchTrades({
+        accountId: activeAccount.id
+      });
+    }
+  }, [activeAccount?.id, activeAccount?.type, refetchTrades]);
 
   // Transform real trades data into UI format
   const activeTrades: ActiveTrade[] = React.useMemo(() => {
     if (!myTradesData?.myP2pTrades) return [];
+    
+    console.log('[ExchangeScreen] Raw trades data:', {
+      tradesCount: myTradesData.myP2pTrades.length,
+      accountFilterUsed: tradesQueryVariables.accountId,
+      currentAccount: {
+        id: activeAccount?.id,
+        type: activeAccount?.type,
+        name: activeAccount?.name
+      },
+      trades: myTradesData.myP2pTrades.map((trade: any) => ({
+        id: trade.id,
+        buyerUser: trade.buyerUser?.id,
+        sellerUser: trade.sellerUser?.id,
+        buyerBusiness: trade.buyerBusiness?.id,
+        sellerBusiness: trade.sellerBusiness?.id,
+        status: trade.status
+      }))
+    });
     
     return myTradesData.myP2pTrades
       .filter((trade: any) => trade.status !== 'COMPLETED' && trade.status !== 'CANCELLED')
@@ -413,6 +465,24 @@ export const ExchangeScreen = () => {
         // Since we're filtering by account context, we know this trade involves the current account
         let tradeType, otherPartyName;
         
+        console.log('[ExchangeScreen] Analyzing trade:', {
+          tradeId: trade.id,
+          buyerUser: trade.buyerUser?.id,
+          sellerUser: trade.sellerUser?.id,
+          buyerBusiness: trade.buyerBusiness?.id,
+          sellerBusiness: trade.sellerBusiness?.id,
+          buyerDisplayName,
+          sellerDisplayName,
+          currentAccountType: activeAccount?.type,
+          currentUserId: profileData?.userProfile?.id,
+          currentBusinessId: activeAccount?.business?.id,
+          paymentMethod: {
+            name: trade.paymentMethod?.name,
+            displayName: trade.paymentMethod?.displayName,
+            isActive: trade.paymentMethod?.isActive
+          }
+        });
+        
         if (activeAccount?.type === 'business') {
           // Current account is business
           const currentBusinessId = activeAccount.business?.id;
@@ -421,8 +491,8 @@ export const ExchangeScreen = () => {
           tradeType = isBuyer ? 'buy' : 'sell';
           otherPartyName = isBuyer ? sellerDisplayName : buyerDisplayName;
         } else {
-          // Current account is personal
-          const currentUserId = activeAccount?.id; // This might need to be adjusted based on account structure
+          // Current account is personal - use the user ID from profile, not account ID
+          const currentUserId = profileData?.userProfile?.id;
           const isBuyer = trade.buyerUser?.id === currentUserId;
           
           tradeType = isBuyer ? 'buy' : 'sell';
@@ -492,7 +562,9 @@ export const ExchangeScreen = () => {
           totalSteps: 4,
           timeRemaining,
           status: trade.status.toLowerCase(),
-          paymentMethod: trade.paymentMethod?.displayName || trade.paymentMethod?.name || 'N/A',
+          paymentMethod: trade.paymentMethod?.isActive === false ? 
+            'Método inactivo' : 
+            (trade.paymentMethod?.displayName || trade.paymentMethod?.name || 'N/A'),
           rate: trade.rateUsed.toString(),
           tradeType,
         };
@@ -842,9 +914,77 @@ export const ExchangeScreen = () => {
     setAmount(value);
   }, []);
 
+  // Check if an offer belongs to the current user/account
+  const checkIfOwnOffer = (offer: any): boolean => {
+    if (!activeAccount) return false;
+    
+    // Add debug logging
+    const currentBusinessId = activeAccount.type === 'business' ? 
+      (profileData?.businessProfile?.id || activeAccount.business?.id) : null;
+    const currentUserId = profileData?.userProfile?.id;
+    
+    console.log('[DEBUG] checkIfOwnOffer:', {
+      activeAccountId: activeAccount.id,
+      activeAccountType: activeAccount.type,
+      activeAccountBusinessId: activeAccount.business?.id,
+      profileUserId: profileData?.userProfile?.id,
+      profileBusinessId: profileData?.businessProfile?.id,
+      computedCurrentBusinessId: currentBusinessId,
+      computedCurrentUserId: currentUserId,
+      // Check new fields
+      offerUserId: offer.offerUser?.id,
+      offerBusinessId: offer.offerBusiness?.id,
+      // Check old fields for comparison
+      oldOfferUserId: offer.user?.id,
+      offer: offer
+    });
+    
+    if (activeAccount.type === 'business') {
+      // Check if the offer belongs to the current business account
+      // Use the new offerBusiness field
+      // Try both profileData and activeAccount business ID for robustness
+      const currentBusinessId = profileData?.businessProfile?.id || activeAccount.business?.id;
+      return offer.offerBusiness?.id === currentBusinessId;
+    } else {
+      // Check if the offer belongs to the current personal account
+      // ONLY use offerUser field - do NOT fallback to user field for business offers
+      if (offer.offerBusiness) {
+        // This is a business offer, so it can't belong to a personal account
+        return false;
+      }
+      
+      const offerUserId = offer.offerUser?.id;
+      const currentUserId = profileData?.userProfile?.id;
+      return offerUserId === currentUserId;
+    }
+  };
+
   const handleSelectOffer = (offer: any, action: 'profile' | 'trade') => {
+    // Check if user is trying to trade with themselves
+    const isOwnOffer = checkIfOwnOffer(offer);
+    
+    if (action === 'trade' && isOwnOffer) {
+      Alert.alert(
+        'No puedes comerciar contigo mismo',
+        'Esta es tu propia oferta. No puedes crear un intercambio contigo mismo.',
+        [{ text: 'Entendido', style: 'default' }]
+      );
+      return;
+    }
+    
     // Map real GraphQL offer data to navigation format
-    const userName = offer.user ? `${offer.user.firstName} ${offer.user.lastName?.charAt(0)}.` : 'Usuario';
+    // Determine the creator name based on offer type
+    let userName = 'Usuario';
+    if (offer.offerBusiness) {
+      userName = offer.offerBusiness.name;
+    } else if (offer.offerUser) {
+      const lastInitial = offer.offerUser.lastName?.charAt(0) || '';
+      userName = `${offer.offerUser.firstName}${lastInitial ? ' ' + lastInitial + '.' : ''}`;
+    } else if (offer.user) {
+      // Fallback to old field for compatibility
+      const lastInitial = offer.user.lastName?.charAt(0) || '';
+      userName = `${offer.user.firstName}${lastInitial ? ' ' + lastInitial + '.' : ''}`;
+    }
     const userStats = offer.userStats || {};
     const completedTrades = userStats.completedTrades || 0;
     const successRate = parseFloat(userStats.successRate || '0');
@@ -910,8 +1050,29 @@ export const ExchangeScreen = () => {
 
   // Enhanced Offer Card Component
   const OfferCard = ({ offer, crypto }: { offer: any, crypto: 'cUSD' | 'CONFIO' }) => {
+    // Check if this is the user's own offer
+    const isOwnOffer = checkIfOwnOffer(offer);
+    
+    // Debug logging for badge rendering
+    console.log('[DEBUG] OfferCard render:', {
+      offerId: offer.id,
+      isOwnOffer,
+      shouldShowBadge: isOwnOffer === true
+    });
+    
     // Extract user info from the real offer structure
-    const userName = offer.user ? `${offer.user.firstName} ${offer.user.lastName?.charAt(0)}.` : 'Usuario';
+    // Determine the creator name based on offer type
+    let userName = 'Usuario';
+    if (offer.offerBusiness) {
+      userName = offer.offerBusiness.name;
+    } else if (offer.offerUser) {
+      const lastInitial = offer.offerUser.lastName?.charAt(0) || '';
+      userName = `${offer.offerUser.firstName}${lastInitial ? ' ' + lastInitial + '.' : ''}`;
+    } else if (offer.user) {
+      // Fallback to old field for compatibility
+      const lastInitial = offer.user.lastName?.charAt(0) || '';
+      userName = `${offer.user.firstName}${lastInitial ? ' ' + lastInitial + '.' : ''}`;
+    }
     const userStats = offer.userStats || {};
     const completedTrades = userStats.completedTrades || 0;
     const successRate = parseFloat(userStats.successRate || '0'); // Convert string to number
@@ -936,6 +1097,12 @@ export const ExchangeScreen = () => {
     
     return (
       <View style={styles.offerCard}>
+        {/* Own Offer Badge */}
+        {isOwnOffer && (
+          <View style={styles.ownOfferBadge}>
+            <Text style={styles.ownOfferBadgeText}>TU OFERTA</Text>
+          </View>
+        )}
         <View style={styles.offerHeader}>
           <View style={styles.offerUser}>
             <View style={styles.avatarContainer}>
@@ -1049,18 +1216,39 @@ export const ExchangeScreen = () => {
       </View>
 
       <View style={styles.offerActions}>
-        <TouchableOpacity 
-            style={styles.detailsButton}
-            onPress={() => handleSelectOffer(offer, 'profile')}
-        >
-          <Text style={styles.detailsButtonText}>Ver Perfil</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-            style={styles.buyButton}
-            onPress={() => handleSelectOffer(offer, 'trade')}
-        >
-          <Text style={styles.buyButtonText}>{activeTab === 'buy' ? 'Comprar' : 'Vender'}</Text>
-        </TouchableOpacity>
+        {isOwnOffer ? (
+          // Show different actions for own offers
+          <>
+            <TouchableOpacity 
+                style={[styles.detailsButton, { opacity: 0.6 }]}
+                disabled={true}
+            >
+              <Text style={[styles.detailsButtonText, { color: '#6B7280' }]}>Tu Oferta</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+                style={[styles.buyButton, { backgroundColor: '#6B7280' }]}
+                disabled={true}
+            >
+              <Text style={styles.buyButtonText}>No Disponible</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          // Show normal actions for other users' offers
+          <>
+            <TouchableOpacity 
+                style={styles.detailsButton}
+                onPress={() => handleSelectOffer(offer, 'profile')}
+            >
+              <Text style={styles.detailsButtonText}>Ver Perfil</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+                style={styles.buyButton}
+                onPress={() => handleSelectOffer(offer, 'trade')}
+            >
+              <Text style={styles.buyButtonText}>{activeTab === 'buy' ? 'Comprar' : 'Vender'}</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     </View>
   );
@@ -2180,6 +2368,7 @@ const styles = StyleSheet.create({
     paddingVertical: 18, // Slightly more vertical padding for better spacing
     borderWidth: 1,
     borderColor: '#E5E7EB',
+    position: 'relative', // Important for absolute positioned badge
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -2191,6 +2380,22 @@ const styles = StyleSheet.create({
         elevation: 2,
       },
     }),
+  },
+  ownOfferBadge: {
+    position: 'absolute',
+    top: -8,
+    left: 12,
+    backgroundColor: colors.accent,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    zIndex: 1,
+  },
+  ownOfferBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
   },
   offerHeader: {
     flexDirection: 'row',

@@ -479,6 +479,17 @@ export const GET_P2P_OFFERS = gql`
         firstName
         lastName
       }
+      offerUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      offerBusiness {
+        id
+        name
+        category
+      }
       exchangeType
       tokenType
       rate
@@ -627,6 +638,7 @@ export const GET_MY_P2P_TRADES = gql`
         name
         displayName
         icon
+        isActive
       }
       status
       expiresAt
@@ -652,6 +664,17 @@ export const GET_P2P_TRADE = gql`
           username
           firstName
           lastName
+        }
+        offerUser {
+          id
+          username
+          firstName
+          lastName
+        }
+        offerBusiness {
+          id
+          name
+          category
         }
         userStats {
           totalTrades
@@ -682,6 +705,7 @@ export const GET_P2P_TRADE = gql`
         name
         displayName
         icon
+        isActive
       }
       status
       expiresAt

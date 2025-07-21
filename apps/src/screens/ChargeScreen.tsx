@@ -21,8 +21,6 @@ import { useMutation, useQuery } from '@apollo/client';
 import { CREATE_INVOICE, GET_INVOICES, GET_INVOICE } from '../apollo/queries';
 import QRCode from 'react-native-qrcode-svg';
 import { Clipboard } from 'react-native';
-import { Camera, useCameraDevice, useCodeScanner, CameraPermissionStatus } from 'react-native-vision-camera';
-import type { Code } from 'react-native-vision-camera';
 
 // Import currency icons
 const cUSDIcon = require('../assets/png/cUSD.png');
@@ -62,16 +60,8 @@ const ChargeScreen = () => {
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'expired'>('pending');
   const [hasNavigatedToSuccess, setHasNavigatedToSuccess] = useState(false);
   
-  // Camera states for pagar mode
-  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
-  const [isScanning, setIsScanning] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [scannedSuccessfully, setScannedSuccessfully] = useState(false);
-  const device = useCameraDevice('back');
-
   // GraphQL mutations and queries
   const [createInvoice] = useMutation(CREATE_INVOICE);
-  const [getInvoice] = useMutation(GET_INVOICE);
   
   // Poll for invoice status updates when QR is shown
   const { data: invoiceData, refetch: refetchInvoice } = useQuery(GET_INVOICES, {
@@ -79,122 +69,6 @@ const ChargeScreen = () => {
     pollInterval: 3000, // Poll every 3 seconds for real-time updates
     fetchPolicy: 'cache-and-network',
   });
-
-  // Camera permission check
-  useEffect(() => {
-    if (mode === 'pagar') {
-      checkCameraPermission();
-    }
-  }, [mode]);
-
-  const checkCameraPermission = async () => {
-    const permission = await Camera.getCameraPermissionStatus();
-    if (permission === 'granted') {
-      setHasCameraPermission(true);
-    } else if (permission === 'denied') {
-      Alert.alert(
-        'Camera Permission Required',
-        'Please enable camera access in your device settings to use the QR code scanner.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Open Settings', onPress: openSettings }
-        ]
-      );
-      setHasCameraPermission(false);
-    } else {
-      const newPermission = await Camera.requestCameraPermission();
-      setHasCameraPermission(newPermission === 'granted');
-    }
-  };
-
-  const openSettings = () => {
-    if (Platform.OS === 'ios') {
-      Linking.openURL('app-settings:');
-    } else {
-      Linking.openSettings();
-    }
-  };
-
-  // QR Code scanner configuration
-  const codeScanner = useCodeScanner({
-    codeTypes: ['qr'],
-    onCodeScanned: (codes: Code[]) => {
-      if (codes.length > 0 && !isProcessing && codes[0].value) {
-        handleQRCodeScanned(codes[0].value);
-      }
-    },
-  });
-
-  const handleQRCodeScanned = async (scannedData: string) => {
-    if (isProcessing) return; // Prevent multiple processing
-    
-    console.log('QR Code scanned:', scannedData);
-    
-    // Show success indicator
-    setScannedSuccessfully(true);
-    
-    // Parse the QR code data
-    const qrMatch = scannedData.match(/^confio:\/\/pay\/(.+)$/);
-    if (!qrMatch || !qrMatch[1]) {
-      Alert.alert(
-        'Invalid QR Code',
-        'This QR code is not a valid Confío payment code.',
-        [{ text: 'OK', style: 'default' }]
-      );
-      setScannedSuccessfully(false);
-      return;
-    }
-
-    const invoiceId = qrMatch[1]!; // Use non-null assertion since we already checked it exists
-    console.log('Invoice ID extracted:', invoiceId);
-
-    setIsProcessing(true);
-
-    try {
-      // SECURITY: Cross-check with server - don't trust QR code data
-      // We only use the QR code to get the invoice ID, then fetch real data from server
-      const { data: invoiceData } = await getInvoice({
-        variables: { invoiceId }
-      });
-
-      if (!invoiceData?.getInvoice?.success) {
-        const errors = invoiceData?.getInvoice?.errors || ['Invoice not found'];
-        Alert.alert('Error', errors.join(', '));
-        return;
-      }
-
-      const invoice = invoiceData.getInvoice.invoice;
-      console.log('Invoice details:', invoice);
-
-      // Server-side validations:
-      // 1. Invoice exists and is valid
-      // 2. Invoice hasn't expired (server checks isExpired)
-      // 3. Invoice is still in PENDING status
-      if (invoice.isExpired) {
-        Alert.alert('Invoice Expired', 'This payment request has expired.');
-        return;
-      }
-
-      // Client-side validations:
-      // 1. User isn't paying their own invoice
-      if (invoice.merchantUser?.id === activeAccount?.id) {
-        Alert.alert('Cannot Pay Own Invoice', 'You cannot pay your own invoice.');
-        setScannedSuccessfully(false);
-        return;
-      }
-
-      // Navigate to payment confirmation screen
-      (navigation as any).navigate('PaymentConfirmation', {
-        invoiceData: invoice
-      });
-    } catch (error) {
-      console.error('Error processing QR code:', error);
-      Alert.alert('Error', 'Failed to process QR code. Please try again.');
-    } finally {
-      setIsProcessing(false);
-      setScannedSuccessfully(false);
-    }
-  };
 
   // Check for payment status updates
   useEffect(() => {
@@ -666,68 +540,30 @@ const ChargeScreen = () => {
           </View>
         ) : (
           <View style={styles.pagarContent}>
-            {hasCameraPermission === null ? (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Solicitando Permiso de Cámara</Text>
-                <Text style={styles.cardSubtitle}>Por favor espera mientras solicitamos acceso a la cámara...</Text>
-              </View>
-            ) : hasCameraPermission === false ? (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Permiso de Cámara Requerido</Text>
-                <Text style={styles.cardSubtitle}>
-                  Necesitamos acceso a la cámara para escanear códigos QR. Por favor habilita el acceso en la configuración de tu dispositivo.
-                </Text>
-                <TouchableOpacity
-                  style={[styles.scanButton, { backgroundColor: colors.primary, marginTop: 16 }]}
-                  onPress={checkCameraPermission}
-                >
-                  <Text style={styles.scanButtonText}>Solicitar Permiso</Text>
-                </TouchableOpacity>
-              </View>
-            ) : !device ? (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>Cámara No Disponible</Text>
-                <Text style={styles.cardSubtitle}>No se pudo acceder a la cámara del dispositivo.</Text>
-              </View>
-            ) : (
-              <>
-                <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Escanear Código QR</Text>
-                  <Text style={styles.cardSubtitle}>
-                    Escanea el código QR de un negocio para realizar un pago
-                  </Text>
-                </View>
-                
-                <View style={styles.cameraContainer}>
-                  <Camera
-                    style={styles.camera}
-                    device={device}
-                    isActive={true}
-                    codeScanner={codeScanner}
-                    enableZoomGesture
-                  >
-                    <View style={styles.cameraOverlay}>
-                      <View style={styles.scanFrame} />
-                      {scannedSuccessfully && (
-                        <View style={styles.successOverlay}>
-                          <Icon name="check-circle" size={60} color="#10B981" />
-                          <Text style={styles.successText}>Código QR detectado</Text>
-                        </View>
-                      )}
-                    </View>
-                  </Camera>
-                </View>
-                
-                <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Instrucciones</Text>
-                  <Text style={styles.cardSubtitle}>
-                    • Coloca el código QR dentro del marco{'\n'}
-                    • Mantén la cámara estable{'\n'}
-                    • El código se detectará automáticamente
-                  </Text>
-                </View>
-              </>
-            )}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Escanear Código QR para Pagar</Text>
+              <Text style={styles.cardSubtitle}>
+                Escanea el código QR de un negocio para realizar un pago de forma rápida y segura
+              </Text>
+              
+              <TouchableOpacity
+                style={[styles.scanButton, { backgroundColor: colors.primary, marginTop: 24 }]}
+                onPress={() => navigation.navigate('Scan', { mode: 'pagar' })}
+              >
+                <Icon name="camera" size={20} color="white" style={{ marginRight: 8 }} />
+                <Text style={styles.scanButtonText}>Abrir Escáner QR</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>¿Cómo funciona?</Text>
+              <Text style={styles.cardSubtitle}>
+                • El negocio te mostrará un código QR{'\n'}
+                • Presiona "Abrir Escáner QR" arriba{'\n'}
+                • Apunta la cámara al código QR{'\n'}
+                • Confirma el pago en la siguiente pantalla
+              </Text>
+            </View>
           </View>
         )}
       </View>
@@ -1125,50 +961,10 @@ const styles = StyleSheet.create({
     color: '#374151',
   },
   
-  // New styles for camera functionality
   cardSubtitle: {
     fontSize: 14,
     color: '#6b7280',
     lineHeight: 20,
-  },
-  cameraContainer: {
-    width: '100%',
-    height: 300,
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 24,
-  },
-  camera: {
-    flex: 1,
-  },
-  cameraOverlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  scanFrame: {
-    width: 250,
-    height: 250,
-    borderWidth: 2,
-    borderColor: colors.primary,
-    borderRadius: 12,
-    backgroundColor: 'transparent',
-  },
-  successOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  successText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-    marginTop: 16,
   },
   
   statusBadge: {

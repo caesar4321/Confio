@@ -38,19 +38,84 @@ class PaymentTransaction(SoftDeleteModel):
         editable=False
     )
 
-    # User references (from our database)
+    # User who initiated the payment (personal account user or business account user)
     payer_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='payment_transactions_sent'
+        related_name='payment_transactions_sent',
+        help_text='User who initiated the payment'
     )
+    
+    # User associated with merchant business (business owner or cashier)
+    merchant_account_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='payment_transactions_merchant_account',
+        null=True,
+        blank=True,
+        help_text='User associated with the merchant business (owner or cashier)'
+    )
+    
+    # LEGACY: Keep for backward compatibility
     merchant_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='payment_transactions_received'
+        related_name='payment_transactions_received_legacy',
+        null=True,
+        blank=True,
+        help_text='DEPRECATED: Use merchant_account_user instead'
     )
 
-    # Account references
+    # Business relationship fields
+    payer_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        related_name='payment_transactions_sent',
+        null=True,
+        blank=True,
+        help_text='Business that made the payment (if payer is business account)'
+    )
+    
+    # The actual merchant entity (WILL BE REQUIRED after data migration)
+    merchant_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        related_name='payment_transactions_received',
+        null=True,
+        blank=True,
+        help_text='Business entity that received the payment (will be required after migration)'
+    )
+
+    # Computed fields for GraphQL
+    ACCOUNT_TYPE_CHOICES = [
+        ('user', 'Personal'),
+        ('business', 'Business'),
+    ]
+    
+    payer_type = models.CharField(
+        max_length=10,
+        choices=ACCOUNT_TYPE_CHOICES,
+        default='user',
+        help_text='Type of payer (user or business)'
+    )
+    merchant_type = models.CharField(
+        max_length=10,
+        choices=ACCOUNT_TYPE_CHOICES,
+        default='business',
+        help_text='Type of merchant (always business for payments)'
+    )
+    payer_display_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Display name for the payer'
+    )
+    merchant_display_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Display name for the merchant'
+    )
+
+    # Legacy Account references
     payer_account = models.ForeignKey(
         'users.Account',
         on_delete=models.CASCADE,
@@ -99,7 +164,7 @@ class PaymentTransaction(SoftDeleteModel):
         ]
 
     def __str__(self):
-        return f"PAY-{self.payment_transaction_id}: {self.token_type} {self.amount} from {self.payer_user} to {self.merchant_user}"
+        return f"PAY-{self.payment_transaction_id}: {self.token_type} {self.amount} from {self.payer_user} to {self.merchant_business.name}"
 
 class Invoice(SoftDeleteModel):
     """Model for storing payment invoices (what merchants create to request payment)"""
@@ -124,14 +189,50 @@ class Invoice(SoftDeleteModel):
         editable=False
     )
 
-    # User who created the invoice (merchant/seller)
+    # User who created the invoice (could be business owner or cashier)
+    created_by_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='invoices_created_by',
+        null=True,
+        blank=True,
+        help_text='User who created this invoice (business owner or cashier)'
+    )
+    
+    # LEGACY: Keep for backward compatibility during transition
     merchant_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='invoices_created'
+        related_name='invoices_created_legacy',
+        null=True,
+        blank=True,
+        help_text='DEPRECATED: Use created_by_user instead'
     )
 
-    # Account that created the invoice
+    # The actual merchant entity (WILL BE REQUIRED after data migration)
+    merchant_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        related_name='invoices_received',
+        null=True,
+        blank=True,
+        help_text='Business entity that is the actual merchant (will be required after migration)'
+    )
+
+    # Computed fields for GraphQL
+    merchant_type = models.CharField(
+        max_length=10,
+        choices=[('user', 'Personal'), ('business', 'Business')],
+        default='business',
+        help_text='Type of merchant (always business for invoices)'
+    )
+    merchant_display_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text='Display name for the merchant'
+    )
+
+    # Legacy Account that created the invoice
     merchant_account = models.ForeignKey(
         'users.Account',
         on_delete=models.CASCADE,
@@ -151,6 +252,14 @@ class Invoice(SoftDeleteModel):
         null=True,
         blank=True,
         related_name='invoices_paid'
+    )
+    paid_by_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='invoices_paid',
+        help_text='Business that paid the invoice (if payer is business)'
     )
     paid_at = models.DateTimeField(null=True, blank=True)
     # Note: The actual payment transaction is now stored in PaymentTransaction model
@@ -177,7 +286,7 @@ class Invoice(SoftDeleteModel):
         ]
 
     def __str__(self):
-        return f"INV-{self.invoice_id}: {self.token_type} {self.amount} by {self.merchant_user}"
+        return f"INV-{self.invoice_id}: {self.token_type} {self.amount} by {self.merchant_business.name}"
 
     @property
     def is_expired(self):
