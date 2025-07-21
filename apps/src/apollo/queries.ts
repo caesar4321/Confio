@@ -827,3 +827,56 @@ export const SEND_P2P_MESSAGE = gql`
     }
   }
 `;
+
+// P2P Exchange Subscriptions
+export const TRADE_CHAT_MESSAGE_SUBSCRIPTION = gql`
+  subscription TradeChatMessage($tradeId: ID!) {
+    tradeChatMessage(tradeId: $tradeId) {
+      tradeId
+      message {
+        id
+        sender {
+          id
+          username
+          firstName
+          lastName
+          type
+          businessName
+          businessId
+        }
+        content
+        messageType
+        createdAt
+        isRead
+      }
+    }
+  }
+`;
+
+export const TRADE_STATUS_SUBSCRIPTION = gql`
+  subscription TradeStatus($tradeId: ID!) {
+    tradeStatusUpdate(tradeId: $tradeId) {
+      tradeId
+      status
+      updatedBy
+      trade {
+        id
+        status
+        cryptoAmount
+        fiatAmount
+        rateUsed
+      }
+    }
+  }
+`;
+
+export const TYPING_INDICATOR_SUBSCRIPTION = gql`
+  subscription TypingIndicator($tradeId: ID!) {
+    typingIndicator(tradeId: $tradeId) {
+      tradeId
+      userId
+      username
+      isTyping
+    }
+  }
+`;

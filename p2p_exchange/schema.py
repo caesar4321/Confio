@@ -5,6 +5,8 @@ from django.db import models
 from django.utils import timezone
 from datetime import timedelta
 from django.contrib.auth import get_user_model
+from channels.layers import get_channel_layer
+import json
 from .models import (
     P2PPaymentMethod, 
     P2POffer, 
@@ -690,6 +692,63 @@ class SendP2PMessage(graphene.Mutation):
             # Create message with new direct relationships
             message = P2PMessage.objects.create(**message_kwargs)
 
+            # Broadcast message via channel layer for GraphQL subscriptions
+            from asgiref.sync import async_to_sync
+            channel_layer = get_channel_layer()
+            
+            if channel_layer:
+                # Format sender info similar to subscription consumer
+                sender_info = {}
+                if message.sender_user:
+                    sender_info = {
+                        'id': str(message.sender_user.id),
+                        'username': message.sender_user.username,
+                        'firstName': message.sender_user.first_name,
+                        'lastName': message.sender_user.last_name,
+                        'type': 'user'
+                    }
+                elif message.sender_business:
+                    business_account = message.sender_business.accounts.first()
+                    if business_account:
+                        sender_info = {
+                            'id': str(business_account.user.id),
+                            'username': business_account.user.username,
+                            'firstName': business_account.user.first_name,
+                            'lastName': business_account.user.last_name,
+                            'type': 'business',
+                            'businessName': message.sender_business.name,
+                            'businessId': str(message.sender_business.id)
+                        }
+                else:
+                    # Fallback
+                    sender_info = {
+                        'id': str(message.sender.id),
+                        'username': message.sender.username,
+                        'firstName': message.sender.first_name,
+                        'lastName': message.sender.last_name,
+                        'type': 'user'
+                    }
+                
+                # Broadcast to GraphQL subscription group
+                group_name = f'trade_chat_{trade.id}'
+                message_data = {
+                    'id': message.id,
+                    'sender': sender_info,
+                    'content': message.content,
+                    'messageType': message.message_type,
+                    'createdAt': message.created_at.isoformat(),
+                    'isRead': message.is_read,
+                }
+                
+                async_to_sync(channel_layer.group_send)(
+                    group_name,
+                    {
+                        'type': 'chat_message',
+                        'trade_id': trade.id,
+                        'message': message_data
+                    }
+                )
+
             return SendP2PMessage(
                 message=message,
                 success=True,
@@ -861,3 +920,138 @@ class Mutation(graphene.ObjectType):
     create_p2p_trade = CreateP2PTrade.Field()
     update_p2p_trade_status = UpdateP2PTradeStatus.Field()
     send_p2p_message = SendP2PMessage.Field()
+
+# Subscriptions
+class TradeChatMessageSubscription(graphene.ObjectType):
+    """Subscription for new chat messages in a trade"""
+    trade_id = graphene.ID(required=True)
+    message = graphene.Field(P2PMessageType)
+
+class TradeStatusSubscription(graphene.ObjectType):
+    """Subscription for trade status updates"""
+    trade_id = graphene.ID(required=True) 
+    trade = graphene.Field(P2PTradeType)
+    status = graphene.String()
+    updated_by = graphene.ID()
+
+class TypingIndicatorSubscription(graphene.ObjectType):
+    """Subscription for typing indicators"""
+    trade_id = graphene.ID(required=True)
+    user_id = graphene.ID()
+    username = graphene.String()
+    is_typing = graphene.Boolean()
+
+class Subscription(graphene.ObjectType):
+    """GraphQL Subscriptions for P2P Exchange"""
+    
+    trade_chat_message = graphene.Field(
+        TradeChatMessageSubscription,
+        trade_id=graphene.ID(required=True)
+    )
+    
+    trade_status_update = graphene.Field(
+        TradeStatusSubscription,
+        trade_id=graphene.ID(required=True)
+    )
+    
+    typing_indicator = graphene.Field(
+        TypingIndicatorSubscription,
+        trade_id=graphene.ID(required=True)
+    )
+
+    def resolve_trade_chat_message(self, info, trade_id):
+        """Subscribe to chat messages for a specific trade"""
+        # Check if user has access to this trade
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            raise ValidationError("Authentication required")
+        
+        try:
+            trade = P2PTrade.objects.get(id=trade_id)
+            # Check access using new direct relationships
+            has_access = (
+                trade.buyer_user == user or 
+                trade.seller_user == user or
+                # Also check business relationships
+                (trade.buyer_business and trade.buyer_business.accounts.filter(user=user).exists()) or
+                (trade.seller_business and trade.seller_business.accounts.filter(user=user).exists()) or
+                # Fallback to old system for backward compatibility
+                trade.buyer == user or 
+                trade.seller == user
+            )
+            if not has_access:
+                raise ValidationError("Access denied to this trade")
+        except P2PTrade.DoesNotExist:
+            raise ValidationError("Trade not found")
+            
+        # Return subscription generator
+        return self._trade_chat_message_generator(trade_id)
+    
+    def resolve_trade_status_update(self, info, trade_id):
+        """Subscribe to status updates for a specific trade"""
+        # Similar access check as above
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            raise ValidationError("Authentication required")
+        
+        try:
+            trade = P2PTrade.objects.get(id=trade_id)
+            has_access = (
+                trade.buyer_user == user or 
+                trade.seller_user == user or
+                (trade.buyer_business and trade.buyer_business.accounts.filter(user=user).exists()) or
+                (trade.seller_business and trade.seller_business.accounts.filter(user=user).exists()) or
+                trade.buyer == user or 
+                trade.seller == user
+            )
+            if not has_access:
+                raise ValidationError("Access denied to this trade")
+        except P2PTrade.DoesNotExist:
+            raise ValidationError("Trade not found")
+            
+        return self._trade_status_update_generator(trade_id)
+    
+    def resolve_typing_indicator(self, info, trade_id):
+        """Subscribe to typing indicators for a specific trade"""
+        # Similar access check
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            raise ValidationError("Authentication required")
+        
+        try:
+            trade = P2PTrade.objects.get(id=trade_id)
+            has_access = (
+                trade.buyer_user == user or 
+                trade.seller_user == user or
+                (trade.buyer_business and trade.buyer_business.accounts.filter(user=user).exists()) or
+                (trade.seller_business and trade.seller_business.accounts.filter(user=user).exists()) or
+                trade.buyer == user or 
+                trade.seller == user
+            )
+            if not has_access:
+                raise ValidationError("Access denied to this trade")
+        except P2PTrade.DoesNotExist:
+            raise ValidationError("Trade not found")
+            
+        return self._typing_indicator_generator(trade_id)
+    
+    def _trade_chat_message_generator(self, trade_id):
+        """Generator for chat message subscription"""
+        # This will be implemented with channels layer integration
+        channel_layer = get_channel_layer()
+        group_name = f'trade_chat_{trade_id}'
+        
+        # For now, return empty generator - will be properly implemented with channels
+        return iter([])
+    
+    def _trade_status_update_generator(self, trade_id):
+        """Generator for trade status update subscription"""
+        channel_layer = get_channel_layer()
+        group_name = f'trade_status_{trade_id}'
+        return iter([])
+    
+    def _typing_indicator_generator(self, trade_id):
+        """Generator for typing indicator subscription"""
+        channel_layer = get_channel_layer()
+        group_name = f'trade_typing_{trade_id}'
+        return iter([])

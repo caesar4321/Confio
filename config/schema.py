@@ -24,6 +24,12 @@ class Mutation(
 ):
 	pass
 
+class Subscription(
+	p2p_exchange_schema.Subscription,
+	graphene.ObjectType
+):
+	pass
+
 # Register all types
 types = [
 	users_schema.UserType,
@@ -44,6 +50,7 @@ types = [
 schema = graphene.Schema(
 	query=Query,
 	mutation=Mutation,
+	subscription=Subscription,
 	types=types
 )
 
