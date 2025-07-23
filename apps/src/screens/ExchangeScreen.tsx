@@ -1875,6 +1875,7 @@ export const ExchangeScreen = () => {
                     transform: [{ translateY: headerTranslateY }],
                 }
             ]}
+            pointerEvents="box-none" // Allow touches to pass through empty areas
         >
             {activeTrades.length > 0 && (
                 <TouchableOpacity 
@@ -2466,12 +2467,12 @@ export const ExchangeScreen = () => {
         ref={scrollViewRef}
         style={styles.content} 
         contentContainerStyle={{ 
-          paddingTop: headerHeight + 16, // Add some padding to ensure content is not hidden
+          paddingTop: headerHeight + 16, // Restored original padding
           paddingBottom: 100 
         }}
         onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: true }
+            { useNativeDriver: false } // Must be false for RefreshControl to work
         )}
         scrollEventThrottle={16}
         bounces={true}
@@ -2482,6 +2483,7 @@ export const ExchangeScreen = () => {
             tintColor={colors.primary}
             colors={[colors.primary]} // Android
             progressBackgroundColor="#fff" // Android
+            progressViewOffset={headerHeight} // Android - offset for header
             title="Actualizando..." // iOS
             titleColor={colors.primary} // iOS
           />
@@ -2523,7 +2525,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 100,
+    zIndex: 10, // Reduced zIndex
     backgroundColor: '#fff',
     padding: 16,
     borderBottomWidth: 1,
