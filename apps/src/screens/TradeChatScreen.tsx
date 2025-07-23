@@ -257,6 +257,7 @@ export const TradeChatScreen: React.FC = () => {
   
   const [message, setMessage] = useState('');
   const [currentTradeStep, setCurrentTradeStep] = useState(initialStep || 1);
+  const [hasSharedPaymentDetails, setHasSharedPaymentDetails] = useState(false);
   
   // Helper function to get step from trade status
   const getStepFromStatus = (status: string) => {
@@ -318,6 +319,11 @@ export const TradeChatScreen: React.FC = () => {
       if (newStep !== currentTradeStep) {
         console.log('🔄 Updating currentTradeStep from', currentTradeStep, 'to', newStep);
         setCurrentTradeStep(newStep);
+      }
+      
+      // Also set hasSharedPaymentDetails if we're in step 2 or higher
+      if (newStep >= 2 && !hasSharedPaymentDetails) {
+        setHasSharedPaymentDetails(true);
       }
     }
   }, [tradeDetailsData?.p2pTrade?.status]);
@@ -870,6 +876,7 @@ export const TradeChatScreen: React.FC = () => {
       
       // Update local state to reflect new status
       setCurrentTradeStep(2);
+      setHasSharedPaymentDetails(true);
       
       // Close selector modal if open
       setShowPaymentMethodSelector(false);
@@ -1244,10 +1251,11 @@ export const TradeChatScreen: React.FC = () => {
       {console.log('🎯 Marcar como pagado button check:', {
         currentTradeStep,
         tradeType,
-        showButton: currentTradeStep === 2 && tradeType === 'buy',
+        hasSharedPaymentDetails,
+        showButton: (currentTradeStep === 2 || (currentTradeStep === 1 && hasSharedPaymentDetails)) && tradeType === 'buy',
         tradeStatus: tradeDetailsData?.p2pTrade?.status
       })}
-      {currentTradeStep === 2 && tradeType === 'buy' && (
+      {((currentTradeStep === 2) || (currentTradeStep === 1 && hasSharedPaymentDetails)) && tradeType === 'buy' && (
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.paymentActionBanner}>
             <View style={styles.paymentActionContent}>
