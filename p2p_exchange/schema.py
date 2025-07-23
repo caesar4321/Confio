@@ -813,6 +813,27 @@ class UpdateP2PTradeStatus(graphene.Mutation):
 
             trade.save()
 
+            # Broadcast the status update via WebSocket
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            
+            channel_layer = get_channel_layer()
+            room_group_name = f'trade_chat_{trade.id}'
+            
+            # Send trade status update to all connected clients
+            async_to_sync(channel_layer.group_send)(
+                room_group_name,
+                {
+                    'type': 'trade_status_update',
+                    'status': input.status,
+                    'updated_by': str(user.id),
+                    'payment_reference': input.payment_reference or '',
+                    'payment_notes': input.payment_notes or '',
+                }
+            )
+            
+            print(f"[UpdateP2PTradeStatus] Broadcasted status update to room {room_group_name}: {input.status}")
+
             return UpdateP2PTradeStatus(
                 trade=trade,
                 success=True,

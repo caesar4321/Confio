@@ -537,22 +537,69 @@ export const TradeChatScreen: React.FC = () => {
         break;
         
       case 'trade_status_update':
-        console.log('🔄 Trade status updated via WebSocket:', data);
+        console.log('🔄 Trade status updated via WebSocket:', {
+          fullData: data,
+          status: data.status,
+          currentTradeStep,
+          tradeType,
+          updatedBy: data.updated_by,
+          myUserId: userProfile?.id
+        });
+        
         // Update the local state with the new status
         if (data.status) {
           const newStep = getStepFromStatus(data.status);
+          console.log('📊 Calculating new step:', {
+            receivedStatus: data.status,
+            newStep,
+            currentStep: currentTradeStep,
+            willUpdate: newStep !== currentTradeStep
+          });
+          
           if (newStep !== currentTradeStep) {
-            console.log('📊 Updating trade step from WebSocket:', currentTradeStep, '->', newStep);
+            console.log('✅ Updating trade step from WebSocket:', currentTradeStep, '->', newStep);
             setCurrentTradeStep(newStep);
             
             // Also update hasSharedPaymentDetails if moving to step 2+
             if (newStep >= 2 && !hasSharedPaymentDetails) {
+              console.log('✅ Setting hasSharedPaymentDetails to true');
               setHasSharedPaymentDetails(true);
+            }
+            
+            // Add a system message for status changes (but not if we initiated it)
+            if (data.updated_by && data.updated_by !== String(userProfile?.id)) {
+              let systemText = '';
+              switch (data.status) {
+                case 'PAYMENT_PENDING':
+                  systemText = '💳 El vendedor ha compartido los datos de pago.';
+                  break;
+                case 'PAYMENT_SENT':
+                  systemText = '✅ El comprador ha marcado el pago como enviado.';
+                  break;
+                case 'PAYMENT_CONFIRMED':
+                  systemText = '🎉 El vendedor ha confirmado la recepción del pago.';
+                  break;
+                case 'COMPLETED':
+                  systemText = '✅ Intercambio completado exitosamente.';
+                  break;
+              }
+              
+              if (systemText) {
+                const systemMessage: Message = {
+                  id: Date.now() + Math.random(),
+                  sender: 'system',
+                  text: systemText,
+                  timestamp: new Date(),
+                  type: 'system',
+                };
+                setMessages(prev => [systemMessage, ...prev]);
+              }
             }
           }
           
-          // Also refetch to ensure all data is synced
+          // Always refetch to ensure all data is synced
           if (refetchTradeDetails) {
+            console.log('🔄 Refetching trade details after WebSocket update');
             refetchTradeDetails();
           }
         }
