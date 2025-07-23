@@ -153,6 +153,8 @@ export const ActiveTradeScreen: React.FC = () => {
       tradeId: trade.id,
       tradeCountryCode: trade.countryCode,
       tradeCurrencyCode: trade.currencyCode,
+      initialStep: activeTradeStep, // Pass the current step
+      tradeStatus: trade.status, // Pass the current status if available
     });
   };
 
@@ -255,13 +257,21 @@ export const ActiveTradeScreen: React.FC = () => {
         </View>
       )}
       
-          <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
-            <Text style={styles.primaryButtonText}>Ya realicé el pago</Text>
-          </TouchableOpacity>
+          <View style={styles.infoCard}>
+            <View style={styles.infoContent}>
+              <Icon name="info" size={20} color={colors.accent} style={styles.infoIcon} />
+              <View>
+                <Text style={styles.infoTitle}>¿Ya realizaste el pago?</Text>
+                <Text style={styles.infoText}>
+                  Usa el chat del intercambio para marcar el pago como completado y comunicarte con el vendedor.
+                </Text>
+              </View>
+            </View>
+          </View>
           
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
-            <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
-            <Text style={styles.secondaryButtonText}>Contactar a {trade.trader.name}</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
+            <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
+            <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
         </View>
       );
@@ -302,9 +312,9 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
           </View>
           
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
-            <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
-            <Text style={styles.secondaryButtonText}>Contactar a {trade.trader.name}</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
+            <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
+            <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
         </View>
       );
@@ -346,14 +356,21 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
           </View>
           
-          <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
-            <Icon name="check" size={16} color="#ffffff" style={styles.buttonIcon} />
-            <Text style={styles.primaryButtonText}>Sí, ya pagué</Text>
-          </TouchableOpacity>
+          <View style={styles.infoCard}>
+            <View style={styles.infoContent}>
+              <Icon name="info" size={20} color={colors.accent} style={styles.infoIcon} />
+              <View>
+                <Text style={styles.infoTitle}>Siguiente paso</Text>
+                <Text style={styles.infoText}>
+                  Debes confirmar el pago desde el chat del intercambio para mayor seguridad.
+                </Text>
+              </View>
+            </View>
+          </View>
           
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
-            <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
-            <Text style={styles.secondaryButtonText}>Enviar mensaje</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
+            <Icon name="message-circle" size={16} color="#ffffff" style={styles.buttonIcon} />
+            <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
         </View>
       );
@@ -391,14 +408,21 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
           </View>
           
-          <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
-            <Icon name="dollar-sign" size={16} color="#ffffff" style={styles.buttonIcon} />
-            <Text style={styles.primaryButtonText}>Liberar {formatCrypto(trade.crypto)}</Text>
-          </TouchableOpacity>
+          <View style={styles.infoCard}>
+            <View style={styles.infoContent}>
+              <Icon name="info" size={20} color={colors.accent} style={styles.infoIcon} />
+              <View>
+                <Text style={styles.infoTitle}>Siguiente paso</Text>
+                <Text style={styles.infoText}>
+                  La liberación de fondos debe realizarse desde el chat del intercambio por seguridad.
+                </Text>
+              </View>
+            </View>
+          </View>
           
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
-            <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
-            <Text style={styles.secondaryButtonText}>Enviar mensaje</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
+            <Icon name="message-circle" size={16} color="#ffffff" style={styles.buttonIcon} />
+            <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
         </View>
       );
@@ -448,9 +472,9 @@ export const ActiveTradeScreen: React.FC = () => {
         </View>
       </View>
       
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
-            <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
-            <Text style={styles.secondaryButtonText}>Enviar mensaje</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
+            <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
+            <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
@@ -501,9 +525,9 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
           </View>
           
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
-            <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
-            <Text style={styles.secondaryButtonText}>Enviar mensaje</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenChat}>
+            <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
+            <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
@@ -1052,5 +1076,13 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     flex: 1,
+  },
+  helperText: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 12,
+    paddingHorizontal: 24,
+    lineHeight: 20,
   },
 });
