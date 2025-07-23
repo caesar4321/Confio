@@ -90,6 +90,8 @@ export type MainStackParamList = {
     selectedPaymentMethodId?: string;
     tradeCountryCode?: string;
     tradeCurrencyCode?: string;
+    initialStep?: number;
+    tradeStatus?: string;
   };
   ActiveTrade: {
     trade: {

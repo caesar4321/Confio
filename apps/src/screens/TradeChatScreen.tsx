@@ -24,7 +24,7 @@ import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
 import { useCurrency } from '../hooks/useCurrency';
 import { useAuth } from '../contexts/AuthContext';
-import { SEND_P2P_MESSAGE, GET_P2P_TRADE, GET_USER_BANK_ACCOUNTS } from '../apollo/queries';
+import { SEND_P2P_MESSAGE, GET_P2P_TRADE, GET_USER_BANK_ACCOUNTS, UPDATE_P2P_TRADE_STATUS } from '../apollo/queries';
 import { ExchangeRateDisplay } from '../components/ExchangeRateDisplay';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { useCountry } from '../contexts/CountryContext';
@@ -63,7 +63,7 @@ interface TradeData {
 export const TradeChatScreen: React.FC = () => {
   const navigation = useNavigation<TradeChatNavigationProp>();
   const route = useRoute<TradeChatRouteProp>();
-  const { offer, crypto, amount, tradeType, tradeId, selectedPaymentMethodId } = route.params;
+  const { offer, crypto, amount, tradeType, tradeId, selectedPaymentMethodId, initialStep, tradeStatus } = route.params;
   const { userProfile } = useAuth();
   const { activeAccount, accounts, getActiveAccountContext } = useAccount();
   const { formatNumber, formatCurrency } = useNumberFormat();
@@ -182,13 +182,16 @@ export const TradeChatScreen: React.FC = () => {
   const { currencyCode, currencySymbol } = getCurrencyInfo();
   
   // Fetch trade details
-  const { data: tradeDetailsData, loading: tradeLoading } = useQuery(GET_P2P_TRADE, {
+  const { data: tradeDetailsData, loading: tradeLoading, refetch: refetchTradeDetails } = useQuery(GET_P2P_TRADE, {
     variables: { id: tradeId },
     skip: !tradeId,
+    fetchPolicy: 'cache-and-network', // Ensure we get fresh data
+    pollInterval: 5000, // Poll every 5 seconds for updates
     onCompleted: (data) => {
       console.log('🔍 Trade details loaded:', {
         tradeId,
         hasData: !!data?.p2pTrade,
+        status: data?.p2pTrade?.status,
         offer: data?.p2pTrade?.offer,
         paymentMethod: data?.p2pTrade?.paymentMethod,
         offerCountryCode: data?.p2pTrade?.offer?.countryCode,
@@ -253,7 +256,20 @@ export const TradeChatScreen: React.FC = () => {
   console.log('Trade type:', tradeType, '- User is:', tradeType === 'sell' ? 'seller' : 'buyer');
   
   const [message, setMessage] = useState('');
-  const [currentTradeStep, setCurrentTradeStep] = useState(1);
+  const [currentTradeStep, setCurrentTradeStep] = useState(initialStep || 1);
+  
+  // Helper function to get step from trade status
+  const getStepFromStatus = (status: string) => {
+    switch (status) {
+      case 'PENDING': return 1;
+      case 'PAYMENT_PENDING': return 2;
+      case 'PAYMENT_SENT': return 3;
+      case 'PAYMENT_CONFIRMED': return 4;
+      case 'COMPLETED': return 4;
+      case 'CANCELLED': return 1;
+      default: return 1;
+    }
+  };
   const [timeRemaining, setTimeRemaining] = useState(900); // 15 minutes in seconds
   const [messages, setMessages] = useState<Message[]>([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -268,8 +284,43 @@ export const TradeChatScreen: React.FC = () => {
   // GraphQL mutation for sending messages
   const [sendMessage, { loading: sendingMessage }] = useMutation(SEND_P2P_MESSAGE);
   
+  // GraphQL mutation for updating trade status
+  const [updateTradeStatus, { loading: updatingTradeStatus }] = useMutation(UPDATE_P2P_TRADE_STATUS, {
+    update: (cache, { data }) => {
+      if (data?.updateP2pTradeStatus?.trade) {
+        // Update the GET_P2P_TRADE query in cache
+        cache.modify({
+          id: cache.identify({ __typename: 'P2PTrade', id: tradeId }),
+          fields: {
+            status: () => data.updateP2pTradeStatus.trade.status
+          }
+        });
+      }
+    }
+  });
+  
   // WebSocket reference for real-time features
   const websocket = useRef<WebSocket | null>(null);
+  
+  // Sync trade step with actual trade status from server
+  useEffect(() => {
+    if (tradeDetailsData?.p2pTrade?.status) {
+      const newStep = getStepFromStatus(tradeDetailsData.p2pTrade.status);
+      console.log('📊 Syncing trade step with status:', {
+        status: tradeDetailsData.p2pTrade.status,
+        currentStep: currentTradeStep,
+        newStep: newStep,
+        tradeType: tradeType,
+        isBuyer: tradeType === 'buy',
+        shouldShowMarkAsPaidButton: newStep === 2 && tradeType === 'buy',
+        willUpdateStep: newStep !== currentTradeStep
+      });
+      if (newStep !== currentTradeStep) {
+        console.log('🔄 Updating currentTradeStep from', currentTradeStep, 'to', newStep);
+        setCurrentTradeStep(newStep);
+      }
+    }
+  }, [tradeDetailsData?.p2pTrade?.status]);
 
   // WebSocket connection for real-time updates
   useEffect(() => {
@@ -750,6 +801,23 @@ export const TradeChatScreen: React.FC = () => {
 
   const sharePaymentDetailsWithAccount = async (userBankAccount: any) => {
     try {
+      // First, update the trade status to PAYMENT_PENDING
+      const { data: updateData } = await updateTradeStatus({
+        variables: {
+          input: {
+            tradeId: tradeId,
+            status: 'PAYMENT_PENDING',
+            paymentNotes: 'Datos de pago compartidos por el vendedor'
+          }
+        }
+      });
+      
+      if (!updateData?.updateP2pTradeStatus?.success) {
+        const errorMessage = updateData?.updateP2pTradeStatus?.errors?.join(', ') || 'Error al actualizar el estado';
+        Alert.alert('Error', errorMessage);
+        return;
+      }
+      
       const paymentMethod = userBankAccount.paymentMethod;
       
       // Format the payment details
@@ -800,9 +868,45 @@ export const TradeChatScreen: React.FC = () => {
         }
       });
       
+      // Update local state to reflect new status
+      setCurrentTradeStep(2);
+      
       // Close selector modal if open
       setShowPaymentMethodSelector(false);
       setAvailablePaymentAccounts([]);
+      
+      // Add system message
+      const systemMessage: Message = {
+        id: messages.length + 1,
+        sender: 'system',
+        text: '💳 Datos de pago compartidos. El comprador ahora puede realizar el pago.',
+        timestamp: new Date(),
+        type: 'system',
+      };
+      setMessages(prev => [...prev, systemMessage]);
+      
+      // Refetch trade details to get updated status (with a small delay to ensure backend has processed)
+      if (refetchTradeDetails) {
+        console.log('🔄 Refetching trade details after sharing payment info...');
+        // Add a small delay to ensure backend has processed the update
+        setTimeout(async () => {
+          const refetchResult = await refetchTradeDetails();
+          console.log('📊 Refetch result:', {
+            newStatus: refetchResult?.data?.p2pTrade?.status,
+            previousStatus: tradeDetailsData?.p2pTrade?.status,
+            currentStep: currentTradeStep,
+            tradeType: tradeType
+          });
+        }, 1000); // 1 second delay
+      }
+      
+      // Debug the current state after sharing payment details
+      console.log('✅ Payment details shared successfully:', {
+        currentTradeStep,
+        tradeStatus: tradeDetailsData?.p2pTrade?.status,
+        tradeType,
+        shouldBuyerSeeMarkAsPaidButton: currentTradeStep === 2 && tradeType === 'buy'
+      });
       
     } catch (error) {
       console.error('Error sharing payment details:', error);
@@ -810,18 +914,121 @@ export const TradeChatScreen: React.FC = () => {
     }
   };
 
-  const confirmMarkAsPaid = () => {
+  const confirmMarkAsPaid = async () => {
     setShowConfirmPaidModal(false);
-    if (currentTradeStep === 1) {
-      setCurrentTradeStep(2);
-      const systemMessage: Message = {
-        id: messages.length + 1,
-        sender: 'system',
-        text: 'Usuario marcó el pago como completado',
-        timestamp: new Date(),
-        type: 'system',
-      };
-      setMessages(prev => [...prev, systemMessage]);
+    
+    try {
+      // Update trade status to PAYMENT_SENT
+      const { data } = await updateTradeStatus({
+        variables: {
+          input: {
+            tradeId: tradeId,
+            status: 'PAYMENT_SENT',
+            paymentReference: '', // User can add this later if needed
+            paymentNotes: 'Pago marcado como enviado por el comprador'
+          }
+        }
+      });
+      
+      if (data?.updateP2pTradeStatus?.success) {
+        // Update local state to reflect new status
+        setCurrentTradeStep(3);
+        
+        // Add system message
+        const systemMessage: Message = {
+          id: messages.length + 1,
+          sender: 'system',
+          text: '✅ Has marcado el pago como completado. El vendedor debe confirmar la recepción.',
+          timestamp: new Date(),
+          type: 'system',
+        };
+        setMessages(prev => [...prev, systemMessage]);
+        
+        // Refetch trade details to get updated status
+        if (refetchTradeDetails) {
+          refetchTradeDetails();
+        }
+      } else {
+        const errorMessage = data?.updateP2pTradeStatus?.errors?.join(', ') || 'Error al actualizar el estado';
+        Alert.alert('Error', errorMessage);
+      }
+    } catch (error) {
+      console.error('Error updating trade status:', error);
+      Alert.alert('Error', 'No se pudo actualizar el estado del intercambio. Por favor intenta de nuevo.');
+    }
+  };
+  
+  const handleReleaseFunds = () => {
+    Alert.alert(
+      'Confirmar liberación de fondos',
+      '¿Has verificado que recibiste el pago completo? Una vez liberados los fondos, no se pueden recuperar.',
+      [
+        {
+          text: 'Cancelar',
+          style: 'cancel'
+        },
+        {
+          text: 'Sí, liberar fondos',
+          onPress: confirmReleaseFunds,
+          style: 'destructive'
+        }
+      ]
+    );
+  };
+  
+  const confirmReleaseFunds = async () => {
+    try {
+      // Update trade status to PAYMENT_CONFIRMED (completed)
+      const { data } = await updateTradeStatus({
+        variables: {
+          input: {
+            tradeId: tradeId,
+            status: 'PAYMENT_CONFIRMED',
+            paymentNotes: 'Pago confirmado por el vendedor, fondos liberados'
+          }
+        }
+      });
+      
+      if (data?.updateP2pTradeStatus?.success) {
+        // Update local state to reflect new status
+        setCurrentTradeStep(4);
+        
+        // Add system message
+        const systemMessage: Message = {
+          id: messages.length + 1,
+          sender: 'system',
+          text: '🎉 ¡Intercambio completado exitosamente! Los fondos han sido liberados.',
+          timestamp: new Date(),
+          type: 'system',
+        };
+        setMessages(prev => [...prev, systemMessage]);
+        
+        // Show success alert
+        Alert.alert(
+          '¡Éxito!',
+          'El intercambio se ha completado exitosamente. Los fondos han sido liberados al comprador.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Navigate back to exchange screen
+                navigation.navigate('BottomTabs', { screen: 'Exchange' });
+              }
+            }
+          ]
+        );
+        
+        // Refetch trade details to get updated status
+        if (refetchTradeDetails) {
+          refetchTradeDetails();
+        }
+      } else {
+        const errorMessage = data?.updateP2pTradeStatus?.errors?.join(', ') || 'Error al liberar los fondos';
+        Alert.alert('Error', errorMessage);
+      }
+    } catch (error) {
+      console.error('Error releasing funds:', error);
+      Alert.alert('Error', 'No se pudieron liberar los fondos. Por favor intenta de nuevo.');
     }
   };
 
@@ -1025,7 +1232,22 @@ export const TradeChatScreen: React.FC = () => {
       </TouchableWithoutFeedback>
 
       {/* Quick Actions */}
-      {currentTradeStep === 1 && (
+      {/* For Buyers - Mark as Paid (show in step 2 - PAYMENT_PENDING status) */}
+      {console.log('🔴 Mark as Paid button check:', {
+        currentTradeStep,
+        tradeType,
+        isBuyer: tradeType === 'buy',
+        shouldShowButton: currentTradeStep === 2 && tradeType === 'buy',
+        tradeStatus: tradeDetailsData?.p2pTrade?.status
+      })}
+      {/* Debug log for button visibility */}
+      {console.log('🎯 Marcar como pagado button check:', {
+        currentTradeStep,
+        tradeType,
+        showButton: currentTradeStep === 2 && tradeType === 'buy',
+        tradeStatus: tradeDetailsData?.p2pTrade?.status
+      })}
+      {currentTradeStep === 2 && tradeType === 'buy' && (
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.paymentActionBanner}>
             <View style={styles.paymentActionContent}>
@@ -1035,6 +1257,23 @@ export const TradeChatScreen: React.FC = () => {
               </View>
               <TouchableOpacity onPress={handleMarkAsPaid} style={styles.markAsPaidButton}>
                 <Text style={styles.markAsPaidButtonText}>Marcar como pagado</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      )}
+      
+      {/* For Sellers - Release Funds */}
+      {currentTradeStep === 3 && tradeType === 'sell' && (
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={[styles.paymentActionBanner, { backgroundColor: '#D1FAE5' }]}>
+            <View style={styles.paymentActionContent}>
+              <View style={styles.paymentActionInfo}>
+                <Icon name="check-circle" size={16} color="#059669" style={styles.paymentActionIcon} />
+                <Text style={[styles.paymentActionText, { color: '#065F46' }]}>¿Recibiste el pago?</Text>
+              </View>
+              <TouchableOpacity onPress={handleReleaseFunds} style={[styles.markAsPaidButton, { backgroundColor: '#059669' }]}>
+                <Text style={styles.markAsPaidButtonText}>Liberar fondos</Text>
               </TouchableOpacity>
             </View>
           </View>
