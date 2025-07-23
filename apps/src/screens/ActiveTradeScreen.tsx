@@ -32,6 +32,8 @@ interface ActiveTrade {
   amount: string;
   crypto: string;
   totalBs: string;
+  countryCode: string;
+  currencyCode: string;
   paymentMethod: string;
   rate: string;
   step: number;
@@ -43,6 +45,13 @@ export const ActiveTradeScreen: React.FC = () => {
   const navigation = useNavigation<ActiveTradeNavigationProp>();
   const route = useRoute<ActiveTradeRouteProp>();
   const { trade } = route.params;
+  
+  // Format crypto token for display
+  const formatCrypto = (crypto: string): string => {
+    if (crypto === 'CUSD' || crypto === 'cusd') return 'cUSD';
+    if (crypto === 'CONFIO' || crypto === 'confio') return 'CONFIO';
+    return crypto;
+  };
   
   const [activeTradeStep, setActiveTradeStep] = useState(trade.step);
   const [timeRemaining, setTimeRemaining] = useState(trade.timeRemaining);
@@ -126,7 +135,7 @@ export const ActiveTradeScreen: React.FC = () => {
       offer: {
         id: trade.id,
         name: trade.trader.name,
-        rate: trade.rate + ' Bs.',
+        rate: trade.rate + ' ' + trade.currencyCode,
         limit: '1000',
         available: '500',
         paymentMethods: [trade.paymentMethod],
@@ -136,11 +145,14 @@ export const ActiveTradeScreen: React.FC = () => {
         verified: trade.trader.verified,
         isOnline: trade.trader.isOnline,
         lastSeen: trade.trader.lastSeen,
+        countryCode: trade.countryCode,
       },
-      crypto: trade.crypto as 'cUSD' | 'CONFIO',
+      crypto: formatCrypto(trade.crypto) as 'cUSD' | 'CONFIO',
       amount: trade.amount,
       tradeType: trade.tradeType,
-      tradeId: trade.id
+      tradeId: trade.id,
+      tradeCountryCode: trade.countryCode,
+      tradeCurrencyCode: trade.currencyCode,
     });
   };
 
@@ -179,24 +191,30 @@ export const ActiveTradeScreen: React.FC = () => {
     </View>
   );
 
-  const renderStep1 = () => (
-    <View style={styles.stepCard}>
-      <Text style={styles.stepTitle}>Realizar Pago</Text>
-      <Text style={styles.stepDescription}>
-        Transfiere <Text style={styles.boldText}>{trade.totalBs} Bs.</Text> usando:
-      </Text>
-      
-      <View style={styles.paymentMethodCard}>
-        <View style={styles.paymentMethodHeader}>
-          <View style={styles.paymentMethodIcon}>
-            <Icon 
-              name={getPaymentMethodIcon(null, null, trade.paymentMethod)} 
-              size={18} 
-              color="#fff" 
-            />
-          </View>
-          <View>
-            <Text style={styles.paymentMethodName}>{trade.paymentMethod}</Text>
+  // Determine if user is buyer or seller
+  const isBuyer = trade.tradeType === 'buy';
+  const isSeller = trade.tradeType === 'sell';
+
+  const renderStep1 = () => {
+    if (isBuyer) {
+      return (
+        <View style={styles.stepCard}>
+          <Text style={styles.stepTitle}>Realizar Pago</Text>
+          <Text style={styles.stepDescription}>
+            Transfiere <Text style={styles.boldText}>{trade.totalBs} {trade.currencyCode}</Text> usando:
+          </Text>
+          
+          <View style={styles.paymentMethodCard}>
+            <View style={styles.paymentMethodHeader}>
+              <View style={styles.paymentMethodIcon}>
+                <Icon 
+                  name={getPaymentMethodIcon(null, null, trade.paymentMethod)} 
+                  size={18} 
+                  color="#fff" 
+                />
+              </View>
+              <View>
+                <Text style={styles.paymentMethodName}>{trade.paymentMethod}</Text>
             <Text style={styles.paymentMethodSubtitle}>Método seleccionado</Text>
           </View>
         </View>
@@ -207,7 +225,7 @@ export const ActiveTradeScreen: React.FC = () => {
           <Text style={styles.cashInstructionsTitle}>Instrucciones para pago en efectivo</Text>
           <View style={styles.cashInstructionsList}>
             <Text style={styles.cashInstruction}>• Coordina el punto de encuentro con {trade.trader.name}</Text>
-            <Text style={styles.cashInstruction}>• Lleva exactamente: <Text style={styles.boldText}>{trade.totalBs} Bs.</Text></Text>
+            <Text style={styles.cashInstruction}>• Lleva exactamente: <Text style={styles.boldText}>{trade.totalBs} {trade.currencyCode}</Text></Text>
             <Text style={styles.cashInstruction}>• Encuentro en lugar público y seguro</Text>
             <Text style={styles.cashInstruction}>• Verifica la identidad del vendedor</Text>
           </View>
@@ -232,73 +250,169 @@ export const ActiveTradeScreen: React.FC = () => {
           </View>
           <View style={styles.bankDetailsRow}>
             <Text style={styles.bankDetailsLabel}>Monto exacto:</Text>
-            <Text style={styles.bankDetailsAmount}>{trade.totalBs} Bs.</Text>
+            <Text style={styles.bankDetailsAmount}>{trade.totalBs} {trade.currencyCode}</Text>
           </View>
         </View>
       )}
       
-      <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
-        <Text style={styles.primaryButtonText}>Ya realicé el pago</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
-        <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
-        <Text style={styles.secondaryButtonText}>Contactar a {trade.trader.name}</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderStep2 = () => (
-    <View style={styles.stepCard}>
-      <Text style={styles.stepTitle}>Confirmar Pago</Text>
-      <Text style={styles.stepDescription}>
-        Confirma que has completado el pago de <Text style={styles.boldText}>{trade.totalBs} Bs.</Text>
-      </Text>
-      
-      <View style={styles.infoCard}>
-        <View style={styles.infoContent}>
-          <Icon name="info" size={20} color={colors.accent} style={styles.infoIcon} />
-          <View>
-            <Text style={styles.infoTitle}>Verificación del vendedor</Text>
-            <Text style={styles.infoText}>
-              {trade.trader.name} verificará el pago en su cuenta bancaria. 
-              Por favor sé paciente mientras confirma la transacción.
-            </Text>
-          </View>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
+            <Text style={styles.primaryButtonText}>Ya realicé el pago</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
+            <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
+            <Text style={styles.secondaryButtonText}>Contactar a {trade.trader.name}</Text>
+          </TouchableOpacity>
         </View>
-      </View>
-        
-      <View style={styles.warningCard}>
-        <View style={styles.warningContent}>
-          <Icon name="alert-triangle" size={20} color="#D97706" style={styles.warningIcon} />
-          <View>
-            <Text style={styles.warningTitle}>Solo confirma si ya pagaste</Text>
-            <Text style={styles.warningText}>
-              No marques como pagado si no has completado la transferencia. 
-              Esto puede resultar en la suspensión de tu cuenta.
-            </Text>
+      );
+    } else {
+      // Seller view
+      return (
+        <View style={styles.stepCard}>
+          <Text style={styles.stepTitle}>Esperando Pago del Comprador</Text>
+          <Text style={styles.stepDescription}>
+            {trade.trader.name} debe transferir <Text style={styles.boldText}>{trade.totalBs} {trade.currencyCode}</Text> a tu cuenta.
+          </Text>
+          
+          <View style={styles.infoCard}>
+            <View style={styles.infoContent}>
+              <Icon name="clock" size={20} color={colors.accent} style={styles.infoIcon} />
+              <View>
+                <Text style={styles.infoTitle}>Tiempo de respuesta esperado</Text>
+                <Text style={styles.infoText}>
+                  El comprador tiene hasta 15 minutos para completar la transferencia.
+                </Text>
+              </View>
+            </View>
           </View>
-        </View>
-      </View>
-      
-      <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
-        <Icon name="check" size={16} color="#ffffff" style={styles.buttonIcon} />
-        <Text style={styles.primaryButtonText}>Sí, ya pagué</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
-        <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
-        <Text style={styles.secondaryButtonText}>Enviar mensaje</Text>
-      </TouchableOpacity>
-    </View>
-  );
 
-  const renderStep3 = () => (
-    <View style={styles.stepCard}>
-      <Text style={styles.stepTitle}>Esperando Confirmación</Text>
-      <Text style={styles.stepDescription}>
-        {trade.trader.name} está verificando tu pago. Esto puede tomar unos minutos.
-      </Text>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryTitle}>Detalles del intercambio</Text>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Vas a enviar:</Text>
+              <Text style={styles.summaryValue}>{trade.amount} {formatCrypto(trade.crypto)}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Vas a recibir:</Text>
+              <Text style={styles.summaryValue}>{trade.totalBs} {trade.currencyCode}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Comprador:</Text>
+              <Text style={styles.summaryValue}>{trade.trader.name}</Text>
+            </View>
+          </View>
+          
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
+            <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
+            <Text style={styles.secondaryButtonText}>Contactar a {trade.trader.name}</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+  };
+
+  const renderStep2 = () => {
+    if (isBuyer) {
+      return (
+        <View style={styles.stepCard}>
+          <Text style={styles.stepTitle}>Confirmar Pago</Text>
+          <Text style={styles.stepDescription}>
+            Confirma que has completado el pago de <Text style={styles.boldText}>{trade.totalBs} {trade.currencyCode}</Text>
+          </Text>
+          
+          <View style={styles.infoCard}>
+            <View style={styles.infoContent}>
+              <Icon name="info" size={20} color={colors.accent} style={styles.infoIcon} />
+              <View>
+                <Text style={styles.infoTitle}>Verificación del vendedor</Text>
+                <Text style={styles.infoText}>
+                  {trade.trader.name} verificará el pago en su cuenta bancaria. 
+                  Por favor sé paciente mientras confirma la transacción.
+                </Text>
+              </View>
+            </View>
+          </View>
+            
+          <View style={styles.warningCard}>
+            <View style={styles.warningContent}>
+              <Icon name="alert-triangle" size={20} color="#D97706" style={styles.warningIcon} />
+              <View>
+                <Text style={styles.warningTitle}>Solo confirma si ya pagaste</Text>
+                <Text style={styles.warningText}>
+                  No marques como pagado si no has completado la transferencia. 
+                  Esto puede resultar en la suspensión de tu cuenta.
+                </Text>
+              </View>
+            </View>
+          </View>
+          
+          <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
+            <Icon name="check" size={16} color="#ffffff" style={styles.buttonIcon} />
+            <Text style={styles.primaryButtonText}>Sí, ya pagué</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
+            <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
+            <Text style={styles.secondaryButtonText}>Enviar mensaje</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    } else {
+      // Seller view - they need to confirm they received payment
+      return (
+        <View style={styles.stepCard}>
+          <Text style={styles.stepTitle}>¿Recibiste el Pago?</Text>
+          <Text style={styles.stepDescription}>
+            Verifica que recibiste <Text style={styles.boldText}>{trade.totalBs} {trade.currencyCode}</Text> en tu cuenta bancaria.
+          </Text>
+          
+          <View style={styles.warningCard}>
+            <View style={styles.warningContent}>
+              <Icon name="alert-triangle" size={20} color="#D97706" style={styles.warningIcon} />
+              <View>
+                <Text style={styles.warningTitle}>Verifica antes de confirmar</Text>
+                <Text style={styles.warningText}>
+                  Solo confirma si realmente recibiste el pago en tu cuenta. 
+                  Una vez confirmado, se liberarán los {formatCrypto(trade.crypto)} al comprador.
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.infoCard}>
+            <View style={styles.infoContent}>
+              <Icon name="shield" size={20} color={colors.primary} style={styles.infoIcon} />
+              <View>
+                <Text style={styles.infoTitle}>Protección del vendedor</Text>
+                <Text style={styles.infoText}>
+                  Si no recibiste el pago, reporta el problema. Nunca liberes fondos sin haber recibido el pago completo.
+                </Text>
+              </View>
+            </View>
+          </View>
+          
+          <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
+            <Icon name="dollar-sign" size={16} color="#ffffff" style={styles.buttonIcon} />
+            <Text style={styles.primaryButtonText}>Liberar {formatCrypto(trade.crypto)}</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
+            <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
+            <Text style={styles.secondaryButtonText}>Enviar mensaje</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+  };
+
+  const renderStep3 = () => {
+    if (isBuyer) {
+      return (
+        <View style={styles.stepCard}>
+          <Text style={styles.stepTitle}>Esperando Confirmación</Text>
+          <Text style={styles.stepDescription}>
+            {trade.trader.name} está verificando tu pago. Esto puede tomar unos minutos.
+          </Text>
       
       <View style={styles.loadingCard}>
         <Animated.View 
@@ -334,16 +448,71 @@ export const ActiveTradeScreen: React.FC = () => {
         </View>
       </View>
       
-      <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
-        <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
-        <Text style={styles.secondaryButtonText}>Enviar mensaje</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
-        <Text style={styles.primaryButtonText}>Simular Completar</Text>
-      </TouchableOpacity>
-    </View>
-  );
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
+            <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
+            <Text style={styles.secondaryButtonText}>Enviar mensaje</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
+            <Text style={styles.primaryButtonText}>Simular Completar</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    } else {
+      // Seller view - processing the release of funds
+      return (
+        <View style={styles.stepCard}>
+          <Text style={styles.stepTitle}>Liberando Fondos</Text>
+          <Text style={styles.stepDescription}>
+            Estamos procesando la transferencia de {trade.amount} {formatCrypto(trade.crypto)} a {trade.trader.name}.
+          </Text>
+          
+          <View style={styles.loadingCard}>
+            <Animated.View 
+              style={[
+                styles.spinner,
+                {
+                  transform: [{
+                    rotate: spinAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['0deg', '360deg'],
+                    })
+                  }]
+                }
+              ]}
+            />
+            <Text style={styles.loadingTitle}>Procesando transacción...</Text>
+            <Text style={styles.loadingSubtitle}>Esto puede tomar unos minutos</Text>
+          </View>
+          
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryTitle}>Resumen de la operación</Text>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Enviando:</Text>
+              <Text style={styles.summaryValue}>{trade.amount} {formatCrypto(trade.crypto)}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Recibido:</Text>
+              <Text style={styles.summaryValue}>{trade.totalBs} {trade.currencyCode}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Comprador:</Text>
+              <Text style={styles.summaryValue}>{trade.trader.name}</Text>
+            </View>
+          </View>
+          
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleOpenChat}>
+            <Icon name="message-circle" size={16} color="#6B7280" style={styles.buttonIcon} />
+            <Text style={styles.secondaryButtonText}>Enviar mensaje</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
+            <Text style={styles.primaryButtonText}>Simular Completar</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+  };
 
   const renderStep4 = () => (
     <View style={styles.stepCard}>
@@ -353,7 +522,7 @@ export const ActiveTradeScreen: React.FC = () => {
         </View>
         <Text style={styles.successTitle}>¡Intercambio Completado!</Text>
         <Text style={styles.successDescription}>
-          Has recibido <Text style={styles.boldText}>{trade.amount} {trade.crypto}</Text> en tu wallet
+          Has recibido <Text style={styles.boldText}>{trade.amount} {formatCrypto(trade.crypto)}</Text> en tu wallet
         </Text>
       </View>
       
@@ -387,7 +556,7 @@ export const ActiveTradeScreen: React.FC = () => {
           },
           tradeDetails: {
             amount: trade.amount,
-            crypto: trade.crypto,
+            crypto: formatCrypto(trade.crypto),
             totalPaid: trade.totalBs,
             method: trade.paymentMethod,
             date: '21 Jun 2025, 14:45', // Replace with real data if available

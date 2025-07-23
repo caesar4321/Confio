@@ -39,6 +39,7 @@
 4. **Maintain security** with soft-delete system
 5. **Consider Latin American context** for financial features
 6. **Test with Venezuelan payment methods** as primary use case
+7. **FlatList Implementation Rule**: When implementing a FlatList in React Native, ALWAYS include proper pagination mechanisms to ensure all items load. FlatList has built-in virtualization that may not render all items without proper configuration.
 
 ### Development Environment
 - **Python Virtual Environment**: Always use `myvenv/bin/python` for Python commands
@@ -58,5 +59,9 @@ We've been working on:
 - Removing "Efectivo" (cash) from Venezuelan payment methods due to hyperinflation
 - Improving admin interface to show country codes and filter payment methods
 - Ensuring GraphQL queries work correctly with country-specific payment methods
+- Fixed FlatList implementation in AddBankInfoModal to properly handle large lists with pagination
+
+### Recent Fixes
+- **FlatList in AddBankInfoModal**: Converted ScrollView to FlatList for payment method and country pickers to handle large lists properly. Added pagination settings: initialNumToRender=20, maxToRenderPerBatch=10, windowSize=21, and getItemLayout for optimal performance.
 
 Always reference the project structure and conventions described in README.md when making changes.

@@ -11,6 +11,7 @@ import {
   Modal,
   TextInput,
   RefreshControl,
+  FlatList,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -159,6 +160,8 @@ export const BankInfoScreen = () => {
 
 
   // GraphQL queries
+  // Only query with numeric account IDs to avoid GraphQL errors
+  const isNumericAccountId = activeAccount?.id && /^\d+$/.test(activeAccount.id);
   const { 
     data: bankAccountsData, 
     loading: bankAccountsLoading, 
@@ -166,7 +169,7 @@ export const BankInfoScreen = () => {
     refetch: refetchBankAccounts 
   } = useQuery(GET_USER_BANK_ACCOUNTS, {
     variables: { accountId: activeAccount?.id },
-    skip: !activeAccount?.id,
+    skip: !activeAccount?.id || !isNumericAccountId,
     fetchPolicy: 'cache-and-network'
   });
 
@@ -376,53 +379,61 @@ export const BankInfoScreen = () => {
         </View>
       </View>
 
-      <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={[colors.primary]}
-            tintColor={colors.primary}
-          />
-        }
-      >
+      <View style={styles.contentContainer}>
+        {/* Payment Methods Header */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Métodos de Pago Configurados</Text>
+          <Text style={styles.sectionSubtitle}>
+            {bankAccounts.length} método{bankAccounts.length !== 1 ? 's' : ''}
+          </Text>
+        </View>
 
-        {/* Payment Methods */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Métodos de Pago Configurados</Text>
-            <Text style={styles.sectionSubtitle}>
-              {bankAccounts.length} método{bankAccounts.length !== 1 ? 's' : ''}
-            </Text>
+        {bankAccountsLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={styles.loadingText}>Cargando cuentas bancarias...</Text>
           </View>
-
-          {bankAccountsLoading ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={styles.loadingText}>Cargando cuentas bancarias...</Text>
-            </View>
-          ) : bankAccountsError ? (
-            <View style={styles.errorContainer}>
-              <Icon name="alert-circle" size={48} color={colors.error} />
-              <Text style={styles.errorText}>Error al cargar las cuentas</Text>
-              <TouchableOpacity style={styles.retryButton} onPress={onRefresh}>
-                <Text style={styles.retryText}>Reintentar</Text>
-              </TouchableOpacity>
-            </View>
-          ) : bankAccounts.length === 0 ? (
-            renderEmptyState()
-          ) : (
-            <>
-              {bankAccounts.map(renderBankAccountCard)}
+        ) : bankAccountsError ? (
+          <View style={styles.errorContainer}>
+            <Icon name="alert-circle" size={48} color={colors.error} />
+            <Text style={styles.errorText}>Error al cargar las cuentas</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={onRefresh}>
+              <Text style={styles.retryText}>Reintentar</Text>
+            </TouchableOpacity>
+          </View>
+        ) : bankAccounts.length === 0 ? (
+          renderEmptyState()
+        ) : (
+          <FlatList
+            data={bankAccounts}
+            renderItem={({ item }) => renderBankAccountCard(item)}
+            keyExtractor={(item) => item.id}
+            style={styles.content}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={[colors.primary]}
+                tintColor={colors.primary}
+              />
+            }
+            ListFooterComponent={
               <TouchableOpacity style={styles.addMoreButton} onPress={handleAddNew}>
                 <Icon name="plus-circle" size={20} color={colors.primary} />
                 <Text style={styles.addMoreText}>Agregar otro método de pago</Text>
               </TouchableOpacity>
-            </>
-          )}
-        </View>
-      </ScrollView>
+            }
+            // FlatList optimizations
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={21}
+            removeClippedSubviews={true}
+            updateCellsBatchingPeriod={50}
+          />
+        )}
+      </View>
 
       {/* Add/Edit Modal */}
       <Modal
@@ -453,6 +464,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  contentContainer: {
+    flex: 1,
+  },
+  listContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
   },
   header: {
     backgroundColor: colors.primary,
@@ -497,6 +515,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
   sectionTitle: {
     fontSize: 18,

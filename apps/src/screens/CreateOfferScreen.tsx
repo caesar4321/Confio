@@ -16,7 +16,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
 import { useMutation, useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
-import { CREATE_P2P_OFFER, GET_P2P_PAYMENT_METHODS } from '../apollo/queries';
+import { CREATE_P2P_OFFER, GET_P2P_PAYMENT_METHODS, GET_USER_BANK_ACCOUNTS } from '../apollo/queries';
 import { countries, Country } from '../utils/countries';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { useCurrency } from '../hooks/useCurrency';
@@ -68,9 +68,18 @@ export const CreateOfferScreen = () => {
       countryCode: selectedCountry?.[2]
     },
     skip: !selectedCountry,
-    fetchPolicy: 'no-cache', // Completely bypass cache
+    fetchPolicy: 'cache-and-network', // Use cache but also fetch fresh data
     errorPolicy: 'all'
   });
+  
+  // Fetch user's registered payment methods
+  const isNumericAccountId = activeAccount?.id && /^\d+$/.test(activeAccount.id);
+  const { data: userBankAccountsData, loading: userBankAccountsLoading } = useQuery(GET_USER_BANK_ACCOUNTS, {
+    variables: { accountId: activeAccount?.id },
+    skip: !activeAccount?.id || !isNumericAccountId,
+    fetchPolicy: 'cache-and-network'
+  });
+  
   const [createOffer, { loading: createOfferLoading }] = useMutation(CREATE_P2P_OFFER);
   
   // Apollo will automatically refetch when variables change, no manual refetch needed
@@ -85,7 +94,33 @@ export const CreateOfferScreen = () => {
   const [terms, setTerms] = useState('');
   const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<string[]>([]);
 
-  const paymentMethods: PaymentMethod[] = paymentMethodsData?.p2pPaymentMethods || [];
+  // Get user's registered payment method IDs
+  const registeredPaymentMethodIds = new Set(
+    userBankAccountsData?.userBankAccounts?.map((account: any) => account.paymentMethod?.id) || []
+  );
+
+  // Filter payment methods to only show registered ones
+  const allPaymentMethods: PaymentMethod[] = paymentMethodsData?.p2pPaymentMethods || [];
+  const registeredPaymentMethods = allPaymentMethods.filter(method => 
+    registeredPaymentMethodIds.has(method.id)
+  );
+  const unregisteredPaymentMethods = allPaymentMethods.filter(method => 
+    !registeredPaymentMethodIds.has(method.id)
+  );
+  
+  // Debug payment methods
+  React.useEffect(() => {
+    if (paymentMethodsData?.p2pPaymentMethods) {
+      console.log('[CreateOfferScreen] Available payment methods for', selectedCountry?.[0], ':', 
+        paymentMethodsData.p2pPaymentMethods.map((m: any) => ({
+          id: m.id,
+          name: m.displayName,
+          isActive: m.isActive,
+          bank: m.bank?.name
+        }))
+      );
+    }
+  }, [paymentMethodsData, selectedCountry]);
   
 
 
@@ -124,6 +159,18 @@ export const CreateOfferScreen = () => {
     }
     if (selectedPaymentMethods.length === 0) {
       Alert.alert('Error', 'Por favor selecciona al menos un método de pago');
+      return false;
+    }
+    // Ensure only registered payment methods are selected
+    const selectedRegisteredMethods = selectedPaymentMethods.filter(id => 
+      registeredPaymentMethodIds.has(id)
+    );
+    if (selectedRegisteredMethods.length === 0) {
+      Alert.alert('Error', 'Debes seleccionar al menos un método de pago que tengas registrado');
+      return false;
+    }
+    if (selectedRegisteredMethods.length !== selectedPaymentMethods.length) {
+      Alert.alert('Error', 'Solo puedes incluir métodos de pago que tengas registrados');
       return false;
     }
     if (!selectedCountry) {
@@ -348,37 +395,106 @@ export const CreateOfferScreen = () => {
         {/* Payment Methods */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Métodos de pago</Text>
-          {paymentMethodsLoading ? (
+          {paymentMethodsLoading || userBankAccountsLoading ? (
             <Text style={styles.helpText}>Cargando métodos de pago...</Text>
           ) : paymentMethodsError ? (
             <Text style={styles.helpText}>Error cargando métodos de pago: {paymentMethodsError.message}</Text>
-          ) : paymentMethods.length === 0 ? (
+          ) : allPaymentMethods.length === 0 ? (
             <Text style={styles.helpText}>No hay métodos de pago disponibles</Text>
           ) : (
-            <View style={styles.paymentMethodsContainer}>
-              {paymentMethods.map((method) => (
-                <TouchableOpacity
-                  key={method.id}
-                  style={[
-                    styles.paymentMethodItem,
-                    selectedPaymentMethods.includes(method.id) && styles.paymentMethodItemSelected
-                  ]}
-                  onPress={() => togglePaymentMethod(method.id)}
-                >
-                  <View style={styles.paymentMethodIcon}>
-                    <Icon 
-                      name={getPaymentMethodIcon(method.icon, method.providerType, method.displayName)} 
-                      size={16} 
-                      color="#fff" 
-                    />
+            <>
+              {/* Registered Payment Methods */}
+              {registeredPaymentMethods.length > 0 && (
+                <>
+                  <Text style={styles.subsectionTitle}>Métodos de pago registrados</Text>
+                  <View style={styles.paymentMethodsContainer}>
+                    {registeredPaymentMethods.map((method) => (
+                      <TouchableOpacity
+                        key={method.id}
+                        style={[
+                          styles.paymentMethodItem,
+                          selectedPaymentMethods.includes(method.id) && styles.paymentMethodItemSelected
+                        ]}
+                        onPress={() => togglePaymentMethod(method.id)}
+                      >
+                        <View style={styles.paymentMethodIcon}>
+                          <Icon 
+                            name={getPaymentMethodIcon(method.icon, method.providerType, method.displayName)} 
+                            size={16} 
+                            color="#fff" 
+                          />
+                        </View>
+                        <Text style={styles.paymentMethodName}>{method.displayName}</Text>
+                        {selectedPaymentMethods.includes(method.id) && (
+                          <Icon name="check" size={20} color={colors.primary} />
+                        )}
+                      </TouchableOpacity>
+                    ))}
                   </View>
-                  <Text style={styles.paymentMethodName}>{method.displayName}</Text>
-                  {selectedPaymentMethods.includes(method.id) && (
-                    <Icon name="check" size={20} color={colors.primary} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
+                </>
+              )}
+              
+              {/* Unregistered Payment Methods */}
+              {unregisteredPaymentMethods.length > 0 && (
+                <>
+                  <Text style={[styles.subsectionTitle, { marginTop: registeredPaymentMethods.length > 0 ? 16 : 0 }]}>
+                    Métodos no registrados
+                  </Text>
+                  <Text style={styles.helpText}>
+                    Para incluir estos métodos en tu oferta, primero debes registrarlos en tu perfil.
+                  </Text>
+                  <View style={[styles.paymentMethodsContainer, { opacity: 0.5 }]}>
+                    {unregisteredPaymentMethods.map((method) => (
+                      <TouchableOpacity
+                        key={method.id}
+                        style={styles.paymentMethodItem}
+                        onPress={() => {
+                          Alert.alert(
+                            'Método no registrado',
+                            `Debes registrar ${method.displayName} en tu perfil antes de poder incluirlo en tu oferta.`,
+                            [
+                              { text: 'Cancelar', style: 'cancel' },
+                              {
+                                text: 'Ir a Métodos de Pago',
+                                onPress: () => navigation.navigate('BankInfo')
+                              }
+                            ]
+                          );
+                        }}
+                      >
+                        <View style={styles.paymentMethodIcon}>
+                          <Icon 
+                            name={getPaymentMethodIcon(method.icon, method.providerType, method.displayName)} 
+                            size={16} 
+                            color="#fff" 
+                          />
+                        </View>
+                        <Text style={styles.paymentMethodName}>{method.displayName}</Text>
+                        <Icon name="lock" size={16} color="#9CA3AF" />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
+              
+              {/* No registered methods message */}
+              {registeredPaymentMethods.length === 0 && (
+                <View style={styles.noMethodsContainer}>
+                  <Icon name="alert-circle" size={48} color={colors.warning} />
+                  <Text style={styles.noMethodsTitle}>No tienes métodos de pago registrados</Text>
+                  <Text style={styles.noMethodsText}>
+                    Debes registrar al menos un método de pago antes de crear una oferta.
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.registerButton}
+                    onPress={() => navigation.navigate('BankInfo')}
+                  >
+                    <Icon name="credit-card" size={20} color="#fff" />
+                    <Text style={styles.registerButtonText}>Registrar Métodos de Pago</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </>
           )}
         </View>
 
@@ -452,6 +568,47 @@ export const CreateOfferScreen = () => {
 };
 
 const styles = StyleSheet.create({
+  subsectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6B7280',
+    marginBottom: 8,
+  },
+  noMethodsContainer: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 16,
+    backgroundColor: '#FEF3C7',
+    borderRadius: 12,
+  },
+  noMethodsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#92400E',
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  noMethodsText: {
+    fontSize: 14,
+    color: '#92400E',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  registerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  registerButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  warning: '#f59e0b',
   container: {
     flex: 1,
     backgroundColor: '#fff',

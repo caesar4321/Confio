@@ -88,6 +88,8 @@ export type MainStackParamList = {
     tradeType: 'buy' | 'sell';
     tradeId: string;
     selectedPaymentMethodId?: string;
+    tradeCountryCode?: string;
+    tradeCurrencyCode?: string;
   };
   ActiveTrade: {
     trade: {
@@ -107,6 +109,8 @@ export type MainStackParamList = {
       step: number;
       timeRemaining: number;
       tradeType: 'buy' | 'sell';
+      countryCode: string;
+      currencyCode: string;
     };
   };
   AccountDetail: {

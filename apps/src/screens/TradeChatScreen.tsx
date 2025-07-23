@@ -14,6 +14,7 @@ import {
   Modal,
   TouchableWithoutFeedback,
   Keyboard,
+  FlatList,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -116,28 +117,63 @@ export const TradeChatScreen: React.FC = () => {
   // Get currency information
   const { selectedCountry } = useCountry();
   
-  // Calculate currency based on offer's country
+  // Get currency directly from trade data
   const getCurrencyInfo = () => {
-    // Always use the offer's country code - offers always have a country
-    const offerCountryCode = tradeDetailsData?.p2pTrade?.offer?.countryCode || offer.countryCode;
+    // First check if we have currency from navigation params (most reliable for new trades)
+    if (route.params?.tradeCurrencyCode) {
+      const navCurrencyCode = route.params.tradeCurrencyCode;
+      const navCurrencySymbol = getCurrencySymbol(navCurrencyCode);
+      
+      // For certain currencies like COP, ARS, show the code instead of symbol
+      const displaySymbol = ['COP', 'ARS', 'CLP', 'PEN'].includes(navCurrencyCode) 
+        ? navCurrencyCode 
+        : navCurrencySymbol;
+      
+      console.log('💱 Currency from navigation params:', {
+        currencyCode: navCurrencyCode,
+        currencySymbol: displaySymbol,
+        countryCode: route.params.tradeCountryCode,
+        source: 'navigation params'
+      });
+      
+      return { currencyCode: navCurrencyCode, currencySymbol: displaySymbol, source: 'navigation' };
+    }
     
-    // Create a country array format for the currency functions
+    // Use trade's currency if available from GraphQL query
+    if (tradeDetailsData?.p2pTrade?.currencyCode) {
+      const tradeCurrencyCode = tradeDetailsData.p2pTrade.currencyCode;
+      const tradeCurrencySymbol = getCurrencySymbol(tradeCurrencyCode);
+      
+      // For certain currencies like COP, ARS, show the code instead of symbol
+      const displaySymbol = ['COP', 'ARS', 'CLP', 'PEN'].includes(tradeCurrencyCode) 
+        ? tradeCurrencyCode 
+        : tradeCurrencySymbol;
+      
+      console.log('💱 Currency from trade query:', {
+        currencyCode: tradeCurrencyCode,
+        currencySymbol: displaySymbol,
+        countryCode: tradeDetailsData.p2pTrade.countryCode,
+        source: 'trade query'
+      });
+      
+      return { currencyCode: tradeCurrencyCode, currencySymbol: displaySymbol, source: 'trade' };
+    }
+    
+    // Fallback to offer's country if trade data not loaded yet
+    const offerCountryCode = offer.countryCode;
     const tradeCountry = ['', '', offerCountryCode, ''];
-    
     const currencyCode = getCurrencyForCountry(tradeCountry);
     const currencySymbol = getCurrencySymbol(currencyCode);
     
-    // For certain currencies like COP, ARS, show the code instead of symbol
     const displaySymbol = ['COP', 'ARS', 'CLP', 'PEN'].includes(currencyCode) 
       ? currencyCode 
       : currencySymbol;
     
-    // Debug currency information
-    console.log('💱 Currency resolution:', {
+    console.log('💱 Currency from offer (fallback):', {
       offerCountryCode,
       currencyCode,
       currencySymbol: displaySymbol,
-      source: 'offer'
+      source: 'offer fallback'
     });
     
     return { currencyCode, currencySymbol: displaySymbol, source: 'offer' };
@@ -156,26 +192,31 @@ export const TradeChatScreen: React.FC = () => {
         offer: data?.p2pTrade?.offer,
         paymentMethod: data?.p2pTrade?.paymentMethod,
         offerCountryCode: data?.p2pTrade?.offer?.countryCode,
+        tradeCountryCode: data?.p2pTrade?.countryCode,
+        tradeCurrencyCode: data?.p2pTrade?.currencyCode,
         paymentMethodCountry: data?.p2pTrade?.paymentMethod?.bank?.country,
         fullData: data
       });
     }
   });
   
-  // Fetch user's bank accounts - try without accountId filter first to get ALL accounts
+  // Fetch user's bank accounts - filter by active account ID
+  const isNumericAccountId = activeAccount?.id && /^\d+$/.test(activeAccount.id);
   const { data: bankAccountsData, loading: bankAccountsLoading, error: bankAccountsError } = useQuery(GET_USER_BANK_ACCOUNTS, {
-    variables: {}, // Get all user's payment methods across all accounts
+    variables: { accountId: activeAccount?.id }, // Filter by active account
     fetchPolicy: 'network-only', // Force fresh data
-    skip: false, // Ensure query runs
+    skip: !activeAccount?.id || !isNumericAccountId, // Skip if no valid account ID
     onCompleted: (data) => {
-      console.log('✅ Bank accounts query completed:', data);
+      console.log('✅ Bank accounts query completed for account:', activeAccount?.id);
       console.log('Number of bank accounts:', data?.userBankAccounts?.length || 0);
       if (data?.userBankAccounts) {
         data.userBankAccounts.forEach((account: any, index: number) => {
           console.log(`Bank account ${index + 1}:`, {
             id: account.id,
             paymentMethod: account.paymentMethod?.displayName,
-            accountHolderName: account.accountHolderName
+            accountHolderName: account.accountHolderName,
+            accountId: account.account?.id,
+            accountType: account.account?.accountType
           });
         });
       }
@@ -219,8 +260,10 @@ export const TradeChatScreen: React.FC = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [typingUser, setTypingUser] = useState<string | null>(null);
   const [isSecurityNoticeDismissed, setIsSecurityNoticeDismissed] = useState(false);
+  const [showPaymentMethodSelector, setShowPaymentMethodSelector] = useState(false);
+  const [availablePaymentAccounts, setAvailablePaymentAccounts] = useState<any[]>([]);
 
-  const messagesEndRef = useRef<ScrollView>(null);
+  const messagesListRef = useRef<FlatList>(null);
   
   // GraphQL mutation for sending messages
   const [sendMessage, { loading: sendingMessage }] = useMutation(SEND_P2P_MESSAGE);
@@ -505,30 +548,19 @@ export const TradeChatScreen: React.FC = () => {
     ? selectedPaymentMethod 
     : (selectedPaymentMethod?.displayName || selectedPaymentMethod?.name || 'Unknown');
   
-  // Get the currency from the offer's country code (where the trade is happening)
-  // Use trade details if available, otherwise use the offer from navigation params
-  const offerCountryCode = tradeDetailsData?.p2pTrade?.offer?.countryCode || offer.countryCode;
-  const offerCurrencyCode = getCurrencyForCountry([
-    '', // name not needed
-    '', // phone code not needed
-    offerCountryCode,
-    '' // flag not needed
-  ]);
-  
-  // Use the offer's currency for display
-  const displayCurrencyCode = offerCurrencyCode;
+  // Get the currency directly from trade data
+  const displayCurrencyCode = tradeDetailsData?.p2pTrade?.currencyCode || currencyCode;
   // For certain currencies like COP, show the code instead of symbol
-  const displayCurrencySymbol = ['COP', 'ARS', 'CLP', 'PEN'].includes(offerCurrencyCode) 
-    ? offerCurrencyCode 
-    : getCurrencySymbol(offerCurrencyCode);
+  const displayCurrencySymbol = ['COP', 'ARS', 'CLP', 'PEN'].includes(displayCurrencyCode) 
+    ? displayCurrencyCode 
+    : getCurrencySymbol(displayCurrencyCode);
   
   console.log('💱 Currency determination:', {
-    offerCountryCode,
-    offerCurrencyCode,
+    tradeCountryCode: tradeDetailsData?.p2pTrade?.countryCode,
+    tradeCurrencyCode: tradeDetailsData?.p2pTrade?.currencyCode,
     displayCurrencyCode,
     displayCurrencySymbol,
-    userSelectedCountry: selectedCountry?.[2],
-    userCurrencyCode: currencyCode
+    source: tradeDetailsData?.p2pTrade?.currencyCode ? 'trade' : 'fallback'
   });
   
   const tradeData: TradeData = {
@@ -573,7 +605,7 @@ export const TradeChatScreen: React.FC = () => {
   useEffect(() => {
     if (messages.length > 0) {
       setTimeout(() => {
-        messagesEndRef.current?.scrollToEnd({ animated: true });
+        messagesListRef.current?.scrollToEnd({ animated: true });
       }, 100);
     }
   }, [messages]);
@@ -674,9 +706,9 @@ export const TradeChatScreen: React.FC = () => {
         displayName: paymentMethod.displayName
       });
       
-      // Find the user's bank account for this payment method
+      // Find all user's bank accounts for this payment method
       // Try matching by ID first, then by name as fallback
-      const userBankAccount = bankAccountsData?.userBankAccounts?.find(
+      const matchingAccounts = bankAccountsData?.userBankAccounts?.filter(
         (account: any) => {
           const matchById = account.paymentMethod?.id === paymentMethod.id;
           const matchByName = account.paymentMethod?.name === paymentMethod.name;
@@ -690,41 +722,42 @@ export const TradeChatScreen: React.FC = () => {
           });
           return matchById || matchByName;
         }
-      );
+      ) || [];
       
-      if (!userBankAccount) {
+      if (matchingAccounts.length === 0) {
         Alert.alert('Error', `No tienes configurado el método de pago: ${paymentMethod.displayName || paymentMethod.name}`);
         return;
       }
       
-      // Log the full bank account data to see what fields are available
-      console.log('Found user bank account:', {
-        accountHolderName: userBankAccount.accountHolderName,
-        accountNumber: userBankAccount.accountNumber,
-        phoneNumber: userBankAccount.phoneNumber,
-        email: userBankAccount.email,
-        username: userBankAccount.username,
-        identificationNumber: userBankAccount.identificationNumber,
-        accountType: userBankAccount.accountType,
-        bank: userBankAccount.bank,
-        paymentMethod: userBankAccount.paymentMethod,
-        country: userBankAccount.country,
-        fullAccount: userBankAccount
-      });
+      // If multiple accounts exist for the same payment method, show selector
+      if (matchingAccounts.length > 1) {
+        setAvailablePaymentAccounts(matchingAccounts);
+        setShowPaymentMethodSelector(true);
+        return;
+      }
+      
+      // If only one account, use it directly
+      const userBankAccount = matchingAccounts[0];
+      
+      // Share the payment details directly with the single account
+      await sharePaymentDetailsWithAccount(userBankAccount);
+      
+    } catch (error) {
+      console.error('Error sharing payment details:', error);
+      Alert.alert('Error', 'No se pudieron compartir los datos de pago');
+    }
+  };
+
+  const sharePaymentDetailsWithAccount = async (userBankAccount: any) => {
+    try {
+      const paymentMethod = userBankAccount.paymentMethod;
       
       // Format the payment details
-      let paymentDetails = `📋 Datos de Pago - ${paymentMethod.displayName || userBankAccount.paymentMethod?.displayName}\n\n`;
+      let paymentDetails = `📋 Datos de Pago - ${paymentMethod.displayName || paymentMethod.name}\n\n`;
       paymentDetails += `👤 Titular: ${userBankAccount.accountHolderName}\n`;
       
       // Check provider type from either source
       const providerType = paymentMethod.providerType || userBankAccount.paymentMethod?.providerType;
-      
-      console.log('Provider type:', providerType);
-      console.log('Payment method requires:', {
-        requiresPhone: paymentMethod.requiresPhone || userBankAccount.paymentMethod?.requiresPhone,
-        requiresEmail: paymentMethod.requiresEmail || userBankAccount.paymentMethod?.requiresEmail,
-        requiresAccountNumber: paymentMethod.requiresAccountNumber || userBankAccount.paymentMethod?.requiresAccountNumber
-      });
       
       if (providerType === 'bank' && userBankAccount.accountNumber) {
         paymentDetails += `🏦 Banco: ${userBankAccount.bank?.name || paymentMethod.bank?.name || userBankAccount.paymentMethod?.bank?.name}\n`;
@@ -756,7 +789,7 @@ export const TradeChatScreen: React.FC = () => {
       console.log(paymentDetails);
       console.log('=== END PAYMENT DETAILS ===');
       
-      // Send the payment details as a message (use TEXT type since PAYMENT_INFO might not exist)
+      // Send the payment details as a message
       await sendMessage({
         variables: {
           input: {
@@ -766,6 +799,10 @@ export const TradeChatScreen: React.FC = () => {
           }
         }
       });
+      
+      // Close selector modal if open
+      setShowPaymentMethodSelector(false);
+      setAvailablePaymentAccounts([]);
       
     } catch (error) {
       console.error('Error sharing payment details:', error);
@@ -1035,29 +1072,44 @@ export const TradeChatScreen: React.FC = () => {
       >
         {/* Messages Area */}
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <ScrollView 
-            ref={messagesEndRef}
-            style={styles.messagesScroll}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.messagesContent}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="on-drag"
-          >
-          {messages.length === 0 ? (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-              <Text style={{ color: '#6B7280', fontStyle: 'italic' }}>
-                No hay mensajes aún...
-              </Text>
-            </View>
-          ) : (
-            <>
-              <View style={{ flex: 1 }} />
-              {messages.map((msg) => (
-                <MessageBubble key={msg.id} msg={msg} />
-              ))}
-            </>
-          )}
-          </ScrollView>
+          <View style={styles.messagesContainer}>
+            {messages.length === 0 ? (
+              <View style={styles.emptyMessagesContainer}>
+                <Text style={styles.emptyMessagesText}>
+                  No hay mensajes aún...
+                </Text>
+              </View>
+            ) : (
+              <FlatList
+                ref={messagesListRef}
+                data={messages}
+                renderItem={({ item }) => <MessageBubble key={item.id} msg={item} />}
+                keyExtractor={(item) => item.id.toString()}
+                style={styles.messagesScroll}
+                contentContainerStyle={styles.messagesContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                inverted={true}
+                // FlatList optimizations for chat
+                initialNumToRender={20}
+                maxToRenderPerBatch={10}
+                windowSize={21}
+                removeClippedSubviews={true}
+                updateCellsBatchingPeriod={50}
+                maintainVisibleContentPosition={{
+                  minIndexForVisible: 0,
+                  autoscrollToTopThreshold: 10,
+                }}
+                // Scroll to bottom on new messages
+                onContentSizeChange={() => {
+                  if (messages.length > 0) {
+                    messagesListRef.current?.scrollToEnd({ animated: true });
+                  }
+                }}
+              />
+            )}
+          </View>
         </TouchableWithoutFeedback>
 
         {/* Message Input */}
@@ -1165,6 +1217,107 @@ export const TradeChatScreen: React.FC = () => {
                 <Text style={{ color: '#fff', fontWeight: '600' }}>Sí, ya pagué</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Payment Method Account Selector Modal */}
+      <Modal
+        visible={showPaymentMethodSelector}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowPaymentMethodSelector(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-end' }}>
+          <View style={{ backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 24, paddingBottom: 32, maxHeight: '80%' }}>
+            <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
+              <Text style={{ fontWeight: 'bold', fontSize: 18, color: '#1F2937', marginBottom: 8 }}>Seleccionar Cuenta</Text>
+              <Text style={{ color: '#6B7280', fontSize: 14 }}>
+                Tienes múltiples cuentas para este método de pago. Selecciona cuál deseas compartir:
+              </Text>
+            </View>
+            
+            <FlatList
+              data={availablePaymentAccounts}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item, index }) => {
+                const getAccountTypeLabel = (type: string) => {
+                  const labels: { [key: string]: string } = {
+                    'ahorro': 'Ahorros',
+                    'corriente': 'Corriente',
+                    'nomina': 'Nómina',
+                  };
+                  return labels[type] || type;
+                };
+                
+                return (
+                  <TouchableOpacity
+                    style={{
+                      paddingHorizontal: 24,
+                      paddingVertical: 16,
+                      borderBottomWidth: index < availablePaymentAccounts.length - 1 ? 1 : 0,
+                      borderBottomColor: '#E5E7EB',
+                    }}
+                    onPress={() => sharePaymentDetailsWithAccount(item)}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: 24,
+                        backgroundColor: colors.primaryLight,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        marginRight: 12,
+                      }}>
+                        <Icon 
+                          name={item.paymentMethod?.providerType === 'bank' ? 'credit-card' : 'smartphone'} 
+                          size={20} 
+                          color={colors.primary} 
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontWeight: '600', fontSize: 16, color: '#1F2937', marginBottom: 2 }}>
+                          {item.accountHolderName}
+                        </Text>
+                        <Text style={{ fontSize: 14, color: '#6B7280' }}>
+                          {item.accountNumber ? 
+                            `****${item.accountNumber.slice(-4)}` : 
+                            (item.phoneNumber || item.email || item.username)
+                          }
+                          {item.accountType && ` • ${getAccountTypeLabel(item.accountType)}`}
+                        </Text>
+                        {item.isDefault && (
+                          <Text style={{ fontSize: 12, color: colors.primary, marginTop: 2 }}>
+                            Cuenta predeterminada
+                          </Text>
+                        )}
+                      </View>
+                      <Icon name="chevron-right" size={20} color="#9CA3AF" />
+                    </View>
+                  </TouchableOpacity>
+                );
+              }}
+              showsVerticalScrollIndicator={true}
+              style={{ maxHeight: 400 }}
+            />
+            
+            <TouchableOpacity
+              style={{
+                marginTop: 16,
+                marginHorizontal: 24,
+                paddingVertical: 12,
+                backgroundColor: '#F3F4F6',
+                borderRadius: 8,
+                alignItems: 'center',
+              }}
+              onPress={() => {
+                setShowPaymentMethodSelector(false);
+                setAvailablePaymentAccounts([]);
+              }}
+            >
+              <Text style={{ color: '#374151', fontWeight: '600' }}>Cancelar</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1436,6 +1589,15 @@ const styles = StyleSheet.create({
   messagesContainer: {
     flex: 1,
   },
+  emptyMessagesContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyMessagesText: {
+    color: '#6B7280',
+    fontStyle: 'italic',
+  },
   messagesScroll: {
     flex: 1,
   },
@@ -1444,7 +1606,6 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 8,
     flexGrow: 1,
-    justifyContent: 'flex-end',
   },
   systemMessageContainer: {
     alignItems: 'center',

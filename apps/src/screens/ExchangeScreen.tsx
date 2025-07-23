@@ -855,11 +855,29 @@ export const ExchangeScreen = () => {
   const minRateInputRef = useRef<TextInputType>(null);
   const maxRateInputRef = useRef<TextInputType>(null);
   // Removed forceHeaderVisible state as it was causing unnecessary re-renders
-  const [headerHeight, setHeaderHeight] = useState(0);
+  // State for header height - start with reasonable defaults to prevent layout shift
+  const [headerHeight, setHeaderHeight] = useState(() => {
+    // Different initial heights based on initial activeList state
+    return 320; // Default for 'offers' which is the initial activeList
+  });
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [activeList, setActiveList] = useState<'offers' | 'trades' | 'myOffers'>('offers');
+  
+  // Track if header has been measured to prevent re-measuring
+  const headerMeasuredRef = useRef(false);
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const route = useRoute<RouteProp<MainStackParamList, 'Exchange'>>();
+  
+  // Reset header measurement when activeList changes
+  useEffect(() => {
+    headerMeasuredRef.current = false;
+    // Set appropriate initial height based on activeList
+    if (activeList === 'offers') {
+      setHeaderHeight(320); // Full height for offers (includes all filters)
+    } else {
+      setHeaderHeight(100); // Smaller height for other tabs (only main tabs)
+    }
+  }, [activeList]);
 
   // Handle route params for showing My Offers
   useEffect(() => {
@@ -1838,9 +1856,12 @@ export const ExchangeScreen = () => {
         <Animated.View 
             onLayout={(event) => {
                 const { height } = event.nativeEvent.layout;
-                if (height > 0 && height !== headerHeight) {
-                    // console.log('Header height changed:', { old: headerHeight, new: height });
-                    setHeaderHeight(height);
+                // Only measure once when activeList changes, not on every render
+                if (height > 0 && !headerMeasuredRef.current) {
+                    headerMeasuredRef.current = true;
+                    if (Math.abs(height - headerHeight) > 5) { // Only update if significantly different
+                        setHeaderHeight(height);
+                    }
                 }
             }}
             style={[
@@ -2422,7 +2443,10 @@ export const ExchangeScreen = () => {
 
       <Animated.ScrollView 
         style={styles.content} 
-        contentContainerStyle={{ paddingTop: headerHeight, paddingBottom: 100 }}
+        contentContainerStyle={{ 
+          paddingTop: headerHeight + 16, // Add some padding to ensure content is not hidden
+          paddingBottom: 100 
+        }}
         onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             { useNativeDriver: true }
