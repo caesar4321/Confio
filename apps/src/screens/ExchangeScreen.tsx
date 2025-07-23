@@ -334,6 +334,8 @@ interface ActiveTrade {
   paymentMethod: string;
   rate: string;
   tradeType: 'buy' | 'sell';
+  countryCode?: string;
+  currencyCode?: string;
 }
 
 export const ExchangeScreen = () => {
@@ -596,8 +598,8 @@ export const ExchangeScreen = () => {
             responseTime: formatResponseTime(otherPartyStats?.avgResponseTime || null),
           },
           amount: trade.cryptoAmount.toString(),
-          crypto: trade.offer?.tokenType || 'cUSD',
-          totalBs: formatAmount.withCode(trade.fiatAmount),
+          crypto: trade.offer?.tokenType === 'CUSD' ? 'cUSD' : (trade.offer?.tokenType || 'cUSD'),
+          totalBs: `${formatNumber(trade.fiatAmount)} ${trade.currencyCode || currency.code}`,
           step: getStepFromStatus(trade.status),
           totalSteps: 4,
           timeRemaining,
@@ -613,6 +615,8 @@ export const ExchangeScreen = () => {
             })(),
           rate: trade.rateUsed.toString(),
           tradeType,
+          countryCode: trade.countryCode,
+          currencyCode: trade.currencyCode,
         };
       });
   }, [myTradesData, formatAmount, activeAccount]);
@@ -1647,7 +1651,7 @@ export const ExchangeScreen = () => {
                     </View>
                     <View>
                         <Text style={styles.userName}>{trade.trader.name}</Text>
-                        <Text style={styles.tradeDetails}>{trade.amount} {trade.crypto} por {formatAmount.withCode(trade.totalBs)}</Text>
+                        <Text style={styles.tradeDetails}>{trade.amount} {trade.crypto} por {trade.totalBs}</Text>
                     </View>
                 </View>
                 <View style={styles.timerBadge}>
@@ -1681,6 +1685,8 @@ export const ExchangeScreen = () => {
                             step: trade.step,
                             timeRemaining: trade.timeRemaining,
                             tradeType: trade.tradeType,
+                            countryCode: trade.countryCode,
+                            currencyCode: trade.currencyCode,
                         }
                     });
                 }}
@@ -1858,7 +1864,16 @@ export const ExchangeScreen = () => {
 
   // Header component - memoized to prevent re-renders
   const Header = React.memo(() => {
-    const scrollYClamped = Animated.diffClamp(scrollY, 0, headerHeight);
+    // Prevent iOS bounce from affecting header position by clamping negative values
+    const scrollYClamped = Animated.diffClamp(
+      scrollY.interpolate({
+        inputRange: [-1000, 0, 1000],
+        outputRange: [0, 0, 1000],
+        extrapolate: 'clamp',
+      }), 
+      0, 
+      headerHeight
+    );
 
     const headerTranslateY = scrollYClamped.interpolate({
         inputRange: [0, headerHeight],
@@ -2472,7 +2487,10 @@ export const ExchangeScreen = () => {
         }}
         onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            { useNativeDriver: false } // Must be false for RefreshControl to work
+            { 
+              useNativeDriver: false, // Must be false for RefreshControl to work
+              listener: handleScroll
+            }
         )}
         scrollEventThrottle={16}
         bounces={true}

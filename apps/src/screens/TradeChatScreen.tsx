@@ -258,13 +258,12 @@ export const TradeChatScreen: React.FC = () => {
       tradeType,
       hasSharedPaymentDetails,
       tradeStatus: tradeDetailsData?.p2pTrade?.status,
-      shouldShowMarkAsPaidButton: ((currentTradeStep === 2) || (currentTradeStep === 1 && hasSharedPaymentDetails)) && tradeType === 'buy'
+      shouldShowMarkAsPaidButton: currentTradeStep === 2 && tradeType === 'buy',
+      shouldShowReleaseFundsButton: currentTradeStep === 3 && tradeType === 'sell',
+      forceUpdate,
+      timestamp: new Date().toISOString()
     });
-  }, [currentTradeStep, tradeType, hasSharedPaymentDetails, tradeDetailsData?.p2pTrade?.status]);
-  
-  const [message, setMessage] = useState('');
-  const [currentTradeStep, setCurrentTradeStep] = useState(initialStep || 1);
-  const [hasSharedPaymentDetails, setHasSharedPaymentDetails] = useState(false);
+  }, [currentTradeStep, tradeType, hasSharedPaymentDetails, tradeDetailsData?.p2pTrade?.status, forceUpdate]);
   
   // Helper function to get step from trade status
   const getStepFromStatus = (status: string) => {
@@ -278,6 +277,23 @@ export const TradeChatScreen: React.FC = () => {
       default: return 1;
     }
   };
+  
+  const [message, setMessage] = useState('');
+  const [currentTradeStep, setCurrentTradeStep] = useState(() => {
+    // Initialize based on trade status if available
+    if (tradeStatus) {
+      return getStepFromStatus(tradeStatus);
+    }
+    return initialStep || 1;
+  });
+  const [hasSharedPaymentDetails, setHasSharedPaymentDetails] = useState(() => {
+    // Initialize based on trade status if available
+    if (tradeStatus) {
+      return getStepFromStatus(tradeStatus) >= 2;
+    }
+    return false;
+  });
+  const [forceUpdate, setForceUpdate] = useState(0); // Force update counter
   const [timeRemaining, setTimeRemaining] = useState(900); // 15 minutes in seconds
   const [messages, setMessages] = useState<Message[]>([]);
   const [isConnected, setIsConnected] = useState(false);
@@ -288,6 +304,7 @@ export const TradeChatScreen: React.FC = () => {
   const [availablePaymentAccounts, setAvailablePaymentAccounts] = useState<any[]>([]);
 
   const messagesListRef = useRef<FlatList>(null);
+  const messageHandlerRef = useRef<(data: any) => void>();
   
   // GraphQL mutation for sending messages
   const [sendMessage, { loading: sendingMessage }] = useMutation(SEND_P2P_MESSAGE);
@@ -321,17 +338,30 @@ export const TradeChatScreen: React.FC = () => {
         tradeType: tradeType,
         isBuyer: tradeType === 'buy',
         shouldShowMarkAsPaidButton: newStep === 2 && tradeType === 'buy',
-        willUpdateStep: newStep !== currentTradeStep
+        shouldShowReleaseFundsButton: newStep === 3 && tradeType === 'sell',
+        timestamp: new Date().toISOString()
       });
-      if (newStep !== currentTradeStep) {
-        console.log('🔄 Updating currentTradeStep from', currentTradeStep, 'to', newStep);
-        setCurrentTradeStep(newStep);
+      
+      // Use functional updates to ensure we're always working with latest state
+      setCurrentTradeStep(prevStep => {
+        if (prevStep !== newStep) {
+          console.log('🔄 GraphQL sync: updating step from', prevStep, 'to', newStep);
+        }
+        return newStep;
+      });
+      
+      // Always set hasSharedPaymentDetails if we're in step 2 or higher
+      if (newStep >= 2) {
+        setHasSharedPaymentDetails(prevShared => {
+          if (!prevShared) {
+            console.log('🔄 GraphQL sync: setting hasSharedPaymentDetails to true');
+          }
+          return true;
+        });
       }
       
-      // Also set hasSharedPaymentDetails if we're in step 2 or higher
-      if (newStep >= 2 && !hasSharedPaymentDetails) {
-        setHasSharedPaymentDetails(true);
-      }
+      // Force re-render
+      setForceUpdate(prev => prev + 1);
     }
   }, [tradeDetailsData?.p2pTrade?.status]);
 
@@ -391,7 +421,15 @@ export const TradeChatScreen: React.FC = () => {
         websocket.current.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            handleWebSocketMessage(data);
+            console.log('📨 WebSocket message received:', {
+              type: data.type,
+              data: data,
+              timestamp: new Date().toISOString()
+            });
+            // Use the ref to call the latest version of the handler
+            if (messageHandlerRef.current) {
+              messageHandlerRef.current(data);
+            }
           } catch (error) {
             console.error('❌ Error parsing WebSocket message:', error);
           }
@@ -429,10 +467,10 @@ export const TradeChatScreen: React.FC = () => {
         websocket.current.close();
       }
     };
-  }, [tradeId, activeAccount]);
+  }, [tradeId, activeAccount?.id]);
 
-  // Handle WebSocket messages  
-  const handleWebSocketMessage = (data: any) => {
+  // Update the message handler ref on every render to avoid stale closures
+  messageHandlerRef.current = (data: any) => {
     // Helper function to determine if message is from current user's perspective
     const isMessageFromCurrentUser = (senderId: number | string, senderBusinessId?: number | string) => {
       // Convert IDs to strings for consistent comparison
@@ -543,7 +581,8 @@ export const TradeChatScreen: React.FC = () => {
           currentTradeStep,
           tradeType,
           updatedBy: data.updated_by,
-          myUserId: userProfile?.id
+          myUserId: userProfile?.id,
+          isOtherUserUpdate: data.updated_by !== String(userProfile?.id)
         });
         
         // Update the local state with the new status
@@ -556,45 +595,75 @@ export const TradeChatScreen: React.FC = () => {
             willUpdate: newStep !== currentTradeStep
           });
           
-          if (newStep !== currentTradeStep) {
-            console.log('✅ Updating trade step from WebSocket:', currentTradeStep, '->', newStep);
-            setCurrentTradeStep(newStep);
+          // Update states using functional updates to ensure we get the latest values
+          setCurrentTradeStep(prevStep => {
+            console.log('✅ Updating trade step from WebSocket:', prevStep, '->', newStep);
+            return newStep;
+          });
+          
+          // Always update hasSharedPaymentDetails if in step 2+
+          if (newStep >= 2) {
+            setHasSharedPaymentDetails(prevShared => {
+              console.log('✅ Setting hasSharedPaymentDetails to true (was:', prevShared, ')');
+              return true;
+            });
+          }
+          
+          // Force a re-render to ensure UI updates
+          setForceUpdate(prev => prev + 1);
             
-            // Also update hasSharedPaymentDetails if moving to step 2+
-            if (newStep >= 2 && !hasSharedPaymentDetails) {
-              console.log('✅ Setting hasSharedPaymentDetails to true');
-              setHasSharedPaymentDetails(true);
-            }
-            
-            // Add a system message for status changes (but not if we initiated it)
-            if (data.updated_by && data.updated_by !== String(userProfile?.id)) {
-              let systemText = '';
-              switch (data.status) {
-                case 'PAYMENT_PENDING':
-                  systemText = '💳 El vendedor ha compartido los datos de pago.';
-                  break;
-                case 'PAYMENT_SENT':
-                  systemText = '✅ El comprador ha marcado el pago como enviado.';
-                  break;
-                case 'PAYMENT_CONFIRMED':
-                  systemText = '🎉 El vendedor ha confirmado la recepción del pago.';
-                  break;
-                case 'COMPLETED':
-                  systemText = '✅ Intercambio completado exitosamente.';
-                  break;
-              }
-              
-              if (systemText) {
-                const systemMessage: Message = {
-                  id: Date.now() + Math.random(),
-                  sender: 'system',
-                  text: systemText,
-                  timestamp: new Date(),
-                  type: 'system',
-                };
-                setMessages(prev => [systemMessage, ...prev]);
-              }
-            }
+          // Add a system message for status changes
+          // Show message even if we initiated it, as other user needs to see the update
+          let systemText = '';
+          switch (data.status) {
+            case 'PAYMENT_PENDING':
+              systemText = '💳 El vendedor ha compartido los datos de pago.';
+              break;
+            case 'PAYMENT_SENT':
+              systemText = '✅ El comprador ha marcado el pago como enviado.';
+              break;
+            case 'PAYMENT_CONFIRMED':
+              systemText = '🎉 El vendedor ha confirmado la recepción del pago.';
+              break;
+            case 'COMPLETED':
+              systemText = '✅ Intercambio completado exitosamente.';
+              break;
+          }
+          
+          if (systemText) {
+            const systemMessage: Message = {
+              id: Date.now() + Math.random(),
+              sender: 'system',
+              text: systemText,
+              timestamp: new Date(),
+              type: 'system',
+            };
+            setMessages(prev => [systemMessage, ...prev]);
+          }
+          
+          // Navigate both buyer and seller to rating screen when trade is completed
+          if ((data.status === 'PAYMENT_CONFIRMED' || data.status === 'COMPLETED') && data.updated_by !== String(userProfile?.id)) {
+            // This is the buyer receiving the completion notification
+            setTimeout(() => {
+              navigation.navigate('TraderRating', {
+                trader: {
+                  name: offer.name,
+                  verified: offer.verified,
+                  completedTrades: offer.completedTrades,
+                  successRate: offer.successRate,
+                },
+                tradeDetails: {
+                  amount: amount,
+                  crypto: crypto,
+                  totalPaid: (parseFloat(amount) * parseFloat(offer.rate)).toFixed(2),
+                  method: selectedPaymentMethodId ? 
+                    offer.paymentMethods.find(pm => pm.id === selectedPaymentMethodId)?.displayName || 'N/A' :
+                    offer.paymentMethods[0]?.displayName || 'N/A',
+                  date: new Date().toLocaleDateString(),
+                  duration: `${Math.floor((900 - timeRemaining) / 60)} minutos`,
+                }
+              });
+            }, 2000); // Give time to see the completion message
           }
           
           // Always refetch to ensure all data is synced
@@ -602,6 +671,18 @@ export const TradeChatScreen: React.FC = () => {
             console.log('🔄 Refetching trade details after WebSocket update');
             refetchTradeDetails();
           }
+          
+          // Force a re-render to update button visibility immediately
+          // This ensures the UI updates even if the user initiated the change
+          console.log('🎯 After WebSocket update - Button visibility check:', {
+            currentTradeStep: newStep,
+            tradeType,
+            hasSharedPaymentDetails: newStep >= 2,
+            shouldShowMarkAsPaidButton: newStep === 2 && tradeType === 'buy',
+            shouldShowReleaseFundsButton: newStep === 3 && tradeType === 'sell',
+            timestamp: new Date().toISOString()
+          });
+          
         }
         break;
         
@@ -1112,16 +1193,33 @@ export const TradeChatScreen: React.FC = () => {
         };
         setMessages(prev => [systemMessage, ...prev]); // Add at beginning (descending order)
         
-        // Show success alert
+        // Show success alert and navigate to rating
         Alert.alert(
           '¡Éxito!',
           'El intercambio se ha completado exitosamente. Los fondos han sido liberados al comprador.',
           [
             {
-              text: 'OK',
+              text: 'Calificar al comprador',
               onPress: () => {
-                // Navigate back to exchange screen
-                navigation.navigate('BottomTabs', { screen: 'Exchange' });
+                // Navigate to rating screen
+                navigation.navigate('TraderRating', {
+                  trader: {
+                    name: offer.name,
+                    verified: offer.verified,
+                    completedTrades: offer.completedTrades,
+                    successRate: offer.successRate,
+                  },
+                  tradeDetails: {
+                    amount: amount,
+                    crypto: crypto,
+                    totalPaid: (parseFloat(amount) * parseFloat(offer.rate)).toFixed(2),
+                    method: selectedPaymentMethodId ? 
+                      offer.paymentMethods.find(pm => pm.id === selectedPaymentMethodId)?.displayName || 'N/A' :
+                      offer.paymentMethods[0]?.displayName || 'N/A',
+                    date: new Date().toLocaleDateString(),
+                    duration: `${Math.floor((900 - timeRemaining) / 60)} minutos`,
+                  }
+                });
               }
             }
           ]
@@ -1340,9 +1438,9 @@ export const TradeChatScreen: React.FC = () => {
         </View>
       </TouchableWithoutFeedback>
 
-      {/* Quick Actions */}
+      {/* Quick Actions - Key prop added to force re-render */}
       {/* For Buyers - Mark as Paid (show in step 2 - PAYMENT_PENDING status) */}
-      {((currentTradeStep === 2) || (currentTradeStep === 1 && hasSharedPaymentDetails)) && tradeType === 'buy' && (
+      {currentTradeStep === 2 && tradeType === 'buy' && (
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.paymentActionBanner}>
             <View style={styles.paymentActionContent}>
@@ -1358,7 +1456,7 @@ export const TradeChatScreen: React.FC = () => {
         </TouchableWithoutFeedback>
       )}
       
-      {/* For Sellers - Release Funds */}
+      {/* For Sellers - Release Funds - Key prop added to force re-render */}
       {currentTradeStep === 3 && tradeType === 'sell' && (
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={[styles.paymentActionBanner, { backgroundColor: '#D1FAE5' }]}>

@@ -179,13 +179,15 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
 
     async def trade_status_update(self, event):
         """Send trade status update to WebSocket"""
-        await self.send(text_data=json.dumps({
+        message_data = {
             'type': 'trade_status_update',
             'status': event['status'],
             'updated_by': event['updated_by'],
-            'payment_reference': event['payment_reference'],
-            'payment_notes': event['payment_notes'],
-        }))
+            'payment_reference': event.get('payment_reference', ''),
+            'payment_notes': event.get('payment_notes', ''),
+        }
+        
+        await self.send(text_data=json.dumps(message_data))
 
     # Database operations
     @database_sync_to_async
@@ -193,14 +195,11 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
         """Check if the current user has access to this trade"""
         try:
             user = self.scope['user']
-            print(f"DEBUG: WebSocket user: {user}, authenticated: {user.is_authenticated if hasattr(user, 'is_authenticated') else 'Unknown'}")
             
             if not hasattr(user, 'is_authenticated') or not user.is_authenticated:
-                print(f"DEBUG: User not authenticated")
                 return False
                 
             trade = P2PTrade.objects.get(id=self.trade_id)
-            print(f"DEBUG: Trade found: {trade.id}, buyer_user: {trade.buyer_user}, seller_user: {trade.seller_user}")
             
             # Check if user has access to this trade using new direct relationships
             has_access = (
@@ -214,10 +213,8 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
                 trade.seller == user
             )
             
-            print(f"DEBUG: User {user.id} has access to trade {self.trade_id}: {has_access}")
             return has_access
         except P2PTrade.DoesNotExist:
-            print(f"DEBUG: Trade {self.trade_id} does not exist")
             return False
 
     @database_sync_to_async
@@ -240,8 +237,6 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
             active_account_type = params.get('account_type', 'personal')
             active_account_index = int(params.get('account_index', '0'))
             
-            print(f"WebSocket save_message - Active account: type={active_account_type}, index={active_account_index}")
-            print(f"WebSocket save_message - Trade participants: buyer_user={trade.buyer_user_id}, seller_user={trade.seller_user_id}, buyer_business={trade.buyer_business_id}, seller_business={trade.seller_business_id}")
             
             # Determine sender entity based on active account context
             message_kwargs = {
@@ -257,18 +252,14 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
                 # User is sending as a business - find which business they're using
                 if trade.buyer_business and trade.buyer_business.accounts.filter(user=user, account_index=active_account_index).exists():
                     message_kwargs['sender_business'] = trade.buyer_business
-                    print(f"WebSocket save_message - Sending as buyer business: {trade.buyer_business.name}")
                 elif trade.seller_business and trade.seller_business.accounts.filter(user=user, account_index=active_account_index).exists():
                     message_kwargs['sender_business'] = trade.seller_business
-                    print(f"WebSocket save_message - Sending as seller business: {trade.seller_business.name}")
                 else:
                     # Fallback to personal if business not found
                     message_kwargs['sender_user'] = user
-                    print(f"WebSocket save_message - Business account not found, falling back to personal")
             else:
                 # User is sending as personal account
                 message_kwargs['sender_user'] = user
-                print(f"WebSocket save_message - Sending as personal user: {user.username}")
             
             message = P2PMessage.objects.create(**message_kwargs)
             return message
