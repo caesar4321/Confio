@@ -502,7 +502,8 @@ export const TradeChatScreen: React.FC = () => {
           // Check if message already exists (prevent duplicates)
           const exists = prev.some(msg => msg.id === newMessage.id);
           if (exists) return prev;
-          return [...prev, newMessage];
+          // Add new message at the beginning for inverted FlatList
+          return [newMessage, ...prev];
         });
         break;
         
@@ -545,25 +546,26 @@ export const TradeChatScreen: React.FC = () => {
     if (!tradeId) {
       console.warn('No tradeId provided, using mock data');
       setMessages([
+        // Messages in reverse order for inverted FlatList (newest first)
         {
-          id: 1,
+          id: 7,
+          sender: 'trader',
+          text: '📋 Datos de Pago - Banco de Venezuela\n\n👤 Titular: Juan Pérez\n🏦 Banco: Banco de Venezuela\n💳 Número de cuenta: 0102-1234-5678-9012\n📝 Tipo de cuenta: Corriente\n🆔 Cédula: V-12.345.678',
+          timestamp: new Date(Date.now() - 150000),
+          type: 'payment_info'
+        },
+        {
+          id: 6,
           sender: 'system',
-          text: 'Intercambio iniciado. Tienes 15 minutos para completar el pago.',
-          timestamp: new Date(Date.now() - 300000),
+          text: '💳 Datos de pago compartidos',
+          timestamp: new Date(Date.now() - 180000),
           type: 'system'
         },
         {
-          id: 2,
-          sender: 'trader',
-          text: '¡Hola! Gracias por elegir mi oferta. Te envío los datos para el pago.',
-          timestamp: new Date(Date.now() - 270000),
-          type: 'text'
-        },
-        {
-          id: 3,
+          id: 5,
           sender: 'user',
-          text: 'Perfecto, estoy listo para hacer el pago.',
-          timestamp: new Date(Date.now() - 240000),
+          text: 'Gracias, reviso y te aviso.',
+          timestamp: new Date(Date.now() - 200000),
           type: 'text'
         },
         {
@@ -574,11 +576,25 @@ export const TradeChatScreen: React.FC = () => {
           type: 'text'
         },
         {
-          id: 5,
+          id: 3,
           sender: 'user',
-          text: 'Recibido, procesando el pago ahora.',
-          timestamp: new Date(Date.now() - 180000),
+          text: 'Perfecto, estoy listo para hacer el pago.',
+          timestamp: new Date(Date.now() - 240000),
           type: 'text'
+        },
+        {
+          id: 2,
+          sender: 'trader',
+          text: '¡Hola! Gracias por elegir mi oferta. Te envío los datos para el pago.',
+          timestamp: new Date(Date.now() - 270000),
+          type: 'text'
+        },
+        {
+          id: 1,
+          sender: 'system',
+          text: 'Intercambio iniciado. Tienes 15 minutos para completar el pago.',
+          timestamp: new Date(Date.now() - 300000),
+          type: 'system'
         }
       ]);
       setIsConnected(false);
@@ -906,7 +922,7 @@ export const TradeChatScreen: React.FC = () => {
         timestamp: new Date(),
         type: 'system',
       };
-      setMessages(prev => [...prev, systemMessage]);
+      setMessages(prev => [systemMessage, ...prev]); // Add at beginning for inverted FlatList
       
       // Refetch trade details to get updated status (with a small delay to ensure backend has processed)
       if (refetchTradeDetails) {
@@ -965,7 +981,7 @@ export const TradeChatScreen: React.FC = () => {
           timestamp: new Date(),
           type: 'system',
         };
-        setMessages(prev => [...prev, systemMessage]);
+        setMessages(prev => [systemMessage, ...prev]); // Add at beginning for inverted FlatList
         
         // Refetch trade details to get updated status
         if (refetchTradeDetails) {
@@ -1024,7 +1040,7 @@ export const TradeChatScreen: React.FC = () => {
           timestamp: new Date(),
           type: 'system',
         };
-        setMessages(prev => [...prev, systemMessage]);
+        setMessages(prev => [systemMessage, ...prev]); // Add at beginning for inverted FlatList
         
         // Show success alert
         Alert.alert(
