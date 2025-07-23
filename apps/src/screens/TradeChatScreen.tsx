@@ -250,8 +250,17 @@ export const TradeChatScreen: React.FC = () => {
   console.log('All accounts:', accounts);
   console.log('User profile:', userProfile);
   
-  // Also log if we're in a different context than expected
-  console.log('Trade type:', tradeType, '- User is:', tradeType === 'sell' ? 'seller' : 'buyer');
+  // Debug logs moved to useEffect to avoid render issues
+  useEffect(() => {
+    console.log('Trade type:', tradeType, '- User is:', tradeType === 'sell' ? 'seller' : 'buyer');
+    console.log('🎯 Trade state:', {
+      currentTradeStep,
+      tradeType,
+      hasSharedPaymentDetails,
+      tradeStatus: tradeDetailsData?.p2pTrade?.status,
+      shouldShowMarkAsPaidButton: ((currentTradeStep === 2) || (currentTradeStep === 1 && hasSharedPaymentDetails)) && tradeType === 'buy'
+    });
+  }, [currentTradeStep, tradeType, hasSharedPaymentDetails, tradeDetailsData?.p2pTrade?.status]);
   
   const [message, setMessage] = useState('');
   const [currentTradeStep, setCurrentTradeStep] = useState(initialStep || 1);
@@ -930,7 +939,7 @@ export const TradeChatScreen: React.FC = () => {
       
       // Add system message
       const systemMessage: Message = {
-        id: messages.length + 1,
+        id: Date.now() + Math.random(), // Use timestamp + random for unique ID
         sender: 'system',
         text: '💳 Datos de pago compartidos. El comprador ahora puede realizar el pago.',
         timestamp: new Date(),
@@ -989,7 +998,7 @@ export const TradeChatScreen: React.FC = () => {
         
         // Add system message
         const systemMessage: Message = {
-          id: messages.length + 1,
+          id: Date.now() + Math.random(), // Use timestamp + random for unique ID
           sender: 'system',
           text: '✅ Has marcado el pago como completado. El vendedor debe confirmar la recepción.',
           timestamp: new Date(),
@@ -1048,7 +1057,7 @@ export const TradeChatScreen: React.FC = () => {
         
         // Add system message
         const systemMessage: Message = {
-          id: messages.length + 1,
+          id: Date.now() + Math.random(), // Use timestamp + random for unique ID
           sender: 'system',
           text: '🎉 ¡Intercambio completado exitosamente! Los fondos han sido liberados.',
           timestamp: new Date(),
@@ -1286,21 +1295,6 @@ export const TradeChatScreen: React.FC = () => {
 
       {/* Quick Actions */}
       {/* For Buyers - Mark as Paid (show in step 2 - PAYMENT_PENDING status) */}
-      {console.log('🔴 Mark as Paid button check:', {
-        currentTradeStep,
-        tradeType,
-        isBuyer: tradeType === 'buy',
-        shouldShowButton: currentTradeStep === 2 && tradeType === 'buy',
-        tradeStatus: tradeDetailsData?.p2pTrade?.status
-      })}
-      {/* Debug log for button visibility */}
-      {console.log('🎯 Marcar como pagado button check:', {
-        currentTradeStep,
-        tradeType,
-        hasSharedPaymentDetails,
-        showButton: (currentTradeStep === 2 || (currentTradeStep === 1 && hasSharedPaymentDetails)) && tradeType === 'buy',
-        tradeStatus: tradeDetailsData?.p2pTrade?.status
-      })}
       {((currentTradeStep === 2) || (currentTradeStep === 1 && hasSharedPaymentDetails)) && tradeType === 'buy' && (
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={styles.paymentActionBanner}>
