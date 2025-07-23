@@ -5,18 +5,65 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 
 class P2PPaymentMethod(SoftDeleteModel):
     """Payment methods available for P2P trading"""
-    name = models.CharField(max_length=50)
-    display_name = models.CharField(max_length=100)
+    PROVIDER_TYPES = [
+        ('bank', 'Traditional Bank'),
+        ('fintech', 'Fintech/Digital Wallet'),
+        ('cash', 'Cash/Physical'),
+        ('other', 'Other'),
+    ]
+    
+    name = models.CharField(max_length=50, help_text="Unique identifier (e.g., 'banco_venezuela', 'nequi')")
+    display_name = models.CharField(max_length=100, help_text="User-friendly name (e.g., 'Banco de Venezuela', 'Nequi')")
+    provider_type = models.CharField(max_length=10, choices=PROVIDER_TYPES, default='other')
     is_active = models.BooleanField(default=True)
-    icon = models.CharField(max_length=50, blank=True)  # For frontend icon reference
+    icon = models.CharField(max_length=50, blank=True, help_text="Frontend icon reference")
     country_code = models.CharField(max_length=2, blank=True, null=True, help_text="ISO country code (e.g., 'VE', 'US'). Leave empty for global methods.")
+    
+    # Link to Bank model for bank-based payment methods
+    bank = models.ForeignKey(
+        'users.Bank', 
+        on_delete=models.CASCADE, 
+        null=True, 
+        blank=True,
+        help_text="Reference to Bank model if this is a bank-based payment method"
+    )
+    
+    # Link to Country model for non-bank payment methods
+    country = models.ForeignKey(
+        'users.Country',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        help_text="Country for non-bank payment methods (e.g., fintech, mobile payments)"
+    )
+    
+    # Additional metadata
+    description = models.TextField(blank=True, help_text="Optional description of the payment method")
+    requires_phone = models.BooleanField(default=False, help_text="Whether this method requires a phone number (e.g., Pago Móvil)")
+    requires_email = models.BooleanField(default=False, help_text="Whether this method requires an email (e.g., PayPal)")
+    requires_account_number = models.BooleanField(default=True, help_text="Whether this method requires an account number")
+    
+    # Display order for UI
+    display_order = models.IntegerField(default=0, help_text="Order for displaying in UI (lower numbers first)")
     
     class Meta:
         unique_together = ['name', 'country_code']
-        ordering = ['display_name']
+        ordering = ['display_order', 'display_name']
     
     def __str__(self):
+        if self.country_code:
+            return f"{self.display_name} ({self.country_code})"
         return self.display_name
+    
+    @property
+    def is_bank_based(self):
+        """Check if this payment method is linked to a traditional bank"""
+        return self.provider_type == 'bank' and self.bank is not None
+    
+    @property 
+    def is_fintech(self):
+        """Check if this payment method is a fintech/digital wallet"""
+        return self.provider_type == 'fintech'
 
 class P2POffer(SoftDeleteModel):
     """P2P trading offers/orders in the marketplace"""

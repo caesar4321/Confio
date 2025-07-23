@@ -15,6 +15,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
+import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 
 type ActiveTradeRouteProp = RouteProp<MainStackParamList, 'ActiveTrade'>;
 type ActiveTradeNavigationProp = NativeStackNavigationProp<MainStackParamList, 'ActiveTrade'>;
@@ -188,7 +189,11 @@ export const ActiveTradeScreen: React.FC = () => {
       <View style={styles.paymentMethodCard}>
         <View style={styles.paymentMethodHeader}>
           <View style={styles.paymentMethodIcon}>
-            <Text style={styles.paymentMethodIconText}>{trade.paymentMethod.charAt(0)}</Text>
+            <Icon 
+              name={getPaymentMethodIcon(null, null, trade.paymentMethod)} 
+              size={18} 
+              color="#fff" 
+            />
           </View>
           <View>
             <Text style={styles.paymentMethodName}>{trade.paymentMethod}</Text>

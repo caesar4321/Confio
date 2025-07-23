@@ -19,6 +19,7 @@ import { Header } from '../navigation/Header';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
+import { useNumberFormat } from '../utils/numberFormatting';
 
 // Color palette
 const colors = {
@@ -57,6 +58,7 @@ interface Transaction {
 export const AccountDetailScreen = () => {
   const navigation = useNavigation<AccountDetailScreenNavigationProp>();
   const route = useRoute<AccountDetailScreenRouteProp>();
+  const { formatNumber, formatCurrency } = useNumberFormat();
   const [showBalance, setShowBalance] = useState(true);
   const [showExchangeModal, setShowExchangeModal] = useState(false);
   const [exchangeAmount, setExchangeAmount] = useState('');
@@ -261,7 +263,7 @@ export const AccountDetailScreen = () => {
             <View style={styles.feeRow}>
               <Text style={styles.feeTotalLabel}>Total a recibir</Text>
               <Text style={styles.feeTotalValue}>
-                {exchangeAmount ? (parseFloat(exchangeAmount) - 0.02).toFixed(2) : '0.00'} cUSD
+                {exchangeAmount ? formatNumber(parseFloat(exchangeAmount) - 0.02) : formatNumber(0)} cUSD
               </Text>
             </View>
           </View>

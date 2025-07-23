@@ -15,7 +15,7 @@ import {
   Alert,
   type TextInput as TextInputType,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery } from '@apollo/client';
@@ -23,13 +23,14 @@ import { MainStackParamList } from '../types/navigation';
 import { countries, Country } from '../utils/countries';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { useCurrency } from '../hooks/useCurrency';
-import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS, GET_MY_P2P_TRADES } from '../apollo/queries';
+import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS, GET_MY_P2P_TRADES, GET_MY_P2P_OFFERS, GET_USER_BANK_ACCOUNTS } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
 import { ExchangeRateDisplay } from '../components/ExchangeRateDisplay';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { getCurrencySymbol, getCurrencyForCountry } from '../utils/currencyMapping';
+import { useNumberFormat } from '../utils/numberFormatting';
 
 // Colors from the design
 const colors = {
@@ -344,6 +345,9 @@ export const ExchangeScreen = () => {
   // Get real market exchange rate for selected country
   const { rate: marketRate, loading: marketRateLoading } = useSelectedCountryRate();
   
+  // Use number formatting based on user's locale
+  const { formatNumber, formatCurrency } = useNumberFormat();
+  
   // Get current account context
   const { activeAccount } = useAccount();
   const { profileData } = useAuth();
@@ -413,6 +417,26 @@ export const ExchangeScreen = () => {
     variables: tradesQueryVariables,
     fetchPolicy: 'network-only', // Always fetch fresh data from server
     notifyOnNetworkStatusChange: true, // Enable to track network status
+    skip: !activeAccount || !activeAccount.id, // Skip if no account or no ID
+    // Removed pollInterval - now using focus-based refresh and manual refresh instead
+  });
+
+  // Fetch user's bank accounts to check payment method availability
+  const { data: bankAccountsData, loading: bankAccountsLoading } = useQuery(GET_USER_BANK_ACCOUNTS, {
+    variables: { 
+      accountId: activeAccount?.id 
+    },
+    skip: !activeAccount?.id,
+    fetchPolicy: 'cache-and-network'
+  });
+
+  // Fetch my P2P offers for the active account
+  const { data: myOffersData, loading: myOffersLoading, error: myOffersError, refetch: refetchMyOffers } = useQuery(GET_MY_P2P_OFFERS, {
+    variables: {
+      accountId: activeAccount?.id
+    },
+    fetchPolicy: 'cache-and-network',
+    notifyOnNetworkStatusChange: false,
     skip: !activeAccount || !activeAccount.id // Skip if no account or no ID
   });
 
@@ -429,6 +453,20 @@ export const ExchangeScreen = () => {
       });
     }
   }, [activeAccount?.id, activeAccount?.type, refetchTrades]);
+
+  // Force refetch offers when active account changes
+  React.useEffect(() => {
+    if (activeAccount?.id && refetchMyOffers) {
+      console.log('[ExchangeScreen] Active account changed, refetching offers for account:', {
+        accountId: activeAccount.id,
+        accountType: activeAccount.type,
+        accountName: activeAccount.name
+      });
+      refetchMyOffers({
+        accountId: activeAccount.id
+      });
+    }
+  }, [activeAccount?.id, activeAccount?.type, refetchMyOffers]);
 
   // Transform real trades data into UI format
   const activeTrades: ActiveTrade[] = React.useMemo(() => {
@@ -564,7 +602,13 @@ export const ExchangeScreen = () => {
           status: trade.status.toLowerCase(),
           paymentMethod: trade.paymentMethod?.isActive === false ? 
             'Método inactivo' : 
-            (trade.paymentMethod?.displayName || trade.paymentMethod?.name || 'N/A'),
+            (() => {
+              const method = trade.paymentMethod;
+              if (!method) return 'N/A';
+              const displayName = method.displayName || method.name || 'N/A';
+              const countryFlag = method.bank?.country?.flagEmoji || '';
+              return countryFlag ? `${displayName} ${countryFlag}` : displayName;
+            })(),
           rate: trade.rateUsed.toString(),
           tradeType,
         };
@@ -649,6 +693,27 @@ export const ExchangeScreen = () => {
   // Filter offers client-side by amount and advanced filters
   const filteredOffers = React.useMemo(() => {
     const offers = offersData?.p2pOffers || [];
+    
+    // Debug logging
+    console.log('[ExchangeScreen] Filtering offers:', {
+      totalOffers: offers.length,
+      activeTab,
+      selectedCrypto,
+      selectedCountry: selectedCountry?.[2],
+      amount,
+      minRate,
+      maxRate,
+      filterVerified,
+      filterOnline,
+      filterHighVolume,
+      offers: offers.map(o => ({
+        id: o.id,
+        type: o.exchangeType,
+        token: o.tokenType,
+        rate: o.rate,
+        country: o.countryCode
+      }))
+    });
     
     // Apply client-side filtering
     
@@ -792,8 +857,41 @@ export const ExchangeScreen = () => {
   // Removed forceHeaderVisible state as it was causing unnecessary re-renders
   const [headerHeight, setHeaderHeight] = useState(0);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
-  const [activeList, setActiveList] = useState<'offers' | 'trades'>('offers');
+  const [activeList, setActiveList] = useState<'offers' | 'trades' | 'myOffers'>('offers');
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const route = useRoute<RouteProp<MainStackParamList, 'Exchange'>>();
+
+  // Handle route params for showing My Offers
+  useEffect(() => {
+    if (route.params?.showMyOffers) {
+      setActiveList('myOffers');
+    }
+  }, [route.params?.showMyOffers]);
+
+  // Handle route params for refreshing data
+  useEffect(() => {
+    if (route.params?.refreshData) {
+      console.log('[ExchangeScreen] Refreshing data due to route params');
+      
+      // Refetch offers data
+      if (refetch) {
+        refetch();
+      }
+      
+      // Refetch my offers data
+      if (refetchMyOffers) {
+        refetchMyOffers();
+      }
+      
+      // Refetch trades data
+      if (refetchTrades) {
+        refetchTrades();
+      }
+      
+      // Clear the refresh parameter to prevent repeated refreshes
+      navigation.setParams({ refreshData: undefined });
+    }
+  }, [route.params?.refreshData, refetch, refetchMyOffers, refetchTrades, navigation]);
 
   // Reset header when screen comes into focus
   useEffect(() => {
@@ -820,6 +918,16 @@ export const ExchangeScreen = () => {
     // Removed timeout to prevent re-renders
   }, []);
 
+  // Refetch trades when screen is focused
+  useFocusEffect(
+    React.useCallback(() => {
+      if (refetchTrades && activeAccount?.id) {
+        console.log('[ExchangeScreen] Screen focused, refetching trades');
+        refetchTrades();
+      }
+    }, [refetchTrades, activeAccount?.id])
+  );
+
 
 
   // Calculate local amount based on crypto amount and rate - memoized to prevent re-creation
@@ -827,22 +935,22 @@ export const ExchangeScreen = () => {
     const numAmount = parseFloat(cryptoAmount.replace(/,/g, ''));
     const numRate = parseFloat(rate);
     if (isNaN(numAmount) || isNaN(numRate)) return '';
-    return (numAmount * numRate).toLocaleString('en-US', {
+    return formatNumber(numAmount * numRate, {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
-  }, []);
+  }, [formatNumber]);
 
   // Calculate crypto amount based on local amount and rate - memoized to prevent re-creation
   const calculateCryptoAmount = React.useCallback((localAmount: string, rate: string) => {
     const numAmount = parseFloat(localAmount.replace(/,/g, ''));
     const numRate = parseFloat(rate);
     if (isNaN(numAmount) || isNaN(numRate)) return '';
-    return (numAmount / numRate).toLocaleString('en-US', {
+    return formatNumber(numAmount / numRate, {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
-  }, []);
+  }, [formatNumber]);
 
   // Removed handleAmountChange - now handled inside AmountInputSection
 
@@ -918,56 +1026,130 @@ export const ExchangeScreen = () => {
   const checkIfOwnOffer = (offer: any): boolean => {
     if (!activeAccount) return false;
     
-    // Add debug logging
-    const currentBusinessId = activeAccount.type === 'business' ? 
+    const isBusinessAccount = activeAccount.type === 'business';
+    const currentBusinessId = isBusinessAccount ? 
       (profileData?.businessProfile?.id || activeAccount.business?.id) : null;
     const currentUserId = profileData?.userProfile?.id;
     
+    // Check for old user field fallback
+    const hasOldUserField = !!offer.user;
+    const oldUserMatch = hasOldUserField && offer.user?.id === currentUserId;
+    
     console.log('[DEBUG] checkIfOwnOffer:', {
-      activeAccountId: activeAccount.id,
+      // Current account info
       activeAccountType: activeAccount.type,
-      activeAccountBusinessId: activeAccount.business?.id,
-      profileUserId: profileData?.userProfile?.id,
-      profileBusinessId: profileData?.businessProfile?.id,
-      computedCurrentBusinessId: currentBusinessId,
-      computedCurrentUserId: currentUserId,
-      // Check new fields
+      currentUserId,
+      currentBusinessId,
+      // Offer info
+      offerId: offer.id,
+      offerHasUser: !!offer.offerUser,
+      offerHasBusiness: !!offer.offerBusiness,
       offerUserId: offer.offerUser?.id,
       offerBusinessId: offer.offerBusiness?.id,
-      // Check old fields for comparison
-      oldOfferUserId: offer.user?.id,
-      offer: offer
+      // Old field check
+      hasOldUserField,
+      oldUserId: offer.user?.id,
+      oldUserMatch,
+      // Comparison results
+      isCheckingBusiness: isBusinessAccount,
+      businessMatch: isBusinessAccount && offer.offerBusiness?.id === currentBusinessId,
+      userMatch: !isBusinessAccount && offer.offerUser?.id === currentUserId,
     });
     
-    if (activeAccount.type === 'business') {
-      // Check if the offer belongs to the current business account
-      // Use the new offerBusiness field
-      // Try both profileData and activeAccount business ID for robustness
-      const currentBusinessId = profileData?.businessProfile?.id || activeAccount.business?.id;
+    if (isBusinessAccount) {
+      // Business account viewing - only own if offer is from same business
       return offer.offerBusiness?.id === currentBusinessId;
     } else {
-      // Check if the offer belongs to the current personal account
-      // ONLY use offerUser field - do NOT fallback to user field for business offers
+      // Personal account viewing - only own if offer is from same user (not business)
+      // If the offer is from a business, it's not "own" even if same underlying user
       if (offer.offerBusiness) {
-        // This is a business offer, so it can't belong to a personal account
-        return false;
+        return false; // Business offers are never "own" for personal accounts
       }
       
-      const offerUserId = offer.offerUser?.id;
-      const currentUserId = profileData?.userProfile?.id;
-      return offerUserId === currentUserId;
+      // IMPORTANT: Do not fall back to old user field for business offers
+      // The old user field might contain the business owner's user ID
+      if (hasOldUserField && !offer.offerUser && !offer.offerBusiness) {
+        // Only use old field if new fields are missing (legacy data)
+        return offer.user?.id === currentUserId;
+      }
+      
+      return offer.offerUser?.id === currentUserId;
     }
   };
 
+  // Helper function to check if user has payment methods for offer requirements
+  const checkPaymentMethodAvailability = (offer: any): boolean => {
+    const userBankAccounts = bankAccountsData?.userBankAccounts || [];
+    if (userBankAccounts.length === 0) return false;
+
+    // Check if user has any payment method that matches the offer's payment methods
+    const offerPaymentMethods = offer.paymentMethods || [];
+    
+    return offerPaymentMethods.some((offerMethod: any) => {
+      return userBankAccounts.some((userAccount: any) => {
+        // First check if user has the new paymentMethod field
+        if (userAccount.paymentMethod) {
+          // Match by payment method ID
+          if (userAccount.paymentMethod.id === offerMethod.id) {
+            // Additional validation for required fields
+            if (offerMethod.requiresPhone && !userAccount.phoneNumber) return false;
+            if (offerMethod.requiresEmail && !userAccount.email) return false;
+            if (offerMethod.requiresAccountNumber && !userAccount.accountNumber) return false;
+            return true;
+          }
+        } 
+        // Legacy check for old bank-only structure
+        else if (offerMethod.providerType === 'BANK' && userAccount.bank) {
+          return userAccount.bank.id === offerMethod.bank?.id;
+        }
+        return false;
+      });
+    });
+  };
+
   const handleSelectOffer = (offer: any, action: 'profile' | 'trade') => {
+    console.log('[DEBUG] handleSelectOffer START:', {
+      action,
+      offerId: offer.id,
+      offerData: offer
+    });
+    
     // Check if user is trying to trade with themselves
     const isOwnOffer = checkIfOwnOffer(offer);
     
+    console.log('[DEBUG] handleSelectOffer AFTER CHECK:', {
+      action,
+      offerId: offer.id,
+      isOwnOffer,
+      offerHasUser: !!offer.offerUser,
+      offerHasBusiness: !!offer.offerBusiness,
+      willBlockTrade: action === 'trade' && isOwnOffer,
+      aboutToShowAlert: action === 'trade' && isOwnOffer
+    });
+    
     if (action === 'trade' && isOwnOffer) {
+      console.log('[DEBUG] SHOWING SELF-TRADE ALERT for offer:', offer.id);
       Alert.alert(
-        'No puedes comerciar contigo mismo',
-        'Esta es tu propia oferta. No puedes crear un intercambio contigo mismo.',
+        'No puedes comerciar con tu propia oferta',
+        'Esta oferta fue creada por tu cuenta. No puedes crear un intercambio con tus propias ofertas.',
         [{ text: 'Entendido', style: 'default' }]
+      );
+      return;
+    }
+
+    // Check if user has configured payment methods for this offer (only for trade action)
+    if (action === 'trade' && !checkPaymentMethodAvailability(offer)) {
+      Alert.alert(
+        'Configura tu método de pago',
+        'Para intercambiar con esta oferta, primero debes configurar un método de pago compatible.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { 
+            text: 'Configurar', 
+            onPress: () => navigation.navigate('BankInfo'),
+            style: 'default' 
+          }
+        ]
       );
       return;
     }
@@ -1030,6 +1212,7 @@ export const ExchangeScreen = () => {
       isOnline: userStats.lastSeenOnline && (Date.now() - new Date(userStats.lastSeenOnline).getTime()) < 2 * 60 * 60 * 1000, // Active within 2 hours
       lastSeen: getActivityText(),
       terms: offer.terms || '', // Include trader's custom terms
+      countryCode: offer.countryCode, // Include the offer's country code
     };
 
     if (action === 'profile') {
@@ -1100,7 +1283,8 @@ export const ExchangeScreen = () => {
         {/* Own Offer Badge */}
         {isOwnOffer && (
           <View style={styles.ownOfferBadge}>
-            <Text style={styles.ownOfferBadgeText}>TU OFERTA</Text>
+            <Icon name="user" size={12} color="#fff" />
+            <Text style={styles.ownOfferBadgeText}>Mi Oferta</Text>
           </View>
         )}
         <View style={styles.offerHeader}>
@@ -1130,8 +1314,8 @@ export const ExchangeScreen = () => {
           <View style={styles.offerRateContainer}>
             <View style={styles.rateSection}>
               <Text style={styles.rateValue}>{formatAmount.withCode(offer.rate)}</Text>
-              {/* Market Rate Comparison */}
-              {marketRate && (() => {
+              {/* Market Rate Comparison - Only for cUSD, not CONFIO */}
+              {marketRate && selectedCrypto === 'cUSD' && (() => {
                 const offerRate = parseFloat(offer.rate);
                 const difference = ((offerRate - marketRate) / marketRate) * 100;
                 const isGoodDeal = activeTab === 'buy' ? difference < 0 : difference > 0;
@@ -1147,7 +1331,7 @@ export const ExchangeScreen = () => {
                         styles.rateComparisonText,
                         isGoodDeal ? styles.goodDealText : styles.badDealText
                       ]}>
-                        {difference > 0 ? '+' : ''}{difference.toFixed(1)}%
+                        {difference > 0 ? '+' : ''}{formatNumber(difference, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
                       </Text>
                     </View>
                   );
@@ -1203,7 +1387,10 @@ export const ExchangeScreen = () => {
                 const visibleMethods = methods.slice(0, maxVisible);
                 const remainingCount = methods.length - maxVisible;
                 
-                let text = visibleMethods.map((pm: any) => pm.displayName).join(', ');
+                let text = visibleMethods.map((pm: any) => {
+                  const countryFlag = pm.bank?.country?.flagEmoji || '';
+                  return countryFlag ? `${pm.displayName} ${countryFlag}` : pm.displayName;
+                }).join(', ');
                 if (remainingCount > 0) {
                   text += `, +${remainingCount} más`;
                 }
@@ -1252,6 +1439,159 @@ export const ExchangeScreen = () => {
       </View>
     </View>
   );
+  };
+
+  const MyOfferCard = ({ offer, onRefresh }: { offer: any; onRefresh: () => void }) => {
+    // Format token type for display
+    const formatTokenType = (tokenType: string): string => {
+      if (tokenType === 'CUSD') return 'cUSD';
+      return tokenType; // CONFIO and others remain unchanged
+    };
+
+    // Use the offer's original country currency, not the selected country currency
+    const getOfferCountryInfo = (countryCode: string) => {
+      const country = countries.find(c => c[2] === countryCode) as Country | undefined;
+      if (!country) return { name: countryCode, currency: 'USD', symbol: '$', flag: '🌍' };
+      
+      const currency = getCurrencyForCountry(country);
+      const symbol = getCurrencySymbol(currency);
+      
+      return {
+        name: country[0], // Country name
+        currency: currency, // Currency code from utility
+        symbol: symbol, // Currency symbol from utility
+        flag: country[3] // Flag emoji
+      };
+    };
+
+    const countryInfo = getOfferCountryInfo(offer.countryCode);
+    
+    // Format amount with the offer's original country currency
+    const formatOfferAmount = (amount: number) => {
+      return `${countryInfo.symbol}${formatNumber(amount, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      })} ${countryInfo.currency}`;
+    };
+    
+    const getStatusColor = (status: string) => {
+      switch (status) {
+        case 'ACTIVE': return colors.primary;
+        case 'PAUSED': return '#F59E0B';
+        case 'COMPLETED': return '#10B981';
+        case 'CANCELLED': return '#EF4444';
+        default: return '#6B7280';
+      }
+    };
+
+    const getStatusText = (status: string) => {
+      switch (status) {
+        case 'ACTIVE': return 'Activa';
+        case 'PAUSED': return 'Pausada';
+        case 'COMPLETED': return 'Completada';
+        case 'CANCELLED': return 'Cancelada';
+        default: return status;
+      }
+    };
+
+    return (
+      <View style={styles.myOfferCard}>
+        {/* Offer Header */}
+        <View style={styles.myOfferHeader}>
+          <View style={[styles.myOfferStatus, { backgroundColor: getStatusColor(offer.status) + '20' }]}>
+            <View style={[styles.statusDot, { backgroundColor: getStatusColor(offer.status) }]} />
+            <Text style={[styles.myOfferStatusText, { color: getStatusColor(offer.status) }]}>
+              {getStatusText(offer.status)}
+            </Text>
+          </View>
+        </View>
+
+        {/* Offer Type and Token */}
+        <View style={styles.myOfferTypeRow}>
+          <View style={styles.myOfferTypeContainer}>
+            <View style={[styles.myOfferTypeBadge, 
+              { backgroundColor: offer.exchangeType === 'BUY' ? colors.primary : colors.accent }
+            ]}>
+              <Text style={styles.myOfferTypeText}>
+                {offer.exchangeType === 'BUY' ? 'COMPRA' : 'VENTA'}
+              </Text>
+            </View>
+            <Text style={styles.myOfferTokenType}>{formatTokenType(offer.tokenType)}</Text>
+          </View>
+          <Text style={styles.myOfferDate}>
+            {new Date(offer.createdAt).toLocaleDateString('es-ES', {
+              day: '2-digit',
+              month: '2-digit'
+            })}
+          </Text>
+        </View>
+
+        {/* Country Label */}
+        <View style={styles.myOfferCountryContainer}>
+          <Text style={styles.myOfferCountryFlag}>{countryInfo.flag}</Text>
+          <Text style={styles.myOfferCountryText}>
+            {countryInfo.name} • {countryInfo.currency}
+          </Text>
+        </View>
+
+        {/* Rate and Range */}
+        <View style={styles.myOfferMainInfo}>
+          <View style={styles.myOfferRateContainer}>
+            <Text style={styles.myOfferRateValue}>{formatOfferAmount(offer.rate)}</Text>
+            <Text style={styles.myOfferRateLabel}>por {formatTokenType(offer.tokenType)}</Text>
+          </View>
+          <View style={styles.myOfferRangeContainer}>
+            <Text style={styles.myOfferRangeLabel}>Rango</Text>
+            <Text style={styles.myOfferRangeValue}>
+              {offer.minAmount} - {offer.maxAmount}
+            </Text>
+          </View>
+        </View>
+
+        {/* Available Amount */}
+        <View style={styles.myOfferAvailableContainer}>
+          <Icon name="package" size={14} color={colors.primary} />
+          <Text style={styles.myOfferAvailableText}>
+            {offer.availableAmount} {formatTokenType(offer.tokenType)} disponible
+          </Text>
+        </View>
+
+        {/* Payment Methods */}
+        {offer.paymentMethods && offer.paymentMethods.length > 0 && (
+          <View style={styles.myOfferPaymentMethods}>
+            <Text style={styles.myOfferPaymentLabel}>
+              <Icon name="credit-card" size={12} color="#6B7280" /> Métodos de pago
+            </Text>
+            <View style={styles.myOfferPaymentList}>
+              {offer.paymentMethods.slice(0, 2).map((method) => (
+                <Text key={method.id} style={styles.myOfferPaymentTag}>
+                  {method.displayName}{method.bank?.country?.flagEmoji ? ` ${method.bank.country.flagEmoji}` : ''}
+                </Text>
+              ))}
+              {offer.paymentMethods.length > 2 && (
+                <Text style={styles.myOfferPaymentMore}>
+                  +{offer.paymentMethods.length - 2} más
+                </Text>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* Action Buttons */}
+        {offer.status === 'ACTIVE' && (
+          <View style={styles.myOfferActions}>
+            <TouchableOpacity style={styles.myOfferActionButton}>
+              <Icon name="pause" size={14} color={colors.accent} />
+              <Text style={[styles.myOfferActionText, { color: colors.accent }]}>Pausar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.myOfferActionButton}>
+              <Icon name="edit-2" size={14} color={colors.primary} />
+              <Text style={[styles.myOfferActionText, { color: colors.primary }]}>Editar</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    );
   };
 
   const ActiveTradeCard = ({ trade }: { trade: ActiveTrade }) => {
@@ -1539,6 +1879,22 @@ export const ExchangeScreen = () => {
                     </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                    style={[styles.mainTab, activeList === 'myOffers' && styles.activeMainTab]}
+                    onPress={() => {
+                        setActiveList('myOffers');
+                        resetScrollPosition();
+                    }}
+                >
+                    <Text style={[styles.mainTabText, activeList === 'myOffers' && styles.activeMainTabText]}>
+                        Mis Ofertas
+                    </Text>
+                    {myOffersData?.myP2pOffers?.length > 0 && (
+                        <View style={styles.notificationBadge}>
+                            <Text style={styles.notificationText}>{myOffersData.myP2pOffers.length}</Text>
+                        </View>
+                    )}
+                </TouchableOpacity>
+                <TouchableOpacity
                     style={[styles.mainTab, activeList === 'trades' && styles.activeMainTab]}
                     onPress={() => {
                         setActiveList('trades');
@@ -1630,7 +1986,7 @@ export const ExchangeScreen = () => {
                             <Icon name="trending-up" size={12} color="#059669" style={styles.marketRateIcon} />
                             <Text style={styles.marketRateText}>
                                 {marketRateLoading ? 'Cargando...' : 
-                                 marketRate ? `${marketRate.toFixed(2)} ${currencyCode}/USD mercado` : 'Sin datos de mercado'}
+                                 marketRate ? `${formatNumber(marketRate)} ${currencyCode}/USD mercado` : 'Sin datos de mercado'}
                             </Text>
                         </View>
                         <View style={styles.filterControls}>
@@ -1690,6 +2046,10 @@ export const ExchangeScreen = () => {
                                         paymentMethod: paymentMethodName,
                                         countryCode: selectedCountry?.[2]
                                     });
+                                    // Also refresh trades if viewing trades tab
+                                    if (activeList === 'trades' && refetchTrades) {
+                                        refetchTrades();
+                                    }
                                 }}
                                 disabled={offersLoading}
                             >
@@ -1932,6 +2292,52 @@ export const ExchangeScreen = () => {
         </View>
       );
     }
+
+    if (activeList === 'myOffers') {
+      const myOffers = myOffersData?.myP2pOffers || [];
+
+      if (myOffersLoading) {
+        return (
+          <View style={[styles.offersList, { padding: 16 }]}>
+            <Text style={styles.loadingText}>Cargando mis ofertas...</Text>
+          </View>
+        );
+      }
+
+      if (myOffersError) {
+        return (
+          <View style={[styles.offersList, { padding: 16 }]}>
+            <Text style={styles.errorText}>Error cargando ofertas: {myOffersError.message}</Text>
+          </View>
+        );
+      }
+
+      return (
+        <View style={[styles.offersList, { padding: 16 }]}>
+          {myOffers.length > 0 ? (
+            <>
+              {myOffers.map((offer) => (
+                <MyOfferCard key={offer.id} offer={offer} onRefresh={refetchMyOffers} />
+              ))}
+            </>
+          ) : (
+            <View style={styles.emptyState}>
+              <Icon name="plus-circle" size={48} color="#9CA3AF" style={styles.emptyIcon} />
+              <Text style={styles.emptyTitle}>No tienes ofertas</Text>
+              <Text style={styles.emptyText}>
+                Crea tu primera oferta para comenzar a intercambiar.
+              </Text>
+              <TouchableOpacity 
+                style={styles.createOfferButton}
+                onPress={() => navigation.navigate('CreateOffer')}
+              >
+                <Text style={styles.createOfferButtonText}>Crear Oferta</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      );
+    }
     
     return null;
   };
@@ -1953,15 +2359,20 @@ export const ExchangeScreen = () => {
             <TouchableWithoutFeedback>
               <View style={styles.modalContent}>
                 <Text style={styles.modalTitle}>Métodos de pago</Text>
-                {paymentMethods.map((method, index) => (
-                  <TouchableOpacity 
-                    key={index} 
-                    style={styles.modalItem}
-                    onPress={() => onSelectPaymentMethod(method)}
-                  >
-                    <Text style={styles.modalItemText}>{method}</Text>
-                  </TouchableOpacity>
-                ))}
+                <ScrollView 
+                  style={styles.modalScrollView}
+                  showsVerticalScrollIndicator={true}
+                >
+                  {paymentMethods.map((method, index) => (
+                    <TouchableOpacity 
+                      key={index} 
+                      style={styles.modalItem}
+                      onPress={() => onSelectPaymentMethod(method)}
+                    >
+                      <Text style={styles.modalItemText}>{method}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -2385,17 +2796,20 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -8,
     left: 12,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.primary,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: 12,
     zIndex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   ownOfferBadgeText: {
     color: '#fff',
     fontSize: 10,
     fontWeight: 'bold',
     letterSpacing: 0.5,
+    marginLeft: 4,
   },
   offerHeader: {
     flexDirection: 'row',
@@ -2589,6 +3003,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     borderRadius: 12,
     padding: 20,
+    maxHeight: '70%',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -2600,6 +3015,9 @@ const styles = StyleSheet.create({
         elevation: 5,
       },
     }),
+  },
+  modalScrollView: {
+    maxHeight: 300,
   },
   modalTitle: {
     fontSize: 18,
@@ -3115,5 +3533,232 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '500',
+  },
+  // My Offers Card styles
+  myOfferCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
+  },
+  myOfferHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  myOfferStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 4,
+  },
+  myOfferStatusText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  myOfferAccountInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  myOfferAccountText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#374151',
+    marginLeft: 8,
+    flex: 1,
+  },
+  accountTypeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  accountTypeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  myOfferTypeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  myOfferCountryContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+  },
+  myOfferCountryFlag: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  myOfferCountryText: {
+    fontSize: 13,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  myOfferTypeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  myOfferTypeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  myOfferTypeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  myOfferTokenType: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
+  myOfferDate: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    fontWeight: '500',
+  },
+  myOfferMainInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  myOfferRateContainer: {
+    flex: 1,
+  },
+  myOfferRateValue: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#1F2937',
+  },
+  myOfferRateLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  myOfferRangeContainer: {
+    alignItems: 'flex-end',
+  },
+  myOfferRangeLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 2,
+  },
+  myOfferRangeValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  myOfferAvailableContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    backgroundColor: colors.primaryLight,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  myOfferAvailableText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.primaryDark,
+    marginLeft: 6,
+  },
+  myOfferPaymentMethods: {
+    marginBottom: 16,
+  },
+  myOfferPaymentLabel: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginBottom: 6,
+  },
+  myOfferPaymentList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  myOfferPaymentTag: {
+    fontSize: 11,
+    color: '#374151',
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginRight: 6,
+    marginBottom: 4,
+  },
+  myOfferPaymentMore: {
+    fontSize: 11,
+    color: '#6B7280',
+    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginRight: 6,
+    marginBottom: 4,
+  },
+  myOfferActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  myOfferActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  myOfferActionText: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  createOfferButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  createOfferButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 }); 

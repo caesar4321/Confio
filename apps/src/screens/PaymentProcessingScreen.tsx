@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -44,6 +44,20 @@ export const PaymentProcessingScreen = () => {
   const [isValid, setIsValid] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [paymentResponse, setPaymentResponse] = useState<any>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  
+  // Generate idempotency key once per screen instance
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const hasProcessedRef = useRef(false);
+  
+  // Generate unique idempotency key
+  useEffect(() => {
+    if (!idempotencyKeyRef.current) {
+      const timestamp = Date.now();
+      const random = Math.random().toString(36).substring(2, 15);
+      idempotencyKeyRef.current = `pay_${timestamp}_${random}`;
+    }
+  }, []);
 
   // GraphQL mutation for paying invoice
   const [payInvoice] = useMutation(PAY_INVOICE, {
@@ -180,11 +194,19 @@ export const PaymentProcessingScreen = () => {
 
   // Process payment when screen loads
   useEffect(() => {
-    if (!isValid || !transactionData.invoiceId) {
+    if (!isValid || !transactionData.invoiceId || isProcessing || hasProcessedRef.current) {
       return;
     }
 
     const processPayment = async () => {
+      if (isProcessing || hasProcessedRef.current) {
+        console.log('PaymentProcessingScreen: Payment already in progress, skipping duplicate request');
+        return;
+      }
+      
+      hasProcessedRef.current = true;
+      setIsProcessing(true);
+      
       try {
         console.log('PaymentProcessingScreen: Starting payment processing for invoice:', transactionData.invoiceId);
         
@@ -211,10 +233,15 @@ export const PaymentProcessingScreen = () => {
         
         // Step 3: Call the actual payment mutation
         setCurrentStep(2);
-        console.log('PaymentProcessingScreen: Calling payInvoice mutation...');
+        // Generate idempotency key to prevent double-payments
+        const minuteTimestamp = Math.floor(Date.now() / 60000);
+        const idempotencyKey = `pay_${transactionData.invoiceId}_${minuteTimestamp}`;
+        
+        console.log('PaymentProcessingScreen: Calling payInvoice mutation with idempotency key:', idempotencyKey);
         const { data } = await payInvoice({
           variables: {
-            invoiceId: transactionData.invoiceId
+            invoiceId: transactionData.invoiceId,
+            idempotencyKey: idempotencyKey
           }
         });
 
@@ -237,6 +264,8 @@ export const PaymentProcessingScreen = () => {
       } catch (error) {
         console.error('PaymentProcessingScreen: Payment error:', error);
         setPaymentError('Error al procesar el pago. Inténtalo de nuevo.');
+      } finally {
+        setIsProcessing(false);
       }
     };
 
@@ -314,6 +343,8 @@ export const PaymentProcessingScreen = () => {
       console.log('PaymentProcessingScreen: Screen unmounting, cleaning up state');
       setCurrentStep(0);
       setIsComplete(false);
+      setIsProcessing(false);
+      hasProcessedRef.current = false;
     };
   }, []);
 

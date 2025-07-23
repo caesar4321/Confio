@@ -61,6 +61,7 @@ export const PaymentConfirmationScreen = () => {
   const navigation = useNavigation();
   const route = useRoute<PaymentConfirmationRouteProp>();
   const { activeAccount } = useAccount();
+  const [isProcessing, setIsProcessing] = useState(false);
 
 
   const { invoiceData } = route.params;
@@ -175,11 +176,18 @@ export const PaymentConfirmationScreen = () => {
   const handleConfirmPayment = async () => {
     console.log('PaymentConfirmationScreen: handleConfirmPayment called');
     
+    // Prevent double-clicks/rapid button presses
+    if (isProcessing) {
+      console.log('PaymentConfirmationScreen: Already processing, ignoring duplicate click');
+      return;
+    }
+    
     if (!hasEnoughBalance) {
       Alert.alert('Saldo Insuficiente', 'No tienes suficiente saldo para realizar este pago.');
       return;
     }
 
+    setIsProcessing(true);
     console.log('PaymentConfirmationScreen: Navigating to PaymentProcessing with data:', {
       type: 'payment',
       amount: currentPayment.amount,
@@ -201,6 +209,9 @@ export const PaymentConfirmationScreen = () => {
         invoiceId: invoiceData.invoiceId
       }
     });
+    
+    // Reset processing state after navigation
+    setTimeout(() => setIsProcessing(false), 1000);
   };
 
   const handleCancel = () => {
@@ -383,14 +394,15 @@ export const PaymentConfirmationScreen = () => {
             <TouchableOpacity
               style={[
                 styles.confirmButton,
-                { backgroundColor: hasEnoughBalance ? colors.primary : '#D1D5DB' },
-                !hasEnoughBalance && styles.disabledButton
+                { backgroundColor: hasEnoughBalance && !isProcessing ? colors.primary : '#D1D5DB' },
+                (!hasEnoughBalance || isProcessing) && styles.disabledButton
               ]}
               onPress={handleConfirmPayment}
-              disabled={!hasEnoughBalance}
+              disabled={!hasEnoughBalance || isProcessing}
             >
               <Text style={styles.confirmButtonText}>
-                {hasEnoughBalance ? 'Confirmar Pago' : 'Saldo Insuficiente'}
+                {isProcessing ? 'Procesando...' :
+                 hasEnoughBalance ? 'Confirmar Pago' : 'Saldo Insuficiente'}
               </Text>
             </TouchableOpacity>
             

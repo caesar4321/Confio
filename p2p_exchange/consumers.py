@@ -227,7 +227,23 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
             user = self.scope['user']
             trade = P2PTrade.objects.get(id=self.trade_id)
             
-            # Determine sender entity based on trade context
+            # Get active account context from query params if available
+            # The WebSocket URL should include these as query parameters
+            query_string = self.scope.get('query_string', b'').decode('utf-8')
+            params = {}
+            if query_string:
+                for param in query_string.split('&'):
+                    if '=' in param:
+                        key, value = param.split('=', 1)
+                        params[key] = value
+            
+            active_account_type = params.get('account_type', 'personal')
+            active_account_index = int(params.get('account_index', '0'))
+            
+            print(f"WebSocket save_message - Active account: type={active_account_type}, index={active_account_index}")
+            print(f"WebSocket save_message - Trade participants: buyer_user={trade.buyer_user_id}, seller_user={trade.seller_user_id}, buyer_business={trade.buyer_business_id}, seller_business={trade.seller_business_id}")
+            
+            # Determine sender entity based on active account context
             message_kwargs = {
                 'trade': trade,
                 'content': content,
@@ -236,18 +252,23 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
                 'sender': user,
             }
             
-            # Check if user is participating as a business or personal account
-            if trade.buyer_user == user:
-                message_kwargs['sender_user'] = user
-            elif trade.buyer_business and trade.buyer_business.accounts.filter(user=user).exists():
-                message_kwargs['sender_business'] = trade.buyer_business
-            elif trade.seller_user == user:
-                message_kwargs['sender_user'] = user
-            elif trade.seller_business and trade.seller_business.accounts.filter(user=user).exists():
-                message_kwargs['sender_business'] = trade.seller_business
+            # Determine which account is sending the message based on active account context
+            if active_account_type == 'business':
+                # User is sending as a business - find which business they're using
+                if trade.buyer_business and trade.buyer_business.accounts.filter(user=user, account_index=active_account_index).exists():
+                    message_kwargs['sender_business'] = trade.buyer_business
+                    print(f"WebSocket save_message - Sending as buyer business: {trade.buyer_business.name}")
+                elif trade.seller_business and trade.seller_business.accounts.filter(user=user, account_index=active_account_index).exists():
+                    message_kwargs['sender_business'] = trade.seller_business
+                    print(f"WebSocket save_message - Sending as seller business: {trade.seller_business.name}")
+                else:
+                    # Fallback to personal if business not found
+                    message_kwargs['sender_user'] = user
+                    print(f"WebSocket save_message - Business account not found, falling back to personal")
             else:
-                # Default to personal user
+                # User is sending as personal account
                 message_kwargs['sender_user'] = user
+                print(f"WebSocket save_message - Sending as personal user: {user.username}")
             
             message = P2PMessage.objects.create(**message_kwargs)
             return message

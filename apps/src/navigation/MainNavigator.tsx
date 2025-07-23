@@ -29,6 +29,7 @@ import { ActiveTradeScreen } from '../screens/ActiveTradeScreen';
 import { TraderRatingScreen } from '../screens/TraderRatingScreen';
 import { ScanScreen } from '../screens/ScanScreen';
 import { CreateOfferScreen } from '../screens/CreateOfferScreen';
+import { BankInfoScreen } from '../screens/BankInfoScreen';
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
 console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
@@ -56,6 +57,13 @@ export const MainNavigator = () => {
       <Stack.Screen 
         name="Verification" 
         component={VerificationScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen 
+        name="BankInfo" 
+        component={BankInfoScreen}
         options={{
           headerShown: false,
         }}

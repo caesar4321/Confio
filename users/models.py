@@ -527,3 +527,506 @@ def sync_business_account_display_name(sender, instance, **kwargs):
     # Update the display name for all accounts linked to this business when the business is updated
     for account in instance.accounts.all():
         account.save(update_fields=["last_login_at"])  # Touch the account to trigger any listeners
+
+
+class Country(SoftDeleteModel):
+    """Country configuration for bank requirements and payment methods"""
+    
+    code = models.CharField(
+        max_length=3,
+        unique=True,
+        help_text="ISO 3166-1 alpha-2 country code (e.g., VE, CO, AR)"
+    )
+    name = models.CharField(
+        max_length=100,
+        help_text="Country name"
+    )
+    flag_emoji = models.CharField(
+        max_length=10,
+        blank=True,
+        null=True,
+        help_text="Country flag emoji (e.g., 🇻🇪)"
+    )
+    currency_code = models.CharField(
+        max_length=3,
+        help_text="Currency code (e.g., VES, COP, ARS)"
+    )
+    currency_symbol = models.CharField(
+        max_length=10,
+        help_text="Currency symbol (e.g., Bs., $)"
+    )
+    
+    # ID/Cedula requirements
+    requires_identification = models.BooleanField(
+        default=True,
+        help_text="Whether bank transfers require recipient ID number"
+    )
+    identification_name = models.CharField(
+        max_length=50,
+        default="Cédula",
+        help_text="Local name for ID document (e.g., Cédula, DNI, RUT)"
+    )
+    identification_format = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Expected format for ID (e.g., 'V-12345678', '12345678-9')"
+    )
+    
+    # Banking details
+    account_number_length = models.PositiveIntegerField(
+        default=20,
+        help_text="Typical account number length"
+    )
+    supports_phone_payments = models.BooleanField(
+        default=False,
+        help_text="Whether country supports phone-based payments"
+    )
+    
+    # Operational settings
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether Confío operates in this country"
+    )
+    display_order = models.PositiveIntegerField(
+        default=1000,
+        help_text="Display order in lists (lower numbers first)"
+    )
+    
+    class Meta:
+        ordering = ['display_order', 'name']
+        verbose_name_plural = "Countries"
+    
+    def __str__(self):
+        flag = f"{self.flag_emoji} " if self.flag_emoji else ""
+        return f"{flag}{self.name} ({self.code})"
+
+
+class Bank(SoftDeleteModel):
+    """Bank information for different countries"""
+    
+    country = models.ForeignKey(
+        Country,
+        on_delete=models.CASCADE,
+        related_name='banks',
+        help_text="Country where this bank operates"
+    )
+    code = models.CharField(
+        max_length=50,
+        help_text="Bank code/identifier"
+    )
+    name = models.CharField(
+        max_length=100,
+        help_text="Bank name"
+    )
+    short_name = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Short/common name for the bank"
+    )
+    
+    # Account type support
+    supports_checking = models.BooleanField(
+        default=True,
+        help_text="Whether bank supports checking accounts"
+    )
+    supports_savings = models.BooleanField(
+        default=True,
+        help_text="Whether bank supports savings accounts"
+    )
+    supports_payroll = models.BooleanField(
+        default=False,
+        help_text="Whether bank supports payroll accounts"
+    )
+    
+    # Operational settings
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this bank is currently supported"
+    )
+    display_order = models.PositiveIntegerField(
+        default=1000,
+        help_text="Display order in lists (lower numbers first)"
+    )
+    
+    class Meta:
+        ordering = ['country__display_order', 'display_order', 'name']
+        unique_together = ['country', 'code']
+    
+    def __str__(self):
+        return f"{self.name} ({self.country.code})"
+    
+    def get_account_type_choices(self):
+        """Get available account types for this bank"""
+        choices = []
+        if self.supports_savings:
+            choices.append(('ahorro', 'Cuenta de Ahorros'))
+        if self.supports_checking:
+            choices.append(('corriente', 'Cuenta Corriente'))
+        if self.supports_payroll:
+            choices.append(('nomina', 'Cuenta Nómina'))
+        return choices
+
+
+class BankInfo(SoftDeleteModel):
+    """Payment method information for users to share payment details - supports banks and fintech"""
+    
+    ACCOUNT_TYPE_CHOICES = [
+        ('ahorro', 'Cuenta de Ahorros'),
+        ('corriente', 'Cuenta Corriente'),
+        ('nomina', 'Cuenta Nómina'),
+    ]
+    
+    # Link to account (supports multi-account system)
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name='bank_accounts',
+        help_text="Account that owns this payment method"
+    )
+    
+    # Link to payment method type (single source of truth)
+    payment_method = models.ForeignKey(
+        'p2p_exchange.P2PPaymentMethod',
+        on_delete=models.CASCADE,
+        related_name='user_payment_accounts',
+        null=True,
+        blank=True,
+        help_text="Type of payment method (bank, fintech, etc.)"
+    )
+    
+    # DEPRECATED: Legacy bank-specific fields (kept for backward compatibility)
+    country = models.ForeignKey(
+        Country,
+        on_delete=models.CASCADE,
+        related_name='bank_accounts',
+        null=True,
+        blank=True,
+        help_text="DEPRECATED: Use payment_method.country_code instead"
+    )
+    bank = models.ForeignKey(
+        Bank,
+        on_delete=models.CASCADE,
+        related_name='bank_accounts',
+        null=True,
+        blank=True,
+        help_text="DEPRECATED: Use payment_method.bank instead"
+    )
+    
+    # Universal payment method details
+    account_holder_name = models.CharField(
+        max_length=200,
+        help_text="Full name of the account/payment method holder"
+    )
+    
+    # Flexible recipient information (depends on payment method type)
+    account_number = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Account number (for banks) or identifier (for some fintech)"
+    )
+    phone_number = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Phone number (for mobile wallets like Nequi, Yape, Pago Móvil)"
+    )
+    email = models.EmailField(
+        blank=True,
+        null=True,
+        help_text="Email address (for PayPal, Wise, etc.)"
+    )
+    username = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Username/handle (for some fintech platforms)"
+    )
+    
+    # Bank-specific details (only used if payment_method is bank type)
+    account_type = models.CharField(
+        max_length=20,
+        choices=ACCOUNT_TYPE_CHOICES,
+        blank=True,
+        null=True,
+        help_text="Type of bank account (only for banks)"
+    )
+    
+    # Identification details (conditional based on country requirements)
+    identification_number = models.CharField(
+        max_length=30,
+        blank=True,
+        null=True,
+        help_text="Identification number (required for some countries/banks)"
+    )
+    
+    # Privacy and sharing settings
+    is_default = models.BooleanField(
+        default=False,
+        help_text="Whether this is the default bank account for this account"
+    )
+    is_public = models.BooleanField(
+        default=False,
+        help_text="Whether this bank info can be shared with other users"
+    )
+    shared_with_users = models.ManyToManyField(
+        User,
+        blank=True,
+        related_name='shared_bank_info',
+        help_text="Users who have access to this bank information"
+    )
+    
+    # Verification status
+    is_verified = models.BooleanField(
+        default=False,
+        help_text="Whether this bank account has been verified"
+    )
+    verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the bank account was verified"
+    )
+    verified_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='verified_bank_accounts',
+        help_text="Admin user who verified this bank account"
+    )
+    
+    class Meta:
+        ordering = ['-is_default', '-created_at']
+        verbose_name = "Payment Method"
+        verbose_name_plural = "Payment Methods"
+        # Remove the old unique constraint since we now support multiple payment types
+    
+    def __str__(self):
+        if self.payment_method.is_bank_based:
+            # For banks, show bank name and masked account
+            identifier = self.get_masked_account_number() if self.account_number else 'No Account'
+            return f"{self.payment_method.display_name} - {identifier} ({self.account.display_name})"
+        else:
+            # For fintech, show the primary identifier
+            identifier = self.get_primary_identifier()
+            return f"{self.payment_method.display_name} - {identifier} ({self.account.display_name})"
+    
+    def clean(self):
+        """Validate payment method based on requirements"""
+        super().clean()
+        
+        # Legacy validation for bank-based payments
+        if self.payment_method and self.payment_method.is_bank_based:
+            # Validate that bank belongs to the selected country
+            if self.bank and self.country and self.bank.country != self.country:
+                raise ValidationError(
+                    f"Selected bank '{self.bank.name}' does not operate in {self.country.name}"
+                )
+            
+            # Validate identification number requirement
+            if self.country and self.country.requires_identification:
+                if not self.identification_number:
+                    raise ValidationError(
+                        f"{self.country.identification_name} is required for bank accounts in {self.country.name}"
+                    )
+        
+        # Validate required fields based on payment method
+        if self.payment_method:
+            if self.payment_method.requires_phone and not self.phone_number:
+                raise ValidationError(
+                    f"Phone number is required for {self.payment_method.display_name}"
+                )
+            if self.payment_method.requires_email and not self.email:
+                raise ValidationError(
+                    f"Email is required for {self.payment_method.display_name}"
+                )
+            if self.payment_method.requires_account_number and not self.account_number:
+                raise ValidationError(
+                    f"Account number is required for {self.payment_method.display_name}"
+                )
+    
+    def save(self, *args, **kwargs):
+        # Auto-set country from bank if not provided
+        if self.bank and not self.country:
+            self.country = self.bank.country
+        super().save(*args, **kwargs)
+    
+    def get_masked_account_number(self):
+        """Get masked account number for security (show only last 4 digits)"""
+        if not self.account_number or len(self.account_number) <= 4:
+            return self.account_number or 'N/A'
+        return '*' * (len(self.account_number) - 4) + self.account_number[-4:]
+    
+    def get_primary_identifier(self):
+        """Get the primary identifier based on payment method requirements"""
+        if not self.payment_method:
+            return 'Unknown'
+            
+        # For banks, always use account number
+        if self.payment_method.is_bank_based and self.account_number:
+            return self.get_masked_account_number()
+        
+        # For fintech, use the appropriate identifier
+        if self.payment_method.requires_phone and self.phone_number:
+            return f"+{self.phone_number}"
+        elif self.payment_method.requires_email and self.email:
+            return self.email
+        elif self.username:
+            return f"@{self.username}"
+        elif self.account_number:
+            return self.get_masked_account_number()
+        
+        return 'No identifier'
+    
+    def get_recipient_info(self):
+        """Get formatted recipient information for sharing"""
+        info = {
+            'payment_method': self.payment_method.display_name,
+            'account_holder': self.account_holder_name,
+        }
+        
+        if self.payment_method.requires_phone and self.phone_number:
+            info['phone'] = self.phone_number
+        if self.payment_method.requires_email and self.email:
+            info['email'] = self.email
+        if self.payment_method.requires_account_number and self.account_number:
+            info['account_number'] = self.account_number
+        if self.username:
+            info['username'] = self.username
+        if self.account_type:
+            info['account_type'] = self.get_account_type_display()
+        if self.identification_number:
+            info['identification'] = self.identification_number
+        
+        return info
+    
+    def set_as_default(self):
+        """Set this bank account as default and unset others"""
+        # Remove default status from other bank accounts in the same account
+        BankInfo.objects.filter(account=self.account, is_default=True).update(is_default=False)
+        self.is_default = True
+        self.save(update_fields=['is_default'])
+    
+    def share_with_user(self, user):
+        """Share this bank info with a specific user"""
+        self.shared_with_users.add(user)
+    
+    def unshare_with_user(self, user):
+        """Stop sharing this bank info with a specific user"""
+        self.shared_with_users.remove(user)
+    
+    def is_shared_with(self, user):
+        """Check if this bank info is shared with a specific user"""
+        return self.shared_with_users.filter(id=user.id).exists()
+    
+    @property
+    def full_bank_name(self):
+        """Get the full bank/payment method name"""
+        if self.payment_method:
+            return self.payment_method.display_name
+        elif self.bank:
+            return self.bank.name
+        return "Payment Method"
+    
+    @property
+    def summary_text(self):
+        """Get a summary text for display in lists"""
+        if self.payment_method:
+            # Handle different payment method types
+            if self.payment_method.provider_type == 'BANK' and self.account_number:
+                return f"{self.payment_method.display_name} - {self.get_account_type_display()} - {self.get_masked_account_number()}"
+            elif self.payment_method.requires_phone and self.phone_number:
+                return f"{self.payment_method.display_name} - {self.phone_number}"
+            elif self.payment_method.requires_email and self.email:
+                return f"{self.payment_method.display_name} - {self.email}"
+            elif self.username:
+                return f"{self.payment_method.display_name} - @{self.username}"
+            else:
+                return f"{self.payment_method.display_name} - {self.account_holder_name}"
+        elif self.bank:
+            # Legacy support
+            return f"{self.bank.name} - {self.get_account_type_display()} - {self.get_masked_account_number()}"
+        return "Payment Method"
+    
+    @property
+    def requires_identification(self):
+        """Check if this payment method requires identification"""
+        if self.payment_method and self.payment_method.bank:
+            return self.payment_method.bank.country.requires_identification
+        elif self.country:
+            return self.country.requires_identification
+        return False
+    
+    @property
+    def identification_label(self):
+        """Get the label for identification field"""
+        if self.payment_method and self.payment_method.bank:
+            return self.payment_method.bank.country.identification_name
+        elif self.country:
+            return self.country.identification_name
+        return "ID"
+    
+    def get_payment_details(self):
+        """Get formatted payment details for sharing"""
+        details = {
+            'account_holder_name': self.account_holder_name,
+        }
+        
+        # Handle payment method details
+        if self.payment_method:
+            details['payment_method'] = self.payment_method.display_name
+            details['provider_type'] = self.payment_method.provider_type
+            
+            # Add relevant fields based on payment method type
+            if self.payment_method.provider_type == 'BANK':
+                if self.payment_method.bank:
+                    details['bank_name'] = self.payment_method.bank.name
+                    details['country'] = self.payment_method.bank.country.name
+                if self.account_number:
+                    details['account_number'] = self.account_number
+                if self.account_type:
+                    details['account_type'] = self.get_account_type_display()
+            
+            if self.payment_method.requires_phone and self.phone_number:
+                details['phone_number'] = self.phone_number
+                
+            if self.payment_method.requires_email and self.email:
+                details['email'] = self.email
+                
+            if self.username:
+                details['username'] = self.username
+                
+        # Legacy support for old bank-only system
+        elif self.bank:
+            details['bank_name'] = self.bank.name
+            details['account_number'] = self.account_number
+            details['account_type'] = self.get_account_type_display()
+            if self.country:
+                details['country'] = self.country.name
+        
+        # Add identification if required
+        if self.requires_identification and self.identification_number:
+            details['identification'] = {
+                'label': self.identification_label,
+                'number': self.identification_number
+            }
+        
+        # Add phone if available
+        if self.phone_number:
+            details['phone_number'] = self.phone_number
+            
+        return details
+
+
+# Signal to ensure only one default bank account per account
+@receiver(post_save, sender=BankInfo)
+def ensure_single_default_bank_account(sender, instance, **kwargs):
+    """Ensure only one bank account is marked as default per account"""
+    if instance.is_default:
+        # Remove default status from other bank accounts in the same account
+        BankInfo.objects.filter(
+            account=instance.account,
+            is_default=True
+        ).exclude(id=instance.id).update(is_default=False)

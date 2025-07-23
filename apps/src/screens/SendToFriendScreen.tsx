@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, Modal } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useMutation } from '@apollo/client';
-import { CREATE_SEND_TRANSACTION } from '../apollo/queries';
+// Removed Apollo imports as mutations are now handled in TransactionProcessingScreen
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import { useNumberFormat } from '../utils/numberFormatting';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -64,6 +64,7 @@ export const SendToFriendScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const insets = useSafeAreaInsets();
+  const { formatNumber } = useNumberFormat();
   
   const friend: Friend = (route.params as any)?.friend || { name: 'Friend', avatar: 'F', isOnConfio: true, phone: '' };
   
@@ -77,22 +78,31 @@ export const SendToFriendScreen = () => {
   const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // GraphQL mutation for creating send transaction
-  const [createSendTransaction] = useMutation(CREATE_SEND_TRANSACTION);
+  // Mutations are now handled in TransactionProcessingScreen
 
   const handleQuickAmount = (val: string) => setAmount(val);
 
   const handleSend = async () => {
     console.log('SendToFriendScreen: handleSend called');
+    
+    // Prevent double-clicks/rapid button presses
+    if (isProcessing) {
+      console.log('SendToFriendScreen: Already processing, ignoring duplicate click');
+      return;
+    }
+    
     if (!amount || parseFloat(amount) < config.minSend) {
       setErrorMessage(`El mínimo para enviar es ${config.minSend} ${config.name}`);
       setShowError(true);
       return;
     }
     
+    setIsProcessing(true);
+    
     try {
-      console.log('SendToFriendScreen: Creating send transaction...');
+      console.log('SendToFriendScreen: Navigating to TransactionProcessing');
       
       // For now, use a mock Sui address for the friend
       // In a real implementation, this would come from the friend's profile
@@ -100,44 +110,33 @@ export const SendToFriendScreen = () => {
         ? '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef' // Mock address
         : '0x0000000000000000000000000000000000000000000000000000000000000000'; // External address
       
-      const { data } = await createSendTransaction({
-        variables: {
-          input: {
-            recipientAddress: friendSuiAddress,
-            amount: amount,
-            tokenType: config.name,
-            memo: `Send ${amount} ${config.name} to ${friend.name}${friend.phone ? ` (${friend.phone})` : ''}`
-          }
+      // Generate idempotency key to prevent double-spending
+      const minuteTimestamp = Math.floor(Date.now() / 60000);
+      const recipientSuffix = friendSuiAddress.slice(-8);
+      const amountStr = amount.replace('.', '');
+      const idempotencyKey = `send_${recipientSuffix}_${amountStr}_${config.name}_${minuteTimestamp}`;
+      
+      // Navigate to processing screen with transaction data
+      (navigation as any).replace('TransactionProcessing', {
+        transactionData: {
+          type: 'sent',
+          amount: amount,
+          currency: config.name,
+          recipient: friend.name,
+          recipientPhone: friend.phone,
+          action: 'Enviando',
+          isOnConfio: friend.isOnConfio,
+          recipientAddress: friendSuiAddress,
+          memo: `Send ${amount} ${config.name} to ${friend.name}${friend.phone ? ` (${friend.phone})` : ''}`,
+          idempotencyKey: idempotencyKey
         }
       });
-
-      console.log('SendToFriendScreen: Send transaction created:', data);
-
-      if (data?.createSendTransaction?.success) {
-        console.log('SendToFriendScreen: Navigating to TransactionProcessing');
-        // Navigate to processing screen with transaction data
-        (navigation as any).replace('TransactionProcessing', {
-          transactionData: {
-            type: 'sent',
-            amount: amount,
-            currency: config.name,
-            recipient: friend.name,
-            recipientPhone: friend.phone,
-            action: 'Enviando',
-            isOnConfio: friend.isOnConfio,
-            sendTransactionId: data.createSendTransaction.sendTransaction.id,
-            recipientAddress: friendSuiAddress
-          }
-        });
-      } else {
-        const errors = data?.createSendTransaction?.errors || ['Error desconocido'];
-        setErrorMessage(errors.join(', '));
-        setShowError(true);
-      }
     } catch (error) {
-      console.error('SendToFriendScreen: Error creating send transaction:', error);
-      setErrorMessage('Error al crear la transacción. Inténtalo de nuevo.');
+      console.error('SendToFriendScreen: Error navigating to processing screen:', error);
+      setErrorMessage('Error al procesar la transacción. Inténtalo de nuevo.');
       setShowError(true);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -223,7 +222,7 @@ export const SendToFriendScreen = () => {
             <View style={styles.feeRow}>
               <Text style={styles.feeTotalLabel}>Total a enviar</Text>
               <Text style={styles.feeTotalValue}>
-                {amount ? parseFloat(amount).toFixed(2) : '0.00'} {config.name}
+                {amount ? formatNumber(parseFloat(amount)) : formatNumber(0)} {config.name}
               </Text>
             </View>
           </View>
@@ -249,18 +248,20 @@ export const SendToFriendScreen = () => {
           <TouchableOpacity 
             style={[
               styles.confirmButton,
-              (!amount || parseFloat(amount) < config.minSend) && styles.confirmButtonDisabled
+              (!amount || parseFloat(amount) < config.minSend || isProcessing) && styles.confirmButtonDisabled
             ]}
-            disabled={!amount || parseFloat(amount) < config.minSend}
+            disabled={!amount || parseFloat(amount) < config.minSend || isProcessing}
             onPress={() => {
               console.log('SendToFriendScreen: Button pressed');
               console.log('SendToFriendScreen: amount:', amount);
               console.log('SendToFriendScreen: config.minSend:', config.minSend);
-              console.log('SendToFriendScreen: button disabled:', !amount || parseFloat(amount) < config.minSend);
+              console.log('SendToFriendScreen: button disabled:', !amount || parseFloat(amount) < config.minSend || isProcessing);
               handleSend();
             }}
           >
-            <Text style={styles.confirmButtonText}>Enviar a {friend.name}</Text>
+            <Text style={styles.confirmButtonText}>
+              {isProcessing ? 'Procesando...' : `Enviar a ${friend.name}`}
+            </Text>
           </TouchableOpacity>
 
           {showSuccess && (

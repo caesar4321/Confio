@@ -98,6 +98,14 @@ class SendTransaction(SoftDeleteModel):
         help_text="Sui transaction digest (0x + 32 bytes, 66 hex characters total)"
     )  # Sui transaction hash
     error_message = models.TextField(blank=True)
+    
+    # Idempotency key for preventing duplicate transactions
+    idempotency_key = models.CharField(
+        max_length=64,
+        blank=True,
+        null=True,
+        help_text='Optional key to prevent duplicate transactions'
+    )
 
     class Meta:
         ordering = ['-created_at']
@@ -110,6 +118,15 @@ class SendTransaction(SoftDeleteModel):
             models.Index(fields=['sender_address']),
             models.Index(fields=['recipient_address']),
             models.Index(fields=['created_at']),
+            models.Index(fields=['idempotency_key']),
+        ]
+        constraints = [
+            # Prevent duplicate transactions with same idempotency key from same user
+            models.UniqueConstraint(
+                fields=['sender_user', 'idempotency_key'],
+                condition=models.Q(idempotency_key__isnull=False, deleted_at__isnull=True),
+                name='unique_send_idempotency'
+            ),
         ]
 
     def __str__(self):

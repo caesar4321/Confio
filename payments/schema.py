@@ -3,6 +3,8 @@ from graphene_django import DjangoObjectType
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from datetime import timedelta
+from django.db import transaction
+from django.db.models import F
 from .models import Invoice, PaymentTransaction
 from send.validators import validate_transaction_amount
 from django.conf import settings
@@ -150,6 +152,7 @@ class CreateInvoice(graphene.Mutation):
                 merchant_business=merchant_business,
                 merchant_type=merchant_type,
                 merchant_display_name=merchant_display_name,
+                created_by_user=user,  # User who created this invoice
                 
                 # Invoice details
                 amount=input.amount,
@@ -228,6 +231,7 @@ class PayInvoice(graphene.Mutation):
     """Mutation for paying an invoice"""
     class Arguments:
         invoice_id = graphene.String(required=True)
+        idempotency_key = graphene.String(description="Optional idempotency key to prevent duplicate payments")
 
     invoice = graphene.Field(InvoiceType)
     payment_transaction = graphene.Field(PaymentTransactionType)
@@ -235,7 +239,7 @@ class PayInvoice(graphene.Mutation):
     errors = graphene.List(graphene.String)
 
     @classmethod
-    def mutate(cls, root, info, invoice_id):
+    def mutate(cls, root, info, invoice_id, idempotency_key=None):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return PayInvoice(
@@ -245,138 +249,169 @@ class PayInvoice(graphene.Mutation):
                 errors=["Authentication required"]
             )
 
+        # Debug logging
+        print(f"PayInvoice: User {user.id} attempting to pay invoice {invoice_id}")
+        print(f"PayInvoice: Idempotency key: {idempotency_key or 'NOT PROVIDED'}")
+
+        # Use atomic transaction with SELECT FOR UPDATE to prevent race conditions
         try:
-            # Get the invoice
-            invoice = Invoice.objects.get(
-                invoice_id=invoice_id,
-                status='PENDING'
-            )
-            
-            # Check if expired
-            if invoice.is_expired:
-                invoice.status = 'EXPIRED'
+            with transaction.atomic():
+                # Check for existing payment with same idempotency key
+                if idempotency_key:
+                    print(f"PayInvoice: Checking for existing payment with idempotency key: {idempotency_key}")
+                    existing_payment = PaymentTransaction.objects.filter(
+                        invoice__invoice_id=invoice_id,
+                        payer_user=user,
+                        idempotency_key=idempotency_key
+                    ).first()
+                    
+                    if existing_payment:
+                        print(f"PayInvoice: Found existing payment {existing_payment.id}, returning it")
+                        # Return existing payment to prevent duplicate
+                        return PayInvoice(
+                            invoice=existing_payment.invoice,
+                            payment_transaction=existing_payment,
+                            success=True,
+                            errors=None
+                        )
+                    else:
+                        print(f"PayInvoice: No existing payment found, proceeding with creation")
+                else:
+                    print(f"PayInvoice: No idempotency key provided")
+                
+                # Get the invoice with row-level locking
+                invoice = Invoice.objects.select_for_update().get(
+                    invoice_id=invoice_id,
+                    status='PENDING'
+                )
+                
+                # Check if expired
+                if invoice.is_expired:
+                    invoice.status = 'EXPIRED'
+                    invoice.save()
+                    return PayInvoice(
+                        invoice=None,
+                        payment_transaction=None,
+                        success=False,
+                        errors=["Invoice has expired"]
+                    )
+
+                # Check if user is trying to pay their own invoice
+                if invoice.merchant_user == user:
+                    return PayInvoice(
+                        invoice=None,
+                        payment_transaction=None,
+                        success=False,
+                        errors=["Cannot pay your own invoice"]
+                    )
+
+                # Debug: Log the active account context being used
+                print(f"PayInvoice - Active account context: {info.context.active_account_type}_{info.context.active_account_index}")
+                print(f"PayInvoice - User ID: {user.id}")
+                print(f"PayInvoice - Available accounts for user: {list(user.accounts.values_list('account_type', 'account_index', 'sui_address'))}")
+                
+                # Get the payer's active account
+                payer_account = user.accounts.filter(
+                    account_type=info.context.active_account_type,
+                    account_index=info.context.active_account_index
+                ).first()
+                
+                print(f"PayInvoice - Found payer account: {payer_account}")
+                
+                if not payer_account or not payer_account.sui_address:
+                    return PayInvoice(
+                        invoice=None,
+                        payment_transaction=None,
+                        success=False,
+                        errors=["Payer account not found or missing Sui address"]
+                    )
+
+                # Check if merchant has Sui address
+                if not invoice.merchant_account.sui_address:
+                    return PayInvoice(
+                        invoice=None,
+                        payment_transaction=None,
+                        success=False,
+                        errors=["Merchant account missing Sui address"]
+                    )
+
+                # Determine payer type and business details
+                payer_business = None
+                payer_type = 'user'  # default to personal
+                payer_display_name = f"{user.first_name} {user.last_name}".strip() or user.username
+                
+                if payer_account.account_type == 'business' and payer_account.business:
+                    payer_business = payer_account.business
+                    payer_type = 'business'
+                    payer_display_name = payer_account.business.name
+                
+                # Determine merchant type and business details  
+                merchant_business = None
+                merchant_type = 'user'  # default to personal
+                merchant_display_name = f"{invoice.merchant_user.first_name} {invoice.merchant_user.last_name}".strip() or invoice.merchant_user.username
+                
+                if invoice.merchant_account.account_type == 'business' and invoice.merchant_account.business:
+                    merchant_business = invoice.merchant_account.business
+                    merchant_type = 'business'
+                    merchant_display_name = invoice.merchant_account.business.name
+
+                # Create the payment transaction
+                payment_transaction = PaymentTransaction.objects.create(
+                    # Legacy user fields (kept for compatibility)
+                    payer_user=user,
+                    merchant_user=invoice.merchant_user,
+                    payer_account=payer_account,
+                    merchant_account=invoice.merchant_account,
+                    
+                    # NEW: Business fields based on account type
+                    payer_business=payer_business,
+                    merchant_business=merchant_business,
+                    merchant_account_user=invoice.merchant_user,  # User associated with merchant account
+                    payer_type=payer_type,
+                    merchant_type=merchant_type,
+                    payer_display_name=payer_display_name,
+                    merchant_display_name=merchant_display_name,
+                    
+                    # Transaction details
+                    payer_address=payer_account.sui_address,
+                    merchant_address=invoice.merchant_account.sui_address,
+                    amount=invoice.amount,
+                    token_type=invoice.token_type,
+                    description=invoice.description,
+                    status='PENDING',
+                    invoice=invoice,
+                    idempotency_key=idempotency_key
+                )
+
+                # Update invoice with proper paid_by fields
+                invoice.status = 'PAID'
+                invoice.paid_by_user = user
+                invoice.paid_by_business = payer_business  # Set if payer is business
+                invoice.paid_at = timezone.now()
                 invoice.save()
-                return PayInvoice(
-                    invoice=None,
-                    payment_transaction=None,
-                    success=False,
-                    errors=["Invoice has expired"]
-                )
 
-            # Check if user is trying to pay their own invoice
-            if invoice.merchant_user == user:
-                return PayInvoice(
-                    invoice=None,
-                    payment_transaction=None,
-                    success=False,
-                    errors=["Cannot pay your own invoice"]
-                )
-
-            # Debug: Log the active account context being used
-            print(f"PayInvoice - Active account context: {info.context.active_account_type}_{info.context.active_account_index}")
-            print(f"PayInvoice - User ID: {user.id}")
-            print(f"PayInvoice - Available accounts for user: {list(user.accounts.values_list('account_type', 'account_index', 'sui_address'))}")
-            
-            # Get the payer's active account
-            payer_account = user.accounts.filter(
-                account_type=info.context.active_account_type,
-                account_index=info.context.active_account_index
-            ).first()
-            
-            print(f"PayInvoice - Found payer account: {payer_account}")
-            
-            if not payer_account or not payer_account.sui_address:
-                return PayInvoice(
-                    invoice=None,
-                    payment_transaction=None,
-                    success=False,
-                    errors=["Payer account not found or missing Sui address"]
-                )
-
-            # Check if merchant has Sui address
-            if not invoice.merchant_account.sui_address:
-                return PayInvoice(
-                    invoice=None,
-                    payment_transaction=None,
-                    success=False,
-                    errors=["Merchant account missing Sui address"]
-                )
-
-            # Determine payer type and business details
-            payer_business = None
-            payer_type = 'user'  # default to personal
-            payer_display_name = f"{user.first_name} {user.last_name}".strip() or user.username
-            
-            if payer_account.account_type == 'business' and payer_account.business:
-                payer_business = payer_account.business
-                payer_type = 'business'
-                payer_display_name = payer_account.business.name
-            
-            # Determine merchant type and business details  
-            merchant_business = None
-            merchant_type = 'user'  # default to personal
-            merchant_display_name = f"{invoice.merchant_user.first_name} {invoice.merchant_user.last_name}".strip() or invoice.merchant_user.username
-            
-            if invoice.merchant_account.account_type == 'business' and invoice.merchant_account.business:
-                merchant_business = invoice.merchant_account.business
-                merchant_type = 'business'
-                merchant_display_name = invoice.merchant_account.business.name
-
-            # Create the payment transaction
-            payment_transaction = PaymentTransaction.objects.create(
-                # Legacy user fields (kept for compatibility)
-                payer_user=user,
-                merchant_user=invoice.merchant_user,
-                payer_account=payer_account,
-                merchant_account=invoice.merchant_account,
+                # TODO: Implement sponsored transaction logic here
+                # This will be handled by a background task
+                # TEMPORARY: For testing, we're marking as PAID immediately
+                # In production, this would wait for blockchain confirmation
                 
-                # NEW: Business fields based on account type
-                payer_business=payer_business,
-                merchant_business=merchant_business,
-                payer_type=payer_type,
-                merchant_type=merchant_type,
-                payer_display_name=payer_display_name,
-                merchant_display_name=merchant_display_name,
-                
-                # Transaction details
-                payer_address=payer_account.sui_address,
-                merchant_address=invoice.merchant_account.sui_address,
-                amount=invoice.amount,
-                token_type=invoice.token_type,
-                description=invoice.description,
-                status='PENDING',
-                invoice=invoice
-            )
+                # TEMPORARY: Mark payment transaction as CONFIRMED for testing
+                # This ensures the UI shows the correct status
+                payment_transaction.status = 'CONFIRMED'
+                # Generate a unique transaction hash using ID, microsecond timestamp, and UUID
+                import time
+                import uuid
+                microsecond_timestamp = int(time.time() * 1000000)  # Microsecond precision
+                unique_id = str(uuid.uuid4())[:8]  # First 8 characters of UUID
+                payment_transaction.transaction_hash = f"test_pay_tx_{payment_transaction.id}_{microsecond_timestamp}_{unique_id}"
+                payment_transaction.save()
 
-            # Update invoice with proper paid_by fields
-            invoice.status = 'PAID'
-            invoice.paid_by_user = user
-            invoice.paid_by_business = payer_business  # Set if payer is business
-            invoice.paid_at = timezone.now()
-            invoice.save()
-
-            # TODO: Implement sponsored transaction logic here
-            # This will be handled by a background task
-            # TEMPORARY: For testing, we're marking as PAID immediately
-            # In production, this would wait for blockchain confirmation
-            
-            # TEMPORARY: Mark payment transaction as CONFIRMED for testing
-            # This ensures the UI shows the correct status
-            payment_transaction.status = 'CONFIRMED'
-            # Generate a unique transaction hash using ID, microsecond timestamp, and UUID
-            import time
-            import uuid
-            microsecond_timestamp = int(time.time() * 1000000)  # Microsecond precision
-            unique_id = str(uuid.uuid4())[:8]  # First 8 characters of UUID
-            payment_transaction.transaction_hash = f"test_pay_tx_{payment_transaction.id}_{microsecond_timestamp}_{unique_id}"
-            payment_transaction.save()
-
-            return PayInvoice(
-                invoice=invoice,
-                payment_transaction=payment_transaction,
-                success=True,
-                errors=None
-            )
+                return PayInvoice(
+                    invoice=invoice,
+                    payment_transaction=payment_transaction,
+                    success=True,
+                    errors=None
+                )
 
         except Invoice.DoesNotExist:
             return PayInvoice(

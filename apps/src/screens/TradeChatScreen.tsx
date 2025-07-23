@@ -17,17 +17,20 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMutation } from '@apollo/client';
+import { useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
 import { useCurrency } from '../hooks/useCurrency';
 import { useAuth } from '../contexts/AuthContext';
-import { SEND_P2P_MESSAGE } from '../apollo/queries';
+import { SEND_P2P_MESSAGE, GET_P2P_TRADE, GET_USER_BANK_ACCOUNTS } from '../apollo/queries';
 import { ExchangeRateDisplay } from '../components/ExchangeRateDisplay';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { useCountry } from '../contexts/CountryContext';
 import { getCurrencySymbol, getCurrencyForCountry } from '../utils/currencyMapping';
+import { useAccountManager } from '../hooks/useAccountManager';
+import { useAccount } from '../contexts/AccountContext';
+import { useNumberFormat } from '../utils/numberFormatting';
 
 type TradeChatRouteProp = RouteProp<MainStackParamList, 'TradeChat'>;
 type TradeChatNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeChat'>;
@@ -59,8 +62,50 @@ interface TradeData {
 export const TradeChatScreen: React.FC = () => {
   const navigation = useNavigation<TradeChatNavigationProp>();
   const route = useRoute<TradeChatRouteProp>();
-  const { offer, crypto, amount, tradeType, tradeId } = route.params;
+  const { offer, crypto, amount, tradeType, tradeId, selectedPaymentMethodId } = route.params;
   const { userProfile } = useAuth();
+  const { activeAccount, accounts, getActiveAccountContext } = useAccount();
+  const { formatNumber, formatCurrency } = useNumberFormat();
+  
+  // Get the current active account context
+  const [currentAccountContext, setCurrentAccountContext] = useState<any>(null);
+  
+  useEffect(() => {
+    const loadAccountContext = async () => {
+      const context = await getActiveAccountContext();
+      setCurrentAccountContext(context);
+      console.log('🔍 Loaded account context:', context);
+      
+      // Also log trade details to understand who is who
+      if (tradeDetailsData?.p2pTrade) {
+        const trade = tradeDetailsData.p2pTrade;
+        console.log('📊 Trade participants:', {
+          buyer: trade.buyer,
+          buyerUser: trade.buyerUser,
+          buyerBusiness: trade.buyerBusiness,
+          seller: trade.seller,
+          sellerUser: trade.sellerUser,
+          sellerBusiness: trade.sellerBusiness,
+          buyerType: trade.buyerType,
+          sellerType: trade.sellerType,
+          iAmBuyer: tradeType === 'buy',
+          myRole: tradeType === 'buy' ? 'buyer' : 'seller'
+        });
+        
+        // Log my current role in the trade
+        console.log('🎭 My role in this trade:', {
+          myUserId: userProfile?.id,
+          myActiveAccountId: activeAccount?.id,
+          myActiveAccountType: activeAccount?.type,
+          myBusinessId: activeAccount?.business?.id,
+          isPersonalAccount: activeAccount?.type === 'personal',
+          isBusinessAccount: activeAccount?.type === 'business',
+          tradeRole: tradeType
+        });
+      }
+    };
+    loadAccountContext();
+  }, [tradeDetailsData, activeAccount, userProfile]);
   
   // Currency formatting
   const { formatAmount } = useCurrency();
@@ -68,9 +113,103 @@ export const TradeChatScreen: React.FC = () => {
   // Get current market exchange rate for comparison (based on selected country)
   const { rate: marketRate } = useSelectedCountryRate();
   
-  // Get currency information for selected country
+  // Get currency information
   const { selectedCountry } = useCountry();
-  const currencyCode = getCurrencyForCountry(selectedCountry);
+  
+  // Calculate currency based on offer's country
+  const getCurrencyInfo = () => {
+    // Always use the offer's country code - offers always have a country
+    const offerCountryCode = tradeDetailsData?.p2pTrade?.offer?.countryCode || offer.countryCode;
+    
+    // Create a country array format for the currency functions
+    const tradeCountry = ['', '', offerCountryCode, ''];
+    
+    const currencyCode = getCurrencyForCountry(tradeCountry);
+    const currencySymbol = getCurrencySymbol(currencyCode);
+    
+    // For certain currencies like COP, ARS, show the code instead of symbol
+    const displaySymbol = ['COP', 'ARS', 'CLP', 'PEN'].includes(currencyCode) 
+      ? currencyCode 
+      : currencySymbol;
+    
+    // Debug currency information
+    console.log('💱 Currency resolution:', {
+      offerCountryCode,
+      currencyCode,
+      currencySymbol: displaySymbol,
+      source: 'offer'
+    });
+    
+    return { currencyCode, currencySymbol: displaySymbol, source: 'offer' };
+  };
+  
+  const { currencyCode, currencySymbol } = getCurrencyInfo();
+  
+  // Fetch trade details
+  const { data: tradeDetailsData, loading: tradeLoading } = useQuery(GET_P2P_TRADE, {
+    variables: { id: tradeId },
+    skip: !tradeId,
+    onCompleted: (data) => {
+      console.log('🔍 Trade details loaded:', {
+        tradeId,
+        hasData: !!data?.p2pTrade,
+        offer: data?.p2pTrade?.offer,
+        paymentMethod: data?.p2pTrade?.paymentMethod,
+        offerCountryCode: data?.p2pTrade?.offer?.countryCode,
+        paymentMethodCountry: data?.p2pTrade?.paymentMethod?.bank?.country,
+        fullData: data
+      });
+    }
+  });
+  
+  // Fetch user's bank accounts - try without accountId filter first to get ALL accounts
+  const { data: bankAccountsData, loading: bankAccountsLoading, error: bankAccountsError } = useQuery(GET_USER_BANK_ACCOUNTS, {
+    variables: {}, // Get all user's payment methods across all accounts
+    fetchPolicy: 'network-only', // Force fresh data
+    skip: false, // Ensure query runs
+    onCompleted: (data) => {
+      console.log('✅ Bank accounts query completed:', data);
+      console.log('Number of bank accounts:', data?.userBankAccounts?.length || 0);
+      if (data?.userBankAccounts) {
+        data.userBankAccounts.forEach((account: any, index: number) => {
+          console.log(`Bank account ${index + 1}:`, {
+            id: account.id,
+            paymentMethod: account.paymentMethod?.displayName,
+            accountHolderName: account.accountHolderName
+          });
+        });
+      }
+    },
+    onError: (error) => {
+      console.error('❌ Bank accounts query error:', error);
+    }
+  });
+  
+  // Log query state
+  useEffect(() => {
+    console.log('Bank accounts query state:', {
+      loading: bankAccountsLoading,
+      error: bankAccountsError,
+      hasData: !!bankAccountsData,
+      dataLength: bankAccountsData?.userBankAccounts?.length
+    });
+  }, [bankAccountsLoading, bankAccountsError, bankAccountsData]);
+  
+  // Log the active account being used
+  console.log('Active account for bank accounts query:', {
+    id: activeAccount?.id,
+    type: activeAccount?.type,
+    name: activeAccount?.name,
+    businessId: activeAccount?.business?.id,
+    businessName: activeAccount?.business?.name,
+    fullAccount: activeAccount
+  });
+  
+  console.log('All accounts:', accounts);
+  console.log('User profile:', userProfile);
+  
+  // Also log if we're in a different context than expected
+  console.log('Trade type:', tradeType, '- User is:', tradeType === 'sell' ? 'seller' : 'buyer');
   
   const [message, setMessage] = useState('');
   const [currentTradeStep, setCurrentTradeStep] = useState(1);
@@ -127,12 +266,18 @@ export const TradeChatScreen: React.FC = () => {
         // Use the raw WebSocket endpoint for real-time updates
         const apiUrl = require('../config/env').getApiUrl();
         const wsBaseUrl = apiUrl.replace('http://', 'ws://').replace('https://', 'wss://').replace('/graphql/', '/');
-        const wsUrl = `${wsBaseUrl}ws/trade/${tradeId}/?token=${encodeURIComponent(token)}`;
+        
+        // Include account context in WebSocket URL
+        const accountType = activeAccount?.type || 'personal';
+        const accountIndex = activeAccount?.index || 0;
+        const wsUrl = `${wsBaseUrl}ws/trade/${tradeId}/?token=${encodeURIComponent(token)}&account_type=${accountType}&account_index=${accountIndex}`;
+        
+        console.log('🔌 WebSocket URL with account context:', wsUrl.replace(token, 'TOKEN_HIDDEN'));
         
         websocket.current = new WebSocket(wsUrl);
         
         websocket.current.onopen = () => {
-          console.log('✅ WebSocket connected');
+          console.log('✅ WebSocket connected for trade:', tradeId);
           setIsConnected(true);
         };
         
@@ -177,15 +322,63 @@ export const TradeChatScreen: React.FC = () => {
         websocket.current.close();
       }
     };
-  }, [tradeId]);
+  }, [tradeId, activeAccount]);
 
   // Handle WebSocket messages  
   const handleWebSocketMessage = (data: any) => {
+    // Helper function to determine if message is from current user's perspective
+    const isMessageFromCurrentUser = (senderId: number | string, senderBusinessId?: number | string) => {
+      // Convert IDs to strings for consistent comparison
+      const senderIdStr = String(senderId);
+      const senderBusinessIdStr = senderBusinessId ? String(senderBusinessId) : undefined;
+      const userProfileIdStr = userProfile?.id ? String(userProfile.id) : '';
+      
+      // Get active account info
+      if (!activeAccount) {
+        console.warn('No active account available for message sender check');
+        return false;
+      }
+      
+      console.log('🎯 Checking message sender:', {
+        activeAccountType: activeAccount.type,
+        activeAccountId: activeAccount.id,
+        activeBusinessId: activeAccount.business?.id,
+        senderId: senderIdStr,
+        senderBusinessId: senderBusinessIdStr,
+        userProfileId: userProfileIdStr,
+        isPersonalMatch: activeAccount.type === 'personal' && senderIdStr === userProfileIdStr && !senderBusinessIdStr,
+        isBusinessMatch: activeAccount.type === 'business' && senderBusinessIdStr === String(activeAccount.business?.id)
+      });
+      
+      // For business accounts
+      if (activeAccount.type === 'business' && activeAccount.business?.id) {
+        // Message is from current user if sender business ID matches active business ID
+        return senderBusinessIdStr === String(activeAccount.business.id);
+      }
+      
+      // For personal accounts
+      if (activeAccount.type === 'personal') {
+        // Message is from current user if sender ID matches user profile ID and no business ID
+        return senderIdStr === userProfileIdStr && !senderBusinessIdStr;
+      }
+      
+      return false;
+    };
+    
     switch (data.type) {
       case 'chat_history':
+        console.log('📜 Received chat history:', data.messages.length, 'messages');
+        data.messages.forEach((msg: any, idx: number) => {
+          console.log(`Message ${idx}:`, {
+            senderId: msg.sender.id,
+            senderBusinessId: msg.sender.businessId,
+            senderType: msg.sender.type,
+            isFromCurrentUser: isMessageFromCurrentUser(msg.sender.id, msg.sender.businessId)
+          });
+        });
         setMessages(data.messages.map((msg: any) => ({
           id: msg.id,
-          sender: msg.sender.id === userProfile?.id ? 'user' : 'trader',
+          sender: isMessageFromCurrentUser(msg.sender.id, msg.sender.businessId) ? 'user' : 'trader',
           text: msg.content,
           timestamp: new Date(msg.createdAt),
           type: msg.messageType.toLowerCase()
@@ -193,9 +386,15 @@ export const TradeChatScreen: React.FC = () => {
         break;
         
       case 'chat_message':
+        console.log('💬 New message received:', {
+          senderId: data.message.sender.id,
+          senderBusinessId: data.message.sender.businessId,
+          senderType: data.message.sender.type,
+          isFromCurrentUser: isMessageFromCurrentUser(data.message.sender.id, data.message.sender.businessId)
+        });
         const newMessage: Message = {
           id: data.message.id,
-          sender: data.message.sender.id === userProfile?.id ? 'user' : 'trader',
+          sender: isMessageFromCurrentUser(data.message.sender.id, data.message.sender.businessId) ? 'user' : 'trader',
           text: data.message.content,
           timestamp: new Date(data.message.createdAt),
           type: data.message.messageType.toLowerCase()
@@ -291,11 +490,52 @@ export const TradeChatScreen: React.FC = () => {
   };
 
   // Trade data calculated from route params
+  const fiatAmount = parseFloat(amount) * parseFloat(offer.rate);
+  // Fix crypto display format
+  const displayCrypto = crypto === 'CUSD' ? 'cUSD' : crypto;
+  
+  // Get payment method name from route params
+  // Handle both object and string formats for payment methods
+  const selectedPaymentMethod = selectedPaymentMethodId 
+    ? offer.paymentMethods.find(pm => typeof pm === 'object' ? pm.id === selectedPaymentMethodId : false)
+    : offer.paymentMethods[0];
+    
+  // Extract payment method name handling both string and object formats
+  const paymentMethodName = typeof selectedPaymentMethod === 'string' 
+    ? selectedPaymentMethod 
+    : (selectedPaymentMethod?.displayName || selectedPaymentMethod?.name || 'Unknown');
+  
+  // Get the currency from the offer's country code (where the trade is happening)
+  // Use trade details if available, otherwise use the offer from navigation params
+  const offerCountryCode = tradeDetailsData?.p2pTrade?.offer?.countryCode || offer.countryCode;
+  const offerCurrencyCode = getCurrencyForCountry([
+    '', // name not needed
+    '', // phone code not needed
+    offerCountryCode,
+    '' // flag not needed
+  ]);
+  
+  // Use the offer's currency for display
+  const displayCurrencyCode = offerCurrencyCode;
+  // For certain currencies like COP, show the code instead of symbol
+  const displayCurrencySymbol = ['COP', 'ARS', 'CLP', 'PEN'].includes(offerCurrencyCode) 
+    ? offerCurrencyCode 
+    : getCurrencySymbol(offerCurrencyCode);
+  
+  console.log('💱 Currency determination:', {
+    offerCountryCode,
+    offerCurrencyCode,
+    displayCurrencyCode,
+    displayCurrencySymbol,
+    userSelectedCountry: selectedCountry?.[2],
+    userCurrencyCode: currencyCode
+  });
+  
   const tradeData: TradeData = {
     amount: amount,
-    crypto: crypto,
-    totalBs: formatAmount.withCode(parseFloat(amount) * parseFloat(offer.rate)),
-    paymentMethod: (offer.paymentMethods[0]?.displayName || offer.paymentMethods[0]?.name) || 'Banco Venezuela',
+    crypto: displayCrypto,
+    totalBs: `${displayCurrencySymbol} ${formatNumber(fiatAmount)}`, // Use user's locale formatting
+    paymentMethod: paymentMethodName,
     rate: offer.rate
   };
 
@@ -391,6 +631,147 @@ export const TradeChatScreen: React.FC = () => {
   const handleMarkAsPaid = () => {
     setShowConfirmPaidModal(true);
   };
+  
+  const handleSharePaymentDetails = async () => {
+    try {
+      console.log('=== SHARE PAYMENT DETAILS DEBUG ===');
+      console.log('Trade details data:', tradeDetailsData);
+      console.log('Selected payment method ID from route:', selectedPaymentMethodId);
+      console.log('Offer from route:', offer);
+      
+      // Get the payment method from the trade or from the selected ID
+      let paymentMethod = tradeDetailsData?.p2pTrade?.paymentMethod;
+      
+      // If not in trade details, find from offer using selectedPaymentMethodId
+      if (!paymentMethod && selectedPaymentMethodId && offer.paymentMethods) {
+        paymentMethod = offer.paymentMethods.find(pm => pm.id === selectedPaymentMethodId);
+      }
+      
+      // Fallback to first payment method if still not found
+      if (!paymentMethod && offer.paymentMethods && offer.paymentMethods.length > 0) {
+        paymentMethod = offer.paymentMethods[0];
+      }
+      
+      console.log('Payment method resolved to:', paymentMethod);
+      console.log('Bank accounts loading:', bankAccountsLoading);
+      console.log('Bank accounts error:', bankAccountsError);
+      console.log('Bank accounts data:', bankAccountsData);
+      
+      if (!paymentMethod) {
+        Alert.alert('Error', 'No se encontró el método de pago');
+        return;
+      }
+      
+      // Log all user's payment methods for debugging
+      console.log('User payment methods:');
+      bankAccountsData?.userBankAccounts?.forEach((account: any) => {
+        console.log(`  - ${account.paymentMethod?.displayName} (ID: ${account.paymentMethod?.id}, Name: ${account.paymentMethod?.name})`);
+      });
+      
+      console.log('Looking for payment method:', {
+        id: paymentMethod.id,
+        name: paymentMethod.name,
+        displayName: paymentMethod.displayName
+      });
+      
+      // Find the user's bank account for this payment method
+      // Try matching by ID first, then by name as fallback
+      const userBankAccount = bankAccountsData?.userBankAccounts?.find(
+        (account: any) => {
+          const matchById = account.paymentMethod?.id === paymentMethod.id;
+          const matchByName = account.paymentMethod?.name === paymentMethod.name;
+          console.log(`Checking account ${account.paymentMethod?.displayName}:`, {
+            matchById,
+            matchByName,
+            accountPmId: account.paymentMethod?.id,
+            accountPmName: account.paymentMethod?.name,
+            targetPmId: paymentMethod.id,
+            targetPmName: paymentMethod.name
+          });
+          return matchById || matchByName;
+        }
+      );
+      
+      if (!userBankAccount) {
+        Alert.alert('Error', `No tienes configurado el método de pago: ${paymentMethod.displayName || paymentMethod.name}`);
+        return;
+      }
+      
+      // Log the full bank account data to see what fields are available
+      console.log('Found user bank account:', {
+        accountHolderName: userBankAccount.accountHolderName,
+        accountNumber: userBankAccount.accountNumber,
+        phoneNumber: userBankAccount.phoneNumber,
+        email: userBankAccount.email,
+        username: userBankAccount.username,
+        identificationNumber: userBankAccount.identificationNumber,
+        accountType: userBankAccount.accountType,
+        bank: userBankAccount.bank,
+        paymentMethod: userBankAccount.paymentMethod,
+        country: userBankAccount.country,
+        fullAccount: userBankAccount
+      });
+      
+      // Format the payment details
+      let paymentDetails = `📋 Datos de Pago - ${paymentMethod.displayName || userBankAccount.paymentMethod?.displayName}\n\n`;
+      paymentDetails += `👤 Titular: ${userBankAccount.accountHolderName}\n`;
+      
+      // Check provider type from either source
+      const providerType = paymentMethod.providerType || userBankAccount.paymentMethod?.providerType;
+      
+      console.log('Provider type:', providerType);
+      console.log('Payment method requires:', {
+        requiresPhone: paymentMethod.requiresPhone || userBankAccount.paymentMethod?.requiresPhone,
+        requiresEmail: paymentMethod.requiresEmail || userBankAccount.paymentMethod?.requiresEmail,
+        requiresAccountNumber: paymentMethod.requiresAccountNumber || userBankAccount.paymentMethod?.requiresAccountNumber
+      });
+      
+      if (providerType === 'bank' && userBankAccount.accountNumber) {
+        paymentDetails += `🏦 Banco: ${userBankAccount.bank?.name || paymentMethod.bank?.name || userBankAccount.paymentMethod?.bank?.name}\n`;
+        paymentDetails += `💳 Número de cuenta: ${userBankAccount.accountNumber}\n`;
+        if (userBankAccount.accountType) {
+          paymentDetails += `📝 Tipo de cuenta: ${userBankAccount.accountType}\n`;
+        }
+      }
+      
+      // For fintech like DaviPlata, always show phone if available
+      if (userBankAccount.phoneNumber) {
+        paymentDetails += `📱 Teléfono: ${userBankAccount.phoneNumber}\n`;
+      }
+      
+      if (userBankAccount.email) {
+        paymentDetails += `📧 Email: ${userBankAccount.email}\n`;
+      }
+      
+      if (userBankAccount.username) {
+        paymentDetails += `👤 Usuario: ${userBankAccount.username}\n`;
+      }
+      
+      if (userBankAccount.identificationNumber) {
+        const identificationLabel = userBankAccount.country?.identificationName || 'Identificación';
+        paymentDetails += `🆔 ${identificationLabel}: ${userBankAccount.identificationNumber}\n`;
+      }
+      
+      console.log('=== PAYMENT DETAILS TO SEND ===');
+      console.log(paymentDetails);
+      console.log('=== END PAYMENT DETAILS ===');
+      
+      // Send the payment details as a message (use TEXT type since PAYMENT_INFO might not exist)
+      await sendMessage({
+        variables: {
+          input: {
+            tradeId: tradeId,
+            content: paymentDetails,
+            messageType: 'TEXT'
+          }
+        }
+      });
+      
+    } catch (error) {
+      console.error('Error sharing payment details:', error);
+      Alert.alert('Error', 'No se pudieron compartir los datos de pago');
+    }
+  };
 
   const confirmMarkAsPaid = () => {
     setShowConfirmPaidModal(false);
@@ -469,8 +850,8 @@ export const TradeChatScreen: React.FC = () => {
         <View style={[styles.paymentInfoContainer, isPaymentFromUser ? styles.userPaymentInfoContainer : styles.traderPaymentInfoContainer]}>
           <View style={[styles.paymentInfoBubble, isPaymentFromUser ? styles.userPaymentInfoBubble : styles.traderPaymentInfoBubble]}>
             <View style={styles.paymentInfoHeader}>
-              <Icon name="check-circle" size={16} color={isPaymentFromUser ? '#ffffff' : colors.success} style={styles.paymentIcon} />
-              <Text style={[styles.paymentInfoTitle, isPaymentFromUser && styles.userPaymentInfoTitle]}>Datos de pago</Text>
+              <Icon name="credit-card" size={16} color={isPaymentFromUser ? '#ffffff' : colors.primary} style={styles.paymentIcon} />
+              <Text style={[styles.paymentInfoTitle, isPaymentFromUser && styles.userPaymentInfoTitle]}>Datos de pago compartidos</Text>
             </View>
             <Text style={[styles.paymentInfoText, isPaymentFromUser && styles.userPaymentInfoText]}>{msg.text}</Text>
             <Text style={[styles.paymentInfoTimestamp, isPaymentFromUser && styles.userPaymentInfoTimestamp]}>
@@ -554,7 +935,9 @@ export const TradeChatScreen: React.FC = () => {
             <View style={styles.tradeInfo}>
               <Icon name="trending-up" size={16} color={colors.primary} style={styles.tradeIcon} />
               <Text style={styles.tradeAmount}>
-                {tradeType === 'buy' ? `${tradeData.amount} ${tradeData.crypto} por ${tradeData.totalBs} Bs.` : `${tradeData.totalBs} Bs. por ${tradeData.amount} ${tradeData.crypto}`}
+                {tradeType === 'buy' 
+                  ? `${formatNumber(parseFloat(tradeData.amount))} ${tradeData.crypto} por ${tradeData.totalBs}` 
+                  : `${tradeData.totalBs} por ${formatNumber(parseFloat(tradeData.amount))} ${tradeData.crypto}`}
               </Text>
             </View>
             <View style={styles.tradeProgress}>
@@ -578,12 +961,12 @@ export const TradeChatScreen: React.FC = () => {
           <View style={styles.rateComparison}>
             <View style={styles.rateComparisonRow}>
               <Text style={styles.rateLabel}>Tasa de este intercambio:</Text>
-              <Text style={styles.rateValue}>{parseFloat(tradeData.rate).toFixed(2)} {currencyCode}/USD</Text>
+              <Text style={styles.rateValue}>{formatNumber(parseFloat(tradeData.rate))} {displayCurrencyCode}/USD</Text>
             </View>
             {marketRate && (
               <View style={styles.rateComparisonRow}>
                 <Text style={styles.rateLabel}>Tasa actual del mercado:</Text>
-                <Text style={[styles.rateValue, styles.marketRate]}>{marketRate.toFixed(2)} {currencyCode}/USD</Text>
+                <Text style={[styles.rateValue, styles.marketRate]}>{formatNumber(marketRate)} {displayCurrencyCode}/USD</Text>
                 {(() => {
                   const tradeRate = parseFloat(tradeData.rate);
                   const difference = ((tradeRate - marketRate) / marketRate) * 100;
@@ -592,7 +975,7 @@ export const TradeChatScreen: React.FC = () => {
                   if (Math.abs(difference) > 1) { // Only show if difference > 1%
                     return (
                       <Text style={[styles.rateDifference, isGood ? styles.goodRate : styles.badRate]}>
-                        {difference > 0 ? '+' : ''}{difference.toFixed(1)}%
+                        {difference > 0 ? '+' : ''}{formatNumber(difference, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
                       </Text>
                     );
                   }
@@ -681,6 +1064,34 @@ export const TradeChatScreen: React.FC = () => {
         <TouchableWithoutFeedback>
           <View style={styles.inputContainer}>
         <View style={styles.inputRow}>
+          {/* Share Payment Details Button - Only show for seller in step 1 */}
+          {tradeType === 'sell' && currentTradeStep === 1 && (
+            <TouchableOpacity 
+              onPress={handleSharePaymentDetails}
+              onLongPress={() => Alert.alert('Compartir Datos de Pago', 'Comparte los datos de tu método de pago seleccionado con el comprador')}
+              style={styles.sharePaymentButton}
+            >
+              <Icon name="credit-card" size={20} color={colors.primary} />
+            </TouchableOpacity>
+          )}
+          
+          
+          {/* Request Payment Details Button - Only show for buyer in step 1 */}
+          {tradeType === 'buy' && currentTradeStep === 1 && (
+            <TouchableOpacity 
+              onPress={() => {
+                Alert.alert(
+                  'Solicitar Datos de Pago', 
+                  'Puedes solicitar al vendedor que comparta los datos de pago a través del chat.',
+                  [{ text: 'OK' }]
+                );
+              }}
+              style={[styles.sharePaymentButton, { backgroundColor: '#FEF3C7' }]}
+            >
+              <Icon name="help-circle" size={20} color="#F59E0B" />
+            </TouchableOpacity>
+          )}
+          
           <View style={styles.inputWrapper}>
             <TextInput
               style={styles.textInput}
@@ -1187,6 +1598,15 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     backgroundColor: '#E5E7EB',
+  },
+  sharePaymentButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#E0F2FE',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
   userPaymentInfoBubble: {
     backgroundColor: colors.primary,

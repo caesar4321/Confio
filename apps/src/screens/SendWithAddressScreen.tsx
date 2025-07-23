@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useMutation } from '@apollo/client';
-import { CREATE_SEND_TRANSACTION } from '../apollo/queries';
+// Removed Apollo imports as mutations are now handled in TransactionProcessingScreen
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNumberFormat } from '../utils/numberFormatting';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -57,6 +57,7 @@ export const SendWithAddressScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const insets = useSafeAreaInsets();
+  const { formatNumber } = useNumberFormat();
   const tokenType: TokenType = (route.params as any)?.tokenType || 'cusd';
   const config = tokenConfig[tokenType];
 
@@ -65,14 +66,21 @@ export const SendWithAddressScreen = () => {
   const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // GraphQL mutation for creating send transaction
-  const [createSendTransaction] = useMutation(CREATE_SEND_TRANSACTION);
+  // Mutations are now handled in TransactionProcessingScreen
 
   const handleQuickAmount = (val: string) => setAmount(val);
 
   const handleSend = async () => {
     console.log('SendWithAddressScreen: handleSend called');
+    
+    // Prevent double-clicks/rapid button presses
+    if (isProcessing) {
+      console.log('SendWithAddressScreen: Already processing, ignoring duplicate click');
+      return;
+    }
+    
     if (!amount || parseFloat(amount) < config.minSend) {
       setErrorMessage(`El mínimo para enviar es ${config.minSend} ${config.name}`);
       setShowError(true);
@@ -84,45 +92,36 @@ export const SendWithAddressScreen = () => {
       return;
     }
     
+    setIsProcessing(true);
+    
     try {
-      console.log('SendWithAddressScreen: Creating send transaction...');
+      console.log('SendWithAddressScreen: Navigating to TransactionProcessing');
       
-      const { data } = await createSendTransaction({
-        variables: {
-          input: {
-            recipientAddress: destination,
-            amount: amount,
-            tokenType: config.name,
-            memo: `Send ${amount} ${config.name} to ${destination.substring(0, 10)}...`
-          }
+      // Generate idempotency key to prevent double-spending
+      const minuteTimestamp = Math.floor(Date.now() / 60000);
+      const recipientSuffix = destination.slice(-8);
+      const amountStr = amount.replace('.', '');
+      const idempotencyKey = `send_${recipientSuffix}_${amountStr}_${config.name}_${minuteTimestamp}`;
+      
+      // Navigate to processing screen with transaction data
+      (navigation as any).replace('TransactionProcessing', {
+        transactionData: {
+          type: 'sent',
+          amount: amount,
+          currency: config.name,
+          recipient: destination.substring(0, 10) + '...',
+          action: 'Enviando',
+          recipientAddress: destination,
+          memo: `Send ${amount} ${config.name} to ${destination.substring(0, 10)}...`,
+          idempotencyKey: idempotencyKey
         }
       });
-
-      console.log('SendWithAddressScreen: Send transaction created:', data);
-
-      if (data?.createSendTransaction?.success) {
-        console.log('SendWithAddressScreen: Navigating to TransactionProcessing');
-        // Navigate to processing screen with transaction data
-        (navigation as any).replace('TransactionProcessing', {
-          transactionData: {
-            type: 'sent',
-            amount: amount,
-            currency: config.name,
-            recipient: destination.substring(0, 10) + '...',
-            action: 'Enviando',
-            sendTransactionId: data.createSendTransaction.sendTransaction.id,
-            recipientAddress: destination
-          }
-        });
-      } else {
-        const errors = data?.createSendTransaction?.errors || ['Error desconocido'];
-        setErrorMessage(errors.join(', '));
-        setShowError(true);
-      }
     } catch (error) {
-      console.error('SendWithAddressScreen: Error creating send transaction:', error);
-      setErrorMessage('Error al crear la transacción. Inténtalo de nuevo.');
+      console.error('SendWithAddressScreen: Error navigating to processing screen:', error);
+      setErrorMessage('Error al procesar la transacción. Inténtalo de nuevo.');
       setShowError(true);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -224,7 +223,7 @@ export const SendWithAddressScreen = () => {
             <View style={styles.feeRow}>
               <Text style={styles.feeTotalLabel}>Total a enviar</Text>
               <Text style={styles.feeTotalValue}>
-                {amount ? parseFloat(amount).toFixed(2) : '0.00'} {config.name}
+                {amount ? formatNumber(parseFloat(amount)) : formatNumber(0)} {config.name}
               </Text>
             </View>
           </View>
@@ -250,12 +249,14 @@ export const SendWithAddressScreen = () => {
           <TouchableOpacity 
             style={[
               styles.confirmButton,
-              (!amount || !destination || parseFloat(amount) < config.minSend) && styles.confirmButtonDisabled
+              (!amount || !destination || parseFloat(amount) < config.minSend || isProcessing) && styles.confirmButtonDisabled
             ]}
-            disabled={!amount || !destination || parseFloat(amount) < config.minSend}
+            disabled={!amount || !destination || parseFloat(amount) < config.minSend || isProcessing}
             onPress={handleSend}
           >
-            <Text style={styles.confirmButtonText}>Confirmar Envío</Text>
+            <Text style={styles.confirmButtonText}>
+              {isProcessing ? 'Procesando...' : 'Confirmar Envío'}
+            </Text>
           </TouchableOpacity>
 
           {showSuccess && (
