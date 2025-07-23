@@ -502,8 +502,8 @@ export const TradeChatScreen: React.FC = () => {
           // Check if message already exists (prevent duplicates)
           const exists = prev.some(msg => msg.id === newMessage.id);
           if (exists) return prev;
-          // Add new message at the beginning for inverted FlatList
-          return [newMessage, ...prev];
+          // Add new message at the end (messages are in ascending order)
+          return [...prev, newMessage];
         });
         break;
         
@@ -546,33 +546,19 @@ export const TradeChatScreen: React.FC = () => {
     if (!tradeId) {
       console.warn('No tradeId provided, using mock data');
       setMessages([
-        // Messages in reverse order for inverted FlatList (newest first)
+        // Messages in ascending order (oldest first) for inverted FlatList
         {
-          id: 7,
-          sender: 'trader',
-          text: '📋 Datos de Pago - Banco de Venezuela\n\n👤 Titular: Juan Pérez\n🏦 Banco: Banco de Venezuela\n💳 Número de cuenta: 0102-1234-5678-9012\n📝 Tipo de cuenta: Corriente\n🆔 Cédula: V-12.345.678',
-          timestamp: new Date(Date.now() - 150000),
-          type: 'payment_info'
-        },
-        {
-          id: 6,
+          id: 1,
           sender: 'system',
-          text: '💳 Datos de pago compartidos',
-          timestamp: new Date(Date.now() - 180000),
+          text: 'Intercambio iniciado. Tienes 15 minutos para completar el pago.',
+          timestamp: new Date(Date.now() - 300000),
           type: 'system'
         },
         {
-          id: 5,
-          sender: 'user',
-          text: 'Gracias, reviso y te aviso.',
-          timestamp: new Date(Date.now() - 200000),
-          type: 'text'
-        },
-        {
-          id: 4,
+          id: 2,
           sender: 'trader',
-          text: 'Te envío los datos bancarios por aquí.',
-          timestamp: new Date(Date.now() - 210000),
+          text: '¡Hola! Gracias por elegir mi oferta. Te envío los datos para el pago.',
+          timestamp: new Date(Date.now() - 270000),
           type: 'text'
         },
         {
@@ -583,18 +569,32 @@ export const TradeChatScreen: React.FC = () => {
           type: 'text'
         },
         {
-          id: 2,
+          id: 4,
           sender: 'trader',
-          text: '¡Hola! Gracias por elegir mi oferta. Te envío los datos para el pago.',
-          timestamp: new Date(Date.now() - 270000),
+          text: 'Te envío los datos bancarios por aquí.',
+          timestamp: new Date(Date.now() - 210000),
           type: 'text'
         },
         {
-          id: 1,
+          id: 5,
+          sender: 'user',
+          text: 'Gracias, reviso y te aviso.',
+          timestamp: new Date(Date.now() - 200000),
+          type: 'text'
+        },
+        {
+          id: 6,
           sender: 'system',
-          text: 'Intercambio iniciado. Tienes 15 minutos para completar el pago.',
-          timestamp: new Date(Date.now() - 300000),
+          text: '💳 Datos de pago compartidos',
+          timestamp: new Date(Date.now() - 180000),
           type: 'system'
+        },
+        {
+          id: 7,
+          sender: 'trader',
+          text: '📋 Datos de Pago - Banco de Venezuela\n\n👤 Titular: Juan Pérez\n🏦 Banco: Banco de Venezuela\n💳 Número de cuenta: 0102-1234-5678-9012\n📝 Tipo de cuenta: Corriente\n🆔 Cédula: V-12.345.678',
+          timestamp: new Date(Date.now() - 150000),
+          type: 'payment_info'
         }
       ]);
       setIsConnected(false);
@@ -922,7 +922,7 @@ export const TradeChatScreen: React.FC = () => {
         timestamp: new Date(),
         type: 'system',
       };
-      setMessages(prev => [systemMessage, ...prev]); // Add at beginning for inverted FlatList
+      setMessages(prev => [...prev, systemMessage]); // Add at end (ascending order)
       
       // Refetch trade details to get updated status (with a small delay to ensure backend has processed)
       if (refetchTradeDetails) {
@@ -981,7 +981,7 @@ export const TradeChatScreen: React.FC = () => {
           timestamp: new Date(),
           type: 'system',
         };
-        setMessages(prev => [systemMessage, ...prev]); // Add at beginning for inverted FlatList
+        setMessages(prev => [...prev, systemMessage]); // Add at end (ascending order)
         
         // Refetch trade details to get updated status
         if (refetchTradeDetails) {
@@ -1040,7 +1040,7 @@ export const TradeChatScreen: React.FC = () => {
           timestamp: new Date(),
           type: 'system',
         };
-        setMessages(prev => [systemMessage, ...prev]); // Add at beginning for inverted FlatList
+        setMessages(prev => [...prev, systemMessage]); // Add at end (ascending order)
         
         // Show success alert
         Alert.alert(
