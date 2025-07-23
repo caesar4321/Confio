@@ -297,8 +297,8 @@ export const GET_INVOICE = gql`
 `;
 
 export const PAY_INVOICE = gql`
-  mutation PayInvoice($invoiceId: String!) {
-    payInvoice(invoiceId: $invoiceId) {
+  mutation PayInvoice($invoiceId: String!, $idempotencyKey: String) {
+    payInvoice(invoiceId: $invoiceId, idempotencyKey: $idempotencyKey) {
       invoice {
         id
         invoiceId
@@ -327,6 +327,33 @@ export const CREATE_SEND_TRANSACTION = gql`
     createSendTransaction(input: $input) {
       sendTransaction {
         id
+        senderUser {
+          id
+          username
+          firstName
+          lastName
+        }
+        recipientUser {
+          id
+          username
+          firstName
+          lastName
+        }
+        senderBusiness {
+          id
+          name
+          category
+        }
+        recipientBusiness {
+          id
+          name
+          category
+        }
+        senderType
+        recipientType
+        senderDisplayName
+        recipientDisplayName
+        senderAddress
         recipientAddress
         amount
         tokenType
@@ -502,6 +529,17 @@ export const GET_P2P_OFFERS = gql`
         name
         displayName
         icon
+        providerType
+        bank {
+          id
+          name
+          country {
+            id
+            code
+            name
+            flagEmoji
+          }
+        }
       }
       terms
       responseTimeMinutes
@@ -520,8 +558,8 @@ export const GET_P2P_OFFERS = gql`
 `;
 
 export const GET_MY_P2P_OFFERS = gql`
-  query GetMyP2POffers {
-    myP2pOffers {
+  query GetMyP2POffers($accountId: String) {
+    myP2pOffers(accountId: $accountId) {
       id
       exchangeType
       tokenType
@@ -535,17 +573,39 @@ export const GET_MY_P2P_OFFERS = gql`
         name
         displayName
         icon
+        providerType
+        bank {
+          id
+          name
+          country {
+            id
+            code
+            name
+            flagEmoji
+          }
+        }
       }
       terms
       responseTimeMinutes
       status
       createdAt
+      offerType
+      offerDisplayName
+      offerUser {
+        id
+        firstName
+        lastName
+      }
+      offerBusiness {
+        id
+        name
+      }
     }
   }
 `;
 
 export const GET_MY_P2P_TRADES = gql`
-  query GetMyP2PTrades($accountId: ID) {
+  query GetMyP2PTrades($accountId: String) {
     myP2pTrades(accountId: $accountId) {
       id
       offer {
@@ -639,6 +699,17 @@ export const GET_MY_P2P_TRADES = gql`
         displayName
         icon
         isActive
+        providerType
+        bank {
+          id
+          name
+          country {
+            id
+            code
+            name
+            flagEmoji
+          }
+        }
       }
       status
       expiresAt
@@ -659,6 +730,8 @@ export const GET_P2P_TRADE = gql`
         id
         exchangeType
         tokenType
+        countryCode
+        rate
         user {
           id
           username
@@ -706,6 +779,17 @@ export const GET_P2P_TRADE = gql`
         displayName
         icon
         isActive
+        providerType
+        bank {
+          id
+          name
+          country {
+            id
+            code
+            name
+            flagEmoji
+          }
+        }
       }
       status
       expiresAt
@@ -746,8 +830,34 @@ export const GET_P2P_PAYMENT_METHODS = gql`
       id
       name
       displayName
+      providerType
       icon
+      requiresPhone
+      requiresEmail
+      requiresAccountNumber
       isActive
+      bank {
+        id
+        name
+        country {
+          id
+          code
+          name
+          flagEmoji
+          requiresIdentification
+          identificationName
+          identificationFormat
+        }
+      }
+      country {
+        id
+        code
+        name
+        flagEmoji
+        requiresIdentification
+        identificationName
+        identificationFormat
+      }
     }
   }
 `;
@@ -940,6 +1050,319 @@ export const TYPING_INDICATOR_SUBSCRIPTION = gql`
       userId
       username
       isTyping
+    }
+  }
+`;
+
+// Bank Info Queries
+export const GET_COUNTRIES = gql`
+  query GetCountries($isActive: Boolean) {
+    countries(isActive: $isActive) {
+      id
+      code
+      name
+      flagEmoji
+      currencyCode
+      currencySymbol
+      requiresIdentification
+      identificationName
+      identificationFormat
+      accountNumberLength
+      supportsPhonePayments
+      isActive
+      displayOrder
+    }
+  }
+`;
+
+export const GET_BANKS = gql`
+  query GetBanks($countryCode: String) {
+    banks(countryCode: $countryCode) {
+      id
+      code
+      name
+      shortName
+      country {
+        id
+        code
+        name
+        flagEmoji
+      }
+      supportsChecking
+      supportsSavings
+      supportsPayroll
+      isActive
+      displayOrder
+      accountTypeChoices
+    }
+  }
+`;
+
+export const GET_USER_BANK_ACCOUNTS = gql`
+  query GetUserBankAccounts($accountId: ID) {
+    userBankAccounts(accountId: $accountId) {
+      id
+      account {
+        id
+        accountId
+        displayName
+        accountType
+      }
+      paymentMethod {
+        id
+        name
+        displayName
+        providerType
+        icon
+        requiresPhone
+        requiresEmail
+        requiresAccountNumber
+        bank {
+          id
+          name
+          shortName
+          country {
+            id
+            code
+            name
+            flagEmoji
+            requiresIdentification
+            identificationName
+          }
+        }
+        country {
+          id
+          code
+          name
+          flagEmoji
+          requiresIdentification
+          identificationName
+        }
+      }
+      country {
+        id
+        code
+        name
+        flagEmoji
+        requiresIdentification
+        identificationName
+      }
+      bank {
+        id
+        name
+        shortName
+      }
+      accountHolderName
+      accountNumber
+      maskedAccountNumber
+      accountType
+      identificationNumber
+      phoneNumber
+      email
+      username
+      isDefault
+      isPublic
+      isVerified
+      verifiedAt
+      fullBankName
+      summaryText
+      requiresIdentification
+      identificationLabel
+      paymentDetails
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_BANK_INFO = gql`
+  query GetBankInfo($id: ID!) {
+    bankInfo(id: $id) {
+      id
+      account {
+        id
+        accountId
+        displayName
+        accountType
+      }
+      country {
+        id
+        code
+        name
+        flagEmoji
+        requiresIdentification
+        identificationName
+        identificationFormat
+      }
+      bank {
+        id
+        name
+        shortName
+      }
+      accountHolderName
+      accountNumber
+      maskedAccountNumber
+      accountType
+      identificationNumber
+      phoneNumber
+      email
+      isDefault
+      isPublic
+      isVerified
+      verifiedAt
+      fullBankName
+      summaryText
+      requiresIdentification
+      identificationLabel
+      paymentDetails
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+// Bank Info Mutations
+export const CREATE_BANK_INFO = gql`
+  mutation CreateBankInfo(
+    $accountId: ID!
+    $paymentMethodId: ID!
+    $accountHolderName: String!
+    $accountNumber: String
+    $phoneNumber: String
+    $email: String
+    $username: String
+    $accountType: String
+    $identificationNumber: String
+    $isDefault: Boolean
+  ) {
+    createBankInfo(
+      accountId: $accountId
+      paymentMethodId: $paymentMethodId
+      accountHolderName: $accountHolderName
+      accountNumber: $accountNumber
+      phoneNumber: $phoneNumber
+      email: $email
+      username: $username
+      accountType: $accountType
+      identificationNumber: $identificationNumber
+      isDefault: $isDefault
+    ) {
+      success
+      error
+      bankInfo {
+        id
+        accountHolderName
+        accountNumber
+        accountType
+        identificationNumber
+        isDefault
+        bank {
+          id
+          name
+          country {
+            id
+            code
+            name
+            flagEmoji
+            requiresIdentification
+            identificationName
+          }
+        }
+        country {
+          id
+          code
+          name
+          flagEmoji
+          requiresIdentification
+          identificationName
+        }
+      }
+    }
+  }
+`;
+
+export const UPDATE_BANK_INFO = gql`
+  mutation UpdateBankInfo(
+    $bankInfoId: ID!
+    $paymentMethodId: ID!
+    $accountHolderName: String!
+    $accountNumber: String
+    $phoneNumber: String
+    $email: String
+    $username: String
+    $accountType: String
+    $identificationNumber: String
+    $isDefault: Boolean
+  ) {
+    updateBankInfo(
+      bankInfoId: $bankInfoId
+      paymentMethodId: $paymentMethodId
+      accountHolderName: $accountHolderName
+      accountNumber: $accountNumber
+      phoneNumber: $phoneNumber
+      email: $email
+      username: $username
+      accountType: $accountType
+      identificationNumber: $identificationNumber
+      isDefault: $isDefault
+    ) {
+      success
+      error
+      bankInfo {
+        id
+        accountHolderName
+        accountNumber
+        phoneNumber
+        email
+        username
+        accountType
+        identificationNumber
+        isDefault
+        paymentMethod {
+          id
+          displayName
+          providerType
+          icon
+          requiresPhone
+          requiresEmail
+          requiresAccountNumber
+          bank {
+            id
+            name
+            country {
+              id
+              code
+              name
+              flagEmoji
+              requiresIdentification
+              identificationName
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+export const DELETE_BANK_INFO = gql`
+  mutation DeleteBankInfo($bankInfoId: ID!) {
+    deleteBankInfo(bankInfoId: $bankInfoId) {
+      success
+      error
+    }
+  }
+`;
+
+export const SET_DEFAULT_BANK_INFO = gql`
+  mutation SetDefaultBankInfo($bankInfoId: ID!) {
+    setDefaultBankInfo(bankInfoId: $bankInfoId) {
+      success
+      error
+      bankInfo {
+        id
+        isDefault
+        summaryText
+      }
     }
   }
 `;

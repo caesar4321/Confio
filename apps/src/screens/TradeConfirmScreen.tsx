@@ -13,13 +13,14 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useMutation } from '@apollo/client';
+import { useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
-import { CREATE_P2P_TRADE } from '../apollo/queries';
+import { CREATE_P2P_TRADE, GET_USER_BANK_ACCOUNTS, GET_MY_P2P_TRADES } from '../apollo/queries';
 import { useCurrency } from '../hooks/useCurrency';
 import { useAccount } from '../contexts/AccountContext';
+import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 
 type TradeConfirmRouteProp = RouteProp<MainStackParamList, 'TradeConfirm'>;
 type TradeConfirmNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeConfirm'>;
@@ -35,12 +36,67 @@ export const TradeConfirmScreen: React.FC = () => {
   // Account context
   const { activeAccount } = useAccount();
   
-  // GraphQL mutation
-  const [createP2PTrade, { loading: createTradeLoading }] = useMutation(CREATE_P2P_TRADE);
+  // GraphQL queries and mutations
+  const [createP2PTrade, { loading: createTradeLoading }] = useMutation(CREATE_P2P_TRADE, {
+    refetchQueries: [
+      {
+        query: GET_MY_P2P_TRADES,
+        variables: { accountId: activeAccount?.id }
+      }
+    ],
+    // Don't wait for refetch to complete before navigating
+    awaitRefetchQueries: false,
+    // Optimistically update the cache
+    update: (cache, { data }) => {
+      if (data?.createP2pTrade?.success && data?.createP2pTrade?.trade) {
+        // The refetchQueries will handle updating the trades list
+        // We could also manually update the cache here if needed for instant updates
+      }
+    }
+  });
+  const { data: userBankAccountsData } = useQuery(GET_USER_BANK_ACCOUNTS, {
+    variables: { accountId: activeAccount?.id },
+    skip: !activeAccount?.id,
+  });
   
   const [amount, setAmount] = useState('');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(offer.paymentMethods[0] || null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  
+  // Auto-select first configured payment method when data loads
+  React.useEffect(() => {
+    if (userBankAccountsData?.userBankAccounts && offer.paymentMethods.length > 0) {
+      // Check if current selection is configured
+      if (selectedPaymentMethod && !isPaymentMethodConfigured(selectedPaymentMethod)) {
+        // Find first configured payment method
+        const firstConfigured = offer.paymentMethods.find(method => isPaymentMethodConfigured(method));
+        if (firstConfigured) {
+          setSelectedPaymentMethod(firstConfigured);
+        }
+      }
+    }
+  }, [userBankAccountsData, offer.paymentMethods]);
+  
+  // Check if user has configured a specific payment method
+  const isPaymentMethodConfigured = (paymentMethod: any) => {
+    if (!userBankAccountsData?.userBankAccounts) return false;
+    
+    return userBankAccountsData.userBankAccounts.some((account: any) => {
+      // Check if user has this payment method configured
+      if (account.paymentMethod?.id === paymentMethod.id) {
+        // Additional validation for required fields
+        if (paymentMethod.requiresPhone && !account.phoneNumber) return false;
+        if (paymentMethod.requiresEmail && !account.email) return false;
+        if (paymentMethod.requiresAccountNumber && !account.accountNumber) return false;
+        return true;
+      }
+      // Legacy check for bank payment methods
+      else if (paymentMethod.providerType === 'BANK' && account.bank?.id === paymentMethod.bank?.id) {
+        return true;
+      }
+      return false;
+    });
+  };
 
   const handleBack = () => {
     navigation.goBack();
@@ -55,6 +111,23 @@ export const TradeConfirmScreen: React.FC = () => {
     const cryptoAmount = parseFloat(amount);
     if (isNaN(cryptoAmount) || cryptoAmount <= 0) {
       Alert.alert('Error', 'Por favor ingresa un monto válido');
+      return;
+    }
+    
+    // Check if user has configured the selected payment method
+    if (!isPaymentMethodConfigured(selectedPaymentMethod)) {
+      Alert.alert(
+        'Método de pago no configurado',
+        `No tienes configurado ${selectedPaymentMethod.displayName || selectedPaymentMethod.name}. ¿Deseas configurarlo ahora?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { 
+            text: 'Configurar', 
+            onPress: () => navigation.navigate('BankInfo'),
+            style: 'default' 
+          }
+        ]
+      );
       return;
     }
     
@@ -81,6 +154,7 @@ export const TradeConfirmScreen: React.FC = () => {
           amount: amount,
           tradeType: tradeType,
           tradeId: createdTrade.id, // Pass the actual trade ID
+          selectedPaymentMethodId: selectedPaymentMethod.id, // Pass the selected payment method ID
         });
       } else {
         const errorMessage = data?.createP2pTrade?.errors?.join(', ') || 'Error desconocido';
@@ -195,16 +269,24 @@ export const TradeConfirmScreen: React.FC = () => {
           
           <View style={styles.paymentMethodContainer}>
             <View style={styles.paymentMethodIcon}>
-              <Text style={styles.paymentMethodIconText}>
-                {(selectedPaymentMethod?.displayName || selectedPaymentMethod?.name || 'M').charAt(0)}
-              </Text>
+              <Icon 
+                name={getPaymentMethodIcon(selectedPaymentMethod?.icon, selectedPaymentMethod?.providerType, selectedPaymentMethod?.displayName || selectedPaymentMethod?.name)} 
+                size={20} 
+                color="#fff" 
+              />
             </View>
             <View style={styles.paymentMethodInfo}>
-              <Text style={styles.paymentMethodName}>
-                {selectedPaymentMethod?.displayName || selectedPaymentMethod?.name || 'Método de pago'}
-              </Text>
+              <View style={styles.paymentMethodHeader}>
+                <Text style={styles.paymentMethodName}>
+                  {selectedPaymentMethod?.displayName || selectedPaymentMethod?.name || 'Método de pago'}
+                </Text>
+                {selectedPaymentMethod?.bank?.country?.flagEmoji && (
+                  <Text style={styles.countryFlag}>{selectedPaymentMethod.bank.country.flagEmoji}</Text>
+                )}
+              </View>
               <Text style={styles.paymentMethodDescription}>
                 {getPaymentMethodDescription(selectedPaymentMethod)}
+                {selectedPaymentMethod?.bank?.country?.name && ` • ${selectedPaymentMethod.bank.country.name}`}
               </Text>
             </View>
           </View>
@@ -245,30 +327,66 @@ export const TradeConfirmScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-              {offer.paymentMethods.map((method, index) => (
-                <TouchableOpacity
-                  key={method.id || index}
-                  style={styles.paymentOption}
-                  onPress={() => handlePaymentMethodSelect(method)}
-                >
-                  <View style={styles.paymentOptionIcon}>
-                    <Text style={styles.paymentOptionIconText}>
-                      {(method.displayName || method.name || 'M').charAt(0)}
-                    </Text>
-                  </View>
-                  <View style={styles.paymentOptionInfo}>
-                    <Text style={styles.paymentOptionText}>
-                      {method.displayName || method.name}
-                    </Text>
-                    <Text style={styles.paymentOptionDescription}>
-                      {getPaymentMethodDescription(method)}
-                    </Text>
-                  </View>
-                  {selectedPaymentMethod?.id === method.id && (
-                    <Icon name="check" size={20} color={colors.primary} />
-                  )}
-                </TouchableOpacity>
-              ))}
+              {offer.paymentMethods.map((method, index) => {
+                const isConfigured = isPaymentMethodConfigured(method);
+                return (
+                  <TouchableOpacity
+                    key={method.id || index}
+                    style={[styles.paymentOption, !isConfigured && styles.paymentOptionDisabled]}
+                    onPress={() => {
+                      if (isConfigured) {
+                        handlePaymentMethodSelect(method);
+                      } else {
+                        Alert.alert(
+                          'Método de pago no configurado',
+                          `Necesitas configurar ${method.displayName || method.name} antes de poder usarlo.`,
+                          [
+                            { text: 'Cancelar', style: 'cancel' },
+                            { 
+                              text: 'Configurar ahora', 
+                              onPress: () => {
+                                setShowPaymentModal(false);
+                                navigation.navigate('BankInfo');
+                              },
+                              style: 'default' 
+                            }
+                          ]
+                        );
+                      }
+                    }}
+                  >
+                    <View style={[styles.paymentOptionIcon, !isConfigured && styles.paymentOptionIconDisabled]}>
+                      <Icon 
+                        name={getPaymentMethodIcon(method.icon, method.providerType, method.displayName || method.name)} 
+                        size={16} 
+                        color={isConfigured ? "#fff" : "#9CA3AF"} 
+                      />
+                    </View>
+                    <View style={styles.paymentOptionInfo}>
+                      <View style={styles.paymentOptionHeader}>
+                        <Text style={[styles.paymentOptionText, !isConfigured && styles.paymentOptionTextDisabled]}>
+                          {method.displayName || method.name}
+                        </Text>
+                        {method.bank?.country?.flagEmoji && (
+                          <Text style={styles.countryFlagSmall}>{method.bank.country.flagEmoji}</Text>
+                        )}
+                        {!isConfigured && (
+                          <View style={styles.notConfiguredBadge}>
+                            <Text style={styles.notConfiguredText}>No configurado</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={[styles.paymentOptionDescription, !isConfigured && styles.paymentOptionDescriptionDisabled]}>
+                        {isConfigured ? getPaymentMethodDescription(method) : 'Toca para configurar este método de pago'}
+                        {method.bank?.country?.name && ` • ${method.bank.country.name}`}
+                      </Text>
+                    </View>
+                    {selectedPaymentMethod?.id === method.id && isConfigured && (
+                      <Icon name="check" size={20} color={colors.primary} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           </View>
         </View>
@@ -478,15 +596,27 @@ const styles = StyleSheet.create({
   paymentMethodInfo: {
     flex: 1,
   },
+  paymentMethodHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
   paymentMethodName: {
     fontSize: 16,
     fontWeight: '500',
     color: '#1F2937',
-    marginBottom: 2,
+    marginRight: 8,
   },
   paymentMethodDescription: {
     fontSize: 14,
     color: '#6B7280',
+  },
+  countryFlag: {
+    fontSize: 18,
+  },
+  countryFlagSmall: {
+    fontSize: 16,
+    marginLeft: 4,
   },
   bottomButtonContainer: {
     backgroundColor: '#fff',
@@ -561,6 +691,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
   },
+  paymentOptionDisabled: {
+    opacity: 0.6,
+  },
   paymentOptionIcon: {
     width: 40,
     height: 40,
@@ -570,6 +703,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
+  paymentOptionIconDisabled: {
+    backgroundColor: '#E5E7EB',
+  },
   paymentOptionIconText: {
     color: '#fff',
     fontSize: 18,
@@ -578,13 +714,36 @@ const styles = StyleSheet.create({
   paymentOptionInfo: {
     flex: 1,
   },
+  paymentOptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
   paymentOptionText: {
     fontSize: 16,
     fontWeight: '500',
     color: '#1F2937',
   },
+  paymentOptionTextDisabled: {
+    color: '#9CA3AF',
+  },
   paymentOptionDescription: {
     fontSize: 14,
     color: '#6B7280',
+  },
+  paymentOptionDescriptionDisabled: {
+    color: '#D1D5DB',
+  },
+  notConfiguredBadge: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 8,
+  },
+  notConfiguredText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#92400E',
   },
 }); 

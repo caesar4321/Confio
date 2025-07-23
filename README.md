@@ -27,6 +27,7 @@ Confío helps people access stable dollars, send remittances, and pay each other
 - 🏪 P2P Trading: Buy and sell crypto with local payment methods
 - 💬 Real-time chat for P2P trades with WebSocket support
 - 🏢 Business accounts for commercial operations
+- 🏦 Bank information management with country-specific requirements
 
 ## 🧱 Tech Stack
 
@@ -783,6 +784,137 @@ python manage.py shell -c "from exchange_rates.models import ExchangeRate; print
 
 This multi-currency system ensures that Confío users across Latin America have access to accurate, real-time exchange rates for fair P2P trading regardless of their local economic conditions.
 
+## 🌍 Internationalization & Number Formatting
+
+Confío provides a comprehensive number formatting system that automatically adapts to users' regional preferences based on their phone number country code. This ensures familiar number formatting for users across 50+ countries.
+
+### Number Formatting System
+
+The system is implemented in `apps/src/utils/numberFormatting.ts` and provides:
+
+#### Country-Specific Formatting
+- **Latin America**: Spanish/Portuguese formatting (1.234,56)
+- **United States/UK**: English formatting (1,234.56)
+- **Europe**: Mixed formatting based on country
+- **Asia**: Country-specific formatting
+
+#### Key Features
+- 📱 **Automatic Detection**: Uses user's phone country code to determine formatting
+- 🔢 **Consistent Display**: All numbers formatted consistently across the app
+- 💱 **Currency Support**: Proper currency symbol placement and formatting
+- 📊 **Percentage Formatting**: Locale-aware percentage display
+- ⌨️ **Input Formatting**: Real-time formatting while typing in input fields
+
+### Usage Examples
+
+#### Basic Number Formatting
+```typescript
+import { useNumberFormat } from '../utils/numberFormatting';
+
+const MyComponent = () => {
+  const { formatNumber, formatCurrency } = useNumberFormat();
+  
+  // User from Colombia sees: 1.234,56
+  // User from US sees: 1,234.56
+  const formatted = formatNumber(1234.56);
+  
+  // Currency formatting
+  // Colombia: COP 1.234,56
+  // US: $1,234.56
+  const price = formatCurrency(1234.56, 'COP');
+};
+```
+
+#### Supported Countries
+The system supports 50+ countries including:
+
+**Latin America** - Two Different Number Format Systems:
+
+> **Important Note**: Latin America doesn't have a unified number format. Countries influenced by Spanish colonialism typically use the European format (1.234,56), while countries with stronger US influence use the American format (1,234.56). This distinction is crucial for user experience - displaying numbers in the wrong format can confuse users and lead to serious financial errors.
+
+**Spanish/European Format** (period for thousands, comma for decimals):
+- 🇦🇷 Argentina: 1.234,56
+- 🇧🇴 Bolivia: 1.234,56
+- 🇨🇱 Chile: 1.234,56
+- 🇨🇴 Colombia: 1.234,56
+- 🇵🇾 Paraguay: 1.234,56
+- 🇺🇾 Uruguay: 1.234,56
+- 🇻🇪 Venezuela: 1.234,56
+- 🇧🇷 Brazil: 1.234,56
+- 🇪🇨 Ecuador: 1.234,56
+
+**American/English Format** (comma for thousands, period for decimals):
+- 🇩🇴 Dominican Republic: 1,234.56
+- 🇸🇻 El Salvador: 1,234.56
+- 🇬🇹 Guatemala: 1,234.56
+- 🇭🇳 Honduras: 1,234.56
+- 🇲🇽 Mexico: 1,234.56
+- 🇳🇮 Nicaragua: 1,234.56
+- 🇵🇦 Panama: 1,234.56
+- 🇵🇪 Peru: 1,234.56
+
+**Special Cases**:
+- 🇨🇷 Costa Rica: 1 234,56 (space for thousands)
+- 🇨🇺 Cuba: 1 234,56 (space for thousands)
+
+**Other Regions**:
+- 🇺🇸 United States: 1,234.56
+- 🇬🇧 United Kingdom: 1,234.56
+- 🇪🇸 Spain: 1.234,56
+- 🇫🇷 France: 1 234,56
+- 🇩🇪 Germany: 1.234,56
+- 🇮🇳 India: 1,23,456.78 (Lakhs system)
+- And 30+ more countries
+
+### Implementation Details
+
+#### React Hook
+```typescript
+const {
+  formatNumber,       // Format plain numbers
+  formatCurrency,     // Format with currency
+  formatNumberForCountry,  // Format for specific country
+  getDecimalSeparator,     // Get user's decimal separator
+  getThousandsSeparator,   // Get user's thousands separator
+  parseLocalizedNumber,    // Parse formatted string to number
+  userCountryCode,         // User's detected country
+  locale                   // User's locale string
+} = useNumberFormat();
+```
+
+#### Input Field Formatting
+```typescript
+import { formatNumberInput } from '../utils/numberFormatting';
+
+// Real-time formatting while user types
+const handleAmountChange = (value: string) => {
+  const { formatted, raw } = formatNumberInput(value, userCountryCode, {
+    decimals: 2
+  });
+  setDisplayValue(formatted);  // What user sees
+  setNumericValue(raw);        // Actual number for calculations
+};
+```
+
+### Integration Status
+
+The number formatting system is fully integrated in:
+- ✅ **TradeChatScreen**: Trade amounts, rates, and percentages
+- ✅ **ExchangeScreen**: Crypto/fiat amounts and exchange rates
+- ✅ **SendToFriendScreen**: Send amounts
+- ✅ **SendWithAddressScreen**: Send amounts
+- ✅ **AccountDetailScreen**: Balance and exchange amounts
+
+### Benefits
+
+1. **User Comfort**: Users see numbers in their familiar format
+2. **Reduced Errors**: Less confusion about decimal/thousand separators
+3. **Professional Appearance**: Consistent, localized formatting
+4. **Easy Maintenance**: Centralized formatting logic
+5. **Scalability**: Easy to add new countries/locales
+
+This internationalization system ensures that Confío feels native to users across Latin America and beyond, building trust through familiar number formatting.
+
 ## 🚀 Development Setup
 
 ### Prerequisites
@@ -834,7 +966,34 @@ This multi-currency system ensures that Confío users across Latin America have 
    make migrate
    ```
 
-4. **Run Django Channels Development Server**
+4. **Setup Unified Payment Method System**
+   ```bash
+   # Create and apply migrations for user and P2P models
+   python manage.py makemigrations users p2p_exchange
+   python manage.py migrate
+   
+   # Populate initial country and bank data
+   python manage.py populate_bank_data
+   
+   # Populate P2P payment methods (banks + fintech solutions)
+   python manage.py populate_payment_methods
+   ```
+   This will:
+   - Create database tables for Country, Bank, and BankInfo models (now called PaymentMethod)
+   - Create P2PPaymentMethod tables with provider types and requirements
+   - Populate countries with specific ID requirements (Venezuela requires Cédula, Colombia doesn't)
+   - Pre-load major banks for each supported LATAM country (83+ banks)
+   - Add fintech solutions (Nequi, Yape, PayPal, Mercado Pago, etc.)
+   - Create unified payment method system supporting both banks and fintech
+   - Enable flexible recipient fields (phone for Nequi, email for PayPal, etc.)
+   
+   **Payment Method Breakdown:**
+   - **Traditional Banks**: 83 (across Venezuela, Colombia, Argentina, Peru, Mexico, etc.)
+   - **Fintech/Digital Wallets**: 13 (Nequi, PayPal, Yape, DaviPlata, Mercado Pago, etc.)
+   - **Cash/Physical**: 2 (OXXO Pay, Efectivo)
+   - **Total**: 107+ payment methods
+
+5. **Run Django Channels Development Server**
    ```bash
    # Primary option: Django Channels with Daphne (supports WebSockets)
    make runserver
@@ -848,7 +1007,7 @@ This multi-currency system ensures that Confío users across Latin America have 
    - Provide GraphQL API endpoints
    - Support WebSocket connections for real-time P2P chat
 
-5. **Development Workflow**
+6. **Development Workflow**
    - For React development: `yarn start` (runs on port 3000)
    - For Django development: `make runserver` (runs on port 8000 with WebSocket support)
    - After making React changes, run `yarn build` to update the Django-served version
@@ -1023,6 +1182,181 @@ The project maintains country code mappings in two locations:
    - Ensures consistent country code handling across the application
 
 Both files maintain the same list of countries and codes, with the client version including additional UI elements (flags) and the server version focusing on validation and formatting.
+
+## 🚀 Deployment Guide
+
+This section covers the essential steps for setting up Confío in production or development environments.
+
+### Database Setup & Migrations
+
+#### Initial Setup
+```bash
+# 1. Create Python virtual environment
+python -m venv myvenv
+source myvenv/bin/activate  # On Windows: myvenv\Scripts\activate
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Setup PostgreSQL database
+# Create database and user (adjust credentials as needed)
+createdb confio_db
+createuser confio_user --createdb
+
+# 4. Configure environment variables in .env file
+DB_NAME=confio_db
+DB_USER=confio_user
+DB_PASSWORD=your_password
+DB_HOST=localhost
+DB_PORT=5432
+REDIS_URL=redis://localhost:6379/0
+```
+
+#### Core System Migrations
+```bash
+# Apply all initial migrations
+python manage.py migrate
+
+# Create admin user (optional)
+python manage.py createsuperuser
+```
+
+### Unified Payment Method System Setup
+
+**⚠️ Critical Step**: The unified payment method system requires specific migration order and data population.
+
+#### Step 1: Run Migrations
+```bash
+# Create migrations for both apps
+python manage.py makemigrations users p2p_exchange
+
+# Apply migrations
+python manage.py migrate
+```
+
+#### Step 2: Populate Base Data
+```bash
+# Populate countries and banks (83+ banks across LATAM)
+python manage.py populate_bank_data
+
+# Populate unified P2P payment methods
+python manage.py populate_payment_methods
+```
+
+#### Step 3: Verify Installation
+```bash
+# Check payment method counts
+python manage.py shell -c "
+from p2p_exchange.models import P2PPaymentMethod
+print(f'Total payment methods: {P2PPaymentMethod.objects.count()}')
+print(f'Banks: {P2PPaymentMethod.objects.filter(provider_type="bank").count()}')
+print(f'Fintech: {P2PPaymentMethod.objects.filter(provider_type="fintech").count()}')
+"
+```
+
+Expected output:
+```
+Total payment methods: 107
+Banks: 83
+Fintech: 13
+```
+
+### Payment Method System Architecture
+
+The unified system provides:
+
+**🏦 Traditional Banks (83+ supported)**
+- Country-specific banks across Venezuela, Colombia, Argentina, Peru, Mexico, Chile, Bolivia, Ecuador
+- Bank-specific account types (checking, savings, payroll)
+- Country-specific ID requirements (Cédula in Venezuela, optional in Colombia)
+
+**📱 Fintech Solutions (13+ supported)**
+- **Mobile Wallets**: Nequi (CO), Yape (PE), DaviPlata (CO), Plin (PE)
+- **Global Platforms**: PayPal, Wise (TransferWise)
+- **Regional Solutions**: Mercado Pago (AR), Ualá (AR), Zelle (US)
+- **Cash Options**: OXXO Pay (MX), Efectivo (Global)
+
+**🔧 Dynamic Field Requirements**
+- Phone numbers for mobile wallets (Nequi, Yape)
+- Email addresses for global platforms (PayPal, Wise)
+- Account numbers for traditional banks
+- Usernames for some fintech platforms
+- Country-specific validation (ID requirements)
+
+### Frontend Integration
+
+The React Native app automatically supports the unified payment method system:
+
+```typescript
+// GraphQL query now includes all payment method types
+const { data } = useQuery(GET_P2P_PAYMENT_METHODS, {
+  variables: { countryCode: selectedCountry }
+});
+
+// Dynamic form fields based on payment method requirements
+if (paymentMethod.requiresPhone) {
+  // Show phone number field
+}
+if (paymentMethod.requiresEmail) {
+  // Show email field
+}
+if (paymentMethod.providerType === 'bank') {
+  // Show bank-specific fields (account type, ID number)
+}
+```
+
+### Troubleshooting
+
+#### Missing Database Columns Error
+If you see `column p2p_exchange_p2ppaymentmethod.provider_type does not exist`:
+
+```bash
+# Check migration status
+python manage.py showmigrations p2p_exchange users
+
+# If migrations are missing, create them
+python manage.py makemigrations p2p_exchange
+python manage.py migrate
+
+# Re-populate payment methods
+python manage.py populate_payment_methods --update-existing
+```
+
+#### Empty Payment Methods
+If GraphQL returns empty payment method lists:
+
+```bash
+# Verify data population
+python manage.py shell -c "from p2p_exchange.models import P2PPaymentMethod; print(P2PPaymentMethod.objects.count())"
+
+# If count is 0, run population command
+python manage.py populate_payment_methods
+```
+
+#### GraphQL Schema Errors
+If you see field errors like `Cannot query field 'providerType'`:
+
+1. Ensure Django server is restarted after schema changes
+2. Check that all migrations are applied
+3. Verify P2PPaymentMethod model has all required fields
+
+### Production Considerations
+
+1. **Database Performance**: Consider indexing frequently queried fields:
+   ```sql
+   CREATE INDEX idx_payment_method_country_active ON p2p_exchange_p2ppaymentmethod(country_code, is_active);
+   CREATE INDEX idx_payment_method_provider_type ON p2p_exchange_p2ppaymentmethod(provider_type);
+   ```
+
+2. **Security**: Ensure sensitive bank information is properly protected:
+   - Use HTTPS for all API endpoints
+   - Implement proper access controls for bank info
+   - Consider encryption for stored payment details
+
+3. **Monitoring**: Track payment method usage and success rates:
+   - Monitor which payment methods are most popular
+   - Track conversion rates by payment method type
+   - Alert on payment method failures
 
 ## 📱 App Verification: `.well-known` Directory & nginx Configuration
 

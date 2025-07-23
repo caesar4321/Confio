@@ -88,6 +88,7 @@ export const ProfileScreen = () => {
 
   const profileOptions = [
     { name: "Verificación", icon: "user-check", onPress: () => navigation.navigate('Verification') },
+    { name: "Métodos de Pago", icon: "credit-card", onPress: () => navigation.navigate('BankInfo') },
     /* Temporarily hidden until 2FA and advanced security features are implemented
     { name: "Seguridad", icon: "shield", onPress: () => {} },
     { name: "Notificaciones", icon: "bell", onPress: () => {} },

@@ -14,6 +14,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
 import { useCurrency } from '../hooks/useCurrency';
+import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 
 type TraderProfileRouteProp = RouteProp<MainStackParamList, 'TraderProfile'>;
 type TraderProfileNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TraderProfile'>;
@@ -84,9 +85,11 @@ export const TraderProfileScreen: React.FC = () => {
               {offer.paymentMethods.map((method, index) => (
                 <View key={method.id || index} style={styles.paymentMethodRow}>
                   <View style={styles.paymentMethodIcon}>
-                    <Text style={styles.paymentMethodIconText}>
-                      {(method.displayName || method.name || 'M').charAt(0)}
-                    </Text>
+                    <Icon 
+                      name={getPaymentMethodIcon(method.icon, method.providerType, method.displayName || method.name)} 
+                      size={14} 
+                      color="#fff" 
+                    />
                   </View>
                   <Text style={styles.paymentMethodName}>
                     {method.displayName || method.name}

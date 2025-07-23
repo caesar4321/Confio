@@ -20,6 +20,9 @@ import { CREATE_P2P_OFFER, GET_P2P_PAYMENT_METHODS } from '../apollo/queries';
 import { countries, Country } from '../utils/countries';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { useCurrency } from '../hooks/useCurrency';
+import { useAccount } from '../contexts/AccountContext';
+import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
+import { useNumberFormat } from '../utils/numberFormatting';
 
 // Colors from the design
 const colors = {
@@ -52,6 +55,12 @@ export const CreateOfferScreen = () => {
   
   // Use currency system based on selected country
   const { currency, formatAmount, inputFormatting } = useCurrency();
+  
+  // Use number formatting based on user's locale
+  const { formatNumber } = useNumberFormat();
+  
+  // Get current account context
+  const { activeAccount } = useAccount();
   
   // GraphQL queries and mutations
   const { data: paymentMethodsData, loading: paymentMethodsLoading, error: paymentMethodsError } = useQuery(GET_P2P_PAYMENT_METHODS, {
@@ -140,6 +149,7 @@ export const CreateOfferScreen = () => {
             paymentMethodIds: selectedPaymentMethods,
             countryCode: selectedCountry?.[2], // Pass the country code
             terms: terms.trim(),
+            accountId: activeAccount?.id, // Pass the current account ID
           },
         },
       });
@@ -150,8 +160,25 @@ export const CreateOfferScreen = () => {
           'Tu oferta ha sido creada exitosamente',
           [
             {
-              text: 'OK',
-              onPress: () => navigation.goBack(),
+              text: 'Ver Mis Ofertas',
+              onPress: () => {
+                // Navigate back to ExchangeScreen and show user's offers
+                navigation.navigate('BottomTabs', { 
+                  screen: 'Exchange', 
+                  params: { showMyOffers: true, refreshData: true } 
+                });
+              },
+            },
+            {
+              text: 'Continuar',
+              onPress: () => {
+                // Navigate back and trigger refresh
+                navigation.navigate('BottomTabs', { 
+                  screen: 'Exchange', 
+                  params: { refreshData: true } 
+                });
+              },
+              style: 'cancel'
             },
           ]
         );
@@ -339,9 +366,11 @@ export const CreateOfferScreen = () => {
                   onPress={() => togglePaymentMethod(method.id)}
                 >
                   <View style={styles.paymentMethodIcon}>
-                    <Text style={styles.paymentMethodIconText}>
-                      {method.displayName.charAt(0)}
-                    </Text>
+                    <Icon 
+                      name={getPaymentMethodIcon(method.icon, method.providerType, method.displayName)} 
+                      size={16} 
+                      color="#fff" 
+                    />
                   </View>
                   <Text style={styles.paymentMethodName}>{method.displayName}</Text>
                   {selectedPaymentMethods.includes(method.id) && (

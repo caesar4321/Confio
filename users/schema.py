@@ -1,7 +1,7 @@
 import graphene
 from graphene_django import DjangoObjectType
 from django.contrib.auth import get_user_model
-from .models import User, Account, IdentityVerification, Business
+from .models import User, Account, IdentityVerification, Business, Country, Bank, BankInfo
 from .country_codes import COUNTRY_CODES
 from graphql_jwt.utils import jwt_encode, jwt_decode
 from graphql_jwt.shortcuts import create_refresh_token
@@ -10,6 +10,7 @@ import logging
 from django.utils.translation import gettext as _
 from .legal.documents import TERMS, PRIVACY, DELETION
 from graphql import GraphQLError
+# Removed circular import - P2PPaymentMethodType will be referenced by string
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -83,6 +84,64 @@ class AccountType(DjangoObjectType):
 	def resolve_avatar_letter(self, info):
 		return self.avatar_letter
 
+
+class CountryType(DjangoObjectType):
+	class Meta:
+		model = Country
+		fields = ('id', 'code', 'name', 'flag_emoji', 'currency_code', 'currency_symbol', 
+		         'requires_identification', 'identification_name', 'identification_format',
+		         'account_number_length', 'supports_phone_payments', 'is_active', 'display_order')
+
+
+class BankType(DjangoObjectType):
+	account_type_choices = graphene.List(graphene.String)
+	
+	class Meta:
+		model = Bank
+		fields = ('id', 'country', 'code', 'name', 'short_name', 'supports_checking', 
+		         'supports_savings', 'supports_payroll', 'is_active', 'display_order')
+	
+	def resolve_account_type_choices(self, info):
+		return [choice[0] for choice in self.get_account_type_choices()]
+
+
+class BankInfoType(DjangoObjectType):
+	# Define computed fields explicitly
+	masked_account_number = graphene.String()
+	full_bank_name = graphene.String()
+	summary_text = graphene.String()
+	requires_identification = graphene.Boolean()
+	identification_label = graphene.String()
+	payment_details = graphene.JSONString()
+	payment_method = graphene.Field('p2p_exchange.schema.P2PPaymentMethodType')
+	
+	class Meta:
+		model = BankInfo
+		fields = ('id', 'account', 'country', 'bank', 'account_holder_name', 'account_number',
+		         'account_type', 'identification_number', 'phone_number', 'email', 'username', 'is_default',
+		         'is_public', 'is_verified', 'verified_at', 'created_at', 'updated_at')
+	
+	def resolve_masked_account_number(self, info):
+		return self.get_masked_account_number()
+	
+	def resolve_full_bank_name(self, info):
+		return self.full_bank_name
+	
+	def resolve_summary_text(self, info):
+		return self.summary_text
+	
+	def resolve_requires_identification(self, info):
+		return self.requires_identification
+	
+	def resolve_identification_label(self, info):
+		return self.identification_label
+	
+	def resolve_payment_details(self, info):
+		return self.get_payment_details()
+	
+	def resolve_payment_method(self, info):
+		return self.payment_method
+
 class CountryCodeType(graphene.ObjectType):
 	code = graphene.String()
 	name = graphene.String()
@@ -139,6 +198,12 @@ class Query(graphene.ObjectType):
 		docType=graphene.String(required=True),
 		language=graphene.String()
 	)
+	
+	# Bank info queries
+	countries = graphene.List(CountryType, is_active=graphene.Boolean())
+	banks = graphene.List(BankType, country_code=graphene.String())
+	user_bank_accounts = graphene.List(BankInfoType, account_id=graphene.ID())
+	bank_info = graphene.Field(BankInfoType, id=graphene.ID(required=True))
 
 	def resolve_legalDocument(self, info, docType, language=None):
 		logger.info(f"Received legal document request for type: {docType}, language: {language}")
@@ -261,6 +326,51 @@ class Query(graphene.ObjectType):
 		}
 		
 		return mock_balances.get(normalized_token_type, '0')
+
+	def resolve_countries(self, info, is_active=None):
+		"""Resolve available countries for bank accounts"""
+		queryset = Country.objects.all()
+		if is_active is not None:
+			queryset = queryset.filter(is_active=is_active)
+		return queryset.order_by('display_order', 'name')
+
+	def resolve_banks(self, info, country_code=None):
+		"""Resolve banks for a specific country"""
+		queryset = Bank.objects.filter(is_active=True)
+		if country_code:
+			queryset = queryset.filter(country__code=country_code)
+		return queryset.order_by('country__display_order', 'display_order', 'name')
+
+	def resolve_user_bank_accounts(self, info, account_id=None):
+		"""Resolve bank accounts for the current user"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return []
+		
+		queryset = BankInfo.objects.select_related('country', 'bank', 'account')
+		
+		if account_id:
+			# Filter by specific account if provided
+			queryset = queryset.filter(account_id=account_id, account__user=user)
+		else:
+			# Return all bank accounts for user's accounts
+			queryset = queryset.filter(account__user=user)
+		
+		return queryset.order_by('-is_default', '-created_at')
+
+	def resolve_bank_info(self, info, id):
+		"""Resolve specific bank info by ID"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return None
+		
+		try:
+			return BankInfo.objects.select_related('country', 'bank', 'account').get(
+				id=id, 
+				account__user=user
+			)
+		except BankInfo.DoesNotExist:
+			return None
 
 class UpdatePhoneNumber(graphene.Mutation):
 	class Arguments:
@@ -720,6 +830,236 @@ class RefreshToken(graphene.Mutation):
 		except Exception as e:
 			raise Exception(str(e))
 
+
+class CreateBankInfo(graphene.Mutation):
+	class Arguments:
+		account_id = graphene.ID(required=True)
+		payment_method_id = graphene.ID(required=True)
+		account_holder_name = graphene.String(required=True)
+		account_number = graphene.String()
+		phone_number = graphene.String()
+		email = graphene.String()
+		username = graphene.String()
+		account_type = graphene.String()
+		identification_number = graphene.String()
+		is_default = graphene.Boolean()
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	bank_info = graphene.Field(BankInfoType)
+
+	@classmethod
+	def mutate(cls, root, info, account_id, payment_method_id, account_holder_name, 
+	          account_number=None, phone_number=None, email=None, username=None,
+	          account_type=None, identification_number=None, is_default=False):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return CreateBankInfo(success=False, error="Authentication required")
+
+		try:
+			# Verify account belongs to user
+			account = Account.objects.get(id=account_id, user=user)
+			
+			# Import P2PPaymentMethod
+			from p2p_exchange.models import P2PPaymentMethod
+			
+			# Verify payment method exists
+			payment_method = P2PPaymentMethod.objects.get(id=payment_method_id, is_active=True)
+			
+			# Validate required fields based on payment method type
+			if payment_method.requires_account_number and not account_number:
+				return CreateBankInfo(
+					success=False,
+					error="Número de cuenta es requerido para este método de pago"
+				)
+			
+			if payment_method.requires_phone and not phone_number:
+				return CreateBankInfo(
+					success=False,
+					error="Número de teléfono es requerido para este método de pago"
+				)
+			
+			if payment_method.requires_email and not email:
+				return CreateBankInfo(
+					success=False,
+					error="Email es requerido para este método de pago"
+				)
+			
+			# For bank payment methods, validate identification requirement
+			if payment_method.bank and payment_method.bank.country.requires_identification and not identification_number:
+				return CreateBankInfo(
+					success=False,
+					error=f"{payment_method.bank.country.identification_name} es requerido para cuentas bancarias en {payment_method.bank.country.name}"
+				)
+			
+			# Check for duplicate payment method
+			duplicate_filter = {
+				'account': account,
+				'payment_method': payment_method
+			}
+			
+			# Add specific duplicate checks based on payment method type
+			if payment_method.requires_account_number and account_number:
+				duplicate_filter['account_number'] = account_number
+			elif payment_method.requires_phone and phone_number:
+				duplicate_filter['phone_number'] = phone_number
+			elif payment_method.requires_email and email:
+				duplicate_filter['email'] = email
+			
+			existing = BankInfo.objects.filter(**duplicate_filter).first()
+			
+			if existing:
+				return CreateBankInfo(
+					success=False,
+					error="Ya tienes registrado este método de pago"
+				)
+
+			# Create bank info
+			bank_info = BankInfo.objects.create(
+				account=account,
+				payment_method=payment_method,
+				account_holder_name=account_holder_name.strip(),
+				account_number=account_number.strip() if account_number else None,
+				phone_number=phone_number.strip() if phone_number else None,
+				email=email.strip() if email else None,
+				username=username.strip() if username else None,
+				account_type=account_type,
+				identification_number=identification_number.strip() if identification_number else None,
+				is_default=is_default
+			)
+			
+			# Set legacy fields for backward compatibility (if it's a bank payment method)
+			if payment_method.bank:
+				bank_info.bank = payment_method.bank
+				bank_info.country = payment_method.bank.country
+				bank_info.save()
+
+			return CreateBankInfo(success=True, error=None, bank_info=bank_info)
+
+		except Account.DoesNotExist:
+			return CreateBankInfo(success=False, error="Cuenta no encontrada")
+		except P2PPaymentMethod.DoesNotExist:
+			return CreateBankInfo(success=False, error="Método de pago no encontrado")
+		except Exception as e:
+			logger.error(f"Error creating bank info: {str(e)}")
+			return CreateBankInfo(success=False, error="Error interno del servidor")
+
+
+class UpdateBankInfo(graphene.Mutation):
+	class Arguments:
+		bank_info_id = graphene.ID(required=True)
+		account_holder_name = graphene.String(required=True)
+		account_number = graphene.String(required=True)
+		account_type = graphene.String(required=True)
+		identification_number = graphene.String()
+		is_default = graphene.Boolean()
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	bank_info = graphene.Field(BankInfoType)
+
+	@classmethod
+	def mutate(cls, root, info, bank_info_id, account_holder_name, account_number,
+	          account_type, identification_number=None, is_default=False):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return UpdateBankInfo(success=False, error="Authentication required")
+
+		try:
+			# Get bank info and verify ownership
+			bank_info = BankInfo.objects.select_related('country', 'bank', 'account').get(
+				id=bank_info_id,
+				account__user=user
+			)
+			
+			# Validate identification requirement
+			if bank_info.country.requires_identification and not identification_number:
+				return UpdateBankInfo(
+					success=False,
+					error=f"{bank_info.country.identification_name} es requerido para cuentas bancarias en {bank_info.country.name}"
+				)
+
+			# Update bank info
+			bank_info.account_holder_name = account_holder_name.strip()
+			bank_info.account_number = account_number.strip()
+			bank_info.account_type = account_type
+			bank_info.identification_number = identification_number.strip() if identification_number else None
+			bank_info.is_default = is_default
+			bank_info.save()
+
+			return UpdateBankInfo(success=True, error=None, bank_info=bank_info)
+
+		except BankInfo.DoesNotExist:
+			return UpdateBankInfo(success=False, error="Información bancaria no encontrada")
+		except Exception as e:
+			logger.error(f"Error updating bank info: {str(e)}")
+			return UpdateBankInfo(success=False, error="Error interno del servidor")
+
+
+class DeleteBankInfo(graphene.Mutation):
+	class Arguments:
+		bank_info_id = graphene.ID(required=True)
+
+	success = graphene.Boolean()
+	error = graphene.String()
+
+	@classmethod
+	def mutate(cls, root, info, bank_info_id):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return DeleteBankInfo(success=False, error="Authentication required")
+
+		try:
+			# Get bank info and verify ownership
+			bank_info = BankInfo.objects.get(
+				id=bank_info_id,
+				account__user=user
+			)
+
+			# Soft delete the bank info
+			bank_info.soft_delete()
+
+			return DeleteBankInfo(success=True, error=None)
+
+		except BankInfo.DoesNotExist:
+			return DeleteBankInfo(success=False, error="Información bancaria no encontrada")
+		except Exception as e:
+			logger.error(f"Error deleting bank info: {str(e)}")
+			return DeleteBankInfo(success=False, error="Error interno del servidor")
+
+
+class SetDefaultBankInfo(graphene.Mutation):
+	class Arguments:
+		bank_info_id = graphene.ID(required=True)
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	bank_info = graphene.Field(BankInfoType)
+
+	@classmethod
+	def mutate(cls, root, info, bank_info_id):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return SetDefaultBankInfo(success=False, error="Authentication required")
+
+		try:
+			# Get bank info and verify ownership
+			bank_info = BankInfo.objects.get(
+				id=bank_info_id,
+				account__user=user
+			)
+
+			# Set as default (this will unset others automatically)
+			bank_info.set_as_default()
+
+			return SetDefaultBankInfo(success=True, error=None, bank_info=bank_info)
+
+		except BankInfo.DoesNotExist:
+			return SetDefaultBankInfo(success=False, error="Información bancaria no encontrada")
+		except Exception as e:
+			logger.error(f"Error setting default bank info: {str(e)}")
+			return SetDefaultBankInfo(success=False, error="Error interno del servidor")
+
 class Mutation(graphene.ObjectType):
 	update_phone_number = UpdatePhoneNumber.Field()
 	update_username = UpdateUsername.Field()
@@ -732,3 +1072,9 @@ class Mutation(graphene.ObjectType):
 	create_business = CreateBusiness.Field()
 	update_business = UpdateBusiness.Field()
 	update_account_sui_address = UpdateAccountSuiAddress.Field()
+	
+	# Bank info mutations
+	create_bank_info = CreateBankInfo.Field()
+	update_bank_info = UpdateBankInfo.Field()
+	delete_bank_info = DeleteBankInfo.Field()
+	set_default_bank_info = SetDefaultBankInfo.Field()

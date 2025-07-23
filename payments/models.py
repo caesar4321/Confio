@@ -143,6 +143,14 @@ class PaymentTransaction(SoftDeleteModel):
         help_text="Sui transaction digest (0x + 32 bytes, 66 hex characters total)"
     )
     error_message = models.TextField(blank=True)
+    
+    # Idempotency key for preventing duplicate payments
+    idempotency_key = models.CharField(
+        max_length=64,
+        blank=True,
+        null=True,
+        help_text='Optional key to prevent duplicate payments'
+    )
 
     # Invoice reference
     invoice = models.ForeignKey(
@@ -161,10 +169,26 @@ class PaymentTransaction(SoftDeleteModel):
             models.Index(fields=['payer_address']),
             models.Index(fields=['merchant_address']),
             models.Index(fields=['created_at']),
+            models.Index(fields=['idempotency_key']),
+        ]
+        constraints = [
+            # Prevent duplicate payments with same idempotency key from same user for same invoice
+            models.UniqueConstraint(
+                fields=['payer_user', 'invoice', 'idempotency_key'],
+                condition=models.Q(idempotency_key__isnull=False, deleted_at__isnull=True),
+                name='unique_payment_idempotency'
+            ),
+            # Prevent multiple successful payments for the same invoice (additional safety)
+            models.UniqueConstraint(
+                fields=['invoice'],
+                condition=models.Q(status__in=['CONFIRMED'], deleted_at__isnull=True),
+                name='unique_confirmed_payment_per_invoice'
+            )
         ]
 
     def __str__(self):
-        return f"PAY-{self.payment_transaction_id}: {self.token_type} {self.amount} from {self.payer_user} to {self.merchant_business.name}"
+        merchant_name = self.merchant_business.name if self.merchant_business else (self.merchant_user.username if self.merchant_user else "Unknown Merchant")
+        return f"PAY-{self.payment_transaction_id}: {self.token_type} {self.amount} from {self.payer_user} to {merchant_name}"
 
 class Invoice(SoftDeleteModel):
     """Model for storing payment invoices (what merchants create to request payment)"""
@@ -286,7 +310,8 @@ class Invoice(SoftDeleteModel):
         ]
 
     def __str__(self):
-        return f"INV-{self.invoice_id}: {self.token_type} {self.amount} by {self.merchant_business.name}"
+        merchant_name = self.merchant_business.name if self.merchant_business else (self.merchant_user.username if self.merchant_user else "Unknown Merchant")
+        return f"INV-{self.invoice_id}: {self.token_type} {self.amount} by {merchant_name}"
 
     @property
     def is_expired(self):

@@ -13,7 +13,7 @@ export type BottomTabParamList = {
   Contacts: undefined;
   Scan: { mode?: 'cobrar' | 'pagar' };
   Charge: undefined;
-  Exchange: undefined;
+  Exchange: { showMyOffers?: boolean; refreshData?: boolean };
   Profile: undefined;
 };
 
@@ -22,6 +22,7 @@ export type MainStackParamList = {
   BottomTabs: NavigatorScreenParams<BottomTabParamList>;
   LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
   Verification: undefined;
+  BankInfo: undefined;
   ConfioAddress: undefined;
   Notification: undefined;
   CreateBusiness: undefined;
@@ -43,6 +44,7 @@ export type MainStackParamList = {
       isOnline: boolean;
       lastSeen: string;
       terms?: string;
+      countryCode?: string;
     };
     crypto: 'cUSD' | 'CONFIO';
   };
@@ -60,6 +62,7 @@ export type MainStackParamList = {
       verified: boolean;
       isOnline: boolean;
       lastSeen: string;
+      countryCode?: string;
     };
     crypto: 'cUSD' | 'CONFIO';
     tradeType: 'buy' | 'sell';
@@ -78,11 +81,13 @@ export type MainStackParamList = {
       verified: boolean;
       isOnline: boolean;
       lastSeen: string;
+      countryCode?: string;
     };
     crypto: 'cUSD' | 'CONFIO';
     amount: string;
     tradeType: 'buy' | 'sell';
     tradeId: string;
+    selectedPaymentMethodId?: string;
   };
   ActiveTrade: {
     trade: {

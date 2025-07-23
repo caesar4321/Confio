@@ -19,12 +19,51 @@ from .default_payment_methods import get_payment_methods_for_country
 
 User = get_user_model()
 
+# Removed circular import - BankType will be imported dynamically
+
 class P2PPaymentMethodType(graphene.ObjectType):
     id = graphene.ID()
     name = graphene.String()
     display_name = graphene.String()
     icon = graphene.String()
     is_active = graphene.Boolean()
+    provider_type = graphene.String()
+    requires_phone = graphene.Boolean()
+    requires_email = graphene.Boolean()
+    requires_account_number = graphene.Boolean()
+    country_code = graphene.String()
+    bank = graphene.Field('users.schema.BankType')
+    country = graphene.Field('users.schema.CountryType')
+    
+    # GraphQL camelCase aliases
+    displayName = graphene.String()
+    isActive = graphene.Boolean()
+    providerType = graphene.String()
+    requiresPhone = graphene.Boolean()
+    requiresEmail = graphene.Boolean()
+    requiresAccountNumber = graphene.Boolean()
+    countryCode = graphene.String()
+    
+    def resolve_displayName(self, info):
+        return self.display_name
+        
+    def resolve_isActive(self, info):
+        return self.is_active
+        
+    def resolve_providerType(self, info):
+        return self.provider_type
+        
+    def resolve_requiresPhone(self, info):
+        return self.requires_phone
+        
+    def resolve_requiresEmail(self, info):
+        return self.requires_email
+        
+    def resolve_requiresAccountNumber(self, info):
+        return self.requires_account_number
+        
+    def resolve_countryCode(self, info):
+        return self.country_code
 
 class P2PUserStatsType(DjangoObjectType):
     # Add computed fields for better frontend integration
@@ -96,14 +135,20 @@ class P2POfferType(DjangoObjectType):
             db_payment_methods = self.payment_methods.filter(is_active=True)
             payment_methods = []
             
-            for i, db_method in enumerate(db_payment_methods):
+            for db_method in db_payment_methods:
                 # Create a simple object that matches P2PPaymentMethodType fields
                 payment_method = type('PaymentMethod', (), {
-                    'id': str(i + 1),  # Simple sequential ID
+                    'id': str(db_method.id),
                     'name': db_method.name,
                     'display_name': db_method.display_name,
                     'icon': db_method.icon,
-                    'is_active': db_method.is_active
+                    'is_active': db_method.is_active,
+                    'provider_type': db_method.provider_type,
+                    'requires_phone': db_method.requires_phone,
+                    'requires_email': db_method.requires_email,
+                    'requires_account_number': db_method.requires_account_number,
+                    'country_code': db_method.country_code,
+                    'bank': db_method.bank
                 })()
                 payment_methods.append(payment_method)
             
@@ -141,7 +186,13 @@ class P2PTradeType(DjangoObjectType):
                 'name': self.payment_method.name,
                 'display_name': self.payment_method.display_name,
                 'icon': self.payment_method.icon,
-                'is_active': self.payment_method.is_active
+                'is_active': self.payment_method.is_active,
+                'provider_type': self.payment_method.provider_type,
+                'requires_phone': self.payment_method.requires_phone,
+                'requires_email': self.payment_method.requires_email,
+                'requires_account_number': self.payment_method.requires_account_number,
+                'country_code': self.payment_method.country_code,
+                'bank': self.payment_method.bank
             })()
         return None
     
@@ -198,13 +249,13 @@ class CreateP2POfferInput(graphene.InputObjectType):
     country_code = graphene.String(required=True)  # Required country code for the offer
     terms = graphene.String()
     response_time_minutes = graphene.Int()
-    account_id = graphene.ID(required=False)  # Optional: specify which account to use
+    account_id = graphene.String(required=False)  # Optional: specify which account to use
 
 class CreateP2PTradeInput(graphene.InputObjectType):
     offerId = graphene.ID(required=True)
     cryptoAmount = graphene.Decimal(required=True)
     paymentMethodId = graphene.ID(required=True)
-    accountId = graphene.ID(required=False)  # Optional: specify which account to use
+    accountId = graphene.String(required=False)  # Optional: specify which account to use
 
 class UpdateP2PTradeStatusInput(graphene.InputObjectType):
     trade_id = graphene.ID(required=True)
@@ -274,50 +325,35 @@ class CreateP2POffer(graphene.Mutation):
                     errors=["No payment methods provided"]
                 )
             
-            # Get all available payment methods from hardcoded data to validate
-            all_country_methods = []
-            for country_code in ['VE', 'US', 'AS', 'AR', 'CO', 'PE', 'MX', '']:  # Include global methods
-                all_country_methods.extend(get_payment_methods_for_country(country_code))
-            
-            # Create a lookup of valid method names
-            valid_methods_lookup = {method['name']: method for method in all_country_methods}
-            
-            # Validate payment method IDs and get or create database records
+            # Validate payment method IDs against database records
             payment_methods = []
             for method_id in input.payment_method_ids:
                 try:
-                    # Convert ID to index (IDs are 1-based, convert to 0-based)
-                    method_index = int(method_id) - 1
-                    
-                    # Get the method data by index from the same list we serve to frontend
-                    # Use the country code from the input to get the exact same list
-                    all_methods_data = get_payment_methods_for_country(input.country_code or '')
-                    
-                    if method_index < 0 or method_index >= len(all_methods_data):
-                        return CreateP2POffer(
-                            offer=None,
-                            success=False,
-                            errors=[f"ID de método de pago inválido: {method_id}. País: {input.country_code or 'global'}, métodos disponibles: {len(all_methods_data)}"]
-                        )
-                    
-                    method_data = all_methods_data[method_index]
-                    
-                    # Get or create the payment method in database for offer linking
-                    payment_method, created = P2PPaymentMethod.objects.get_or_create(
-                        name=method_data['name'],
-                        defaults={
-                            'display_name': method_data['display_name'],
-                            'icon': method_data['icon'],
-                            'is_active': method_data['is_active'],
-                        }
+                    # Look up payment method by database ID
+                    payment_method = P2PPaymentMethod.objects.get(
+                        id=method_id,
+                        country_code=input.country_code,
+                        is_active=True
                     )
                     payment_methods.append(payment_method)
                     
-                except (ValueError, IndexError):
+                except P2PPaymentMethod.DoesNotExist:
+                    # Get available methods count for error message
+                    available_count = P2PPaymentMethod.objects.filter(
+                        country_code=input.country_code,
+                        is_active=True
+                    ).count()
+                    
                     return CreateP2POffer(
                         offer=None,
                         success=False,
-                        errors=[f"Invalid payment method ID: {method_id}"]
+                        errors=[f"ID de método de pago inválido: {method_id}, País: {input.country_code}, métodos disponibles: {available_count}"]
+                    )
+                except (ValueError, TypeError):
+                    return CreateP2POffer(
+                        offer=None,
+                        success=False,
+                        errors=[f"Invalid payment method ID format: {method_id}"]
                     )
             
             if not payment_methods:
@@ -344,22 +380,58 @@ class CreateP2POffer(graphene.Mutation):
 
             if input.account_id:
                 from users.models import Account
-                try:
-                    account = Account.objects.get(id=input.account_id, user=user)
-                    offer_kwargs['account'] = account
+                
+                # Handle special frontend account ID format (e.g., 'personal_0', 'business_0')
+                if isinstance(input.account_id, str) and '_' in input.account_id:
+                    account_type, account_index = input.account_id.split('_', 1)
+                    account_index = int(account_index)
                     
-                    if account.account_type == 'business' and account.business:
-                        # Business offer
-                        offer_kwargs['offer_business'] = account.business
-                    else:
+                    if account_type == 'personal':
                         # Personal offer
                         offer_kwargs['offer_user'] = user
-                except Account.DoesNotExist:
-                    return CreateP2POffer(
-                        offer=None,
-                        success=False,
-                        errors=["Account not found or access denied"]
-                    )
+                    elif account_type == 'business':
+                        # Find the business account by index
+                        try:
+                            account = Account.objects.get(
+                                user=user, 
+                                account_type='business', 
+                                account_index=account_index
+                            )
+                            offer_kwargs['account'] = account
+                            
+                            if account.business:
+                                # Business offer
+                                offer_kwargs['offer_business'] = account.business
+                            else:
+                                return CreateP2POffer(
+                                    offer=None,
+                                    success=False,
+                                    errors=["Business account has no associated business"]
+                                )
+                        except Account.DoesNotExist:
+                            return CreateP2POffer(
+                                offer=None,
+                                success=False,
+                                errors=["Business account not found or access denied"]
+                            )
+                else:
+                    # Fallback: try to use account_id as a direct database ID
+                    try:
+                        account = Account.objects.get(id=input.account_id, user=user)
+                        offer_kwargs['account'] = account
+                        
+                        if account.account_type == 'business' and account.business:
+                            # Business offer
+                            offer_kwargs['offer_business'] = account.business
+                        else:
+                            # Personal offer
+                            offer_kwargs['offer_user'] = user
+                    except (Account.DoesNotExist, ValueError):
+                        return CreateP2POffer(
+                            offer=None,
+                            success=False,
+                            errors=["Account not found or access denied"]
+                        )
             else:
                 # Default to personal offer
                 offer_kwargs['offer_user'] = user
@@ -421,14 +493,6 @@ class CreateP2PTrade(graphene.Mutation):
         try:
             # Get offer
             offer = P2POffer.objects.get(id=input.offerId, status='ACTIVE')
-            
-            # Validate user can't trade with themselves
-            if offer.user == user:
-                return CreateP2PTrade(
-                    trade=None,
-                    success=False,
-                    errors=["Cannot trade with yourself"]
-                )
 
             # Validate amount
             if input.cryptoAmount < offer.min_amount or input.cryptoAmount > offer.max_amount:
@@ -445,26 +509,28 @@ class CreateP2PTrade(graphene.Mutation):
                     errors=["Insufficient available amount"]
                 )
 
-            # Validate payment method - convert sequential ID to actual database ID
-            # The frontend sends sequential IDs (1, 2, 3) but we need actual DB IDs
+            # Validate payment method - frontend sends actual database IDs
             try:
-                payment_method_index = int(input.paymentMethodId) - 1  # Convert to 0-based index
-                offer_payment_methods = list(offer.payment_methods.filter(is_active=True))
+                # Check if the payment method belongs to the offer
+                payment_method = offer.payment_methods.filter(
+                    id=input.paymentMethodId,
+                    is_active=True
+                ).first()
                 
-                if payment_method_index < 0 or payment_method_index >= len(offer_payment_methods):
+                if not payment_method:
+                    # List available payment methods for debugging
+                    available_methods = list(offer.payment_methods.filter(is_active=True).values_list('id', 'display_name'))
                     return CreateP2PTrade(
                         trade=None,
                         success=False,
-                        errors=["Payment method not found"]
+                        errors=[f"El método de pago seleccionado no está disponible para esta oferta. Métodos disponibles: {available_methods}"]
                     )
                 
-                payment_method = offer_payment_methods[payment_method_index]
-                
-            except (ValueError, IndexError):
+            except Exception as e:
                 return CreateP2PTrade(
                     trade=None,
                     success=False,
-                    errors=["Payment method not found"]
+                    errors=[f"Error al validar el método de pago: {str(e)}"]
                 )
 
             # Calculate fiat amount
@@ -479,22 +545,74 @@ class CreateP2PTrade(graphene.Mutation):
             
             if input.accountId:
                 from users.models import Account
-                try:
-                    user_account = Account.objects.get(id=input.accountId, user=user)
-                    if user_account.account_type == 'business' and user_account.business:
-                        user_entity = user_account.business
-                        user_entity_type = 'business'
-                except Account.DoesNotExist:
-                    return CreateP2PTrade(
-                        trade=None,
-                        success=False,
-                        errors=["Account not found or access denied"]
-                    )
+                
+                # Handle special frontend account ID format (e.g., 'personal_0', 'business_0')
+                if isinstance(input.accountId, str) and '_' in input.accountId:
+                    account_type, account_index = input.accountId.split('_', 1)
+                    account_index = int(account_index)
+                    
+                    if account_type == 'personal':
+                        # Keep default personal settings
+                        user_entity = user
+                        user_entity_type = 'user'
+                        user_account = None
+                    elif account_type == 'business':
+                        # Find the business account by index
+                        try:
+                            user_account = Account.objects.get(
+                                user=user, 
+                                account_type='business', 
+                                account_index=account_index
+                            )
+                            if user_account.business:
+                                user_entity = user_account.business
+                                user_entity_type = 'business'
+                            else:
+                                return CreateP2PTrade(
+                                    trade=None,
+                                    success=False,
+                                    errors=["Business account has no associated business"]
+                                )
+                        except Account.DoesNotExist:
+                            return CreateP2PTrade(
+                                trade=None,
+                                success=False,
+                                errors=["Business account not found or access denied"]
+                            )
+                else:
+                    # Fallback: try to use accountId as a direct database ID
+                    try:
+                        user_account = Account.objects.get(id=input.accountId, user=user)
+                        if user_account.account_type == 'business' and user_account.business:
+                            user_entity = user_account.business
+                            user_entity_type = 'business'
+                    except (Account.DoesNotExist, ValueError):
+                        return CreateP2PTrade(
+                            trade=None,
+                            success=False,
+                            errors=["Account not found or access denied"]
+                        )
             
             # Check offer's account type
             if offer.account and offer.account.account_type == 'business' and offer.account.business:
                 offer_entity = offer.account.business
                 offer_entity_type = 'business'
+            
+            # Validate user can't trade with themselves (after entity determination)
+            # Personal account can trade with business account even if same underlying user
+            if user_entity_type == offer_entity_type:
+                if user_entity_type == 'user' and offer_entity == user_entity:
+                    return CreateP2PTrade(
+                        trade=None,
+                        success=False,
+                        errors=["No puedes comerciar con tu propia oferta"]
+                    )
+                elif user_entity_type == 'business' and offer_entity == user_entity:
+                    return CreateP2PTrade(
+                        trade=None,
+                        success=False,
+                        errors=["No puedes comerciar con tu propia oferta"]
+                    )
 
             # Determine buyer and seller entities based on offer type
             trade_kwargs = {
@@ -651,14 +769,32 @@ class SendP2PMessage(graphene.Mutation):
             )
 
         try:
-            # Get trade and verify user is part of it
+            # Get trade and verify user is part of it using new fields
             trade = P2PTrade.objects.filter(
                 id=input.trade_id
             ).filter(
-                models.Q(buyer=user) | models.Q(seller=user)
-            ).get()
+                models.Q(buyer_user=user) | 
+                models.Q(seller_user=user) |
+                models.Q(buyer_business__accounts__user=user) |
+                models.Q(seller_business__accounts__user=user)
+            ).distinct().first()
+            
+            if not trade:
+                return SendP2PMessage(
+                    message=None,
+                    success=False,
+                    errors=["Trade not found or access denied"]
+                )
 
-            # Determine sender entity based on the trade context
+            # Get the active account context from the request
+            request = info.context
+            active_account_type = getattr(request, 'active_account_type', 'personal')
+            active_account_index = getattr(request, 'active_account_index', 0)
+            
+            print(f"SendP2PMessage - Active account context: type={active_account_type}, index={active_account_index}")
+            print(f"SendP2PMessage - Trade participants: buyer_user={trade.buyer_user_id}, seller_user={trade.seller_user_id}, buyer_business={trade.buyer_business_id}, seller_business={trade.seller_business_id}")
+
+            # Determine sender entity based on the active account context
             message_kwargs = {
                 'trade': trade,
                 'content': input.content,
@@ -669,26 +805,23 @@ class SendP2PMessage(graphene.Mutation):
                 'sender': user,
             }
             
-            # Check if user is participating as a business or personal account
-            if trade.buyer_user == user:
-                message_kwargs['sender_user'] = user
-            elif trade.buyer_business and hasattr(trade.buyer_business, 'accounts'):
-                # Check if user has access to this business
-                if trade.buyer_business.accounts.filter(user=user).exists():
+            # Determine which account is sending the message based on active account context
+            if active_account_type == 'business':
+                # User is sending as a business - find which business they're using
+                if trade.buyer_business and trade.buyer_business.accounts.filter(user=user, account_index=active_account_index).exists():
                     message_kwargs['sender_business'] = trade.buyer_business
-                else:
-                    message_kwargs['sender_user'] = user
-            elif trade.seller_user == user:
-                message_kwargs['sender_user'] = user
-            elif trade.seller_business and hasattr(trade.seller_business, 'accounts'):
-                # Check if user has access to this business
-                if trade.seller_business.accounts.filter(user=user).exists():
+                    print(f"SendP2PMessage - Sending as buyer business: {trade.buyer_business.name}")
+                elif trade.seller_business and trade.seller_business.accounts.filter(user=user, account_index=active_account_index).exists():
                     message_kwargs['sender_business'] = trade.seller_business
+                    print(f"SendP2PMessage - Sending as seller business: {trade.seller_business.name}")
                 else:
+                    # Fallback to personal if business not found
                     message_kwargs['sender_user'] = user
+                    print(f"SendP2PMessage - Business account not found, falling back to personal")
             else:
-                # Default to personal user
+                # User is sending as personal account
                 message_kwargs['sender_user'] = user
+                print(f"SendP2PMessage - Sending as personal user: {user.username}")
 
             # Create message with new direct relationships
             message = P2PMessage.objects.create(**message_kwargs)
@@ -779,8 +912,8 @@ class Query(graphene.ObjectType):
         country_code=graphene.String()
     )
     p2p_offer = graphene.Field(P2POfferType, id=graphene.ID(required=True))
-    my_p2p_offers = graphene.List(P2POfferType)
-    my_p2p_trades = graphene.List(P2PTradeType, account_id=graphene.ID())
+    my_p2p_offers = graphene.List(P2POfferType, account_id=graphene.String())
+    my_p2p_trades = graphene.List(P2PTradeType, account_id=graphene.String())
     p2p_trade = graphene.Field(P2PTradeType, id=graphene.ID(required=True))
     p2p_trade_messages = graphene.List(P2PMessageType, trade_id=graphene.ID(required=True))
     p2p_payment_methods = graphene.List(P2PPaymentMethodType, country_code=graphene.String())
@@ -807,12 +940,71 @@ class Query(graphene.ObjectType):
         except P2POffer.DoesNotExist:
             return None
 
-    def resolve_my_p2p_offers(self, info):
+    def resolve_my_p2p_offers(self, info, account_id=None):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return []
         
-        return P2POffer.objects.filter(user=user).order_by('-created_at')
+        from django.db.models import Q
+        from users.models import Account, Business
+        
+        if account_id:
+            # Handle special frontend account ID format (e.g., 'personal_0', 'business_0')
+            if isinstance(account_id, str) and '_' in account_id:
+                account_type, account_index = account_id.split('_', 1)
+                account_index = int(account_index)
+                
+                if account_type == 'personal':
+                    # Return only personal offers for this user
+                    return P2POffer.objects.filter(
+                        Q(offer_user=user) | Q(user=user)  # Include legacy offers
+                    ).exclude(
+                        offer_business__isnull=False  # Exclude business offers
+                    ).order_by('-created_at')
+                elif account_type == 'business':
+                    # Find the business account by index
+                    try:
+                        account = Account.objects.get(
+                            user=user, 
+                            account_type='business', 
+                            account_index=account_index
+                        )
+                        if account.business:
+                            # Return only business offers for this specific business
+                            return P2POffer.objects.filter(
+                                offer_business=account.business
+                            ).order_by('-created_at')
+                    except Account.DoesNotExist:
+                        return []
+            else:
+                # Fallback: try to use account_id as a direct database ID
+                try:
+                    account = Account.objects.get(id=account_id, user=user)
+                    
+                    if account.account_type == 'business' and account.business:
+                        # Return only business offers for this specific business
+                        return P2POffer.objects.filter(
+                            offer_business=account.business
+                        ).order_by('-created_at')
+                    else:
+                        # Return only personal offers for this user
+                        return P2POffer.objects.filter(
+                            Q(offer_user=user) | Q(user=user)  # Include legacy offers
+                        ).exclude(
+                            offer_business__isnull=False  # Exclude business offers
+                        ).order_by('-created_at')
+                        
+                except (Account.DoesNotExist, ValueError):
+                    return []
+            
+            return []
+        else:
+            # Fallback: return all user's offers if no account specified
+            user_businesses = Business.objects.filter(user=user)
+            query = Q(offer_user=user) | Q(user=user)
+            if user_businesses.exists():
+                query |= Q(offer_business__in=user_businesses)
+            return P2POffer.objects.filter(query).order_by('-created_at')
 
     def resolve_my_p2p_trades(self, info, account_id=None):
         user = getattr(info.context, 'user', None)
@@ -822,29 +1014,68 @@ class Query(graphene.ObjectType):
         print(f"[P2P] resolve_my_p2p_trades - account_id: {account_id}, user: {user.username if user else 'None'}")
         
         if account_id:
-            # Filter trades for a specific account context
-            from users.models import Account
-            try:
-                account = Account.objects.get(id=account_id, user=user)
-                print(f"[P2P] Found account: {account.id}, type: {account.account_type}, business: {account.business.id if account.business else 'None'}")
+            # Handle special frontend account ID format (e.g., 'personal_0', 'business_0')
+            print(f"[P2P] Processing account_id: '{account_id}' for user: {user.username}")
+            
+            if isinstance(account_id, str) and '_' in account_id:
+                account_type, account_index = account_id.split('_', 1)
+                account_index = int(account_index)
+                print(f"[P2P] Parsed frontend account ID: type='{account_type}', index={account_index}")
                 
-                if account.account_type == 'business' and account.business:
-                    # Show only business trades for this specific business
-                    trades = P2PTrade.objects.filter(
-                        models.Q(buyer_business=account.business) | models.Q(seller_business=account.business)
-                    ).order_by('-created_at')
-                    print(f"[P2P] Filtering business trades for business_id: {account.business.id}, found: {trades.count()} trades")
-                    return trades
-                else:
+                if account_type == 'personal':
                     # Show only personal trades for this user
                     trades = P2PTrade.objects.filter(
                         models.Q(buyer_user=user) | models.Q(seller_user=user)
                     ).order_by('-created_at')
                     print(f"[P2P] Filtering personal trades for user_id: {user.id}, found: {trades.count()} trades")
                     return trades
-            except Account.DoesNotExist:
-                print(f"[P2P] Account not found: account_id={account_id}, user_id={user.id}")
-                return []
+                elif account_type == 'business':
+                    # Find the business account by index
+                    from users.models import Account
+                    try:
+                        account = Account.objects.get(
+                            user=user, 
+                            account_type='business', 
+                            account_index=account_index
+                        )
+                        print(f"[P2P] Found business account: {account.id}, business: {account.business.id if account.business else 'None'}")
+                        
+                        if account.business:
+                            # Show only business trades for this specific business
+                            trades = P2PTrade.objects.filter(
+                                models.Q(buyer_business=account.business) | models.Q(seller_business=account.business)
+                            ).order_by('-created_at')
+                            print(f"[P2P] Filtering business trades for business_id: {account.business.id}, found: {trades.count()} trades")
+                            return trades
+                    except Account.DoesNotExist:
+                        print(f"[P2P] Business account not found: user_id={user.id}, account_index={account_index}")
+                        return []
+            else:
+                # Fallback: try to use account_id as a direct database ID
+                from users.models import Account
+                try:
+                    account = Account.objects.get(id=account_id, user=user)
+                    print(f"[P2P] Found database account: {account.id}, type: {account.account_type}, business: {account.business.id if account.business else 'None'}")
+                    
+                    if account.account_type == 'business' and account.business:
+                        # Show only business trades for this specific business
+                        trades = P2PTrade.objects.filter(
+                            models.Q(buyer_business=account.business) | models.Q(seller_business=account.business)
+                        ).order_by('-created_at')
+                        print(f"[P2P] Filtering business trades for business_id: {account.business.id}, found: {trades.count()} trades")
+                        return trades
+                    else:
+                        # Show only personal trades for this user
+                        trades = P2PTrade.objects.filter(
+                            models.Q(buyer_user=user) | models.Q(seller_user=user)
+                        ).order_by('-created_at')
+                        print(f"[P2P] Filtering personal trades for user_id: {user.id}, found: {trades.count()} trades")
+                        return trades
+                except (Account.DoesNotExist, ValueError):
+                    print(f"[P2P] Database account not found: account_id={account_id}, user_id={user.id}")
+                    return []
+            
+            return []
         else:
             # No account filter - show all trades for this user (all accounts)
             print(f"[P2P] No account_id provided - returning ALL trades for user")
@@ -895,36 +1126,42 @@ class Query(graphene.ObjectType):
         request_id = random.randint(1000, 9999)
         print(f"🔍 DEBUG [{datetime.datetime.now()}] REQ-{request_id}: resolve_p2p_payment_methods called with country_code: '{country_code}'")
         
-        # Force fresh import to avoid caching issues
-        import importlib
-        from . import default_payment_methods
-        importlib.reload(default_payment_methods)
+        # Get payment methods from database (only country-specific methods)
+        # No global methods should exist per user requirements
+        if country_code:
+            db_methods = P2PPaymentMethod.objects.filter(
+                country_code=country_code,
+                is_active=True
+            ).order_by('display_order', 'display_name')
+        else:
+            # If no country_code provided, return empty list
+            # All payment methods must be country-specific
+            db_methods = P2PPaymentMethod.objects.none()
         
-        # Get payment methods directly from Python file (hardcoded data)
-        methods_data = default_payment_methods.get_payment_methods_for_country(country_code or '')
-        print(f"📋 DEBUG REQ-{request_id}: get_payment_methods_for_country('{country_code or ''}') returned {len(methods_data)} methods:")
-        for method in methods_data:
-            print(f"   - {method['display_name']} ({method['name']})")
+        print(f"📋 DEBUG REQ-{request_id}: Found {db_methods.count()} database payment methods for country: '{country_code or 'global'}'")
         
-        # Convert to GraphQL objects with simple sequential IDs
+        # Convert to GraphQL objects
         payment_methods = []
-        for i, method_data in enumerate(methods_data):
+        for db_method in db_methods:
             # Create a simple object that matches P2PPaymentMethodType fields
             payment_method = type('PaymentMethod', (), {
-                'id': str(i + 1),  # Simple sequential ID
-                'name': method_data['name'],
-                'display_name': method_data['display_name'],
-                'icon': method_data['icon'],
-                'is_active': method_data['is_active']
+                'id': str(db_method.id),
+                'name': db_method.name,
+                'display_name': db_method.display_name,
+                'icon': db_method.icon,
+                'is_active': db_method.is_active,
+                'provider_type': db_method.provider_type,
+                'requires_phone': db_method.requires_phone,
+                'requires_email': db_method.requires_email,
+                'requires_account_number': db_method.requires_account_number,
+                'country_code': db_method.country_code,
+                'bank': db_method.bank,  # This will be resolved by users.schema.BankType
+                'country': db_method.country  # This will be resolved by users.schema.CountryType
             })()
             payment_methods.append(payment_method)
+            print(f"   - {db_method.display_name} ({db_method.name}) - Type: {db_method.provider_type}")
         
         print(f"✅ DEBUG REQ-{request_id}: Returning {len(payment_methods)} payment methods to GraphQL")
-        print(f"🚀 DEBUG REQ-{request_id}: Final GraphQL objects being returned:")
-        for i, pm in enumerate(payment_methods):
-            print(f"   {i+1}. {pm.display_name} ({pm.name}) - ID: {pm.id}")
-        
-        # Don't sort to maintain consistent IDs - sorting changes the order and breaks ID mapping
         return payment_methods
 
 # Mutations

@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Platform, Animated, ScrollView, BackHandler } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
 import { useMutation } from '@apollo/client';
-import { PAY_INVOICE } from '../apollo/queries';
+import { PAY_INVOICE, CREATE_SEND_TRANSACTION } from '../apollo/queries';
 import { AccountManager } from '../utils/accountManager';
 
 const colors = {
@@ -34,7 +34,10 @@ interface TransactionData {
   isOnConfio?: boolean;
   sendTransactionId?: string;
   recipientAddress?: string;
+  recipientPhone?: string;
   invoiceId?: string;
+  memo?: string;
+  idempotencyKey?: string; // Pass idempotency key from calling screen
 }
 
 export const TransactionProcessingScreen = () => {
@@ -61,8 +64,27 @@ export const TransactionProcessingScreen = () => {
     new Animated.Value(0)
   ]);
 
-  // GraphQL mutation for paying invoice (only used for payment transactions)
+  // GraphQL mutations
   const [payInvoice] = useMutation(PAY_INVOICE);
+  const [createSendTransaction] = useMutation(CREATE_SEND_TRANSACTION);
+  
+  // Ref to prevent duplicate transaction processing within this session
+  const hasProcessedRef = useRef(false);
+  
+  // Use idempotency key from transactionData, or generate one as fallback
+  const idempotencyKey = transactionData.idempotencyKey || (() => {
+    // Fallback: generate idempotency key if not provided
+    const minuteTimestamp = Math.floor(Date.now() / 60000);
+    if (transactionData.type === 'payment' && transactionData.invoiceId) {
+      return `pay_${transactionData.invoiceId}_${minuteTimestamp}`;
+    } else if (transactionData.type === 'sent' && transactionData.recipientAddress) {
+      const recipientSuffix = transactionData.recipientAddress.slice(-8);
+      const amountStr = transactionData.amount.replace('.', '');
+      return `send_${recipientSuffix}_${amountStr}_${transactionData.currency}_${minuteTimestamp}`;
+    } else {
+      return `tx_unknown_${minuteTimestamp}`;
+    }
+  })();
 
   // Processing steps
   const processingSteps = [
@@ -127,62 +149,132 @@ export const TransactionProcessingScreen = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // Process transaction when screen loads (for payment transactions)
+  // Process transaction when screen loads
   useEffect(() => {
-    if (transactionData.type === 'payment' && transactionData.invoiceId) {
-      const processPayment = async () => {
-        try {
-          console.log('TransactionProcessingScreen: Processing payment for invoice:', transactionData.invoiceId);
-          
-          // Debug: Check current active account context before payment
-          try {
-            const accountManager = AccountManager.getInstance();
-            const activeContext = await accountManager.getActiveAccountContext();
-            console.log('TransactionProcessingScreen - Active account context before payment:', {
-              type: activeContext.type,
-              index: activeContext.index,
-              accountId: `${activeContext.type}_${activeContext.index}`
-            });
-          } catch (error) {
-            console.log('TransactionProcessingScreen - Could not get active account context:', error);
-          }
-          
-          // Step 1: Verifying transaction
-          setCurrentStep(0);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // Step 2: Processing in blockchain
-          setCurrentStep(1);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // Step 3: Call the actual payment mutation
-          setCurrentStep(2);
-          console.log('TransactionProcessingScreen: Calling payInvoice mutation...');
-          const { data } = await payInvoice({
-            variables: {
-              invoiceId: transactionData.invoiceId
-            }
-          });
-
-          console.log('TransactionProcessingScreen: Payment mutation response:', data);
-          
-          if (data?.payInvoice?.success) {
-            console.log('TransactionProcessingScreen: Payment successful');
-            // The transaction is already marked as confirmed in the backend
-            // Just wait for the UI to complete
-          } else {
-            console.error('TransactionProcessingScreen: Payment failed:', data?.payInvoice?.errors);
-            // Handle payment failure
-          }
-        } catch (error) {
-          console.error('TransactionProcessingScreen: Error processing payment:', error);
-          // Handle error
-        }
-      };
-
-      processPayment();
+    console.log('TransactionProcessingScreen: useEffect triggered, hasProcessedRef.current:', hasProcessedRef.current);
+    console.log('TransactionProcessingScreen: transactionData:', transactionData);
+    console.log('TransactionProcessingScreen: Generated idempotencyKey:', idempotencyKey);
+    
+    // Prevent duplicate processing within this screen session
+    if (hasProcessedRef.current) {
+      console.log('TransactionProcessingScreen: Transaction already processed in this session, skipping');
+      return;
     }
-  }, [transactionData.type, transactionData.invoiceId]);
+    
+    const initializeProcessing = async () => {
+      try {
+        hasProcessedRef.current = true;
+        
+        if (transactionData.type === 'payment' && transactionData.invoiceId) {
+          console.log('TransactionProcessingScreen: Starting payment processing');
+          await processPayment();
+        } else if (transactionData.type === 'sent' && transactionData.recipientAddress) {
+          console.log('TransactionProcessingScreen: Starting send processing');
+          await processSend();
+        }
+      } catch (error) {
+        console.error('TransactionProcessingScreen: Error in initializeProcessing:', error);
+      }
+    };
+
+    const processPayment = async () => {
+      try {
+        console.log('TransactionProcessingScreen: Processing payment for invoice:', transactionData.invoiceId);
+        
+        // Debug: Check current active account context before payment
+        try {
+          const accountManager = AccountManager.getInstance();
+          const activeContext = await accountManager.getActiveAccountContext();
+          console.log('TransactionProcessingScreen - Active account context before payment:', {
+            type: activeContext.type,
+            index: activeContext.index,
+            accountId: `${activeContext.type}_${activeContext.index}`
+          });
+        } catch (error) {
+          console.log('TransactionProcessingScreen - Could not get active account context:', error);
+        }
+        
+        // Step 1: Verifying transaction
+        setCurrentStep(0);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Step 2: Processing in blockchain
+        setCurrentStep(1);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Step 3: Call the actual payment mutation
+        setCurrentStep(2);
+        console.log('TransactionProcessingScreen: Calling payInvoice mutation with idempotency key:', idempotencyKey);
+        
+        const { data } = await payInvoice({
+          variables: {
+            invoiceId: transactionData.invoiceId,
+            idempotencyKey: idempotencyKey
+          }
+        });
+
+        console.log('TransactionProcessingScreen: Payment mutation response:', data);
+        
+        if (data?.payInvoice?.success) {
+          console.log('TransactionProcessingScreen: Payment successful');
+          // The transaction is already marked as confirmed in the backend
+          // Just wait for the UI to complete
+        } else {
+          console.error('TransactionProcessingScreen: Payment failed:', data?.payInvoice?.errors);
+          // Handle payment failure
+        }
+      } catch (error) {
+        console.error('TransactionProcessingScreen: Error processing payment:', error);
+        // Handle error
+      }
+    };
+
+    const processSend = async () => {
+      try {
+        console.log('TransactionProcessingScreen: Processing send transaction to:', transactionData.recipientAddress);
+        
+        // Step 1: Verifying transaction
+        setCurrentStep(0);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Step 2: Processing in blockchain
+        setCurrentStep(1);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Step 3: Call the actual send mutation
+        setCurrentStep(2);
+        console.log('TransactionProcessingScreen: Calling createSendTransaction mutation with idempotency key:', idempotencyKey);
+        
+        const { data } = await createSendTransaction({
+          variables: {
+            input: {
+              recipientAddress: transactionData.recipientAddress,
+              amount: transactionData.amount,
+              tokenType: transactionData.currency,
+              memo: transactionData.memo || `Send ${transactionData.amount} ${transactionData.currency} to ${transactionData.recipient}`,
+              idempotencyKey: idempotencyKey
+            }
+          }
+        });
+
+        console.log('TransactionProcessingScreen: Send mutation response:', data);
+        
+        if (data?.createSendTransaction?.success) {
+          console.log('TransactionProcessingScreen: Send successful');
+          // The transaction is already marked as confirmed in the backend
+          // Just wait for the UI to complete
+        } else {
+          console.error('TransactionProcessingScreen: Send failed:', data?.createSendTransaction?.errors);
+          // Handle send failure
+        }
+      } catch (error) {
+        console.error('TransactionProcessingScreen: Error processing send:', error);
+        // Handle error
+      }
+    };
+
+    initializeProcessing();
+  }, []); // Empty dependency array - only run once on mount
 
   // Pulse animation for current step
   useEffect(() => {
