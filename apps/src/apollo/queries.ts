@@ -524,6 +524,7 @@ export const GET_P2P_OFFERS = gql`
       maxAmount
       availableAmount
       countryCode
+      currencyCode
       paymentMethods {
         id
         name
@@ -568,6 +569,7 @@ export const GET_MY_P2P_OFFERS = gql`
       maxAmount
       availableAmount
       countryCode
+      currencyCode
       paymentMethods {
         id
         name
@@ -718,6 +720,8 @@ export const GET_MY_P2P_TRADES = gql`
       cryptoTransactionHash
       completedAt
       createdAt
+      countryCode
+      currencyCode
     }
   }
 `;
@@ -731,6 +735,7 @@ export const GET_P2P_TRADE = gql`
         exchangeType
         tokenType
         countryCode
+        currencyCode
         rate
         user {
           id
@@ -799,6 +804,8 @@ export const GET_P2P_TRADE = gql`
       completedAt
       disputeReason
       createdAt
+      countryCode
+      currencyCode
     }
   }
 `;
@@ -917,6 +924,8 @@ export const CREATE_P2P_TRADE = gql`
         status
         expiresAt
         createdAt
+        countryCode
+        currencyCode
       }
       success
       errors

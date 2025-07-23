@@ -10,24 +10,36 @@ from .models import (
 
 @admin.register(P2PPaymentMethod)
 class P2PPaymentMethodAdmin(admin.ModelAdmin):
-    list_display = ['name', 'display_name', 'is_active', 'offer_count', 'created_at']
-    list_filter = ['is_active', 'created_at']
-    search_fields = ['name', 'display_name']
-    ordering = ['display_name']
+    list_display = ['name', 'display_name', 'country_display', 'provider_type', 'is_active', 'offer_count', 'created_at']
+    list_filter = ['is_active', 'provider_type', 'country_code', 'created_at']
+    search_fields = ['name', 'display_name', 'country_code']
+    ordering = ['country_code', 'display_name']
     
     def offer_count(self, obj):
         """Show how many active offers use this payment method"""
         return obj.offers.filter(status='ACTIVE').count()
     offer_count.short_description = 'Active Offers'
     
+    def country_display(self, obj):
+        """Display country with flag emoji"""
+        if obj.country_code:
+            # Get flag emoji for country
+            if obj.bank and obj.bank.country:
+                return f"{obj.bank.country.flag_emoji} {obj.country_code}"
+            elif obj.country:
+                return f"{obj.country.flag_emoji} {obj.country_code}"
+            return obj.country_code
+        return "🌐 Global"
+    country_display.short_description = 'Country'
+    
     def get_queryset(self, request):
         """Optimize queries by prefetching related offers"""
-        return super().get_queryset(request).prefetch_related('offers')
+        return super().get_queryset(request).prefetch_related('offers').select_related('bank__country', 'country')
 
 @admin.register(P2POffer)
 class P2POfferAdmin(admin.ModelAdmin):
     list_display = [
-        'id', 'offer_entity_display', 'exchange_type', 'token_type', 'country_code', 'rate', 
+        'id', 'offer_entity_display', 'exchange_type', 'token_type', 'country_display', 'rate_display', 
         'available_amount', 'status', 'created_at'
     ]
     list_filter = [
@@ -56,6 +68,38 @@ class P2POfferAdmin(admin.ModelAdmin):
             return f"⚠️ {obj.user.username} (Legacy)"
         return "❓ Unknown"
     offer_entity_display.short_description = 'Offer Creator'
+    
+    def country_display(self, obj):
+        """Display country with flag"""
+        # Map country codes to flag emojis
+        country_flags = {
+            'VE': '🇻🇪', 'CO': '🇨🇴', 'AR': '🇦🇷', 'PE': '🇵🇪', 'CL': '🇨🇱',
+            'BR': '🇧🇷', 'MX': '🇲🇽', 'US': '🇺🇸', 'DO': '🇩🇴', 'PA': '🇵🇦',
+            'EC': '🇪🇨', 'BO': '🇧🇴', 'UY': '🇺🇾', 'PY': '🇵🇾', 'GT': '🇬🇹',
+            'HN': '🇭🇳', 'SV': '🇸🇻', 'NI': '🇳🇮', 'CR': '🇨🇷', 'CU': '🇨🇺',
+            'JM': '🇯🇲', 'TT': '🇹🇹'
+        }
+        flag = country_flags.get(obj.country_code, '🌐')
+        return f"{flag} {obj.country_code}"
+    country_display.short_description = 'Country'
+    
+    def rate_display(self, obj):
+        """Display rate with currency"""
+        # Use the stored currency_code if available, otherwise fall back to mapping
+        if obj.currency_code:
+            currency = obj.currency_code
+        else:
+            # Fallback for old records
+            country_currencies = {
+                'VE': 'VES', 'CO': 'COP', 'AR': 'ARS', 'PE': 'PEN', 'CL': 'CLP',
+                'BR': 'BRL', 'MX': 'MXN', 'US': 'USD', 'DO': 'DOP', 'PA': 'USD',
+                'EC': 'USD', 'BO': 'BOB', 'UY': 'UYU', 'PY': 'PYG', 'GT': 'GTQ',
+                'HN': 'HNL', 'SV': 'USD', 'NI': 'NIO', 'CR': 'CRC', 'CU': 'CUP',
+                'JM': 'JMD', 'TT': 'TTD'
+            }
+            currency = country_currencies.get(obj.country_code, 'USD')
+        return f"{obj.rate:,.2f} {currency}"
+    rate_display.short_description = 'Rate'
     
     fieldsets = (
         ('Offer Creator (Direct Relationships)', {
@@ -144,11 +188,12 @@ class P2POfferAdmin(admin.ModelAdmin):
 class P2PTradeAdmin(admin.ModelAdmin):
     list_display = [
         'id', 'buyer_entity_display', 'seller_entity_display', 
-        'trade_type_display', 'crypto_amount', 'fiat_amount', 
-        'status', 'created_at', 'expires_at'
+        'trade_type_display', 'crypto_amount', 'fiat_amount_display', 
+        'country_code', 'status', 'created_at', 'expires_at'
     ]
     list_filter = [
-        'status', 'offer__token_type', 'created_at', 'expires_at',
+        'status', 'offer__token_type', 'country_code', 'currency_code', 
+        'created_at', 'expires_at',
         ('buyer_user', admin.RelatedOnlyFieldListFilter),
         ('buyer_business', admin.RelatedOnlyFieldListFilter),
         ('seller_user', admin.RelatedOnlyFieldListFilter),
@@ -202,6 +247,20 @@ class P2PTradeAdmin(admin.ModelAdmin):
             return f"{buyer_type}↔️{seller_type} Mixed/Legacy"
     trade_type_display.short_description = 'Trade Type'
     
+    def fiat_amount_display(self, obj):
+        """Display fiat amount with currency code"""
+        # Map country codes to flag emojis
+        country_flags = {
+            'VE': '🇻🇪', 'CO': '🇨🇴', 'AR': '🇦🇷', 'PE': '🇵🇪', 'CL': '🇨🇱',
+            'BR': '🇧🇷', 'MX': '🇲🇽', 'US': '🇺🇸', 'DO': '🇩🇴', 'PA': '🇵🇦',
+            'EC': '🇪🇨', 'BO': '🇧🇴', 'UY': '🇺🇾', 'PY': '🇵🇾', 'GT': '🇬🇹',
+            'HN': '🇭🇳', 'SV': '🇸🇻', 'NI': '🇳🇮', 'CR': '🇨🇷', 'CU': '🇨🇺',
+            'JM': '🇯🇲', 'TT': '🇹🇹'
+        }
+        flag = country_flags.get(obj.country_code, '🌐')
+        return f"{flag} {obj.fiat_amount:,.2f} {obj.currency_code}"
+    fiat_amount_display.short_description = 'Fiat Amount'
+    
     def payment_method_display(self, obj):
         """Display payment method with icon"""
         if obj.payment_method:
@@ -229,6 +288,7 @@ class P2PTradeAdmin(admin.ModelAdmin):
         ('Trade Details', {
             'fields': (
                 'crypto_amount', 'fiat_amount', 'rate_used', 
+                'country_code', 'currency_code',
                 'payment_method', 'status', 'expires_at'
             )
         }),

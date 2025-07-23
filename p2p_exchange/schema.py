@@ -107,7 +107,7 @@ class P2POfferType(DjangoObjectType):
             # Keep old fields for backward compatibility (but marked as deprecated)
             'user', 'account', 
             'exchange_type', 'token_type', 'rate', 'min_amount',
-            'max_amount', 'available_amount', 'payment_methods', 'country_code', 'terms',
+            'max_amount', 'available_amount', 'payment_methods', 'country_code', 'currency_code', 'terms',
             'response_time_minutes', 'status', 'auto_complete_enabled',
             'auto_complete_time_minutes', 'created_at', 'updated_at'
         )
@@ -175,7 +175,9 @@ class P2PTradeType(DjangoObjectType):
             'buyer', 'seller', 'buyer_account', 'seller_account', 
             'crypto_amount', 'fiat_amount', 'rate_used', 'payment_method', 'status', 
             'expires_at', 'payment_reference', 'payment_notes', 'crypto_transaction_hash', 
-            'completed_at', 'dispute_reason', 'disputed_at', 'resolved_at', 'created_at', 'updated_at'
+            'completed_at', 'dispute_reason', 'disputed_at', 'resolved_at', 'created_at', 'updated_at',
+            # Country and currency info
+            'country_code', 'currency_code'
         )
     
     def resolve_payment_method(self, info):
@@ -278,6 +280,39 @@ class CreateP2POffer(graphene.Mutation):
     offer = graphene.Field(P2POfferType)
     success = graphene.Boolean()
     errors = graphene.List(graphene.String)
+    
+    @staticmethod
+    def _get_currency_for_country(country_code):
+        """Get currency code for a given country code"""
+        # Country ISO code to currency mapping
+        COUNTRY_TO_CURRENCY = {
+            # Latin America (Primary focus)
+            'VE': 'VES',  # Venezuela - Bolívar
+            'AR': 'ARS',  # Argentina - Peso
+            'CO': 'COP',  # Colombia - Peso
+            'PE': 'PEN',  # Peru - Sol
+            'CL': 'CLP',  # Chile - Peso
+            'BO': 'BOB',  # Bolivia - Boliviano
+            'UY': 'UYU',  # Uruguay - Peso
+            'PY': 'PYG',  # Paraguay - Guaraní
+            'BR': 'BRL',  # Brazil - Real
+            'MX': 'MXN',  # Mexico - Peso
+            'EC': 'USD',  # Ecuador - US Dollar (dollarized)
+            'PA': 'USD',  # Panama - US Dollar (dollarized)
+            'GT': 'GTQ',  # Guatemala - Quetzal
+            'HN': 'HNL',  # Honduras - Lempira
+            'SV': 'USD',  # El Salvador - US Dollar (dollarized)
+            'NI': 'NIO',  # Nicaragua - Córdoba
+            'CR': 'CRC',  # Costa Rica - Colón
+            'DO': 'DOP',  # Dominican Republic - Peso
+            'CU': 'CUP',  # Cuba - Peso
+            'JM': 'JMD',  # Jamaica - Dollar
+            'TT': 'TTD',  # Trinidad and Tobago - Dollar
+            # North America
+            'US': 'USD',  # United States - Dollar
+            'CA': 'CAD',  # Canada - Dollar
+        }
+        return COUNTRY_TO_CURRENCY.get(country_code, 'USD')  # Default to USD if unknown
 
     @classmethod
     def mutate(cls, root, info, input):
@@ -372,6 +407,7 @@ class CreateP2POffer(graphene.Mutation):
                 'max_amount': input.max_amount,
                 'available_amount': input.available_amount,
                 'country_code': input.country_code,
+                'currency_code': cls._get_currency_for_country(input.country_code),
                 'terms': input.terms or '',
                 'response_time_minutes': input.response_time_minutes or 15,
                 # Keep old fields for backward compatibility
@@ -479,6 +515,39 @@ class CreateP2PTrade(graphene.Mutation):
     trade = graphene.Field(P2PTradeType)
     success = graphene.Boolean()
     errors = graphene.List(graphene.String)
+    
+    @staticmethod
+    def _get_currency_for_country(country_code):
+        """Get currency code for a given country code"""
+        # Country ISO code to currency mapping
+        COUNTRY_TO_CURRENCY = {
+            # Latin America (Primary focus)
+            'VE': 'VES',  # Venezuela - Bolívar
+            'AR': 'ARS',  # Argentina - Peso
+            'CO': 'COP',  # Colombia - Peso
+            'PE': 'PEN',  # Peru - Sol
+            'CL': 'CLP',  # Chile - Peso
+            'BO': 'BOB',  # Bolivia - Boliviano
+            'UY': 'UYU',  # Uruguay - Peso
+            'PY': 'PYG',  # Paraguay - Guaraní
+            'BR': 'BRL',  # Brazil - Real
+            'MX': 'MXN',  # Mexico - Peso
+            'EC': 'USD',  # Ecuador - US Dollar (dollarized)
+            'PA': 'USD',  # Panama - US Dollar (dollarized)
+            'GT': 'GTQ',  # Guatemala - Quetzal
+            'HN': 'HNL',  # Honduras - Lempira
+            'SV': 'USD',  # El Salvador - US Dollar (dollarized)
+            'NI': 'NIO',  # Nicaragua - Córdoba
+            'CR': 'CRC',  # Costa Rica - Colón
+            'DO': 'DOP',  # Dominican Republic - Peso
+            'CU': 'CUP',  # Cuba - Peso
+            'JM': 'JMD',  # Jamaica - Dollar
+            'TT': 'TTD',  # Trinidad and Tobago - Dollar
+            # North America
+            'US': 'USD',  # United States - Dollar
+            'CA': 'CAD',  # Canada - Dollar
+        }
+        return COUNTRY_TO_CURRENCY.get(country_code, 'USD')  # Default to USD if unknown
 
     @classmethod
     def mutate(cls, root, info, input):
@@ -622,6 +691,9 @@ class CreateP2PTrade(graphene.Mutation):
                 'rate_used': offer.rate,
                 'payment_method': payment_method,
                 'expires_at': timezone.now() + timedelta(minutes=30),
+                # Country and currency from the offer
+                'country_code': offer.country_code,
+                'currency_code': offer.currency_code if offer.currency_code else self._get_currency_for_country(offer.country_code),
                 # Keep old fields for backward compatibility
                 'buyer': user if offer.exchange_type == 'SELL' else offer.user,
                 'seller': offer.user if offer.exchange_type == 'SELL' else user,

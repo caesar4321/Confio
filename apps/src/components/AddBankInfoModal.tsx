@@ -10,13 +10,14 @@ import {
   ActivityIndicator,
   Modal,
   Platform,
+  FlatList,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useQuery, useMutation } from '@apollo/client';
+import { useQuery, useMutation, useApolloClient } from '@apollo/client';
 import { 
   GET_COUNTRIES, 
-  GET_BANKS, 
   GET_P2P_PAYMENT_METHODS,
+  GET_USER_BANK_ACCOUNTS,
   CREATE_BANK_INFO,
   UPDATE_BANK_INFO
 } from '../apollo/queries';
@@ -151,6 +152,7 @@ export const AddBankInfoModal = ({
 }: AddBankInfoModalProps) => {
   const insets = useSafeAreaInsets();
   const isEditing = !!editingBankInfo;
+  const apolloClient = useApolloClient();
 
   // Form state
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<P2PPaymentMethod | null>(null);
@@ -168,7 +170,6 @@ export const AddBankInfoModal = ({
   });
   const [showPaymentMethodPicker, setShowPaymentMethodPicker] = useState(false);
   const [showCountryPicker, setShowCountryPicker] = useState(false);
-  const [showBankPicker, setShowBankPicker] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Initialize form for editing
@@ -221,30 +222,49 @@ export const AddBankInfoModal = ({
     loading: paymentMethodsLoading 
   } = useQuery(GET_P2P_PAYMENT_METHODS, {
     variables: { countryCode: selectedCountry?.code },
-    skip: !isVisible,
+    skip: !isVisible || !selectedCountry,
+    fetchPolicy: 'cache-and-network', // Use same policy as CreateOfferScreen for consistency
     onCompleted: (data) => {
-      console.log('Payment methods query completed:', {
+      console.log('[AddBankInfoModal] Payment methods query completed:', {
         countryCode: selectedCountry?.code,
-        methodsCount: data?.p2pPaymentMethods?.length
+        methodsCount: data?.p2pPaymentMethods?.length,
+        methods: data?.p2pPaymentMethods?.slice(0, 5).map((m: any) => ({
+          id: m.id,
+          name: m.displayName,
+          providerType: m.providerType
+        }))
       });
     }
   });
 
-  const { 
-    data: banksData, 
-    loading: banksLoading 
-  } = useQuery(GET_BANKS, {
-    variables: { countryCode: selectedCountry?.code },
-    skip: !selectedCountry || !selectedPaymentMethod?.bank
-  });
 
-  // Mutations
-  const [createBankInfo] = useMutation(CREATE_BANK_INFO);
-  const [updateBankInfo] = useMutation(UPDATE_BANK_INFO);
+  // Mutations with cache update
+  const [createBankInfo] = useMutation(CREATE_BANK_INFO, {
+    update(cache, { data }) {
+      if (data?.createBankInfo?.success) {
+        // Evict all getUserBankAccounts queries to force refetch
+        cache.evict({ fieldName: 'userBankAccounts' });
+        // Also try to evict the root query
+        cache.evict({ id: 'ROOT_QUERY', fieldName: 'userBankAccounts' });
+        cache.gc();
+      }
+    }
+  });
+  
+  const [updateBankInfo] = useMutation(UPDATE_BANK_INFO, {
+    update(cache, { data }) {
+      if (data?.updateBankInfo?.success) {
+        // Evict all getUserBankAccounts queries to force refetch
+        cache.evict({ fieldName: 'userBankAccounts' });
+        // Also try to evict the root query
+        cache.evict({ id: 'ROOT_QUERY', fieldName: 'userBankAccounts' });
+        cache.gc();
+      }
+    }
+  });
 
   const countries: Country[] = countriesData?.countries || [];
   const paymentMethods: P2PPaymentMethod[] = paymentMethodsData?.p2pPaymentMethods || [];
-  const banks: Bank[] = banksData?.banks || [];
 
   // Debug logging
   console.log('Countries loaded:', countries.length);
@@ -255,7 +275,7 @@ export const AddBankInfoModal = ({
   }
 
   const getAccountTypeOptions = () => {
-    if (selectedBank && selectedBank.accountTypeChoices.length > 0) {
+    if (selectedBank && selectedBank.accountTypeChoices && selectedBank.accountTypeChoices.length > 0) {
       return selectedBank.accountTypeChoices.map(type => ({
         value: type,
         label: getAccountTypeLabel(type)
@@ -288,11 +308,6 @@ export const AddBankInfoModal = ({
       return false;
     }
     
-    // For bank-based payments, validate bank selection
-    if (selectedPaymentMethod.bank && !selectedBank) {
-      Alert.alert('Error', 'Por favor selecciona un banco');
-      return false;
-    }
     
     if (!formData.accountHolderName.trim()) {
       Alert.alert('Error', 'Por favor ingresa el nombre del titular');
@@ -349,15 +364,50 @@ export const AddBankInfoModal = ({
           variables: {
             bankInfoId: editingBankInfo!.id,
             ...variables
-          }
+          },
+          refetchQueries: [
+            { query: GET_USER_BANK_ACCOUNTS, variables: { accountId } },
+            { query: GET_USER_BANK_ACCOUNTS, variables: {} } // Also refetch without filter
+          ],
+          awaitRefetchQueries: true
         });
       } else {
-        result = await createBankInfo({ variables });
+        result = await createBankInfo({ 
+          variables,
+          refetchQueries: [
+            { query: GET_USER_BANK_ACCOUNTS, variables: { accountId } },
+            { query: GET_USER_BANK_ACCOUNTS, variables: {} } // Also refetch without filter
+          ],
+          awaitRefetchQueries: true
+        });
       }
 
       const data = isEditing ? result.data?.updateBankInfo : result.data?.createBankInfo;
 
       if (data?.success) {
+        // Force refetch all active queries that depend on bank accounts
+        try {
+          // Method 1: Refetch by query name
+          await apolloClient.refetchQueries({
+            include: ['GetUserBankAccounts']
+          });
+          
+          // Method 2: Reset the entire store to force all queries to refetch
+          // This is more aggressive but ensures all data is fresh
+          await apolloClient.resetStore();
+          
+          console.log('Successfully reset Apollo store and refetched all queries');
+        } catch (refetchError) {
+          console.error('Error refetching queries:', refetchError);
+          // Even if refetch fails, try to clear the cache
+          try {
+            apolloClient.cache.evict({ fieldName: 'userBankAccounts' });
+            apolloClient.cache.gc();
+          } catch (cacheError) {
+            console.error('Error clearing cache:', cacheError);
+          }
+        }
+        
         Alert.alert(
           'Éxito', 
           isEditing ? 'Método de pago actualizado' : 'Método de pago agregado',
@@ -375,7 +425,42 @@ export const AddBankInfoModal = ({
   };
 
   const renderPaymentMethodPicker = () => {
-    const activePaymentMethods = paymentMethods.filter(method => method.isActive);
+    // No need to filter by isActive - backend already returns only active methods
+    const activePaymentMethods = paymentMethods;
+    
+    console.log('[AddBankInfoModal] Payment methods to display:', {
+      total: paymentMethods.length,
+      methods: paymentMethods.slice(0, 5).map(m => m.displayName)
+    });
+    
+    const renderPaymentMethodItem = ({ item: method }: { item: P2PPaymentMethod }) => (
+      <TouchableOpacity
+        style={styles.pickerItem}
+        onPress={() => {
+          setSelectedPaymentMethod(method);
+          if (method.bank) {
+            setSelectedCountry(method.bank.country);
+            setSelectedBank(method.bank);
+          } else {
+            setSelectedBank(null);
+          }
+          setShowPaymentMethodPicker(false);
+        }}
+      >
+        <Icon name={getPaymentMethodIcon(method.icon, method.providerType, method.displayName)} size={20} color={colors.text.secondary} />
+        <View style={{ flex: 1, marginLeft: 12 }}>
+          <Text style={styles.pickerItemText}>{method.displayName}</Text>
+          <Text style={styles.providerTypeSubtext}>
+            {method.providerType === 'bank' ? 'Banco' : 
+             method.providerType === 'fintech' ? 'Billetera Digital' : 
+             method.providerType}
+          </Text>
+        </View>
+        {selectedPaymentMethod?.id === method.id && (
+          <Icon name="check" size={20} color={colors.primary} />
+        )}
+      </TouchableOpacity>
+    );
     
     return (
       <Modal
@@ -400,130 +485,98 @@ export const AddBankInfoModal = ({
             </View>
           )}
           
-          <ScrollView 
+          <FlatList
+            data={activePaymentMethods}
+            renderItem={renderPaymentMethodItem}
+            keyExtractor={(item) => item.id}
             style={styles.pickerList}
-            showsVerticalScrollIndicator={true}
             contentContainerStyle={styles.pickerListContent}
-          >
-            {activePaymentMethods.map((method) => (
-            <TouchableOpacity
-              key={method.id}
-              style={styles.pickerItem}
-              onPress={() => {
-                setSelectedPaymentMethod(method);
-                if (method.bank) {
-                  setSelectedCountry(method.bank.country);
-                  setSelectedBank(method.bank);
-                } else {
-                  setSelectedBank(null);
-                }
-                setShowPaymentMethodPicker(false);
-              }}
-            >
-              <Icon name={getPaymentMethodIcon(method.icon, method.providerType, method.displayName)} size={20} color={colors.text.secondary} />
-              <Text style={[styles.pickerItemText, { marginLeft: 12 }]}>{method.displayName}</Text>
-              <Text style={styles.providerTypeText}>{method.providerType}</Text>
-              {selectedPaymentMethod?.id === method.id && (
-                <Icon name="check" size={20} color={colors.primary} />
-              )}
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-    </Modal>
+            showsVerticalScrollIndicator={true}
+            // Important FlatList optimizations for large lists
+            initialNumToRender={20}
+            maxToRenderPerBatch={10}
+            windowSize={21}
+            removeClippedSubviews={true}
+            updateCellsBatchingPeriod={50}
+            // Ensure all items are rendered
+            getItemLayout={(data, index) => ({
+              length: 60, // Approximate height of each item
+              offset: 60 * index,
+              index,
+            })}
+          />
+        </View>
+      </Modal>
     );
   };
 
-  const renderCountryPicker = () => (
-    <Modal
-      visible={showCountryPicker}
-      animationType="slide"
-      presentationStyle="pageSheet"
-    >
-      <View style={styles.pickerContainer}>
-        <View style={styles.pickerHeader}>
-          <TouchableOpacity onPress={() => setShowCountryPicker(false)}>
-            <Text style={styles.pickerCancel}>Cancelar</Text>
-          </TouchableOpacity>
-          <Text style={styles.pickerTitle}>Seleccionar País</Text>
-          <View style={{ width: 60 }} />
-        </View>
-        
-        {countries.length > 10 && (
-          <View style={styles.scrollHint}>
-            <Text style={styles.scrollHintText}>
-              {countries.length} países disponibles - desliza para ver más
-            </Text>
-          </View>
+  const renderCountryPicker = () => {
+    const renderCountryItem = ({ item: country }: { item: Country }) => (
+      <TouchableOpacity
+        style={styles.pickerItem}
+        onPress={() => {
+          setSelectedCountry(country);
+          setSelectedBank(null);
+          setSelectedPaymentMethod(null); // Reset payment method when country changes
+          setShowCountryPicker(false);
+        }}
+      >
+        <Text style={styles.countryFlag}>{country.flagEmoji}</Text>
+        <Text style={styles.pickerItemText}>{country.name}</Text>
+        {selectedCountry?.id === country.id && (
+          <Icon name="check" size={20} color={colors.primary} />
         )}
-        
-        <ScrollView 
-          style={styles.pickerList}
-          showsVerticalScrollIndicator={true}
-          contentContainerStyle={styles.pickerListContent}
-        >
-          {countries.map((country) => (
-            <TouchableOpacity
-              key={country.id}
-              style={styles.pickerItem}
-              onPress={() => {
-                setSelectedCountry(country);
-                setSelectedBank(null);
-                setSelectedPaymentMethod(null); // Reset payment method when country changes
-                setShowCountryPicker(false);
-              }}
-            >
-              <Text style={styles.countryFlag}>{country.flagEmoji}</Text>
-              <Text style={styles.pickerItemText}>{country.name}</Text>
-              {selectedCountry?.id === country.id && (
-                <Icon name="check" size={20} color={colors.primary} />
-              )}
+      </TouchableOpacity>
+    );
+    
+    return (
+      <Modal
+        visible={showCountryPicker}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <View style={styles.pickerContainer}>
+          <View style={styles.pickerHeader}>
+            <TouchableOpacity onPress={() => setShowCountryPicker(false)}>
+              <Text style={styles.pickerCancel}>Cancelar</Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-    </Modal>
-  );
-
-  const renderBankPicker = () => (
-    <Modal
-      visible={showBankPicker}
-      animationType="slide"
-      presentationStyle="pageSheet"
-    >
-      <View style={styles.pickerContainer}>
-        <View style={styles.pickerHeader}>
-          <TouchableOpacity onPress={() => setShowBankPicker(false)}>
-            <Text style={styles.pickerCancel}>Cancelar</Text>
-          </TouchableOpacity>
-          <Text style={styles.pickerTitle}>Seleccionar Banco</Text>
-          <View style={{ width: 60 }} />
+            <Text style={styles.pickerTitle}>Seleccionar País</Text>
+            <View style={{ width: 60 }} />
+          </View>
+          
+          {countries.length > 10 && (
+            <View style={styles.scrollHint}>
+              <Text style={styles.scrollHintText}>
+                {countries.length} países disponibles - desliza para ver más
+              </Text>
+            </View>
+          )}
+          
+          <FlatList
+            data={countries}
+            renderItem={renderCountryItem}
+            keyExtractor={(item) => item.id}
+            style={styles.pickerList}
+            contentContainerStyle={styles.pickerListContent}
+            showsVerticalScrollIndicator={true}
+            // Important FlatList optimizations for large lists
+            initialNumToRender={20}
+            maxToRenderPerBatch={10}
+            windowSize={21}
+            removeClippedSubviews={true}
+            updateCellsBatchingPeriod={50}
+            // Ensure all items are rendered
+            getItemLayout={(data, index) => ({
+              length: 60, // Approximate height of each item
+              offset: 60 * index,
+              index,
+            })}
+          />
         </View>
-        
-        <ScrollView 
-          style={styles.pickerList}
-          showsVerticalScrollIndicator={true}
-          contentContainerStyle={styles.pickerListContent}
-        >
-          {banks.map((bank) => (
-            <TouchableOpacity
-              key={bank.id}
-              style={styles.pickerItem}
-              onPress={() => {
-                setSelectedBank(bank);
-                setShowBankPicker(false);
-              }}
-            >
-              <Text style={styles.pickerItemText}>{bank.name}</Text>
-              {selectedBank?.id === bank.id && (
-                <Icon name="check" size={20} color={colors.primary} />
-              )}
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-    </Modal>
-  );
+      </Modal>
+    );
+  };
+
 
   return (
     <View style={styles.container}>
@@ -598,26 +651,14 @@ export const AddBankInfoModal = ({
           </TouchableOpacity>
         </View>
 
-        {/* Bank Selection (only for bank-based payment methods) */}
+        {/* Bank Information Display (only show for bank-based payment methods) */}
         {selectedPaymentMethod?.bank && (
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Banco *</Text>
-            <TouchableOpacity
-              style={[styles.picker, !selectedCountry && styles.pickerDisabled]}
-              onPress={() => selectedCountry && setShowBankPicker(true)}
-              disabled={!selectedCountry}
-            >
-              <View style={styles.pickerContent}>
-                {selectedBank ? (
-                  <Text style={styles.pickerText}>{selectedBank.name}</Text>
-                ) : (
-                  <Text style={styles.pickerPlaceholder}>
-                    {selectedCountry ? 'Seleccionar banco' : 'Primero selecciona un país'}
-                  </Text>
-                )}
-              </View>
-              <Icon name="chevron-down" size={20} color={colors.text.secondary} />
-            </TouchableOpacity>
+            <Text style={styles.label}>Banco</Text>
+            <View style={styles.infoBox}>
+              <Icon name="info" size={16} color={colors.text.secondary} />
+              <Text style={styles.infoText}>{selectedPaymentMethod.bank.name}</Text>
+            </View>
           </View>
         )}
 
@@ -762,7 +803,6 @@ export const AddBankInfoModal = ({
       {/* Pickers */}
       {renderPaymentMethodPicker()}
       {renderCountryPicker()}
-      {renderBankPicker()}
     </View>
   );
 };
@@ -980,5 +1020,24 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     marginRight: 8,
     textTransform: 'capitalize',
+  },
+  providerTypeSubtext: {
+    fontSize: 12,
+    color: colors.text.light,
+    marginTop: 2,
+  },
+  infoBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primaryLight,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  infoText: {
+    fontSize: 14,
+    color: colors.text.primary,
+    flex: 1,
   },
 });

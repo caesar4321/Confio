@@ -137,6 +137,7 @@ class P2POffer(SoftDeleteModel):
     
     # Country where this offer is available
     country_code = models.CharField(max_length=2, help_text="ISO country code (e.g., 'VE', 'US', 'AS')")
+    currency_code = models.CharField(max_length=3, default='', help_text="Currency code (e.g., 'VES', 'COP', 'ARS')")
     
     # Terms and conditions
     terms = models.TextField(blank=True)
@@ -290,6 +291,10 @@ class P2PTrade(SoftDeleteModel):
     fiat_amount = models.DecimalField(max_digits=10, decimal_places=2)
     rate_used = models.DecimalField(max_digits=10, decimal_places=2)  # Rate at time of trade
     
+    # Country and currency info (inherited from offer)
+    country_code = models.CharField(max_length=2, default='VE', help_text="ISO country code from the offer")
+    currency_code = models.CharField(max_length=3, default='VES', help_text="Currency code (e.g., 'VES', 'COP', 'ARS')")
+    
     # Payment method used for this trade
     payment_method = models.ForeignKey(P2PPaymentMethod, on_delete=models.PROTECT)
     
@@ -399,7 +404,7 @@ class P2PTrade(SoftDeleteModel):
         ]
     
     def __str__(self):
-        return f"Trade {self.id}: {self.crypto_amount} {self.offer.token_type} @ {self.rate_used} Bs"
+        return f"Trade {self.id}: {self.crypto_amount} {self.offer.token_type} @ {self.rate_used} {self.currency_code}"
 
 class P2PMessage(SoftDeleteModel):
     """Chat messages between traders"""

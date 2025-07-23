@@ -11,7 +11,7 @@ import {
   Alert,
   Modal,
 } from 'react-native';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
@@ -54,14 +54,31 @@ export const TradeConfirmScreen: React.FC = () => {
       }
     }
   });
-  const { data: userBankAccountsData } = useQuery(GET_USER_BANK_ACCOUNTS, {
+  // Only query with numeric account IDs to avoid GraphQL errors
+  const isNumericAccountId = activeAccount?.id && /^\d+$/.test(activeAccount.id);
+  const { 
+    data: userBankAccountsData,
+    refetch: refetchBankAccounts 
+  } = useQuery(GET_USER_BANK_ACCOUNTS, {
     variables: { accountId: activeAccount?.id },
-    skip: !activeAccount?.id,
+    skip: !activeAccount?.id || !isNumericAccountId,
+    fetchPolicy: 'cache-and-network',
+    notifyOnNetworkStatusChange: true
   });
   
   const [amount, setAmount] = useState('');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(offer.paymentMethods[0] || null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  
+  // Refetch bank accounts when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (refetchBankAccounts && activeAccount?.id && isNumericAccountId) {
+        console.log('[TradeConfirmScreen] Screen focused, refetching bank accounts');
+        refetchBankAccounts();
+      }
+    }, [refetchBankAccounts, activeAccount?.id, isNumericAccountId])
+  );
   
   // Auto-select first configured payment method when data loads
   React.useEffect(() => {
@@ -155,6 +172,8 @@ export const TradeConfirmScreen: React.FC = () => {
           tradeType: tradeType,
           tradeId: createdTrade.id, // Pass the actual trade ID
           selectedPaymentMethodId: selectedPaymentMethod.id, // Pass the selected payment method ID
+          tradeCountryCode: createdTrade.countryCode, // Pass trade's country code
+          tradeCurrencyCode: createdTrade.currencyCode, // Pass trade's currency code
         });
       } else {
         const errorMessage = data?.createP2pTrade?.errors?.join(', ') || 'Error desconocido';
