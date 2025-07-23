@@ -474,13 +474,27 @@ export const TradeChatScreen: React.FC = () => {
             isFromCurrentUser: isMessageFromCurrentUser(msg.sender.id, msg.sender.businessId)
           });
         });
-        setMessages(data.messages.map((msg: any) => ({
+        const mappedMessages = data.messages.map((msg: any) => ({
           id: msg.id,
           sender: isMessageFromCurrentUser(msg.sender.id, msg.sender.businessId) ? 'user' : 'trader',
           text: msg.content,
           timestamp: new Date(msg.createdAt),
           type: msg.messageType.toLowerCase()
-        })));
+        }));
+        
+        // Reverse messages for inverted FlatList (newest first)
+        const reversedMessages = [...mappedMessages].reverse();
+        
+        console.log('📊 Setting messages from chat history:', {
+          messageCount: reversedMessages.length,
+          firstMessage: reversedMessages[0]?.text?.substring(0, 50),
+          lastMessage: reversedMessages[reversedMessages.length - 1]?.text?.substring(0, 50),
+          firstTimestamp: reversedMessages[0]?.timestamp,
+          lastTimestamp: reversedMessages[reversedMessages.length - 1]?.timestamp,
+          reversed: true
+        });
+        
+        setMessages(reversedMessages);
         break;
         
       case 'chat_message':
@@ -502,8 +516,8 @@ export const TradeChatScreen: React.FC = () => {
           // Check if message already exists (prevent duplicates)
           const exists = prev.some(msg => msg.id === newMessage.id);
           if (exists) return prev;
-          // Add new message at the end (messages are in ascending order)
-          return [...prev, newMessage];
+          // Add new message at the beginning (messages are in descending order for inverted FlatList)
+          return [newMessage, ...prev];
         });
         break;
         
@@ -546,26 +560,26 @@ export const TradeChatScreen: React.FC = () => {
     if (!tradeId) {
       console.warn('No tradeId provided, using mock data');
       setMessages([
-        // Messages in ascending order (oldest first) for inverted FlatList
+        // Messages in descending order (newest first) for inverted FlatList
         {
-          id: 1,
+          id: 7,
+          sender: 'trader',
+          text: '📋 Datos de Pago - Banco de Venezuela\n\n👤 Titular: Juan Pérez\n🏦 Banco: Banco de Venezuela\n💳 Número de cuenta: 0102-1234-5678-9012\n📝 Tipo de cuenta: Corriente\n🆔 Cédula: V-12.345.678',
+          timestamp: new Date(Date.now() - 150000),
+          type: 'payment_info'
+        },
+        {
+          id: 6,
           sender: 'system',
-          text: 'Intercambio iniciado. Tienes 15 minutos para completar el pago.',
-          timestamp: new Date(Date.now() - 300000),
+          text: '💳 Datos de pago compartidos',
+          timestamp: new Date(Date.now() - 180000),
           type: 'system'
         },
         {
-          id: 2,
-          sender: 'trader',
-          text: '¡Hola! Gracias por elegir mi oferta. Te envío los datos para el pago.',
-          timestamp: new Date(Date.now() - 270000),
-          type: 'text'
-        },
-        {
-          id: 3,
+          id: 5,
           sender: 'user',
-          text: 'Perfecto, estoy listo para hacer el pago.',
-          timestamp: new Date(Date.now() - 240000),
+          text: 'Gracias, reviso y te aviso.',
+          timestamp: new Date(Date.now() - 200000),
           type: 'text'
         },
         {
@@ -576,25 +590,25 @@ export const TradeChatScreen: React.FC = () => {
           type: 'text'
         },
         {
-          id: 5,
+          id: 3,
           sender: 'user',
-          text: 'Gracias, reviso y te aviso.',
-          timestamp: new Date(Date.now() - 200000),
+          text: 'Perfecto, estoy listo para hacer el pago.',
+          timestamp: new Date(Date.now() - 240000),
           type: 'text'
         },
         {
-          id: 6,
-          sender: 'system',
-          text: '💳 Datos de pago compartidos',
-          timestamp: new Date(Date.now() - 180000),
-          type: 'system'
+          id: 2,
+          sender: 'trader',
+          text: '¡Hola! Gracias por elegir mi oferta. Te envío los datos para el pago.',
+          timestamp: new Date(Date.now() - 270000),
+          type: 'text'
         },
         {
-          id: 7,
-          sender: 'trader',
-          text: '📋 Datos de Pago - Banco de Venezuela\n\n👤 Titular: Juan Pérez\n🏦 Banco: Banco de Venezuela\n💳 Número de cuenta: 0102-1234-5678-9012\n📝 Tipo de cuenta: Corriente\n🆔 Cédula: V-12.345.678',
-          timestamp: new Date(Date.now() - 150000),
-          type: 'payment_info'
+          id: 1,
+          sender: 'system',
+          text: 'Intercambio iniciado. Tienes 15 minutos para completar el pago.',
+          timestamp: new Date(Date.now() - 300000),
+          type: 'system'
         }
       ]);
       setIsConnected(false);
@@ -922,7 +936,7 @@ export const TradeChatScreen: React.FC = () => {
         timestamp: new Date(),
         type: 'system',
       };
-      setMessages(prev => [...prev, systemMessage]); // Add at end (ascending order)
+      setMessages(prev => [systemMessage, ...prev]); // Add at beginning (descending order)
       
       // Refetch trade details to get updated status (with a small delay to ensure backend has processed)
       if (refetchTradeDetails) {
@@ -981,7 +995,7 @@ export const TradeChatScreen: React.FC = () => {
           timestamp: new Date(),
           type: 'system',
         };
-        setMessages(prev => [...prev, systemMessage]); // Add at end (ascending order)
+        setMessages(prev => [systemMessage, ...prev]); // Add at beginning (descending order)
         
         // Refetch trade details to get updated status
         if (refetchTradeDetails) {
@@ -1040,7 +1054,7 @@ export const TradeChatScreen: React.FC = () => {
           timestamp: new Date(),
           type: 'system',
         };
-        setMessages(prev => [...prev, systemMessage]); // Add at end (ascending order)
+        setMessages(prev => [systemMessage, ...prev]); // Add at beginning (descending order)
         
         // Show success alert
         Alert.alert(
