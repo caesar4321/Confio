@@ -111,8 +111,8 @@ export type MainStackParamList = {
       step: number;
       timeRemaining: number;
       tradeType: 'buy' | 'sell';
-      countryCode: string;
-      currencyCode: string;
+      countryCode?: string;
+      currencyCode?: string;
     };
   };
   AccountDetail: {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
@@ -86,18 +86,39 @@ export const ProfileScreen = () => {
     }
   };
 
-  const profileOptions = [
-    { name: "Verificación", icon: "user-check", onPress: () => navigation.navigate('Verification') },
-    { name: "Métodos de Pago", icon: "credit-card", onPress: () => navigation.navigate('BankInfo') },
-    /* Temporarily hidden until 2FA and advanced security features are implemented
-    { name: "Seguridad", icon: "shield", onPress: () => {} },
-    { name: "Notificaciones", icon: "bell", onPress: () => {} },
-    */
-    { name: "Comunidad", icon: "users", onPress: handleTelegramPress },
-    { name: "Términos de Servicio", icon: "file-text", onPress: () => handleLegalDocumentPress('terms') },
-    { name: "Política de Privacidad", icon: "lock", onPress: () => handleLegalDocumentPress('privacy') },
-    { name: "Eliminación de Datos", icon: "trash-2", onPress: () => handleLegalDocumentPress('deletion') }
+  const handleSocialMediaPress = async (platform: 'tiktok' | 'instagram' | 'youtube') => {
+    let url = '';
+    switch (platform) {
+      case 'tiktok':
+        url = 'https://www.tiktok.com/@julianmoonluna';
+        break;
+      case 'instagram':
+        url = 'https://www.instagram.com/julianmoonluna';
+        break;
+      case 'youtube':
+        url = 'https://www.youtube.com/@julianmoonluna';
+        break;
+    }
+    
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      console.error(`Error opening ${platform} link:`, error);
+    }
+  };
+
+  // Simplified achievement data for cleaner display
+  const achievements = [
+    { id: 1, name: 'Primeros Pasos', icon: 'user-check', completed: true, shared: true, date: '15 Nov' },
+    { id: 2, name: 'Primera Compra', icon: 'users', completed: true, shared: false, date: '18 Nov' },
+    { id: 3, name: 'Primer Envío', icon: 'send', completed: true, shared: true, date: '20 Nov' },
+    { id: 4, name: 'Primera Recepción', icon: 'download', completed: true, shared: false, date: '22 Nov' },
+    { id: 5, name: 'Primer Pago', icon: 'credit-card', completed: true, shared: false, date: '25 Nov' },
+    { id: 6, name: 'Verificado', icon: 'shield', completed: false, shared: false },
+    { id: 7, name: '10 Intercambios', icon: 'trending-up', completed: false, shared: false },
   ];
+
+  const completedCount = achievements.filter(a => a.completed).length;
 
   // Get display information based on active account
   const getDisplayInfo = () => {
@@ -180,40 +201,170 @@ export const ProfileScreen = () => {
         </View>
       </View>
 
-      {/* Confío Address Card - Only show for personal accounts */}
-      {activeAccount?.type.toLowerCase() === 'personal' && (
-        <View style={styles.addressCard}>
+      {/* Achievements Card */}
+      <TouchableOpacity style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardTitleRow}>
+            <Icon name="award" size={20} color={colors.primary} />
+            <Text style={styles.cardTitle}>Logros</Text>
+          </View>
+          <View style={styles.achievementProgress}>
+            <Text style={styles.achievementProgressText}>{completedCount}/{achievements.length}</Text>
+            <Icon name="chevron-right" size={16} color="#9CA3AF" />
+          </View>
+        </View>
+        <View style={styles.achievementPreview}>
+          {achievements.slice(0, 5).map((achievement) => (
+            <View 
+              key={achievement.id} 
+              style={[
+                styles.achievementDot,
+                achievement.completed ? styles.achievementDotCompleted : styles.achievementDotLocked
+              ]}
+            />
+          ))}
+          {achievements.length > 5 && (
+            <Text style={styles.achievementMore}>+{achievements.length - 5}</Text>
+          )}
+        </View>
+      </TouchableOpacity>
+
+      {/* Account Management Card */}
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardTitleRow}>
+            <Icon name="user" size={20} color="#6B7280" />
+            <Text style={styles.cardTitle}>Cuenta</Text>
+          </View>
+        </View>
+        <View style={styles.cardOptions}>
           <TouchableOpacity 
-            style={styles.addressCardContent}
-            onPress={() => navigation.navigate('ConfioAddress')}
+            style={styles.cardOption}
+            onPress={() => navigation.navigate('Verification')}
           >
-            <View style={styles.addressIconContainer}>
-              <Icon name="maximize" size={20} color="#6B7280" />
-            </View>
-            <View style={styles.addressInfo}>
-              <Text style={styles.addressTitle}>Mi dirección de Confío</Text>
-              <Text style={styles.addressValue}>
-                {userProfile?.username ? `confio.lat/@${userProfile.username}` : 'confio.lat/@usuario'}
-              </Text>
-            </View>
-            <Icon name="chevron-right" size={20} color="#9CA3AF" />
+            <Icon name="user-check" size={18} color="#6B7280" />
+            <Text style={styles.cardOptionText}>Verificación</Text>
+            <Icon name="chevron-right" size={16} color="#9CA3AF" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.cardOption}
+            onPress={() => navigation.navigate('BankInfo')}
+          >
+            <Icon name="credit-card" size={18} color="#6B7280" />
+            <Text style={styles.cardOptionText}>Métodos de Pago</Text>
+            <Icon name="chevron-right" size={16} color="#9CA3AF" />
+          </TouchableOpacity>
+          
+          {activeAccount?.type.toLowerCase() === 'personal' && (
+            <TouchableOpacity 
+              style={styles.cardOption}
+              onPress={() => navigation.navigate('ConfioAddress')}
+            >
+              <Icon name="at-sign" size={18} color="#6B7280" />
+              <Text style={styles.cardOptionText}>Mi dirección Confío</Text>
+              <Icon name="chevron-right" size={16} color="#9CA3AF" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Community Card */}
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardTitleRow}>
+            <Icon name="users" size={20} color="#6B7280" />
+            <Text style={styles.cardTitle}>Comunidad</Text>
+          </View>
+        </View>
+        <View style={styles.cardOptions}>
+          <TouchableOpacity 
+            style={styles.cardOption}
+            onPress={handleTelegramPress}
+          >
+            <Icon name="message-circle" size={18} color="#6B7280" />
+            <Text style={styles.cardOptionText}>Grupo Telegram</Text>
+            <Text style={styles.cardOptionSubtext}>@FansDeJulian</Text>
+            <Icon name="chevron-right" size={16} color="#9CA3AF" />
           </TouchableOpacity>
         </View>
-      )}
+      </View>
 
-      {/* Profile Options */}
-      <View style={styles.optionsContainer}>
-        {profileOptions.map((option, index) => (
-          <TouchableOpacity key={index} style={styles.optionItem} onPress={option.onPress}>
-            <View style={styles.optionLeft}>
-              <View style={styles.optionIconContainer}>
-                <Icon name={option.icon} size={20} color="#6B7280" />
-              </View>
-              <Text style={styles.optionText}>{option.name}</Text>
-            </View>
-            <Icon name="chevron-right" size={20} color="#9CA3AF" />
+      {/* Follow the Founder Section */}
+      <View style={styles.founderSection}>
+        <View style={styles.founderHeader}>
+          <Icon name="star" size={20} color={colors.primary} />
+          <Text style={styles.founderTitle}>Sigue al fundador</Text>
+        </View>
+        
+        <View style={styles.socialButtonsContainer}>
+          <TouchableOpacity 
+            style={styles.socialImageButton} 
+            onPress={() => handleSocialMediaPress('tiktok')}
+          >
+            <Image 
+              source={require('../assets/png/TikTok.png')} 
+              style={[styles.socialButtonImage, styles.tiktokImage]}
+              resizeMode="contain"
+            />
           </TouchableOpacity>
-        ))}
+          
+          <TouchableOpacity 
+            style={styles.socialImageButton} 
+            onPress={() => handleSocialMediaPress('instagram')}
+          >
+            <Image 
+              source={require('../assets/png/Instagram.png')} 
+              style={styles.socialButtonImage}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.socialImageButton} 
+            onPress={() => handleSocialMediaPress('youtube')}
+          >
+            <Image 
+              source={require('../assets/png/YouTube.png')} 
+              style={styles.socialButtonImage}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+        </View>
+        
+        <View style={styles.founderStory}>
+          <Text style={styles.founderHandle}>@julianmoonluna</Text>
+          <Text style={styles.founderTagline}>
+            Un coreano que sueña con una nueva Latinoamérica
+          </Text>
+          <Text style={styles.founderDescription}>
+            Descubre por qué un coreano confía en América Latina
+          </Text>
+        </View>
+      </View>
+
+      {/* Legal Links */}
+      <View style={styles.legalSection}>
+        <TouchableOpacity 
+          style={styles.legalLink}
+          onPress={() => handleLegalDocumentPress('terms')}
+        >
+          <Text style={styles.legalLinkText}>Términos de Servicio</Text>
+        </TouchableOpacity>
+        <Text style={styles.legalSeparator}>•</Text>
+        <TouchableOpacity 
+          style={styles.legalLink}
+          onPress={() => handleLegalDocumentPress('privacy')}
+        >
+          <Text style={styles.legalLinkText}>Privacidad</Text>
+        </TouchableOpacity>
+        <Text style={styles.legalSeparator}>•</Text>
+        <TouchableOpacity 
+          style={styles.legalLink}
+          onPress={() => handleLegalDocumentPress('deletion')}
+        >
+          <Text style={styles.legalLinkText}>Eliminación</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Sign Out Button */}
@@ -285,17 +436,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: 'rgba(255, 255, 255, 0.8)',
   },
-  addressCard: {
+  card: {
     backgroundColor: '#fff',
     borderRadius: 16,
-    marginTop: -16,
     marginHorizontal: 16,
-    marginBottom: 8,
+    marginBottom: 12,
+    padding: 16,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.05,
         shadowRadius: 4,
       },
       android: {
@@ -303,66 +454,160 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  addressCardContent: {
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  cardTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    gap: 8,
   },
-  addressIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.neutralDark,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  addressInfo: {
-    flex: 1,
-  },
-  addressTitle: {
+  cardTitle: {
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#1F2937',
-    marginBottom: 2,
   },
-  addressValue: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  optionsContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
+  cardOptions: {
     gap: 12,
   },
-  optionItem: {
+  cardOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.neutralDark,
-    padding: 12,
-    borderRadius: 12,
+    paddingVertical: 8,
   },
-  optionLeft: {
+  cardOptionText: {
+    flex: 1,
+    fontSize: 15,
+    color: '#374151',
+    marginLeft: 12,
+  },
+  cardOptionSubtext: {
+    fontSize: 13,
+    color: '#9CA3AF',
+    marginRight: 8,
+  },
+  achievementProgress: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
   },
-  optionIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#fff',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  optionText: {
-    fontSize: 16,
+  achievementProgressText: {
+    fontSize: 14,
     fontWeight: '500',
+    color: colors.primary,
+  },
+  achievementPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  achievementDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  achievementDotCompleted: {
+    backgroundColor: colors.primary,
+  },
+  achievementDotLocked: {
+    backgroundColor: '#E5E7EB',
+  },
+  achievementMore: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginLeft: 4,
+  },
+  founderSection: {
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  separator: {
+    height: 1,
+    backgroundColor: '#E5E7EB',
+    marginHorizontal: 16,
+    marginVertical: 8,
+  },
+  founderHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    gap: 8,
+  },
+  founderTitle: {
+    fontSize: 18,
+    fontWeight: '700',
     color: '#1F2937',
   },
+  socialButtonsContainer: {
+    flexDirection: 'row',
+    marginVertical: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  socialImageButton: {
+    width: 69, // Fixed width for all buttons (53 + 16 padding)
+    height: 69, // Fixed height for all buttons
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 10, // Equal spacing between buttons
+  },
+  socialButtonImage: {
+    width: 53, // 2/3 of 80px for Instagram and YouTube
+    height: 53,
+  },
+  tiktokImage: {
+    width: 40, // Keep TikTok at original size
+    height: 40,
+  },
+  founderStory: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  founderHandle: {
+    fontSize: 16,
+    color: colors.primary,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  founderTagline: {
+    fontSize: 15,
+    color: '#1F2937',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  founderDescription: {
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  legalSection: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  legalLink: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  legalLinkText: {
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  legalSeparator: {
+    color: '#E5E7EB',
+    fontSize: 13,
+  },
   signOutButton: {
-    marginTop: 32,
+    marginTop: 16,
     marginBottom: 32,
     paddingVertical: 12,
     alignItems: 'center',

@@ -1394,3 +1394,129 @@ location ^~ /.well-known/ {
 **Note:**
 - The `default_type application/json;` ensures the correct content-type for verification files.
 - If you use a different static file server, adapt the config accordingly.
+
+## 🏆 Achievements (Logros) System
+
+The Confío app includes a gamified achievement system to encourage user engagement and promote viral growth through social sharing.
+
+### Achievement Types
+
+1. **Primeros Pasos** (First Steps) - Complete registration
+2. **Primera Compra** (First Purchase) - Complete first P2P trade
+3. **Primer Envío** (First Send) - Send cUSD for the first time
+4. **Primera Recepción** (First Receive) - Receive cUSD for the first time
+5. **Primer Pago** (First Payment) - Make first merchant payment
+6. **Verificado** (Verified) - Complete identity verification
+7. **10 Intercambios** (10 Trades) - Complete 10 P2P trades
+8. **Embajador** (Ambassador) - Refer 5 new users
+9. **Hodler** (Hodler) - Hold cUSD for 30 days
+10. **Comerciante** (Merchant) - Accept 10 payments
+11. **Viajero** (Traveler) - Send to 3 different countries
+12. **Veterano** (Veteran) - Active for 6 months
+
+### Implementation Details
+
+- **Location**: Profile screen (`ProfileScreen.tsx`)
+- **Visual Design**: Circular badges with completion status
+- **Progress Tracking**: "5/12" style counter
+- **Share Indicator**: Blue badge for achievements shared on social media
+
+### Social Sharing Integration
+
+Each achievement can be shared to social media with pre-configured hashtags:
+- Latin America: `#RetoConfio #MiPrimerConfioDollar`
+- Other regions: `#ConfioChallenge #MyFirstSecureDollar`
+
+## 📱 Social Financial Marketing Strategy: "Sigue al fundador"
+
+### Overview
+
+The "Sigue al fundador" (Follow the founder) section transforms Confío from a simple financial app into a social financial platform by leveraging founder Julian Moon's personal brand (@julianmoonluna) with 240K+ TikTok followers.
+
+### Key Components
+
+#### 1. **Strategic Placement**
+- Located in Profile tab between Community and Legal sections
+- Features prominent social media buttons (TikTok, Instagram, YouTube)
+- Includes emotional tagline: "Un coreano que sueña con una nueva Latinoamérica"
+
+#### 2. **Viral Growth Loop**
+```
+TikTok (@julianmoonluna) → Confío App → Share Achievements → TikTok
+```
+
+#### 3. **Milestone-Based Sharing**
+
+**Registration:**
+```
+#RetoConfio #MiPrimerConfioDollar #NuevoEnConfio
+"¡Me uní a Confío! Mi primer paso hacia un dólar seguro 💪"
+```
+
+**First P2P Trade:**
+```
+#RetoConfio #PrimerDolarSeguro #ConfioP2P
+"¡Conseguí mi primer cUSD en Confío! 🔥 #DolarAntiInflacion"
+```
+
+**First Send:**
+```
+#RetoConfio #EnviandoConConfio #DolarSeguro
+"Enviando dinero fácil y seguro con Confío ✈️"
+```
+
+### Technical Implementation
+
+#### Share Functionality (React Native)
+```javascript
+const shareMilestone = async (milestone: string) => {
+  const hashtags = getHashtagsByRegion(userRegion);
+  const message = getMilestoneMessage(milestone);
+  
+  await Share.share({
+    message: `${message}\n\n${hashtags}`,
+    url: videoTemplateUrl, // Pre-made template video
+  });
+};
+```
+
+#### Region-Based Hashtags
+```javascript
+const getHashtagsByRegion = (region: string) => {
+  const baseTag = region === 'LATAM' ? '#RetoConfio' : '#ConfioChallenge';
+  // ... milestone-specific tags
+};
+```
+
+### Marketing Benefits
+
+1. **Trust Building**: Personal founder story increases app credibility
+2. **Organic Growth**: Users become voluntary brand ambassadors
+3. **Cultural Connection**: "Korean dreaming of new Latin America" narrative
+4. **Viral Potential**: Achievement sharing creates social proof
+5. **Community Building**: Links app users with founder's social following
+
+### Success Metrics
+
+- Achievement share rate
+- Social media referral traffic
+- Hashtag reach and engagement
+- User retention after social sharing
+- Viral coefficient (K-factor)
+
+### Future Enhancements
+
+1. **Rewards System**: Offer fee discounts for social sharing
+2. **Leaderboards**: Regional achievement rankings
+3. **Special Badges**: Exclusive achievements for social sharers
+4. **Creator Fund**: Revenue sharing for viral content creators
+5. **Live Events**: TikTok lives with app feature launches
+
+### Cultural Adaptation
+
+The strategy adapts to regional preferences:
+- **Spanish-speaking LATAM**: Uses "Reto" (challenge) which resonates with all age groups
+- **English-speaking regions**: Uses "Challenge" for broader appeal
+- **Visual Content**: TikTok-first approach aligns with LATAM's video consumption habits
+
+This social financial approach positions Confío not just as a utility app but as a movement for financial inclusion in Latin America, with Julian's personal story as the emotional anchor.
