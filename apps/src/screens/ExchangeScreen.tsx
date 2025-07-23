@@ -856,28 +856,17 @@ export const ExchangeScreen = () => {
   const maxRateInputRef = useRef<TextInputType>(null);
   // Removed forceHeaderVisible state as it was causing unnecessary re-renders
   // State for header height - start with reasonable defaults to prevent layout shift
-  const [headerHeight, setHeaderHeight] = useState(() => {
-    // Different initial heights based on initial activeList state
-    return 320; // Default for 'offers' which is the initial activeList
-  });
+  // Fixed header heights - don't change with filters
+  const HEADER_HEIGHT_OFFERS = 360; // Rounded up from 353.454559
+  const HEADER_HEIGHT_OTHER = 160; // Rounded up from 155.636368
+  
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [activeList, setActiveList] = useState<'offers' | 'trades' | 'myOffers'>('offers');
-  
-  // Track if header has been measured to prevent re-measuring
-  const headerMeasuredRef = useRef(false);
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const route = useRoute<RouteProp<MainStackParamList, 'Exchange'>>();
   
-  // Reset header measurement when activeList changes
-  useEffect(() => {
-    headerMeasuredRef.current = false;
-    // Set appropriate initial height based on activeList
-    if (activeList === 'offers') {
-      setHeaderHeight(320); // Full height for offers (includes all filters)
-    } else {
-      setHeaderHeight(100); // Smaller height for other tabs (only main tabs)
-    }
-  }, [activeList]);
+  // Header height never changes with filters - keeps it stable
+  const headerHeight = activeList === 'offers' ? HEADER_HEIGHT_OFFERS : HEADER_HEIGHT_OTHER;
 
   // Handle route params for showing My Offers
   useEffect(() => {
@@ -919,8 +908,6 @@ export const ExchangeScreen = () => {
       scrollY.setValue(0);
       scrollY.setOffset(0);
       lastScrollY.current = 0;
-      
-      // Removed timeout to prevent re-renders
     });
 
     return unsubscribe;
@@ -932,8 +919,6 @@ export const ExchangeScreen = () => {
     scrollY.stopAnimation();
     scrollY.setValue(0);
     lastScrollY.current = 0;
-    
-    // Removed timeout to prevent re-renders
   }, []);
 
   // Refetch trades when screen is focused
@@ -1854,16 +1839,7 @@ export const ExchangeScreen = () => {
 
     return (
         <Animated.View 
-            onLayout={(event) => {
-                const { height } = event.nativeEvent.layout;
-                // Only measure once when activeList changes, not on every render
-                if (height > 0 && !headerMeasuredRef.current) {
-                    headerMeasuredRef.current = true;
-                    if (Math.abs(height - headerHeight) > 5) { // Only update if significantly different
-                        setHeaderHeight(height);
-                    }
-                }
-            }}
+            // Remove onLayout completely - we're using fixed heights
             style={[
                 styles.header,
                 {
@@ -1875,8 +1851,10 @@ export const ExchangeScreen = () => {
                 <TouchableOpacity 
                     style={styles.activeTradesAlert}
                     onPress={() => {
-                        setActiveList('trades');
-                        resetScrollPosition();
+                        if (activeList !== 'trades') {
+                            setActiveList('trades');
+                            resetScrollPosition();
+                        }
                     }}
                 >
                     <Icon name="alert-triangle" size={16} color={colors.primary} />
@@ -1891,8 +1869,10 @@ export const ExchangeScreen = () => {
                 <TouchableOpacity
                     style={[styles.mainTab, activeList === 'offers' && styles.activeMainTab]}
                     onPress={() => {
-                        setActiveList('offers');
-                        resetScrollPosition();
+                        if (activeList !== 'offers') {
+                            setActiveList('offers');
+                            resetScrollPosition();
+                        }
                     }}
                 >
                     <Text style={[styles.mainTabText, activeList === 'offers' && styles.activeMainTabText]}>
@@ -1902,8 +1882,10 @@ export const ExchangeScreen = () => {
                 <TouchableOpacity
                     style={[styles.mainTab, activeList === 'myOffers' && styles.activeMainTab]}
                     onPress={() => {
-                        setActiveList('myOffers');
-                        resetScrollPosition();
+                        if (activeList !== 'myOffers') {
+                            setActiveList('myOffers');
+                            resetScrollPosition();
+                        }
                     }}
                 >
                     <Text style={[styles.mainTabText, activeList === 'myOffers' && styles.activeMainTabText]}>
@@ -1918,8 +1900,10 @@ export const ExchangeScreen = () => {
                 <TouchableOpacity
                     style={[styles.mainTab, activeList === 'trades' && styles.activeMainTab]}
                     onPress={() => {
-                        setActiveList('trades');
-                        resetScrollPosition();
+                        if (activeList !== 'trades') {
+                            setActiveList('trades');
+                            resetScrollPosition();
+                        }
                     }}
                 >
                     <Text style={[styles.mainTabText, activeList === 'trades' && styles.activeMainTabText]}>
@@ -1940,8 +1924,10 @@ export const ExchangeScreen = () => {
                         <TouchableOpacity
                             style={[styles.tab, activeTab === 'buy' && styles.activeTab]}
                             onPress={() => {
-                                setActiveTab('buy');
-                                resetScrollPosition();
+                                if (activeTab !== 'buy') {
+                                    setActiveTab('buy');
+                                    resetScrollPosition();
+                                }
                             }}
                         >
                             <Text style={[styles.tabText, activeTab === 'buy' && styles.activeTabText]}>Comprar</Text>
@@ -1949,8 +1935,10 @@ export const ExchangeScreen = () => {
                         <TouchableOpacity
                             style={[styles.tab, activeTab === 'sell' && styles.activeTab]}
                             onPress={() => {
-                                setActiveTab('sell');
-                                resetScrollPosition();
+                                if (activeTab !== 'sell') {
+                                    setActiveTab('sell');
+                                    resetScrollPosition();
+                                }
                             }}
                         >
                             <Text style={[styles.tabText, activeTab === 'sell' && styles.activeTabText]}>Vender</Text>
@@ -1962,8 +1950,10 @@ export const ExchangeScreen = () => {
                         <TouchableOpacity
                             style={[styles.cryptoButton, selectedCrypto === 'cUSD' && styles.selectedCryptoButton]}
                             onPress={() => {
-                                setSelectedCrypto('cUSD');
-                                resetScrollPosition();
+                                if (selectedCrypto !== 'cUSD') {
+                                    setSelectedCrypto('cUSD');
+                                    resetScrollPosition();
+                                }
                             }}
                         >
                             <Text style={[styles.cryptoButtonText, selectedCrypto === 'cUSD' && styles.selectedCryptoButtonText]}>
@@ -1973,8 +1963,10 @@ export const ExchangeScreen = () => {
                         <TouchableOpacity
                             style={[styles.cryptoButton, selectedCrypto === 'CONFIO' && styles.selectedCryptoButton]}
                             onPress={() => {
-                                setSelectedCrypto('CONFIO');
-                                resetScrollPosition();
+                                if (selectedCrypto !== 'CONFIO') {
+                                    setSelectedCrypto('CONFIO');
+                                    resetScrollPosition();
+                                }
                             }}
                         >
                             <Text style={[styles.cryptoButtonText, selectedCrypto === 'CONFIO' && styles.selectedCryptoButtonText]}>
@@ -2442,6 +2434,7 @@ export const ExchangeScreen = () => {
       </Modal>
 
       <Animated.ScrollView 
+        ref={scrollViewRef}
         style={styles.content} 
         contentContainerStyle={{ 
           paddingTop: headerHeight + 16, // Add some padding to ensure content is not hidden
@@ -2696,6 +2689,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.neutralDark,
     borderRadius: 8,
   },
+  advancedFiltersContainer: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
   advancedFilters: {
     marginTop: 4, // Reduced gap between filter button and advanced filters menu
     paddingTop: 12,
@@ -2820,7 +2820,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -8,
     left: 12,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.accent, // Changed from primary (emerald) to accent (blue)
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 12,
