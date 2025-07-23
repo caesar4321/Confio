@@ -13,6 +13,7 @@ import {
   TouchableWithoutFeedback,
   FlatList,
   Alert,
+  RefreshControl,
   type TextInput as TextInputType,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
@@ -375,6 +376,7 @@ export const ExchangeScreen = () => {
   const [filterVerified, setFilterVerified] = useState(false);
   const [filterOnline, setFilterOnline] = useState(false);
   const [filterHighVolume, setFilterHighVolume] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const scrollY = useRef(new Animated.Value(0)).current;
   const refreshRotation = useRef(new Animated.Value(0)).current;
 
@@ -971,6 +973,33 @@ export const ExchangeScreen = () => {
     }
     
     scrollY.setValue(currentScrollY);
+  };
+
+  // Handle pull-to-refresh
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    
+    try {
+      // Refresh based on active list
+      if (activeList === 'trades' && refetchTrades) {
+        await refetchTrades();
+      } else if (activeList === 'myOffers' && refetchMyOffers) {
+        await refetchMyOffers();
+      } else if (activeList === 'offers') {
+        // Refetch offers with current filters
+        const paymentMethodName = selectedPaymentMethod !== 'Todos los métodos' ? selectedPaymentMethod : null;
+        await refetch({
+          exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
+          tokenType: selectedCrypto,
+          paymentMethod: paymentMethodName,
+          countryCode: selectedCountry?.[2]
+        });
+      }
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   // Reset scroll position when switching between tabs
@@ -2445,7 +2474,18 @@ export const ExchangeScreen = () => {
             { useNativeDriver: true }
         )}
         scrollEventThrottle={16}
-        bounces={false}
+        bounces={true}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]} // Android
+            progressBackgroundColor="#fff" // Android
+            title="Actualizando..." // iOS
+            titleColor={colors.primary} // iOS
+          />
+        }
       >
         {renderContent()}
       </Animated.ScrollView>
