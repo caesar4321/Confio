@@ -1208,7 +1208,7 @@ class Query(graphene.ObjectType):
             ).distinct().first()
             
             if trade:
-                return P2PMessage.objects.filter(trade=trade).order_by('created_at')
+                return P2PMessage.objects.filter(trade=trade).order_by('-created_at')  # Descending order for inverted FlatList
             return []
         except P2PTrade.DoesNotExist:
             return []
