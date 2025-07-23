@@ -185,8 +185,6 @@ export const TradeChatScreen: React.FC = () => {
   const { data: tradeDetailsData, loading: tradeLoading, refetch: refetchTradeDetails } = useQuery(GET_P2P_TRADE, {
     variables: { id: tradeId },
     skip: !tradeId,
-    fetchPolicy: 'cache-and-network', // Ensure we get fresh data
-    pollInterval: 5000, // Poll every 5 seconds for updates
     onCompleted: (data) => {
       console.log('🔍 Trade details loaded:', {
         tradeId,
@@ -515,7 +513,25 @@ export const TradeChatScreen: React.FC = () => {
         break;
         
       case 'trade_status_update':
-        console.log('Trade status updated:', data.status);
+        console.log('🔄 Trade status updated via WebSocket:', data);
+        // Update the local state with the new status
+        if (data.status) {
+          const newStep = getStepFromStatus(data.status);
+          if (newStep !== currentTradeStep) {
+            console.log('📊 Updating trade step from WebSocket:', currentTradeStep, '->', newStep);
+            setCurrentTradeStep(newStep);
+            
+            // Also update hasSharedPaymentDetails if moving to step 2+
+            if (newStep >= 2 && !hasSharedPaymentDetails) {
+              setHasSharedPaymentDetails(true);
+            }
+          }
+          
+          // Also refetch to ensure all data is synced
+          if (refetchTradeDetails) {
+            refetchTradeDetails();
+          }
+        }
         break;
         
       case 'error':

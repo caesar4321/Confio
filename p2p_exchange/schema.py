@@ -775,12 +775,22 @@ class UpdateP2PTradeStatus(graphene.Mutation):
             )
 
         try:
-            # Get trade and verify user is part of it
+            # Get trade and verify user is part of it using new fields
             trade = P2PTrade.objects.filter(
                 id=input.trade_id
             ).filter(
-                models.Q(buyer=user) | models.Q(seller=user)
-            ).get()
+                models.Q(buyer_user=user) | 
+                models.Q(seller_user=user) |
+                models.Q(buyer_business__accounts__user=user) |
+                models.Q(seller_business__accounts__user=user)
+            ).distinct().first()
+            
+            if not trade:
+                return UpdateP2PTradeStatus(
+                    trade=None,
+                    success=False,
+                    errors=["Trade not found or access denied"]
+                )
 
             # Validate status transition
             valid_statuses = [choice[0] for choice in P2PTrade.STATUS_CHOICES]
@@ -1169,11 +1179,15 @@ class Query(graphene.ObjectType):
             return None
         
         try:
+            # Use new fields to check access
             return P2PTrade.objects.filter(
                 id=id
             ).filter(
-                models.Q(buyer=user) | models.Q(seller=user)
-            ).get()
+                models.Q(buyer_user=user) | 
+                models.Q(seller_user=user) |
+                models.Q(buyer_business__accounts__user=user) |
+                models.Q(seller_business__accounts__user=user)
+            ).distinct().first()
         except P2PTrade.DoesNotExist:
             return None
 
@@ -1183,12 +1197,19 @@ class Query(graphene.ObjectType):
             return []
         
         try:
+            # Use new fields to check access
             trade = P2PTrade.objects.filter(
                 id=trade_id
             ).filter(
-                models.Q(buyer=user) | models.Q(seller=user)
-            ).get()
-            return P2PMessage.objects.filter(trade=trade).order_by('created_at')
+                models.Q(buyer_user=user) | 
+                models.Q(seller_user=user) |
+                models.Q(buyer_business__accounts__user=user) |
+                models.Q(seller_business__accounts__user=user)
+            ).distinct().first()
+            
+            if trade:
+                return P2PMessage.objects.filter(trade=trade).order_by('created_at')
+            return []
         except P2PTrade.DoesNotExist:
             return []
 
