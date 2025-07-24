@@ -646,6 +646,7 @@ export const TradeChatScreen: React.FC = () => {
             // This is the buyer receiving the completion notification
             setTimeout(() => {
               navigation.navigate('TraderRating', {
+                tradeId,
                 trader: {
                   name: offer.name,
                   verified: offer.verified,
@@ -1203,6 +1204,7 @@ export const TradeChatScreen: React.FC = () => {
               onPress: () => {
                 // Navigate to rating screen
                 navigation.navigate('TraderRating', {
+                  tradeId,
                   trader: {
                     name: offer.name,
                     verified: offer.verified,

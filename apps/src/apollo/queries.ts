@@ -722,6 +722,7 @@ export const GET_MY_P2P_TRADES = gql`
       createdAt
       countryCode
       currencyCode
+      hasRating
     }
   }
 `;
@@ -965,6 +966,33 @@ export const SEND_P2P_MESSAGE = gql`
         attachmentUrl
         attachmentType
         createdAt
+      }
+      success
+      errors
+    }
+  }
+`;
+
+export const RATE_P2P_TRADE = gql`
+  mutation RateP2PTrade($input: RateP2PTradeInput!) {
+    rateP2pTrade(input: $input) {
+      rating {
+        id
+        trade {
+          id
+          status
+        }
+        overallRating
+        communicationRating
+        speedRating
+        reliabilityRating
+        comment
+        tags
+        ratedAt
+      }
+      trade {
+        id
+        status
       }
       success
       errors

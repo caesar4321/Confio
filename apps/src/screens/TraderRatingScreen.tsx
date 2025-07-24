@@ -14,6 +14,8 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
+import { useMutation } from '@apollo/client';
+import { RATE_P2P_TRADE } from '../apollo/queries';
 
 type TraderRatingRouteProp = RouteProp<MainStackParamList, 'TraderRating'>;
 
@@ -71,22 +73,10 @@ const StarRating = ({ rating, onRatingChange, size = 'medium' }: { rating: numbe
 
 export const TraderRatingScreen: React.FC = () => {
   const navigation = useNavigation();
-  const route = useRoute<any>();
-  // Fallback mock data for demo/testing
-  const trader = route.params?.trader || {
-    name: 'Maria L.',
-    verified: true,
-    completedTrades: 248,
-    successRate: 99.2,
-  };
-  const tradeDetails = route.params?.tradeDetails || {
-    amount: '100.00',
-    crypto: 'cUSD',
-    totalPaid: '3,610.00',
-    method: 'Banco Venezuela',
-    date: '21 Jun 2025, 14:45',
-    duration: '8 minutos',
-  };
+  const route = useRoute<TraderRatingRouteProp>();
+  const tradeId = route.params?.tradeId;
+  const trader = route.params?.trader;
+  const tradeDetails = route.params?.tradeDetails;
 
   const [overallRating, setOverallRating] = useState(0);
   const [communicationRating, setCommunicationRating] = useState(0);
@@ -96,23 +86,58 @@ export const TraderRatingScreen: React.FC = () => {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
+  const [rateP2PTrade, { loading: submitting }] = useMutation(RATE_P2P_TRADE);
+
   const handleTagToggle = (tag: string) => {
     setSelectedTags((prev) =>
       prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
     );
   };
 
-  const handleSubmitRating = () => {
+  const handleSubmitRating = async () => {
     if (overallRating === 0) {
-      Alert.alert('Por favor selecciona una calificación general');
+      Alert.alert('Error', 'Por favor selecciona una calificación general');
       return;
     }
-    // Here you would send the rating to the backend
-    setIsSubmitted(true);
+
+    if (!tradeId) {
+      Alert.alert('Error', 'No se encontró el ID del intercambio');
+      return;
+    }
+
+    try {
+      const result = await rateP2PTrade({
+        variables: {
+          input: {
+            tradeId,
+            overallRating,
+            communicationRating: communicationRating || null,
+            speedRating: speedRating || null,
+            reliabilityRating: reliabilityRating || null,
+            comment: comment.trim(),
+            tags: selectedTags,
+          },
+        },
+      });
+
+      if (result.data?.rateP2pTrade?.success) {
+        setIsSubmitted(true);
+      } else {
+        const errors = result.data?.rateP2pTrade?.errors || ['Error desconocido'];
+        Alert.alert('Error', errors.join('\n'));
+      }
+    } catch (error) {
+      console.error('Error submitting rating:', error);
+      Alert.alert('Error', 'No se pudo enviar la calificación. Por favor intenta de nuevo.');
+    }
   };
 
   const handleGoBack = () => {
-    navigation.goBack();
+    // Navigate to Exchange screen with refresh flag to update trade status
+    navigation.navigate('BottomTabs', { 
+      screen: 'Exchange',
+      params: { refreshData: true }
+    });
   };
 
   if (isSubmitted) {
@@ -151,7 +176,7 @@ export const TraderRatingScreen: React.FC = () => {
               <Text style={styles.ratingText}>{getRatingText(overallRating)}</Text>
             </View>
             <TouchableOpacity style={styles.primaryButton} onPress={handleGoBack}>
-              <Text style={styles.primaryButtonText}>Continuar Intercambiando</Text>
+              <Text style={styles.primaryButtonText}>Volver a Intercambios</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -303,11 +328,13 @@ export const TraderRatingScreen: React.FC = () => {
       </ScrollView>
       <View style={styles.submitBar}>
         <TouchableOpacity
-          style={[styles.primaryButton, overallRating === 0 && styles.primaryButtonDisabled]}
+          style={[styles.primaryButton, (overallRating === 0 || submitting) && styles.primaryButtonDisabled]}
           onPress={handleSubmitRating}
-          disabled={overallRating === 0}
+          disabled={overallRating === 0 || submitting}
         >
-          <Text style={styles.primaryButtonText}>Enviar Calificación</Text>
+          <Text style={styles.primaryButtonText}>
+            {submitting ? 'Enviando...' : 'Enviar Calificación'}
+          </Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>

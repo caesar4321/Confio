@@ -625,3 +625,106 @@ class P2PEscrow(SoftDeleteModel):
     
     def __str__(self):
         return f"Escrow for Trade {self.trade.id}: {self.escrow_amount} {self.token_type}"
+
+
+class P2PTradeRating(SoftDeleteModel):
+    """Rating for P2P trades"""
+    
+    # Trade being rated
+    trade = models.OneToOneField(P2PTrade, on_delete=models.CASCADE, related_name='rating')
+    
+    # Who is rating (the rater)
+    rater_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='p2p_ratings_given',
+        null=True,
+        blank=True
+    )
+    rater_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        related_name='p2p_ratings_given',
+        null=True,
+        blank=True
+    )
+    
+    # Who is being rated (the ratee)
+    ratee_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='p2p_ratings_received',
+        null=True,
+        blank=True
+    )
+    ratee_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        related_name='p2p_ratings_received',
+        null=True,
+        blank=True
+    )
+    
+    # Ratings
+    overall_rating = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)]
+    )
+    communication_rating = models.IntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(5)]
+    )
+    speed_rating = models.IntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(5)]
+    )
+    reliability_rating = models.IntegerField(
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1), MaxValueValidator(5)]
+    )
+    
+    # Feedback
+    comment = models.TextField(max_length=500, blank=True)
+    tags = models.JSONField(default=list, blank=True)  # List of tag strings
+    
+    # Metadata
+    rated_at = models.DateTimeField(auto_now_add=True)
+    
+    # Helper properties
+    @property
+    def rater_type(self):
+        return 'business' if self.rater_business else 'user'
+    
+    @property
+    def ratee_type(self):
+        return 'business' if self.ratee_business else 'user'
+    
+    @property
+    def rater_display_name(self):
+        if self.rater_business:
+            return self.rater_business.name
+        elif self.rater_user:
+            return f"{self.rater_user.first_name} {self.rater_user.last_name}".strip() or self.rater_user.username
+        return "Unknown"
+    
+    @property
+    def ratee_display_name(self):
+        if self.ratee_business:
+            return self.ratee_business.name
+        elif self.ratee_user:
+            return f"{self.ratee_user.first_name} {self.ratee_user.last_name}".strip() or self.ratee_user.username
+        return "Unknown"
+    
+    class Meta:
+        ordering = ['-rated_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['trade'],
+                name='unique_rating_per_trade'
+            )
+        ]
+    
+    def __str__(self):
+        return f"Rating for Trade {self.trade.id}: {self.overall_rating}/5 stars"

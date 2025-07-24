@@ -13,7 +13,8 @@ from .models import (
     P2PTrade, 
     P2PMessage, 
     P2PUserStats, 
-    P2PEscrow
+    P2PEscrow,
+    P2PTradeRating
 )
 from .default_payment_methods import get_payment_methods_for_country
 
@@ -157,6 +158,36 @@ class P2POfferType(DjangoObjectType):
             # Return empty list if there's any issue with payment methods
             return []
 
+class P2PTradeRatingType(DjangoObjectType):
+    """GraphQL type for P2P trade ratings"""
+    rater_type = graphene.String()
+    ratee_type = graphene.String()
+    rater_display_name = graphene.String()
+    ratee_display_name = graphene.String()
+    
+    class Meta:
+        model = P2PTradeRating
+        fields = (
+            'id', 'trade',
+            'rater_user', 'rater_business',
+            'ratee_user', 'ratee_business',
+            'overall_rating', 'communication_rating',
+            'speed_rating', 'reliability_rating',
+            'comment', 'tags', 'rated_at'
+        )
+    
+    def resolve_rater_type(self, info):
+        return self.rater_type
+    
+    def resolve_ratee_type(self, info):
+        return self.ratee_type
+    
+    def resolve_rater_display_name(self, info):
+        return self.rater_display_name
+    
+    def resolve_ratee_display_name(self, info):
+        return self.ratee_display_name
+
 class P2PTradeType(DjangoObjectType):
     payment_method = graphene.Field(P2PPaymentMethodType)
     # Add computed fields for better frontend integration
@@ -164,6 +195,9 @@ class P2PTradeType(DjangoObjectType):
     seller_type = graphene.String()
     buyer_display_name = graphene.String()
     seller_display_name = graphene.String()
+    # Add rating field to check if trade has been rated
+    rating = graphene.Field(P2PTradeRatingType)
+    has_rating = graphene.Boolean()
     
     class Meta:
         model = P2PTrade
@@ -213,6 +247,13 @@ class P2PTradeType(DjangoObjectType):
     def resolve_seller_display_name(self, info):
         """Returns display name for the seller"""
         return self.seller_display_name
+    
+    def resolve_has_rating(self, info):
+        """Returns True if the trade has been rated"""
+        try:
+            return hasattr(self, 'rating') and self.rating is not None
+        except:
+            return False
 
 class P2PMessageType(DjangoObjectType):
     # Add computed fields for better frontend integration
@@ -238,6 +279,7 @@ class P2PMessageType(DjangoObjectType):
     def resolve_sender_display_name(self, info):
         """Returns display name for the sender"""
         return self.sender_display_name
+
 
 # Input Types
 class CreateP2POfferInput(graphene.InputObjectType):
@@ -271,6 +313,16 @@ class SendP2PMessageInput(graphene.InputObjectType):
     message_type = graphene.String()
     attachment_url = graphene.String()
     attachment_type = graphene.String()
+
+
+class RateP2PTradeInput(graphene.InputObjectType):
+    trade_id = graphene.ID(required=True)
+    overall_rating = graphene.Int(required=True)
+    communication_rating = graphene.Int()
+    speed_rating = graphene.Int()
+    reliability_rating = graphene.Int()
+    comment = graphene.String()
+    tags = graphene.List(graphene.String)
 
 # Mutations
 class CreateP2POffer(graphene.Mutation):
@@ -1005,6 +1057,179 @@ class SendP2PMessage(graphene.Mutation):
                 errors=[str(e)]
             )
 
+
+class RateP2PTrade(graphene.Mutation):
+    class Arguments:
+        input = RateP2PTradeInput(required=True)
+    
+    rating = graphene.Field(P2PTradeRatingType)
+    trade = graphene.Field(P2PTradeType)
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+    
+    @classmethod
+    def mutate(cls, root, info, input):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return RateP2PTrade(
+                rating=None,
+                trade=None,
+                success=False,
+                errors=["Authentication required"]
+            )
+        
+        try:
+            # Get trade and verify user is part of it
+            trade = P2PTrade.objects.filter(
+                id=input.trade_id
+            ).filter(
+                models.Q(buyer_user=user) | 
+                models.Q(seller_user=user) |
+                models.Q(buyer_business__accounts__user=user) |
+                models.Q(seller_business__accounts__user=user)
+            ).distinct().first()
+            
+            if not trade:
+                return RateP2PTrade(
+                    rating=None,
+                    trade=None,
+                    success=False,
+                    errors=["Trade not found or access denied"]
+                )
+            
+            # Check if trade is completed
+            if trade.status not in ['PAYMENT_CONFIRMED', 'COMPLETED']:
+                return RateP2PTrade(
+                    rating=None,
+                    trade=None,
+                    success=False,
+                    errors=["Trade must be completed before rating"]
+                )
+            
+            # Check if already rated
+            if hasattr(trade, 'rating'):
+                return RateP2PTrade(
+                    rating=None,
+                    trade=None,
+                    success=False,
+                    errors=["This trade has already been rated"]
+                )
+            
+            # Validate ratings
+            if not (1 <= input.overall_rating <= 5):
+                return RateP2PTrade(
+                    rating=None,
+                    trade=None,
+                    success=False,
+                    errors=["Overall rating must be between 1 and 5"]
+                )
+            
+            # Get the active account context
+            request = info.context
+            active_account_type = getattr(request, 'active_account_type', 'personal')
+            active_account_index = getattr(request, 'active_account_index', 0)
+            
+            # Determine who is rating and who is being rated
+            rating_kwargs = {
+                'trade': trade,
+                'overall_rating': input.overall_rating,
+                'communication_rating': input.communication_rating,
+                'speed_rating': input.speed_rating,
+                'reliability_rating': input.reliability_rating,
+                'comment': input.comment or '',
+                'tags': input.tags or []
+            }
+            
+            # Determine rater and ratee based on who the user is in the trade
+            is_buyer = False
+            is_seller = False
+            
+            if active_account_type == 'business':
+                # Check if user is acting as a business
+                if trade.buyer_business and trade.buyer_business.accounts.filter(user=user, account_index=active_account_index).exists():
+                    rating_kwargs['rater_business'] = trade.buyer_business
+                    is_buyer = True
+                elif trade.seller_business and trade.seller_business.accounts.filter(user=user, account_index=active_account_index).exists():
+                    rating_kwargs['rater_business'] = trade.seller_business
+                    is_seller = True
+            else:
+                # User is acting as personal account
+                if trade.buyer_user == user:
+                    rating_kwargs['rater_user'] = user
+                    is_buyer = True
+                elif trade.seller_user == user:
+                    rating_kwargs['rater_user'] = user
+                    is_seller = True
+            
+            # Set ratee based on who is rating
+            if is_buyer:
+                # Buyer is rating the seller
+                if trade.seller_business:
+                    rating_kwargs['ratee_business'] = trade.seller_business
+                else:
+                    rating_kwargs['ratee_user'] = trade.seller_user
+            elif is_seller:
+                # Seller is rating the buyer
+                if trade.buyer_business:
+                    rating_kwargs['ratee_business'] = trade.buyer_business
+                else:
+                    rating_kwargs['ratee_user'] = trade.buyer_user
+            else:
+                return RateP2PTrade(
+                    rating=None,
+                    trade=None,
+                    success=False,
+                    errors=["You are not part of this trade"]
+                )
+            
+            # Create the rating
+            rating = P2PTradeRating.objects.create(**rating_kwargs)
+            
+            # Update trade status to COMPLETED if not already
+            if trade.status == 'PAYMENT_CONFIRMED':
+                trade.status = 'COMPLETED'
+                trade.save()
+            
+            # Update user stats for the ratee
+            ratee = rating.ratee_user or rating.ratee_business
+            if ratee:
+                # Get or create stats for the ratee
+                if rating.ratee_business:
+                    stats, created = P2PUserStats.objects.get_or_create(
+                        stats_business=rating.ratee_business,
+                        defaults={'total_trades': 0, 'completed_trades': 0}
+                    )
+                else:
+                    stats, created = P2PUserStats.objects.get_or_create(
+                        stats_user=rating.ratee_user,
+                        defaults={'total_trades': 0, 'completed_trades': 0}
+                    )
+                
+                # Update average rating (simplified - in production, calculate properly)
+                all_ratings = P2PTradeRating.objects.filter(
+                    models.Q(ratee_user=rating.ratee_user) | 
+                    models.Q(ratee_business=rating.ratee_business)
+                )
+                avg_rating = all_ratings.aggregate(models.Avg('overall_rating'))['overall_rating__avg']
+                if avg_rating:
+                    stats.success_rate = min(avg_rating * 20, 100)  # Convert 1-5 to 0-100
+                    stats.save()
+            
+            return RateP2PTrade(
+                rating=rating,
+                trade=trade,
+                success=True,
+                errors=None
+            )
+            
+        except Exception as e:
+            return RateP2PTrade(
+                rating=None,
+                trade=None,
+                success=False,
+                errors=[str(e)]
+            )
+
 # Queries
 class Query(graphene.ObjectType):
     p2p_offers = graphene.List(
@@ -1129,7 +1354,7 @@ class Query(graphene.ObjectType):
                     # Show only personal trades for this user
                     trades = P2PTrade.objects.filter(
                         models.Q(buyer_user=user) | models.Q(seller_user=user)
-                    ).order_by('-created_at')
+                    ).select_related('rating').order_by('-created_at')
                     print(f"[P2P] Filtering personal trades for user_id: {user.id}, found: {trades.count()} trades")
                     return trades
                 elif account_type == 'business':
@@ -1147,7 +1372,7 @@ class Query(graphene.ObjectType):
                             # Show only business trades for this specific business
                             trades = P2PTrade.objects.filter(
                                 models.Q(buyer_business=account.business) | models.Q(seller_business=account.business)
-                            ).order_by('-created_at')
+                            ).select_related('rating').order_by('-created_at')
                             print(f"[P2P] Filtering business trades for business_id: {account.business.id}, found: {trades.count()} trades")
                             return trades
                     except Account.DoesNotExist:
@@ -1164,14 +1389,14 @@ class Query(graphene.ObjectType):
                         # Show only business trades for this specific business
                         trades = P2PTrade.objects.filter(
                             models.Q(buyer_business=account.business) | models.Q(seller_business=account.business)
-                        ).order_by('-created_at')
+                        ).select_related('rating').order_by('-created_at')
                         print(f"[P2P] Filtering business trades for business_id: {account.business.id}, found: {trades.count()} trades")
                         return trades
                     else:
                         # Show only personal trades for this user
                         trades = P2PTrade.objects.filter(
                             models.Q(buyer_user=user) | models.Q(seller_user=user)
-                        ).order_by('-created_at')
+                        ).select_related('rating').order_by('-created_at')
                         print(f"[P2P] Filtering personal trades for user_id: {user.id}, found: {trades.count()} trades")
                         return trades
                 except (Account.DoesNotExist, ValueError):
@@ -1190,7 +1415,7 @@ class Query(graphene.ObjectType):
             trades = P2PTrade.objects.filter(
                 models.Q(buyer_user=user) | models.Q(seller_user=user) |
                 models.Q(buyer_business__in=user_businesses) | models.Q(seller_business__in=user_businesses)
-            ).order_by('-created_at')
+            ).select_related('rating').order_by('-created_at')
             print(f"[P2P] Found {trades.count()} total trades across all accounts")
             return trades
 
@@ -1284,6 +1509,7 @@ class Mutation(graphene.ObjectType):
     create_p2p_trade = CreateP2PTrade.Field()
     update_p2p_trade_status = UpdateP2PTradeStatus.Field()
     send_p2p_message = SendP2PMessage.Field()
+    rate_p2p_trade = RateP2PTrade.Field()
 
 # Subscriptions
 class TradeChatMessageSubscription(graphene.ObjectType):
