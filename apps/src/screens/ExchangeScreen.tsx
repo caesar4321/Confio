@@ -14,18 +14,20 @@ import {
   FlatList,
   Alert,
   RefreshControl,
+  ActivityIndicator,
+  StatusBar,
   type TextInput as TextInputType,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
-import { useQuery } from '@apollo/client';
+import { useQuery, useMutation } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { countries, Country } from '../utils/countries';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { useCurrency } from '../hooks/useCurrency';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
-import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS, GET_MY_P2P_TRADES, GET_MY_P2P_OFFERS, GET_USER_BANK_ACCOUNTS } from '../apollo/queries';
+import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS, GET_MY_P2P_TRADES, GET_MY_P2P_OFFERS, GET_USER_BANK_ACCOUNTS, UPDATE_P2P_OFFER } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -384,6 +386,11 @@ export const ExchangeScreen = () => {
   const scrollY = useRef(new Animated.Value(0)).current;
   const refreshRotation = useRef(new Animated.Value(0)).current;
 
+  // Pagination state for trades
+  const [tradesOffset, setTradesOffset] = useState(0);
+  const [isLoadingMoreTrades, setIsLoadingMoreTrades] = useState(false);
+  const TRADES_LIMIT = 10;
+
   // Fetch real P2P offers from database
   const { data: offersData, loading: offersLoading, error: offersError, refetch } = useQuery(GET_P2P_OFFERS, {
     variables: {
@@ -409,23 +416,45 @@ export const ExchangeScreen = () => {
 
   // Fetch user's active trades filtered by current account context
   const tradesQueryVariables = {
-    accountId: activeAccount?.id // Filter trades by current account context
+    accountId: activeAccount?.id, // Filter trades by current account context
+    offset: tradesOffset,
+    limit: TRADES_LIMIT
   };
   
   console.log('[ExchangeScreen] Trades query variables:', {
     accountId: tradesQueryVariables.accountId,
     activeAccountType: activeAccount?.type,
     activeAccountIndex: activeAccount?.index,
+    offset: tradesQueryVariables.offset,
+    limit: tradesQueryVariables.limit,
     willSkipQuery: !activeAccount || !activeAccount.id
   });
   
-  const { data: myTradesData, loading: tradesLoading, error: tradesError, refetch: refetchTrades } = useQuery(GET_MY_P2P_TRADES, {
+  const { data: myTradesData, loading: tradesLoading, error: tradesError, refetch: refetchTrades, fetchMore } = useQuery(GET_MY_P2P_TRADES, {
     variables: tradesQueryVariables,
     fetchPolicy: 'network-only', // Always fetch fresh data from server
     notifyOnNetworkStatusChange: true, // Enable to track network status
     skip: !activeAccount || !activeAccount.id, // Skip if no account or no ID
     // Removed pollInterval - now using focus-based refresh and manual refresh instead
   });
+  
+  // Debug trades query
+  useEffect(() => {
+    console.log('[ExchangeScreen] Trades query debug:', {
+      loading: tradesLoading,
+      error: tradesError,
+      hasData: !!myTradesData,
+      tradesCount: myTradesData?.myP2pTrades?.trades?.length || 0,
+      totalCount: myTradesData?.myP2pTrades?.totalCount || 0,
+      activeCount: myTradesData?.myP2pTrades?.activeCount || 0,
+      variables: tradesQueryVariables,
+      skip: !activeAccount || !activeAccount.id,
+      activeAccount: activeAccount ? { id: activeAccount.id, type: activeAccount.type } : null
+    });
+    if (tradesError) {
+      console.error('[ExchangeScreen] Trades query error:', tradesError);
+    }
+  }, [tradesLoading, tradesError, myTradesData, tradesQueryVariables, activeAccount]);
 
   // Fetch user's bank accounts to check payment method availability
   const { data: bankAccountsData, loading: bankAccountsLoading } = useQuery(GET_USER_BANK_ACCOUNTS, {
@@ -474,19 +503,25 @@ export const ExchangeScreen = () => {
     }
   }, [activeAccount?.id, activeAccount?.type, refetchMyOffers]);
 
+  // Get active trade count from server
+  const activeTradeCount = myTradesData?.myP2pTrades?.activeCount || 0;
+  
   // Transform real trades data into UI format
   const activeTrades: ActiveTrade[] = React.useMemo(() => {
-    if (!myTradesData?.myP2pTrades) return [];
+    if (!myTradesData?.myP2pTrades?.trades) return [];
     
     console.log('[ExchangeScreen] Raw trades data:', {
-      tradesCount: myTradesData.myP2pTrades.length,
+      tradesCount: myTradesData.myP2pTrades.trades.length,
+      totalCount: myTradesData.myP2pTrades.totalCount,
+      hasMore: myTradesData.myP2pTrades.hasMore,
+      activeCount: myTradesData.myP2pTrades.activeCount,
       accountFilterUsed: tradesQueryVariables.accountId,
       currentAccount: {
         id: activeAccount?.id,
         type: activeAccount?.type,
         name: activeAccount?.name
       },
-      trades: myTradesData.myP2pTrades.map((trade: any) => ({
+      trades: myTradesData.myP2pTrades.trades.map((trade: any) => ({
         id: trade.id,
         buyerUser: trade.buyerUser?.id,
         sellerUser: trade.sellerUser?.id,
@@ -498,49 +533,20 @@ export const ExchangeScreen = () => {
       }))
     });
     
-    const filteredTrades = myTradesData.myP2pTrades
-      .filter((trade: any) => {
-        // Don't show cancelled trades
-        if (trade.status === 'CANCELLED') return false;
-        
-        // Show all other trades (including completed ones for history)
-        return true;
+    // Special debug for trade 14
+    const trade14 = myTradesData.myP2pTrades.trades.find((t: any) => t.id === '14');
+    if (trade14) {
+      console.log('[ExchangeScreen] Trade 14 raw GraphQL data:', {
+        id: trade14.id,
+        status: trade14.status,
+        hasRating: trade14.hasRating,
+        buyerUser: trade14.buyerUser?.id,
+        sellerBusiness: trade14.sellerBusiness?.id
       });
+    }
     
-    console.log('[ExchangeScreen] After filtering:', {
-      filteredCount: filteredTrades.length,
-      statuses: filteredTrades.map((t: any) => ({ id: t.id, status: t.status, hasRating: t.hasRating }))
-    });
-    
-    return filteredTrades
-      .sort((a: any, b: any) => {
-        // Sort by status priority first
-        const statusPriority: { [key: string]: number } = {
-          'PENDING': 1,
-          'PAYMENT_PENDING': 2,
-          'PAYMENT_SENT': 3,
-          'PAYMENT_CONFIRMED': 4,
-          'COMPLETED': 5, // Completed trades go to the bottom
-        };
-        
-        const aPriority = statusPriority[a.status] || 999;
-        const bPriority = statusPriority[b.status] || 999;
-        
-        // If both are completed, sort by whether they have ratings
-        if (a.status === 'COMPLETED' && b.status === 'COMPLETED') {
-          // Unrated completed trades come before rated ones
-          if (!a.hasRating && b.hasRating) return -1;
-          if (a.hasRating && !b.hasRating) return 1;
-        }
-        
-        // If same priority, sort by creation date (newest first)
-        if (aPriority === bPriority) {
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        }
-        
-        return aPriority - bPriority;
-      })
-      .map((trade: any) => {
+    // Trades are already filtered and sorted on the server
+    return myTradesData.myP2pTrades.trades.map((trade: any) => {
         // NEW: Use the computed helper fields from GraphQL for cleaner logic
         const buyerDisplayName = trade.buyerDisplayName || 'Unknown Buyer';
         const sellerDisplayName = trade.sellerDisplayName || 'Unknown Seller';
@@ -589,19 +595,38 @@ export const ExchangeScreen = () => {
         const timeRemaining = 900; // 15 minutes default
         
         // Map status to step
-        const getStepFromStatus = (status: string) => {
+        const getStepFromStatus = (status: string, hasRating?: boolean) => {
+          // If trade is completed or payment confirmed but not rated, we're on the rating step
+          if ((status === 'COMPLETED' || status === 'PAYMENT_CONFIRMED') && !hasRating) {
+            return 5; // Rating step
+          }
+          
           switch (status) {
             case 'PENDING': return 1;
             case 'PAYMENT_PENDING': return 2;
             case 'PAYMENT_SENT': return 3;
-            case 'PAYMENT_CONFIRMED': return 4;
-            case 'COMPLETED': return 4; // Completed trades are at step 4
+            case 'PAYMENT_CONFIRMED': return hasRating ? 5 : 4; // If rated, completed, else funds released
+            case 'CRYPTO_RELEASED': return 4;
+            case 'COMPLETED': return 5; // Completed and rated
             default: return 1;
           }
         };
 
-        // Get user stats for the other party (if available)
-        const otherPartyStats = trade.offer?.userStats;
+        // Get user stats for the other party based on trade role
+        // If I'm the buyer, I want to see seller's stats, and vice versa
+        let otherPartyStats;
+        if (activeAccount?.type === 'business') {
+          const currentBusinessId = activeAccount.business?.id;
+          const isBuyer = trade.buyerBusiness?.id === currentBusinessId;
+          otherPartyStats = isBuyer ? trade.sellerStats : trade.buyerStats;
+        } else {
+          const currentUserId = profileData?.userProfile?.id;
+          const isBuyer = trade.buyerUser?.id === currentUserId;
+          otherPartyStats = isBuyer ? trade.sellerStats : trade.buyerStats;
+        }
+        
+        // Fallback to offer stats if buyer/seller stats not available
+        otherPartyStats = otherPartyStats || trade.offer?.userStats;
         
         // Calculate if user is "online" (active within last 6 hours)
         const isOnline = otherPartyStats?.lastSeenOnline ? (() => {
@@ -649,7 +674,10 @@ export const ExchangeScreen = () => {
           otherPartyBusinessId = isBuyer ? trade.sellerBusiness?.id : trade.buyerBusiness?.id;
         }
 
-        return {
+        // Debug the actual status
+        console.log(`[Trade ${trade.id}] Status: ${trade.status}, hasRating: ${trade.hasRating}`);
+        
+        const mappedTrade = {
           id: trade.id,
           trader: {
             name: otherPartyName,
@@ -667,8 +695,8 @@ export const ExchangeScreen = () => {
           amount: trade.cryptoAmount.toString(),
           crypto: trade.offer?.tokenType === 'CUSD' ? 'cUSD' : (trade.offer?.tokenType || 'cUSD'),
           totalBs: `${formatNumber(trade.fiatAmount)} ${trade.currencyCode || currency.code}`,
-          step: getStepFromStatus(trade.status),
-          totalSteps: 4,
+          step: getStepFromStatus(trade.status, trade.hasRating),
+          totalSteps: (trade.status === 'COMPLETED' || trade.status === 'PAYMENT_CONFIRMED') ? 5 : 4, // 5 steps for completed or payment confirmed trades
           timeRemaining,
           status: trade.status, // Keep original case for proper comparison
           paymentMethod: trade.paymentMethod?.isActive === false ? 
@@ -687,6 +715,20 @@ export const ExchangeScreen = () => {
           hasRating: trade.hasRating || false,
           createdAt: trade.createdAt,
         };
+        
+        // Debug logging for trade 14
+        if (trade.id === '14') {
+          console.log('[ExchangeScreen] Trade 14 mapping:', {
+            tradeId: trade.id,
+            status: trade.status,
+            hasRating: trade.hasRating,
+            step: mappedTrade.step,
+            totalSteps: mappedTrade.totalSteps,
+            shouldShowRatingUI: trade.status === 'COMPLETED' && !trade.hasRating
+          });
+        }
+        
+        return mappedTrade;
       });
   }, [myTradesData, formatAmount, activeAccount]);
 
@@ -932,8 +974,8 @@ export const ExchangeScreen = () => {
   // Removed forceHeaderVisible state as it was causing unnecessary re-renders
   // State for header height - start with reasonable defaults to prevent layout shift
   // Fixed header heights - don't change with filters
-  const HEADER_HEIGHT_OFFERS = 360; // Rounded up from 353.454559
-  const HEADER_HEIGHT_OTHER = 160; // Rounded up from 155.636368
+  const HEADER_HEIGHT_OFFERS = Platform.OS === 'ios' ? 340 : 360; // Adjusted for iOS
+  const HEADER_HEIGHT_OTHER = Platform.OS === 'ios' ? 140 : 160; // Adjusted for iOS
   
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [activeList, setActiveList] = useState<'offers' | 'trades' | 'myOffers'>('offers');
@@ -1034,7 +1076,7 @@ export const ExchangeScreen = () => {
 
   // Removed handleLocalAmountChange - not used anymore
 
-  // Handle scroll for header visibility
+  // Handle scroll for header visibility and infinite scroll
   const handleScroll = (event: any) => {
     const currentScrollY = event.nativeEvent.contentOffset.y;
     const scrollDifference = currentScrollY - lastScrollY.current;
@@ -1046,6 +1088,16 @@ export const ExchangeScreen = () => {
     }
     
     scrollY.setValue(currentScrollY);
+    
+    // Check if we need to load more trades (infinite scroll)
+    if (activeList === 'trades' && myTradesData?.myP2pTrades?.hasMore && !isLoadingMoreTrades) {
+      const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+      const paddingToBottom = 100; // Start loading 100px from the bottom
+      
+      if (contentOffset.y + layoutMeasurement.height >= contentSize.height - paddingToBottom) {
+        loadMoreTrades();
+      }
+    }
   };
 
   // Handle pull-to-refresh
@@ -1053,6 +1105,9 @@ export const ExchangeScreen = () => {
     setRefreshing(true);
     
     try {
+      // Reset pagination when refreshing
+      setTradesOffset(0);
+      
       // Refresh based on active list
       if (activeList === 'trades' && refetchTrades) {
         await refetchTrades();
@@ -1072,6 +1127,46 @@ export const ExchangeScreen = () => {
       console.error('Error refreshing data:', error);
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  // Load more trades for pagination
+  const loadMoreTrades = async () => {
+    if (!myTradesData?.myP2pTrades?.hasMore || isLoadingMoreTrades) {
+      return;
+    }
+
+    setIsLoadingMoreTrades(true);
+    
+    try {
+      const result = await fetchMore({
+        variables: {
+          ...tradesQueryVariables,
+          offset: myTradesData.myP2pTrades.trades.length,
+        },
+        updateQuery: (prev, { fetchMoreResult }) => {
+          if (!fetchMoreResult) return prev;
+          
+          return {
+            myP2pTrades: {
+              ...fetchMoreResult.myP2pTrades,
+              trades: [
+                ...prev.myP2pTrades.trades,
+                ...fetchMoreResult.myP2pTrades.trades
+              ]
+            }
+          };
+        }
+      });
+      
+      console.log('[ExchangeScreen] Loaded more trades:', {
+        newCount: result.data.myP2pTrades.trades.length,
+        hasMore: result.data.myP2pTrades.hasMore
+      });
+    } catch (error) {
+      console.error('Error loading more trades:', error);
+    } finally {
+      setIsLoadingMoreTrades(false);
     }
   };
 
@@ -1322,6 +1417,19 @@ export const ExchangeScreen = () => {
 
     if (action === 'profile') {
       // Navigate to TraderProfile screen with trader data
+      console.log('[OfferCard] Navigating to TraderProfile:', {
+        offerUser: offer.offerUser?.firstName + ' ' + offer.offerUser?.lastName,
+        offerBusiness: offer.offerBusiness?.name,
+        userStats: {
+          completedTrades: userStats.completedTrades,
+          successRate: userStats.successRate,
+          avgRating: userStats.avgRating,
+          hasAvgRating: userStats.avgRating !== undefined,
+          avgRatingType: typeof userStats.avgRating,
+          rawUserStats: JSON.stringify(userStats)
+        }
+      });
+      
       const traderData = {
         id: offer.offerUser?.id || offer.offerBusiness?.id || offer.user?.id || offer.id,
         name: userName,
@@ -1381,7 +1489,7 @@ export const ExchangeScreen = () => {
     const userStats = offer.userStats || {};
     const completedTrades = userStats.completedTrades || 0;
     const successRate = parseFloat(userStats.successRate || '0'); // Convert string to number
-    const responseTime = offer.responseTimeMinutes || 15;
+    const responseTime = userStats.avgResponseTime || offer.responseTimeMinutes || null;
     const isVerified = userStats.isVerified || false;
     
     // Calculate simple activity status instead of real-time online
@@ -1422,7 +1530,7 @@ export const ExchangeScreen = () => {
             </View>
             <View style={styles.userInfoContainer}>
               <View style={styles.userNameContainer}>
-                <Text style={styles.userName}>{userName}</Text>
+                <Text style={styles.userName} numberOfLines={1} ellipsizeMode="tail">{userName}</Text>
                 {isVerified && (
                   <Icon name="shield" size={16} color={colors.accent} style={styles.verifiedIcon} />
                 )}
@@ -1431,7 +1539,7 @@ export const ExchangeScreen = () => {
                 {completedTrades === 0 ? 'Nuevo trader' : `${completedTrades} operaciones`}
               </Text>
               <Text style={styles.successRate}>
-                {completedTrades === 0 ? 'Sin historial' : `${successRate}% completado`}
+                {completedTrades === 0 ? 'Sin historial' : `${Number(successRate).toFixed(1)}% completado`}
               </Text>
               <Text style={[styles.activityStatus, activityStatus.isActive && styles.activeStatus]}>
                 {activityStatus.text}
@@ -1600,11 +1708,58 @@ export const ExchangeScreen = () => {
 
   const MyOfferCard = ({ offer, onRefresh }: { offer: any; onRefresh: () => void }) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    const [updateOffer, { loading: updating }] = useMutation(UPDATE_P2P_OFFER);
     
     // Format token type for display
     const formatTokenType = (tokenType: string): string => {
       if (tokenType === 'CUSD') return 'cUSD';
       return tokenType; // CONFIO and others remain unchanged
+    };
+    
+    // Handle pause/resume offer
+    const handleTogglePause = async () => {
+      const newStatus = offer.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
+      
+      try {
+        const { data } = await updateOffer({
+          variables: {
+            offerId: offer.id,
+            status: newStatus
+          }
+        });
+        
+        if (data?.updateP2pOffer?.success) {
+          Alert.alert(
+            'Éxito',
+            `Oferta ${newStatus === 'ACTIVE' ? 'activada' : 'pausada'} correctamente`,
+            [{ text: 'OK', onPress: onRefresh }]
+          );
+        } else {
+          Alert.alert('Error', data?.updateP2pOffer?.errors?.[0] || 'No se pudo actualizar la oferta');
+        }
+      } catch (error) {
+        Alert.alert('Error', 'No se pudo conectar con el servidor');
+      }
+    };
+    
+    // Handle edit offer
+    const handleEdit = () => {
+      // Navigate to edit offer screen with offer data
+      navigation.navigate('CreateOffer', { 
+        editMode: true, 
+        offerId: offer.id,
+        offerData: {
+          exchangeType: offer.exchangeType,
+          tokenType: offer.tokenType,
+          rate: offer.rate,
+          minAmount: offer.minAmount,
+          maxAmount: offer.maxAmount,
+          availableAmount: offer.availableAmount,
+          countryCode: offer.countryCode,
+          paymentMethods: offer.paymentMethods,
+          terms: offer.terms
+        }
+      });
     };
 
     // Use the offer's original country currency, not the selected country currency
@@ -1654,7 +1809,7 @@ export const ExchangeScreen = () => {
     };
 
     return (
-      <View style={styles.myOfferCard}>
+      <View style={[styles.myOfferCard, offer.status === 'PAUSED' && styles.myOfferCardPaused]}>
         {/* Offer Header */}
         <View style={styles.myOfferHeader}>
           <View style={[styles.myOfferStatus, { backgroundColor: getStatusColor(offer.status) + '20' }]}>
@@ -1688,7 +1843,7 @@ export const ExchangeScreen = () => {
         {/* Country Label */}
         <View style={styles.myOfferCountryContainer}>
           <Text style={styles.myOfferCountryFlag}>{countryInfo.flag}</Text>
-          <Text style={styles.myOfferCountryText}>
+          <Text style={[styles.myOfferCountryText, offer.status === 'PAUSED' && { opacity: 0.6 }]}>
             {countryInfo.name} • {countryInfo.currency}
           </Text>
         </View>
@@ -1760,13 +1915,26 @@ export const ExchangeScreen = () => {
         )}
 
         {/* Action Buttons */}
-        {offer.status === 'ACTIVE' && (
+        {(offer.status === 'ACTIVE' || offer.status === 'PAUSED') && (
           <View style={styles.myOfferActions}>
-            <TouchableOpacity style={styles.myOfferActionButton}>
-              <Icon name="pause" size={14} color={colors.accent} />
-              <Text style={[styles.myOfferActionText, { color: colors.accent }]}>Pausar</Text>
+            <TouchableOpacity 
+              style={[styles.myOfferActionButton, updating && styles.disabledButton]}
+              onPress={handleTogglePause}
+              disabled={updating}
+            >
+              <Icon 
+                name={offer.status === 'ACTIVE' ? "pause" : "play"} 
+                size={14} 
+                color={updating ? '#9CA3AF' : colors.accent} 
+              />
+              <Text style={[styles.myOfferActionText, { color: updating ? '#9CA3AF' : colors.accent }]}>
+                {updating ? 'Actualizando...' : (offer.status === 'ACTIVE' ? 'Pausar' : 'Activar')}
+              </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.myOfferActionButton}>
+            <TouchableOpacity 
+              style={styles.myOfferActionButton}
+              onPress={handleEdit}
+            >
               <Icon name="edit-2" size={14} color={colors.primary} />
               <Text style={[styles.myOfferActionText, { color: colors.primary }]}>Editar</Text>
             </TouchableOpacity>
@@ -1787,7 +1955,16 @@ export const ExchangeScreen = () => {
         if (status === 'COMPLETED' && hasRating) {
             return "Intercambio completado";
         }
-        const steps: { [key: number]: string } = { 1: "Realizar pago", 2: "Confirmar pago", 3: "Esperando verificación", 4: "Calificar trader" };
+        if (status === 'COMPLETED' && !hasRating) {
+            return "Calificar trader";
+        }
+        const steps: { [key: number]: string } = { 
+            1: "Realizar pago", 
+            2: "Confirmar pago", 
+            3: "Esperando verificación", 
+            4: "Liberando fondos", 
+            5: "Calificar trader" 
+        };
         return steps[step] || "En proceso";
     };
 
@@ -1800,6 +1977,12 @@ export const ExchangeScreen = () => {
                 <TouchableOpacity 
                     style={[styles.tradeUser, { flex: 1 }]}
                     onPress={() => {
+                        console.log('[ActiveTradeCard] Navigating to TraderProfile with:', {
+                            name: trade.trader.name,
+                            successRate: trade.trader.successRate,
+                            avgRating: trade.trader.avgRating,
+                            completedTrades: trade.trader.completedTrades
+                        });
                         navigation.navigate('TraderProfile', {
                             trader: {
                                 id: trade.trader.id,
@@ -1842,19 +2025,42 @@ export const ExchangeScreen = () => {
                 )}
             </View>
             {/* Different layout for completed trades */}
-            {trade.status === 'COMPLETED' ? (
+            {(() => {
+              const isCompletedWithRating = trade.status === 'COMPLETED' && trade.hasRating;
+              if (trade.id === '14') {
+                console.log('[ExchangeScreen] Trade 14 UI decision:', {
+                  status: trade.status,
+                  hasRating: trade.hasRating,
+                  isCompletedWithRating,
+                  willShowCompletedUI: isCompletedWithRating
+                });
+              }
+              return isCompletedWithRating;
+            })() ? (
                 <TouchableOpacity 
                     style={styles.completedTradeContent}
                     onPress={() => {
                         navigation.navigate('ActiveTrade', {
                             trade: {
                                 id: trade.id,
-                                trader: {
-                                    name: trade.trader.name,
-                                    isOnline: trade.trader.isOnline,
-                                    verified: trade.trader.verified,
-                                    lastSeen: trade.trader.lastSeen,
-                                    responseTime: trade.trader.responseTime,
+                                trader: trade.trader ? {
+                                    name: trade.trader.name || 'Comerciante',
+                                    isOnline: trade.trader.isOnline || false,
+                                    verified: trade.trader.verified || false,
+                                    lastSeen: trade.trader.lastSeen || 'Desconocido',
+                                    responseTime: trade.trader.responseTime || 'N/A',
+                                    completedTrades: trade.trader.completedTrades || 0,
+                                    successRate: trade.trader.successRate || 0,
+                                    avgRating: trade.trader.avgRating || 0,
+                                } : {
+                                    name: 'Comerciante',
+                                    isOnline: false,
+                                    verified: false,
+                                    lastSeen: 'Desconocido',
+                                    responseTime: 'N/A',
+                                    completedTrades: 0,
+                                    successRate: 0,
+                                    avgRating: 0,
                                 },
                                 amount: trade.amount,
                                 crypto: trade.crypto,
@@ -1868,6 +2074,7 @@ export const ExchangeScreen = () => {
                                 currencyCode: trade.currencyCode,
                                 status: trade.status,
                                 hasRating: trade.hasRating,
+                                createdAt: trade.createdAt,
                             }
                         });
                     }}
@@ -1916,12 +2123,24 @@ export const ExchangeScreen = () => {
                             navigation.navigate('ActiveTrade', {
                                 trade: {
                                     id: trade.id,
-                                    trader: {
-                                        name: trade.trader.name,
-                                        isOnline: trade.trader.isOnline,
-                                        verified: trade.trader.verified,
-                                        lastSeen: trade.trader.lastSeen,
-                                        responseTime: trade.trader.responseTime,
+                                    trader: trade.trader ? {
+                                        name: trade.trader.name || 'Comerciante',
+                                        isOnline: trade.trader.isOnline || false,
+                                        verified: trade.trader.verified || false,
+                                        lastSeen: trade.trader.lastSeen || 'Desconocido',
+                                        responseTime: trade.trader.responseTime || 'N/A',
+                                        completedTrades: trade.trader.completedTrades || 0,
+                                        successRate: trade.trader.successRate || 0,
+                                        avgRating: trade.trader.avgRating || 0,
+                                    } : {
+                                        name: 'Comerciante',
+                                        isOnline: false,
+                                        verified: false,
+                                        lastSeen: 'Desconocido',
+                                        responseTime: 'N/A',
+                                        completedTrades: 0,
+                                        successRate: 0,
+                                        avgRating: 0,
                                     },
                                     amount: trade.amount,
                                     crypto: trade.crypto,
@@ -1935,6 +2154,7 @@ export const ExchangeScreen = () => {
                                     currencyCode: trade.currencyCode,
                                     status: trade.status,
                                     hasRating: trade.hasRating,
+                                    createdAt: trade.createdAt,
                                 }
                             });
                         }}
@@ -2142,26 +2362,23 @@ export const ExchangeScreen = () => {
             ]}
             pointerEvents="box-none" // Allow touches to pass through empty areas
         >
-            {(() => {
-                const activeCount = activeTrades.filter(t => t.status !== 'COMPLETED').length;
-                return activeCount > 0 ? (
-                    <TouchableOpacity 
-                        style={styles.activeTradesAlert}
-                        onPress={() => {
-                            if (activeList !== 'trades') {
-                                setActiveList('trades');
-                                resetScrollPosition();
-                            }
-                        }}
-                    >
-                        <Icon name="alert-triangle" size={16} color={colors.primary} />
-                        <Text style={styles.activeTradesText}>
-                            {activeCount} intercambio{activeCount > 1 ? 's' : ''} activo{activeCount > 1 ? 's' : ''} - Toca para continuar
-                        </Text>
-                        <Icon name="chevron-right" size={16} color={colors.primary} />
-                    </TouchableOpacity>
-                ) : null;
-            })()}
+            {activeTradeCount > 0 ? (
+                <TouchableOpacity 
+                    style={styles.activeTradesAlert}
+                    onPress={() => {
+                        if (activeList !== 'trades') {
+                            setActiveList('trades');
+                            resetScrollPosition();
+                        }
+                    }}
+                >
+                    <Icon name="alert-triangle" size={16} color={colors.primary} />
+                    <Text style={styles.activeTradesText}>
+                        {activeTradeCount} intercambio{activeTradeCount > 1 ? 's' : ''} activo{activeTradeCount > 1 ? 's' : ''} - Toca para continuar
+                    </Text>
+                    <Icon name="chevron-right" size={16} color={colors.primary} />
+                </TouchableOpacity>
+            ) : null}
 
             <View style={styles.mainTabsContainer}>
                 <TouchableOpacity
@@ -2207,14 +2424,11 @@ export const ExchangeScreen = () => {
                     <Text style={[styles.mainTabText, activeList === 'trades' && styles.activeMainTabText]}>
                         Mis Intercambios
                     </Text>
-                    {(() => {
-                        const activeCount = activeTrades.filter(t => t.status !== 'COMPLETED').length;
-                        return activeCount > 0 ? (
-                            <View style={styles.notificationBadge}>
-                                <Text style={styles.notificationText}>{activeCount}</Text>
-                            </View>
-                        ) : null;
-                    })()}
+                    {activeTradeCount > 0 ? (
+                        <View style={styles.notificationBadge}>
+                            <Text style={styles.notificationText}>{activeTradeCount}</Text>
+                        </View>
+                    ) : null}
                 </TouchableOpacity>
             </View>
 
@@ -2588,11 +2802,42 @@ export const ExchangeScreen = () => {
     if (activeList === 'trades') {
       return (
         <View style={[styles.offersList, { padding: 16 }]}>
-          {activeTrades.length > 0 ? (
+          {tradesLoading && !myTradesData ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={colors.primary} />
+              <Text style={styles.loadingText}>Cargando intercambios...</Text>
+            </View>
+          ) : tradesError ? (
+            <View style={styles.emptyState}>
+              <Icon name="alert-circle" size={48} color="#EF4444" style={styles.emptyIcon} />
+              <Text style={styles.emptyTitle}>Error al cargar intercambios</Text>
+              <Text style={styles.emptyText}>
+                {tradesError.message || 'Ocurrió un error al cargar tus intercambios. Por favor, intenta de nuevo.'}
+              </Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => refetchTrades()}>
+                <Text style={styles.retryButtonText}>Intentar de nuevo</Text>
+              </TouchableOpacity>
+            </View>
+          ) : activeTrades.length > 0 ? (
             <>
               {activeTrades.map((trade) => (
                 <ActiveTradeCard key={trade.id} trade={trade} />
               ))}
+              
+              {/* Load More Button */}
+              {myTradesData?.myP2pTrades?.hasMore && (
+                <TouchableOpacity
+                  style={styles.loadMoreButton}
+                  onPress={loadMoreTrades}
+                  disabled={isLoadingMoreTrades}
+                >
+                  {isLoadingMoreTrades ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Text style={styles.loadMoreText}>Cargar más</Text>
+                  )}
+                </TouchableOpacity>
+              )}
             </>
           ) : (
             <View style={styles.emptyState}>
@@ -2738,7 +2983,7 @@ export const ExchangeScreen = () => {
         ref={scrollViewRef}
         style={styles.content} 
         contentContainerStyle={{ 
-          paddingTop: headerHeight + 16, // Restored original padding
+          paddingTop: Platform.OS === 'ios' ? headerHeight - 16 : headerHeight, // Adjust for iOS content padding
           paddingBottom: 100 
         }}
         onScroll={Animated.event(
@@ -3160,6 +3405,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start', // Changed from 'center' to allow proper height
     flex: 1,
+    marginRight: 8, // Add some margin to prevent overlap with rate
   },
   avatarContainer: {
     width: 40,
@@ -3195,9 +3441,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#1F2937',
+    flexShrink: 1,
   },
   verifiedIcon: {
     marginLeft: 4,
+    flexShrink: 0, // Prevent the icon from shrinking
   },
   userInfoContainer: {
     flex: 1,
@@ -3236,6 +3484,7 @@ const styles = StyleSheet.create({
   },
   offerRateContainer: {
     alignItems: 'flex-end',
+    marginLeft: 8,
   },
   rateSection: {
     alignItems: 'flex-end',
@@ -3842,6 +4091,23 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 8,
   },
+  loadMoreButton: {
+    marginTop: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 8,
+    alignItems: 'center',
+    alignSelf: 'center',
+  },
+  loadMoreText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
   fab: {
     position: 'absolute',
     bottom: 24,
@@ -3967,6 +4233,29 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 32,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6B7280',
+  },
+  retryButton: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    backgroundColor: '#34d399',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   checkboxChecked: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
@@ -4004,6 +4293,10 @@ const styles = StyleSheet.create({
         elevation: 4,
       },
     }),
+  },
+  myOfferCardPaused: {
+    opacity: 0.8,
+    backgroundColor: '#F9FAFB',
   },
   myOfferHeader: {
     flexDirection: 'row',

@@ -43,7 +43,7 @@ const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string 
 };
 
 export const EditProfileScreen = () => {
-  const { userProfile, isUserProfileLoading, refreshUserProfile } = useAuth();
+  const { userProfile, isUserProfileLoading, refreshProfile } = useAuth();
   const navigation = useNavigation<EditProfileScreenNavigationProp>();
   
   const [firstName, setFirstName] = useState('');
@@ -119,7 +119,7 @@ export const EditProfileScreen = () => {
             {
               text: 'OK',
               onPress: () => {
-                refreshUserProfile();
+                refreshProfile('personal');
                 navigation.goBack();
               }
             }

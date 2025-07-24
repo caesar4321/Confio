@@ -552,6 +552,7 @@ export const GET_P2P_OFFERS = gql`
         avgResponseTime
         isVerified
         lastSeenOnline
+        avgRating
       }
       createdAt
     }
@@ -607,8 +608,9 @@ export const GET_MY_P2P_OFFERS = gql`
 `;
 
 export const GET_MY_P2P_TRADES = gql`
-  query GetMyP2PTrades($accountId: String) {
-    myP2pTrades(accountId: $accountId) {
+  query GetMyP2PTrades($accountId: String, $offset: Int, $limit: Int) {
+    myP2pTrades(accountId: $accountId, offset: $offset, limit: $limit) {
+      trades {
       id
       offer {
         id
@@ -629,6 +631,26 @@ export const GET_MY_P2P_TRADES = gql`
             name
             category
           }
+        }
+        offerUser {
+          id
+          username
+          firstName
+          lastName
+        }
+        offerBusiness {
+          id
+          name
+          category
+        }
+        userStats {
+          totalTrades
+          completedTrades
+          successRate
+          avgResponseTime
+          isVerified
+          lastSeenOnline
+          avgRating
         }
       }
       # NEW: Direct relationship fields
@@ -723,6 +745,30 @@ export const GET_MY_P2P_TRADES = gql`
       countryCode
       currencyCode
       hasRating
+      buyerStats {
+        totalTrades
+        completedTrades
+        successRate
+        avgResponseTime
+        isVerified
+        lastSeenOnline
+        avgRating
+      }
+      sellerStats {
+        totalTrades
+        completedTrades
+        successRate
+        avgResponseTime
+        isVerified
+        lastSeenOnline
+        avgRating
+      }
+      }
+      totalCount
+      hasMore
+      offset
+      limit
+      activeCount
     }
   }
 `;
@@ -807,6 +853,34 @@ export const GET_P2P_TRADE = gql`
       createdAt
       countryCode
       currencyCode
+      confirmations {
+        id
+        confirmationType
+        confirmerType
+        confirmerDisplayName
+        reference
+        notes
+        proofImageUrl
+        createdAt
+      }
+      buyerStats {
+        totalTrades
+        completedTrades
+        successRate
+        avgResponseTime
+        isVerified
+        lastSeenOnline
+        avgRating
+      }
+      sellerStats {
+        totalTrades
+        completedTrades
+        successRate
+        avgResponseTime
+        isVerified
+        lastSeenOnline
+        avgRating
+      }
     }
   }
 `;
@@ -883,6 +957,50 @@ export const CREATE_P2P_OFFER = gql`
         maxAmount
         availableAmount
         status
+        createdAt
+      }
+      success
+      errors
+    }
+  }
+`;
+
+export const UPDATE_P2P_OFFER = gql`
+  mutation UpdateP2POffer(
+    $offerId: ID!
+    $status: String
+    $rate: Float
+    $minAmount: Float
+    $maxAmount: Float
+    $availableAmount: Float
+    $paymentMethodIds: [ID]
+    $terms: String
+  ) {
+    updateP2pOffer(
+      offerId: $offerId
+      status: $status
+      rate: $rate
+      minAmount: $minAmount
+      maxAmount: $maxAmount
+      availableAmount: $availableAmount
+      paymentMethodIds: $paymentMethodIds
+      terms: $terms
+    ) {
+      offer {
+        id
+        exchangeType
+        tokenType
+        rate
+        minAmount
+        maxAmount
+        availableAmount
+        status
+        terms
+        paymentMethods {
+          id
+          name
+          displayName
+        }
         createdAt
       }
       success
@@ -993,6 +1111,42 @@ export const RATE_P2P_TRADE = gql`
       trade {
         id
         status
+      }
+      success
+      errors
+    }
+  }
+`;
+
+export const CONFIRM_P2P_TRADE_STEP = gql`
+  mutation ConfirmP2PTradeStep($input: ConfirmP2PTradeStepInput!) {
+    confirmP2pTradeStep(input: $input) {
+      confirmation {
+        id
+        trade {
+          id
+          status
+        }
+        confirmationType
+        confirmerType
+        confirmerDisplayName
+        reference
+        notes
+        proofImageUrl
+        createdAt
+      }
+      trade {
+        id
+        status
+        confirmations {
+          id
+          confirmationType
+          confirmerType
+          confirmerDisplayName
+          reference
+          notes
+          createdAt
+        }
       }
       success
       errors

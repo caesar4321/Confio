@@ -1,5 +1,6 @@
 import graphene
 from graphene_django import DjangoObjectType
+from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
@@ -14,7 +15,8 @@ from .models import (
     P2PMessage, 
     P2PUserStats, 
     P2PEscrow,
-    P2PTradeRating
+    P2PTradeRating,
+    P2PTradeConfirmation
 )
 from .default_payment_methods import get_payment_methods_for_country
 
@@ -70,6 +72,10 @@ class P2PUserStatsType(DjangoObjectType):
     # Add computed fields for better frontend integration
     stats_type = graphene.String()
     stats_display_name = graphene.String()
+    # Override decimal fields to return float
+    avg_rating = graphene.Float()
+    success_rate = graphene.Float()  # Override to return Float instead of Decimal
+    last_seen_online = graphene.String()  # Override to return ISO string instead of DateTime
     
     class Meta:
         model = P2PUserStats
@@ -91,6 +97,24 @@ class P2PUserStatsType(DjangoObjectType):
     def resolve_stats_display_name(self, info):
         """Returns display name for the stats owner"""
         return self.stats_display_name
+    
+    def resolve_avg_rating(self, info):
+        """Convert Decimal to float for GraphQL compatibility"""
+        return float(self.avg_rating) if self.avg_rating is not None else 0.0
+    
+    def resolve_success_rate(self, info):
+        """Convert Decimal to float for GraphQL compatibility"""
+        return float(self.success_rate) if self.success_rate is not None else 0.0
+    
+    def resolve_last_seen_online(self, info):
+        """Convert DateTime to ISO string for GraphQL compatibility"""
+        if self.last_seen_online:
+            # Check if it's a datetime object with isoformat method
+            if hasattr(self.last_seen_online, 'isoformat'):
+                return self.last_seen_online.isoformat()
+            # If it's already a string, return as is
+            return str(self.last_seen_online)
+        return None
 
 class P2POfferType(DjangoObjectType):
     payment_methods = graphene.List(P2PPaymentMethodType)
@@ -116,8 +140,33 @@ class P2POfferType(DjangoObjectType):
     def resolve_user_stats(self, info):
         # Use the offer entity (new or old) to get user stats
         user = self.offer_user if self.offer_user else self.user
-        if user:
-            stats, created = P2PUserStats.objects.get_or_create(user=user)
+        business = self.offer_business
+        
+        if business:
+            # For business offers, get or create stats for the business
+            stats, created = P2PUserStats.objects.get_or_create(
+                stats_business=business,
+                defaults={
+                    'user': user,  # Set deprecated field for compatibility
+                    'total_trades': 0,
+                    'completed_trades': 0,
+                    'success_rate': 0,
+                    'avg_rating': 0
+                }
+            )
+            return stats
+        elif user:
+            # For personal offers, get or create stats for the user
+            stats, created = P2PUserStats.objects.get_or_create(
+                stats_user=user,
+                defaults={
+                    'user': user,  # Set deprecated field for compatibility
+                    'total_trades': 0,
+                    'completed_trades': 0,
+                    'success_rate': 0,
+                    'avg_rating': 0
+                }
+            )
             return stats
         return None
     
@@ -188,6 +237,26 @@ class P2PTradeRatingType(DjangoObjectType):
     def resolve_ratee_display_name(self, info):
         return self.ratee_display_name
 
+class P2PTradeConfirmationType(DjangoObjectType):
+    """GraphQL type for P2P trade confirmations"""
+    confirmer_type = graphene.String()
+    confirmer_display_name = graphene.String()
+    
+    class Meta:
+        model = P2PTradeConfirmation
+        fields = (
+            'id', 'trade', 'confirmation_type',
+            'confirmer_user', 'confirmer_business',
+            'reference', 'notes', 'proof_image_url',
+            'created_at', 'updated_at'
+        )
+    
+    def resolve_confirmer_type(self, info):
+        return self.confirmer_type
+    
+    def resolve_confirmer_display_name(self, info):
+        return self.confirmer_display_name
+
 class P2PTradeType(DjangoObjectType):
     payment_method = graphene.Field(P2PPaymentMethodType)
     # Add computed fields for better frontend integration
@@ -198,6 +267,11 @@ class P2PTradeType(DjangoObjectType):
     # Add rating field to check if trade has been rated
     rating = graphene.Field(P2PTradeRatingType)
     has_rating = graphene.Boolean()
+    # Add confirmations field
+    confirmations = graphene.List(P2PTradeConfirmationType)
+    # Add user stats for both parties
+    buyer_stats = graphene.Field(P2PUserStatsType)
+    seller_stats = graphene.Field(P2PUserStatsType)
     
     class Meta:
         model = P2PTrade
@@ -249,11 +323,225 @@ class P2PTradeType(DjangoObjectType):
         return self.seller_display_name
     
     def resolve_has_rating(self, info):
-        """Returns True if the trade has been rated"""
+        """Returns True if the current user has already rated this trade"""
         try:
-            return hasattr(self, 'rating') and self.rating is not None
-        except:
+            user = info.context.user
+            if not user.is_authenticated:
+                return False
+            
+            # Get the active account context from request (set by middleware)
+            request = info.context
+            active_account_type = getattr(request, 'active_account_type', 'personal')
+            active_account_index = getattr(request, 'active_account_index', 0)
+            
+            # Check if current user/business has already rated this trade
+            from .models import P2PTradeRating
+            
+            if active_account_type == 'business':
+                # Check if this specific business account has rated
+                # First, check if the user is part of this trade as a business
+                if self.buyer_business and self.buyer_business.accounts.filter(user=user, account_index=active_account_index).exists():
+                    # User is the buyer business with this specific account index
+                    return P2PTradeRating.objects.filter(
+                        trade=self,
+                        rater_business=self.buyer_business
+                    ).exists()
+                elif self.seller_business and self.seller_business.accounts.filter(user=user, account_index=active_account_index).exists():
+                    # User is the seller business with this specific account index
+                    return P2PTradeRating.objects.filter(
+                        trade=self,
+                        rater_business=self.seller_business
+                    ).exists()
+                else:
+                    return False
+            else:
+                # Personal account - check if user has rated
+                return P2PTradeRating.objects.filter(
+                    trade=self,
+                    rater_user=user
+                ).exists()
+                
+        except Exception as e:
+            print(f"[DEBUG] hasRating error for trade {self.id}: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
+    
+    def resolve_confirmations(self, info):
+        """Get all confirmations for this trade"""
+        return self.confirmations.all().order_by('created_at')
+    
+    def resolve_buyer_stats(self, info):
+        """Get stats for the buyer"""
+        print(f"\n[resolve_buyer_stats] Trade {self.id}")
+        print(f"  - buyer_user: {self.buyer_user}")
+        print(f"  - buyer_business: {self.buyer_business}")
+        
+        # Check if it's a business buyer
+        if self.buyer_business:
+            # For business buyers, we need to aggregate stats across all business trades
+            completed_trades = P2PTrade.objects.filter(
+                models.Q(buyer_business=self.buyer_business) | 
+                models.Q(seller_business=self.buyer_business),
+                status='COMPLETED'
+            ).count()
+            
+            total_trades = P2PTrade.objects.filter(
+                models.Q(buyer_business=self.buyer_business) | 
+                models.Q(seller_business=self.buyer_business)
+            ).count()
+            
+            # Get average rating for business
+            ratings = P2PTradeRating.objects.filter(
+                models.Q(ratee_business=self.buyer_business)
+            )
+            avg_rating = ratings.aggregate(models.Avg('overall_rating'))['overall_rating__avg'] or 0.0
+            
+            # Get last activity
+            last_trade = P2PTrade.objects.filter(
+                models.Q(buyer_business=self.buyer_business) | 
+                models.Q(seller_business=self.buyer_business)
+            ).order_by('-created_at').first()
+            
+            stats = P2PUserStatsType(
+                total_trades=total_trades,
+                completed_trades=completed_trades,
+                success_rate=float((completed_trades / total_trades * 100)) if total_trades > 0 else 0.0,
+                avg_response_time=15,  # Default 15 minutes
+                is_verified=self.buyer_business.is_verified if hasattr(self.buyer_business, 'is_verified') else False,
+                last_seen_online=last_trade.created_at if last_trade else None,
+                avg_rating=float(avg_rating),
+            )
+            print(f"  - Buyer business stats: total_trades={total_trades}, completed_trades={completed_trades}")
+            return stats
+        elif self.buyer_user:
+            # For personal buyers
+            completed_trades = P2PTrade.objects.filter(
+                models.Q(buyer_user=self.buyer_user) | 
+                models.Q(seller_user=self.buyer_user),
+                status='COMPLETED'
+            ).count()
+            
+            total_trades = P2PTrade.objects.filter(
+                models.Q(buyer_user=self.buyer_user) | 
+                models.Q(seller_user=self.buyer_user)
+            ).count()
+            
+            # Get average rating for user
+            ratings = P2PTradeRating.objects.filter(
+                models.Q(ratee_user=self.buyer_user)
+            )
+            avg_rating = ratings.aggregate(models.Avg('overall_rating'))['overall_rating__avg'] or 0.0
+            
+            # Get last activity
+            last_trade = P2PTrade.objects.filter(
+                models.Q(buyer_user=self.buyer_user) | 
+                models.Q(seller_user=self.buyer_user)
+            ).order_by('-created_at').first()
+            
+            stats = P2PUserStatsType(
+                total_trades=total_trades,
+                completed_trades=completed_trades,
+                success_rate=float((completed_trades / total_trades * 100)) if total_trades > 0 else 0.0,
+                avg_response_time=15,  # Default 15 minutes
+                is_verified=self.buyer_user.is_identity_verified if hasattr(self.buyer_user, 'is_identity_verified') else False,
+                last_seen_online=last_trade.created_at if last_trade else None,
+                avg_rating=float(avg_rating),
+            )
+            print(f"  - Buyer user stats: total_trades={total_trades}, completed_trades={completed_trades}")
+            return stats
+        return None
+    
+    def resolve_seller_stats(self, info):
+        """Get stats for the seller"""
+        print(f"\n[resolve_seller_stats] Trade {self.id}")
+        print(f"  - seller_user: {self.seller_user}")
+        print(f"  - seller_business: {self.seller_business}")
+        
+        # Check if it's a business seller
+        if self.seller_business:
+            # For business sellers, we need to aggregate stats across all business trades
+            completed_trades = P2PTrade.objects.filter(
+                models.Q(buyer_business=self.seller_business) | 
+                models.Q(seller_business=self.seller_business),
+                status='COMPLETED'
+            ).count()
+            
+            total_trades = P2PTrade.objects.filter(
+                models.Q(buyer_business=self.seller_business) | 
+                models.Q(seller_business=self.seller_business)
+            ).count()
+            
+            # Get average rating for business
+            ratings = P2PTradeRating.objects.filter(
+                models.Q(ratee_business=self.seller_business)
+            )
+            avg_rating = ratings.aggregate(models.Avg('overall_rating'))['overall_rating__avg'] or 0.0
+            
+            # Get last activity
+            last_trade = P2PTrade.objects.filter(
+                models.Q(buyer_business=self.seller_business) | 
+                models.Q(seller_business=self.seller_business)
+            ).order_by('-created_at').first()
+            
+            stats = P2PUserStatsType(
+                total_trades=total_trades,
+                completed_trades=completed_trades,
+                success_rate=float((completed_trades / total_trades * 100)) if total_trades > 0 else 0.0,
+                avg_response_time=15,  # Default 15 minutes
+                is_verified=self.seller_business.is_verified if hasattr(self.seller_business, 'is_verified') else False,
+                last_seen_online=last_trade.created_at if last_trade else None,
+                avg_rating=float(avg_rating),
+            )
+            print(f"  - Seller business stats: total_trades={total_trades}, completed_trades={completed_trades}")
+            return stats
+        elif self.seller_user:
+            # For personal sellers
+            completed_trades = P2PTrade.objects.filter(
+                models.Q(buyer_user=self.seller_user) | 
+                models.Q(seller_user=self.seller_user),
+                status='COMPLETED'
+            ).count()
+            
+            total_trades = P2PTrade.objects.filter(
+                models.Q(buyer_user=self.seller_user) | 
+                models.Q(seller_user=self.seller_user)
+            ).count()
+            
+            # Get average rating for user
+            ratings = P2PTradeRating.objects.filter(
+                models.Q(ratee_user=self.seller_user)
+            )
+            avg_rating = ratings.aggregate(models.Avg('overall_rating'))['overall_rating__avg'] or 0.0
+            
+            # Get last activity
+            last_trade = P2PTrade.objects.filter(
+                models.Q(buyer_user=self.seller_user) | 
+                models.Q(seller_user=self.seller_user)
+            ).order_by('-created_at').first()
+            
+            stats = P2PUserStatsType(
+                total_trades=total_trades,
+                completed_trades=completed_trades,
+                success_rate=float((completed_trades / total_trades * 100)) if total_trades > 0 else 0.0,
+                avg_response_time=15,  # Default 15 minutes
+                is_verified=self.seller_user.is_identity_verified if hasattr(self.seller_user, 'is_identity_verified') else False,
+                last_seen_online=last_trade.created_at if last_trade else None,
+                avg_rating=float(avg_rating),
+            )
+            print(f"  - Seller user stats: total_trades={total_trades}, completed_trades={completed_trades}")
+            return stats
+        return None
+
+
+class P2PTradePaginatedType(graphene.ObjectType):
+    """Paginated response for P2P trades"""
+    trades = graphene.List(P2PTradeType)
+    total_count = graphene.Int()
+    has_more = graphene.Boolean()
+    offset = graphene.Int()
+    limit = graphene.Int()
+    active_count = graphene.Int()  # Count of non-completed trades
 
 class P2PMessageType(DjangoObjectType):
     # Add computed fields for better frontend integration
@@ -323,6 +611,13 @@ class RateP2PTradeInput(graphene.InputObjectType):
     reliability_rating = graphene.Int()
     comment = graphene.String()
     tags = graphene.List(graphene.String)
+
+class ConfirmP2PTradeStepInput(graphene.InputObjectType):
+    trade_id = graphene.ID(required=True)
+    confirmation_type = graphene.String(required=True)
+    reference = graphene.String()
+    notes = graphene.String()
+    proof_image_url = graphene.String()
 
 # Mutations
 class CreateP2POffer(graphene.Mutation):
@@ -537,6 +832,98 @@ class CreateP2POffer(graphene.Mutation):
 
         except Exception as e:
             return CreateP2POffer(
+                offer=None,
+                success=False,
+                errors=[str(e)]
+            )
+    
+
+class UpdateP2POffer(graphene.Mutation):
+    class Arguments:
+        offer_id = graphene.ID(required=True)
+        status = graphene.String()  # ACTIVE, PAUSED, CANCELLED
+        rate = graphene.Float()
+        min_amount = graphene.Float()
+        max_amount = graphene.Float()
+        available_amount = graphene.Float()
+        payment_method_ids = graphene.List(graphene.ID)
+        terms = graphene.String()
+    
+    offer = graphene.Field(P2POfferType)
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+    
+    @classmethod
+    def mutate(cls, root, info, offer_id, **kwargs):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return UpdateP2POffer(
+                offer=None,
+                success=False,
+                errors=["Authentication required"]
+            )
+        
+        try:
+            # Get the offer and check ownership
+            offer = P2POffer.objects.filter(
+                models.Q(id=offer_id) & (
+                    models.Q(offer_user=user) | 
+                    models.Q(offer_business__accounts__user=user)
+                )
+            ).distinct().first()
+            
+            if not offer:
+                return UpdateP2POffer(
+                    offer=None,
+                    success=False,
+                    errors=["Offer not found or access denied"]
+                )
+            
+            # Update allowed fields
+            if 'status' in kwargs and kwargs['status']:
+                if kwargs['status'] in ['ACTIVE', 'PAUSED', 'CANCELLED']:
+                    offer.status = kwargs['status']
+                else:
+                    return UpdateP2POffer(
+                        offer=None,
+                        success=False,
+                        errors=["Invalid status. Must be ACTIVE, PAUSED, or CANCELLED"]
+                    )
+            
+            if 'rate' in kwargs and kwargs['rate'] is not None:
+                offer.rate = kwargs['rate']
+            
+            if 'min_amount' in kwargs and kwargs['min_amount'] is not None:
+                offer.min_amount = kwargs['min_amount']
+            
+            if 'max_amount' in kwargs and kwargs['max_amount'] is not None:
+                offer.max_amount = kwargs['max_amount']
+            
+            if 'available_amount' in kwargs and kwargs['available_amount'] is not None:
+                offer.available_amount = kwargs['available_amount']
+            
+            if 'terms' in kwargs and kwargs['terms'] is not None:
+                offer.terms = kwargs['terms']
+            
+            # Update payment methods if provided
+            if 'payment_method_ids' in kwargs and kwargs['payment_method_ids'] is not None:
+                from .models import P2PPaymentMethod
+                payment_methods = P2PPaymentMethod.objects.filter(
+                    id__in=kwargs['payment_method_ids'],
+                    is_active=True
+                )
+                offer.payment_methods.set(payment_methods)
+            
+            offer.save()
+            
+            return UpdateP2POffer(
+                offer=offer,
+                success=True,
+                errors=None
+            )
+            
+        except Exception as e:
+            return UpdateP2POffer(
                 offer=None,
                 success=False,
                 errors=[str(e)]
@@ -853,6 +1240,32 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                     errors=["Invalid status"]
                 )
 
+            # Get active account context to determine confirmer
+            request = info.context
+            active_account_type = getattr(request, 'active_account_type', 'personal')
+            active_account_index = getattr(request, 'active_account_index', 0)
+            
+            # Determine if user is buyer or seller
+            is_buyer = False
+            is_seller = False
+            confirmer_user = None
+            confirmer_business = None
+            
+            if active_account_type == 'business':
+                # Check if user is buyer business
+                if trade.buyer_business and trade.buyer_business.accounts.filter(user=user, account_index=active_account_index).exists():
+                    is_buyer = True
+                    confirmer_business = trade.buyer_business
+                # Check if user is seller business
+                elif trade.seller_business and trade.seller_business.accounts.filter(user=user, account_index=active_account_index).exists():
+                    is_seller = True
+                    confirmer_business = trade.seller_business
+            else:
+                # Personal account
+                is_buyer = trade.buyer_user == user
+                is_seller = trade.seller_user == user
+                confirmer_user = user
+
             # Update trade
             trade.status = input.status
             if input.payment_reference:
@@ -864,6 +1277,45 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                 trade.completed_at = timezone.now()
 
             trade.save()
+            
+            # Create confirmation records for specific status changes
+            confirmation_type = None
+            if input.status == 'PAYMENT_SENT' and is_buyer:
+                confirmation_type = 'PAYMENT_SENT'
+            elif input.status == 'PAYMENT_CONFIRMED' and is_seller:
+                confirmation_type = 'PAYMENT_RECEIVED'
+            elif input.status == 'CRYPTO_RELEASED' and is_seller:
+                confirmation_type = 'CRYPTO_RELEASED'
+            elif input.status == 'COMPLETED' and is_buyer:
+                confirmation_type = 'CRYPTO_RECEIVED'
+            
+            if confirmation_type:
+                # Check if confirmation already exists
+                existing_confirmation = P2PTradeConfirmation.objects.filter(
+                    trade=trade,
+                    confirmation_type=confirmation_type
+                )
+                
+                if confirmer_business:
+                    existing_confirmation = existing_confirmation.filter(confirmer_business=confirmer_business)
+                else:
+                    existing_confirmation = existing_confirmation.filter(confirmer_user=confirmer_user)
+                
+                # Create confirmation if it doesn't exist
+                if not existing_confirmation.exists():
+                    confirmation_data = {
+                        'trade': trade,
+                        'confirmation_type': confirmation_type,
+                        'reference': input.payment_reference or '',
+                        'notes': input.payment_notes or ''
+                    }
+                    
+                    if confirmer_business:
+                        confirmation_data['confirmer_business'] = confirmer_business
+                    else:
+                        confirmation_data['confirmer_user'] = confirmer_user
+                    
+                    P2PTradeConfirmation.objects.create(**confirmation_data)
 
             # Broadcast the status update via WebSocket
             from channels.layers import get_channel_layer
@@ -1205,14 +1657,14 @@ class RateP2PTrade(graphene.Mutation):
                         defaults={'total_trades': 0, 'completed_trades': 0}
                     )
                 
-                # Update average rating (simplified - in production, calculate properly)
+                # Update average rating
                 all_ratings = P2PTradeRating.objects.filter(
                     models.Q(ratee_user=rating.ratee_user) | 
                     models.Q(ratee_business=rating.ratee_business)
                 )
                 avg_rating = all_ratings.aggregate(models.Avg('overall_rating'))['overall_rating__avg']
                 if avg_rating:
-                    stats.success_rate = min(avg_rating * 20, 100)  # Convert 1-5 to 0-100
+                    stats.avg_rating = avg_rating  # Store the actual average rating (1-5 scale)
                     stats.save()
             
             return RateP2PTrade(
@@ -1230,6 +1682,203 @@ class RateP2PTrade(graphene.Mutation):
                 errors=[str(e)]
             )
 
+class ConfirmP2PTradeStep(graphene.Mutation):
+    class Arguments:
+        input = ConfirmP2PTradeStepInput(required=True)
+    
+    confirmation = graphene.Field(P2PTradeConfirmationType)
+    trade = graphene.Field(P2PTradeType)
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+    
+    @classmethod
+    def mutate(cls, root, info, input):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return ConfirmP2PTradeStep(
+                confirmation=None,
+                trade=None,
+                success=False,
+                errors=["Authentication required"]
+            )
+        
+        try:
+            # Get trade and verify user is part of it
+            trade = P2PTrade.objects.filter(
+                id=input.trade_id
+            ).filter(
+                models.Q(buyer_user=user) | 
+                models.Q(seller_user=user) |
+                models.Q(buyer_business__accounts__user=user) |
+                models.Q(seller_business__accounts__user=user)
+            ).distinct().first()
+            
+            if not trade:
+                return ConfirmP2PTradeStep(
+                    confirmation=None,
+                    trade=None,
+                    success=False,
+                    errors=["Trade not found or access denied"]
+                )
+            
+            # Get active account context
+            request = info.context
+            active_account_type = getattr(request, 'active_account_type', 'personal')
+            active_account_index = getattr(request, 'active_account_index', 0)
+            
+            # Determine if user is buyer or seller
+            is_buyer = False
+            is_seller = False
+            
+            if active_account_type == 'business':
+                # Check if user is buyer business
+                if trade.buyer_business and trade.buyer_business.accounts.filter(user=user, account_index=active_account_index).exists():
+                    is_buyer = True
+                # Check if user is seller business
+                elif trade.seller_business and trade.seller_business.accounts.filter(user=user, account_index=active_account_index).exists():
+                    is_seller = True
+            else:
+                # Personal account
+                is_buyer = trade.buyer_user == user
+                is_seller = trade.seller_user == user
+            
+            # Validate confirmation type based on role
+            confirmation_type = input.confirmation_type
+            
+            if confirmation_type == 'PAYMENT_SENT' and not is_buyer:
+                return ConfirmP2PTradeStep(
+                    confirmation=None,
+                    trade=None,
+                    success=False,
+                    errors=["Only buyer can confirm payment sent"]
+                )
+            elif confirmation_type == 'PAYMENT_RECEIVED' and not is_seller:
+                return ConfirmP2PTradeStep(
+                    confirmation=None,
+                    trade=None,
+                    success=False,
+                    errors=["Only seller can confirm payment received"]
+                )
+            elif confirmation_type == 'CRYPTO_RELEASED' and not is_seller:
+                return ConfirmP2PTradeStep(
+                    confirmation=None,
+                    trade=None,
+                    success=False,
+                    errors=["Only seller can release crypto"]
+                )
+            elif confirmation_type == 'CRYPTO_RECEIVED' and not is_buyer:
+                return ConfirmP2PTradeStep(
+                    confirmation=None,
+                    trade=None,
+                    success=False,
+                    errors=["Only buyer can confirm crypto received"]
+                )
+            
+            # Prepare confirmation data
+            confirmation_data = {
+                'trade': trade,
+                'confirmation_type': confirmation_type,
+                'reference': input.reference or '',
+                'notes': input.notes or '',
+                'proof_image_url': input.proof_image_url or ''
+            }
+            
+            # Set confirmer based on account type
+            if active_account_type == 'business':
+                if is_buyer:
+                    confirmation_data['confirmer_business'] = trade.buyer_business
+                elif is_seller:
+                    confirmation_data['confirmer_business'] = trade.seller_business
+            else:
+                confirmation_data['confirmer_user'] = user
+            
+            # Check if already confirmed
+            existing_confirmation = P2PTradeConfirmation.objects.filter(
+                trade=trade,
+                confirmation_type=confirmation_type
+            )
+            
+            if active_account_type == 'business':
+                if is_buyer:
+                    existing_confirmation = existing_confirmation.filter(confirmer_business=trade.buyer_business)
+                elif is_seller:
+                    existing_confirmation = existing_confirmation.filter(confirmer_business=trade.seller_business)
+            else:
+                existing_confirmation = existing_confirmation.filter(confirmer_user=user)
+            
+            if existing_confirmation.exists():
+                return ConfirmP2PTradeStep(
+                    confirmation=None,
+                    trade=None,
+                    success=False,
+                    errors=["This step has already been confirmed"]
+                )
+            
+            # Create confirmation
+            confirmation = P2PTradeConfirmation.objects.create(**confirmation_data)
+            
+            # Update trade status based on confirmation type
+            status_updated = False
+            if confirmation_type == 'PAYMENT_SENT':
+                if trade.status == 'PAYMENT_PENDING':
+                    trade.status = 'PAYMENT_SENT'
+                    status_updated = True
+            elif confirmation_type == 'PAYMENT_RECEIVED':
+                if trade.status == 'PAYMENT_SENT':
+                    trade.status = 'PAYMENT_CONFIRMED'
+                    status_updated = True
+            elif confirmation_type == 'CRYPTO_RELEASED':
+                if trade.status == 'PAYMENT_CONFIRMED':
+                    trade.status = 'CRYPTO_RELEASED'
+                    status_updated = True
+            elif confirmation_type == 'CRYPTO_RECEIVED':
+                if trade.status == 'CRYPTO_RELEASED':
+                    trade.status = 'COMPLETED'
+                    trade.completed_at = timezone.now()
+                    status_updated = True
+            
+            if status_updated:
+                trade.save()
+                
+                # Send WebSocket notification
+                channel_layer = get_channel_layer()
+                message = {
+                    'tradeId': str(trade.id),
+                    'status': trade.status,
+                    'updatedBy': user.id,
+                    'trade': {
+                        'id': str(trade.id),
+                        'status': trade.status,
+                        'cryptoAmount': str(trade.crypto_amount),
+                        'fiatAmount': str(trade.fiat_amount),
+                        'rateUsed': str(trade.rate_used)
+                    }
+                }
+                
+                from asgiref.sync import async_to_sync
+                async_to_sync(channel_layer.group_send)(
+                    f'trade_{trade.id}',
+                    {
+                        'type': 'trade_status_update',
+                        'message': message
+                    }
+                )
+            
+            return ConfirmP2PTradeStep(
+                confirmation=confirmation,
+                trade=trade,
+                success=True,
+                errors=None
+            )
+            
+        except Exception as e:
+            return ConfirmP2PTradeStep(
+                confirmation=None,
+                trade=None,
+                success=False,
+                errors=[str(e)]
+            )
+
 # Queries
 class Query(graphene.ObjectType):
     p2p_offers = graphene.List(
@@ -1241,7 +1890,12 @@ class Query(graphene.ObjectType):
     )
     p2p_offer = graphene.Field(P2POfferType, id=graphene.ID(required=True))
     my_p2p_offers = graphene.List(P2POfferType, account_id=graphene.String())
-    my_p2p_trades = graphene.List(P2PTradeType, account_id=graphene.String())
+    my_p2p_trades = graphene.Field(
+        P2PTradePaginatedType, 
+        account_id=graphene.String(),
+        offset=graphene.Int(default_value=0),
+        limit=graphene.Int(default_value=10)
+    )
     p2p_trade = graphene.Field(P2PTradeType, id=graphene.ID(required=True))
     p2p_trade_messages = graphene.List(P2PMessageType, trade_id=graphene.ID(required=True))
     p2p_payment_methods = graphene.List(P2PPaymentMethodType, country_code=graphene.String())
@@ -1334,90 +1988,235 @@ class Query(graphene.ObjectType):
                 query |= Q(offer_business__in=user_businesses)
             return P2POffer.objects.filter(query).order_by('-created_at')
 
-    def resolve_my_p2p_trades(self, info, account_id=None):
-        user = getattr(info.context, 'user', None)
-        if not (user and getattr(user, 'is_authenticated', False)):
-            return []
-        
-        print(f"[P2P] resolve_my_p2p_trades - account_id: {account_id}, user: {user.username if user else 'None'}")
-        
-        if account_id:
-            # Handle special frontend account ID format (e.g., 'personal_0', 'business_0')
-            print(f"[P2P] Processing account_id: '{account_id}' for user: {user.username}")
+    def resolve_my_p2p_trades(self, info, account_id=None, offset=0, limit=10):
+        try:
+            user = getattr(info.context, 'user', None)
+            if not (user and getattr(user, 'is_authenticated', False)):
+                return P2PTradePaginatedType(
+                    trades=[],
+                    total_count=0,
+                    has_more=False,
+                    offset=offset,
+                    limit=limit,
+                    active_count=0
+                )
             
-            if isinstance(account_id, str) and '_' in account_id:
-                account_type, account_index = account_id.split('_', 1)
-                account_index = int(account_index)
-                print(f"[P2P] Parsed frontend account ID: type='{account_type}', index={account_index}")
+            print(f"[P2P] resolve_my_p2p_trades - account_id: {account_id}, user: {user.username if user else 'None'}")
+            
+            if account_id:
+                # Handle special frontend account ID format (e.g., 'personal_0', 'business_0')
+                print(f"[P2P] Processing account_id: '{account_id}' for user: {user.username}")
                 
-                if account_type == 'personal':
-                    # Show only personal trades for this user
-                    trades = P2PTrade.objects.filter(
-                        models.Q(buyer_user=user) | models.Q(seller_user=user)
-                    ).select_related('rating').order_by('-created_at')
-                    print(f"[P2P] Filtering personal trades for user_id: {user.id}, found: {trades.count()} trades")
-                    return trades
-                elif account_type == 'business':
-                    # Find the business account by index
+                if isinstance(account_id, str) and '_' in account_id:
+                    account_type, account_index = account_id.split('_', 1)
+                    account_index = int(account_index)
+                    print(f"[P2P] Parsed frontend account ID: type='{account_type}', index={account_index}")
+                    
+                    if account_type == 'personal':
+                        # Show only personal trades for this user, excluding cancelled
+                        base_trades = P2PTrade.objects.filter(
+                            models.Q(buyer_user=user) | models.Q(seller_user=user)
+                        ).exclude(status='CANCELLED').prefetch_related('ratings')
+                        
+                        # Apply sorting
+                        trades = Query._get_sorted_trades_queryset(base_trades)
+                        
+                        total_count = trades.count()
+                        active_count = trades.exclude(status='COMPLETED').count()
+                        
+                        print(f"[P2P] Filtering personal trades for user_id: {user.id}, found: {total_count} trades ({active_count} active), returning offset={offset}, limit={limit}")
+                        paginated_trades = trades[offset:offset+limit]
+                        
+                        return P2PTradePaginatedType(
+                            trades=paginated_trades,
+                            total_count=total_count,
+                            has_more=(offset + limit) < total_count,
+                            offset=offset,
+                            limit=limit,
+                            active_count=active_count
+                        )
+                    elif account_type == 'business':
+                        # Find the business account by index
+                        from users.models import Account
+                        try:
+                            account = Account.objects.get(
+                                user=user, 
+                                account_type='business', 
+                                account_index=account_index
+                            )
+                            print(f"[P2P] Found business account: {account.id}, business: {account.business.id if account.business else 'None'}")
+                            
+                            if account.business:
+                                # Show only business trades for this specific business, excluding cancelled
+                                base_trades = P2PTrade.objects.filter(
+                                    models.Q(buyer_business=account.business) | models.Q(seller_business=account.business)
+                                ).exclude(status='CANCELLED').prefetch_related('ratings')
+                                
+                                # Apply sorting
+                                trades = Query._get_sorted_trades_queryset(base_trades)
+                                
+                                total_count = trades.count()
+                                active_count = trades.exclude(status='COMPLETED').count()
+                                
+                                print(f"[P2P] Filtering business trades for business_id: {account.business.id}, found: {total_count} trades ({active_count} active), returning offset={offset}, limit={limit}")
+                                paginated_trades = trades[offset:offset+limit]
+                                
+                                return P2PTradePaginatedType(
+                                    trades=paginated_trades,
+                                    total_count=total_count,
+                                    has_more=(offset + limit) < total_count,
+                                    offset=offset,
+                                    limit=limit,
+                                    active_count=active_count
+                                )
+                        except Account.DoesNotExist:
+                            print(f"[P2P] Business account not found: user_id={user.id}, account_index={account_index}")
+                            return P2PTradePaginatedType(
+                                trades=[],
+                                total_count=0,
+                                has_more=False,
+                                offset=offset,
+                                limit=limit,
+                                active_count=0
+                            )
+                else:
+                    # Fallback: try to use account_id as a direct database ID
                     from users.models import Account
                     try:
-                        account = Account.objects.get(
-                            user=user, 
-                            account_type='business', 
-                            account_index=account_index
-                        )
-                        print(f"[P2P] Found business account: {account.id}, business: {account.business.id if account.business else 'None'}")
+                        account = Account.objects.get(id=account_id, user=user)
+                        print(f"[P2P] Found database account: {account.id}, type: {account.account_type}, business: {account.business.id if account.business else 'None'}")
                         
-                        if account.business:
-                            # Show only business trades for this specific business
-                            trades = P2PTrade.objects.filter(
+                        if account.account_type == 'business' and account.business:
+                            # Show only business trades for this specific business, excluding cancelled
+                            base_trades = P2PTrade.objects.filter(
                                 models.Q(buyer_business=account.business) | models.Q(seller_business=account.business)
-                            ).select_related('rating').order_by('-created_at')
-                            print(f"[P2P] Filtering business trades for business_id: {account.business.id}, found: {trades.count()} trades")
-                            return trades
-                    except Account.DoesNotExist:
-                        print(f"[P2P] Business account not found: user_id={user.id}, account_index={account_index}")
-                        return []
+                            ).exclude(status='CANCELLED').prefetch_related('ratings')
+                            
+                            # Apply sorting
+                            trades = Query._get_sorted_trades_queryset(base_trades)
+                            
+                            total_count = trades.count()
+                            active_count = trades.exclude(status='COMPLETED').count()
+                            
+                            print(f"[P2P] Filtering business trades for business_id: {account.business.id}, found: {total_count} trades ({active_count} active), returning offset={offset}, limit={limit}")
+                            paginated_trades = trades[offset:offset+limit]
+                            
+                            return P2PTradePaginatedType(
+                                trades=paginated_trades,
+                                total_count=total_count,
+                                has_more=(offset + limit) < total_count,
+                                offset=offset,
+                                limit=limit,
+                                active_count=active_count
+                            )
+                        else:
+                            # Show only personal trades for this user, excluding cancelled
+                            base_trades = P2PTrade.objects.filter(
+                                models.Q(buyer_user=user) | models.Q(seller_user=user)
+                            ).exclude(status='CANCELLED').prefetch_related('ratings')
+                            
+                            # Apply sorting
+                            trades = Query._get_sorted_trades_queryset(base_trades)
+                            
+                            total_count = trades.count()
+                            active_count = trades.exclude(status='COMPLETED').count()
+                            
+                            print(f"[P2P] Filtering personal trades for user_id: {user.id}, found: {total_count} trades ({active_count} active), returning offset={offset}, limit={limit}")
+                            paginated_trades = trades[offset:offset+limit]
+                            
+                            return P2PTradePaginatedType(
+                                trades=paginated_trades,
+                                total_count=total_count,
+                                has_more=(offset + limit) < total_count,
+                                offset=offset,
+                                limit=limit,
+                                active_count=active_count
+                            )
+                    except (Account.DoesNotExist, ValueError):
+                        print(f"[P2P] Database account not found: account_id={account_id}, user_id={user.id}")
+                        return P2PTradePaginatedType(
+                            trades=[],
+                            total_count=0,
+                            has_more=False,
+                            offset=offset,
+                            limit=limit,
+                            active_count=0
+                        )
+                
+                return P2PTradePaginatedType(
+                    trades=[],
+                    total_count=0,
+                    has_more=False,
+                    offset=offset,
+                    limit=limit,
+                    active_count=0
+                )
             else:
-                # Fallback: try to use account_id as a direct database ID
-                from users.models import Account
-                try:
-                    account = Account.objects.get(id=account_id, user=user)
-                    print(f"[P2P] Found database account: {account.id}, type: {account.account_type}, business: {account.business.id if account.business else 'None'}")
-                    
-                    if account.account_type == 'business' and account.business:
-                        # Show only business trades for this specific business
-                        trades = P2PTrade.objects.filter(
-                            models.Q(buyer_business=account.business) | models.Q(seller_business=account.business)
-                        ).select_related('rating').order_by('-created_at')
-                        print(f"[P2P] Filtering business trades for business_id: {account.business.id}, found: {trades.count()} trades")
-                        return trades
-                    else:
-                        # Show only personal trades for this user
-                        trades = P2PTrade.objects.filter(
-                            models.Q(buyer_user=user) | models.Q(seller_user=user)
-                        ).select_related('rating').order_by('-created_at')
-                        print(f"[P2P] Filtering personal trades for user_id: {user.id}, found: {trades.count()} trades")
-                        return trades
-                except (Account.DoesNotExist, ValueError):
-                    print(f"[P2P] Database account not found: account_id={account_id}, user_id={user.id}")
-                    return []
-            
-            return []
-        else:
-            # No account filter - show all trades for this user (all accounts)
-            print(f"[P2P] No account_id provided - returning ALL trades for user")
-            from users.models import Business
-            user_businesses = Business.objects.filter(accounts__user=user)
-            
-            # Find trades where user is involved as a person OR through their businesses
-            # NEW: Use direct relationships for cleaner semantics
-            trades = P2PTrade.objects.filter(
-                models.Q(buyer_user=user) | models.Q(seller_user=user) |
-                models.Q(buyer_business__in=user_businesses) | models.Q(seller_business__in=user_businesses)
-            ).select_related('rating').order_by('-created_at')
-            print(f"[P2P] Found {trades.count()} total trades across all accounts")
-            return trades
+                # No account filter - show all trades for this user (all accounts)
+                print(f"[P2P] No account_id provided - returning ALL trades for user")
+                from users.models import Business
+                user_businesses = Business.objects.filter(accounts__user=user)
+                
+                # Find trades where user is involved as a person OR through their businesses, excluding cancelled
+                # NEW: Use direct relationships for cleaner semantics
+                base_trades = P2PTrade.objects.filter(
+                    models.Q(buyer_user=user) | models.Q(seller_user=user) |
+                    models.Q(buyer_business__in=user_businesses) | models.Q(seller_business__in=user_businesses)
+                ).exclude(status='CANCELLED').prefetch_related('ratings')
+                
+                # Apply sorting
+                trades = Query._get_sorted_trades_queryset(base_trades)
+                
+                total_count = trades.count()
+                active_count = trades.exclude(status='COMPLETED').count()
+                
+                print(f"[P2P] Found {total_count} total trades across all accounts ({active_count} active), returning offset={offset}, limit={limit}")
+                paginated_trades = trades[offset:offset+limit]
+                
+                return P2PTradePaginatedType(
+                    trades=paginated_trades,
+                    total_count=total_count,
+                    has_more=(offset + limit) < total_count,
+                    offset=offset,
+                    limit=limit,
+                    active_count=active_count
+                )
+        except Exception as e:
+            print(f"[P2P] Error in resolve_my_p2p_trades: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Return empty result on error
+            return P2PTradePaginatedType(
+                trades=[],
+                total_count=0,
+                has_more=False,
+                offset=offset,
+                limit=limit,
+                active_count=0
+            )
+    
+    @staticmethod
+    def _get_sorted_trades_queryset(base_queryset):
+        """
+        Sort trades by status priority and creation date.
+        Active trades come first, sorted by status, then completed trades.
+        """
+        from django.db.models import Case, When, IntegerField
+        
+        # Define status priority (lower number = higher priority)
+        status_ordering = Case(
+            When(status='PENDING', then=1),
+            When(status='PAYMENT_PENDING', then=2),
+            When(status='PAYMENT_SENT', then=3),
+            When(status='PAYMENT_CONFIRMED', then=4),
+            When(status='COMPLETED', then=5),
+            default=999,
+            output_field=IntegerField()
+        )
+        
+        return base_queryset.annotate(
+            status_priority=status_ordering
+        ).order_by('status_priority', '-created_at')
 
     def resolve_p2p_trade(self, info, id):
         user = getattr(info.context, 'user', None)
@@ -1506,10 +2305,12 @@ class Query(graphene.ObjectType):
 # Mutations
 class Mutation(graphene.ObjectType):
     create_p2p_offer = CreateP2POffer.Field()
+    update_p2p_offer = UpdateP2POffer.Field()
     create_p2p_trade = CreateP2PTrade.Field()
     update_p2p_trade_status = UpdateP2PTradeStatus.Field()
     send_p2p_message = SendP2PMessage.Field()
     rate_p2p_trade = RateP2PTrade.Field()
+    confirm_p2p_trade_step = ConfirmP2PTradeStep.Field()
 
 # Subscriptions
 class TradeChatMessageSubscription(graphene.ObjectType):
@@ -1645,3 +2446,18 @@ class Subscription(graphene.ObjectType):
         channel_layer = get_channel_layer()
         group_name = f'trade_typing_{trade_id}'
         return iter([])
+
+# Ensure all types are properly exported
+__all__ = [
+    'P2POfferType',
+    'P2PTradeType',
+    'P2PTradePaginatedType',
+    'P2PMessageType',
+    'P2PPaymentMethodType',
+    'P2PUserStatsType',
+    'P2PRatingType',
+    'P2PTradeConfirmationType',
+    'Query',
+    'Mutation',
+    'Subscription',
+]

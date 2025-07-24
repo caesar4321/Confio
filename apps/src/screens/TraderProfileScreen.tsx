@@ -39,6 +39,18 @@ export const TraderProfileScreen: React.FC = () => {
   // Determine if we're in trader view mode or offer view mode
   const isTraderView = !!trader && !offer;
   const profileData = isTraderView ? trader : offer;
+  
+  // Debug logging
+  if (isTraderView && trader) {
+    console.log('[TraderProfileScreen] Received trader data:', {
+      name: trader.name,
+      successRate: trader.successRate,
+      avgRating: trader.avgRating,
+      completedTrades: trader.completedTrades,
+      typeOfSuccessRate: typeof trader.successRate,
+      typeOfAvgRating: typeof trader.avgRating
+    });
+  }
 
   const handleBack = () => {
     navigation.goBack();
@@ -223,8 +235,8 @@ export const TraderProfileScreen: React.FC = () => {
               </View>
               <Text style={styles.lastSeenText}>{profileData!.lastSeen}</Text>
               <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 4}}>
-                <Icon name="star" size={16} color="#f59e0b" style={{marginRight: 4}} />
-                <Text style={styles.profileStatsText}>{profileData!.successRate}% • {profileData!.completedTrades} operaciones</Text>
+                <Icon name="check-circle" size={16} color="#16a34a" style={{marginRight: 4}} />
+                <Text style={styles.profileStatsText}>{Number(profileData!.successRate).toFixed(1)}% completado • {profileData!.completedTrades} operaciones</Text>
               </View>
             </View>
           </View>
@@ -239,7 +251,7 @@ export const TraderProfileScreen: React.FC = () => {
               <Text style={[styles.statValue, {color: '#16a34a'}]}>
                 {isTraderView && trader?.avgRating ? 
                   `${trader.avgRating.toFixed(1)} ★` : 
-                  `${profileData!.successRate}%`
+                  `${Number(profileData!.successRate).toFixed(1)}%`
                 }
               </Text>
             </View>
@@ -287,7 +299,7 @@ export const TraderProfileScreen: React.FC = () => {
               <View style={{flex: 1}}>
                 <Text style={styles.infoBoxTitle}>Información del trader</Text>
                 <Text style={styles.infoBoxText}>
-                  Este trader ha completado {trader.completedTrades} intercambios con una tasa de éxito del {trader.successRate}%.
+                  Este trader ha completado {trader.completedTrades} intercambios con una tasa de éxito del {Number(trader.successRate).toFixed(1)}%.
                   {trader.avgRating && trader.avgRating > 0 ? ` Su calificación promedio es ${trader.avgRating.toFixed(1)}/5.` : ''}
                 </Text>
               </View>

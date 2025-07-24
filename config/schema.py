@@ -44,6 +44,7 @@ types = [
 	payments_schema.PaymentTransactionType,
 	p2p_exchange_schema.P2POfferType,
 	p2p_exchange_schema.P2PTradeType,
+	p2p_exchange_schema.P2PTradePaginatedType,
 	p2p_exchange_schema.P2PMessageType,
 	p2p_exchange_schema.P2PPaymentMethodType,
 	p2p_exchange_schema.P2PUserStatsType,

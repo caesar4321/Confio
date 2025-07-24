@@ -638,23 +638,53 @@ export const TradeChatScreen: React.FC = () => {
           
           // Navigate both buyer and seller to rating screen when trade is completed
           if ((data.status === 'PAYMENT_CONFIRMED' || data.status === 'COMPLETED') && data.updated_by !== String(userProfile?.id)) {
-            // This is the buyer receiving the completion notification
+            // This is the person receiving the completion notification
             setTimeout(() => {
+              const tradeData = tradeDetailsData?.p2pTrade;
+              
+              // Determine who is rating whom based on the current user's role
+              const iAmBuyer = tradeType === 'buy';
+              const counterpartyInfo = iAmBuyer ? tradeData?.seller : tradeData?.buyer;
+              
+              // Get the actual stats for the counterparty
+              const counterpartyStats = iAmBuyer 
+                ? tradeData?.sellerStats 
+                : tradeData?.buyerStats;
+              
+              console.log('🎯 Rating navigation - Stats debug:', {
+                iAmBuyer,
+                tradeType,
+                buyerInfo: tradeData?.buyer,
+                sellerInfo: tradeData?.seller,
+                buyerStats: tradeData?.buyerStats,
+                sellerStats: tradeData?.sellerStats,
+                counterpartyStats,
+                offerStats: tradeData?.offer?.userStats,
+              });
+              
+              // Use the stats if available, otherwise fallback to default
+              const stats = counterpartyStats || {
+                isVerified: false,
+                completedTrades: 0,
+                successRate: 0,
+              };
+              
+              // If I'm the buyer, I rate the seller. If I'm the seller, I rate the buyer.
+              const ratingTargetName = iAmBuyer ? 'vendedor' : 'comprador';
+              
               navigation.navigate('TraderRating', {
                 tradeId,
                 trader: {
-                  name: offer.name,
-                  verified: offer.verified,
-                  completedTrades: offer.completedTrades,
-                  successRate: offer.successRate,
+                  name: `${counterpartyInfo?.firstName || ''} ${counterpartyInfo?.lastName || ''}`.trim() || counterpartyInfo?.username || 'Usuario',
+                  verified: stats.isVerified || false,
+                  completedTrades: stats.completedTrades || 0,
+                  successRate: stats.successRate || 0,
                 },
                 tradeDetails: {
                   amount: amount,
                   crypto: crypto,
                   totalPaid: (parseFloat(amount) * parseFloat(offer.rate)).toFixed(2),
-                  method: selectedPaymentMethodId ? 
-                    offer.paymentMethods.find(pm => pm.id === selectedPaymentMethodId)?.displayName || 'N/A' :
-                    offer.paymentMethods[0]?.displayName || 'N/A',
+                  method: tradeData?.paymentMethod?.displayName || 'N/A',
                   date: new Date().toLocaleDateString(),
                   duration: `${Math.floor((900 - timeRemaining) / 60)} minutos`,
                 }
@@ -1196,21 +1226,48 @@ export const TradeChatScreen: React.FC = () => {
               text: 'Calificar al comprador',
               onPress: () => {
                 // Navigate to rating screen
+                const tradeData = tradeDetailsData?.p2pTrade;
+                
+                // Determine who is rating whom based on the current user's role
+                const iAmSeller = tradeType === 'sell';
+                const counterpartyInfo = iAmSeller ? tradeData?.buyer : tradeData?.seller;
+                
+                // Get the actual stats for the counterparty
+                const counterpartyStats = iAmSeller 
+                  ? tradeData?.buyerStats 
+                  : tradeData?.sellerStats;
+                
+                console.log('🎯 Seller rating navigation - Stats debug:', {
+                  iAmSeller,
+                  tradeType,
+                  buyerInfo: tradeData?.buyer,
+                  sellerInfo: tradeData?.seller,
+                  buyerStats: tradeData?.buyerStats,
+                  sellerStats: tradeData?.sellerStats,
+                  counterpartyStats,
+                  offerStats: tradeData?.offer?.userStats,
+                });
+                
+                // Use the stats if available, otherwise fallback to default
+                const stats = counterpartyStats || {
+                  isVerified: false,
+                  completedTrades: 0,
+                  successRate: 0,
+                };
+                
                 navigation.navigate('TraderRating', {
                   tradeId,
                   trader: {
-                    name: offer.name,
-                    verified: offer.verified,
-                    completedTrades: offer.completedTrades,
-                    successRate: offer.successRate,
+                    name: `${counterpartyInfo?.firstName || ''} ${counterpartyInfo?.lastName || ''}`.trim() || counterpartyInfo?.username || 'Usuario',
+                    verified: stats.isVerified || false,
+                    completedTrades: stats.completedTrades || 0,
+                    successRate: stats.successRate || 0,
                   },
                   tradeDetails: {
                     amount: amount,
                     crypto: crypto,
                     totalPaid: (parseFloat(amount) * parseFloat(offer.rate)).toFixed(2),
-                    method: selectedPaymentMethodId ? 
-                      offer.paymentMethods.find(pm => pm.id === selectedPaymentMethodId)?.displayName || 'N/A' :
-                      offer.paymentMethods[0]?.displayName || 'N/A',
+                    method: tradeData?.paymentMethod?.displayName || 'N/A',
                     date: new Date().toLocaleDateString(),
                     duration: `${Math.floor((900 - timeRemaining) / 60)} minutos`,
                   }

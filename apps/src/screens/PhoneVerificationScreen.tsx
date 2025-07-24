@@ -36,7 +36,7 @@ type PhoneVerificationScreenNavigationProp = NativeStackNavigationProp<RootStack
 
 const PhoneVerificationScreen = () => {
   const navigation = useNavigation<PhoneVerificationScreenNavigationProp>();
-  const { handleSuccessfulLogin, userProfile, refreshUserProfile } = useAuth();
+  const { handleSuccessfulLogin, userProfile, refreshProfile } = useAuth();
   const [phoneNumber, setPhoneNumber] = useState('');
   const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal, setSelectedCountry } = useCountrySelection();
   const [verificationMethod, setVerificationMethod] = useState<'telegram' | 'sms' | null>(null);
@@ -145,7 +145,7 @@ const PhoneVerificationScreen = () => {
                     text: 'OK',
                     onPress: () => {
                       // Refresh user profile and go back
-                      refreshUserProfile();
+                      refreshProfile('personal');
                       navigation.goBack();
                     }
                   }

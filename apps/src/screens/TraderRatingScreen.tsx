@@ -118,6 +118,8 @@ export const TraderRatingScreen: React.FC = () => {
             tags: selectedTags,
           },
         },
+        refetchQueries: ['GetMyP2PTrades'],
+        awaitRefetchQueries: true,
       });
 
       if (result.data?.rateP2pTrade?.success) {
@@ -207,13 +209,17 @@ export const TraderRatingScreen: React.FC = () => {
                   <Icon name="shield" size={16} color={colors.accent} style={{ marginLeft: 4 }} />
                 )}
               </View>
-              <Text style={styles.traderStats}>{trader.completedTrades} operaciones • {trader.successRate}% éxito</Text>
+              <Text style={styles.traderStats}>
+                {trader.completedTrades > 0 
+                  ? `${trader.completedTrades} operaciones • ${Number(trader.successRate).toFixed(1)}% éxito`
+                  : 'Nuevo usuario'}
+              </Text>
             </View>
           </View>
           <View style={styles.tradeSummaryCard}>
             <Text style={styles.tradeSummaryTitle}>Resumen del intercambio</Text>
             <View style={styles.tradeSummaryRow}><Text style={styles.tradeSummaryLabel}>Cantidad:</Text><Text>{tradeDetails.amount} {tradeDetails.crypto}</Text></View>
-            <View style={styles.tradeSummaryRow}><Text style={styles.tradeSummaryLabel}>Total pagado:</Text><Text>{tradeDetails.totalPaid} Bs.</Text></View>
+            <View style={styles.tradeSummaryRow}><Text style={styles.tradeSummaryLabel}>Total pagado:</Text><Text>{tradeDetails.totalPaid}</Text></View>
             <View style={styles.tradeSummaryRow}><Text style={styles.tradeSummaryLabel}>Método:</Text><Text>{tradeDetails.method}</Text></View>
             <View style={styles.tradeSummaryRow}><Text style={styles.tradeSummaryLabel}>Duración:</Text><Text style={{ color: colors.success }}>{tradeDetails.duration}</Text></View>
           </View>
