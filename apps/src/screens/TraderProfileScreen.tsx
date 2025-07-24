@@ -15,6 +15,7 @@ import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
 import { useCurrency } from '../hooks/useCurrency';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
+import { getCurrencyForCountry } from '../utils/currencyMapping';
 import { useQuery } from '@apollo/client';
 import { GET_P2P_OFFERS, GET_USER_BANK_ACCOUNTS } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
@@ -120,6 +121,21 @@ export const TraderProfileScreen: React.FC = () => {
       return matches;
     });
   }, [offersData, trader]);
+
+  // Helper function to format amount with offer's currency
+  const formatOfferAmount = (amount: string | number, countryCode?: string) => {
+    if (!countryCode) return formatAmount.withCode(amount);
+    
+    // Create a dummy Country array with the country code at index 2
+    const dummyCountry: any = ['', '', countryCode, ''];
+    const currency = getCurrencyForCountry(dummyCountry);
+    const amountStr = typeof amount === 'number' ? amount.toString() : amount;
+    
+    return `${currency} ${parseFloat(amountStr).toLocaleString('es-VE', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })}`;
+  };
 
   // Check if an offer belongs to the current user/account
   const checkIfOwnOffer = (offer: any): boolean => {
@@ -286,7 +302,7 @@ export const TraderProfileScreen: React.FC = () => {
             <View style={{gap: 12}}>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Precio</Text>
-                <Text style={styles.detailValueBold}>{formatAmount.withCode(offer.rate)} / {crypto}</Text>
+                <Text style={styles.detailValueBold}>{formatOfferAmount(offer.rate, offer.countryCode)} / {crypto}</Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Disponible</Text>
@@ -359,7 +375,7 @@ export const TraderProfileScreen: React.FC = () => {
                           </Text>
                         </View>
                         <View style={styles.offerRateContainer}>
-                          <Text style={styles.rateValue}>{formatAmount.withCode(offer.rate)}</Text>
+                          <Text style={styles.rateValue}>{formatOfferAmount(offer.rate, offer.countryCode)}</Text>
                           <Text style={styles.ratePerCrypto}>/ {offer.tokenType === 'CUSD' ? 'cUSD' : 'CONFIO'}</Text>
                         </View>
                       </View>

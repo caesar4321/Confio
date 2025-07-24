@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useQuery } from '@apollo/client';
 import { GET_EXCHANGE_RATE_WITH_FALLBACK, GET_CURRENT_EXCHANGE_RATE } from '../apollo/queries';
 import { useCountry } from '../contexts/CountryContext';
-import { getCurrencySymbol } from '../utils/currencyMapping';
 
 interface ExchangeRateResult {
   rate: number | null;
@@ -144,17 +143,16 @@ export const useCryptoToFiatCalculator = (
 
   const formatFiatAmount = (cryptoAmount: number, exchangeRate?: number): string => {
     const fiatAmount = calculateFiatAmount(cryptoAmount, exchangeRate);
-    const currencySymbol = getCurrencySymbol(fiatCurrency);
     
     if (fiatCurrency === 'VES') {
       // Format Venezuelan bolívars
       return `${fiatAmount.toLocaleString('es-VE', { 
         minimumFractionDigits: 2, 
         maximumFractionDigits: 2 
-      })} ${currencySymbol}`;
+      })} ${fiatCurrency}`;
     }
     
-    return `${fiatAmount.toFixed(2)} ${currencySymbol}`;
+    return `${fiatAmount.toFixed(2)} ${fiatCurrency}`;
   };
 
   return {

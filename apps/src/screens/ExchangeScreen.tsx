@@ -1321,9 +1321,23 @@ export const ExchangeScreen = () => {
     };
 
     if (action === 'profile') {
-      // Navigate to TraderProfile screen
+      // Navigate to TraderProfile screen with trader data
+      const traderData = {
+        id: offer.offerUser?.id || offer.offerBusiness?.id || offer.user?.id || offer.id,
+        name: userName,
+        completedTrades: completedTrades,
+        successRate: successRate,
+        responseTime: getResponseTimeText(),
+        isOnline: userStats.lastSeenOnline && (Date.now() - new Date(userStats.lastSeenOnline).getTime()) < 2 * 60 * 60 * 1000,
+        verified: isVerified,
+        lastSeen: getActivityText(),
+        avgRating: userStats.avgRating || 0,
+        userId: offer.offerUser?.id || offer.user?.id,
+        businessId: offer.offerBusiness?.id,
+      };
+      
       navigation.navigate('TraderProfile', { 
-        offer: mappedOffer, 
+        trader: traderData,
         crypto: selectedCrypto 
       });
     } else if (action === 'trade') {
@@ -1396,7 +1410,12 @@ export const ExchangeScreen = () => {
           </View>
         )}
         <View style={styles.offerHeader}>
-          <View style={styles.offerUser}>
+          <TouchableOpacity 
+            style={styles.offerUser}
+            onPress={() => !isOwnOffer && handleSelectOffer(offer, 'profile')}
+            activeOpacity={isOwnOffer ? 1 : 0.7}
+            disabled={isOwnOffer}
+          >
             <View style={styles.avatarContainer}>
               <Text style={styles.avatarText}>{userName.charAt(0)}</Text>
               {activityStatus.isActive && <View style={styles.onlineIndicator} />}
@@ -1418,7 +1437,7 @@ export const ExchangeScreen = () => {
                 {activityStatus.text}
               </Text>
             </View>
-          </View>
+          </TouchableOpacity>
           <View style={styles.offerRateContainer}>
             <View style={styles.rateSection}>
               <Text style={styles.rateValue}>{formatAmount.withCode(offer.rate)}</Text>
@@ -1580,6 +1599,8 @@ export const ExchangeScreen = () => {
   };
 
   const MyOfferCard = ({ offer, onRefresh }: { offer: any; onRefresh: () => void }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+    
     // Format token type for display
     const formatTokenType = (tokenType: string): string => {
       if (tokenType === 'CUSD') return 'cUSD';
@@ -1606,10 +1627,10 @@ export const ExchangeScreen = () => {
     
     // Format amount with the offer's original country currency
     const formatOfferAmount = (amount: number) => {
-      return `${countryInfo.symbol}${formatNumber(amount, {
+      return `${countryInfo.currency} ${formatNumber(amount, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
-      })} ${countryInfo.currency}`;
+      })}`;
     };
     
     const getStatusColor = (status: string) => {
@@ -1696,23 +1717,46 @@ export const ExchangeScreen = () => {
 
         {/* Payment Methods */}
         {offer.paymentMethods && offer.paymentMethods.length > 0 && (
-          <View style={styles.myOfferPaymentMethods}>
-            <Text style={styles.myOfferPaymentLabel}>
-              <Icon name="credit-card" size={12} color="#6B7280" /> Métodos de pago
-            </Text>
+          <TouchableOpacity 
+            style={styles.myOfferPaymentMethods}
+            onPress={() => setIsExpanded(!isExpanded)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.myOfferPaymentHeader}>
+              <Text style={styles.myOfferPaymentLabel}>
+                <Icon name="credit-card" size={12} color="#6B7280" /> Métodos de pago
+              </Text>
+              <Icon 
+                name={isExpanded ? "chevron-up" : "chevron-down"} 
+                size={16} 
+                color="#6B7280" 
+              />
+            </View>
             <View style={styles.myOfferPaymentList}>
-              {offer.paymentMethods.slice(0, 2).map((method) => (
-                <Text key={method.id} style={styles.myOfferPaymentTag}>
-                  {method.displayName}{method.bank?.country?.flagEmoji ? ` ${method.bank.country.flagEmoji}` : ''}
-                </Text>
-              ))}
-              {offer.paymentMethods.length > 2 && (
-                <Text style={styles.myOfferPaymentMore}>
-                  +{offer.paymentMethods.length - 2} más
-                </Text>
+              {isExpanded ? (
+                <>
+                  {offer.paymentMethods.map((method) => (
+                    <Text key={method.id} style={styles.myOfferPaymentTag}>
+                      {method.displayName}{method.bank?.country?.flagEmoji ? ` ${method.bank.country.flagEmoji}` : ''}
+                    </Text>
+                  ))}
+                </>
+              ) : (
+                <>
+                  {offer.paymentMethods.slice(0, 2).map((method) => (
+                    <Text key={method.id} style={styles.myOfferPaymentTag}>
+                      {method.displayName}{method.bank?.country?.flagEmoji ? ` ${method.bank.country.flagEmoji}` : ''}
+                    </Text>
+                  ))}
+                  {offer.paymentMethods.length > 2 && (
+                    <Text style={styles.myOfferPaymentMore}>
+                      +{offer.paymentMethods.length - 2} más
+                    </Text>
+                  )}
+                </>
               )}
             </View>
-          </View>
+          </TouchableOpacity>
         )}
 
         {/* Action Buttons */}
@@ -4108,10 +4152,15 @@ const styles = StyleSheet.create({
   myOfferPaymentMethods: {
     marginBottom: 16,
   },
+  myOfferPaymentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
   myOfferPaymentLabel: {
     fontSize: 12,
     color: '#6B7280',
-    marginBottom: 6,
   },
   myOfferPaymentList: {
     flexDirection: 'row',

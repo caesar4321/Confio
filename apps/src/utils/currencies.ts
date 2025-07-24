@@ -483,7 +483,7 @@ export const convertCurrency = (
   toCurrency: Currency
 ): string => {
   const convertedAmount = amount * rate;
-  return formatCurrencyAmount(convertedAmount, toCurrency, { showSymbol: true });
+  return formatCurrencyAmount(convertedAmount, toCurrency, { showSymbol: true, preferCode: true });
 };
 
 /**
