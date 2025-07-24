@@ -1,11 +1,16 @@
 from django.contrib import admin
+from django.utils.html import format_html
+from django.urls import reverse
+from django.utils.safestring import mark_safe
+from django.db import models
 from .models import (
     P2PPaymentMethod, 
     P2POffer, 
     P2PTrade, 
     P2PMessage, 
     P2PUserStats, 
-    P2PEscrow
+    P2PEscrow,
+    P2PTradeRating
 )
 
 @admin.register(P2PPaymentMethod)
@@ -189,7 +194,7 @@ class P2PTradeAdmin(admin.ModelAdmin):
     list_display = [
         'id', 'buyer_entity_display', 'seller_entity_display', 
         'trade_type_display', 'crypto_amount', 'fiat_amount_display', 
-        'country_code', 'status', 'created_at', 'expires_at'
+        'country_code', 'status', 'rating_display', 'created_at', 'expires_at'
     ]
     list_filter = [
         'status', 'offer__token_type', 'country_code', 'currency_code', 
@@ -205,7 +210,7 @@ class P2PTradeAdmin(admin.ModelAdmin):
     ]
     readonly_fields = [
         'created_at', 'updated_at', 'completed_at', 
-        'disputed_at', 'resolved_at'
+        'disputed_at', 'resolved_at', 'rating_link'
     ]
     
     def buyer_entity_display(self, obj):
@@ -275,6 +280,37 @@ class P2PTradeAdmin(admin.ModelAdmin):
         return "❓ No Offer"
     offer_display.short_description = 'Offer'
     
+    def rating_display(self, obj):
+        """Display rating status with stars"""
+        try:
+            if hasattr(obj, 'rating') and obj.rating:
+                rating = obj.rating
+                stars = '⭐' * rating.overall_rating
+                return format_html(
+                    '<span title="Rating: {}/5">{}</span>',
+                    rating.overall_rating,
+                    stars
+                )
+            return format_html('<span style="color: #999;">No rating</span>')
+        except:
+            return format_html('<span style="color: #999;">No rating</span>')
+    rating_display.short_description = 'Rating'
+    
+    def rating_link(self, obj):
+        """Link to view/edit rating"""
+        try:
+            if hasattr(obj, 'rating') and obj.rating:
+                url = reverse('admin:p2p_exchange_p2ptraderating_change', args=[obj.rating.pk])
+                return format_html(
+                    '<a href="{}" target="_blank">View Rating ({}/5)</a>',
+                    url,
+                    obj.rating.overall_rating
+                )
+            return "No rating yet"
+        except:
+            return "No rating yet"
+    rating_link.short_description = 'Rating Details'
+    
     fieldsets = (
         ('Trade Participants (Direct Relationships)', {
             'fields': ('offer', 'buyer_user', 'buyer_business', 'seller_user', 'seller_business'),
@@ -296,7 +332,7 @@ class P2PTradeAdmin(admin.ModelAdmin):
             'fields': ('payment_reference', 'payment_notes')
         }),
         ('Completion', {
-            'fields': ('crypto_transaction_hash', 'completed_at')
+            'fields': ('crypto_transaction_hash', 'completed_at', 'rating_link')
         }),
         ('Dispute Handling', {
             'fields': ('dispute_reason', 'disputed_at', 'resolved_at'),
@@ -362,7 +398,7 @@ class P2PMessageAdmin(admin.ModelAdmin):
 class P2PUserStatsAdmin(admin.ModelAdmin):
     list_display = [
         'stats_entity_display', 'total_trades', 'completed_trades', 'success_rate', 
-        'avg_response_time', 'is_verified'
+        'avg_rating_display', 'rating_count', 'avg_response_time', 'is_verified'
     ]
     list_filter = [
         'is_verified', 'verification_level', 'last_seen_online',
@@ -385,6 +421,44 @@ class P2PUserStatsAdmin(admin.ModelAdmin):
             return f"⚠️ {obj.user.username} (Legacy)"
         return "❓ Unknown"
     stats_entity_display.short_description = 'Stats Owner'
+    
+    def avg_rating_display(self, obj):
+        """Display average rating with stars"""
+        from django.db.models import Avg
+        
+        # Get ratings for this entity
+        ratings = P2PTradeRating.objects.filter(
+            models.Q(ratee_user=obj.stats_user) | 
+            models.Q(ratee_business=obj.stats_business)
+        )
+        
+        if ratings.exists():
+            avg = ratings.aggregate(Avg('overall_rating'))['overall_rating__avg']
+            if avg:
+                stars = '⭐' * int(avg)
+                partial = '✨' if (avg % 1) >= 0.5 else ''
+                return format_html(
+                    '<span title="{}/5">{}</span>',
+                    f"{avg:.2f}",
+                    stars + partial
+                )
+        return format_html('<span style="color: #999;">No ratings</span>')
+    avg_rating_display.short_description = 'Avg Rating'
+    
+    def rating_count(self, obj):
+        """Show total number of ratings received"""
+        count = P2PTradeRating.objects.filter(
+            models.Q(ratee_user=obj.stats_user) | 
+            models.Q(ratee_business=obj.stats_business)
+        ).count()
+        
+        if count > 0:
+            return format_html(
+                '<span style="color: #4CAF50; font-weight: bold;">{}</span>',
+                count
+            )
+        return format_html('<span style="color: #999;">0</span>')
+    rating_count.short_description = 'Ratings'
     
     fieldsets = (
         ('Stats Owner (Direct Relationships)', {
@@ -430,3 +504,146 @@ class P2PEscrowAdmin(admin.ModelAdmin):
     readonly_fields = [
         'created_at', 'updated_at', 'escrowed_at', 'released_at'
     ]
+
+
+@admin.register(P2PTradeRating)
+class P2PTradeRatingAdmin(admin.ModelAdmin):
+    list_display = [
+        'id', 'trade_link', 'rater_display', 'ratee_display', 
+        'overall_rating_stars', 'rating_breakdown', 'has_comment', 
+        'tags_display', 'rated_at'
+    ]
+    list_filter = [
+        'overall_rating', 'communication_rating', 'speed_rating', 
+        'reliability_rating', 'rated_at',
+        ('rater_user', admin.RelatedOnlyFieldListFilter),
+        ('rater_business', admin.RelatedOnlyFieldListFilter),
+        ('ratee_user', admin.RelatedOnlyFieldListFilter),
+        ('ratee_business', admin.RelatedOnlyFieldListFilter),
+    ]
+    search_fields = [
+        'trade__id', 'comment',
+        'rater_user__username', 'rater_business__name',
+        'ratee_user__username', 'ratee_business__name'
+    ]
+    readonly_fields = ['rated_at', 'trade_details']
+    
+    def trade_link(self, obj):
+        """Link to the trade"""
+        url = reverse('admin:p2p_exchange_p2ptrade_change', args=[obj.trade.pk])
+        return format_html(
+            '<a href="{}" target="_blank">Trade #{}</a>',
+            url,
+            obj.trade.id
+        )
+    trade_link.short_description = 'Trade'
+    
+    def rater_display(self, obj):
+        """Display rater with icon"""
+        if obj.rater_user:
+            return f"👤 {obj.rater_user.username}"
+        elif obj.rater_business:
+            return f"🏢 {obj.rater_business.name}"
+        return "❓ Unknown"
+    rater_display.short_description = 'Rater'
+    
+    def ratee_display(self, obj):
+        """Display ratee with icon"""
+        if obj.ratee_user:
+            return f"👤 {obj.ratee_user.username}"
+        elif obj.ratee_business:
+            return f"🏢 {obj.ratee_business.name}"
+        return "❓ Unknown"
+    ratee_display.short_description = 'Ratee'
+    
+    def overall_rating_stars(self, obj):
+        """Display overall rating as stars"""
+        stars = '⭐' * obj.overall_rating
+        empty_stars = '☆' * (5 - obj.overall_rating)
+        return format_html(
+            '<span style="font-size: 16px;" title="{}/5">{}{}</span>',
+            obj.overall_rating,
+            stars,
+            empty_stars
+        )
+    overall_rating_stars.short_description = 'Overall Rating'
+    
+    def rating_breakdown(self, obj):
+        """Display all ratings in a compact format"""
+        ratings = []
+        if obj.communication_rating:
+            ratings.append(f"💬 {obj.communication_rating}/5")
+        if obj.speed_rating:
+            ratings.append(f"⚡ {obj.speed_rating}/5")
+        if obj.reliability_rating:
+            ratings.append(f"🛡️ {obj.reliability_rating}/5")
+        
+        if ratings:
+            return format_html('<br>'.join(ratings))
+        return format_html('<span style="color: #999;">No detailed ratings</span>')
+    rating_breakdown.short_description = 'Detailed Ratings'
+    
+    def has_comment(self, obj):
+        """Show if rating has a comment"""
+        if obj.comment:
+            return format_html(
+                '<span title="{}" style="cursor: help;">✅ Yes ({} chars)</span>',
+                obj.comment[:100] + '...' if len(obj.comment) > 100 else obj.comment,
+                len(obj.comment)
+            )
+        return format_html('<span style="color: #999;">❌ No</span>')
+    has_comment.short_description = 'Comment'
+    
+    def tags_display(self, obj):
+        """Display tags as badges"""
+        if obj.tags:
+            tag_html = []
+            for tag in obj.tags[:3]:  # Show first 3 tags
+                tag_html.append(
+                    '<span style="background: #e3f2fd; color: #1976d2; '
+                    'padding: 2px 8px; border-radius: 12px; font-size: 11px; '
+                    'margin-right: 4px;">{}</span>'.format(tag)
+                )
+            if len(obj.tags) > 3:
+                tag_html.append(
+                    '<span style="color: #999; font-size: 11px;">+{} more</span>'.format(len(obj.tags) - 3)
+                )
+            return format_html(''.join(tag_html))
+        return format_html('<span style="color: #999;">No tags</span>')
+    tags_display.short_description = 'Tags'
+    
+    def trade_details(self, obj):
+        """Show trade details in a formatted way"""
+        trade = obj.trade
+        details = f"""
+        <div style="background: #f5f5f5; padding: 10px; border-radius: 5px;">
+            <strong>Trade #{trade.id}</strong><br>
+            <strong>Amount:</strong> {trade.crypto_amount} {trade.offer.token_type} / {trade.fiat_amount} {trade.currency_code}<br>
+            <strong>Status:</strong> {trade.status}<br>
+            <strong>Created:</strong> {trade.created_at.strftime('%Y-%m-%d %H:%M')}<br>
+            <strong>Completed:</strong> {trade.completed_at.strftime('%Y-%m-%d %H:%M') if trade.completed_at else 'N/A'}
+        </div>
+        """
+        return format_html(details)
+    trade_details.short_description = 'Trade Information'
+    
+    fieldsets = (
+        ('Rating Information', {
+            'fields': ('trade', 'overall_rating', 'communication_rating', 
+                      'speed_rating', 'reliability_rating')
+        }),
+        ('Participants', {
+            'fields': ('rater_user', 'rater_business', 'ratee_user', 'ratee_business')
+        }),
+        ('Feedback', {
+            'fields': ('comment', 'tags')
+        }),
+        ('Metadata', {
+            'fields': ('rated_at', 'trade_details'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def has_add_permission(self, request):
+        """Prevent manual creation of ratings through admin"""
+        return False

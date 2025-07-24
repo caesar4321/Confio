@@ -336,6 +336,7 @@ interface ActiveTrade {
   tradeType: 'buy' | 'sell';
   countryCode?: string;
   currencyCode?: string;
+  hasRating?: boolean;
 }
 
 export const ExchangeScreen = () => {
@@ -495,7 +496,16 @@ export const ExchangeScreen = () => {
     });
     
     return myTradesData.myP2pTrades
-      .filter((trade: any) => trade.status !== 'COMPLETED' && trade.status !== 'CANCELLED')
+      .filter((trade: any) => {
+        // Show cancelled trades never
+        if (trade.status === 'CANCELLED') return false;
+        
+        // Show completed trades only if they haven't been rated yet
+        if (trade.status === 'COMPLETED' && trade.hasRating) return false;
+        
+        // Show all other trades (active, pending, etc.) and completed but not rated
+        return true;
+      })
       .map((trade: any) => {
         // NEW: Use the computed helper fields from GraphQL for cleaner logic
         const buyerDisplayName = trade.buyerDisplayName || 'Unknown Buyer';
@@ -617,6 +627,7 @@ export const ExchangeScreen = () => {
           tradeType,
           countryCode: trade.countryCode,
           currencyCode: trade.currencyCode,
+          hasRating: trade.hasRating || false,
         };
       });
   }, [myTradesData, formatAmount, activeAccount]);
@@ -1637,8 +1648,11 @@ export const ExchangeScreen = () => {
         return `${minutes}:${secs.toString().padStart(2, '0')}`;
     };
 
-    const getStepText = (step: number) => {
-        const steps: { [key: number]: string } = { 1: "Realizar pago", 2: "Confirmar pago", 3: "Esperando verificación", 4: "Completado" };
+    const getStepText = (step: number, status?: string, hasRating?: boolean) => {
+        if (status === 'COMPLETED' && hasRating) {
+            return "Intercambio completado";
+        }
+        const steps: { [key: number]: string } = { 1: "Realizar pago", 2: "Confirmar pago", 3: "Esperando verificación", 4: "Calificar trader" };
         return steps[step] || "En proceso";
     };
 
@@ -1659,13 +1673,22 @@ export const ExchangeScreen = () => {
                 </View>
             </View>
             <View style={styles.progressContainer}>
-                <Text style={styles.stepText}>Paso {trade.step}/{trade.totalSteps}: {getStepText(trade.step)}</Text>
-                <View style={styles.progressBar}>
-                    <View style={[styles.progressFill, { width: `${(trade.step / trade.totalSteps) * 100}%` }]} />
-                </View>
+                {trade.status === 'COMPLETED' && trade.hasRating ? (
+                    <View style={styles.completedBadge}>
+                        <Icon name="check-circle" size={16} color="#10B981" style={{ marginRight: 4 }} />
+                        <Text style={styles.completedText}>Intercambio completado</Text>
+                    </View>
+                ) : (
+                    <>
+                        <Text style={styles.stepText}>Paso {trade.step}/{trade.totalSteps}: {getStepText(trade.step, trade.status, trade.hasRating)}</Text>
+                        <View style={styles.progressBar}>
+                            <View style={[styles.progressFill, { width: `${(trade.step / trade.totalSteps) * 100}%` }]} />
+                        </View>
+                    </>
+                )}
             </View>
             <TouchableOpacity 
-                style={styles.continueButton}
+                style={[styles.continueButton, (trade.status === 'COMPLETED' && trade.hasRating) && styles.viewDetailsButton]}
                 onPress={() => {
                     navigation.navigate('ActiveTrade', {
                         trade: {
@@ -1687,11 +1710,15 @@ export const ExchangeScreen = () => {
                             tradeType: trade.tradeType,
                             countryCode: trade.countryCode,
                             currencyCode: trade.currencyCode,
+                            status: trade.status,
+                            hasRating: trade.hasRating,
                         }
                     });
                 }}
             >
-                <Text style={styles.continueButtonText}>Continuar</Text>
+                <Text style={[styles.continueButtonText, (trade.status === 'COMPLETED' && trade.hasRating) && styles.viewDetailsButtonText]}>
+                    {trade.status === 'COMPLETED' && trade.hasRating ? 'Ver detalles' : 'Continuar'}
+                </Text>
             </TouchableOpacity>
         </View>
     );
@@ -3311,6 +3338,25 @@ const styles = StyleSheet.create({
   continueButtonText: {
     color: '#fff',
     fontWeight: 'bold',
+  },
+  viewDetailsButton: {
+    backgroundColor: '#6B7280',
+  },
+  viewDetailsButtonText: {
+    color: '#fff',
+  },
+  completedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#D1FAE5',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  completedText: {
+    color: '#059669',
+    fontWeight: '600',
+    fontSize: 14,
   },
   detailsCard: {
     backgroundColor: '#fff',

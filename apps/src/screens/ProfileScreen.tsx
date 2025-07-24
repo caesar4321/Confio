@@ -202,7 +202,7 @@ export const ProfileScreen = () => {
       </View>
 
       {/* Achievements Card */}
-      <TouchableOpacity style={styles.card}>
+      <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Achievements')}>
         <View style={styles.cardHeader}>
           <View style={styles.cardTitleRow}>
             <Icon name="award" size={20} color={colors.primary} />

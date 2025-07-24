@@ -113,6 +113,8 @@ export type MainStackParamList = {
       tradeType: 'buy' | 'sell';
       countryCode?: string;
       currencyCode?: string;
+      status?: string;
+      hasRating?: boolean;
     };
   };
   AccountDetail: {
@@ -267,6 +269,7 @@ export type MainStackParamList = {
     mode?: 'pagar' | 'cobrar';
   };
   TraderRating: {
+    tradeId: string;
     trader: {
       name: string;
       verified: boolean;
@@ -283,6 +286,8 @@ export type MainStackParamList = {
     };
   };
   CreateOffer: undefined;
+  Achievements: undefined;
+  ConfioTokenInfo: undefined;
 };
 
 // Root Stack - Top level navigation

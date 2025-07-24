@@ -39,6 +39,8 @@ interface ActiveTrade {
   step: number;
   timeRemaining: number;
   tradeType: 'buy' | 'sell';
+  status?: string;
+  hasRating?: boolean;
 }
 
 export const ActiveTradeScreen: React.FC = () => {
@@ -100,8 +102,11 @@ export const ActiveTradeScreen: React.FC = () => {
   };
 
   const handleGoBack = () => {
-    // Navigate back to Exchange screen with active trades tab
-    navigation.navigate('BottomTabs', { screen: 'Exchange' });
+    // Navigate back to Exchange screen with refresh flag
+    navigation.navigate('BottomTabs', { 
+      screen: 'Exchange',
+      params: { refreshData: true }
+    });
   };
 
   const handleAbandonTrade = () => {
@@ -126,9 +131,6 @@ export const ActiveTradeScreen: React.FC = () => {
     );
   };
 
-  const handleNextStep = () => {
-    setActiveTradeStep(prev => Math.min(prev + 1, 4));
-  };
 
   const handleOpenChat = () => {
     navigation.navigate('TradeChat', {
@@ -476,10 +478,6 @@ export const ActiveTradeScreen: React.FC = () => {
             <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
-            <Text style={styles.primaryButtonText}>Simular Completar</Text>
-          </TouchableOpacity>
         </View>
       );
     } else {
@@ -529,72 +527,119 @@ export const ActiveTradeScreen: React.FC = () => {
             <Icon name="message-circle" size={16} color="#fff" style={styles.buttonIcon} />
             <Text style={styles.primaryButtonText}>Ir al chat del intercambio</Text>
           </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.primaryButton} onPress={handleNextStep}>
-            <Text style={styles.primaryButtonText}>Simular Completar</Text>
-          </TouchableOpacity>
         </View>
       );
     }
   };
 
-  const renderStep4 = () => (
-    <View style={styles.stepCard}>
-      <View style={styles.successHeader}>
-        <View style={styles.successIcon}>
-          <Icon name="check" size={32} color="#ffffff" />
+  const renderStep4 = () => {
+    // If trade is already completed (rated), show different UI
+    if (trade.status === 'COMPLETED' && trade.hasRating) {
+      return (
+        <View style={styles.stepCard}>
+          <View style={styles.successHeader}>
+            <View style={styles.successIcon}>
+              <Icon name="check" size={32} color="#ffffff" />
+            </View>
+            <Text style={styles.successTitle}>¡Intercambio Completado!</Text>
+            <Text style={styles.successDescription}>
+              Este intercambio ha sido completado y calificado
+            </Text>
+          </View>
+          
+          <View style={styles.transactionDetailsCard}>
+            <Text style={styles.transactionDetailsTitle}>Detalles de la transacción</Text>
+            <View style={styles.transactionDetailsRow}>
+              <Text style={styles.transactionDetailsLabel}>ID de transacción:</Text>
+              <Text style={styles.transactionDetailsValue}>0x1a2b3c4d...</Text>
+            </View>
+            <View style={styles.transactionDetailsRow}>
+              <Text style={styles.transactionDetailsLabel}>Fecha:</Text>
+              <Text style={styles.transactionDetailsValue}>21 Jun 2025, 14:45</Text>
+            </View>
+            <View style={styles.transactionDetailsRow}>
+              <Text style={styles.transactionDetailsLabel}>Comerciante:</Text>
+              <Text style={styles.transactionDetailsValue}>{trade.trader.name}</Text>
+            </View>
+            <View style={styles.transactionDetailsRow}>
+              <Text style={styles.transactionDetailsLabel}>Método de pago:</Text>
+              <Text style={styles.transactionDetailsValue}>{trade.paymentMethod}</Text>
+            </View>
+            <View style={styles.transactionDetailsRow}>
+              <Text style={styles.transactionDetailsLabel}>Estado:</Text>
+              <Text style={[styles.transactionDetailsValue, { color: colors.success }]}>Completado y calificado</Text>
+            </View>
+          </View>
+          
+          <View style={styles.successButtons}>
+            <TouchableOpacity style={styles.secondaryButton} onPress={handleGoBack}>
+              <Text style={styles.secondaryButtonText}>Volver a Intercambios</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-        <Text style={styles.successTitle}>¡Intercambio Completado!</Text>
-        <Text style={styles.successDescription}>
-          Has recibido <Text style={styles.boldText}>{trade.amount} {formatCrypto(trade.crypto)}</Text> en tu wallet
-        </Text>
+      );
+    }
+    
+    // If trade is not yet rated, show rating button
+    return (
+      <View style={styles.stepCard}>
+        <View style={styles.successHeader}>
+          <View style={styles.successIcon}>
+            <Icon name="check" size={32} color="#ffffff" />
+          </View>
+          <Text style={styles.successTitle}>¡Intercambio Completado!</Text>
+          <Text style={styles.successDescription}>
+            Has recibido <Text style={styles.boldText}>{trade.amount} {formatCrypto(trade.crypto)}</Text> en tu wallet
+          </Text>
+        </View>
+        
+        <View style={styles.transactionDetailsCard}>
+          <Text style={styles.transactionDetailsTitle}>Detalles de la transacción</Text>
+          <View style={styles.transactionDetailsRow}>
+            <Text style={styles.transactionDetailsLabel}>ID de transacción:</Text>
+            <Text style={styles.transactionDetailsValue}>0x1a2b3c4d...</Text>
+          </View>
+          <View style={styles.transactionDetailsRow}>
+            <Text style={styles.transactionDetailsLabel}>Fecha:</Text>
+            <Text style={styles.transactionDetailsValue}>21 Jun 2025, 14:45</Text>
+          </View>
+          <View style={styles.transactionDetailsRow}>
+            <Text style={styles.transactionDetailsLabel}>Comerciante:</Text>
+            <Text style={styles.transactionDetailsValue}>{trade.trader.name}</Text>
+          </View>
+          <View style={styles.transactionDetailsRow}>
+            <Text style={styles.transactionDetailsLabel}>Método de pago:</Text>
+            <Text style={styles.transactionDetailsValue}>{trade.paymentMethod}</Text>
+          </View>
+        </View>
+        
+        <View style={styles.successButtons}>
+          <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate('TraderRating', {
+            tradeId: trade.id,
+            trader: {
+              name: trade.trader.name,
+              verified: trade.trader.verified,
+              completedTrades: 248, // Replace with real data if available
+              successRate: 99.2, // Replace with real data if available
+            },
+            tradeDetails: {
+              amount: trade.amount,
+              crypto: formatCrypto(trade.crypto),
+              totalPaid: trade.totalBs,
+              method: trade.paymentMethod,
+              date: '21 Jun 2025, 14:45', // Replace with real data if available
+              duration: '8 minutos', // Replace with real data if available
+            }
+          })}>
+            <Text style={styles.primaryButtonText}>Calificar a {trade.trader.name}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryButton} onPress={handleGoBack}>
+            <Text style={styles.secondaryButtonText}>Volver al Inicio</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-      
-      <View style={styles.transactionDetailsCard}>
-        <Text style={styles.transactionDetailsTitle}>Detalles de la transacción</Text>
-        <View style={styles.transactionDetailsRow}>
-          <Text style={styles.transactionDetailsLabel}>ID de transacción:</Text>
-          <Text style={styles.transactionDetailsValue}>0x1a2b3c4d...</Text>
-        </View>
-        <View style={styles.transactionDetailsRow}>
-          <Text style={styles.transactionDetailsLabel}>Fecha:</Text>
-          <Text style={styles.transactionDetailsValue}>21 Jun 2025, 14:45</Text>
-        </View>
-        <View style={styles.transactionDetailsRow}>
-          <Text style={styles.transactionDetailsLabel}>Comerciante:</Text>
-          <Text style={styles.transactionDetailsValue}>{trade.trader.name}</Text>
-        </View>
-        <View style={styles.transactionDetailsRow}>
-          <Text style={styles.transactionDetailsLabel}>Método de pago:</Text>
-          <Text style={styles.transactionDetailsValue}>{trade.paymentMethod}</Text>
-        </View>
-      </View>
-      
-      <View style={styles.successButtons}>
-        <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate('TraderRating', {
-          trader: {
-            name: trade.trader.name,
-            verified: trade.trader.verified,
-            completedTrades: 248, // Replace with real data if available
-            successRate: 99.2, // Replace with real data if available
-          },
-          tradeDetails: {
-            amount: trade.amount,
-            crypto: formatCrypto(trade.crypto),
-            totalPaid: trade.totalBs,
-            method: trade.paymentMethod,
-            date: '21 Jun 2025, 14:45', // Replace with real data if available
-            duration: '8 minutos', // Replace with real data if available
-          }
-        })}>
-          <Text style={styles.primaryButtonText}>Calificar a {trade.trader.name}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryButton} onPress={handleGoBack}>
-          <Text style={styles.secondaryButtonText}>Volver al Inicio</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
