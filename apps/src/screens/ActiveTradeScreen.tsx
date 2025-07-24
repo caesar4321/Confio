@@ -102,11 +102,8 @@ export const ActiveTradeScreen: React.FC = () => {
   };
 
   const handleGoBack = () => {
-    // Navigate back to Exchange screen with refresh flag
-    navigation.navigate('BottomTabs', { 
-      screen: 'Exchange',
-      params: { refreshData: true }
-    });
+    // Simply go back to the previous screen
+    navigation.goBack();
   };
 
   const handleAbandonTrade = () => {
@@ -651,40 +648,46 @@ export const ActiveTradeScreen: React.FC = () => {
           <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
             <Icon name="arrow-left" size={24} color="#374151" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Intercambio Activo</Text>
+          <Text style={styles.headerTitle}>
+            {trade.status === 'COMPLETED' ? 'Detalle del Intercambio' : 'Intercambio Activo'}
+          </Text>
           <View style={styles.headerSpacer} />
-          <TouchableOpacity 
-            style={styles.abandonButton}
-            onPress={handleAbandonTrade}
-          >
-            <Text style={styles.abandonButtonText}>Abandonar</Text>
-          </TouchableOpacity>
+          {trade.status !== 'COMPLETED' && (
+            <TouchableOpacity 
+              style={styles.abandonButton}
+              onPress={handleAbandonTrade}
+            >
+              <Text style={styles.abandonButtonText}>Abandonar</Text>
+            </TouchableOpacity>
+          )}
         </View>
         
         <TradeProgressBar currentStep={activeTradeStep} totalSteps={4} />
         
-        {/* Timer */}
-        <View style={styles.timerCard}>
-          <View style={styles.timerHeader}>
-            <Text style={styles.timerLabel}>Tiempo restante</Text>
-            <Text style={styles.timerValue}>{formatTime(timeRemaining)}</Text>
+        {/* Timer - only for active trades */}
+        {trade.status !== 'COMPLETED' && (
+          <View style={styles.timerCard}>
+            <View style={styles.timerHeader}>
+              <Text style={styles.timerLabel}>Tiempo restante</Text>
+              <Text style={styles.timerValue}>{formatTime(timeRemaining)}</Text>
+            </View>
+            <View style={styles.timerProgressBar}>
+              <View 
+                style={[
+                  styles.timerProgressFill, 
+                  { width: `${Math.max(10, 100 - getProgressPercentage())}%` }
+                ]} 
+              />
+            </View>
+            <TouchableOpacity 
+              style={styles.viewAllTradesHint}
+              onPress={() => navigation.navigate('BottomTabs', { screen: 'Exchange' })}
+            >
+              <Icon name="list" size={12} color="#2563EB" style={styles.hintIcon} />
+              <Text style={styles.hintText}>Ver todos mis intercambios</Text>
+            </TouchableOpacity>
           </View>
-          <View style={styles.timerProgressBar}>
-            <View 
-              style={[
-                styles.timerProgressFill, 
-                { width: `${Math.max(10, 100 - getProgressPercentage())}%` }
-              ]} 
-            />
-          </View>
-          <TouchableOpacity 
-            style={styles.viewAllTradesHint}
-            onPress={() => navigation.navigate('BottomTabs', { screen: 'Exchange' })}
-          >
-            <Icon name="list" size={12} color="#2563EB" style={styles.hintIcon} />
-            <Text style={styles.hintText}>Ver todos mis intercambios</Text>
-          </TouchableOpacity>
-        </View>
+        )}
       </View>
       
       {/* Content */}

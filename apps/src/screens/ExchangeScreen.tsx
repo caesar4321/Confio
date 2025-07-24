@@ -24,6 +24,7 @@ import { MainStackParamList } from '../types/navigation';
 import { countries, Country } from '../utils/countries';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { useCurrency } from '../hooks/useCurrency';
+import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS, GET_MY_P2P_TRADES, GET_MY_P2P_OFFERS, GET_USER_BANK_ACCOUNTS } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { useCountry } from '../contexts/CountryContext';
@@ -491,20 +492,53 @@ export const ExchangeScreen = () => {
         sellerUser: trade.sellerUser?.id,
         buyerBusiness: trade.buyerBusiness?.id,
         sellerBusiness: trade.sellerBusiness?.id,
-        status: trade.status
+        status: trade.status,
+        hasRating: trade.hasRating,
+        createdAt: trade.createdAt
       }))
     });
     
-    return myTradesData.myP2pTrades
+    const filteredTrades = myTradesData.myP2pTrades
       .filter((trade: any) => {
-        // Show cancelled trades never
+        // Don't show cancelled trades
         if (trade.status === 'CANCELLED') return false;
         
-        // Show completed trades only if they haven't been rated yet
-        if (trade.status === 'COMPLETED' && trade.hasRating) return false;
-        
-        // Show all other trades (active, pending, etc.) and completed but not rated
+        // Show all other trades (including completed ones for history)
         return true;
+      });
+    
+    console.log('[ExchangeScreen] After filtering:', {
+      filteredCount: filteredTrades.length,
+      statuses: filteredTrades.map((t: any) => ({ id: t.id, status: t.status, hasRating: t.hasRating }))
+    });
+    
+    return filteredTrades
+      .sort((a: any, b: any) => {
+        // Sort by status priority first
+        const statusPriority: { [key: string]: number } = {
+          'PENDING': 1,
+          'PAYMENT_PENDING': 2,
+          'PAYMENT_SENT': 3,
+          'PAYMENT_CONFIRMED': 4,
+          'COMPLETED': 5, // Completed trades go to the bottom
+        };
+        
+        const aPriority = statusPriority[a.status] || 999;
+        const bPriority = statusPriority[b.status] || 999;
+        
+        // If both are completed, sort by whether they have ratings
+        if (a.status === 'COMPLETED' && b.status === 'COMPLETED') {
+          // Unrated completed trades come before rated ones
+          if (!a.hasRating && b.hasRating) return -1;
+          if (a.hasRating && !b.hasRating) return 1;
+        }
+        
+        // If same priority, sort by creation date (newest first)
+        if (aPriority === bPriority) {
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        }
+        
+        return aPriority - bPriority;
       })
       .map((trade: any) => {
         // NEW: Use the computed helper fields from GraphQL for cleaner logic
@@ -561,6 +595,7 @@ export const ExchangeScreen = () => {
             case 'PAYMENT_PENDING': return 2;
             case 'PAYMENT_SENT': return 3;
             case 'PAYMENT_CONFIRMED': return 4;
+            case 'COMPLETED': return 4; // Completed trades are at step 4
             default: return 1;
           }
         };
@@ -598,6 +633,22 @@ export const ExchangeScreen = () => {
           return `${Math.round(avgResponseTimeMinutes / 60)} horas`;
         };
 
+        // Determine the other party's user ID and business ID
+        let otherPartyUserId, otherPartyBusinessId;
+        const isBusinessOffer = otherPartyName.includes('de '); // Simple check for business names like "Salud de Julian"
+        
+        if (activeAccount?.type === 'business') {
+          const currentBusinessId = activeAccount.business?.id;
+          const isBuyer = trade.buyerBusiness?.id === currentBusinessId;
+          otherPartyUserId = isBuyer ? trade.sellerUser?.id : trade.buyerUser?.id;
+          otherPartyBusinessId = isBuyer ? trade.sellerBusiness?.id : trade.buyerBusiness?.id;
+        } else {
+          const currentUserId = profileData?.userProfile?.id;
+          const isBuyer = trade.buyerUser?.id === currentUserId;
+          otherPartyUserId = isBuyer ? trade.sellerUser?.id : trade.buyerUser?.id;
+          otherPartyBusinessId = isBuyer ? trade.sellerBusiness?.id : trade.buyerBusiness?.id;
+        }
+
         return {
           id: trade.id,
           trader: {
@@ -606,6 +657,12 @@ export const ExchangeScreen = () => {
             verified: otherPartyStats?.isVerified || false,
             lastSeen: formatLastSeen(otherPartyStats?.lastSeenOnline || null),
             responseTime: formatResponseTime(otherPartyStats?.avgResponseTime || null),
+            completedTrades: otherPartyStats?.completedTrades || 0,
+            successRate: otherPartyStats?.successRate || 0,
+            avgRating: otherPartyStats?.avgRating || 0,
+            id: otherPartyBusinessId || otherPartyUserId || otherPartyStats?.id || `trader-${trade.id}`,
+            userId: otherPartyUserId,
+            businessId: otherPartyBusinessId,
           },
           amount: trade.cryptoAmount.toString(),
           crypto: trade.offer?.tokenType === 'CUSD' ? 'cUSD' : (trade.offer?.tokenType || 'cUSD'),
@@ -613,7 +670,7 @@ export const ExchangeScreen = () => {
           step: getStepFromStatus(trade.status),
           totalSteps: 4,
           timeRemaining,
-          status: trade.status.toLowerCase(),
+          status: trade.status, // Keep original case for proper comparison
           paymentMethod: trade.paymentMethod?.isActive === false ? 
             'Método inactivo' : 
             (() => {
@@ -628,6 +685,7 @@ export const ExchangeScreen = () => {
           countryCode: trade.countryCode,
           currencyCode: trade.currencyCode,
           hasRating: trade.hasRating || false,
+          createdAt: trade.createdAt,
         };
       });
   }, [myTradesData, formatAmount, activeAccount]);
@@ -1280,6 +1338,9 @@ export const ExchangeScreen = () => {
 
   // Enhanced Offer Card Component
   const OfferCard = ({ offer, crypto }: { offer: any, crypto: 'cUSD' | 'CONFIO' }) => {
+    // State for expanded payment methods
+    const [isExpanded, setIsExpanded] = useState(false);
+    
     // Check if this is the user's own offer
     const isOwnOffer = checkIfOwnOffer(offer);
     
@@ -1422,31 +1483,61 @@ export const ExchangeScreen = () => {
           <Text style={styles.detailLabel}>Disponible</Text>
           <Text style={styles.detailValue}>{offer.availableAmount} {crypto}</Text>
         </View>
-        <View style={styles.detailRow}>
+        <TouchableOpacity 
+          style={styles.detailRow}
+          onPress={() => offer.paymentMethods?.length > 0 && setIsExpanded(!isExpanded)}
+          activeOpacity={offer.paymentMethods?.length > 0 ? 0.7 : 1}
+        >
           <Text style={styles.detailLabel}>Métodos de pago</Text>
           <View style={styles.paymentMethodsContainer}>
-            <Text style={styles.detailValue}>
-              {(() => {
-                const methods = offer.paymentMethods || [];
-                if (methods.length === 0) return 'N/A';
-                
-                const maxVisible = 2; // Show first 2 methods
-                const visibleMethods = methods.slice(0, maxVisible);
-                const remainingCount = methods.length - maxVisible;
-                
-                let text = visibleMethods.map((pm: any) => {
-                  const countryFlag = pm.bank?.country?.flagEmoji || '';
-                  return countryFlag ? `${pm.displayName} ${countryFlag}` : pm.displayName;
-                }).join(', ');
-                if (remainingCount > 0) {
-                  text += `, +${remainingCount} más`;
-                }
-                
-                return text;
-              })()}
-            </Text>
+            {!isExpanded ? (
+              <View style={styles.paymentMethodsCollapsed}>
+                <Text style={styles.detailValue}>
+                  {(() => {
+                    const methods = offer.paymentMethods || [];
+                    if (methods.length === 0) return 'N/A';
+                    
+                    const maxVisible = 2; // Show first 2 methods
+                    const visibleMethods = methods.slice(0, maxVisible);
+                    const remainingCount = methods.length - maxVisible;
+                    
+                    let text = visibleMethods.map((pm: any) => {
+                      const countryFlag = pm.bank?.country?.flagEmoji || '';
+                      return countryFlag ? `${pm.displayName} ${countryFlag}` : pm.displayName;
+                    }).join(', ');
+                    if (remainingCount > 0) {
+                      text += `, +${remainingCount} más`;
+                    }
+                    
+                    return text;
+                  })()}
+                </Text>
+                {offer.paymentMethods?.length > 2 && (
+                  <Icon name="chevron-down" size={16} color="#6B7280" style={{ marginLeft: 4 }} />
+                )}
+              </View>
+            ) : (
+              <View style={styles.paymentMethodsExpanded}>
+                <View style={styles.paymentMethodsList}>
+                  {offer.paymentMethods?.map((pm: any, index: number) => (
+                    <View key={pm.id || index} style={styles.paymentMethodItem}>
+                      <Icon 
+                        name={getPaymentMethodIcon(pm.icon, pm.providerType, pm.displayName || pm.name)} 
+                        size={14} 
+                        color="#6B7280" 
+                      />
+                      <Text style={styles.paymentMethodName}>
+                        {pm.displayName || pm.name}
+                        {pm.bank?.country?.flagEmoji ? ` ${pm.bank.country.flagEmoji}` : ''}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+                <Icon name="chevron-up" size={16} color="#6B7280" style={{ marginLeft: 4 }} />
+              </View>
+            )}
           </View>
-        </View>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.offerActions}>
@@ -1657,69 +1748,157 @@ export const ExchangeScreen = () => {
     };
 
     return (
-        <View style={styles.activeTradeCard}>
+        <View style={[
+            styles.activeTradeCard,
+            trade.status === 'COMPLETED' && styles.completedTradeCard
+        ]}>
             <View style={styles.tradeHeader}>
-                <View style={styles.tradeUser}>
+                <TouchableOpacity 
+                    style={[styles.tradeUser, { flex: 1 }]}
+                    onPress={() => {
+                        navigation.navigate('TraderProfile', {
+                            trader: {
+                                id: trade.trader.id,
+                                name: trade.trader.name,
+                                completedTrades: trade.trader.completedTrades,
+                                successRate: trade.trader.successRate,
+                                responseTime: trade.trader.responseTime,
+                                isOnline: trade.trader.isOnline,
+                                verified: trade.trader.verified,
+                                lastSeen: trade.trader.lastSeen,
+                                avgRating: trade.trader.avgRating,
+                                userId: trade.trader.userId,
+                                businessId: trade.trader.businessId,
+                            }
+                        });
+                    }}
+                    activeOpacity={0.7}
+                >
                     <View style={styles.avatarContainer}>
                         <Text style={styles.avatarText}>{trade.trader.name.charAt(0)}</Text>
                     </View>
-                    <View>
-                        <Text style={styles.userName}>{trade.trader.name}</Text>
-                        <Text style={styles.tradeDetails}>{trade.amount} {trade.crypto} por {trade.totalBs}</Text>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.userName} numberOfLines={1}>{trade.trader.name}</Text>
+                        <Text style={styles.tradeDetails} numberOfLines={1}>
+                            {trade.amount} {trade.crypto} por {trade.totalBs}
+                        </Text>
                     </View>
-                </View>
-                <View style={styles.timerBadge}>
-                    <Text style={styles.timerText}>{formatTime(trade.timeRemaining)}</Text>
-                </View>
+                </TouchableOpacity>
+                {/* Only show timer for active trades */}
+                {trade.status !== 'COMPLETED' && (
+                    <View style={styles.timerBadge}>
+                        <Text style={styles.timerText}>{formatTime(trade.timeRemaining)}</Text>
+                    </View>
+                )}
+                {/* Show completed date for completed trades */}
+                {trade.status === 'COMPLETED' && (
+                    <View style={styles.completedDateBadge}>
+                        <Text style={styles.completedDateText}>Completado</Text>
+                    </View>
+                )}
             </View>
-            <View style={styles.progressContainer}>
-                {trade.status === 'COMPLETED' && trade.hasRating ? (
-                    <View style={styles.completedBadge}>
-                        <Icon name="check-circle" size={16} color="#10B981" style={{ marginRight: 4 }} />
-                        <Text style={styles.completedText}>Intercambio completado</Text>
+            {/* Different layout for completed trades */}
+            {trade.status === 'COMPLETED' ? (
+                <TouchableOpacity 
+                    style={styles.completedTradeContent}
+                    onPress={() => {
+                        navigation.navigate('ActiveTrade', {
+                            trade: {
+                                id: trade.id,
+                                trader: {
+                                    name: trade.trader.name,
+                                    isOnline: trade.trader.isOnline,
+                                    verified: trade.trader.verified,
+                                    lastSeen: trade.trader.lastSeen,
+                                    responseTime: trade.trader.responseTime,
+                                },
+                                amount: trade.amount,
+                                crypto: trade.crypto,
+                                totalBs: trade.totalBs,
+                                paymentMethod: trade.paymentMethod,
+                                rate: trade.rate,
+                                step: trade.step,
+                                timeRemaining: trade.timeRemaining,
+                                tradeType: trade.tradeType,
+                                countryCode: trade.countryCode,
+                                currencyCode: trade.currencyCode,
+                                status: trade.status,
+                                hasRating: trade.hasRating,
+                            }
+                        });
+                    }}
+                >
+                    <View style={styles.completedBadgeRow}>
+                        {trade.hasRating ? (
+                            <>
+                                <Icon name="check-circle" size={16} color="#10B981" style={{ marginRight: 4 }} />
+                                <Text style={styles.completedText}>Intercambio completado y calificado</Text>
+                            </>
+                        ) : (
+                            <>
+                                <Icon name="alert-circle" size={16} color="#F59E0B" style={{ marginRight: 4 }} />
+                                <Text style={styles.pendingRatingText}>Pendiente de calificar</Text>
+                            </>
+                        )}
                     </View>
-                ) : (
-                    <>
+                    <View style={styles.completedTradeInfo}>
+                        <Text style={styles.completedDateText}>
+                            {new Date(trade.createdAt).toLocaleDateString('es-ES', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                            })}
+                        </Text>
+                    </View>
+                    <View style={styles.viewDetailsRow}>
+                        <Text style={styles.viewDetailsText}>Ver detalles del intercambio</Text>
+                        <Icon name="chevron-right" size={16} color="#6B7280" />
+                    </View>
+                </TouchableOpacity>
+            ) : (
+                /* Active trades layout */
+                <>
+                    <View style={styles.progressContainer}>
                         <Text style={styles.stepText}>Paso {trade.step}/{trade.totalSteps}: {getStepText(trade.step, trade.status, trade.hasRating)}</Text>
                         <View style={styles.progressBar}>
                             <View style={[styles.progressFill, { width: `${(trade.step / trade.totalSteps) * 100}%` }]} />
                         </View>
-                    </>
-                )}
-            </View>
-            <TouchableOpacity 
-                style={[styles.continueButton, (trade.status === 'COMPLETED' && trade.hasRating) && styles.viewDetailsButton]}
-                onPress={() => {
-                    navigation.navigate('ActiveTrade', {
-                        trade: {
-                            id: trade.id,
-                            trader: {
-                                name: trade.trader.name,
-                                isOnline: trade.trader.isOnline,
-                                verified: trade.trader.verified,
-                                lastSeen: trade.trader.lastSeen,
-                                responseTime: trade.trader.responseTime,
-                            },
-                            amount: trade.amount,
-                            crypto: trade.crypto,
-                            totalBs: trade.totalBs,
-                            paymentMethod: trade.paymentMethod,
-                            rate: trade.rate,
-                            step: trade.step,
-                            timeRemaining: trade.timeRemaining,
-                            tradeType: trade.tradeType,
-                            countryCode: trade.countryCode,
-                            currencyCode: trade.currencyCode,
-                            status: trade.status,
-                            hasRating: trade.hasRating,
-                        }
-                    });
-                }}
-            >
-                <Text style={[styles.continueButtonText, (trade.status === 'COMPLETED' && trade.hasRating) && styles.viewDetailsButtonText]}>
-                    {trade.status === 'COMPLETED' && trade.hasRating ? 'Ver detalles' : 'Continuar'}
-                </Text>
-            </TouchableOpacity>
+                    </View>
+                    <TouchableOpacity 
+                        style={styles.continueButton}
+                        onPress={() => {
+                            navigation.navigate('ActiveTrade', {
+                                trade: {
+                                    id: trade.id,
+                                    trader: {
+                                        name: trade.trader.name,
+                                        isOnline: trade.trader.isOnline,
+                                        verified: trade.trader.verified,
+                                        lastSeen: trade.trader.lastSeen,
+                                        responseTime: trade.trader.responseTime,
+                                    },
+                                    amount: trade.amount,
+                                    crypto: trade.crypto,
+                                    totalBs: trade.totalBs,
+                                    paymentMethod: trade.paymentMethod,
+                                    rate: trade.rate,
+                                    step: trade.step,
+                                    timeRemaining: trade.timeRemaining,
+                                    tradeType: trade.tradeType,
+                                    countryCode: trade.countryCode,
+                                    currencyCode: trade.currencyCode,
+                                    status: trade.status,
+                                    hasRating: trade.hasRating,
+                                }
+                            });
+                        }}
+                    >
+                        <Text style={styles.continueButtonText}>Continuar</Text>
+                    </TouchableOpacity>
+                </>
+            )}
         </View>
     );
   };
@@ -1919,23 +2098,26 @@ export const ExchangeScreen = () => {
             ]}
             pointerEvents="box-none" // Allow touches to pass through empty areas
         >
-            {activeTrades.length > 0 && (
-                <TouchableOpacity 
-                    style={styles.activeTradesAlert}
-                    onPress={() => {
-                        if (activeList !== 'trades') {
-                            setActiveList('trades');
-                            resetScrollPosition();
-                        }
-                    }}
-                >
-                    <Icon name="alert-triangle" size={16} color={colors.primary} />
-                    <Text style={styles.activeTradesText}>
-                        {activeTrades.length} intercambio{activeTrades.length > 1 ? 's' : ''} activo{activeTrades.length > 1 ? 's' : ''} - Toca para continuar
-                    </Text>
-                    <Icon name="chevron-right" size={16} color={colors.primary} />
-                </TouchableOpacity>
-            )}
+            {(() => {
+                const activeCount = activeTrades.filter(t => t.status !== 'COMPLETED').length;
+                return activeCount > 0 ? (
+                    <TouchableOpacity 
+                        style={styles.activeTradesAlert}
+                        onPress={() => {
+                            if (activeList !== 'trades') {
+                                setActiveList('trades');
+                                resetScrollPosition();
+                            }
+                        }}
+                    >
+                        <Icon name="alert-triangle" size={16} color={colors.primary} />
+                        <Text style={styles.activeTradesText}>
+                            {activeCount} intercambio{activeCount > 1 ? 's' : ''} activo{activeCount > 1 ? 's' : ''} - Toca para continuar
+                        </Text>
+                        <Icon name="chevron-right" size={16} color={colors.primary} />
+                    </TouchableOpacity>
+                ) : null;
+            })()}
 
             <View style={styles.mainTabsContainer}>
                 <TouchableOpacity
@@ -1981,11 +2163,14 @@ export const ExchangeScreen = () => {
                     <Text style={[styles.mainTabText, activeList === 'trades' && styles.activeMainTabText]}>
                         Mis Intercambios
                     </Text>
-                    {activeTrades.length > 0 && (
-                        <View style={styles.notificationBadge}>
-                            <Text style={styles.notificationText}>{activeTrades.length}</Text>
-                        </View>
-                    )}
+                    {(() => {
+                        const activeCount = activeTrades.filter(t => t.status !== 'COMPLETED').length;
+                        return activeCount > 0 ? (
+                            <View style={styles.notificationBadge}>
+                                <Text style={styles.notificationText}>{activeCount}</Text>
+                            </View>
+                        ) : null;
+                    })()}
                 </TouchableOpacity>
             </View>
 
@@ -2368,9 +2553,9 @@ export const ExchangeScreen = () => {
           ) : (
             <View style={styles.emptyState}>
               <Icon name="inbox" size={48} color="#9CA3AF" style={styles.emptyIcon} />
-              <Text style={styles.emptyTitle}>No hay intercambios activos</Text>
+              <Text style={styles.emptyTitle}>No hay intercambios</Text>
               <Text style={styles.emptyText}>
-                Cuando inicies un intercambio, aparecerá aquí para que puedas darle seguimiento.
+                Cuando inicies un intercambio, aparecerá aquí. Podrás ver tanto intercambios activos como tu historial completo.
               </Text>
             </View>
           )}
@@ -3075,6 +3260,48 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'flex-end',
   },
+  paymentMethodsCollapsed: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  paymentMethodsExpanded: {
+    alignItems: 'flex-end',
+  },
+  paymentMethodsList: {
+    gap: 4,
+  },
+  paymentMethodItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 4,
+  },
+  paymentMethodIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  paymentMethodIconText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  paymentMethodName: {
+    fontSize: 12,
+    color: '#4B5563',
+  },
+  paymentMethodMore: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  expandIcon: {
+    marginLeft: 4,
+  },
   offerActions: {
     flexDirection: 'row',
     gap: 8,
@@ -3289,11 +3516,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     marginBottom: 12,
+    gap: 8,
   },
   tradeUser: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
+    minWidth: 0,
   },
   tradeDetails: {
     fontSize: 12,
@@ -3357,6 +3586,54 @@ const styles = StyleSheet.create({
     color: '#059669',
     fontWeight: '600',
     fontSize: 14,
+  },
+  completedTradeCard: {
+    backgroundColor: '#F9FAFB',
+    borderColor: '#E5E7EB',
+  },
+  completedDateBadge: {
+    backgroundColor: '#E5E7EB',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    flexShrink: 0,
+    marginLeft: 8,
+  },
+  completedDateText: {
+    color: '#6B7280',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  completedTradeContent: {
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+  },
+  completedBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  pendingRatingText: {
+    color: '#F59E0B',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  viewDetailsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  viewDetailsText: {
+    color: '#6B7280',
+    fontSize: 14,
+  },
+  completedTradeInfo: {
+    marginBottom: 8,
+  },
+  completedDateText: {
+    color: '#6B7280',
+    fontSize: 13,
   },
   detailsCard: {
     backgroundColor: '#fff',

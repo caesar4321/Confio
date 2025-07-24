@@ -13,7 +13,10 @@ export type BottomTabParamList = {
   Contacts: undefined;
   Scan: { mode?: 'cobrar' | 'pagar' };
   Charge: undefined;
-  Exchange: { showMyOffers?: boolean; refreshData?: boolean };
+  Exchange: { 
+    showMyOffers?: boolean; 
+    refreshData?: boolean;
+  };
   Profile: undefined;
 };
 
@@ -30,7 +33,7 @@ export type MainStackParamList = {
   EditProfile: undefined;
   PhoneVerification: undefined;
   TraderProfile: {
-    offer: {
+    offer?: {
       id: string;
       name: string;
       rate: string;
@@ -46,7 +49,20 @@ export type MainStackParamList = {
       terms?: string;
       countryCode?: string;
     };
-    crypto: 'cUSD' | 'CONFIO';
+    trader?: {
+      id: string;
+      name: string;
+      completedTrades: number;
+      successRate: number;
+      responseTime: string;
+      isOnline: boolean;
+      verified: boolean;
+      lastSeen: string;
+      avgRating?: number;
+      userId?: string;
+      businessId?: string;
+    };
+    crypto?: 'cUSD' | 'CONFIO';
   };
   TradeConfirm: {
     offer: {
