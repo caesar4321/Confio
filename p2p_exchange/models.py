@@ -2,6 +2,7 @@ from django.db import models
 from django.conf import settings
 from users.models import SoftDeleteModel
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.exceptions import ValidationError
 
 class P2PPaymentMethod(SoftDeleteModel):
     """Payment methods available for P2P trading"""
@@ -561,6 +562,15 @@ class P2PUserStats(SoftDeleteModel):
     is_verified = models.BooleanField(default=False)
     verification_level = models.IntegerField(default=0)  # 0-5 verification levels
     
+    # Average rating from completed trades
+    avg_rating = models.DecimalField(
+        max_digits=3, 
+        decimal_places=2, 
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(5)],
+        help_text="Average rating from completed trades (0-5)"
+    )
+    
     # Helper methods for the new design
     @property
     def stats_entity(self):
@@ -627,11 +637,99 @@ class P2PEscrow(SoftDeleteModel):
         return f"Escrow for Trade {self.trade.id}: {self.escrow_amount} {self.token_type}"
 
 
+class P2PTradeConfirmation(SoftDeleteModel):
+    """
+    Track confirmations for each step of a P2P trade.
+    This provides an audit trail of who confirmed what and when.
+    """
+    
+    CONFIRMATION_TYPES = [
+        ('PAYMENT_SENT', 'Payment Sent'),        # Buyer confirms they sent payment
+        ('PAYMENT_RECEIVED', 'Payment Received'), # Seller confirms they received payment
+        ('CRYPTO_RELEASED', 'Crypto Released'),   # System/Seller releases crypto
+        ('CRYPTO_RECEIVED', 'Crypto Received'),   # Buyer confirms crypto received
+    ]
+    
+    # Trade being confirmed
+    trade = models.ForeignKey(P2PTrade, on_delete=models.CASCADE, related_name='confirmations')
+    
+    # Type of confirmation
+    confirmation_type = models.CharField(max_length=20, choices=CONFIRMATION_TYPES)
+    
+    # Who is confirming - either user or business
+    confirmer_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='p2p_confirmations',
+        null=True,
+        blank=True
+    )
+    confirmer_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        related_name='p2p_confirmations',
+        null=True,
+        blank=True
+    )
+    
+    # Reference/proof
+    reference = models.CharField(max_length=200, blank=True)
+    notes = models.TextField(blank=True)
+    proof_image_url = models.URLField(blank=True)
+    
+    # Metadata
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    
+    class Meta:
+        db_table = 'p2p_trade_confirmations'
+        ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['trade', 'confirmation_type', 'confirmer_user'],
+                condition=models.Q(confirmer_user__isnull=False),
+                name='unique_user_confirmation'
+            ),
+            models.UniqueConstraint(
+                fields=['trade', 'confirmation_type', 'confirmer_business'],
+                condition=models.Q(confirmer_business__isnull=False),
+                name='unique_business_confirmation'
+            ),
+        ]
+    
+    def __str__(self):
+        confirmer = self.confirmer_display_name
+        return f"{self.get_confirmation_type_display()} by {confirmer} for Trade #{self.trade.id}"
+    
+    @property
+    def confirmer_type(self):
+        """Returns 'user' or 'business' for the confirmer"""
+        if self.confirmer_business:
+            return 'business'
+        return 'user'
+    
+    @property
+    def confirmer_display_name(self):
+        """Returns display name for the confirmer"""
+        if self.confirmer_business:
+            return self.confirmer_business.name
+        elif self.confirmer_user:
+            return self.confirmer_user.get_full_name() or self.confirmer_user.username
+        return 'Unknown'
+    
+    def clean(self):
+        """Validate that either user or business is set, not both"""
+        if not self.confirmer_user and not self.confirmer_business:
+            raise ValidationError("Either confirmer_user or confirmer_business must be set")
+        if self.confirmer_user and self.confirmer_business:
+            raise ValidationError("Cannot set both confirmer_user and confirmer_business")
+
+
 class P2PTradeRating(SoftDeleteModel):
     """Rating for P2P trades"""
     
     # Trade being rated
-    trade = models.OneToOneField(P2PTrade, on_delete=models.CASCADE, related_name='rating')
+    trade = models.ForeignKey(P2PTrade, on_delete=models.CASCADE, related_name='ratings')
     
     # Who is rating (the rater)
     rater_user = models.ForeignKey(
@@ -721,8 +819,8 @@ class P2PTradeRating(SoftDeleteModel):
         ordering = ['-rated_at']
         constraints = [
             models.UniqueConstraint(
-                fields=['trade'],
-                name='unique_rating_per_trade'
+                fields=['trade', 'rater_user', 'rater_business'],
+                name='unique_rating_per_rater_per_trade'
             )
         ]
     

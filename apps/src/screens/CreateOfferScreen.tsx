@@ -11,12 +11,12 @@ import {
   Modal,
   FlatList,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
 import { useMutation, useQuery } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
-import { CREATE_P2P_OFFER, GET_P2P_PAYMENT_METHODS, GET_USER_BANK_ACCOUNTS } from '../apollo/queries';
+import { CREATE_P2P_OFFER, UPDATE_P2P_OFFER, GET_P2P_PAYMENT_METHODS, GET_USER_BANK_ACCOUNTS } from '../apollo/queries';
 import { countries, Country } from '../utils/countries';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { useCurrency } from '../hooks/useCurrency';
@@ -49,6 +49,12 @@ type PaymentMethod = {
 
 export const CreateOfferScreen = () => {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
+  const route = useRoute<RouteProp<MainStackParamList, 'CreateOffer'>>();
+  
+  // Check if we're in edit mode
+  const editMode = route.params?.editMode || false;
+  const offerId = route.params?.offerId;
+  const offerData = route.params?.offerData;
   
   // Use centralized country selection hook
   const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal } = useCountrySelection();
@@ -81,17 +87,23 @@ export const CreateOfferScreen = () => {
   });
   
   const [createOffer, { loading: createOfferLoading }] = useMutation(CREATE_P2P_OFFER);
+  const [updateOffer, { loading: updateOfferLoading }] = useMutation(UPDATE_P2P_OFFER);
   
   // Apollo will automatically refetch when variables change, no manual refetch needed
   // Removed manual refetch to prevent conflicts with other screens
 
-  const [exchangeType, setExchangeType] = useState<'BUY' | 'SELL'>('SELL');
-  const [tokenType, setTokenType] = useState<'cUSD' | 'CONFIO'>('cUSD');
-  const [rate, setRate] = useState('');
-  const [minAmount, setMinAmount] = useState('');
-  const [maxAmount, setMaxAmount] = useState('');
-  const [availableAmount, setAvailableAmount] = useState('');
-  const [terms, setTerms] = useState('');
+  // Initialize state with offer data if in edit mode
+  const [exchangeType, setExchangeType] = useState<'BUY' | 'SELL'>(
+    editMode && offerData ? offerData.exchangeType : 'SELL'
+  );
+  const [tokenType, setTokenType] = useState<'cUSD' | 'CONFIO'>(
+    editMode && offerData ? (offerData.tokenType === 'CUSD' ? 'cUSD' : offerData.tokenType) : 'cUSD'
+  );
+  const [rate, setRate] = useState(editMode && offerData ? offerData.rate.toString() : '');
+  const [minAmount, setMinAmount] = useState(editMode && offerData ? offerData.minAmount.toString() : '');
+  const [maxAmount, setMaxAmount] = useState(editMode && offerData ? offerData.maxAmount.toString() : '');
+  const [availableAmount, setAvailableAmount] = useState(editMode && offerData ? offerData.availableAmount.toString() : '');
+  const [terms, setTerms] = useState(editMode && offerData ? (offerData.terms || '') : '');
   const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<string[]>([]);
 
   // Get user's registered payment method IDs
@@ -121,6 +133,24 @@ export const CreateOfferScreen = () => {
       );
     }
   }, [paymentMethodsData, selectedCountry]);
+  
+  // Set selected payment methods when in edit mode
+  React.useEffect(() => {
+    if (editMode && offerData?.paymentMethods && !selectedPaymentMethods.length) {
+      const methodIds = offerData.paymentMethods.map((method: any) => method.id);
+      setSelectedPaymentMethods(methodIds);
+    }
+  }, [editMode, offerData]);
+  
+  // Set country when in edit mode
+  React.useEffect(() => {
+    if (editMode && offerData?.countryCode) {
+      const country = countries.find(c => c[2] === offerData.countryCode);
+      if (country) {
+        selectCountry(country);
+      }
+    }
+  }, [editMode, offerData?.countryCode, selectCountry]);
   
 
 
@@ -184,59 +214,143 @@ export const CreateOfferScreen = () => {
     if (!validateForm()) return;
 
     try {
-      const { data } = await createOffer({
-        variables: {
-          input: {
-            exchangeType,
-            tokenType,
+      if (editMode) {
+        // Update existing offer
+        const { data } = await updateOffer({
+          variables: {
+            offerId: offerId,
             rate: parseFloat(rate),
             minAmount: parseFloat(minAmount),
             maxAmount: parseFloat(maxAmount),
             availableAmount: parseFloat(availableAmount),
             paymentMethodIds: selectedPaymentMethods,
-            countryCode: selectedCountry?.[2], // Pass the country code
             terms: terms.trim(),
-            accountId: activeAccount?.id, // Pass the current account ID
           },
-        },
-      });
-
-      if (data?.createP2pOffer?.success) {
-        Alert.alert(
-          'Éxito',
-          'Tu oferta ha sido creada exitosamente',
-          [
-            {
-              text: 'Ver Mis Ofertas',
-              onPress: () => {
-                // Navigate back to ExchangeScreen and show user's offers
-                navigation.navigate('BottomTabs', { 
-                  screen: 'Exchange', 
-                  params: { showMyOffers: true, refreshData: true } 
-                });
+        });
+        
+        if (data?.updateP2pOffer?.success) {
+          Alert.alert(
+            'Éxito',
+            'Tu oferta ha sido actualizada exitosamente',
+            [
+              {
+                text: 'Ver Mis Ofertas',
+                onPress: () => {
+                  // Navigate back to ExchangeScreen and show user's offers
+                  navigation.navigate('BottomTabs', { 
+                    screen: 'Exchange', 
+                    params: { showMyOffers: true, refreshData: true } 
+                  });
+                },
               },
-            },
-            {
-              text: 'Continuar',
-              onPress: () => {
-                // Navigate back and trigger refresh
-                navigation.navigate('BottomTabs', { 
-                  screen: 'Exchange', 
-                  params: { refreshData: true } 
-                });
-              },
-              style: 'cancel'
-            },
-          ]
-        );
+            ]
+          );
+        } else {
+          const errorMessage = data?.updateP2pOffer?.errors?.join(', ') || 'Error desconocido';
+          Alert.alert('Error', errorMessage);
+        }
       } else {
-        const errorMessage = data?.createP2pOffer?.errors?.join(', ') || 'Error desconocido';
-        Alert.alert('Error', errorMessage);
+        // Create new offer
+        const { data } = await createOffer({
+          variables: {
+            input: {
+              exchangeType,
+              tokenType,
+              rate: parseFloat(rate),
+              minAmount: parseFloat(minAmount),
+              maxAmount: parseFloat(maxAmount),
+              availableAmount: parseFloat(availableAmount),
+              paymentMethodIds: selectedPaymentMethods,
+              countryCode: selectedCountry?.[2], // Pass the country code
+              terms: terms.trim(),
+              accountId: activeAccount?.id, // Pass the current account ID
+            },
+          },
+        });
+
+        if (data?.createP2pOffer?.success) {
+          Alert.alert(
+            'Éxito',
+            'Tu oferta ha sido creada exitosamente',
+            [
+              {
+                text: 'Ver Mis Ofertas',
+                onPress: () => {
+                  // Navigate back to ExchangeScreen and show user's offers
+                  navigation.navigate('BottomTabs', { 
+                    screen: 'Exchange', 
+                    params: { showMyOffers: true, refreshData: true } 
+                  });
+                },
+              },
+              {
+                text: 'Continuar',
+                onPress: () => {
+                  // Navigate back and trigger refresh
+                  navigation.navigate('BottomTabs', { 
+                    screen: 'Exchange', 
+                    params: { refreshData: true } 
+                  });
+                },
+                style: 'cancel'
+              },
+            ]
+          );
+        } else {
+          const errorMessage = data?.createP2pOffer?.errors?.join(', ') || 'Error desconocido';
+          Alert.alert('Error', errorMessage);
+        }
       }
     } catch (error) {
-      console.error('Error creating offer:', error);
-      Alert.alert('Error', 'Ocurrió un error al crear la oferta. Por favor intenta de nuevo.');
+      console.error('Error creating/updating offer:', error);
+      Alert.alert('Error', `Ocurrió un error al ${editMode ? 'actualizar' : 'crear'} la oferta. Por favor intenta de nuevo.`);
     }
+  };
+  
+  const handleDeleteOffer = async () => {
+    Alert.alert(
+      'Eliminar Oferta',
+      '¿Estás seguro de que deseas eliminar esta oferta? Esta acción no se puede deshacer.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { data } = await updateOffer({
+                variables: {
+                  offerId: offerId,
+                  status: 'CANCELLED',
+                },
+              });
+              
+              if (data?.updateP2pOffer?.success) {
+                Alert.alert(
+                  'Oferta Eliminada',
+                  'Tu oferta ha sido eliminada exitosamente',
+                  [
+                    {
+                      text: 'OK',
+                      onPress: () => {
+                        navigation.navigate('BottomTabs', { 
+                          screen: 'Exchange', 
+                          params: { showMyOffers: true, refreshData: true } 
+                        });
+                      },
+                    },
+                  ]
+                );
+              } else {
+                Alert.alert('Error', 'No se pudo eliminar la oferta');
+              }
+            } catch (error) {
+              Alert.alert('Error', 'No se pudo eliminar la oferta');
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -249,7 +363,7 @@ export const CreateOfferScreen = () => {
         >
           <Icon name="arrow-left" size={24} color="#1F2937" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Crear Oferta</Text>
+        <Text style={styles.headerTitle}>{editMode ? 'Editar Oferta' : 'Crear Oferta'}</Text>
         <View style={styles.placeholder} />
       </View>
 
@@ -257,10 +371,11 @@ export const CreateOfferScreen = () => {
         {/* Exchange Type */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Tipo de operación</Text>
-          <View style={styles.toggleContainer}>
+          <View style={[styles.toggleContainer, editMode && styles.disabledContainer]}>
             <TouchableOpacity
               style={[styles.toggleButton, exchangeType === 'BUY' && styles.toggleButtonActive]}
-              onPress={() => setExchangeType('BUY')}
+              onPress={() => !editMode && setExchangeType('BUY')}
+              disabled={editMode}
             >
               <Text style={[styles.toggleButtonText, exchangeType === 'BUY' && styles.toggleButtonTextActive]}>
                 Comprar
@@ -268,7 +383,8 @@ export const CreateOfferScreen = () => {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.toggleButton, exchangeType === 'SELL' && styles.toggleButtonActive]}
-              onPress={() => setExchangeType('SELL')}
+              onPress={() => !editMode && setExchangeType('SELL')}
+              disabled={editMode}
             >
               <Text style={[styles.toggleButtonText, exchangeType === 'SELL' && styles.toggleButtonTextActive]}>
                 Vender
@@ -276,9 +392,10 @@ export const CreateOfferScreen = () => {
             </TouchableOpacity>
           </View>
           <Text style={styles.helpText}>
-            {exchangeType === 'BUY' 
-              ? 'Quieres comprar monedas digitales (pagarás con bolívares)'
-              : 'Quieres vender monedas digitales (recibirás bolívares)'
+            {editMode ? 'El tipo de operación no se puede cambiar' :
+              (exchangeType === 'BUY' 
+                ? 'Quieres comprar monedas digitales (pagarás con bolívares)'
+                : 'Quieres vender monedas digitales (recibirás bolívares)')
             }
           </Text>
         </View>
@@ -287,8 +404,9 @@ export const CreateOfferScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>País de operación</Text>
           <TouchableOpacity
-            style={styles.countrySelector}
-            onPress={openCountryModal}
+            style={[styles.countrySelector, editMode && styles.disabledInput]}
+            onPress={() => !editMode && openCountryModal()}
+            disabled={editMode}
           >
             <View style={styles.countryDisplay}>
               <Text style={styles.countryFlag}>{selectedCountry?.[3] || '🌍'}</Text>
@@ -296,20 +414,21 @@ export const CreateOfferScreen = () => {
                 {selectedCountry?.[0] || 'Seleccionar país'}
               </Text>
             </View>
-            <Icon name="chevron-down" size={20} color="#6B7280" />
+            <Icon name="chevron-down" size={20} color={editMode ? "#D1D5DB" : "#6B7280"} />
           </TouchableOpacity>
           <Text style={styles.helpText}>
-            País donde operarás y recibirás pagos locales
+            {editMode ? 'El país no se puede cambiar' : 'País donde operarás y recibirás pagos locales'}
           </Text>
         </View>
 
         {/* Token Type */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Moneda digital</Text>
-          <View style={styles.toggleContainer}>
+          <View style={[styles.toggleContainer, editMode && styles.disabledContainer]}>
             <TouchableOpacity
               style={[styles.toggleButton, tokenType === 'cUSD' && styles.toggleButtonActive]}
-              onPress={() => setTokenType('cUSD')}
+              onPress={() => !editMode && setTokenType('cUSD')}
+              disabled={editMode}
             >
               <Text style={[styles.toggleButtonText, tokenType === 'cUSD' && styles.toggleButtonTextActive]}>
                 Confío Dollar ($cUSD)
@@ -317,13 +436,17 @@ export const CreateOfferScreen = () => {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.toggleButton, tokenType === 'CONFIO' && styles.toggleButtonActive]}
-              onPress={() => setTokenType('CONFIO')}
+              onPress={() => !editMode && setTokenType('CONFIO')}
+              disabled={editMode}
             >
               <Text style={[styles.toggleButtonText, tokenType === 'CONFIO' && styles.toggleButtonTextActive]}>
                 Confío ($CONFIO)
               </Text>
             </TouchableOpacity>
           </View>
+          <Text style={styles.helpText}>
+            {editMode && 'La moneda digital no se puede cambiar'}
+          </Text>
         </View>
 
         {/* Rate */}
@@ -513,16 +636,31 @@ export const CreateOfferScreen = () => {
           />
         </View>
 
-        {/* Create Button */}
+        {/* Create/Update Button */}
         <TouchableOpacity
-          style={[styles.createButton, createOfferLoading && styles.createButtonDisabled]}
+          style={[styles.createButton, (createOfferLoading || updateOfferLoading) && styles.createButtonDisabled]}
           onPress={handleCreateOffer}
-          disabled={createOfferLoading}
+          disabled={createOfferLoading || updateOfferLoading}
         >
           <Text style={styles.createButtonText}>
-            {createOfferLoading ? 'Creando...' : 'Crear Oferta'}
+            {(createOfferLoading || updateOfferLoading) 
+              ? (editMode ? 'Actualizando...' : 'Creando...')
+              : (editMode ? 'Actualizar Oferta' : 'Crear Oferta')
+            }
           </Text>
         </TouchableOpacity>
+        
+        {/* Delete Button (only in edit mode) */}
+        {editMode && (
+          <TouchableOpacity
+            style={[styles.deleteButton, updateOfferLoading && styles.deleteButtonDisabled]}
+            onPress={handleDeleteOffer}
+            disabled={updateOfferLoading}
+          >
+            <Icon name="trash-2" size={20} color="#EF4444" />
+            <Text style={styles.deleteButtonText}>Eliminar Oferta</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
 
       {/* Country Selection Modal */}
@@ -772,6 +910,31 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    backgroundColor: '#FEE2E2',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 32,
+    gap: 8,
+  },
+  deleteButtonDisabled: {
+    backgroundColor: '#F3F4F6',
+  },
+  deleteButtonText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#EF4444',
+  },
+  disabledContainer: {
+    opacity: 0.6,
+  },
+  disabledInput: {
+    backgroundColor: '#F9FAFB',
+    opacity: 0.7,
   },
   countrySelector: {
     flexDirection: 'row',

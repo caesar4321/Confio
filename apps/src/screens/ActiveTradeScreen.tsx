@@ -16,6 +16,8 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
+import { useQuery } from '@apollo/client';
+import { GET_P2P_TRADE } from '../apollo/queries';
 
 type ActiveTradeRouteProp = RouteProp<MainStackParamList, 'ActiveTrade'>;
 type ActiveTradeNavigationProp = NativeStackNavigationProp<MainStackParamList, 'ActiveTrade'>;
@@ -44,9 +46,25 @@ interface ActiveTrade {
 }
 
 export const ActiveTradeScreen: React.FC = () => {
-  const navigation = useNavigation<ActiveTradeNavigationProp>();
-  const route = useRoute<ActiveTradeRouteProp>();
-  const { trade } = route.params;
+  try {
+    const navigation = useNavigation<ActiveTradeNavigationProp>();
+    const route = useRoute<ActiveTradeRouteProp>();
+    const { trade } = route.params;
+  
+  // Debug log to see what data we received
+  console.log('[ActiveTradeScreen] Trade data:', {
+    id: trade?.id,
+    step: trade?.step,
+    status: trade?.status,
+    hasRating: trade?.hasRating,
+    tradeType: trade?.tradeType,
+    hasTrader: !!trade?.trader,
+    traderName: trade?.trader?.name,
+    amount: trade?.amount,
+    crypto: trade?.crypto,
+    totalBs: trade?.totalBs,
+    paymentMethod: trade?.paymentMethod,
+  });
   
   // Format crypto token for display
   const formatCrypto = (crypto: string): string => {
@@ -55,9 +73,53 @@ export const ActiveTradeScreen: React.FC = () => {
     return crypto;
   };
   
-  const [activeTradeStep, setActiveTradeStep] = useState(trade.step);
-  const [timeRemaining, setTimeRemaining] = useState(trade.timeRemaining);
+  // Safety check
+  if (!trade) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <Icon name="arrow-left" size={24} color="#374151" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Error</Text>
+          </View>
+        </View>
+        <View style={styles.content}>
+          <View style={styles.stepCard}>
+            <Text style={styles.stepTitle}>Error al cargar el intercambio</Text>
+            <Text style={styles.stepDescription}>
+              No se pudieron cargar los datos del intercambio. Por favor, vuelve a intentarlo.
+            </Text>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+  
+  const [activeTradeStep, setActiveTradeStep] = useState(trade.step || 1);
+  const [timeRemaining, setTimeRemaining] = useState(trade.timeRemaining || 900);
   const [spinAnim] = useState(new Animated.Value(0));
+  
+  // Fetch full trade details to get buyer/seller stats
+  const { data: tradeDetailsData, loading: tradeDetailsLoading } = useQuery(GET_P2P_TRADE, {
+    variables: { id: trade.id },
+    skip: !trade.id,
+    fetchPolicy: 'cache-and-network',
+  });
+  
+  useEffect(() => {
+    if (tradeDetailsData?.p2pTrade) {
+      console.log('[ActiveTradeScreen] Full trade details loaded:', {
+        tradeId: trade.id,
+        buyerStats: tradeDetailsData.p2pTrade.buyerStats,
+        sellerStats: tradeDetailsData.p2pTrade.sellerStats,
+        buyer: tradeDetailsData.p2pTrade.buyer,
+        seller: tradeDetailsData.p2pTrade.seller,
+      });
+    }
+  }, [tradeDetailsData, trade.id]);
 
   // Timer countdown effect
   useEffect(() => {
@@ -133,20 +195,20 @@ export const ActiveTradeScreen: React.FC = () => {
     navigation.navigate('TradeChat', {
       offer: {
         id: trade.id,
-        name: trade.trader.name,
-        rate: trade.rate + ' ' + trade.currencyCode,
+        name: trade.trader?.name || 'Comerciante',
+        rate: (trade.rate || '0') + ' ' + (trade.currencyCode || 'VES'),
         limit: '1000',
         available: '500',
         paymentMethods: [trade.paymentMethod],
-        responseTime: trade.trader.responseTime,
-        completedTrades: 50,
-        successRate: 98,
-        verified: trade.trader.verified,
-        isOnline: trade.trader.isOnline,
-        lastSeen: trade.trader.lastSeen,
+        responseTime: trade.trader?.responseTime || 'N/A',
+        completedTrades: trade.trader?.completedTrades || 0,
+        successRate: trade.trader?.successRate || 0,
+        verified: trade.trader?.verified || false,
+        isOnline: trade.trader?.isOnline || false,
+        lastSeen: trade.trader?.lastSeen || null,
         countryCode: trade.countryCode,
       },
-      crypto: formatCrypto(trade.crypto) as 'cUSD' | 'CONFIO',
+      crypto: formatCrypto(trade.crypto || 'cUSD') as 'cUSD' | 'CONFIO',
       amount: trade.amount,
       tradeType: trade.tradeType,
       tradeId: trade.id,
@@ -197,12 +259,13 @@ export const ActiveTradeScreen: React.FC = () => {
   const isSeller = trade.tradeType === 'sell';
 
   const renderStep1 = () => {
+    console.log('[ActiveTradeScreen] renderStep1 called, isBuyer:', isBuyer);
     if (isBuyer) {
       return (
         <View style={styles.stepCard}>
           <Text style={styles.stepTitle}>Realizar Pago</Text>
           <Text style={styles.stepDescription}>
-            Transfiere <Text style={styles.boldText}>{trade.totalBs} {trade.currencyCode}</Text> usando:
+            Transfiere <Text style={styles.boldText}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text> usando:
           </Text>
           
           <View style={styles.paymentMethodCard}>
@@ -215,47 +278,47 @@ export const ActiveTradeScreen: React.FC = () => {
                 />
               </View>
               <View>
-                <Text style={styles.paymentMethodName}>{trade.paymentMethod}</Text>
-            <Text style={styles.paymentMethodSubtitle}>Método seleccionado</Text>
+                <Text style={styles.paymentMethodName}>{trade.paymentMethod || 'N/A'}</Text>
+                <Text style={styles.paymentMethodSubtitle}>Método seleccionado</Text>
+              </View>
+            </View>
           </View>
-        </View>
-      </View>
 
-      {trade.paymentMethod.includes('Efectivo') ? (
-        <View style={styles.cashInstructionsCard}>
-          <Text style={styles.cashInstructionsTitle}>Instrucciones para pago en efectivo</Text>
-          <View style={styles.cashInstructionsList}>
-            <Text style={styles.cashInstruction}>• Coordina el punto de encuentro con {trade.trader.name}</Text>
-            <Text style={styles.cashInstruction}>• Lleva exactamente: <Text style={styles.boldText}>{trade.totalBs} {trade.currencyCode}</Text></Text>
-            <Text style={styles.cashInstruction}>• Encuentro en lugar público y seguro</Text>
-            <Text style={styles.cashInstruction}>• Verifica la identidad del vendedor</Text>
-          </View>
-        </View>
-      ) : (
-        <View style={styles.bankDetailsCard}>
-          <View style={styles.bankDetailsRow}>
-            <Text style={styles.bankDetailsLabel}>Banco:</Text>
-            <Text style={styles.bankDetailsValue}>{trade.paymentMethod}</Text>
-          </View>
-          <View style={styles.bankDetailsRow}>
-            <Text style={styles.bankDetailsLabel}>Titular:</Text>
-            <Text style={styles.bankDetailsValue}>{trade.trader.name} (Nombre completo)</Text>
-          </View>
-          <View style={styles.bankDetailsRow}>
-            <Text style={styles.bankDetailsLabel}>Cédula:</Text>
-            <Text style={styles.bankDetailsValue}>V-12.345.678</Text>
-          </View>
-          <View style={styles.bankDetailsRow}>
-            <Text style={styles.bankDetailsLabel}>Cuenta:</Text>
-            <Text style={styles.bankDetailsValue}>0102-0000-00000000000</Text>
-          </View>
-          <View style={styles.bankDetailsRow}>
-            <Text style={styles.bankDetailsLabel}>Monto exacto:</Text>
-            <Text style={styles.bankDetailsAmount}>{trade.totalBs} {trade.currencyCode}</Text>
-          </View>
-        </View>
-      )}
-      
+          {trade.paymentMethod && typeof trade.paymentMethod === 'string' && trade.paymentMethod.includes('Efectivo') ? (
+            <View style={styles.cashInstructionsCard}>
+              <Text style={styles.cashInstructionsTitle}>Instrucciones para pago en efectivo</Text>
+              <View style={styles.cashInstructionsList}>
+                <Text style={styles.cashInstruction}>• Coordina el punto de encuentro con {trade.trader?.name || 'el vendedor'}</Text>
+                <Text style={styles.cashInstruction}>• Lleva exactamente: <Text style={styles.boldText}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text></Text>
+                <Text style={styles.cashInstruction}>• Encuentro en lugar público y seguro</Text>
+                <Text style={styles.cashInstruction}>• Verifica la identidad del vendedor</Text>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.bankDetailsCard}>
+              <View style={styles.bankDetailsRow}>
+                <Text style={styles.bankDetailsLabel}>Banco:</Text>
+                <Text style={styles.bankDetailsValue}>{trade.paymentMethod || 'N/A'}</Text>
+              </View>
+              <View style={styles.bankDetailsRow}>
+                <Text style={styles.bankDetailsLabel}>Titular:</Text>
+                <Text style={styles.bankDetailsValue}>{trade.trader?.name || 'el vendedor'} (Nombre completo)</Text>
+              </View>
+              <View style={styles.bankDetailsRow}>
+                <Text style={styles.bankDetailsLabel}>Cédula:</Text>
+                <Text style={styles.bankDetailsValue}>V-12.345.678</Text>
+              </View>
+              <View style={styles.bankDetailsRow}>
+                <Text style={styles.bankDetailsLabel}>Cuenta:</Text>
+                <Text style={styles.bankDetailsValue}>0102-0000-00000000000</Text>
+              </View>
+              <View style={styles.bankDetailsRow}>
+                <Text style={styles.bankDetailsLabel}>Monto exacto:</Text>
+                <Text style={styles.bankDetailsAmount}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text>
+              </View>
+            </View>
+          )}
+          
           <View style={styles.infoCard}>
             <View style={styles.infoContent}>
               <Icon name="info" size={20} color={colors.accent} style={styles.infoIcon} />
@@ -280,7 +343,7 @@ export const ActiveTradeScreen: React.FC = () => {
         <View style={styles.stepCard}>
           <Text style={styles.stepTitle}>Esperando Pago del Comprador</Text>
           <Text style={styles.stepDescription}>
-            {trade.trader.name} debe transferir <Text style={styles.boldText}>{trade.totalBs} {trade.currencyCode}</Text> a tu cuenta.
+            {trade.trader?.name || 'El vendedor'} debe transferir <Text style={styles.boldText}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text> a tu cuenta.
           </Text>
           
           <View style={styles.infoCard}>
@@ -299,15 +362,15 @@ export const ActiveTradeScreen: React.FC = () => {
             <Text style={styles.summaryTitle}>Detalles del intercambio</Text>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Vas a enviar:</Text>
-              <Text style={styles.summaryValue}>{trade.amount} {formatCrypto(trade.crypto)}</Text>
+              <Text style={styles.summaryValue}>{trade.amount || '0'} {formatCrypto(trade.crypto || 'cUSD')}</Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Vas a recibir:</Text>
-              <Text style={styles.summaryValue}>{trade.totalBs} {trade.currencyCode}</Text>
+              <Text style={styles.summaryValue}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Comprador:</Text>
-              <Text style={styles.summaryValue}>{trade.trader.name}</Text>
+              <Text style={styles.summaryValue}>{trade.trader?.name || 'Comerciante'}</Text>
             </View>
           </View>
           
@@ -326,7 +389,7 @@ export const ActiveTradeScreen: React.FC = () => {
         <View style={styles.stepCard}>
           <Text style={styles.stepTitle}>Confirmar Pago</Text>
           <Text style={styles.stepDescription}>
-            Confirma que has completado el pago de <Text style={styles.boldText}>{trade.totalBs} {trade.currencyCode}</Text>
+            Confirma que has completado el pago de <Text style={styles.boldText}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text>
           </Text>
           
           <View style={styles.infoCard}>
@@ -335,7 +398,7 @@ export const ActiveTradeScreen: React.FC = () => {
               <View>
                 <Text style={styles.infoTitle}>Verificación del vendedor</Text>
                 <Text style={styles.infoText}>
-                  {trade.trader.name} verificará el pago en su cuenta bancaria. 
+                  {trade.trader?.name || 'El vendedor'} verificará el pago en su cuenta bancaria. 
                   Por favor sé paciente mientras confirma la transacción.
                 </Text>
               </View>
@@ -379,7 +442,7 @@ export const ActiveTradeScreen: React.FC = () => {
         <View style={styles.stepCard}>
           <Text style={styles.stepTitle}>¿Recibiste el Pago?</Text>
           <Text style={styles.stepDescription}>
-            Verifica que recibiste <Text style={styles.boldText}>{trade.totalBs} {trade.currencyCode}</Text> en tu cuenta bancaria.
+            Verifica que recibiste <Text style={styles.boldText}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text> en tu cuenta bancaria.
           </Text>
           
           <View style={styles.warningCard}>
@@ -389,7 +452,7 @@ export const ActiveTradeScreen: React.FC = () => {
                 <Text style={styles.warningTitle}>Verifica antes de confirmar</Text>
                 <Text style={styles.warningText}>
                   Solo confirma si realmente recibiste el pago en tu cuenta. 
-                  Una vez confirmado, se liberarán los {formatCrypto(trade.crypto)} al comprador.
+                  Una vez confirmado, se liberarán los {formatCrypto(trade.crypto || 'cUSD')} al comprador.
                 </Text>
               </View>
             </View>
@@ -434,7 +497,7 @@ export const ActiveTradeScreen: React.FC = () => {
         <View style={styles.stepCard}>
           <Text style={styles.stepTitle}>Esperando Confirmación</Text>
           <Text style={styles.stepDescription}>
-            {trade.trader.name} está verificando tu pago. Esto puede tomar unos minutos.
+            {trade.trader?.name || 'El vendedor'} está verificando tu pago. Esto puede tomar unos minutos.
           </Text>
       
       <View style={styles.loadingCard}>
@@ -452,22 +515,22 @@ export const ActiveTradeScreen: React.FC = () => {
           ]}
         />
         <Text style={styles.loadingTitle}>Verificando pago...</Text>
-        <Text style={styles.loadingSubtitle}>Tiempo promedio: {trade.trader.responseTime}</Text>
+        <Text style={styles.loadingSubtitle}>Tiempo promedio: {trade.trader?.responseTime || 'N/A'}</Text>
       </View>
       
       <View style={styles.summaryCard}>
         <Text style={styles.summaryTitle}>Resumen de la operación</Text>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Cantidad:</Text>
-          <Text style={styles.summaryValue}>{trade.amount} {trade.crypto}</Text>
+          <Text style={styles.summaryValue}>{trade.amount || '0'} {trade.crypto}</Text>
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Pagado:</Text>
-          <Text style={styles.summaryValue}>{trade.totalBs} Bs.</Text>
+          <Text style={styles.summaryValue}>{trade.totalBs || '0'}</Text>
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Vendedor:</Text>
-          <Text style={styles.summaryValue}>{trade.trader.name}</Text>
+          <Text style={styles.summaryValue}>{trade.trader?.name || 'el vendedor'}</Text>
         </View>
       </View>
       
@@ -483,7 +546,7 @@ export const ActiveTradeScreen: React.FC = () => {
         <View style={styles.stepCard}>
           <Text style={styles.stepTitle}>Liberando Fondos</Text>
           <Text style={styles.stepDescription}>
-            Estamos procesando la transferencia de {trade.amount} {formatCrypto(trade.crypto)} a {trade.trader.name}.
+            Estamos procesando la transferencia de {trade.amount || '0'} {formatCrypto(trade.crypto || 'cUSD')} a {trade.trader?.name || 'el comprador'}.
           </Text>
           
           <View style={styles.loadingCard}>
@@ -508,15 +571,15 @@ export const ActiveTradeScreen: React.FC = () => {
             <Text style={styles.summaryTitle}>Resumen de la operación</Text>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Enviando:</Text>
-              <Text style={styles.summaryValue}>{trade.amount} {formatCrypto(trade.crypto)}</Text>
+              <Text style={styles.summaryValue}>{trade.amount || '0'} {formatCrypto(trade.crypto || 'cUSD')}</Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Recibido:</Text>
-              <Text style={styles.summaryValue}>{trade.totalBs} {trade.currencyCode}</Text>
+              <Text style={styles.summaryValue}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Comprador:</Text>
-              <Text style={styles.summaryValue}>{trade.trader.name}</Text>
+              <Text style={styles.summaryValue}>{trade.trader?.name || 'el comprador'}</Text>
             </View>
           </View>
           
@@ -556,11 +619,11 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
             <View style={styles.transactionDetailsRow}>
               <Text style={styles.transactionDetailsLabel}>Comerciante:</Text>
-              <Text style={styles.transactionDetailsValue}>{trade.trader.name}</Text>
+              <Text style={styles.transactionDetailsValue}>{trade.trader?.name || 'Comerciante'}</Text>
             </View>
             <View style={styles.transactionDetailsRow}>
               <Text style={styles.transactionDetailsLabel}>Método de pago:</Text>
-              <Text style={styles.transactionDetailsValue}>{trade.paymentMethod}</Text>
+              <Text style={styles.transactionDetailsValue}>{trade.paymentMethod || 'N/A'}</Text>
             </View>
             <View style={styles.transactionDetailsRow}>
               <Text style={styles.transactionDetailsLabel}>Estado:</Text>
@@ -586,7 +649,7 @@ export const ActiveTradeScreen: React.FC = () => {
           </View>
           <Text style={styles.successTitle}>¡Intercambio Completado!</Text>
           <Text style={styles.successDescription}>
-            Has recibido <Text style={styles.boldText}>{trade.amount} {formatCrypto(trade.crypto)}</Text> en tu wallet
+            Has recibido <Text style={styles.boldText}>{trade.amount || '0'} {formatCrypto(trade.crypto || 'cUSD')}</Text> en tu wallet
           </Text>
         </View>
         
@@ -602,33 +665,54 @@ export const ActiveTradeScreen: React.FC = () => {
           </View>
           <View style={styles.transactionDetailsRow}>
             <Text style={styles.transactionDetailsLabel}>Comerciante:</Text>
-            <Text style={styles.transactionDetailsValue}>{trade.trader.name}</Text>
+            <Text style={styles.transactionDetailsValue}>{trade.trader?.name || 'Comerciante'}</Text>
           </View>
           <View style={styles.transactionDetailsRow}>
             <Text style={styles.transactionDetailsLabel}>Método de pago:</Text>
-            <Text style={styles.transactionDetailsValue}>{trade.paymentMethod}</Text>
+            <Text style={styles.transactionDetailsValue}>{trade.paymentMethod || 'N/A'}</Text>
           </View>
         </View>
         
         <View style={styles.successButtons}>
-          <TouchableOpacity style={styles.primaryButton} onPress={() => navigation.navigate('TraderRating', {
-            tradeId: trade.id,
-            trader: {
-              name: trade.trader.name,
-              verified: trade.trader.verified,
-              completedTrades: 248, // Replace with real data if available
-              successRate: 99.2, // Replace with real data if available
-            },
-            tradeDetails: {
-              amount: trade.amount,
-              crypto: formatCrypto(trade.crypto),
-              totalPaid: trade.totalBs,
-              method: trade.paymentMethod,
-              date: '21 Jun 2025, 14:45', // Replace with real data if available
-              duration: '8 minutos', // Replace with real data if available
-            }
-          })}>
-            <Text style={styles.primaryButtonText}>Calificar a {trade.trader.name}</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={() => {
+            // Determine who is rating whom based on current user's role
+            const iAmBuyer = trade.tradeType === 'buy';
+            const fullTradeData = tradeDetailsData?.p2pTrade;
+            
+            // Get the correct counterparty info and stats
+            const counterpartyInfo = iAmBuyer ? fullTradeData?.seller : fullTradeData?.buyer;
+            const counterpartyStats = iAmBuyer ? fullTradeData?.sellerStats : fullTradeData?.buyerStats;
+            
+            console.log('[ActiveTradeScreen] Rating navigation:', {
+              iAmBuyer,
+              tradeType: trade.tradeType,
+              counterpartyInfo,
+              counterpartyStats,
+              // Fallback to original data if full data not loaded
+              usingFallback: !fullTradeData,
+            });
+            
+            navigation.navigate('TraderRating', {
+              tradeId: trade.id,
+              trader: {
+                name: counterpartyInfo 
+                  ? `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Usuario'
+                  : trade.trader?.name || 'Comerciante',
+                verified: counterpartyStats?.isVerified || trade.trader?.verified || false,
+                completedTrades: counterpartyStats?.completedTrades || trade.trader?.completedTrades || 0,
+                successRate: counterpartyStats?.successRate || trade.trader?.successRate || 0
+              },
+              tradeDetails: {
+                amount: trade.amount,
+                crypto: formatCrypto(trade.crypto || 'cUSD'),
+                totalPaid: trade.totalBs,
+                method: fullTradeData?.paymentMethod?.displayName || trade.paymentMethod || 'N/A',
+                date: new Date(trade.createdAt || Date.now()).toLocaleDateString('es-ES'),
+                duration: '8 minutos', // Replace with real data if available
+              }
+            });
+          }}>
+            <Text style={styles.primaryButtonText}>Calificar a {trade.trader?.name || 'Comerciante'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.secondaryButton} onPress={handleGoBack}>
             <Text style={styles.secondaryButtonText}>Volver al Inicio</Text>
@@ -642,7 +726,6 @@ export const ActiveTradeScreen: React.FC = () => {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
           <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
@@ -664,7 +747,6 @@ export const ActiveTradeScreen: React.FC = () => {
         
         <TradeProgressBar currentStep={activeTradeStep} totalSteps={4} />
         
-        {/* Timer - only for active trades */}
         {trade.status !== 'COMPLETED' && (
           <View style={styles.timerCard}>
             <View style={styles.timerHeader}>
@@ -690,15 +772,55 @@ export const ActiveTradeScreen: React.FC = () => {
         )}
       </View>
       
-      {/* Content */}
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {activeTradeStep === 1 && renderStep1()}
         {activeTradeStep === 2 && renderStep2()}
         {activeTradeStep === 3 && renderStep3()}
         {activeTradeStep === 4 && renderStep4()}
+        {activeTradeStep === 5 && renderStep4()}
+        {activeTradeStep > 5 && (
+          <View style={styles.stepCard}>
+            <Text style={styles.stepTitle}>Estado desconocido</Text>
+            <Text style={styles.stepDescription}>
+              Step: {activeTradeStep}, Status: {trade.status}
+            </Text>
+          </View>
+        )}
+        {!activeTradeStep && (
+          <View style={styles.stepCard}>
+            <Text style={styles.stepTitle}>Cargando...</Text>
+            <Text style={styles.stepDescription}>
+              Por favor espera mientras cargamos los detalles del intercambio.
+            </Text>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
+  } catch (error) {
+    console.error('[ActiveTradeScreen] Error rendering:', error);
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity onPress={() => navigation?.goBack()} style={styles.backButton}>
+              <Icon name="arrow-left" size={24} color="#374151" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Error</Text>
+          </View>
+        </View>
+        <View style={styles.content}>
+          <View style={styles.stepCard}>
+            <Text style={styles.stepTitle}>Error al cargar</Text>
+            <Text style={styles.stepDescription}>
+              Se produjo un error al cargar la pantalla. Por favor, vuelve a intentarlo.
+            </Text>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 };
 
 const styles = StyleSheet.create({

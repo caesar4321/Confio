@@ -118,6 +118,9 @@ export type MainStackParamList = {
         verified: boolean;
         lastSeen: string;
         responseTime: string;
+        completedTrades?: number;
+        successRate?: number;
+        avgRating?: number;
       };
       amount: string;
       crypto: string;
@@ -301,7 +304,21 @@ export type MainStackParamList = {
       duration: string;
     };
   };
-  CreateOffer: undefined;
+  CreateOffer: {
+    editMode?: boolean;
+    offerId?: string;
+    offerData?: {
+      exchangeType: 'BUY' | 'SELL';
+      tokenType: string;
+      rate: number;
+      minAmount: number;
+      maxAmount: number;
+      availableAmount: number;
+      countryCode: string;
+      paymentMethods: Array<{id: string; name: string; displayName: string}>;
+      terms?: string;
+    };
+  } | undefined;
   Achievements: undefined;
   ConfioTokenInfo: undefined;
 };
