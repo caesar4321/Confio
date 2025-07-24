@@ -124,10 +124,8 @@ export const TradeChatScreen: React.FC = () => {
       const navCurrencyCode = route.params.tradeCurrencyCode;
       const navCurrencySymbol = getCurrencySymbol(navCurrencyCode);
       
-      // For certain currencies like COP, ARS, show the code instead of symbol
-      const displaySymbol = ['COP', 'ARS', 'CLP', 'PEN'].includes(navCurrencyCode) 
-        ? navCurrencyCode 
-        : navCurrencySymbol;
+      // Always show currency code instead of symbol to avoid confusion
+      const displaySymbol = navCurrencyCode;
       
       console.log('💱 Currency from navigation params:', {
         currencyCode: navCurrencyCode,
@@ -144,10 +142,8 @@ export const TradeChatScreen: React.FC = () => {
       const tradeCurrencyCode = tradeDetailsData.p2pTrade.currencyCode;
       const tradeCurrencySymbol = getCurrencySymbol(tradeCurrencyCode);
       
-      // For certain currencies like COP, ARS, show the code instead of symbol
-      const displaySymbol = ['COP', 'ARS', 'CLP', 'PEN'].includes(tradeCurrencyCode) 
-        ? tradeCurrencyCode 
-        : tradeCurrencySymbol;
+      // Always show currency code instead of symbol to avoid confusion
+      const displaySymbol = tradeCurrencyCode;
       
       console.log('💱 Currency from trade query:', {
         currencyCode: tradeCurrencyCode,
@@ -165,9 +161,8 @@ export const TradeChatScreen: React.FC = () => {
     const currencyCode = getCurrencyForCountry(tradeCountry);
     const currencySymbol = getCurrencySymbol(currencyCode);
     
-    const displaySymbol = ['COP', 'ARS', 'CLP', 'PEN'].includes(currencyCode) 
-      ? currencyCode 
-      : currencySymbol;
+    // Always show currency code instead of symbol to avoid confusion
+    const displaySymbol = currencyCode;
     
     console.log('💱 Currency from offer (fallback):', {
       offerCountryCode,
@@ -791,10 +786,8 @@ export const TradeChatScreen: React.FC = () => {
   
   // Get the currency directly from trade data
   const displayCurrencyCode = tradeDetailsData?.p2pTrade?.currencyCode || currencyCode;
-  // For certain currencies like COP, show the code instead of symbol
-  const displayCurrencySymbol = ['COP', 'ARS', 'CLP', 'PEN'].includes(displayCurrencyCode) 
-    ? displayCurrencyCode 
-    : getCurrencySymbol(displayCurrencyCode);
+  // Always show currency code instead of symbol to avoid confusion
+  const displayCurrencySymbol = displayCurrencyCode;
   
   console.log('💱 Currency determination:', {
     tradeCountryCode: tradeDetailsData?.p2pTrade?.countryCode,
