@@ -3028,7 +3028,7 @@ export const ExchangeScreen = () => {
                         <TouchableOpacity 
                             style={[
                                 styles.filterChip, 
-                                (marketRate && selectedCrypto === 'cUSD' && maxRate && activeTab === 'buy') && styles.filterChipActive
+                                maxRate && styles.filterChipActive
                             ]}
                             onPress={() => {
                                 if (marketRate && selectedCrypto === 'cUSD') {
@@ -3046,10 +3046,10 @@ export const ExchangeScreen = () => {
                             }}
                             disabled={!marketRate || selectedCrypto !== 'cUSD'}
                         >
-                            <Icon name="percent" size={12} color={marketRate && selectedCrypto === 'cUSD' ? '#6B7280' : '#D1D5DB'} />
+                            <Icon name="percent" size={12} color={maxRate ? '#fff' : '#6B7280'} />
                             <Text style={[
                                 styles.filterChipText, 
-                                (marketRate && selectedCrypto === 'cUSD' && maxRate) && styles.filterChipTextActive
+                                maxRate && styles.filterChipTextActive
                             ]}>
                                 Mejor tasa
                             </Text>
