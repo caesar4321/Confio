@@ -3025,13 +3025,13 @@ export const ExchangeScreen = () => {
                             </Text>
                         </TouchableOpacity>
                         
-                        <TouchableOpacity 
-                            style={[
-                                styles.filterChip, 
-                                maxRate && styles.filterChipActive
-                            ]}
-                            onPress={() => {
-                                if (marketRate && selectedCrypto === 'cUSD') {
+                        {marketRate && selectedCrypto === 'cUSD' && activeTab === 'buy' && (
+                            <TouchableOpacity 
+                                style={[
+                                    styles.filterChip, 
+                                    maxRate && styles.filterChipActive
+                                ]}
+                                onPress={() => {
                                     if (maxRate) {
                                         // Toggle off
                                         setMaxRate('');
@@ -3042,18 +3042,17 @@ export const ExchangeScreen = () => {
                                         setMaxRate(maxAcceptableRate.toFixed(2));
                                         maxRateInputRef.current?.setNativeProps({ text: maxAcceptableRate.toFixed(2) });
                                     }
-                                }
-                            }}
-                            disabled={!marketRate || selectedCrypto !== 'cUSD'}
-                        >
-                            <Icon name="percent" size={12} color={maxRate ? '#fff' : '#6B7280'} />
-                            <Text style={[
-                                styles.filterChipText, 
-                                maxRate && styles.filterChipTextActive
-                            ]}>
-                                Mejor tasa
-                            </Text>
-                        </TouchableOpacity>
+                                }}
+                            >
+                                <Icon name="percent" size={12} color={maxRate ? '#fff' : '#6B7280'} />
+                                <Text style={[
+                                    styles.filterChipText, 
+                                    maxRate && styles.filterChipTextActive
+                                ]}>
+                                    Mejor tasa
+                                </Text>
+                            </TouchableOpacity>
+                        )}
                         
                         {(filterVerified || filterOnline || filterHighVolume || minRate || maxRate) && (
                             <TouchableOpacity 
