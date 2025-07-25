@@ -744,15 +744,18 @@ export const ExchangeScreen = () => {
           completedAt: trade.completedAt, // Add completedAt for syncing dates
         };
         
-        // Debug logging for trade 14
-        if (trade.id === '14') {
-          console.log('[ExchangeScreen] Trade 14 mapping:', {
-            tradeId: trade.id,
+        // Debug logging for completed trades
+        if (trade.status === 'COMPLETED') {
+          console.log(`[ExchangeScreen] Completed trade ${trade.id}:`, {
+            cryptoAmount: trade.cryptoAmount,
+            fiatAmount: trade.fiatAmount,
             status: trade.status,
             hasRating: trade.hasRating,
             step: mappedTrade.step,
             totalSteps: mappedTrade.totalSteps,
-            shouldShowRatingUI: trade.status === 'COMPLETED' && !trade.hasRating
+            shouldShowRatingUI: !trade.hasRating,
+            sellerBusiness: trade.sellerBusiness?.name,
+            buyerUser: trade.buyerUser?.username
           });
         }
         
@@ -2107,9 +2110,9 @@ export const ExchangeScreen = () => {
                 </TouchableOpacity>
             ) : /* Different layout for completed trades */
             (() => {
-              const isCompletedWithRating = trade.status === 'COMPLETED' && trade.hasRating;
-              if (trade.id === '14') {
-                console.log('[ExchangeScreen] Trade 14 UI decision:', {
+              const isCompletedWithRating = (trade.status === 'COMPLETED' || trade.status === 'CRYPTO_RELEASED' || trade.status === 'PAYMENT_CONFIRMED') && trade.hasRating;
+              if (trade.status === 'COMPLETED' || trade.status === 'CRYPTO_RELEASED' || trade.status === 'PAYMENT_CONFIRMED') {
+                console.log(`[ExchangeScreen] Trade ${trade.id} completion check:`, {
                   status: trade.status,
                   hasRating: trade.hasRating,
                   isCompletedWithRating,

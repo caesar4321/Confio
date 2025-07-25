@@ -15,7 +15,8 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { MainStackParamList } from '../types/navigation';
 import { colors } from '../config/theme';
 import { useMutation } from '@apollo/client';
-import { RATE_P2P_TRADE } from '../apollo/queries';
+import { RATE_P2P_TRADE, GET_MY_P2P_TRADES } from '../apollo/queries';
+import { useAccount } from '../contexts/AccountContext';
 
 type TraderRatingRouteProp = RouteProp<MainStackParamList, 'TraderRating'>;
 
@@ -74,6 +75,7 @@ const StarRating = ({ rating, onRatingChange, size = 'medium' }: { rating: numbe
 export const TraderRatingScreen: React.FC = () => {
   const navigation = useNavigation();
   const route = useRoute<TraderRatingRouteProp>();
+  const { activeAccount } = useAccount();
   const tradeId = route.params?.tradeId;
   const trader = route.params?.trader;
   const tradeDetails = route.params?.tradeDetails;
@@ -118,7 +120,13 @@ export const TraderRatingScreen: React.FC = () => {
             tags: selectedTags,
           },
         },
-        refetchQueries: ['GetMyP2PTrades', 'GetP2PTrade'],
+        refetchQueries: [
+          {
+            query: GET_MY_P2P_TRADES,
+            variables: { accountId: activeAccount?.id || null, offset: 0, limit: 20 }
+          },
+          'GetP2PTrade'
+        ],
         awaitRefetchQueries: true,
       });
 
@@ -139,9 +147,17 @@ export const TraderRatingScreen: React.FC = () => {
 
   const handleGoBack = () => {
     // Navigate to Exchange screen with refresh flag to update trade status
-    navigation.navigate('BottomTabs', { 
-      screen: 'Exchange',
-      params: { refreshData: true }
+    navigation.reset({
+      index: 0,
+      routes: [
+        { 
+          name: 'BottomTabs',
+          params: { 
+            screen: 'Exchange',
+            params: { refreshData: true }
+          }
+        }
+      ],
     });
   };
 

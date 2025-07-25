@@ -374,32 +374,60 @@ class P2PTradeType(DjangoObjectType):
             active_account_type = getattr(request, 'active_account_type', 'personal')
             active_account_index = getattr(request, 'active_account_index', 0)
             
-            # Check if current user/business has already rated this trade
-            from .models import P2PTradeRating
+            print(f"\n[DEBUG] resolve_has_rating for trade {self.id}")
+            print(f"  - User: {user.id} ({user.username})")
+            print(f"  - Active account: {active_account_type} (index: {active_account_index})")
+            print(f"  - Trade buyer_user: {self.buyer_user_id} ({self.buyer_user.username if self.buyer_user else 'None'})")
+            print(f"  - Trade seller_user: {self.seller_user_id} ({self.seller_user.username if self.seller_user else 'None'})")
+            print(f"  - Trade buyer_business: {self.buyer_business}")
+            print(f"  - Trade seller_business: {self.seller_business}")
             
+            # Check if current user/business has already rated this trade
             if active_account_type == 'business':
                 # Check if this specific business account has rated
                 # First, check if the user is part of this trade as a business
                 if self.buyer_business and self.buyer_business.accounts.filter(user=user, account_index=active_account_index).exists():
                     # User is the buyer business with this specific account index
-                    return P2PTradeRating.objects.filter(
+                    has_rating = P2PTradeRating.objects.filter(
                         trade=self,
                         rater_business=self.buyer_business
                     ).exists()
+                    print(f"  - Buyer business rating exists: {has_rating}")
+                    return has_rating
                 elif self.seller_business and self.seller_business.accounts.filter(user=user, account_index=active_account_index).exists():
                     # User is the seller business with this specific account index
-                    return P2PTradeRating.objects.filter(
+                    has_rating = P2PTradeRating.objects.filter(
                         trade=self,
                         rater_business=self.seller_business
                     ).exists()
+                    print(f"  - Seller business rating exists: {has_rating}")
+                    return has_rating
                 else:
+                    print(f"  - User not part of trade as business")
                     return False
             else:
                 # Personal account - check if user has rated
-                return P2PTradeRating.objects.filter(
+                rating_query = P2PTradeRating.objects.filter(
                     trade=self,
                     rater_user=user
-                ).exists()
+                )
+                has_rating = rating_query.exists()
+                
+                # Debug: Check the actual rating if it exists
+                if has_rating:
+                    actual_rating = rating_query.first()
+                    print(f"  - Personal account rating exists: {has_rating}")
+                    print(f"  - Rating ID: {actual_rating.id}")
+                    print(f"  - Created at: {actual_rating.created_at}")
+                else:
+                    print(f"  - Personal account rating exists: {has_rating}")
+                    # Check if there are any ratings for this trade at all
+                    all_ratings = P2PTradeRating.objects.filter(trade=self)
+                    print(f"  - Total ratings for this trade: {all_ratings.count()}")
+                    for r in all_ratings:
+                        print(f"    - Rating {r.id}: rater_user={r.rater_user}, rater_business={r.rater_business}")
+                
+                return has_rating
                 
         except Exception as e:
             print(f"[DEBUG] hasRating error for trade {self.id}: {str(e)}")
@@ -1616,13 +1644,39 @@ class RateP2PTrade(graphene.Mutation):
                     errors=["Trade must be completed before rating"]
                 )
             
-            # Check if already rated by current user
-            existing_rating = trade.ratings.filter(
-                models.Q(rater_user=user) | 
-                models.Q(rater_business__accounts__user=user)
-            ).first()
+            # Get the active account context
+            request = info.context
+            active_account_type = getattr(request, 'active_account_type', 'personal')
+            active_account_index = getattr(request, 'active_account_index', 0)
+            
+            # Check if already rated by current user IN THEIR CURRENT CONTEXT
+            if active_account_type == 'business':
+                # Check if this specific business account has rated
+                # First find which business the user is acting as
+                from users.models import Account
+                active_account = Account.objects.filter(
+                    user=user,
+                    account_type='business',
+                    account_index=active_account_index
+                ).first()
+                
+                if active_account and active_account.business:
+                    existing_rating = trade.ratings.filter(
+                        rater_business=active_account.business
+                    ).first()
+                else:
+                    existing_rating = None
+            else:
+                # Personal account - check only personal ratings
+                existing_rating = trade.ratings.filter(
+                    rater_user=user
+                ).first()
             
             if existing_rating:
+                print(f"\n[RateP2PTrade] User already rated this trade")
+                print(f"  - Existing rating ID: {existing_rating.id}")
+                print(f"  - Rater User: {existing_rating.rater_user}")
+                print(f"  - Rater Business: {existing_rating.rater_business}")
                 return RateP2PTrade(
                     rating=None,
                     trade=None,
@@ -1638,11 +1692,6 @@ class RateP2PTrade(graphene.Mutation):
                     success=False,
                     errors=["Overall rating must be between 1 and 5"]
                 )
-            
-            # Get the active account context
-            request = info.context
-            active_account_type = getattr(request, 'active_account_type', 'personal')
-            active_account_index = getattr(request, 'active_account_index', 0)
             
             # Determine who is rating and who is being rated
             rating_kwargs = {
@@ -1700,11 +1749,24 @@ class RateP2PTrade(graphene.Mutation):
             # Create the rating
             rating = P2PTradeRating.objects.create(**rating_kwargs)
             
+            print(f"\n[RateP2PTrade] Rating created successfully")
+            print(f"  - Trade ID: {trade.id}")
+            print(f"  - Rating ID: {rating.id}")
+            print(f"  - Rater User: {rating.rater_user}")
+            print(f"  - Rater Business: {rating.rater_business}")
+            print(f"  - Ratee User: {rating.ratee_user}")
+            print(f"  - Ratee Business: {rating.ratee_business}")
+            print(f"  - Overall Rating: {rating.overall_rating}")
+            
             # Update trade status to COMPLETED if not already
             if trade.status in ['PAYMENT_CONFIRMED', 'CRYPTO_RELEASED']:
+                old_status = trade.status
                 trade.status = 'COMPLETED'
                 trade.completed_at = timezone.now()
                 trade.save()
+                print(f"  - Trade status updated from {old_status} to COMPLETED")
+            else:
+                print(f"  - Trade status remains: {trade.status}")
             
             # Update user stats for the ratee
             ratee = rating.ratee_user or rating.ratee_business

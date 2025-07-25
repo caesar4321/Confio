@@ -694,6 +694,12 @@ export const TradeChatScreen: React.FC = () => {
               // If I'm the buyer, I rate the seller. If I'm the seller, I rate the buyer.
               const ratingTargetName = iAmBuyer ? 'vendedor' : 'comprador';
               
+              // Check if already rated
+              if (tradeData?.hasRating) {
+                Alert.alert('Ya calificado', 'Ya has calificado este intercambio.');
+                return;
+              }
+              
               navigation.navigate('TraderRating', {
                 tradeId,
                 trader: {
@@ -1303,6 +1309,12 @@ export const TradeChatScreen: React.FC = () => {
                   completedTrades: 0,
                   successRate: 0,
                 };
+                
+                // Check if already rated
+                if (tradeData?.hasRating) {
+                  Alert.alert('Ya calificado', 'Ya has calificado este intercambio.');
+                  return;
+                }
                 
                 navigation.navigate('TraderRating', {
                   tradeId,
