@@ -35,10 +35,11 @@ const colors = {
 const USDCManageScreen = () => {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const [activeTab, setActiveTab] = useState('exchange'); // 'exchange' or 'withdraw'
   const [exchangeDirection, setExchangeDirection] = useState('usdc-to-cusd');
   const [exchangeAmount, setExchangeAmount] = useState('');
   const [withdrawalAddress, setWithdrawalAddress] = useState('');
-  const [showWithdrawSection, setShowWithdrawSection] = useState(false);
+  const [withdrawalAmount, setWithdrawalAmount] = useState('');
   
   const availableUSDC = "458.22";
   const availableCUSD = "2,850.35";
@@ -52,28 +53,39 @@ const USDCManageScreen = () => {
   const totalFees = networkFee + withdrawalFee;
 
   const handleMaxAmount = () => {
-    if (isUSDCToCUSD) {
-      setExchangeAmount(availableUSDC);
+    if (activeTab === 'exchange') {
+      if (isUSDCToCUSD) {
+        setExchangeAmount(availableUSDC);
+      } else {
+        setExchangeAmount(availableCUSD.replace(',', ''));
+      }
     } else {
-      setExchangeAmount(availableCUSD.replace(',', ''));
+      setWithdrawalAmount(availableUSDC);
     }
   };
 
   const calculateReceiveAmount = () => {
-    if (!exchangeAmount) return '0.00';
-    const amount = parseFloat(exchangeAmount);
-    return (amount - totalFees).toFixed(2);
+    const amount = activeTab === 'exchange' ? exchangeAmount : withdrawalAmount;
+    if (!amount) return '0.00';
+    const numAmount = parseFloat(amount);
+    const fees = activeTab === 'exchange' ? networkFee : (networkFee + 0.50);
+    return (numAmount - fees).toFixed(2);
   };
 
-  const [amount, setAmount] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
   const handleExchange = () => {
+    const amount = activeTab === 'exchange' ? exchangeAmount : withdrawalAmount;
     if (!amount || parseFloat(amount) <= 0) {
       setErrorMessage('Por favor ingresa un monto válido');
+      setShowError(true);
+      return;
+    }
+    if (activeTab === 'withdraw' && !withdrawalAddress) {
+      setErrorMessage('Por favor ingresa una dirección de retiro');
       setShowError(true);
       return;
     }
@@ -81,12 +93,13 @@ const USDCManageScreen = () => {
   };
 
   const handleConfirm = () => {
-    // TODO: Implement actual exchange logic
+    // TODO: Implement actual exchange/withdrawal logic
     setShowConfirm(false);
     setShowSuccess(true);
     setTimeout(() => {
       setShowSuccess(false);
-      setAmount('');
+      setExchangeAmount('');
+      setWithdrawalAmount('');
     }, 2000);
 };
 
@@ -658,6 +671,91 @@ const styles = StyleSheet.create({
   errorIcon: {
     backgroundColor: colors.warning.background,
   },
+  quickInfoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#eff6ff',
+    padding: 12,
+    borderRadius: 10,
+    marginBottom: 16,
+  },
+  quickInfoText: {
+    fontSize: 13,
+    color: '#3b82f6',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  suiBadge: {
+    position: 'absolute',
+    bottom: -4,
+    right: -4,
+    backgroundColor: '#3b82f6',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+  },
+  suiBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#ffffff',
+  },
+  headerBalance: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 4,
+  },
+  headerSubtext: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  tabContainer: {
+    paddingHorizontal: 16,
+    marginTop: -16,
+    marginBottom: 16,
+  },
+  tabWrapper: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 4,
+    flexDirection: 'row',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabButtonActive: {
+    backgroundColor: '#eff6ff',
+  },
+  tabButtonText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  tabButtonTextActive: {
+    color: '#3b82f6',
+  },
+  tabIcon: {
+    marginRight: 6,
+  },
 });
 
   return (
@@ -745,6 +843,13 @@ const styles = StyleSheet.create({
       </View>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
+        {/* Quick Info Card */}
+        <View style={styles.quickInfoCard}>
+          <Icon name="info" size={16} color="#3b82f6" />
+          <Text style={styles.quickInfoText}>
+            1 USDC = 1 cUSD • Sin comisiones de intercambio • 3-5 segundos
+          </Text>
+        </View>
         {showWithdrawSection ? (
           <>
             {/* USDC Balance */}

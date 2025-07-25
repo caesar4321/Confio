@@ -631,14 +631,26 @@ export const AccountDetailScreen = () => {
         {/* USDC Balance Section - Only show for cUSD account */}
         {route.params.accountType === 'cusd' && usdcAccount && (
           <View style={styles.usdcSection}>
+            <View style={styles.sectionHeaderContainer}>
+              <Text style={styles.sectionTitle}>Gestión Avanzada</Text>
+              <TouchableOpacity style={styles.helpButton}>
+                <Icon name="help-circle" size={18} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+            
             <View style={styles.usdcCard}>
               <View style={styles.usdcHeader}>
                 <View style={styles.usdcInfo}>
-                  <Image source={USDCLogo} style={styles.usdcLogo} />
+                  <View style={styles.usdcLogoContainer}>
+                    <Image source={USDCLogo} style={styles.usdcLogo} />
+                    <View style={styles.usdcBadge}>
+                      <Text style={styles.usdcBadgeText}>Sui</Text>
+                    </View>
+                  </View>
                   <View style={styles.usdcTextContainer}>
                     <Text style={styles.usdcName}>{usdcAccount.name}</Text>
-                    <Text style={styles.usdcDescription} numberOfLines={2}>
-                      {usdcAccount.description}
+                    <Text style={styles.usdcDescription}>
+                      Intercambia entre USDC y cUSD
                     </Text>
                   </View>
                 </View>
@@ -650,23 +662,52 @@ export const AccountDetailScreen = () => {
                 </View>
               </View>
 
+              <View style={styles.exchangeRateInfo}>
+                <Icon name="info" size={14} color="#3b82f6" />
+                <Text style={styles.exchangeRateText}>
+                  1 USDC = 1.00 cUSD • Sin comisión
+                </Text>
+              </View>
+
               <View style={styles.usdcActions}>
                 <TouchableOpacity 
                   style={styles.usdcActionButton}
-                  onPress={() => navigation.navigate('USDCDeposit', { tokenType: 'usdc' })}
+                  onPress={() => navigation.navigate('Deposit', { tokenType: 'usdc' })}
                 >
-                  <Text style={styles.usdcActionButtonText}>Depositar USDC</Text>
+                  <Icon name="download" size={16} color="#3b82f6" style={styles.actionIcon} />
+                  <View style={styles.actionTextContainer}>
+                    <Text style={styles.usdcActionButtonText}>Depositar</Text>
+                    <Text style={styles.usdcActionSubtext}>Recibe desde Sui</Text>
+                  </View>
                 </TouchableOpacity>
+                
                 <TouchableOpacity
-                  style={[styles.usdcActionButton, { backgroundColor: colors.accent }]}
+                  style={[styles.usdcActionButton, styles.usdcSecondaryButton]}
+                  onPress={() => setShowExchangeModal(true)}
+                >
+                  <Icon name="refresh-cw" size={16} color="#fff" style={styles.actionIcon} />
+                  <View style={styles.actionTextContainer}>
+                    <Text style={[styles.usdcActionButtonText, { color: '#ffffff' }]}>
+                      Convertir
+                    </Text>
+                    <Text style={[styles.usdcActionSubtext, { color: 'rgba(255,255,255,0.8)' }]}>
+                      A cUSD
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={styles.usdcMoreButton}
                   onPress={() => navigation.navigate('USDCManage')}
                 >
-                  <Text style={[styles.usdcActionButtonText, { color: '#ffffff' }]}>
-                    Gestionar
-                  </Text>
+                  <Icon name="more-horizontal" size={20} color="#6b7280" />
                 </TouchableOpacity>
               </View>
             </View>
+            
+            <Text style={styles.usdcDisclaimer}>
+              Para usuarios avanzados • Requiere conocimiento de wallets Sui
+            </Text>
           </View>
         )}
 
@@ -947,21 +988,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 16,
   },
+  sectionHeaderContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1f2937',
+  },
+  helpButton: {
+    padding: 4,
+  },
   usdcCard: {
     backgroundColor: '#ffffff',
     borderRadius: 16,
     padding: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.accent,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
       },
       android: {
-        elevation: 2,
+        elevation: 3,
       },
     }),
   },
@@ -976,11 +1031,30 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 12,
   },
-  usdcLogo: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  usdcLogoContainer: {
+    position: 'relative',
     marginRight: 12,
+  },
+  usdcLogo: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  usdcBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: '#3b82f6',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+  },
+  usdcBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#ffffff',
   },
   usdcTextContainer: {
     flex: 1,
@@ -992,15 +1066,14 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   usdcDescription: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#6b7280',
-    flexWrap: 'wrap',
   },
   usdcBalance: {
     alignItems: 'flex-end',
   },
   usdcBalanceText: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#1f2937',
   },
@@ -1008,22 +1081,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6b7280',
   },
-  usdcAddressContainer: {
-    marginBottom: 12,
-  },
-  usdcAddressLabel: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginBottom: 4,
-  },
-  usdcAddressRow: {
+  exchangeRateInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: '#eff6ff',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginBottom: 12,
   },
-  usdcAddressText: {
+  exchangeRateText: {
     fontSize: 12,
-    color: '#6b7280',
-    marginRight: 4,
+    color: '#3b82f6',
+    marginLeft: 6,
+    fontWeight: '500',
   },
   usdcActions: {
     flexDirection: 'row',
@@ -1031,16 +1102,46 @@ const styles = StyleSheet.create({
   },
   usdcActionButton: {
     flex: 1,
-    backgroundColor: colors.neutralDark,
+    flexDirection: 'row',
+    backgroundColor: '#f3f4f6',
     paddingVertical: 12,
-    borderRadius: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  usdcSecondaryButton: {
+    backgroundColor: colors.accent,
+  },
+  usdcMoreButton: {
+    backgroundColor: '#f3f4f6',
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionIcon: {
+    marginRight: 6,
+  },
+  actionTextContainer: {
+    alignItems: 'flex-start',
+  },
   usdcActionButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '600',
     color: '#1f2937',
+  },
+  usdcActionSubtext: {
+    fontSize: 11,
+    color: '#6b7280',
+    marginTop: 1,
+  },
+  usdcDisclaimer: {
+    fontSize: 12,
+    color: '#6b7280',
+    textAlign: 'center',
+    marginTop: 8,
   },
   transactionsSection: {
     paddingHorizontal: 16,
