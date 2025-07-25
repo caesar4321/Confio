@@ -573,7 +573,7 @@ export const AccountDetailScreen = () => {
               onPress={handleSend}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.primary }]}>
-                <Icon name="send" size={20} color="#ffffff" />
+                <Icon name="send" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Enviar</Text>
             </TouchableOpacity>
@@ -588,7 +588,7 @@ export const AccountDetailScreen = () => {
               }}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.primary }]}>
-                <Icon name="download" size={20} color="#ffffff" />
+                <Icon name="download" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Recibir</Text>
             </TouchableOpacity>
@@ -604,7 +604,7 @@ export const AccountDetailScreen = () => {
               }}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}>
-                <Icon name="shopping-bag" size={20} color="#ffffff" />
+                <Icon name="shopping-bag" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Pagar</Text>
             </TouchableOpacity>
@@ -617,7 +617,7 @@ export const AccountDetailScreen = () => {
               }}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.accent }]}>
-                <Icon name="refresh-cw" size={20} color="#ffffff" />
+                <Icon name="refresh-cw" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Intercambio</Text>
             </TouchableOpacity>
@@ -948,7 +948,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'space-evenly',
+    alignItems: 'center',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -967,9 +968,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   actionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
@@ -1105,7 +1106,6 @@ const styles = StyleSheet.create({
   },
   usdcActions: {
     flexDirection: 'row',
-    gap: 8,
   },
   usdcActionButton: {
     flex: 1,
@@ -1116,6 +1116,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 8,
   },
   usdcSecondaryButton: {
     backgroundColor: colors.accent,
@@ -1167,15 +1168,14 @@ const styles = StyleSheet.create({
   },
   transactionsFilters: {
     flexDirection: 'row',
-    gap: 8,
   },
   filterButton: {
     padding: 8,
     backgroundColor: '#ffffff',
     borderRadius: 8,
+    marginLeft: 8,
   },
   transactionsList: {
-    gap: 8,
   },
   transactionItem: {
     flexDirection: 'row',
