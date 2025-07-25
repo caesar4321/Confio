@@ -409,9 +409,7 @@ export const AccountDetailScreen = () => {
                   style={styles.exchangeInputText}
                 />
                 <View style={styles.currencyBadge}>
-                  <View style={[styles.currencyIcon, { backgroundColor: colors.accent }]}>
-                    <Text style={styles.currencyIconText}>U</Text>
-                  </View>
+                  <Image source={USDCLogo} style={styles.currencyLogo} />
                   <Text style={styles.currencyText}>USDC</Text>
                 </View>
               </View>
@@ -431,9 +429,7 @@ export const AccountDetailScreen = () => {
                   {exchangeAmount || '0.00'}
                 </Text>
                 <View style={styles.currencyBadge}>
-                  <View style={[styles.currencyIcon, { backgroundColor: colors.primary }]}>
-                    <Text style={styles.currencyIconText}>C</Text>
-                  </View>
+                  <Image source={cUSDLogo} style={styles.currencyLogo} />
                   <Text style={styles.currencyText}>cUSD</Text>
                 </View>
               </View>
@@ -585,7 +581,7 @@ export const AccountDetailScreen = () => {
             <TouchableOpacity 
               style={styles.actionButton}
               onPress={() => {
-                // @ts-ignore - Navigation type mismatch, but should work at runtime
+                // Navigate to USDCDeposit screen with proper token type
                 navigation.navigate('USDCDeposit', { 
                   tokenType: route.params.accountType === 'cusd' ? 'cusd' : 'confio' 
                 });
@@ -672,7 +668,7 @@ export const AccountDetailScreen = () => {
               <View style={styles.usdcActions}>
                 <TouchableOpacity 
                   style={styles.usdcActionButton}
-                  onPress={() => navigation.navigate('Deposit', { tokenType: 'usdc' })}
+                  onPress={() => navigation.navigate('USDCDeposit', { tokenType: 'usdc' })}
                 >
                   <Icon name="download" size={16} color="#3b82f6" style={styles.actionIcon} />
                   <View style={styles.actionTextContainer}>
@@ -977,6 +973,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
   },
   actionButtonText: {
     fontSize: 12,
@@ -1315,6 +1322,12 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: 'bold',
     fontSize: 12,
+  },
+  currencyLogo: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 8,
   },
   currencyText: {
     fontSize: 14,
