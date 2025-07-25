@@ -203,22 +203,22 @@ export const HomeScreen = () => {
       id: 'receive',
       label: 'Recibir',
       icon: 'download',
-      color: '#3b82f6',
-      route: () => navigation.navigate('ConfioAddress'),
+      color: '#10b981',
+      route: () => navigation.navigate('USDCDeposit', { tokenType: 'cusd' }),
+    },
+    {
+      id: 'pay',
+      label: 'Pagar',
+      icon: 'shopping-bag',
+      color: '#8b5cf6',
+      route: () => navigation.navigate('BottomTabs', { screen: 'Scan' }),
     },
     {
       id: 'exchange',
       label: 'Intercambiar',
       icon: 'refresh-cw',
-      color: '#8b5cf6',
+      color: '#3b82f6',
       route: () => navigation.navigate('BottomTabs', { screen: 'Exchange' }),
-    },
-    {
-      id: 'pay',
-      label: 'Pagar',
-      icon: 'credit-card',
-      color: '#f59e0b',
-      route: () => navigation.navigate('BottomTabs', { screen: 'Scan', params: { mode: 'pagar' } }),
     },
   ];
 
@@ -376,7 +376,7 @@ export const HomeScreen = () => {
               activeOpacity={0.7}
             >
               <Text style={styles.currencyToggleText}>
-                {showLocalCurrency ? 'USD' : 'VES'}
+                {showLocalCurrency ? 'VES' : 'USD'}
               </Text>
               <Icon name="chevron-down" size={14} color="#fff" />
             </TouchableOpacity>
@@ -500,7 +500,7 @@ export const HomeScreen = () => {
                 activeOpacity={0.7}
               >
                 <View style={styles.walletCardContent}>
-                  <View style={styles.walletLogoContainer}>
+                  <View style={[styles.walletLogoContainer, { backgroundColor: '#ffffff' }]}>
                     <Image source={cUSDLogo} style={styles.walletLogo} />
                   </View>
                   <View style={styles.walletInfo}>
@@ -637,7 +637,7 @@ const styles = StyleSheet.create({
   // Quick actions styles
   quickActionsCard: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-evenly',
     paddingVertical: 24,
     paddingHorizontal: 16,
     backgroundColor: '#fff',
@@ -652,7 +652,7 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     alignItems: 'center',
-    paddingHorizontal: 10,
+    flex: 1,
   },
   actionIcon: {
     width: 52,

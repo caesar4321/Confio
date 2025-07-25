@@ -1002,7 +1002,7 @@ const styles = StyleSheet.create({
                   <View style={styles.timeContainer}>
                     <Icon name="clock" size={12} color={colors.accent} style={styles.timeIcon} />
                     <Text style={styles.timeText}>
-                      {isUSDCToCUSD ? '3-5 segundos' : '2-5 min'}
+                      3-5 segundos
                     </Text>
                   </View>
                 </View>
