@@ -3028,13 +3028,20 @@ export const ExchangeScreen = () => {
                         <TouchableOpacity 
                             style={[
                                 styles.filterChip, 
-                                (marketRate && selectedCrypto === 'cUSD' && activeTab === 'buy') && styles.filterChipActive
+                                (marketRate && selectedCrypto === 'cUSD' && maxRate && activeTab === 'buy') && styles.filterChipActive
                             ]}
                             onPress={() => {
                                 if (marketRate && selectedCrypto === 'cUSD') {
-                                    const maxAcceptableRate = marketRate * 1.02; // 2% above market
-                                    setMaxRate(maxAcceptableRate.toFixed(2));
-                                    maxRateInputRef.current?.setNativeProps({ text: maxAcceptableRate.toFixed(2) });
+                                    if (maxRate) {
+                                        // Toggle off
+                                        setMaxRate('');
+                                        maxRateInputRef.current?.clear();
+                                    } else {
+                                        // Toggle on
+                                        const maxAcceptableRate = marketRate * 1.02; // 2% above market
+                                        setMaxRate(maxAcceptableRate.toFixed(2));
+                                        maxRateInputRef.current?.setNativeProps({ text: maxAcceptableRate.toFixed(2) });
+                                    }
                                 }
                             }}
                             disabled={!marketRate || selectedCrypto !== 'cUSD'}
@@ -3042,7 +3049,7 @@ export const ExchangeScreen = () => {
                             <Icon name="percent" size={12} color={marketRate && selectedCrypto === 'cUSD' ? '#6B7280' : '#D1D5DB'} />
                             <Text style={[
                                 styles.filterChipText, 
-                                marketRate && selectedCrypto === 'cUSD' && styles.filterChipTextActive
+                                (marketRate && selectedCrypto === 'cUSD' && maxRate) && styles.filterChipTextActive
                             ]}>
                                 Mejor tasa
                             </Text>
