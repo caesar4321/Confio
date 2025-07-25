@@ -2794,6 +2794,13 @@ export const ExchangeScreen = () => {
                             <TouchableOpacity 
                                 style={styles.refreshButton}
                                 onPress={() => {
+                                    // Trigger refresh animation
+                                    Animated.timing(refreshRotation, {
+                                        toValue: refreshRotation._value + 1,
+                                        duration: 500,
+                                        useNativeDriver: true,
+                                    }).start();
+                                    
                                     // Convert display name to internal name inline
                                     let paymentMethodName = null;
                                     if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
