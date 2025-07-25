@@ -118,11 +118,14 @@ export const TraderRatingScreen: React.FC = () => {
             tags: selectedTags,
           },
         },
-        refetchQueries: ['GetMyP2PTrades'],
+        refetchQueries: ['GetMyP2PTrades', 'GetP2PTrade'],
         awaitRefetchQueries: true,
       });
 
       if (result.data?.rateP2pTrade?.success) {
+        // The mutation returns the updated trade with COMPLETED status
+        // This should automatically update the cache for any queries watching this trade
+        console.log('[TraderRatingScreen] Rating submitted successfully. Trade status:', result.data.rateP2pTrade.trade?.status);
         setIsSubmitted(true);
       } else {
         const errors = result.data?.rateP2pTrade?.errors || ['Error desconocido'];

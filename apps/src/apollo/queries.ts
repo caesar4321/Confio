@@ -808,6 +808,7 @@ export const GET_P2P_TRADE = gql`
           avgResponseTime
           isVerified
           lastSeenOnline
+          avgRating
         }
       }
       buyer {
@@ -880,6 +881,15 @@ export const GET_P2P_TRADE = gql`
         isVerified
         lastSeenOnline
         avgRating
+      }
+      escrow {
+        id
+        escrowAmount
+        tokenType
+        isEscrowed
+        isReleased
+        escrowedAt
+        releasedAt
       }
     }
   }
@@ -1068,6 +1078,35 @@ export const UPDATE_P2P_TRADE_STATUS = gql`
   }
 `;
 
+export const CONFIRM_P2P_TRADE_STEP = gql`
+  mutation ConfirmP2PTradeStep($input: ConfirmP2PTradeStepInput!) {
+    confirmP2pTradeStep(input: $input) {
+      confirmation {
+        id
+        confirmationType
+        reference
+        notes
+        createdAt
+      }
+      trade {
+        id
+        status
+        escrow {
+          id
+          escrowAmount
+          tokenType
+          isEscrowed
+          isReleased
+          escrowedAt
+          releasedAt
+        }
+      }
+      success
+      errors
+    }
+  }
+`;
+
 export const SEND_P2P_MESSAGE = gql`
   mutation SendP2PMessage($input: SendP2PMessageInput!) {
     sendP2pMessage(input: $input) {
@@ -1111,42 +1150,6 @@ export const RATE_P2P_TRADE = gql`
       trade {
         id
         status
-      }
-      success
-      errors
-    }
-  }
-`;
-
-export const CONFIRM_P2P_TRADE_STEP = gql`
-  mutation ConfirmP2PTradeStep($input: ConfirmP2PTradeStepInput!) {
-    confirmP2pTradeStep(input: $input) {
-      confirmation {
-        id
-        trade {
-          id
-          status
-        }
-        confirmationType
-        confirmerType
-        confirmerDisplayName
-        reference
-        notes
-        proofImageUrl
-        createdAt
-      }
-      trade {
-        id
-        status
-        confirmations {
-          id
-          confirmationType
-          confirmerType
-          confirmerDisplayName
-          reference
-          notes
-          createdAt
-        }
       }
       success
       errors

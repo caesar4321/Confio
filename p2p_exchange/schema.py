@@ -257,6 +257,19 @@ class P2PTradeConfirmationType(DjangoObjectType):
     def resolve_confirmer_display_name(self, info):
         return self.confirmer_display_name
 
+class P2PEscrowType(DjangoObjectType):
+    """GraphQL type for P2P escrow records"""
+    
+    class Meta:
+        model = P2PEscrow
+        fields = (
+            'id', 'trade', 'escrow_amount', 'token_type',
+            'escrow_transaction_hash', 'release_transaction_hash',
+            'is_escrowed', 'is_released',
+            'escrowed_at', 'released_at',
+            'created_at', 'updated_at'
+        )
+
 class P2PTradeType(DjangoObjectType):
     payment_method = graphene.Field(P2PPaymentMethodType)
     # Add computed fields for better frontend integration
@@ -273,6 +286,9 @@ class P2PTradeType(DjangoObjectType):
     buyer_stats = graphene.Field(P2PUserStatsType)
     seller_stats = graphene.Field(P2PUserStatsType)
     
+    # Add escrow field
+    escrow = graphene.Field('p2p_exchange.schema.P2PEscrowType')
+    
     class Meta:
         model = P2PTrade
         fields = (
@@ -285,7 +301,9 @@ class P2PTradeType(DjangoObjectType):
             'expires_at', 'payment_reference', 'payment_notes', 'crypto_transaction_hash', 
             'completed_at', 'dispute_reason', 'disputed_at', 'resolved_at', 'created_at', 'updated_at',
             # Country and currency info
-            'country_code', 'currency_code'
+            'country_code', 'currency_code',
+            # Escrow info
+            'escrow'
         )
     
     def resolve_payment_method(self, info):
@@ -1165,6 +1183,24 @@ class CreateP2PTrade(graphene.Mutation):
 
             # Create trade with new direct relationships
             trade = P2PTrade.objects.create(**trade_kwargs)
+            
+            # Create escrow record for this trade
+            from .models import P2PEscrow
+            escrow = P2PEscrow.objects.create(
+                trade=trade,
+                escrow_amount=input.cryptoAmount,
+                token_type=offer.token_type,
+                is_escrowed=False,  # Will be set to True when blockchain confirms escrow
+                is_released=False
+            )
+            
+            # TODO: In production, initiate blockchain escrow transaction here
+            # and update is_escrowed=True when blockchain confirms
+            # For now, we'll simulate this by setting it to True immediately
+            escrow.is_escrowed = True
+            escrow.escrowed_at = timezone.now()
+            escrow.escrow_transaction_hash = f"simulated_tx_hash_{trade.id}"
+            escrow.save()
 
             # Update offer available amount
             offer.available_amount -= input.cryptoAmount
@@ -1550,7 +1586,7 @@ class RateP2PTrade(graphene.Mutation):
                 )
             
             # Check if trade is completed
-            if trade.status not in ['PAYMENT_CONFIRMED', 'COMPLETED']:
+            if trade.status not in ['PAYMENT_CONFIRMED', 'CRYPTO_RELEASED', 'COMPLETED']:
                 return RateP2PTrade(
                     rating=None,
                     trade=None,
@@ -1558,13 +1594,18 @@ class RateP2PTrade(graphene.Mutation):
                     errors=["Trade must be completed before rating"]
                 )
             
-            # Check if already rated
-            if hasattr(trade, 'rating'):
+            # Check if already rated by current user
+            existing_rating = trade.ratings.filter(
+                models.Q(rater_user=user) | 
+                models.Q(rater_business__accounts__user=user)
+            ).first()
+            
+            if existing_rating:
                 return RateP2PTrade(
                     rating=None,
                     trade=None,
                     success=False,
-                    errors=["This trade has already been rated"]
+                    errors=["You have already rated this trade"]
                 )
             
             # Validate ratings
@@ -1638,8 +1679,9 @@ class RateP2PTrade(graphene.Mutation):
             rating = P2PTradeRating.objects.create(**rating_kwargs)
             
             # Update trade status to COMPLETED if not already
-            if trade.status == 'PAYMENT_CONFIRMED':
+            if trade.status in ['PAYMENT_CONFIRMED', 'CRYPTO_RELEASED']:
                 trade.status = 'COMPLETED'
+                trade.completed_at = timezone.now()
                 trade.save()
             
             # Update user stats for the ratee
@@ -1827,10 +1869,26 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                 if trade.status == 'PAYMENT_SENT':
                     trade.status = 'PAYMENT_CONFIRMED'
                     status_updated = True
+                    
+                    # Note: is_escrowed should be set to True when blockchain confirms escrow
+                    # This would typically happen async after trade creation
+                    # For now, we're simulating it here, but in production this would be
+                    # set by a webhook or polling service checking blockchain status
+                        
             elif confirmation_type == 'CRYPTO_RELEASED':
+                # This is now handled by PAYMENT_RECEIVED
+                # Keep for backward compatibility but it won't be used in new flow
                 if trade.status == 'PAYMENT_CONFIRMED':
                     trade.status = 'CRYPTO_RELEASED'
                     status_updated = True
+                    
+                    # Update escrow status when crypto is released
+                    if hasattr(trade, 'escrow'):
+                        escrow = trade.escrow
+                        escrow.is_released = True
+                        escrow.released_at = timezone.now()
+                        escrow.save()
+                        
             elif confirmation_type == 'CRYPTO_RECEIVED':
                 if trade.status == 'CRYPTO_RELEASED':
                     trade.status = 'COMPLETED'

@@ -45,6 +45,25 @@ interface ActiveTrade {
   hasRating?: boolean;
 }
 
+// Helper function to format date to local time
+const formatLocalDateTime = (dateString: string) => {
+  const date = new Date(dateString);
+  
+  // Format date parts manually for better React Native compatibility
+  const day = date.getDate().toString().padStart(2, '0');
+  const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
+  
+  let hours = date.getHours();
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // 0 should be 12
+  
+  return `${day} ${month} ${year}, ${hours}:${minutes} ${ampm}`;
+};
+
 export const ActiveTradeScreen: React.FC = () => {
   try {
     const navigation = useNavigation<ActiveTradeNavigationProp>();
@@ -369,8 +388,16 @@ export const ActiveTradeScreen: React.FC = () => {
               <Text style={styles.summaryValue}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text>
             </View>
             <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Tasa de cambio:</Text>
+              <Text style={styles.summaryValue}>{trade.rate || '0'} {trade.currencyCode || 'VES'}/{formatCrypto(trade.crypto || 'cUSD')}</Text>
+            </View>
+            <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Comprador:</Text>
               <Text style={styles.summaryValue}>{trade.trader?.name || 'Comerciante'}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>ID del intercambio:</Text>
+              <Text style={[styles.summaryValue, { fontSize: 12 }]}>#{trade.id.slice(-8).toUpperCase()}</Text>
             </View>
           </View>
           
@@ -526,11 +553,19 @@ export const ActiveTradeScreen: React.FC = () => {
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Pagado:</Text>
-          <Text style={styles.summaryValue}>{trade.totalBs || '0'}</Text>
+          <Text style={styles.summaryValue}>{trade.totalBs || '0'} {trade.currencyCode || 'VES'}</Text>
+        </View>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>Tasa de cambio:</Text>
+          <Text style={styles.summaryValue}>{trade.rate || '0'} {trade.currencyCode || 'VES'}/{formatCrypto(trade.crypto || 'cUSD')}</Text>
         </View>
         <View style={styles.summaryRow}>
           <Text style={styles.summaryLabel}>Vendedor:</Text>
           <Text style={styles.summaryValue}>{trade.trader?.name || 'el vendedor'}</Text>
+        </View>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>ID del intercambio:</Text>
+          <Text style={[styles.summaryValue, { fontSize: 12 }]}>#{trade.id.slice(-8).toUpperCase()}</Text>
         </View>
       </View>
       
@@ -593,6 +628,9 @@ export const ActiveTradeScreen: React.FC = () => {
   };
 
   const renderStep4 = () => {
+    // Get full trade data from GraphQL query
+    const fullTradeData = tradeDetailsData?.p2pTrade;
+    
     // If trade is already completed (rated), show different UI
     if (trade.status === 'COMPLETED' && trade.hasRating) {
       return (
@@ -610,12 +648,24 @@ export const ActiveTradeScreen: React.FC = () => {
           <View style={styles.transactionDetailsCard}>
             <Text style={styles.transactionDetailsTitle}>Detalles de la transacción</Text>
             <View style={styles.transactionDetailsRow}>
-              <Text style={styles.transactionDetailsLabel}>ID de transacción:</Text>
-              <Text style={styles.transactionDetailsValue}>0x1a2b3c4d...</Text>
+              <Text style={styles.transactionDetailsLabel}>ID del intercambio:</Text>
+              <Text style={[styles.transactionDetailsValue, { fontSize: 12 }]}>#{trade.id.slice(-8).toUpperCase()}</Text>
             </View>
             <View style={styles.transactionDetailsRow}>
-              <Text style={styles.transactionDetailsLabel}>Fecha:</Text>
-              <Text style={styles.transactionDetailsValue}>21 Jun 2025, 14:45</Text>
+              <Text style={styles.transactionDetailsLabel}>Fecha de finalización:</Text>
+              <Text style={styles.transactionDetailsValue}>{formatLocalDateTime(fullTradeData?.completedAt || trade.completedAt || new Date().toISOString())}</Text>
+            </View>
+            <View style={styles.transactionDetailsRow}>
+              <Text style={styles.transactionDetailsLabel}>Cantidad:</Text>
+              <Text style={styles.transactionDetailsValue}>{trade.amount || '0'} {formatCrypto(trade.crypto || 'cUSD')}</Text>
+            </View>
+            <View style={styles.transactionDetailsRow}>
+              <Text style={styles.transactionDetailsLabel}>Total pagado:</Text>
+              <Text style={styles.transactionDetailsValue}>{trade.totalBs || '0'}{(trade.totalBs && !trade.totalBs.includes(trade.currencyCode || 'VES')) ? ` ${trade.currencyCode || 'VES'}` : ''}</Text>
+            </View>
+            <View style={styles.transactionDetailsRow}>
+              <Text style={styles.transactionDetailsLabel}>Tasa de cambio:</Text>
+              <Text style={styles.transactionDetailsValue}>{trade.rate || '0'} {trade.currencyCode || 'VES'}/{formatCrypto(trade.crypto || 'cUSD')}</Text>
             </View>
             <View style={styles.transactionDetailsRow}>
               <Text style={styles.transactionDetailsLabel}>Comerciante:</Text>
@@ -623,7 +673,7 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
             <View style={styles.transactionDetailsRow}>
               <Text style={styles.transactionDetailsLabel}>Método de pago:</Text>
-              <Text style={styles.transactionDetailsValue}>{trade.paymentMethod || 'N/A'}</Text>
+              <Text style={styles.transactionDetailsValue}>{fullTradeData?.paymentMethod?.displayName || trade.paymentMethod || 'N/A'}</Text>
             </View>
             <View style={styles.transactionDetailsRow}>
               <Text style={styles.transactionDetailsLabel}>Estado:</Text>
@@ -656,12 +706,24 @@ export const ActiveTradeScreen: React.FC = () => {
         <View style={styles.transactionDetailsCard}>
           <Text style={styles.transactionDetailsTitle}>Detalles de la transacción</Text>
           <View style={styles.transactionDetailsRow}>
-            <Text style={styles.transactionDetailsLabel}>ID de transacción:</Text>
-            <Text style={styles.transactionDetailsValue}>0x1a2b3c4d...</Text>
+            <Text style={styles.transactionDetailsLabel}>ID del intercambio:</Text>
+            <Text style={[styles.transactionDetailsValue, { fontSize: 12 }]}>#{trade.id.slice(-8).toUpperCase()}</Text>
           </View>
           <View style={styles.transactionDetailsRow}>
-            <Text style={styles.transactionDetailsLabel}>Fecha:</Text>
-            <Text style={styles.transactionDetailsValue}>21 Jun 2025, 14:45</Text>
+            <Text style={styles.transactionDetailsLabel}>Fecha de finalización:</Text>
+            <Text style={styles.transactionDetailsValue}>{formatLocalDateTime(fullTradeData?.completedAt || trade.completedAt || new Date().toISOString())}</Text>
+          </View>
+          <View style={styles.transactionDetailsRow}>
+            <Text style={styles.transactionDetailsLabel}>Cantidad:</Text>
+            <Text style={styles.transactionDetailsValue}>{trade.amount || '0'} {formatCrypto(trade.crypto || 'cUSD')}</Text>
+          </View>
+          <View style={styles.transactionDetailsRow}>
+            <Text style={styles.transactionDetailsLabel}>Total pagado:</Text>
+            <Text style={styles.transactionDetailsValue}>{trade.totalBs || '0'}{(trade.totalBs && !trade.totalBs.includes(trade.currencyCode || 'VES')) ? ` ${trade.currencyCode || 'VES'}` : ''}</Text>
+          </View>
+          <View style={styles.transactionDetailsRow}>
+            <Text style={styles.transactionDetailsLabel}>Tasa de cambio:</Text>
+            <Text style={styles.transactionDetailsValue}>{trade.rate || '0'} {trade.currencyCode || 'VES'}/{formatCrypto(trade.crypto || 'cUSD')}</Text>
           </View>
           <View style={styles.transactionDetailsRow}>
             <Text style={styles.transactionDetailsLabel}>Comerciante:</Text>
@@ -669,7 +731,7 @@ export const ActiveTradeScreen: React.FC = () => {
           </View>
           <View style={styles.transactionDetailsRow}>
             <Text style={styles.transactionDetailsLabel}>Método de pago:</Text>
-            <Text style={styles.transactionDetailsValue}>{trade.paymentMethod || 'N/A'}</Text>
+            <Text style={styles.transactionDetailsValue}>{fullTradeData?.paymentMethod?.displayName || trade.paymentMethod || 'N/A'}</Text>
           </View>
         </View>
         
@@ -707,7 +769,7 @@ export const ActiveTradeScreen: React.FC = () => {
                 crypto: formatCrypto(trade.crypto || 'cUSD'),
                 totalPaid: trade.totalBs,
                 method: fullTradeData?.paymentMethod?.displayName || trade.paymentMethod || 'N/A',
-                date: new Date(trade.createdAt || Date.now()).toLocaleDateString('es-ES'),
+                date: formatLocalDateTime(fullTradeData?.completedAt || trade.completedAt || new Date().toISOString()),
                 duration: '8 minutos', // Replace with real data if available
               }
             });
