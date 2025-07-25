@@ -1679,7 +1679,7 @@ export const ExchangeScreen = () => {
                 <Text style={styles.userName} numberOfLines={1} ellipsizeMode="tail">{userName}</Text>
                 <View style={styles.userActionsRow}>
                   {isVerified && (
-                    <Icon name="shield" size={16} color={colors.accent} style={styles.verifiedIcon} />
+                    <Icon name="shield" size={16} color={colors.accent} />
                   )}
                   <TouchableOpacity 
                     style={styles.favoriteButton}
@@ -3830,8 +3830,9 @@ const styles = StyleSheet.create({
   userActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     flexShrink: 0,
+    marginLeft: 8,
   },
   userNameContainer: {
     flexDirection: 'row',
@@ -3842,10 +3843,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1F2937',
     flex: 1,
-  },
-  verifiedIcon: {
-    marginLeft: 6,
-    flexShrink: 0, // Prevent the icon from shrinking
   },
   badge: {
     backgroundColor: '#F3F4F6',
