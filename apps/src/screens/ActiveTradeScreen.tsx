@@ -9,6 +9,8 @@ import {
   SafeAreaView,
   Alert,
   Animated,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -16,9 +18,27 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
-import { useQuery } from '@apollo/client';
-import { GET_P2P_TRADE } from '../apollo/queries';
+import { useQuery, useMutation, gql } from '@apollo/client';
+import { GET_P2P_TRADE, DISPUTE_P2P_TRADE } from '../apollo/queries';
 import { formatLocalDateTime } from '../utils/dateUtils';
+
+// Temporary workaround - define mutation locally if import fails
+const DISPUTE_P2P_TRADE_LOCAL = gql`
+  mutation DisputeP2PTrade($tradeId: ID!, $reason: String!) {
+    disputeP2pTrade(tradeId: $tradeId, reason: $reason) {
+      trade {
+        id
+        status
+      }
+      success
+      errors
+    }
+  }
+`;
+
+// Debug log
+console.log('[ActiveTradeScreen] DISPUTE_P2P_TRADE imported:', !!DISPUTE_P2P_TRADE);
+console.log('[ActiveTradeScreen] Using fallback:', !DISPUTE_P2P_TRADE);
 
 type ActiveTradeRouteProp = RouteProp<MainStackParamList, 'ActiveTrade'>;
 type ActiveTradeNavigationProp = NativeStackNavigationProp<MainStackParamList, 'ActiveTrade'>;
@@ -50,10 +70,9 @@ interface ActiveTrade {
 
 
 export const ActiveTradeScreen: React.FC = () => {
-  try {
-    const navigation = useNavigation<ActiveTradeNavigationProp>();
-    const route = useRoute<ActiveTradeRouteProp>();
-    const { trade } = route.params;
+  const navigation = useNavigation<ActiveTradeNavigationProp>();
+  const route = useRoute<ActiveTradeRouteProp>();
+  const { trade } = route.params;
   
   // Debug log to see what data we received
   console.log('[ActiveTradeScreen] Trade data:', {
@@ -105,6 +124,14 @@ export const ActiveTradeScreen: React.FC = () => {
   const [activeTradeStep, setActiveTradeStep] = useState(trade.step || 1);
   const [timeRemaining, setTimeRemaining] = useState(trade.timeRemaining || 900);
   const [spinAnim] = useState(new Animated.Value(0));
+  const [showDisputeModal, setShowDisputeModal] = useState(false);
+  const [disputeReason, setDisputeReason] = useState('');
+  const [isSubmittingDispute, setIsSubmittingDispute] = useState(false);
+  
+  // Mutations - Use local fallback if import fails
+  const mutationToUse = DISPUTE_P2P_TRADE || DISPUTE_P2P_TRADE_LOCAL;
+  console.log('[ActiveTradeScreen] Using mutation:', !!mutationToUse, mutationToUse === DISPUTE_P2P_TRADE_LOCAL ? 'local' : 'imported');
+  const [disputeP2PTrade] = useMutation(mutationToUse);
   
   // Fetch full trade details to get buyer/seller stats
   const { data: tradeDetailsData, loading: tradeDetailsLoading } = useQuery(GET_P2P_TRADE, {
@@ -172,6 +199,54 @@ export const ActiveTradeScreen: React.FC = () => {
     navigation.goBack();
   };
 
+  const handleDisputeTrade = () => {
+    setShowDisputeModal(true);
+  };
+
+  const submitDispute = async () => {
+    if (!disputeReason || disputeReason.trim().length < 10) {
+      Alert.alert('Error', 'Por favor proporciona una descripción detallada del problema (mínimo 10 caracteres).');
+      return;
+    }
+
+    if (!disputeP2PTrade) {
+      console.error('[ActiveTradeScreen] DISPUTE_P2P_TRADE mutation is not available');
+      Alert.alert('Error', 'La función de disputa no está disponible en este momento. Por favor intenta más tarde.');
+      return;
+    }
+
+    setIsSubmittingDispute(true);
+    try {
+      const { data } = await disputeP2PTrade({
+        variables: {
+          tradeId: trade.id,
+          reason: disputeReason.trim(),
+        },
+      });
+
+      if (data?.disputeP2pTrade?.success) {
+        setShowDisputeModal(false);
+        Alert.alert(
+          'Disputa iniciada',
+          'Tu disputa ha sido registrada. Un administrador revisará el caso pronto.',
+          [
+            {
+              text: 'OK',
+              onPress: () => navigation.goBack(),
+            },
+          ],
+        );
+      } else {
+        Alert.alert('Error', data?.disputeP2pTrade?.errors?.join(', ') || 'No se pudo iniciar la disputa.');
+      }
+    } catch (error) {
+      console.error('Error initiating dispute:', error);
+      Alert.alert('Error', 'Ocurrió un error al iniciar la disputa. Por favor intenta de nuevo.');
+    } finally {
+      setIsSubmittingDispute(false);
+    }
+  };
+
   const handleAbandonTrade = () => {
     Alert.alert(
       '¿Abandonar intercambio?',
@@ -193,7 +268,6 @@ export const ActiveTradeScreen: React.FC = () => {
       ]
     );
   };
-
 
   const handleOpenChat = () => {
     navigation.navigate('TradeChat', {
@@ -782,19 +856,47 @@ export const ActiveTradeScreen: React.FC = () => {
             {trade.status === 'COMPLETED' ? 'Detalle del Intercambio' : 'Intercambio Activo'}
           </Text>
           <View style={styles.headerSpacer} />
-          {trade.status !== 'COMPLETED' && (
+          {trade.status !== 'COMPLETED' && trade.status !== 'CANCELLED' && trade.status !== 'EXPIRED' && trade.status !== 'DISPUTED' && (
             <TouchableOpacity 
-              style={styles.abandonButton}
-              onPress={handleAbandonTrade}
+              style={styles.menuButton}
+              onPress={() => {
+                Alert.alert(
+                  'Opciones del intercambio',
+                  '¿Qué deseas hacer?',
+                  [
+                    {
+                      text: 'Reportar problema',
+                      onPress: handleDisputeTrade,
+                    },
+                    {
+                      text: 'Abandonar intercambio',
+                      onPress: handleAbandonTrade,
+                      style: 'destructive',
+                    },
+                    {
+                      text: 'Cancelar',
+                      style: 'cancel',
+                    },
+                  ],
+                );
+              }}
             >
-              <Text style={styles.abandonButtonText}>Abandonar</Text>
+              <Icon name="more-vertical" size={20} color="#374151" />
             </TouchableOpacity>
+          )}
+          {trade.status === 'DISPUTED' && (
+            <View style={styles.disputedBadge}>
+              <Icon name="alert-triangle" size={14} color="#DC2626" />
+              <Text style={styles.disputedBadgeText}>En disputa</Text>
+            </View>
           )}
         </View>
         
-        <TradeProgressBar currentStep={activeTradeStep} totalSteps={4} />
+        {trade.status !== 'DISPUTED' && (
+          <TradeProgressBar currentStep={activeTradeStep} totalSteps={4} />
+        )}
         
-        {trade.status !== 'COMPLETED' && (
+        {trade.status !== 'COMPLETED' && trade.status !== 'DISPUTED' && (
           <View style={styles.timerCard}>
             <View style={styles.timerHeader}>
               <Text style={styles.timerLabel}>Tiempo restante</Text>
@@ -819,55 +921,160 @@ export const ActiveTradeScreen: React.FC = () => {
         )}
       </View>
       
+      {/* Dispute Banner */}
+      {trade.status === 'DISPUTED' && (
+        <View style={styles.disputeBanner}>
+          <View style={styles.disputeBannerContent}>
+            <Icon name="shield" size={24} color="#0F766E" style={styles.disputeBannerIcon} />
+            <View style={styles.disputeBannerTextContainer}>
+              <Text style={styles.disputeBannerTitle}>🤝 Estamos aquí para ayudarte</Text>
+              <Text style={styles.disputeBannerText}>
+                Hemos recibido tu solicitud y nuestro equipo especializado está trabajando para resolver 
+                este intercambio de manera justa. Tus fondos están completamente seguros durante este proceso.
+              </Text>
+            </View>
+          </View>
+          <TouchableOpacity 
+            style={styles.disputeChatButton}
+            onPress={handleOpenChat}
+          >
+            <Icon name="message-circle" size={16} color="#0F766E" />
+            <Text style={styles.disputeChatButtonText}>💬 Continuar conversación</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {activeTradeStep === 1 && renderStep1()}
-        {activeTradeStep === 2 && renderStep2()}
-        {activeTradeStep === 3 && renderStep3()}
-        {activeTradeStep === 4 && renderStep4()}
-        {activeTradeStep === 5 && renderStep4()}
-        {activeTradeStep > 5 && (
+        {trade.status === 'DISPUTED' ? (
           <View style={styles.stepCard}>
-            <Text style={styles.stepTitle}>Estado desconocido</Text>
+            <Text style={styles.stepTitle}>✅ Tu caso está en buenas manos</Text>
             <Text style={styles.stepDescription}>
-              Step: {activeTradeStep}, Status: {trade.status}
+              Un especialista de nuestro equipo está revisando todos los detalles para encontrar la mejor solución. 
+              Recibirás una notificación tan pronto como tengamos una resolución.
             </Text>
+            <View style={styles.disputeInfoCard}>
+              <Text style={styles.disputeInfoTitle}>💡 Mientras tanto, esto es lo que debes saber:</Text>
+              <View style={styles.disputeInfoItem}>
+                <Text style={styles.disputeInfoBullet}>🛡️</Text>
+                <Text style={styles.disputeInfoText}>
+                  Tus fondos están completamente seguros y no pueden ser movidos sin tu autorización
+                </Text>
+              </View>
+              <View style={styles.disputeInfoItem}>
+                <Text style={styles.disputeInfoBullet}>⏱️</Text>
+                <Text style={styles.disputeInfoText}>
+                  Nuestro equipo responde en un máximo de 24 horas hábiles
+                </Text>
+              </View>
+              <View style={styles.disputeInfoItem}>
+                <Text style={styles.disputeInfoBullet}>💬</Text>
+                <Text style={styles.disputeInfoText}>
+                  Nuestro equipo de soporte se comunicará contigo a través del chat del intercambio
+                </Text>
+              </View>
+              <View style={styles.disputeInfoItem}>
+                <Text style={styles.disputeInfoBullet}>🎯</Text>
+                <Text style={styles.disputeInfoText}>
+                  Nuestro objetivo es resolver el 95% de las disputas en menos de 48 horas
+                </Text>
+              </View>
+            </View>
           </View>
-        )}
-        {!activeTradeStep && (
-          <View style={styles.stepCard}>
-            <Text style={styles.stepTitle}>Cargando...</Text>
-            <Text style={styles.stepDescription}>
-              Por favor espera mientras cargamos los detalles del intercambio.
-            </Text>
-          </View>
+        ) : (
+          <>
+            {activeTradeStep === 1 && renderStep1()}
+            {activeTradeStep === 2 && renderStep2()}
+            {activeTradeStep === 3 && renderStep3()}
+            {activeTradeStep === 4 && renderStep4()}
+            {activeTradeStep === 5 && renderStep4()}
+            {activeTradeStep > 5 && (
+              <View style={styles.stepCard}>
+                <Text style={styles.stepTitle}>Estado desconocido</Text>
+                <Text style={styles.stepDescription}>
+                  Step: {activeTradeStep}, Status: {trade.status}
+                </Text>
+              </View>
+            )}
+            {!activeTradeStep && (
+              <View style={styles.stepCard}>
+                <Text style={styles.stepTitle}>Cargando...</Text>
+                <Text style={styles.stepDescription}>
+                  Por favor espera mientras cargamos los detalles del intercambio.
+                </Text>
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
+
+      {/* Dispute Modal */}
+      <Modal
+        visible={showDisputeModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowDisputeModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Disputar intercambio</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowDisputeModal(false);
+                  setDisputeReason('');
+                }}
+                style={styles.modalCloseButton}
+              >
+                <Icon name="x" size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalDescription}>
+              Por favor describe detalladamente el problema con este intercambio. 
+              Tu reporte será revisado por nuestro equipo de soporte.
+            </Text>
+
+            <TextInput
+              style={styles.disputeTextInput}
+              placeholder="Describe el problema (mínimo 10 caracteres)..."
+              placeholderTextColor="#9CA3AF"
+              value={disputeReason}
+              onChangeText={setDisputeReason}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => {
+                  setShowDisputeModal(false);
+                  setDisputeReason('');
+                }}
+                disabled={isSubmittingDispute}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.modalSubmitButton,
+                  (isSubmittingDispute || disputeReason.trim().length < 10) && styles.modalSubmitButtonDisabled
+                ]}
+                onPress={submitDispute}
+                disabled={isSubmittingDispute || disputeReason.trim().length < 10}
+              >
+                <Text style={styles.modalSubmitButtonText}>
+                  {isSubmittingDispute ? 'Enviando...' : 'Enviar disputa'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
-  } catch (error) {
-    console.error('[ActiveTradeScreen] Error rendering:', error);
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <TouchableOpacity onPress={() => navigation?.goBack()} style={styles.backButton}>
-              <Icon name="arrow-left" size={24} color="#374151" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Error</Text>
-          </View>
-        </View>
-        <View style={styles.content}>
-          <View style={styles.stepCard}>
-            <Text style={styles.stepTitle}>Error al cargar</Text>
-            <Text style={styles.stepDescription}>
-              Se produjo un error al cargar la pantalla. Por favor, vuelve a intentarlo.
-            </Text>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
 };
 
 const styles = StyleSheet.create({
@@ -1294,6 +1501,154 @@ const styles = StyleSheet.create({
   headerSpacer: {
     flex: 1,
   },
+  menuButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  disputedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  disputedBadgeText: {
+    color: '#DC2626',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  disputeBanner: {
+    backgroundColor: '#F0FDF9',
+    margin: 16,
+    marginTop: 0,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#10B981',
+    overflow: 'hidden',
+  },
+  disputeBannerContent: {
+    flexDirection: 'row',
+    padding: 16,
+    alignItems: 'flex-start',
+  },
+  disputeBannerIcon: {
+    marginRight: 12,
+    marginTop: 2,
+  },
+  disputeBannerTextContainer: {
+    flex: 1,
+  },
+  disputeBannerTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0F766E',
+    marginBottom: 4,
+  },
+  disputeBannerText: {
+    fontSize: 14,
+    color: '#134E4A',
+    lineHeight: 20,
+  },
+  disputeReasonContainer: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#ECFDF5',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  disputeReasonLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0F766E',
+    marginBottom: 4,
+  },
+  disputeReasonText: {
+    fontSize: 14,
+    color: '#134E4A',
+    lineHeight: 20,
+  },
+  disputeChatButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    backgroundColor: '#ECFDF5',
+    borderTopWidth: 1,
+    borderTopColor: '#A7F3D0',
+  },
+  disputeChatButtonText: {
+    color: '#0F766E',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  disputeInfoCard: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: '#F0FDF9',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  disputeInfoTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0F766E',
+    marginBottom: 12,
+  },
+  disputeInfoItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  disputeInfoBullet: {
+    fontSize: 16,
+    marginRight: 8,
+    marginTop: 1,
+  },
+  disputeInfoText: {
+    fontSize: 13,
+    color: '#134E4A',
+    flex: 1,
+    lineHeight: 18,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  disputeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+  },
+  disputeButtonText: {
+    color: '#F59E0B',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  disputedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: '#FEE2E2',
+    gap: 4,
+  },
+  disputedBadgeText: {
+    color: '#DC2626',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   helperText: {
     fontSize: 14,
     color: '#6B7280',
@@ -1301,5 +1656,81 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingHorizontal: 24,
     lineHeight: 20,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    width: '100%',
+    maxWidth: 400,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalDescription: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  disputeTextInput: {
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 14,
+    color: '#111827',
+    minHeight: 100,
+    marginBottom: 20,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalCancelButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    alignItems: 'center',
+  },
+  modalCancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  modalSubmitButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+  },
+  modalSubmitButtonDisabled: {
+    backgroundColor: '#9CA3AF',
+  },
+  modalSubmitButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
