@@ -124,7 +124,15 @@ export const TraderProfileScreen: React.FC = () => {
       
       if (data?.toggleFavoriteTrader?.success) {
         // Update with server response
-        setIsFavorite(data.toggleFavoriteTrader.isFavorite);
+        const finalFavoriteStatus = data.toggleFavoriteTrader.isFavorite;
+        setIsFavorite(finalFavoriteStatus);
+        
+        // If we came from an offer, update the navigation params
+        if (offer) {
+          navigation.setParams({
+            offer: { ...offer, isFavorite: finalFavoriteStatus }
+          });
+        }
       } else {
         // Revert on failure
         setIsFavorite(!newFavoriteStatus);
