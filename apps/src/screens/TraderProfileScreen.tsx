@@ -16,8 +16,8 @@ import { MainStackParamList } from '../types/navigation';
 import { useCurrency } from '../hooks/useCurrency';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { getCurrencyForCountry } from '../utils/currencyMapping';
-import { useQuery } from '@apollo/client';
-import { GET_P2P_OFFERS, GET_USER_BANK_ACCOUNTS } from '../apollo/queries';
+import { useQuery, useMutation, gql } from '@apollo/client';
+import { GET_P2P_OFFERS, GET_USER_BANK_ACCOUNTS, TOGGLE_FAVORITE_TRADER } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { useAuth } from '../contexts/AuthContext';
 import { Alert } from 'react-native';
@@ -30,8 +30,11 @@ export const TraderProfileScreen: React.FC = () => {
   const route = useRoute<TraderProfileRouteProp>();
   const { offer, trader, crypto } = route.params;
   const { activeAccount } = useAccount();
-  const { userProfile } = useAuth();
+  const { profileData: authProfileData } = useAuth();
+  const user = authProfileData?.userProfile;
   const [expandedOffers, setExpandedOffers] = React.useState<Record<string, boolean>>({});
+  const [isFavoriting, setIsFavoriting] = React.useState(false);
+  const [isFavorite, setIsFavorite] = React.useState(false);
   
   // Use currency system based on selected country
   const { currency, formatAmount } = useCurrency();
@@ -39,6 +42,61 @@ export const TraderProfileScreen: React.FC = () => {
   // Determine if we're in trader view mode or offer view mode
   const isTraderView = !!trader && !offer;
   const profileData = isTraderView ? trader : offer;
+  
+  // Define mutation inline to avoid import issues
+  const TOGGLE_FAVORITE_MUTATION = gql`
+    mutation ToggleFavoriteTrader($traderUserId: ID, $traderBusinessId: ID, $note: String) {
+      toggleFavoriteTrader(traderUserId: $traderUserId, traderBusinessId: $traderBusinessId, note: $note) {
+        success
+        isFavorite
+        message
+      }
+    }
+  `;
+  
+  const [toggleFavorite] = useMutation(TOGGLE_FAVORITE_MUTATION);
+  
+  // Handle toggle favorite
+  const handleToggleFavorite = async () => {
+    if (!user || isFavoriting) return;
+    
+    try {
+      setIsFavoriting(true);
+      
+      // Determine trader ID from the profile data
+      let mutationVariables = {};
+      if (trader?.businessId) {
+        mutationVariables = { traderBusinessId: trader.businessId };
+      } else if (trader?.userId) {
+        mutationVariables = { traderUserId: trader.userId };
+      } else if (offer?.offerBusiness?.id) {
+        mutationVariables = { traderBusinessId: offer.offerBusiness.id };
+      } else if (offer?.offerUser?.id) {
+        mutationVariables = { traderUserId: offer.offerUser.id };
+      } else if (offer?.user?.id) {
+        mutationVariables = { traderUserId: offer.user.id };
+      } else {
+        Alert.alert('Error', 'No se pudo identificar al trader');
+        return;
+      }
+      
+      const { data } = await toggleFavorite({
+        variables: mutationVariables
+      });
+      
+      if (data?.toggleFavoriteTrader?.success) {
+        setIsFavorite(data.toggleFavoriteTrader.isFavorite);
+      } else {
+        const message = data?.toggleFavoriteTrader?.message || 'No se pudo actualizar el favorito';
+        Alert.alert('Error', message);
+      }
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+      Alert.alert('Error', 'Ocurrió un error al actualizar el favorito');
+    } finally {
+      setIsFavoriting(false);
+    }
+  };
   
   // Debug logging
   if (isTraderView && trader) {
@@ -232,6 +290,19 @@ export const TraderProfileScreen: React.FC = () => {
               <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 4}}>
                 <Text style={styles.profileName}>{profileData!.name}</Text>
                 {profileData!.verified && <Icon name="shield" size={20} color={colors.accent} style={{marginLeft: 8}} />}
+                {user && (
+                  <TouchableOpacity 
+                    style={styles.favoriteButton}
+                    onPress={handleToggleFavorite}
+                    disabled={isFavoriting}
+                  >
+                    <Icon 
+                      name="star" 
+                      size={20} 
+                      color={isFavorite ? '#FBBF24' : '#9CA3AF'} 
+                    />
+                  </TouchableOpacity>
+                )}
               </View>
               <Text style={styles.lastSeenText}>{profileData!.lastSeen}</Text>
               <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 4}}>
@@ -591,6 +662,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#1F2937',
+  },
+  favoriteButton: {
+    marginLeft: 8,
+    padding: 4,
   },
   lastSeenText: {
     fontSize: 14,

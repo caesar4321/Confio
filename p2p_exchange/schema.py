@@ -17,7 +17,8 @@ from .models import (
     P2PEscrow,
     P2PTradeRating,
     P2PTradeConfirmation,
-    P2PDispute
+    P2PDispute,
+    P2PFavoriteTrader
 )
 from .default_payment_methods import get_payment_methods_for_country
 
@@ -117,12 +118,45 @@ class P2PUserStatsType(DjangoObjectType):
             return str(self.last_seen_online)
         return None
 
+class P2PFavoriteTraderType(DjangoObjectType):
+    favorite_display_name = graphene.String()
+    favorite_type = graphene.String()  # 'user' or 'business'
+    is_online = graphene.Boolean()
+    
+    class Meta:
+        model = P2PFavoriteTrader
+        fields = '__all__'
+    
+    def resolve_favorite_display_name(self, info):
+        if self.favorite_user:
+            return f"{self.favorite_user.first_name} {self.favorite_user.last_name}".strip() or self.favorite_user.username
+        elif self.favorite_business:
+            return self.favorite_business.name
+        return "Unknown"
+    
+    def resolve_favorite_type(self, info):
+        return 'business' if self.favorite_business else 'user'
+    
+    def resolve_is_online(self, info):
+        # Check last activity within 5 minutes
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        if self.favorite_user:
+            last_seen = getattr(self.favorite_user, 'last_seen_at', None)
+            if last_seen:
+                return (timezone.now() - last_seen) < timedelta(minutes=5)
+        # For businesses, we could check if any of their accounts are online
+        return False
+
+
 class P2POfferType(DjangoObjectType):
     payment_methods = graphene.List(P2PPaymentMethodType)
     user_stats = graphene.Field(P2PUserStatsType)
     # Add computed fields for better frontend integration
     offer_type = graphene.String()
     offer_display_name = graphene.String()
+    is_favorite = graphene.Boolean()
     
     class Meta:
         model = P2POffer
@@ -178,6 +212,60 @@ class P2POfferType(DjangoObjectType):
     def resolve_offer_display_name(self, info):
         """Returns display name for the offer creator"""
         return self.offer_display_name
+    
+    def resolve_is_favorite(self, info):
+        """Check if current user has favorited this trader"""
+        user = info.context.user
+        if not user.is_authenticated:
+            return False
+        
+        # Get the active account context from the request
+        request = info.context
+        active_account_type = getattr(request, 'active_account_type', 'personal')
+        active_account_index = getattr(request, 'active_account_index', 0)
+        
+        # Determine favoriter_business if acting as business account
+        favoriter_business = None
+        if active_account_type == 'business':
+            from users.models import Account
+            active_account = Account.objects.filter(
+                user=user,
+                account_type='business',
+                account_index=active_account_index
+            ).first()
+            
+            if active_account and active_account.business:
+                favoriter_business = active_account.business
+        
+        # Check if the offer creator is in user's favorites based on account context
+        if self.offer_user:
+            if favoriter_business:
+                return P2PFavoriteTrader.objects.filter(
+                    user=user,
+                    favoriter_business=favoriter_business,
+                    favorite_user=self.offer_user
+                ).exists()
+            else:
+                return P2PFavoriteTrader.objects.filter(
+                    user=user,
+                    favoriter_business__isnull=True,
+                    favorite_user=self.offer_user
+                ).exists()
+        elif self.offer_business:
+            if favoriter_business:
+                return P2PFavoriteTrader.objects.filter(
+                    user=user,
+                    favoriter_business=favoriter_business,
+                    favorite_business=self.offer_business
+                ).exists()
+            else:
+                return P2PFavoriteTrader.objects.filter(
+                    user=user,
+                    favoriter_business__isnull=True,
+                    favorite_business=self.offer_business
+                ).exists()
+        
+        return False
     
     def resolve_payment_methods(self, info):
         """Resolve payment methods for this offer, converting DB records to our GraphQL type"""
@@ -2146,7 +2234,8 @@ class Query(graphene.ObjectType):
         exchange_type=graphene.String(),
         token_type=graphene.String(),
         payment_method=graphene.String(),
-        country_code=graphene.String()
+        country_code=graphene.String(),
+        favorites_only=graphene.Boolean()
     )
     p2p_offer = graphene.Field(P2POfferType, id=graphene.ID(required=True))
     my_p2p_offers = graphene.List(P2POfferType, account_id=graphene.String())
@@ -2160,7 +2249,7 @@ class Query(graphene.ObjectType):
     p2p_trade_messages = graphene.List(P2PMessageType, trade_id=graphene.ID(required=True))
     p2p_payment_methods = graphene.List(P2PPaymentMethodType, country_code=graphene.String())
 
-    def resolve_p2p_offers(self, info, exchange_type=None, token_type=None, payment_method=None, country_code=None):
+    def resolve_p2p_offers(self, info, exchange_type=None, token_type=None, payment_method=None, country_code=None, favorites_only=False):
         queryset = P2POffer.objects.filter(status='ACTIVE').select_related('user')
         
         if exchange_type:
@@ -2173,6 +2262,62 @@ class Query(graphene.ObjectType):
         # Filter by country: only show offers created for that specific country
         if country_code:
             queryset = queryset.filter(country_code=country_code)
+        
+        # Filter by favorites if requested
+        if favorites_only:
+            user = getattr(info.context, 'user', None)
+            if user and getattr(user, 'is_authenticated', False):
+                from django.db.models import Q
+                from .models import P2PFavoriteTrader
+                
+                # Get the active account context from the request
+                request = info.context
+                active_account_type = getattr(request, 'active_account_type', 'personal')
+                active_account_index = getattr(request, 'active_account_index', 0)
+                
+                # Determine favoriter_business if acting as business account
+                favoriter_business = None
+                if active_account_type == 'business':
+                    from users.models import Account
+                    active_account = Account.objects.filter(
+                        user=user,
+                        account_type='business',
+                        account_index=active_account_index
+                    ).first()
+                    
+                    if active_account and active_account.business:
+                        favoriter_business = active_account.business
+                
+                # Get all favorite traders for this user in the current account context
+                if favoriter_business:
+                    favorite_users = P2PFavoriteTrader.objects.filter(
+                        user=user,
+                        favoriter_business=favoriter_business
+                    ).values_list('favorite_user_id', 'favorite_business_id')
+                else:
+                    favorite_users = P2PFavoriteTrader.objects.filter(
+                        user=user,
+                        favoriter_business__isnull=True
+                    ).values_list('favorite_user_id', 'favorite_business_id')
+                
+                # Build query for favorite offers
+                favorite_q = Q()
+                for fav_user_id, fav_business_id in favorite_users:
+                    if fav_user_id:
+                        favorite_q |= Q(offer_user_id=fav_user_id)
+                    if fav_business_id:
+                        favorite_q |= Q(offer_business_id=fav_business_id)
+                
+                # Also include legacy offers from favorite users
+                favorite_user_ids = [u[0] for u in favorite_users if u[0]]
+                if favorite_user_ids:
+                    favorite_q |= Q(user_id__in=favorite_user_ids)
+                
+                if favorite_q:
+                    queryset = queryset.filter(favorite_q)
+                else:
+                    # No favorites, return empty
+                    return []
         
         return queryset.order_by('-created_at')
 
@@ -2565,6 +2710,176 @@ class Query(graphene.ObjectType):
         return payment_methods
 
 # Mutations
+class ToggleFavoriteTrader(graphene.Mutation):
+    class Arguments:
+        trader_user_id = graphene.ID(required=False)
+        trader_business_id = graphene.ID(required=False)
+        note = graphene.String(required=False)
+    
+    success = graphene.Boolean()
+    is_favorite = graphene.Boolean()
+    message = graphene.String()
+    
+    @classmethod
+    def mutate(cls, root, info, trader_user_id=None, trader_business_id=None, note=""):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return ToggleFavoriteTrader(
+                success=False,
+                is_favorite=False,
+                message="Authentication required"
+            )
+        
+        # Validate input
+        if not trader_user_id and not trader_business_id:
+            return ToggleFavoriteTrader(
+                success=False,
+                is_favorite=False,
+                message="Either trader_user_id or trader_business_id must be provided"
+            )
+        
+        if trader_user_id and trader_business_id:
+            return ToggleFavoriteTrader(
+                success=False,
+                is_favorite=False,
+                message="Cannot provide both trader_user_id and trader_business_id"
+            )
+        
+        # Get the active account context from the request
+        request = info.context
+        active_account_type = getattr(request, 'active_account_type', 'personal')
+        active_account_index = getattr(request, 'active_account_index', 0)
+        
+        try:
+            # Determine favoriter_business if acting as business account
+            favoriter_business = None
+            if active_account_type == 'business':
+                from users.models import Account
+                active_account = Account.objects.filter(
+                    user=user,
+                    account_type='business',
+                    account_index=active_account_index
+                ).first()
+                
+                if active_account and active_account.business:
+                    favoriter_business = active_account.business
+                else:
+                    return ToggleFavoriteTrader(
+                        success=False,
+                        is_favorite=False,
+                        message="Business account not found"
+                    )
+            
+            # Check if already favorited
+            if trader_user_id:
+                # Personal accounts can't favorite themselves, but business accounts can favorite the owner's personal account
+                if str(trader_user_id) == str(user.id) and active_account_type == 'personal':
+                    return ToggleFavoriteTrader(
+                        success=False,
+                        is_favorite=False,
+                        message="Cannot favorite yourself"
+                    )
+                
+                favorite_user = User.objects.get(id=trader_user_id)
+                
+                # Check for existing favorite based on account context
+                if favoriter_business:
+                    existing = P2PFavoriteTrader.objects.filter(
+                        user=user,
+                        favoriter_business=favoriter_business,
+                        favorite_user=favorite_user
+                    ).first()
+                else:
+                    existing = P2PFavoriteTrader.objects.filter(
+                        user=user,
+                        favoriter_business__isnull=True,
+                        favorite_user=favorite_user
+                    ).first()
+                
+                if existing:
+                    # Remove from favorites
+                    existing.delete()
+                    return ToggleFavoriteTrader(
+                        success=True,
+                        is_favorite=False,
+                        message="Removed from favorites"
+                    )
+                else:
+                    # Add to favorites
+                    P2PFavoriteTrader.objects.create(
+                        user=user,
+                        favoriter_business=favoriter_business,
+                        favorite_user=favorite_user,
+                        note=note
+                    )
+                    return ToggleFavoriteTrader(
+                        success=True,
+                        is_favorite=True,
+                        message="Added to favorites"
+                    )
+            
+            else:  # trader_business_id
+                from users.models import Business
+                favorite_business = Business.objects.get(id=trader_business_id)
+                
+                # Check if trying to favorite own business from same business account
+                if favoriter_business and favoriter_business.id == favorite_business.id:
+                    return ToggleFavoriteTrader(
+                        success=False,
+                        is_favorite=False,
+                        message="Cannot favorite your own business account"
+                    )
+                
+                # Check for existing favorite based on account context
+                if favoriter_business:
+                    existing = P2PFavoriteTrader.objects.filter(
+                        user=user,
+                        favoriter_business=favoriter_business,
+                        favorite_business=favorite_business
+                    ).first()
+                else:
+                    existing = P2PFavoriteTrader.objects.filter(
+                        user=user,
+                        favoriter_business__isnull=True,
+                        favorite_business=favorite_business
+                    ).first()
+                
+                if existing:
+                    # Remove from favorites
+                    existing.delete()
+                    return ToggleFavoriteTrader(
+                        success=True,
+                        is_favorite=False,
+                        message="Removed from favorites"
+                    )
+                else:
+                    # Add to favorites
+                    P2PFavoriteTrader.objects.create(
+                        user=user,
+                        favoriter_business=favoriter_business,
+                        favorite_business=favorite_business,
+                        note=note
+                    )
+                    return ToggleFavoriteTrader(
+                        success=True,
+                        is_favorite=True,
+                        message="Added to favorites"
+                    )
+                
+        except User.DoesNotExist:
+            return ToggleFavoriteTrader(
+                success=False,
+                is_favorite=False,
+                message="Trader not found"
+            )
+        except Exception as e:
+            return ToggleFavoriteTrader(
+                success=False,
+                is_favorite=False,
+                message=str(e)
+            )
+
+
 class Mutation(graphene.ObjectType):
     create_p2p_offer = CreateP2POffer.Field()
     update_p2p_offer = UpdateP2POffer.Field()
@@ -2574,6 +2889,7 @@ class Mutation(graphene.ObjectType):
     rate_p2p_trade = RateP2PTrade.Field()
     dispute_p2p_trade = DisputeP2PTrade.Field()
     confirm_p2p_trade_step = ConfirmP2PTradeStep.Field()
+    toggle_favorite_trader = ToggleFavoriteTrader.Field()
 
 # Admin Dispute Resolution Mutations
 class ResolveDispute(graphene.Mutation):

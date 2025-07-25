@@ -12,7 +12,8 @@ from .models import (
     P2PEscrow,
     P2PTradeRating,
     P2PDispute,
-    P2PDisputeTransaction
+    P2PDisputeTransaction,
+    P2PFavoriteTrader
 )
 
 @admin.register(P2PPaymentMethod)
@@ -1532,3 +1533,61 @@ class P2PDisputeTransactionAdmin(admin.ModelAdmin):
         if obj and obj.status == 'COMPLETED':
             return False
         return super().has_change_permission(request, obj)
+
+@admin.register(P2PFavoriteTrader)
+class P2PFavoriteTraderAdmin(admin.ModelAdmin):
+    list_display = ['user', 'favorite_trader_display', 'trader_type', 'note_preview', 'created_at']
+    list_filter = ['created_at']
+    search_fields = ['user__username', 'user__email', 'favorite_user__username', 'favorite_business__name', 'note']
+    readonly_fields = ['created_at', 'updated_at']
+    raw_id_fields = ['user', 'favorite_user', 'favorite_business']
+    
+    def favorite_trader_display(self, obj):
+        """Display the favorited trader with appropriate icon"""
+        if obj.favorite_business:
+            return format_html(
+                '<span style="font-weight: bold;">🏢 {}</span>',
+                obj.favorite_business.name
+            )
+        elif obj.favorite_user:
+            return format_html(
+                '<span>👤 {} {}</span>',
+                obj.favorite_user.first_name or '',
+                obj.favorite_user.last_name or ''
+            )
+        return '-'
+    favorite_trader_display.short_description = 'Favorite Trader'
+    
+    def trader_type(self, obj):
+        """Show whether it's a user or business favorite"""
+        if obj.favorite_business:
+            return format_html('<span style="background-color: #3B82F6; color: white; padding: 2px 6px; border-radius: 12px; font-size: 11px;">Business</span>')
+        return format_html('<span style="background-color: #10B981; color: white; padding: 2px 6px; border-radius: 12px; font-size: 11px;">Personal</span>')
+    trader_type.short_description = 'Type'
+    
+    def note_preview(self, obj):
+        """Show first 50 chars of note"""
+        if obj.note:
+            preview = obj.note[:50]
+            if len(obj.note) > 50:
+                preview += '...'
+            return preview
+        return '-'
+    note_preview.short_description = 'Note'
+    
+    fieldsets = (
+        ('User', {
+            'fields': ('user',)
+        }),
+        ('Favorite Trader', {
+            'fields': ('favorite_user', 'favorite_business'),
+            'description': 'Only one of these should be filled'
+        }),
+        ('Details', {
+            'fields': ('note',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
