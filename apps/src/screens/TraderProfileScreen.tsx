@@ -48,7 +48,18 @@ export const TraderProfileScreen: React.FC = () => {
 
   // Determine if we're in trader view mode or offer view mode
   const isTraderView = !!trader && !offer;
-  const profileData = isTraderView ? trader : offer;
+  const profileData = isTraderView ? trader : {
+    ...offer,
+    name: offer?.offerDisplay || offer?.offerUser?.username || 
+          `${offer?.offerUser?.firstName || ''} ${offer?.offerUser?.lastName || ''}`.trim() ||
+          offer?.offerBusiness?.name || 'Usuario',
+    successRate: offer?.successRate || 0,
+    completedTrades: offer?.completedTrades || 0,
+    responseTime: offer?.responseTime || '< 1 hora',
+    isOnline: offer?.isOnline || false,
+    verified: offer?.verified || false,
+    lastSeen: offer?.lastSeen || 'Recientemente',
+  };
   
   // Define mutation inline to avoid import issues
   const TOGGLE_FAVORITE_MUTATION = gql`
@@ -300,13 +311,13 @@ export const TraderProfileScreen: React.FC = () => {
         <View style={styles.detailsCard}>
           <View style={styles.profileHeader}>
             <View style={styles.profileAvatarContainer}>
-              <Text style={styles.profileAvatarText}>{profileData!.name.charAt(0)}</Text>
-              {profileData!.isOnline && <View style={styles.onlineIndicatorLarge} />}
+              <Text style={styles.profileAvatarText}>{profileData?.name?.charAt(0) || 'U'}</Text>
+              {profileData?.isOnline && <View style={styles.onlineIndicatorLarge} />}
             </View>
             <View style={{flex: 1}}>
               <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 4}}>
-                <Text style={styles.profileName}>{profileData!.name}</Text>
-                {profileData!.verified && <Icon name="shield" size={20} color={colors.accent} style={{marginLeft: 8}} />}
+                <Text style={styles.profileName}>{profileData?.name || 'Usuario'}</Text>
+                {profileData?.verified && <Icon name="shield" size={20} color={colors.accent} style={{marginLeft: 8}} />}
                 {user && (
                   <TouchableOpacity 
                     style={styles.favoriteButton}
@@ -321,10 +332,10 @@ export const TraderProfileScreen: React.FC = () => {
                   </TouchableOpacity>
                 )}
               </View>
-              <Text style={styles.lastSeenText}>{profileData!.lastSeen}</Text>
+              <Text style={styles.lastSeenText}>{profileData?.lastSeen || 'Recientemente'}</Text>
               <View style={{flexDirection: 'row', alignItems: 'center', marginTop: 4}}>
                 <Icon name="check-circle" size={16} color="#16a34a" style={{marginRight: 4}} />
-                <Text style={styles.profileStatsText}>{Number(profileData!.successRate).toFixed(1)}% completado • {profileData!.completedTrades} operaciones</Text>
+                <Text style={styles.profileStatsText}>{Number(profileData?.successRate || 0).toFixed(1)}% completado • {profileData?.completedTrades || 0} operaciones</Text>
               </View>
             </View>
           </View>
@@ -332,14 +343,14 @@ export const TraderProfileScreen: React.FC = () => {
           <View style={styles.statsGrid}>
             <View style={styles.statBox}>
               <Text style={styles.statLabel}>Tiempo de respuesta</Text>
-              <Text style={styles.statValue}>{profileData!.responseTime}</Text>
+              <Text style={styles.statValue}>{profileData?.responseTime || '< 1 hora'}</Text>
             </View>
             <View style={styles.statBox}>
               <Text style={styles.statLabel}>{isTraderView ? 'Calificación' : 'Tasa de éxito'}</Text>
               <Text style={[styles.statValue, {color: '#16a34a'}]}>
                 {isTraderView && trader?.avgRating ? 
                   `${trader.avgRating.toFixed(1)} ★` : 
-                  `${Number(profileData!.successRate).toFixed(1)}%`
+                  `${Number(profileData?.successRate || 0).toFixed(1)}%`
                 }
               </Text>
             </View>
