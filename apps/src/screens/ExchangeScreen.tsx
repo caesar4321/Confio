@@ -1699,9 +1699,14 @@ export const ExchangeScreen = () => {
               </View>
               <Text style={styles.tradeCount}>
                 {completedTrades === 0 ? 'Nuevo trader' : `${completedTrades} operaciones`}
-                {isHighRated && ' • ⭐ Top'}
-                {isFastResponder && ' • ⚡ Rápido'}
               </Text>
+              {(isHighRated || isFastResponder) && (
+                <Text style={styles.traderStatus}>
+                  {isHighRated && '⭐ Trader Top'}
+                  {isHighRated && isFastResponder && ' • '}
+                  {isFastResponder && '⚡ Responde rápido'}
+                </Text>
+              )}
               <Text style={styles.successRate}>
                 {completedTrades === 0 ? 'Sin historial' : `${Number(successRate).toFixed(1)}% completado`}
               </Text>
@@ -3839,7 +3844,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   verifiedIcon: {
-    marginLeft: 2,
+    marginLeft: 6,
     flexShrink: 0, // Prevent the icon from shrinking
   },
   badge: {
@@ -3866,6 +3871,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
     fontWeight: '400',
+    marginTop: 2,
+  },
+  traderStatus: {
+    fontSize: 11,
+    color: '#059669',
+    fontWeight: '500',
     marginTop: 2,
   },
   bullet: {
