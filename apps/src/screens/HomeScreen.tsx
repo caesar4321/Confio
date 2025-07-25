@@ -32,6 +32,7 @@ import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
 import { useQuery } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
+import { useCountry } from '../contexts/CountryContext';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
@@ -83,6 +84,7 @@ export const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const { setCurrentAccountAvatar, profileMenu } = useHeader();
   const { signOut, userProfile } = useAuth();
+  const { userCountry } = useCountry();
   const [suiAddress, setSuiAddress] = React.useState<string>('');
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -120,7 +122,12 @@ export const HomeScreen = () => {
   // Calculate portfolio value - Only include cUSD for now
   // CONFIO value is not determined yet
   const totalUSDValue = cUSDBalance;
-  const localExchangeRate = 35.5; // TODO: Fetch real VES rate
+  
+  // Get local currency info based on user's country
+  const isVenezuela = userCountry?.[0] === 'VE';
+  const localCurrencySymbol = isVenezuela ? 'Bs.' : '$';
+  const localCurrencyName = isVenezuela ? 'Bolívares Venezolanos' : 'Dólares';
+  const localExchangeRate = isVenezuela ? 35.5 : 1; // TODO: Fetch real exchange rates
   const totalLocalValue = totalUSDValue * localExchangeRate;
   
   // Only show loading for initial data load
@@ -378,7 +385,7 @@ export const HomeScreen = () => {
             <View style={styles.portfolioTitleContainer}>
               <Text style={styles.portfolioLabel}>Mi Saldo Total</Text>
               <Text style={styles.portfolioSubLabel}>
-                {showLocalCurrency ? 'En Bolívares Venezolanos' : 'En Dólares Estadounidenses'}
+                {showLocalCurrency ? `En ${localCurrencyName}` : 'En Dólares Estadounidenses'}
               </Text>
             </View>
             <TouchableOpacity 
@@ -387,7 +394,7 @@ export const HomeScreen = () => {
               activeOpacity={0.7}
             >
               <Text style={styles.currencyToggleText}>
-                {showLocalCurrency ? 'Bs.' : 'USD'}
+                {showLocalCurrency ? (isVenezuela ? 'VES' : 'Local') : 'USD'}
               </Text>
               <Icon name="chevron-down" size={14} color="#fff" />
             </TouchableOpacity>
@@ -399,13 +406,13 @@ export const HomeScreen = () => {
               {
                 opacity: balanceAnim.interpolate({
                   inputRange: [0, 1],
-                  outputRange: [1, 0.3],
+                  outputRange: [1, 1],
                 }),
               }
             ]}
           >
             <Text style={styles.currencySymbol}>
-              {showLocalCurrency ? 'Bs.' : '$'}
+              {showLocalCurrency ? localCurrencySymbol : '$'}
             </Text>
             <Text style={styles.balanceAmount}>
               {showLocalCurrency 
@@ -608,10 +615,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   portfolioSubLabel: {
-    fontSize: 13,
-    color: '#ffffff',
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
     marginTop: 2,
-    fontWeight: '400',
   },
   currencyToggle: {
     flexDirection: 'row',
