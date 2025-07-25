@@ -3782,8 +3782,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   favoriteButton: {
-    padding: 4,
-    marginLeft: 8,
+    padding: 2,
   },
   offerHeader: {
     flexDirection: 'row',
@@ -3830,9 +3829,8 @@ const styles = StyleSheet.create({
   userActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
     flexShrink: 0,
-    marginLeft: 8,
   },
   userNameContainer: {
     flexDirection: 'row',
