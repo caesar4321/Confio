@@ -237,14 +237,6 @@ class P2POfferType(DjangoObjectType):
             if active_account and active_account.business:
                 favoriter_business = active_account.business
         
-        # Debug logging
-        print(f"\n[DEBUG] resolve_is_favorite for offer {self.id}")
-        print(f"  Active account: {active_account_type} (index: {active_account_index})")
-        print(f"  User: {user.id}")
-        print(f"  Favoriter business: {favoriter_business.id if favoriter_business else 'None'}")
-        print(f"  Offer user: {self.offer_user.id if self.offer_user else 'None'}")
-        print(f"  Offer business: {self.offer_business.id if self.offer_business else 'None'}")
-        
         # Check if the offer creator is in user's favorites based on account context
         if self.offer_user:
             if favoriter_business:
@@ -2258,7 +2250,6 @@ class Query(graphene.ObjectType):
     p2p_payment_methods = graphene.List(P2PPaymentMethodType, country_code=graphene.String())
 
     def resolve_p2p_offers(self, info, exchange_type=None, token_type=None, payment_method=None, country_code=None, favorites_only=False):
-        print(f"\n[DEBUG] resolve_p2p_offers called with favorites_only={favorites_only}")
         queryset = P2POffer.objects.filter(status='ACTIVE').select_related('user')
         
         if exchange_type:
@@ -2303,19 +2294,11 @@ class Query(graphene.ObjectType):
                         user=user,
                         favoriter_business=favoriter_business
                     ).values_list('favorite_user_id', 'favorite_business_id')
-                    print(f"\n[DEBUG] Favorites query (business {favoriter_business.id}):")
-                    print(f"  Found {len(favorite_users)} favorites")
-                    for fav_user_id, fav_business_id in favorite_users:
-                        print(f"  - User: {fav_user_id}, Business: {fav_business_id}")
                 else:
                     favorite_users = P2PFavoriteTrader.objects.filter(
                         user=user,
                         favoriter_business__isnull=True
                     ).values_list('favorite_user_id', 'favorite_business_id')
-                    print(f"\n[DEBUG] Favorites query (personal account):")
-                    print(f"  Found {len(favorite_users)} favorites")
-                    for fav_user_id, fav_business_id in favorite_users:
-                        print(f"  - User: {fav_user_id}, Business: {fav_business_id}")
                 
                 # Build query for favorite offers
                 favorite_q = Q()
@@ -2326,29 +2309,18 @@ class Query(graphene.ObjectType):
                         favorite_q |= Q(offer_business_id=fav_business_id)
                 
                 # Also include legacy offers from favorite users
+                # BUT exclude offers that have a business as primary creator
                 favorite_user_ids = [u[0] for u in favorite_users if u[0]]
                 if favorite_user_ids:
-                    favorite_q |= Q(user_id__in=favorite_user_ids)
-                
-                # Debug the query
-                print(f"\n[DEBUG] Favorite query Q object: {favorite_q}")
-                print(f"[DEBUG] Queryset before filter: {queryset.count()} offers")
+                    favorite_q |= Q(user_id__in=favorite_user_ids, offer_business__isnull=True)
                 
                 if favorite_q:
                     queryset = queryset.filter(favorite_q)
-                    print(f"[DEBUG] Queryset after filter: {queryset.count()} offers")
                 else:
                     # No favorites, return empty
                     return []
         
-        result = queryset.order_by('-created_at')
-        
-        # Debug: Log what offers are being returned
-        print(f"\n[DEBUG] resolve_p2p_offers returning {result.count()} offers")
-        for offer in result[:10]:  # First 10 to avoid too much logging
-            print(f"  - Offer {offer.id}: offer_user={offer.offer_user_id}, offer_business={offer.offer_business_id}, old_user={offer.user_id}")
-        
-        return result
+        return queryset.order_by('-created_at')
 
     def resolve_p2p_offer(self, info, id):
         try:
