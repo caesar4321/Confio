@@ -300,30 +300,12 @@ const authLink = setContext(async (operation, { headers }) => {
                 }
               );
               
-              // Get active account context to include in headers
-              let activeAccountType = 'personal';
-              let activeAccountIndex = 0;
-              
-              try {
-                const accountManager = AccountManager.getInstance();
-                const activeContext = await accountManager.getActiveAccountContext();
-                activeAccountType = activeContext.type;
-                activeAccountIndex = activeContext.index;
-                console.log('Token refresh - Including active account in headers:', {
-                  type: activeAccountType,
-                  index: activeAccountIndex
-                });
-              } catch (error) {
-                console.log('Token refresh - Could not get active account context, using defaults:', error);
-              }
-              
               // Use the new token for this request
               return {
                 headers: {
                   ...headers,
-                  Authorization: `JWT ${data.refreshToken.token}`,
-                  'X-Active-Account-Type': activeAccountType,
-                  'X-Active-Account-Index': activeAccountIndex.toString()
+                  Authorization: `JWT ${data.refreshToken.token}`
+                  // Account context is now embedded in the JWT token
                 }
               };
             } else {
@@ -348,32 +330,14 @@ const authLink = setContext(async (operation, { headers }) => {
           }
         } else {
           // If we're already refreshing, wait for the refresh to complete
-          return new Promise(async (resolve) => {
-            // Get active account context to include in headers
-            let activeAccountType = 'personal';
-            let activeAccountIndex = 0;
-            
-            try {
-              const accountManager = AccountManager.getInstance();
-              const activeContext = await accountManager.getActiveAccountContext();
-              activeAccountType = activeContext.type;
-              activeAccountIndex = activeContext.index;
-              console.log('Pending request - Including active account in headers:', {
-                type: activeAccountType,
-                index: activeAccountIndex
-              });
-            } catch (error) {
-              console.log('Pending request - Could not get active account context, using defaults:', error);
-            }
-            
+          return new Promise((resolve) => {
             pendingRequests.push((token: string | null) => {
               if (token) {
                 resolve({
                   headers: {
                     ...headers,
-                    Authorization: `JWT ${token}`,
-                    'X-Active-Account-Type': activeAccountType,
-                    'X-Active-Account-Index': activeAccountIndex.toString()
+                    Authorization: `JWT ${token}`
+                    // Account context is now embedded in the JWT token
                   }
                 });
               } else {
@@ -400,29 +364,11 @@ const authLink = setContext(async (operation, { headers }) => {
       // Always include the token in the header for authenticated requests
       console.log('Including JWT token in request header');
       
-      // Get active account context to include in headers
-      let activeAccountType = 'personal';
-      let activeAccountIndex = 0;
-      
-      try {
-        const accountManager = AccountManager.getInstance();
-        const activeContext = await accountManager.getActiveAccountContext();
-        activeAccountType = activeContext.type;
-        activeAccountIndex = activeContext.index;
-        console.log('Including active account in headers:', {
-          type: activeAccountType,
-          index: activeAccountIndex
-        });
-      } catch (error) {
-        console.log('Could not get active account context, using defaults:', error);
-      }
-      
       return {
         headers: {
           ...headers,
-          Authorization: `JWT ${token}`,
-          'X-Active-Account-Type': activeAccountType,
-          'X-Active-Account-Index': activeAccountIndex.toString()
+          Authorization: `JWT ${token}`
+          // Account context is now embedded in the JWT token
         }
       };
     } catch (error) {

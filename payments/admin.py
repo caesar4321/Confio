@@ -4,31 +4,15 @@ from django.contrib import messages
 from django.utils.html import format_html
 from .models import Invoice, PaymentTransaction
 
-class MerchantBusinessFilter(admin.SimpleListFilter):
-    title = 'Merchant Business Status'
-    parameter_name = 'merchant_business_status'
-
-    def lookups(self, request, model_admin):
-        return (
-            ('has_business', 'Has Business'),
-            ('missing_business', 'Missing Business (Legacy)'),
-        )
-
-    def queryset(self, request, queryset):
-        if self.value() == 'has_business':
-            return queryset.filter(merchant_business__isnull=False)
-        elif self.value() == 'missing_business':
-            return queryset.filter(merchant_business__isnull=True)
 
 @admin.register(PaymentTransaction)
 class PaymentTransactionAdmin(admin.ModelAdmin):
     """Admin configuration for PaymentTransaction model"""
     list_display = [
-        'id',
         'payment_transaction_id',
         'payer_display', 
         'merchant_display',
-        'amount', 
+        'amount_display', 
         'token_type', 
         'status', 
         'created_at',
@@ -42,8 +26,7 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
         'created_at', 
         'updated_at',
         'payer_user__is_active',
-        'merchant_account_user__is_active',
-        MerchantBusinessFilter  # Shows if merchant_business is missing
+        'merchant_account_user__is_active'
     ]
     search_fields = [
         'payment_transaction_id',
@@ -64,7 +47,8 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
         'payment_transaction_id',
         'created_at', 
         'updated_at', 
-        'transaction_hash'
+        'transaction_hash',
+        'amount_display'
     ]
     date_hierarchy = 'created_at'
     ordering = ['-created_at']
@@ -73,7 +57,7 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Payment Information', {
-            'fields': ('payment_transaction_id', 'amount', 'token_type', 'description')
+            'fields': ('payment_transaction_id', 'invoice', 'amount_display', 'amount', 'token_type', 'description')
         }),
         ('Payer Details', {
             'fields': ('payer_type', 'payer_user', 'payer_business', 'payer_display_name'),
@@ -81,17 +65,10 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
         }),
         ('Merchant Details', {
             'fields': ('merchant_type', 'merchant_business', 'merchant_account_user', 'merchant_display_name'),
-            'description': 'Merchant Business (REQUIRED) + User who handled the transaction (owner/cashier)'
+            'description': 'Merchant is always a business'
         }),
-        ('Legacy User Fields', {
-            'fields': ('merchant_user',),
-            'classes': ('collapse',),
-            'description': 'DEPRECATED: Use merchant_business + merchant_account_user instead'
-        }),
-        ('Legacy Account Details', {
+        ('Account Details', {
             'fields': ('payer_account', 'merchant_account'),
-            'classes': ('collapse',),
-            'description': 'Legacy account fields - will be deprecated'
         }),
         ('Blockchain Details', {
             'fields': ('payer_address', 'merchant_address', 'transaction_hash'),
@@ -99,10 +76,6 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
         }),
         ('Status & Timing', {
             'fields': ('status', 'error_message', 'created_at', 'updated_at')
-        }),
-        ('Invoice Reference', {
-            'fields': ('invoice',),
-            'classes': ('collapse',)
         }),
         ('System Fields', {
             'fields': ('deleted_at',),
@@ -133,32 +106,15 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
     
     def merchant_display(self, obj):
         """Display merchant with business and account user info"""
-        business_part = ""
-        user_part = ""
-        
-        # Show merchant business (the actual merchant entity)
-        if obj.merchant_business:
-            business_part = format_html(
-                '<span style="background-color: #8B5CF6; color: white; padding: 2px 6px; '
-                'border-radius: 4px; font-size: 11px; margin-right: 4px;">BUSINESS</span>'
-                '<strong>{}</strong>',
-                obj.merchant_business.name
-            )
-        elif obj.merchant_user:
-            # Legacy fallback - should be migrated
-            business_part = format_html(
-                '<span style="background-color: #F59E0B; color: white; padding: 2px 6px; '
-                'border-radius: 4px; font-size: 11px; margin-right: 4px;">LEGACY</span>'
-                '{}',
-                obj.merchant_user.username
-            )
-        else:
-            business_part = format_html(
-                '<span style="background-color: #EF4444; color: white; padding: 2px 6px; '
-                'border-radius: 4px; font-size: 11px;">⚠️ MISSING BUSINESS</span>'
-            )
+        business_part = format_html(
+            '<span style="background-color: #8B5CF6; color: white; padding: 2px 6px; '
+            'border-radius: 4px; font-size: 11px; margin-right: 4px;">BUSINESS</span>'
+            '<strong>{}</strong>',
+            obj.merchant_business.name
+        )
         
         # Show account user (who handled the transaction)
+        user_part = ""
         if obj.merchant_account_user:
             user_part = format_html(
                 '<br><small>👤 Handled by: {}</small>',
@@ -169,6 +125,16 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
     
     merchant_display.short_description = "Merchant Business & Handler"
     merchant_display.admin_order_field = 'merchant_business__name'
+    
+    def amount_display(self, obj):
+        """Display amount in decimal format"""
+        try:
+            from decimal import Decimal
+            amount = Decimal(obj.amount)
+            return f"{amount:,.2f} {obj.token_type}"
+        except (ValueError, TypeError):
+            return f"{obj.amount} {obj.token_type}"
+    amount_display.short_description = "Amount"
     
     def transaction_hash_display(self, obj):
         """Display transaction hash with truncation"""
@@ -201,7 +167,7 @@ class InvoiceAdmin(admin.ModelAdmin):
     list_display = [
         'invoice_id', 
         'merchant_display', 
-        'amount', 
+        'amount_display', 
         'token_type', 
         'status', 
         'created_at', 
@@ -214,8 +180,7 @@ class InvoiceAdmin(admin.ModelAdmin):
         'merchant_type', 
         'created_at', 
         'expires_at',
-        'created_by_user__is_active',
-        MerchantBusinessFilter  # Shows if merchant_business is missing
+        'created_by_user__is_active'
     ]
     search_fields = [
         'invoice_id', 
@@ -230,7 +195,8 @@ class InvoiceAdmin(admin.ModelAdmin):
         'created_at', 
         'updated_at', 
         'qr_code_data', 
-        'is_expired'
+        'is_expired',
+        'amount_display'
     ]
     date_hierarchy = 'created_at'
     ordering = ['-created_at']
@@ -239,27 +205,17 @@ class InvoiceAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Invoice Information', {
-            'fields': ('invoice_id', 'amount', 'token_type', 'description')
+            'fields': ('invoice_id', 'amount_display', 'amount', 'token_type', 'description')
         }),
         ('Merchant Details', {
-            'fields': ('merchant_type', 'merchant_business', 'created_by_user', 'merchant_display_name'),
-            'description': 'Merchant Business (REQUIRED) + User who created the invoice (owner/cashier)'
-        }),
-        ('Legacy User Fields', {
-            'fields': ('merchant_user',),
-            'classes': ('collapse',),
-            'description': 'DEPRECATED: Use merchant_business + created_by_user instead'
-        }),
-        ('Legacy Account Details', {
-            'fields': ('merchant_account',),
-            'classes': ('collapse',),
-            'description': 'Legacy account field - will be deprecated'
+            'fields': ('merchant_type', 'merchant_business', 'created_by_user', 'merchant_display_name', 'merchant_account'),
+            'description': 'Merchant is always a business'
         }),
         ('Status & Timing', {
             'fields': ('status', 'created_at', 'expires_at', 'is_expired')
         }),
         ('Payment Details', {
-            'fields': ('paid_by_user', 'paid_by_business', 'paid_at', 'transaction'),
+            'fields': ('paid_by_user', 'paid_by_business', 'paid_at'),
             'classes': ('collapse',)
         }),
         ('QR Code', {
@@ -274,42 +230,33 @@ class InvoiceAdmin(admin.ModelAdmin):
     
     def merchant_display(self, obj):
         """Display merchant with business and creator info"""
-        business_part = ""
-        creator_part = ""
-        
-        # Show merchant business (the actual merchant entity)
-        if obj.merchant_business:
-            business_part = format_html(
-                '<span style="background-color: #8B5CF6; color: white; padding: 2px 6px; '
-                'border-radius: 4px; font-size: 11px; margin-right: 4px;">BUSINESS</span>'
-                '<strong>{}</strong>',
-                obj.merchant_business.name
-            )
-        elif obj.merchant_user:
-            # Legacy fallback - should be migrated
-            business_part = format_html(
-                '<span style="background-color: #F59E0B; color: white; padding: 2px 6px; '
-                'border-radius: 4px; font-size: 11px; margin-right: 4px;">LEGACY</span>'
-                '{}',
-                obj.merchant_user.username
-            )
-        else:
-            business_part = format_html(
-                '<span style="background-color: #EF4444; color: white; padding: 2px 6px; '
-                'border-radius: 4px; font-size: 11px;">⚠️ MISSING BUSINESS</span>'
-            )
+        business_part = format_html(
+            '<span style="background-color: #8B5CF6; color: white; padding: 2px 6px; '
+            'border-radius: 4px; font-size: 11px; margin-right: 4px;">BUSINESS</span>'
+            '<strong>{}</strong>',
+            obj.merchant_business.name
+        )
         
         # Show creator user (who created the invoice)
-        if obj.created_by_user:
-            creator_part = format_html(
-                '<br><small>📝 Created by: {}</small>',
-                obj.created_by_user.username
-            )
+        creator_part = format_html(
+            '<br><small>📝 Created by: {}</small>',
+            obj.created_by_user.username
+        )
         
         return format_html('{}{}', business_part, creator_part)
     
     merchant_display.short_description = "Merchant Business & Creator"
     merchant_display.admin_order_field = 'merchant_business__name'
+    
+    def amount_display(self, obj):
+        """Display amount in decimal format"""
+        try:
+            from decimal import Decimal
+            amount = Decimal(obj.amount)
+            return f"{amount:,.2f} {obj.token_type}"
+        except (ValueError, TypeError):
+            return f"{obj.amount} {obj.token_type}"
+    amount_display.short_description = "Amount"
     
     def is_expired_display(self, obj):
         """Display if invoice is expired with color coding"""

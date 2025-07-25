@@ -1221,8 +1221,8 @@ export class AuthService {
       note: accountContext.type === 'personal' ? 'Personal account (index 0)' : `Business account (index ${accountContext.index})`
     });
     
-    // Use the updated salt generation function with account type and index
-    return generateZkLoginSaltUtil(iss, sub, clientId, accountContext.type, accountContext.index);
+    // Use the updated salt generation function with account type, business_id, and index
+    return generateZkLoginSaltUtil(iss, sub, clientId, accountContext.type, accountContext.businessId || '', accountContext.index);
   }
 
   private async storeTokens(tokens: TokenStorage): Promise<void> {
@@ -1444,10 +1444,19 @@ export class AuthService {
     
     const accountContext = accountManager.parseAccountId(accountId);
     
+    // If it's a business account, get the businessId
+    if (accountContext.type === 'business') {
+      const account = await accountManager.getAccount(accountId);
+      if (account?.business?.id) {
+        accountContext.businessId = account.business.id;
+      }
+    }
+    
     console.log('AuthService - Parsed account context:', {
       accountId: accountId,
       accountType: accountContext.type,
       accountIndex: accountContext.index,
+      businessId: accountContext.businessId,
       note: accountContext.type === 'personal' ? 'Personal account (index 0)' : `Business account (index ${accountContext.index})`
     });
     

@@ -167,7 +167,8 @@ export const CreateBusinessScreen = () => {
           // Set the active account context to the newly created business account
           await authService.setActiveAccountContext({
             type: createdAccount.accountType,
-            index: createdAccount.accountIndex
+            index: createdAccount.accountIndex,
+            businessId: createdBusiness?.id
           });
           
           // Generate the Sui address

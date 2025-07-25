@@ -55,16 +55,6 @@ class PaymentTransaction(SoftDeleteModel):
         blank=True,
         help_text='User associated with the merchant business (owner or cashier)'
     )
-    
-    # LEGACY: Keep for backward compatibility
-    merchant_user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='payment_transactions_received_legacy',
-        null=True,
-        blank=True,
-        help_text='DEPRECATED: Use merchant_account_user instead'
-    )
 
     # Business relationship fields
     payer_business = models.ForeignKey(
@@ -76,14 +66,12 @@ class PaymentTransaction(SoftDeleteModel):
         help_text='Business that made the payment (if payer is business account)'
     )
     
-    # The actual merchant entity (WILL BE REQUIRED after data migration)
+    # The actual merchant entity (REQUIRED - only businesses can accept payments)
     merchant_business = models.ForeignKey(
         'users.Business',
         on_delete=models.CASCADE,
         related_name='payment_transactions_received',
-        null=True,
-        blank=True,
-        help_text='Business entity that received the payment (will be required after migration)'
+        help_text='Business entity that received the payment'
     )
 
     # Computed fields for GraphQL
@@ -113,6 +101,13 @@ class PaymentTransaction(SoftDeleteModel):
         max_length=255,
         blank=True,
         help_text='Display name for the merchant'
+    )
+    
+    # Phone number at transaction time (only for payer)
+    payer_phone = models.CharField(
+        max_length=30,
+        blank=True,
+        help_text='Payer phone number at transaction time'
     )
 
     # Legacy Account references
@@ -165,7 +160,7 @@ class PaymentTransaction(SoftDeleteModel):
             models.Index(fields=['payment_transaction_id']),
             models.Index(fields=['transaction_hash']),
             models.Index(fields=['payer_user', 'status']),
-            models.Index(fields=['merchant_user', 'status']),
+            models.Index(fields=['merchant_account_user', 'status']),
             models.Index(fields=['payer_address']),
             models.Index(fields=['merchant_address']),
             models.Index(fields=['created_at']),
@@ -187,7 +182,7 @@ class PaymentTransaction(SoftDeleteModel):
         ]
 
     def __str__(self):
-        merchant_name = self.merchant_business.name if self.merchant_business else (self.merchant_user.username if self.merchant_user else "Unknown Merchant")
+        merchant_name = self.merchant_business.name
         return f"PAY-{self.payment_transaction_id}: {self.token_type} {self.amount} from {self.payer_user} to {merchant_name}"
 
 class Invoice(SoftDeleteModel):
@@ -218,29 +213,15 @@ class Invoice(SoftDeleteModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name='invoices_created_by',
-        null=True,
-        blank=True,
         help_text='User who created this invoice (business owner or cashier)'
     )
-    
-    # LEGACY: Keep for backward compatibility during transition
-    merchant_user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='invoices_created_legacy',
-        null=True,
-        blank=True,
-        help_text='DEPRECATED: Use created_by_user instead'
-    )
 
-    # The actual merchant entity (WILL BE REQUIRED after data migration)
+    # The actual merchant entity (REQUIRED - only businesses can create invoices)
     merchant_business = models.ForeignKey(
         'users.Business',
         on_delete=models.CASCADE,
         related_name='invoices_received',
-        null=True,
-        blank=True,
-        help_text='Business entity that is the actual merchant (will be required after migration)'
+        help_text='Business entity that is the actual merchant'
     )
 
     # Computed fields for GraphQL
@@ -286,16 +267,6 @@ class Invoice(SoftDeleteModel):
         help_text='Business that paid the invoice (if payer is business)'
     )
     paid_at = models.DateTimeField(null=True, blank=True)
-    # Note: The actual payment transaction is now stored in PaymentTransaction model
-    # This field is kept for backward compatibility but will be deprecated
-    transaction = models.ForeignKey(
-        'send.SendTransaction',
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='invoice',
-        help_text="DEPRECATED: Use payment_transactions instead"
-    )
 
     # Expiration
     expires_at = models.DateTimeField()
@@ -304,13 +275,13 @@ class Invoice(SoftDeleteModel):
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['invoice_id']),
-            models.Index(fields=['merchant_user', 'status']),
+            models.Index(fields=['merchant_business', 'status']),
             models.Index(fields=['status', 'expires_at']),
             models.Index(fields=['created_at']),
         ]
 
     def __str__(self):
-        merchant_name = self.merchant_business.name if self.merchant_business else (self.merchant_user.username if self.merchant_user else "Unknown Merchant")
+        merchant_name = self.merchant_business.name
         return f"INV-{self.invoice_id}: {self.token_type} {self.amount} by {merchant_name}"
 
     @property

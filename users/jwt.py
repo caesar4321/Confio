@@ -8,7 +8,7 @@ from django.contrib.auth import get_user_model
 logger = logging.getLogger(__name__)
 
 def jwt_payload_handler(user, context=None):
-    """Add auth_token_version to the JWT payload"""
+    """Add auth_token_version and account context to the JWT payload"""
     logger.info(f"jwt_payload_handler called with user: id={user.id}, username={user.username}, auth_token_version={getattr(user, 'auth_token_version', None)}")
     
     # Ensure user has auth_token_version
@@ -22,7 +22,31 @@ def jwt_payload_handler(user, context=None):
     username = user.get_username()
     auth_token_version = user.auth_token_version
     
+    # Get active account context from request if available
+    account_type = 'personal'
+    account_index = 0
+    business_id = None
+    
+    if context and hasattr(context, 'active_account_type'):
+        account_type = context.active_account_type
+        account_index = context.active_account_index
+        
+        # If it's a business account, get the business_id
+        if account_type == 'business':
+            try:
+                from users.models import Account
+                account = Account.objects.get(
+                    user=user,
+                    account_type='business',
+                    account_index=account_index
+                )
+                if account.business:
+                    business_id = str(account.business.id)
+            except Account.DoesNotExist:
+                logger.warning(f"Business account not found for user {user_id} with index {account_index}")
+    
     logger.info(f"User details - id: {user_id}, username: {username}, auth_token_version: {auth_token_version}")
+    logger.info(f"Account context - type: {account_type}, index: {account_index}, business_id: {business_id}")
     
     # Get current timestamp
     now = datetime.utcnow()
@@ -34,13 +58,17 @@ def jwt_payload_handler(user, context=None):
         'origIat': int(now.timestamp()),  # Convert to timestamp
         'auth_token_version': auth_token_version,
         'exp': int((now + timedelta(hours=1)).timestamp()),  # 1 hour for access token
-        'type': 'access'  # Indicate this is an access token
+        'type': 'access',  # Indicate this is an access token
+        # Account context fields
+        'account_type': account_type,
+        'account_index': account_index,
+        'business_id': business_id  # Will be None for personal accounts
     }
     logger.info(f"Generated JWT payload: {payload}")
     return payload
 
-def refresh_token_payload_handler(user):
-    """Generate a refresh token payload with longer expiration"""
+def refresh_token_payload_handler(user, account_type='personal', account_index=0, business_id=None):
+    """Generate a refresh token payload with longer expiration and account context"""
     now = datetime.utcnow()
     payload = {
         'user_id': user.id,
@@ -48,7 +76,11 @@ def refresh_token_payload_handler(user):
         'origIat': int(now.timestamp()),
         'auth_token_version': user.auth_token_version,
         'exp': int((now + timedelta(days=365)).timestamp()),  # 1 year for refresh token
-        'type': 'refresh'  # Indicate this is a refresh token
+        'type': 'refresh',  # Indicate this is a refresh token
+        # Account context fields
+        'account_type': account_type,
+        'account_index': account_index,
+        'business_id': business_id
     }
     return payload
 

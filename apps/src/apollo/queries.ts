@@ -263,7 +263,7 @@ export const GET_INVOICE = gql`
       invoice {
         id
         invoiceId
-        merchantUser {
+        createdByUser {
           id
           username
           firstName
@@ -398,6 +398,200 @@ export const GET_SEND_TRANSACTIONS = gql`
   }
 `;
 
+// NEW: Get send transactions by specific account
+export const GET_SEND_TRANSACTIONS_BY_ACCOUNT = gql`
+  query GetSendTransactionsByAccount($accountType: String!, $accountIndex: Int!, $limit: Int) {
+    sendTransactionsByAccount(accountType: $accountType, accountIndex: $accountIndex, limit: $limit) {
+      id
+      senderUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      recipientUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      senderBusiness {
+        id
+        name
+        category
+      }
+      recipientBusiness {
+        id
+        name
+        category
+      }
+      senderType
+      recipientType
+      senderDisplayName
+      recipientDisplayName
+      senderPhone
+      recipientPhone
+      senderAddress
+      recipientAddress
+      amount
+      tokenType
+      memo
+      status
+      transactionHash
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+// NEW: Get send transactions with a specific friend
+export const GET_SEND_TRANSACTIONS_WITH_FRIEND = gql`
+  query GetSendTransactionsWithFriend($friendUserId: ID!, $limit: Int) {
+    sendTransactionsWithFriend(friendUserId: $friendUserId, limit: $limit) {
+      id
+      senderUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      recipientUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      senderBusiness {
+        id
+        name
+        category
+      }
+      recipientBusiness {
+        id
+        name
+        category
+      }
+      senderType
+      recipientType
+      senderDisplayName
+      recipientDisplayName
+      senderPhone
+      recipientPhone
+      senderAddress
+      recipientAddress
+      amount
+      tokenType
+      memo
+      status
+      transactionHash
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+// NEW: Get payment transactions by specific account
+export const GET_PAYMENT_TRANSACTIONS_BY_ACCOUNT = gql`
+  query GetPaymentTransactionsByAccount($accountType: String!, $accountIndex: Int!, $limit: Int) {
+    paymentTransactionsByAccount(accountType: $accountType, accountIndex: $accountIndex, limit: $limit) {
+      id
+      paymentTransactionId
+      payerUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      merchantAccountUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      payerBusiness {
+        id
+        name
+        category
+      }
+      merchantBusiness {
+        id
+        name
+        category
+      }
+      payerType
+      merchantType
+      payerDisplayName
+      merchantDisplayName
+      payerPhone
+      payerAddress
+      merchantAddress
+      amount
+      tokenType
+      description
+      status
+      transactionHash
+      createdAt
+      updatedAt
+      invoice {
+        id
+        invoiceId
+        description
+      }
+    }
+  }
+`;
+
+// NEW: Get payment transactions with a specific friend
+export const GET_PAYMENT_TRANSACTIONS_WITH_FRIEND = gql`
+  query GetPaymentTransactionsWithFriend($friendUserId: ID!, $limit: Int) {
+    paymentTransactionsWithFriend(friendUserId: $friendUserId, limit: $limit) {
+      id
+      paymentTransactionId
+      payerUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      merchantAccountUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      payerBusiness {
+        id
+        name
+        category
+      }
+      merchantBusiness {
+        id
+        name
+        category
+      }
+      payerType
+      merchantType
+      payerDisplayName
+      merchantDisplayName
+      payerPhone
+      payerAddress
+      merchantAddress
+      amount
+      tokenType
+      description
+      status
+      transactionHash
+      createdAt
+      updatedAt
+      invoice {
+        id
+        invoiceId
+        description
+      }
+    }
+  }
+`;
+
 export const GET_ACCOUNT_BALANCE = gql`
   query GetAccountBalance($tokenType: String!) {
     accountBalance(tokenType: $tokenType)
@@ -424,7 +618,7 @@ export const GET_INVOICES = gql`
       createdAt
       updatedAt
       isExpired
-      merchantUser {
+      merchantAccountUser {
         id
         username
         firstName
@@ -463,7 +657,7 @@ export const GET_INVOICES = gql`
             address
           }
         }
-        merchantUser {
+        createdByUser {
           id
           username
           firstName

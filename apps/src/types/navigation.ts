@@ -141,6 +141,7 @@ export type MainStackParamList = {
     accountName: string;
     accountSymbol: string;
     accountBalance: string;
+    accountAddress?: string;
   };
   USDCDeposit: { tokenType?: 'usdc' | 'cusd' | 'confio' };
   USDCManage: undefined;
@@ -148,6 +149,13 @@ export type MainStackParamList = {
   SendToFriend: { 
     friend: { name: string; avatar: string; isOnConfio: boolean; phone: string };
     tokenType?: 'cusd' | 'confio';
+  };
+  FriendDetail: {
+    friendId: string;
+    friendName: string;
+    friendAvatar: string;
+    friendPhone?: string;
+    isOnConfio: boolean;
   };
   TransactionDetail: {
     transactionType: 'received' | 'sent' | 'exchange' | 'payment';
@@ -332,5 +340,6 @@ export type RootStackParamList = {
     accountName: string;
     accountSymbol: string;
     accountBalance: string;
+    accountAddress?: string;
   };
 }; 

@@ -36,17 +36,17 @@ export const ContactsScreen = () => {
   
   // Mock data
   const friends = [
-    { name: "Evelyn", isOnConfio: true, avatar: "E", phone: "+58 412-123-4567" },
-    { name: "Julian", isOnConfio: true, avatar: "J", phone: "+58 414-987-6543" },
-    { name: "Olivia", isOnConfio: true, avatar: "O", phone: "+58 416-555-1234" },
-    { name: "Susy", isOnConfio: true, avatar: "S", phone: "+58 418-777-8888" }
+    { id: "1", name: "Evelyn", isOnConfio: true, avatar: "E", phone: "+58 412-123-4567" },
+    { id: "2", name: "Julian", isOnConfio: true, avatar: "J", phone: "+58 414-987-6543" },
+    { id: "3", name: "Olivia", isOnConfio: true, avatar: "O", phone: "+58 416-555-1234" },
+    { id: "4", name: "Susy", isOnConfio: true, avatar: "S", phone: "+58 418-777-8888" }
   ];
 
   const nonConfioFriends = [
-    { name: "Boris", avatar: "B", phone: "+58 412-111-2222" },
-    { name: "Jeffrey", avatar: "J", phone: "+58 414-333-4444" },
-    { name: "Juan", avatar: "J", phone: "+58 416-555-6666" },
-    { name: "Yadira", avatar: "Y", phone: "+58 418-999-0000" }
+    { id: "5", name: "Boris", avatar: "B", phone: "+58 412-111-2222" },
+    { id: "6", name: "Jeffrey", avatar: "J", phone: "+58 414-333-4444" },
+    { id: "7", name: "Juan", avatar: "J", phone: "+58 416-555-6666" },
+    { id: "8", name: "Yadira", avatar: "Y", phone: "+58 418-999-0000" }
   ];
 
   const handleReceiveWithAddress = () => {
@@ -98,8 +98,19 @@ export const ContactsScreen = () => {
     friend.phone.includes(searchTerm)
   );
 
+  const handleFriendPress = (contact: any) => {
+    // Navigate to friend detail screen to show transaction history
+    navigation.navigate('FriendDetail', {
+      friendId: contact.id || `friend_${contact.name}`, // Use contact ID or generate one
+      friendName: contact.name,
+      friendAvatar: contact.avatar,
+      friendPhone: contact.phone,
+      isOnConfio: contact.isOnConfio || false
+    });
+  };
+
   const ContactCard = ({ contact, isOnConfio = false }: { contact: any; isOnConfio?: boolean }) => (
-    <View style={styles.contactCard}>
+    <TouchableOpacity style={styles.contactCard} onPress={() => handleFriendPress(contact)}>
       <View style={[
         styles.avatarContainer,
         { backgroundColor: isOnConfio ? colors.primaryLight : '#e5e7eb' }
@@ -120,20 +131,26 @@ export const ContactsScreen = () => {
       {isOnConfio ? (
         <TouchableOpacity
           style={styles.sendButton}
-          onPress={() => handleSendToFriend(contact)}
+          onPress={(e) => {
+            e.stopPropagation(); // Prevent triggering the card press
+            handleSendToFriend(contact);
+          }}
         >
           <Icon name="send" size={20} color="#fff" />
         </TouchableOpacity>
       ) : (
         <TouchableOpacity
           style={styles.inviteButton}
-          onPress={() => handleInviteFriend(contact)}
+          onPress={(e) => {
+            e.stopPropagation(); // Prevent triggering the card press
+            handleInviteFriend(contact);
+          }}
         >
           <Icon name="gift" size={16} color="#fff" style={{ marginRight: 6 }} />
           <Text style={styles.inviteButtonText}>Enviar & Invitar</Text>
         </TouchableOpacity>
       )}
-    </View>
+    </TouchableOpacity>
   );
 
   const TokenSelectionModal = () => (

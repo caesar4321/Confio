@@ -127,7 +127,7 @@ export const ScanScreen = () => {
 
       // Client-side validations:
       // 1. User isn't paying their own invoice
-      if (invoice.merchantUser?.id === activeAccount?.id) {
+      if (invoice.createdByUser?.id === activeAccount?.id) {
         Alert.alert('Cannot Pay Own Invoice', 'You cannot pay your own invoice.');
         setScannedSuccessfully(false);
         return;
