@@ -475,22 +475,6 @@ export const AccountDetailScreen = () => {
     navigation.navigate('BottomTabs', { screen: 'Contacts' });
   };
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    setTransactionLimit(10); // Reset to initial limit
-    setHasReachedEnd(false); // Reset end flag
-    try {
-      await Promise.all([
-        refetchSend(),
-        refetchPayment()
-      ]);
-    } catch (error) {
-      console.error('Error refreshing transactions:', error);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   const loadMoreTransactions = async () => {
     if (loadingMore || hasReachedEnd) return;
     
