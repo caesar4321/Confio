@@ -2779,6 +2779,7 @@ export const ExchangeScreen = () => {
                                         setFilterVerified(false);
                                         setFilterOnline(false);
                                         setFilterHighVolume(false);
+                                        setFilterFavorites(false);
                                         setSelectedPaymentMethod('Todos los métodos');
                                         
                                         // Also clear the filter inputs
