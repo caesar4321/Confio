@@ -109,6 +109,45 @@ export const TransactionItemSkeleton: React.FC = () => (
   </View>
 );
 
+export const OfferCardSkeleton: React.FC = () => (
+  <View style={styles.offerCard}>
+    <View style={styles.offerHeader}>
+      <View style={styles.offerUserInfo}>
+        <SkeletonLoader width={40} height={40} borderRadius={20} />
+        <View style={styles.offerUserDetails}>
+          <SkeletonLoader width={120} height={16} style={{ marginBottom: 4 }} />
+          <SkeletonLoader width={80} height={14} />
+        </View>
+      </View>
+      <SkeletonLoader width={60} height={20} />
+    </View>
+    <View style={styles.offerBody}>
+      <SkeletonLoader width={100} height={14} style={{ marginBottom: 8 }} />
+      <SkeletonLoader width="100%" height={16} style={{ marginBottom: 4 }} />
+      <SkeletonLoader width="80%" height={14} />
+    </View>
+  </View>
+);
+
+export const TradeCardSkeleton: React.FC = () => (
+  <View style={styles.tradeCard}>
+    <View style={styles.tradeHeader}>
+      <SkeletonLoader width={80} height={20} borderRadius={10} />
+      <SkeletonLoader width={100} height={16} />
+    </View>
+    <View style={styles.tradeBody}>
+      <View style={styles.tradeInfo}>
+        <SkeletonLoader width={40} height={40} borderRadius={20} />
+        <View style={styles.tradeDetails}>
+          <SkeletonLoader width={150} height={16} style={{ marginBottom: 4 }} />
+          <SkeletonLoader width={120} height={14} />
+        </View>
+      </View>
+      <SkeletonLoader width={80} height={24} />
+    </View>
+  </View>
+);
+
 const styles = StyleSheet.create({
   container: {
     backgroundColor: '#e5e7eb',
@@ -141,5 +180,61 @@ const styles = StyleSheet.create({
   transactionDetails: {
     flex: 1,
     marginLeft: 12,
+  },
+  offerCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  offerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  offerUserInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  offerUserDetails: {
+    marginLeft: 12,
+  },
+  offerBody: {
+    marginTop: 8,
+  },
+  tradeCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  tradeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  tradeBody: {
+    marginTop: 8,
+  },
+  tradeInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  tradeDetails: {
+    marginLeft: 12,
+    flex: 1,
   },
 });
