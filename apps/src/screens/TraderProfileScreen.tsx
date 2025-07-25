@@ -48,18 +48,33 @@ export const TraderProfileScreen: React.FC = () => {
 
   // Determine if we're in trader view mode or offer view mode
   const isTraderView = !!trader && !offer;
-  const profileData = isTraderView ? trader : {
-    ...offer,
-    name: offer?.offerDisplay || offer?.offerUser?.username || 
-          `${offer?.offerUser?.firstName || ''} ${offer?.offerUser?.lastName || ''}`.trim() ||
-          offer?.offerBusiness?.name || 'Usuario',
-    successRate: offer?.successRate || 0,
-    completedTrades: offer?.completedTrades || 0,
-    responseTime: offer?.responseTime || '< 1 hora',
-    isOnline: offer?.isOnline || false,
-    verified: offer?.verified || false,
-    lastSeen: offer?.lastSeen || 'Recientemente',
-  };
+  const profileData = isTraderView ? trader : (() => {
+    // Extract the proper display name
+    let displayName = 'Usuario';
+    if (offer?.offerBusiness) {
+      displayName = offer.offerBusiness.name;
+    } else if (offer?.offerUser) {
+      const firstName = offer.offerUser.firstName || '';
+      const lastInitial = offer.offerUser.lastName?.charAt(0) || '';
+      displayName = `${firstName}${lastInitial ? ' ' + lastInitial + '.' : ''}`;
+    } else if (offer?.user) {
+      // Fallback to old field for compatibility
+      const firstName = offer.user.firstName || '';
+      const lastInitial = offer.user.lastName?.charAt(0) || '';
+      displayName = `${firstName}${lastInitial ? ' ' + lastInitial + '.' : ''}`;
+    }
+    
+    return {
+      ...offer,
+      name: displayName,
+      successRate: offer?.successRate || 0,
+      completedTrades: offer?.completedTrades || 0,
+      responseTime: offer?.responseTime || '< 1 hora',
+      isOnline: offer?.isOnline || false,
+      verified: offer?.verified || false,
+      lastSeen: offer?.lastSeen || 'Recientemente',
+    };
+  })();
   
   // Define mutation inline to avoid import issues
   const TOGGLE_FAVORITE_MUTATION = gql`
