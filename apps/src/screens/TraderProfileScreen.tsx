@@ -36,6 +36,13 @@ export const TraderProfileScreen: React.FC = () => {
   const [isFavoriting, setIsFavoriting] = React.useState(false);
   const [isFavorite, setIsFavorite] = React.useState(false);
   
+  // Initialize favorite status from route params or fetch it
+  React.useEffect(() => {
+    if (offer?.isFavorite !== undefined) {
+      setIsFavorite(offer.isFavorite);
+    }
+  }, [offer?.isFavorite]);
+  
   // Use currency system based on selected country
   const { currency, formatAmount } = useCurrency();
 
@@ -63,6 +70,10 @@ export const TraderProfileScreen: React.FC = () => {
     try {
       setIsFavoriting(true);
       
+      // Optimistic update
+      const newFavoriteStatus = !isFavorite;
+      setIsFavorite(newFavoriteStatus);
+      
       // Determine trader ID from the profile data
       let mutationVariables = {};
       if (trader?.businessId) {
@@ -77,6 +88,7 @@ export const TraderProfileScreen: React.FC = () => {
         mutationVariables = { traderUserId: offer.user.id };
       } else {
         Alert.alert('Error', 'No se pudo identificar al trader');
+        setIsFavorite(!newFavoriteStatus); // Revert on error
         return;
       }
       
@@ -85,13 +97,18 @@ export const TraderProfileScreen: React.FC = () => {
       });
       
       if (data?.toggleFavoriteTrader?.success) {
+        // Update with server response
         setIsFavorite(data.toggleFavoriteTrader.isFavorite);
       } else {
+        // Revert on failure
+        setIsFavorite(!newFavoriteStatus);
         const message = data?.toggleFavoriteTrader?.message || 'No se pudo actualizar el favorito';
         Alert.alert('Error', message);
       }
     } catch (error) {
       console.error('Error toggling favorite:', error);
+      // Revert on error
+      setIsFavorite(!isFavorite);
       Alert.alert('Error', 'Ocurrió un error al actualizar el favorito');
     } finally {
       setIsFavoriting(false);
