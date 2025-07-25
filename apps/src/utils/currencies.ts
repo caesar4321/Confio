@@ -17,7 +17,7 @@ export const currencies: { [key: string]: Currency } = {
   // Major currencies
   USD: {
     code: 'USD',
-    name: 'US Dollar',
+    name: 'Dólar Estadounidense',
     symbol: '$',
     symbolPosition: 'before',
     decimals: 2,
@@ -37,7 +37,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   GBP: {
     code: 'GBP',
-    name: 'British Pound',
+    name: 'Libra Esterlina',
     symbol: '£',
     symbolPosition: 'before',
     decimals: 2,
@@ -49,7 +49,7 @@ export const currencies: { [key: string]: Currency } = {
   // Latin America
   VES: {
     code: 'VES',
-    name: 'Venezuelan Bolívar',
+    name: 'Bolívar Venezolano',
     symbol: 'Bs.',
     symbolPosition: 'after',
     decimals: 2,
@@ -59,7 +59,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   ARS: {
     code: 'ARS',
-    name: 'Argentine Peso',
+    name: 'Peso Argentino',
     symbol: '$',
     symbolPosition: 'before',
     decimals: 2,
@@ -69,7 +69,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   BRL: {
     code: 'BRL',
-    name: 'Brazilian Real',
+    name: 'Real Brasileño',
     symbol: 'R$',
     symbolPosition: 'before',
     decimals: 2,
@@ -79,7 +79,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   CLP: {
     code: 'CLP',
-    name: 'Chilean Peso',
+    name: 'Peso Chileno',
     symbol: '$',
     symbolPosition: 'before',
     decimals: 0,
@@ -89,7 +89,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   COP: {
     code: 'COP',
-    name: 'Colombian Peso',
+    name: 'Peso Colombiano',
     symbol: '$',
     symbolPosition: 'before',
     decimals: 2,
@@ -99,7 +99,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   MXN: {
     code: 'MXN',
-    name: 'Mexican Peso',
+    name: 'Peso Mexicano',
     symbol: '$',
     symbolPosition: 'before',
     decimals: 2,
@@ -109,7 +109,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   PEN: {
     code: 'PEN',
-    name: 'Peruvian Sol',
+    name: 'Sol Peruano',
     symbol: 'S/',
     symbolPosition: 'before',
     decimals: 2,
@@ -119,7 +119,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   UYU: {
     code: 'UYU',
-    name: 'Uruguayan Peso',
+    name: 'Peso Uruguayo',
     symbol: '$U',
     symbolPosition: 'before',
     decimals: 2,
@@ -127,11 +127,21 @@ export const currencies: { [key: string]: Currency } = {
     decimalSeparator: ',',
     minorUnit: 100,
   },
+  DOP: {
+    code: 'DOP',
+    name: 'Peso Dominicano',
+    symbol: 'RD$',
+    symbolPosition: 'before',
+    decimals: 2,
+    thousandsSeparator: ',',
+    decimalSeparator: '.',
+    minorUnit: 100,
+  },
   
   // Asia
   CNY: {
     code: 'CNY',
-    name: 'Chinese Yuan',
+    name: 'Yuan Chino',
     symbol: '¥',
     symbolPosition: 'before',
     decimals: 2,
@@ -141,7 +151,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   JPY: {
     code: 'JPY',
-    name: 'Japanese Yen',
+    name: 'Yen Japonés',
     symbol: '¥',
     symbolPosition: 'before',
     decimals: 0,
@@ -151,7 +161,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   KRW: {
     code: 'KRW',
-    name: 'South Korean Won',
+    name: 'Won Surcoreano',
     symbol: '₩',
     symbolPosition: 'before',
     decimals: 0,
@@ -161,7 +171,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   INR: {
     code: 'INR',
-    name: 'Indian Rupee',
+    name: 'Rupia India',
     symbol: '₹',
     symbolPosition: 'before',
     decimals: 2,
@@ -171,7 +181,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   IDR: {
     code: 'IDR',
-    name: 'Indonesian Rupiah',
+    name: 'Rupia Indonesia',
     symbol: 'Rp',
     symbolPosition: 'before',
     decimals: 0,
@@ -181,7 +191,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   THB: {
     code: 'THB',
-    name: 'Thai Baht',
+    name: 'Baht Tailandés',
     symbol: '฿',
     symbolPosition: 'before',
     decimals: 2,
@@ -191,7 +201,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   VND: {
     code: 'VND',
-    name: 'Vietnamese Dong',
+    name: 'Dong Vietnamita',
     symbol: '₫',
     symbolPosition: 'after',
     decimals: 0,
@@ -203,7 +213,7 @@ export const currencies: { [key: string]: Currency } = {
   // Europe
   RUB: {
     code: 'RUB',
-    name: 'Russian Ruble',
+    name: 'Rublo Ruso',
     symbol: '₽',
     symbolPosition: 'after',
     decimals: 2,
@@ -213,7 +223,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   PLN: {
     code: 'PLN',
-    name: 'Polish Zloty',
+    name: 'Zloty Polaco',
     symbol: 'zł',
     symbolPosition: 'after',
     decimals: 2,
@@ -223,7 +233,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   CZK: {
     code: 'CZK',
-    name: 'Czech Koruna',
+    name: 'Corona Checa',
     symbol: 'Kč',
     symbolPosition: 'after',
     decimals: 2,
@@ -235,7 +245,7 @@ export const currencies: { [key: string]: Currency } = {
   // Africa
   NGN: {
     code: 'NGN',
-    name: 'Nigerian Naira',
+    name: 'Naira Nigeriano',
     symbol: '₦',
     symbolPosition: 'before',
     decimals: 2,
@@ -245,7 +255,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   ZAR: {
     code: 'ZAR',
-    name: 'South African Rand',
+    name: 'Rand Sudafricano',
     symbol: 'R',
     symbolPosition: 'before',
     decimals: 2,
@@ -255,7 +265,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   EGP: {
     code: 'EGP',
-    name: 'Egyptian Pound',
+    name: 'Libra Egipcia',
     symbol: 'E£',
     symbolPosition: 'before',
     decimals: 2,
@@ -267,7 +277,7 @@ export const currencies: { [key: string]: Currency } = {
   // Middle East
   AED: {
     code: 'AED',
-    name: 'UAE Dirham',
+    name: 'Dírham de EAU',
     symbol: 'د.إ',
     symbolPosition: 'before',
     decimals: 2,
@@ -277,7 +287,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   SAR: {
     code: 'SAR',
-    name: 'Saudi Riyal',
+    name: 'Riyal Saudí',
     symbol: '﷼',
     symbolPosition: 'before',
     decimals: 2,
@@ -289,7 +299,7 @@ export const currencies: { [key: string]: Currency } = {
   // Other major currencies
   CAD: {
     code: 'CAD',
-    name: 'Canadian Dollar',
+    name: 'Dólar Canadiense',
     symbol: 'C$',
     symbolPosition: 'before',
     decimals: 2,
@@ -299,7 +309,7 @@ export const currencies: { [key: string]: Currency } = {
   },
   AUD: {
     code: 'AUD',
-    name: 'Australian Dollar',
+    name: 'Dólar Australiano',
     symbol: 'A$',
     symbolPosition: 'before',
     decimals: 2,
@@ -309,11 +319,21 @@ export const currencies: { [key: string]: Currency } = {
   },
   CHF: {
     code: 'CHF',
-    name: 'Swiss Franc',
+    name: 'Franco Suizo',
     symbol: 'CHF',
     symbolPosition: 'before',
     decimals: 2,
     thousandsSeparator: "'",
+    decimalSeparator: '.',
+    minorUnit: 100,
+  },
+  NZD: {
+    code: 'NZD',
+    name: 'Dólar Neozelandés',
+    symbol: 'NZ$',
+    symbolPosition: 'before',
+    decimals: 2,
+    thousandsSeparator: ',',
     decimalSeparator: '.',
     minorUnit: 100,
   },
@@ -345,6 +365,7 @@ export const countryToCurrency: { [countryIso: string]: string } = {
   'CO': 'COP',
   'PE': 'PEN',
   'UY': 'UYU',
+  'DO': 'DOP',
   
   // Asia
   'CN': 'CNY',

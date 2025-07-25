@@ -34,6 +34,7 @@ import { useQuery } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 import { useCountry } from '../contexts/CountryContext';
 import { useCurrency } from '../hooks/useCurrency';
+import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
@@ -87,6 +88,7 @@ export const HomeScreen = () => {
   const { signOut, userProfile } = useAuth();
   const { userCountry } = useCountry();
   const { currency, formatAmount, exchangeRate } = useCurrency();
+  const { rate: marketRate } = useSelectedCountryRate();
   const [suiAddress, setSuiAddress] = React.useState<string>('');
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -125,8 +127,8 @@ export const HomeScreen = () => {
   // CONFIO value is not determined yet
   const totalUSDValue = cUSDBalance;
   
-  // TODO: Fetch real exchange rate from API
-  const localExchangeRate = 35.5; // Temporary hardcoded rate
+  // Use real exchange rate from API, fallback to 1 if not available
+  const localExchangeRate = marketRate || 1;
   const totalLocalValue = totalUSDValue * localExchangeRate;
   
   // Only show loading for initial data load
@@ -384,7 +386,7 @@ export const HomeScreen = () => {
             <View style={styles.portfolioTitleContainer}>
               <Text style={styles.portfolioLabel}>Mi Saldo Total</Text>
               <Text style={styles.portfolioSubLabel}>
-                {showLocalCurrency ? `En ${currency.name}` : 'En Dólares Estadounidenses'}
+                {showLocalCurrency ? `En ${currency.name}` : 'En Dólares'}
               </Text>
             </View>
             <TouchableOpacity 
