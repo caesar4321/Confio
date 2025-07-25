@@ -2346,7 +2346,7 @@ class Query(graphene.ObjectType):
         # Debug: Log what offers are being returned
         print(f"\n[DEBUG] resolve_p2p_offers returning {result.count()} offers")
         for offer in result[:10]:  # First 10 to avoid too much logging
-            print(f"  - Offer {offer.id}: user={offer.offer_user_id}, business={offer.offer_business_id}")
+            print(f"  - Offer {offer.id}: offer_user={offer.offer_user_id}, offer_business={offer.offer_business_id}, old_user={offer.user_id}")
         
         return result
 
