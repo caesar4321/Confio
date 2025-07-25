@@ -1675,11 +1675,11 @@ export const ExchangeScreen = () => {
               {activityStatus.isActive && <View style={styles.onlineIndicator} />}
             </View>
             <View style={styles.userInfoContainer}>
-              <View style={styles.userNameContainer}>
+              <View style={styles.userTopRow}>
                 <Text style={styles.userName} numberOfLines={1} ellipsizeMode="tail">{userName}</Text>
-                <View style={styles.traderBadges}>
+                <View style={styles.userActionsRow}>
                   {isVerified && (
-                    <Icon name="shield" size={16} color={colors.accent} style={styles.verifiedIcon} />
+                    <Icon name="shield" size={14} color={colors.accent} style={styles.verifiedIcon} />
                   )}
                   {(isHighRated || isNewTrader || isFastResponder) && (
                     <View style={styles.badge}>
@@ -1688,22 +1688,21 @@ export const ExchangeScreen = () => {
                       </Text>
                     </View>
                   )}
+                  <TouchableOpacity 
+                    style={styles.favoriteButton}
+                    onPress={() => {
+                      console.log('[Star Button] Pressed. Current isFavorite:', offer.isFavorite);
+                      handleToggleFavorite();
+                    }}
+                    disabled={isFavoriting || isOwnOffer}
+                  >
+                    <Icon 
+                      name="star" 
+                      size={16} 
+                      color={localIsFavorite ? '#FBBF24' : (isOwnOffer ? '#E5E7EB' : '#9CA3AF')} 
+                    />
+                  </TouchableOpacity>
                 </View>
-                {/* Add a visible star for ALL offers to test rendering */}
-                <TouchableOpacity 
-                  style={styles.favoriteButtonName}
-                  onPress={() => {
-                    console.log('[Star Button] Pressed. Current isFavorite:', offer.isFavorite);
-                    handleToggleFavorite();
-                  }}
-                  disabled={isFavoriting || isOwnOffer}
-                >
-                  <Icon 
-                    name="star" 
-                    size={18} 
-                    color={localIsFavorite ? '#FBBF24' : (isOwnOffer ? '#E5E7EB' : '#9CA3AF')} 
-                  />
-                </TouchableOpacity>
               </View>
               <Text style={styles.tradeCount}>
                 {completedTrades === 0 ? 'Nuevo trader' : `${completedTrades} operaciones`}
@@ -3782,11 +3781,9 @@ const styles = StyleSheet.create({
     padding: 8,
     marginLeft: 8,
   },
-  favoriteButtonName: {
+  favoriteButton: {
     padding: 4,
     marginLeft: 8,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 12,
   },
   offerHeader: {
     flexDirection: 'row',
@@ -3825,25 +3822,30 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#fff',
   },
+  userTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  userActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   userNameContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   userName: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: '#1F2937',
-    flexShrink: 1,
+    flex: 1,
+    marginRight: 8,
   },
   verifiedIcon: {
-    marginLeft: 4,
+    marginLeft: 2,
     flexShrink: 0, // Prevent the icon from shrinking
-  },
-  traderBadges: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 6,
-    gap: 4,
   },
   badge: {
     backgroundColor: '#F3F4F6',
