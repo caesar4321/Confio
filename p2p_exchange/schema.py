@@ -16,7 +16,8 @@ from .models import (
     P2PUserStats, 
     P2PEscrow,
     P2PTradeRating,
-    P2PTradeConfirmation
+    P2PTradeConfirmation,
+    P2PDispute
 )
 from .default_payment_methods import get_payment_methods_for_country
 
@@ -260,14 +261,35 @@ class P2PTradeConfirmationType(DjangoObjectType):
 class P2PEscrowType(DjangoObjectType):
     """GraphQL type for P2P escrow records"""
     
+    # Add computed field for status display
+    status_display = graphene.String()
+    
     class Meta:
         model = P2PEscrow
         fields = (
             'id', 'trade', 'escrow_amount', 'token_type',
             'escrow_transaction_hash', 'release_transaction_hash',
             'is_escrowed', 'is_released',
-            'escrowed_at', 'released_at',
+            'release_type', 'release_amount', 'resolved_by_dispute',
+            'dispute_resolution', 'escrowed_at', 'released_at',
             'created_at', 'updated_at'
+        )
+    
+    def resolve_status_display(self, info):
+        """Return human-readable status"""
+        return self.status_display
+
+class P2PDisputeType(DjangoObjectType):
+    """GraphQL type for P2P disputes"""
+    
+    class Meta:
+        model = P2PDispute
+        fields = (
+            'id', 'trade', 'initiator_user', 'initiator_business',
+            'reason', 'status', 'priority', 'resolution_type',
+            'resolution_amount', 'resolution_notes', 'admin_notes',
+            'evidence_urls', 'resolved_by', 'opened_at', 'resolved_at',
+            'last_updated'
         )
 
 class P2PTradeType(DjangoObjectType):
@@ -299,7 +321,7 @@ class P2PTradeType(DjangoObjectType):
             'buyer', 'seller', 'buyer_account', 'seller_account', 
             'crypto_amount', 'fiat_amount', 'rate_used', 'payment_method', 'status', 
             'expires_at', 'payment_reference', 'payment_notes', 'crypto_transaction_hash', 
-            'completed_at', 'dispute_reason', 'disputed_at', 'resolved_at', 'created_at', 'updated_at',
+            'completed_at', 'created_at', 'updated_at',
             # Country and currency info
             'country_code', 'currency_code',
             # Escrow info
@@ -1724,6 +1746,124 @@ class RateP2PTrade(graphene.Mutation):
                 errors=[str(e)]
             )
 
+class DisputeP2PTrade(graphene.Mutation):
+    class Arguments:
+        trade_id = graphene.ID(required=True)
+        reason = graphene.String(required=True)
+        
+    trade = graphene.Field(P2PTradeType)
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+    
+    @classmethod
+    def mutate(cls, root, info, trade_id, reason):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return DisputeP2PTrade(
+                trade=None,
+                success=False,
+                errors=["Authentication required"]
+            )
+        
+        try:
+            # Get trade and verify user is part of it
+            trade = P2PTrade.objects.filter(
+                id=trade_id
+            ).filter(
+                models.Q(buyer_user=user) | 
+                models.Q(seller_user=user) |
+                models.Q(buyer_business__accounts__user=user) |
+                models.Q(seller_business__accounts__user=user)
+            ).distinct().first()
+            
+            if not trade:
+                return DisputeP2PTrade(
+                    trade=None,
+                    success=False,
+                    errors=["Trade not found or access denied"]
+                )
+            
+            # Check if trade can be disputed
+            if trade.status in ['COMPLETED', 'CANCELLED', 'EXPIRED']:
+                return DisputeP2PTrade(
+                    trade=None,
+                    success=False,
+                    errors=[f"Cannot dispute a trade with status: {trade.status}"]
+                )
+            
+            # Check if already disputed
+            if trade.status == 'DISPUTED':
+                return DisputeP2PTrade(
+                    trade=trade,
+                    success=False,
+                    errors=["Trade is already disputed"]
+                )
+            
+            # Validate reason
+            if not reason or len(reason.strip()) < 10:
+                return DisputeP2PTrade(
+                    trade=None,
+                    success=False,
+                    errors=["Please provide a detailed reason for the dispute (minimum 10 characters)"]
+                )
+            
+            # Update trade status to disputed
+            from django.utils import timezone
+            trade.status = 'DISPUTED'
+            trade.save()
+            
+            # Create detailed dispute record
+            from .models import P2PDispute
+            
+            # Determine if initiator is user or business based on active account
+            request = info.context
+            active_account_type = getattr(request, 'active_account_type', 'personal')
+            active_account_index = getattr(request, 'active_account_index', 0)
+            
+            dispute_kwargs = {
+                'trade': trade,
+                'reason': reason.strip(),
+                'priority': 2  # Default to medium priority
+            }
+            
+            # Determine which account is initiating the dispute
+            if active_account_type == 'business':
+                # Check if user is acting as buyer business or seller business
+                if trade.buyer_business and trade.buyer_business.accounts.filter(user=user, account_index=active_account_index).exists():
+                    dispute_kwargs['initiator_business'] = trade.buyer_business
+                elif trade.seller_business and trade.seller_business.accounts.filter(user=user, account_index=active_account_index).exists():
+                    dispute_kwargs['initiator_business'] = trade.seller_business
+                else:
+                    # Fallback to user if business not found
+                    dispute_kwargs['initiator_user'] = user
+            else:
+                # User is disputing as personal account
+                dispute_kwargs['initiator_user'] = user
+            
+            P2PDispute.objects.create(**dispute_kwargs)
+            
+            # Send system message about dispute
+            P2PMessage.objects.create(
+                trade=trade,
+                message_type='SYSTEM',
+                content=f"Trade disputed: {reason}"
+            )
+            
+            # TODO: Send notification to admin and other party
+            
+            return DisputeP2PTrade(
+                trade=trade,
+                success=True,
+                errors=[]
+            )
+            
+        except Exception as e:
+            return DisputeP2PTrade(
+                trade=None,
+                success=False,
+                errors=[str(e)]
+            )
+
 class ConfirmP2PTradeStep(graphene.Mutation):
     class Arguments:
         input = ConfirmP2PTradeStepInput(required=True)
@@ -2262,12 +2402,14 @@ class Query(graphene.ObjectType):
         from django.db.models import Case, When, IntegerField
         
         # Define status priority (lower number = higher priority)
+        # DISPUTED trades should appear at the top with high priority
         status_ordering = Case(
-            When(status='PENDING', then=1),
-            When(status='PAYMENT_PENDING', then=2),
-            When(status='PAYMENT_SENT', then=3),
-            When(status='PAYMENT_CONFIRMED', then=4),
-            When(status='COMPLETED', then=5),
+            When(status='DISPUTED', then=1),
+            When(status='PENDING', then=2),
+            When(status='PAYMENT_PENDING', then=3),
+            When(status='PAYMENT_SENT', then=4),
+            When(status='PAYMENT_CONFIRMED', then=5),
+            When(status='COMPLETED', then=6),
             default=999,
             output_field=IntegerField()
         )
@@ -2368,7 +2510,465 @@ class Mutation(graphene.ObjectType):
     update_p2p_trade_status = UpdateP2PTradeStatus.Field()
     send_p2p_message = SendP2PMessage.Field()
     rate_p2p_trade = RateP2PTrade.Field()
+    dispute_p2p_trade = DisputeP2PTrade.Field()
     confirm_p2p_trade_step = ConfirmP2PTradeStep.Field()
+
+# Admin Dispute Resolution Mutations
+class ResolveDispute(graphene.Mutation):
+    """Mutation for admins to resolve disputes"""
+    
+    class Arguments:
+        dispute_id = graphene.ID(required=True)
+        resolution_type = graphene.String(required=True)
+        resolution_notes = graphene.String()
+        resolution_amount = graphene.Decimal()
+    
+    dispute = graphene.Field(P2PDisputeType)
+    trade = graphene.Field(P2PTradeType)
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+    
+    def mutate(self, info, dispute_id, resolution_type, resolution_notes=None, resolution_amount=None):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return ResolveDispute(
+                dispute=None,
+                trade=None,
+                success=False,
+                errors=["Authentication required"]
+            )
+        
+        # Check if user is admin/staff
+        if not (user.is_staff or user.is_superuser):
+            return ResolveDispute(
+                dispute=None,
+                trade=None,
+                success=False,
+                errors=["Admin privileges required"]
+            )
+        
+        try:
+            from .models import P2PDispute, P2PTrade
+            from django.utils import timezone
+            
+            # Get the dispute
+            dispute = P2PDispute.objects.get(id=dispute_id)
+            
+            if dispute.status == 'RESOLVED':
+                return ResolveDispute(
+                    dispute=dispute,
+                    trade=dispute.trade,
+                    success=False,
+                    errors=["Dispute is already resolved"]
+                )
+            
+            # Update dispute
+            dispute.status = 'RESOLVED'
+            dispute.resolution_type = resolution_type
+            dispute.resolution_notes = resolution_notes or f"Resolved by {user.username}"
+            dispute.resolution_amount = resolution_amount
+            dispute.resolved_by = user
+            dispute.resolved_at = timezone.now()
+            dispute.save()
+            
+            # Update trade based on resolution type and handle escrow
+            trade = dispute.trade
+            
+            # Handle escrow fund movements
+            try:
+                escrow = trade.escrow
+                if escrow and escrow.is_escrowed and not escrow.is_released:
+                    # Funds are in escrow and need to be moved
+                    
+                    if resolution_type == 'REFUND_BUYER':
+                        # Refund funds to buyer
+                        trade.status = 'CANCELLED'
+                        # TODO: Implement blockchain refund transaction
+                        escrow.release_transaction_hash = f"dispute_refund_{dispute.id}_{timezone.now().timestamp()}"
+                        
+                        # Use the new release_funds method
+                        escrow.release_funds(
+                            release_type='REFUND',
+                            amount=escrow.escrow_amount,
+                            dispute=dispute
+                        )
+                        
+                        # Create transaction record
+                        from .models import P2PDisputeTransaction
+                        P2PDisputeTransaction.objects.create(
+                            dispute=dispute,
+                            trade=trade,
+                            transaction_type='REFUND',
+                            amount=escrow.escrow_amount,
+                            token_type=escrow.token_type,
+                            recipient_user=trade.buyer_user,
+                            recipient_business=trade.buyer_business,
+                            status='COMPLETED',
+                            processed_by=user,
+                            processed_at=timezone.now(),
+                            transaction_hash=escrow.release_transaction_hash,
+                            notes=f"Dispute resolution: Full refund to buyer"
+                        )
+                        
+                    elif resolution_type == 'RELEASE_TO_SELLER':
+                        # Release funds to seller (dispute resolved in seller's favor)
+                        trade.status = 'COMPLETED' 
+                        trade.completed_at = timezone.now()
+                        # TODO: Implement blockchain release transaction
+                        escrow.release_transaction_hash = f"dispute_release_{dispute.id}_{timezone.now().timestamp()}"
+                        
+                        # Use the new release_funds method
+                        escrow.release_funds(
+                            release_type='DISPUTE_RELEASE',
+                            amount=escrow.escrow_amount,
+                            dispute=dispute
+                        )
+                        
+                        # Create transaction record
+                        P2PDisputeTransaction.objects.create(
+                            dispute=dispute,
+                            trade=trade,
+                            transaction_type='RELEASE',
+                            amount=escrow.escrow_amount,
+                            token_type=escrow.token_type,
+                            recipient_user=trade.seller_user,
+                            recipient_business=trade.seller_business,
+                            status='COMPLETED',
+                            processed_by=user,
+                            processed_at=timezone.now(),
+                            transaction_hash=escrow.release_transaction_hash,
+                            notes=f"Dispute resolution: Release to seller"
+                        )
+                        
+                    elif resolution_type == 'PARTIAL_REFUND':
+                        # Split funds between buyer and seller
+                        trade.status = 'COMPLETED'
+                        trade.completed_at = timezone.now()
+                        # TODO: Implement blockchain partial refund transaction
+                        escrow.release_transaction_hash = f"dispute_partial_{dispute.id}_{timezone.now().timestamp()}"
+                        
+                        # Calculate amounts
+                        refund_amount = resolution_amount or (escrow.escrow_amount / 2)  # Default to 50/50 split
+                        
+                        # Use the new release_funds method
+                        escrow.release_funds(
+                            release_type='PARTIAL_REFUND',
+                            amount=refund_amount,  # Track the refund amount as the primary release amount
+                            dispute=dispute
+                        )
+                        
+                        # Create transaction records for partial refund
+                        seller_amount = escrow.escrow_amount - refund_amount
+                        
+                        # Refund to buyer
+                        if refund_amount > 0:
+                            P2PDisputeTransaction.objects.create(
+                                dispute=dispute,
+                                trade=trade,
+                                transaction_type='PARTIAL_REFUND',
+                                amount=refund_amount,
+                                token_type=escrow.token_type,
+                                recipient_user=trade.buyer_user,
+                                recipient_business=trade.buyer_business,
+                                status='COMPLETED',
+                                processed_by=user,
+                                processed_at=timezone.now(),
+                                transaction_hash=escrow.release_transaction_hash + "_buyer",
+                                notes=f"Dispute resolution: Partial refund to buyer ({refund_amount} {escrow.token_type})"
+                            )
+                        
+                        # Payment to seller
+                        if seller_amount > 0:
+                            P2PDisputeTransaction.objects.create(
+                                dispute=dispute,
+                                trade=trade,
+                                transaction_type='SPLIT',
+                                amount=seller_amount,
+                                token_type=escrow.token_type,
+                                recipient_user=trade.seller_user,
+                                recipient_business=trade.seller_business,
+                                status='COMPLETED',
+                                processed_by=user,
+                                processed_at=timezone.now(),
+                                transaction_hash=escrow.release_transaction_hash + "_seller",
+                                notes=f"Dispute resolution: Partial payment to seller ({seller_amount} {escrow.token_type})"
+                            )
+                        
+                    elif resolution_type == 'CANCELLED':
+                        # Cancel trade and refund to buyer
+                        trade.status = 'CANCELLED'
+                        # TODO: Implement blockchain refund transaction
+                        escrow.release_transaction_hash = f"dispute_cancel_{dispute.id}_{timezone.now().timestamp()}"
+                        
+                        # Use the new release_funds method
+                        escrow.release_funds(
+                            release_type='REFUND',
+                            amount=escrow.escrow_amount,
+                            dispute=dispute
+                        )
+                        
+                        # Create transaction record
+                        P2PDisputeTransaction.objects.create(
+                            dispute=dispute,
+                            trade=trade,
+                            transaction_type='REFUND',
+                            amount=escrow.escrow_amount,
+                            token_type=escrow.token_type,
+                            recipient_user=trade.buyer_user,
+                            recipient_business=trade.buyer_business,
+                            status='COMPLETED',
+                            processed_by=user,
+                            processed_at=timezone.now(),
+                            transaction_hash=escrow.release_transaction_hash,
+                            notes=f"Dispute resolution: Trade cancelled, full refund to buyer"
+                        )
+                        
+                    # For 'NO_ACTION', keep current trade status and don't touch escrow
+                    
+                else:
+                    # No escrow or already released, just update trade status
+                    if resolution_type == 'REFUND_BUYER':
+                        trade.status = 'CANCELLED'
+                    elif resolution_type == 'RELEASE_TO_SELLER':
+                        trade.status = 'COMPLETED'
+                        trade.completed_at = timezone.now()
+                    elif resolution_type == 'PARTIAL_REFUND':
+                        trade.status = 'COMPLETED'
+                        trade.completed_at = timezone.now()
+                    elif resolution_type == 'CANCELLED':
+                        trade.status = 'CANCELLED'
+                        
+            except Exception as escrow_error:
+                print(f"[DISPUTE] Escrow handling error for dispute {dispute_id}: {str(escrow_error)}")
+                # Continue with trade status update even if escrow fails
+                if resolution_type == 'REFUND_BUYER':
+                    trade.status = 'CANCELLED'
+                elif resolution_type == 'RELEASE_TO_SELLER':
+                    trade.status = 'COMPLETED'
+                    trade.completed_at = timezone.now()
+                elif resolution_type == 'PARTIAL_REFUND':
+                    trade.status = 'COMPLETED'
+                    trade.completed_at = timezone.now()
+                elif resolution_type == 'CANCELLED':
+                    trade.status = 'CANCELLED'
+            
+            trade.save()
+            
+            # Send system message to chat
+            from .models import P2PMessage
+            resolution_messages = {
+                'REFUND_BUYER': '✅ Disputa resuelta: Se ha procesado el reembolso completo al comprador.',
+                'RELEASE_TO_SELLER': '✅ Disputa resuelta: Los fondos han sido liberados al vendedor.',
+                'PARTIAL_REFUND': f'✅ Disputa resuelta: Se ha procesado un reembolso parcial de {resolution_amount or "N/A"}.',
+                'CANCELLED': '✅ Disputa resuelta: El intercambio ha sido cancelado.',
+                'NO_ACTION': '✅ Disputa resuelta: No se requiere acción adicional.'
+            }
+            
+            system_message = resolution_messages.get(resolution_type, '✅ Disputa resuelta.')
+            if resolution_notes:
+                system_message += f"\n\nNotas del administrador: {resolution_notes}"
+            
+            P2PMessage.objects.create(
+                trade=trade,
+                message=system_message,
+                sender_type='system',
+                message_type='system'
+            )
+            
+            print(f"[DISPUTE] Resolved dispute {dispute_id} with {resolution_type} by {user.username}")
+            
+            return ResolveDispute(
+                dispute=dispute,
+                trade=trade,
+                success=True,
+                errors=[]
+            )
+            
+        except P2PDispute.DoesNotExist:
+            return ResolveDispute(
+                dispute=None,
+                trade=None,
+                success=False,
+                errors=["Dispute not found"]
+            )
+        except Exception as e:
+            print(f"[DEBUG] Error in ResolveDispute: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return ResolveDispute(
+                dispute=None,
+                trade=None,
+                success=False,
+                errors=[f"Error resolving dispute: {str(e)}"]
+            )
+
+class EscalateDispute(graphene.Mutation):
+    """Mutation for escalating disputes to higher priority"""
+    
+    class Arguments:
+        dispute_id = graphene.ID(required=True)
+        escalation_notes = graphene.String()
+    
+    dispute = graphene.Field(P2PDisputeType)
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+    
+    def mutate(self, info, dispute_id, escalation_notes=None):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return EscalateDispute(
+                dispute=None,
+                success=False,
+                errors=["Authentication required"]
+            )
+        
+        # Check if user is admin/staff
+        if not (user.is_staff or user.is_superuser):
+            return EscalateDispute(
+                dispute=None,
+                success=False,
+                errors=["Admin privileges required"]
+            )
+        
+        try:
+            from .models import P2PDispute
+            
+            dispute = P2PDispute.objects.get(id=dispute_id)
+            
+            if dispute.status == 'RESOLVED':
+                return EscalateDispute(
+                    dispute=dispute,
+                    success=False,
+                    errors=["Cannot escalate resolved dispute"]
+                )
+            
+            # Update dispute
+            dispute.status = 'ESCALATED'
+            dispute.priority = min(3, dispute.priority + 1)  # Max priority is 3 (high)
+            if escalation_notes:
+                current_notes = dispute.admin_notes or ""
+                dispute.admin_notes = f"{current_notes}\n\n[ESCALATED by {user.username}]: {escalation_notes}".strip()
+            dispute.save()
+            
+            print(f"[DISPUTE] Escalated dispute {dispute_id} by {user.username}")
+            
+            return EscalateDispute(
+                dispute=dispute,
+                success=True,
+                errors=[]
+            )
+            
+        except P2PDispute.DoesNotExist:
+            return EscalateDispute(
+                dispute=None,
+                success=False,
+                errors=["Dispute not found"]
+            )
+        except Exception as e:
+            print(f"[DEBUG] Error in EscalateDispute: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return EscalateDispute(
+                dispute=None,
+                success=False,
+                errors=[f"Error escalating dispute: {str(e)}"]
+            )
+
+class AddDisputeEvidence(graphene.Mutation):
+    """Mutation for admins to add evidence or notes to disputes"""
+    
+    class Arguments:
+        dispute_id = graphene.ID(required=True)
+        evidence_type = graphene.String(required=True)  # 'note', 'evidence', 'communication'
+        content = graphene.String(required=True)
+        evidence_urls = graphene.List(graphene.String)
+    
+    dispute = graphene.Field(P2PDisputeType)
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+    
+    def mutate(self, info, dispute_id, evidence_type, content, evidence_urls=None):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return AddDisputeEvidence(
+                dispute=None,
+                success=False,
+                errors=["Authentication required"]
+            )
+        
+        # Check if user is admin/staff
+        if not (user.is_staff or user.is_superuser):
+            return AddDisputeEvidence(
+                dispute=None,
+                success=False,
+                errors=["Admin privileges required"]
+            )
+        
+        try:
+            from .models import P2PDispute
+            from django.utils import timezone
+            
+            dispute = P2PDispute.objects.get(id=dispute_id)
+            
+            if dispute.status == 'RESOLVED':
+                return AddDisputeEvidence(
+                    dispute=dispute,
+                    success=False,
+                    errors=["Cannot add evidence to resolved dispute"]
+                )
+            
+            # Add to admin notes
+            timestamp = timezone.now().strftime('%Y-%m-%d %H:%M:%S')
+            evidence_entry = f"\n\n[{evidence_type.upper()} - {timestamp} by {user.username}]: {content}"
+            
+            if evidence_urls:
+                evidence_entry += f"\nEvidence URLs: {', '.join(evidence_urls)}"
+                # Also add to evidence_urls field
+                current_urls = dispute.evidence_urls or []
+                dispute.evidence_urls = current_urls + evidence_urls
+            
+            current_notes = dispute.admin_notes or ""
+            dispute.admin_notes = (current_notes + evidence_entry).strip()
+            dispute.save()
+            
+            # If it's a communication note, also add to trade chat
+            if evidence_type == 'communication':
+                from .models import P2PMessage
+                P2PMessage.objects.create(
+                    trade=dispute.trade,
+                    message=f"💬 Mensaje del equipo de soporte:\n\n{content}",
+                    sender_type='system',
+                    message_type='system'
+                )
+            
+            print(f"[DISPUTE] Added {evidence_type} to dispute {dispute_id} by {user.username}")
+            
+            return AddDisputeEvidence(
+                dispute=dispute,
+                success=True,
+                errors=[]
+            )
+            
+        except P2PDispute.DoesNotExist:
+            return AddDisputeEvidence(
+                dispute=None,
+                success=False,
+                errors=["Dispute not found"]
+            )
+        except Exception as e:
+            print(f"[DEBUG] Error in AddDisputeEvidence: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return AddDisputeEvidence(
+                dispute=None,
+                success=False,
+                errors=[f"Error adding evidence: {str(e)}"]
+            )
+
+# Add the admin dispute mutations to the main Mutation class
+Mutation.resolve_dispute = ResolveDispute.Field()
+Mutation.escalate_dispute = EscalateDispute.Field()
+Mutation.add_dispute_evidence = AddDisputeEvidence.Field()
 
 # Subscriptions
 class TradeChatMessageSubscription(graphene.ObjectType):

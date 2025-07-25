@@ -296,6 +296,9 @@ export const TradeChatScreen: React.FC = () => {
   const [typingUser, setTypingUser] = useState<string | null>(null);
   const [isSecurityNoticeDismissed, setIsSecurityNoticeDismissed] = useState(false);
   const [showPaymentMethodSelector, setShowPaymentMethodSelector] = useState(false);
+  
+  // Check if trade is disputed
+  const isTradeDisputed = tradeDetailsData?.p2pTrade?.status === 'DISPUTED' || tradeStatus === 'DISPUTED';
   const [availablePaymentAccounts, setAvailablePaymentAccounts] = useState<any[]>([]);
 
   const messagesListRef = useRef<FlatList>(null);
@@ -639,6 +642,9 @@ export const TradeChatScreen: React.FC = () => {
             case 'COMPLETED':
               systemText = '✅ Intercambio completado exitosamente.';
               break;
+            case 'DISPUTED':
+              systemText = '⚠️ Este intercambio ha sido reportado y está en disputa. Un moderador revisará el caso.';
+              break;
           }
           
           if (systemText) {
@@ -866,6 +872,21 @@ export const TradeChatScreen: React.FC = () => {
 
     return () => clearInterval(timer);
   }, []);
+
+  // Monitor trade status for dispute
+  useEffect(() => {
+    if (tradeDetailsData?.p2pTrade?.status === 'DISPUTED' && !isTradeDisputed) {
+      // Add system message when trade becomes disputed
+      const systemMessage: Message = {
+        id: Date.now() + Math.random(),
+        sender: 'system',
+        text: '⚠️ Este intercambio ha sido reportado y está en disputa. Un moderador revisará el caso.',
+        timestamp: new Date(),
+        type: 'system',
+      };
+      setMessages(prev => [systemMessage, ...prev]);
+    }
+  }, [tradeDetailsData?.p2pTrade?.status, isTradeDisputed]);
 
   // Debug messages state
   useEffect(() => {
@@ -1454,13 +1475,15 @@ export const TradeChatScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Right: Abandonar Button */}
-        <TouchableOpacity 
-          style={styles.abandonButton}
-          onPress={handleAbandonTrade}
-        >
-          <Text style={styles.abandonButtonText}>Abandonar</Text>
-        </TouchableOpacity>
+        {/* Right: Abandonar Button - Hidden during disputes */}
+        {!isTradeDisputed && (
+          <TouchableOpacity 
+            style={styles.abandonButton}
+            onPress={handleAbandonTrade}
+          >
+            <Text style={styles.abandonButtonText}>Abandonar</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Trade Status Banner */}
@@ -1580,6 +1603,20 @@ export const TradeChatScreen: React.FC = () => {
         </TouchableWithoutFeedback>
       )}
 
+      {/* Dispute Banner */}
+      {isTradeDisputed && (
+        <View style={styles.disputeBanner}>
+          <Icon name="alert-triangle" size={16} color="#DC2626" style={styles.disputeIcon} />
+          <View style={styles.disputeTextContainer}>
+            <Text style={styles.disputeTitle}>Intercambio en disputa</Text>
+            <Text style={styles.disputeText}>
+              Este intercambio está siendo revisado por nuestro equipo de soporte. 
+              El chat permanece abierto para facilitar la resolución.
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* Messages and Input Container */}
       <KeyboardAvoidingView 
         style={styles.chatContainer} 
@@ -1631,7 +1668,15 @@ export const TradeChatScreen: React.FC = () => {
         {/* Message Input */}
         <TouchableWithoutFeedback>
           <View style={styles.inputContainer}>
-        <View style={styles.inputRow}>
+            {isTradeDisputed ? (
+              <View style={styles.disputedInputContainer}>
+                <Icon name="alert-triangle" size={16} color="#DC2626" style={styles.disputedInputIcon} />
+                <Text style={styles.disputedInputText}>
+                  Chat bloqueado durante la disputa. El equipo de soporte revisará este intercambio.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.inputRow}>
           {/* Share Payment Details Button - Only show for seller in step 1 */}
           {tradeType === 'sell' && currentTradeStep === 1 && (
             <TouchableOpacity 
@@ -1700,8 +1745,9 @@ export const TradeChatScreen: React.FC = () => {
               color={(message.trim() && !sendingMessage) ? '#ffffff' : '#9CA3AF'} 
             />
           </TouchableOpacity>
-        </View>
-        </View>
+              </View>
+            )}
+          </View>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
 
@@ -2358,5 +2404,47 @@ const styles = StyleSheet.create({
   badRate: {
     backgroundColor: '#FEE2E2',
     color: '#DC2626',
+  },
+  // Dispute styles
+  disputeBanner: {
+    backgroundColor: '#FEE2E2',
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderBottomWidth: 1,
+    borderBottomColor: '#FECACA',
+  },
+  disputeIcon: {
+    marginRight: 8,
+    marginTop: 2,
+  },
+  disputeTextContainer: {
+    flex: 1,
+  },
+  disputeTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#DC2626',
+    marginBottom: 2,
+  },
+  disputeText: {
+    fontSize: 12,
+    color: '#7F1D1D',
+    lineHeight: 16,
+  },
+  disputedInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  disputedInputIcon: {
+    marginRight: 8,
+  },
+  disputedInputText: {
+    fontSize: 14,
+    color: '#DC2626',
+    textAlign: 'center',
   },
 }); 

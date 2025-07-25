@@ -1995,7 +1995,8 @@ export const ExchangeScreen = () => {
     return (
         <View style={[
             styles.activeTradeCard,
-            trade.status === 'COMPLETED' && styles.completedTradeCard
+            trade.status === 'COMPLETED' && styles.completedTradeCard,
+            trade.status === 'DISPUTED' && styles.disputedTradeCard
         ]}>
             <View style={styles.tradeHeader}>
                 <TouchableOpacity 
@@ -2036,7 +2037,7 @@ export const ExchangeScreen = () => {
                     </View>
                 </TouchableOpacity>
                 {/* Only show timer for active trades */}
-                {trade.status !== 'COMPLETED' && (
+                {trade.status !== 'COMPLETED' && trade.status !== 'DISPUTED' && (
                     <View style={styles.timerBadge}>
                         <Text style={styles.timerText}>{formatTime(trade.timeRemaining)}</Text>
                     </View>
@@ -2047,9 +2048,58 @@ export const ExchangeScreen = () => {
                         <Text style={styles.completedDateText}>Completado</Text>
                     </View>
                 )}
+                {/* Show dispute badge for disputed trades */}
+                {trade.status === 'DISPUTED' && (
+                    <View style={styles.disputeBadge}>
+                        <Icon name="alert-triangle" size={14} color="#fff" />
+                        <Text style={styles.disputeText}>En Disputa</Text>
+                    </View>
+                )}
             </View>
-            {/* Different layout for completed trades */}
-            {(() => {
+            {/* Different layout for disputed trades */}
+            {trade.status === 'DISPUTED' ? (
+                <TouchableOpacity 
+                    style={styles.disputedTradeContent}
+                    onPress={() => {
+                        navigation.navigate('ActiveTrade', {
+                            trade: {
+                                id: trade.id,
+                                trader: trade.trader,
+                                amount: trade.amount,
+                                crypto: trade.crypto,
+                                totalBs: trade.totalBs,
+                                paymentMethod: trade.paymentMethod,
+                                rate: trade.rate,
+                                step: trade.step,
+                                timeRemaining: trade.timeRemaining,
+                                tradeType: trade.tradeType,
+                                countryCode: trade.countryCode,
+                                currencyCode: trade.currencyCode,
+                                status: trade.status,
+                                hasRating: trade.hasRating,
+                                createdAt: trade.createdAt,
+                                completedAt: trade.completedAt,
+                            }
+                        });
+                    }}
+                >
+                    <View style={styles.disputeWarningContainer}>
+                        <Icon name="alert-triangle" size={24} color="#DC2626" />
+                        <View style={styles.disputeWarningTextContainer}>
+                            <Text style={styles.disputeWarningTitle}>Intercambio en disputa</Text>
+                            <Text style={styles.disputeWarningText}>
+                                Este intercambio está siendo revisado por nuestro equipo de soporte. 
+                                Toca para ver detalles.
+                            </Text>
+                        </View>
+                    </View>
+                    <View style={styles.disputeActionButton}>
+                        <Text style={styles.disputeActionText}>Ver detalles</Text>
+                        <Icon name="chevron-right" size={16} color="#DC2626" />
+                    </View>
+                </TouchableOpacity>
+            ) : /* Different layout for completed trades */
+            (() => {
               const isCompletedWithRating = trade.status === 'COMPLETED' && trade.hasRating;
               if (trade.id === '14') {
                 console.log('[ExchangeScreen] Trade 14 UI decision:', {
@@ -3852,6 +3902,62 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 12,
   },
+  disputeBadge: {
+    backgroundColor: '#DC2626',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  disputeText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 12,
+    marginLeft: 4,
+  },
+  disputedTradeContent: {
+    paddingTop: 12,
+  },
+  disputeWarningContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEE2E2',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  disputeWarningTextContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  disputeWarningTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#DC2626',
+    marginBottom: 2,
+  },
+  disputeWarningText: {
+    fontSize: 12,
+    color: '#7F1D1D',
+    lineHeight: 16,
+  },
+  disputeActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FEE2E2',
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  disputeActionText: {
+    color: '#DC2626',
+    fontWeight: '600',
+    fontSize: 14,
+    marginRight: 4,
+  },
   progressContainer: {
     marginBottom: 12,
   },
@@ -3903,6 +4009,11 @@ const styles = StyleSheet.create({
   completedTradeCard: {
     backgroundColor: '#F9FAFB',
     borderColor: '#E5E7EB',
+  },
+  disputedTradeCard: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#DC2626',
+    borderWidth: 2,
   },
   completedDateBadge: {
     backgroundColor: '#E5E7EB',

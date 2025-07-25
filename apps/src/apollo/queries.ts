@@ -850,7 +850,6 @@ export const GET_P2P_TRADE = gql`
       paymentNotes
       cryptoTransactionHash
       completedAt
-      disputeReason
       createdAt
       countryCode
       currencyCode
@@ -1150,9 +1149,140 @@ export const RATE_P2P_TRADE = gql`
       trade {
         id
         status
+        hasRating
       }
       success
       errors
+    }
+  }
+`;
+
+export const DISPUTE_P2P_TRADE = gql`
+  mutation DisputeP2PTrade($tradeId: ID!, $reason: String!) {
+    disputeP2pTrade(tradeId: $tradeId, reason: $reason) {
+      trade {
+        id
+        status
+      }
+      success
+      errors
+    }
+  }
+`;
+
+// Admin dispute resolution mutations
+export const RESOLVE_DISPUTE = gql`
+  mutation ResolveDispute($disputeId: ID!, $resolutionType: String!, $resolutionNotes: String, $resolutionAmount: Decimal) {
+    resolveDispute(disputeId: $disputeId, resolutionType: $resolutionType, resolutionNotes: $resolutionNotes, resolutionAmount: $resolutionAmount) {
+      dispute {
+        id
+        status
+        resolutionType
+        resolutionNotes
+        resolvedAt
+        resolvedBy {
+          id
+          username
+        }
+      }
+      trade {
+        id
+        status
+        completedAt
+      }
+      success
+      errors
+    }
+  }
+`;
+
+export const ESCALATE_DISPUTE = gql`
+  mutation EscalateDispute($disputeId: ID!, $escalationNotes: String) {
+    escalateDispute(disputeId: $disputeId, escalationNotes: $escalationNotes) {
+      dispute {
+        id
+        status
+        priority
+        adminNotes
+      }
+      success
+      errors
+    }
+  }
+`;
+
+export const ADD_DISPUTE_EVIDENCE = gql`
+  mutation AddDisputeEvidence($disputeId: ID!, $evidenceType: String!, $content: String!, $evidenceUrls: [String]) {
+    addDisputeEvidence(disputeId: $disputeId, evidenceType: $evidenceType, content: $content, evidenceUrls: $evidenceUrls) {
+      dispute {
+        id
+        adminNotes
+        evidenceUrls
+      }
+      success
+      errors
+    }
+  }
+`;
+
+// Query to get dispute details for admin
+export const GET_DISPUTE_DETAILS = gql`
+  query GetDisputeDetails($disputeId: ID!) {
+    dispute(id: $disputeId) {
+      id
+      trade {
+        id
+        buyerUser {
+          id
+          username
+          firstName
+          lastName
+        }
+        sellerUser {
+          id
+          username
+          firstName
+          lastName
+        }
+        buyerBusiness {
+          id
+          name
+        }
+        sellerBusiness {
+          id
+          name
+        }
+        cryptoAmount
+        fiatAmount
+        currencyCode
+        status
+        createdAt
+      }
+      initiatorUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      initiatorBusiness {
+        id
+        name
+      }
+      reason
+      status
+      priority
+      resolutionType
+      resolutionAmount
+      resolutionNotes
+      adminNotes
+      evidenceUrls
+      resolvedBy {
+        id
+        username
+      }
+      openedAt
+      resolvedAt
+      lastUpdated
     }
   }
 `;

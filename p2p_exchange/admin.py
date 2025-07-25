@@ -10,7 +10,9 @@ from .models import (
     P2PMessage, 
     P2PUserStats, 
     P2PEscrow,
-    P2PTradeRating
+    P2PTradeRating,
+    P2PDispute,
+    P2PDisputeTransaction
 )
 
 @admin.register(P2PPaymentMethod)
@@ -308,18 +310,38 @@ class P2POfferAdmin(admin.ModelAdmin):
         self.message_user(request, f'{queryset.count()} ofertas actualizadas con cantidad máxima disponible.')
     refresh_available_amount.short_description = '🔄 Restablecer cantidad disponible'
 
+class DisputedTradeFilter(admin.SimpleListFilter):
+    title = 'Dispute Status'
+    parameter_name = 'dispute_status'
+    
+    def lookups(self, request, model_admin):
+        return (
+            ('disputed', '⚠️ Currently Disputed'),
+            ('resolved', '✅ Dispute Resolved'),
+            ('never_disputed', '✓ Never Disputed'),
+        )
+    
+    def queryset(self, request, queryset):
+        if self.value() == 'disputed':
+            return queryset.filter(status='DISPUTED')
+        elif self.value() == 'resolved':
+            return queryset.filter(dispute_details__status='RESOLVED')
+        elif self.value() == 'never_disputed':
+            return queryset.filter(dispute_details__isnull=True)
+        return queryset
+
 @admin.register(P2PTrade)
 class P2PTradeAdmin(admin.ModelAdmin):
-    list_display = ['id', 'crypto_amount_display', 'country_display', 'trade_summary', 'status_display', 'time_remaining', 'created_at', 'completed_at']
-    list_filter = ['status', 'created_at', 'completed_at', 'offer__token_type', 'country_code', 'payment_method']
+    list_display = ['id', 'crypto_amount_display', 'country_display', 'trade_summary', 'status_display', 'dispute_indicator', 'time_remaining', 'created_at', 'completed_at']
+    list_filter = [DisputedTradeFilter, 'status', 'created_at', 'completed_at', 'offer__token_type', 'country_code', 'payment_method']
     search_fields = [
         'id', 'buyer_user__username', 'seller_user__username', 'offer__user__username',
         'buyer_business__name', 'seller_business__name', 'payment_reference'
     ]
-    readonly_fields = ['created_at', 'updated_at', 'crypto_amount_display', 'country_display', 'status_display', 'time_remaining', 'trade_summary', 'rating_link']
+    readonly_fields = ['created_at', 'updated_at', 'crypto_amount_display', 'country_display', 'status_display', 'time_remaining', 'trade_summary', 'rating_link', 'dispute_link']
     list_per_page = 50
     date_hierarchy = 'created_at'
-    actions = ['mark_as_completed', 'mark_as_disputed']
+    actions = ['mark_as_completed', 'mark_as_disputed', 'resolve_dispute']
     
     fieldsets = (
         ('Trade Parties', {
@@ -346,8 +368,6 @@ class P2PTradeAdmin(admin.ModelAdmin):
                 ('payment_reference', 'payment_notes'),
                 'crypto_transaction_hash',
                 ('created_at', 'completed_at'),
-                ('disputed_at', 'dispute_reason'),
-                'resolved_at',
             )
         }),
         ('Rating', {
@@ -504,12 +524,87 @@ class P2PTradeAdmin(admin.ModelAdmin):
             'PAYMENT_CONFIRMED': '<span style="color: #32CD32; font-weight: bold;">✅ PAGO CONFIRMADO</span>',
             'CRYPTO_RELEASED': '<span style="color: #228B22; font-weight: bold;">🚀 CRYPTO LIBERADO</span>',
             'COMPLETED': '<span style="color: #006400; font-weight: bold;">✅ COMPLETADO</span>',
-            'DISPUTED': '<span style="color: #DC143C; font-weight: bold;">⚠️ DISPUTADO</span>',
+            'DISPUTED': '<span style="background-color: #DC143C; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold;">⚠️ EN DISPUTA</span>',
             'CANCELLED': '<span style="color: #8B0000; font-weight: bold;">❌ CANCELADO</span>',
             'EXPIRED': '<span style="color: #696969; font-weight: bold;">⏰ EXPIRADO</span>',
         }
         return format_html(status_colors.get(obj.status, obj.status))
     status_display.short_description = 'Estado'
+    
+    def dispute_indicator(self, obj):
+        """Show dispute information prominently using the P2PDispute model"""
+        if obj.status == 'DISPUTED':
+            try:
+                dispute = obj.dispute_details
+                reason_preview = dispute.reason[:50] + '...' if len(dispute.reason) > 50 else dispute.reason
+                dispute_url = reverse('admin:p2p_exchange_p2pdispute_change', args=[dispute.pk])
+                return format_html(
+                    '<div style="background-color: #FFEBEE; border: 2px solid #DC143C; padding: 5px; border-radius: 5px;">'
+                    '<strong style="color: #DC143C;">🚨 DISPUTADO</strong>'
+                    '<a href="{}" target="_blank" style="margin-left: 10px; color: #DC143C; text-decoration: underline;">'
+                    '[Ver Disputa #{}]</a><br/>'
+                    '<small style="color: #B71C1C;">Razón: {}</small><br/>'
+                    '<small style="color: #666;">Desde: {}</small>'
+                    '</div>',
+                    dispute_url,
+                    dispute.id,
+                    reason_preview,
+                    dispute.opened_at.strftime('%Y-%m-%d %H:%M')
+                )
+            except P2PDispute.DoesNotExist:
+                return format_html(
+                    '<span style="color: #DC143C;">🚨 DISPUTADO (sin detalles)</span>'
+                )
+        else:
+            # Check if there's a resolved dispute
+            try:
+                dispute = obj.dispute_details
+                dispute_url = reverse('admin:p2p_exchange_p2pdispute_change', args=[dispute.pk])
+                if dispute.status == 'RESOLVED':
+                    return format_html(
+                        '<span style="color: #4CAF50;">✅ Disputa resuelta</span> '
+                        '<a href="{}" target="_blank" style="color: #4CAF50; text-decoration: underline;">'
+                        '[Ver #{}]</a>',
+                        dispute_url,
+                        dispute.id
+                    )
+                else:
+                    return format_html(
+                        '<span style="color: #FF9800;">⚠️ Disputa pendiente</span> '
+                        '<a href="{}" target="_blank" style="color: #FF9800; text-decoration: underline;">'
+                        '[Ver #{}]</a>',
+                        dispute_url,
+                        dispute.id
+                    )
+            except P2PDispute.DoesNotExist:
+                return format_html('<span style="color: #4CAF50;">✓</span>')
+    dispute_indicator.short_description = 'Disputa'
+    
+    def dispute_link(self, obj):
+        """Link to dispute details if exists"""
+        try:
+            dispute = obj.dispute_details
+            dispute_url = reverse('admin:p2p_exchange_p2pdispute_change', args=[dispute.pk])
+            status_colors = {
+                'OPEN': '#DC2626',
+                'UNDER_REVIEW': '#F59E0B',
+                'RESOLVED': '#10B981',
+                'ESCALATED': '#7C3AED',
+            }
+            status_color = status_colors.get(dispute.status, '#6B7280')
+            return format_html(
+                '<a href="{}" target="_blank" style="color: {}; font-weight: bold; text-decoration: none; '
+                'background: {}; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px;">'
+                '🚨 Ver Disputa #{} ({})</a>',
+                dispute_url,
+                status_color,
+                status_color,
+                dispute.id,
+                dispute.get_status_display()
+            )
+        except P2PDispute.DoesNotExist:
+            return format_html('<span style="color: #999;">No hay disputa</span>')
+    dispute_link.short_description = 'Enlace a Disputa'
     
     def time_remaining(self, obj):
         """Display time remaining until expiry"""
@@ -575,14 +670,13 @@ class P2PTradeAdmin(admin.ModelAdmin):
             'fields': ('payment_reference', 'payment_notes'),
             'description': 'Referencia de pago y notas adicionales'
         }),
+        ('🚨 Gestión de Disputas', {
+            'fields': ('dispute_link',),
+            'description': 'Enlace a detalles de disputa si existe'
+        }),
         ('✅ Finalización', {
             'fields': ('crypto_transaction_hash', 'completed_at', 'rating_link'),
             'description': 'Detalles de la transacción completada'
-        }),
-        ('⚠️ Manejo de Disputas', {
-            'fields': ('dispute_reason', 'disputed_at', 'resolved_at'),
-            'classes': ('collapse',),
-            'description': 'Información sobre disputas si las hay'
         }),
         ('📅 Marcas de Tiempo', {
             'fields': ('created_at', 'updated_at'),
@@ -609,16 +703,50 @@ class P2PTradeAdmin(admin.ModelAdmin):
     mark_as_completed.short_description = '✅ Marcar como completado'
     
     def mark_as_disputed(self, request, queryset):
-        """Mark selected trades as disputed"""
+        """Mark selected trades as disputed and create dispute records"""
         from django.utils import timezone
-        updated = queryset.exclude(
-            status__in=['COMPLETED', 'CANCELLED', 'EXPIRED']
-        ).update(
-            status='DISPUTED',
-            disputed_at=timezone.now()
-        )
+        updated = 0
+        for trade in queryset.exclude(status__in=['COMPLETED', 'CANCELLED', 'EXPIRED']):
+            trade.status = 'DISPUTED'
+            trade.save()
+            
+            # Create P2PDispute record if it doesn't exist
+            P2PDispute.objects.get_or_create(
+                trade=trade,
+                defaults={
+                    'reason': 'Marcado como disputado desde el admin',
+                    'status': 'UNDER_REVIEW',
+                    'priority': 2,
+                    'initiator_user': request.user,
+                }
+            )
+            updated += 1
         self.message_user(request, f'{updated} trades marked as disputed.')
     mark_as_disputed.short_description = '⚠️ Marcar como disputado'
+    
+    def resolve_dispute(self, request, queryset):
+        """Resolve disputes and mark trades as completed"""
+        from django.utils import timezone
+        updated = 0
+        for trade in queryset.filter(status='DISPUTED'):
+            trade.status = 'COMPLETED'
+            trade.completed_at = timezone.now()
+            trade.save()
+            
+            # Update the dispute record
+            try:
+                dispute = trade.dispute_details
+                dispute.status = 'RESOLVED'
+                dispute.resolution_type = 'NO_ACTION'
+                dispute.resolved_at = timezone.now()
+                dispute.resolved_by = request.user
+                dispute.resolution_notes = f"Resolved by {request.user.username} via admin action"
+                dispute.save()
+                updated += 1
+            except P2PDispute.DoesNotExist:
+                pass
+        self.message_user(request, f'{updated} disputes resolved and trades marked as completed.')
+    resolve_dispute.short_description = '✅ Resolver disputa'
 
 @admin.register(P2PMessage)
 class P2PMessageAdmin(admin.ModelAdmin):
@@ -768,18 +896,116 @@ class P2PUserStatsAdmin(admin.ModelAdmin):
 @admin.register(P2PEscrow)
 class P2PEscrowAdmin(admin.ModelAdmin):
     list_display = [
-        'id', 'trade', 'escrow_amount', 'token_type', 
-        'is_escrowed', 'is_released', 'created_at'
+        'id', 'trade_link', 'escrow_amount_display', 'status_badge', 
+        'release_type_badge', 'dispute_indicator', 'created_at'
     ]
     list_filter = [
-        'token_type', 'is_escrowed', 'is_released', 'created_at'
+        'token_type', 'is_escrowed', 'is_released', 'release_type',
+        'resolved_by_dispute', 'created_at', 'released_at'
     ]
     search_fields = [
         'trade__id', 'escrow_transaction_hash', 'release_transaction_hash'
     ]
     readonly_fields = [
-        'created_at', 'updated_at', 'escrowed_at', 'released_at'
+        'created_at', 'updated_at', 'escrowed_at', 'released_at', 'status_display'
     ]
+    
+    def trade_link(self, obj):
+        """Link to the related trade"""
+        url = reverse('admin:p2p_exchange_p2ptrade_change', args=[obj.trade.pk])
+        return format_html(
+            '<a href="{}" target="_blank">Trade #{}</a>',
+            url,
+            obj.trade.id
+        )
+    trade_link.short_description = 'Trade'
+    
+    def escrow_amount_display(self, obj):
+        """Display escrow amount with token type"""
+        token_emoji = '💵' if obj.token_type == 'cUSD' else '🪙'
+        return format_html(
+            '<span style="font-weight: bold;">{} {} {}</span>',
+            token_emoji, f'{float(obj.escrow_amount):.2f}', obj.token_type
+        )
+    escrow_amount_display.short_description = 'Amount'
+    
+    def status_badge(self, obj):
+        """Display status with colored badge"""
+        if not obj.is_escrowed:
+            return format_html(
+                '<span style="background-color: #F59E0B; color: white; padding: 4px 8px; '
+                'border-radius: 4px; font-weight: bold; font-size: 11px;">Pending</span>'
+            )
+        elif not obj.is_released:
+            return format_html(
+                '<span style="background-color: #3B82F6; color: white; padding: 4px 8px; '
+                'border-radius: 4px; font-weight: bold; font-size: 11px;">In Escrow</span>'
+            )
+        else:
+            return format_html(
+                '<span style="background-color: #10B981; color: white; padding: 4px 8px; '
+                'border-radius: 4px; font-weight: bold; font-size: 11px;">Released</span>'
+            )
+    status_badge.short_description = 'Status'
+    
+    def release_type_badge(self, obj):
+        """Display release type with colored badge"""
+        if not obj.release_type:
+            return format_html('<span style="color: #999;">-</span>')
+        
+        colors = {
+            'NORMAL': '#10B981',
+            'REFUND': '#F59E0B',
+            'PARTIAL_REFUND': '#8B5CF6',
+            'DISPUTE_RELEASE': '#DC2626',
+        }
+        
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 2px 6px; '
+            'border-radius: 12px; font-size: 11px;">{}</span>',
+            colors.get(obj.release_type, '#6B7280'),
+            obj.get_release_type_display() if obj.release_type else 'None'
+        )
+    release_type_badge.short_description = 'Release Type'
+    
+    def dispute_indicator(self, obj):
+        """Show if escrow was resolved by dispute"""
+        if obj.resolved_by_dispute:
+            if obj.dispute_resolution:
+                url = reverse('admin:p2p_exchange_p2pdispute_change', args=[obj.dispute_resolution.pk])
+                return format_html(
+                    '<a href="{}" target="_blank" style="color: #DC2626; font-weight: bold;">🚨 Dispute #{}</a>',
+                    url,
+                    obj.dispute_resolution.id
+                )
+            else:
+                return format_html('<span style="color: #DC2626;">🚨 Dispute</span>')
+        return format_html('<span style="color: #10B981;">✓ Normal</span>')
+    dispute_indicator.short_description = 'Resolution'
+    
+    fieldsets = (
+        ('Escrow Information', {
+            'fields': ('trade', 'escrow_amount', 'token_type', 'status_display')
+        }),
+        ('Blockchain Details', {
+            'fields': ('escrow_transaction_hash', 'release_transaction_hash'),
+            'classes': ('collapse',)
+        }),
+        ('Status', {
+            'fields': ('is_escrowed', 'is_released', 'escrowed_at', 'released_at')
+        }),
+        ('Release Details', {
+            'fields': ('release_type', 'release_amount', 'resolved_by_dispute', 'dispute_resolution')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def has_add_permission(self, request):
+        """Prevent manual creation - escrows are created automatically"""
+        return False
 
 
 @admin.register(P2PTradeRating)
@@ -923,3 +1149,386 @@ class P2PTradeRatingAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         """Prevent manual creation of ratings through admin"""
         return False
+
+
+@admin.register(P2PDispute)
+class P2PDisputeAdmin(admin.ModelAdmin):
+    list_display = [
+        'trade_link', 'initiator_display', 'status_badge', 'priority_badge',
+        'duration_display', 'resolution_display', 'opened_at'
+    ]
+    list_filter = [
+        'status', 'priority', 'resolution_type', 'opened_at', 'resolved_at',
+        ('initiator_user', admin.RelatedOnlyFieldListFilter),
+        ('initiator_business', admin.RelatedOnlyFieldListFilter),
+        ('resolved_by', admin.RelatedOnlyFieldListFilter),
+    ]
+    search_fields = [
+        'trade__id', 'reason', 'resolution_notes', 'admin_notes',
+        'initiator_user__username', 'initiator_business__name'
+    ]
+    readonly_fields = [
+        'trade', 'opened_at', 'last_updated', 'duration_display', 
+        'trade_details', 'evidence_display'
+    ]
+    
+    def trade_link(self, obj):
+        """Link to the disputed trade"""
+        url = reverse('admin:p2p_exchange_p2ptrade_change', args=[obj.trade.pk])
+        return format_html(
+            '<a href="{}" target="_blank">Trade #{}</a>',
+            url,
+            obj.trade.id
+        )
+    trade_link.short_description = 'Trade'
+    
+    def initiator_display(self, obj):
+        """Display dispute initiator"""
+        if obj.initiator_user:
+            return f"👤 {obj.initiator_user.username}"
+        elif obj.initiator_business:
+            return f"🏢 {obj.initiator_business.name}"
+        return "❓ Unknown"
+    initiator_display.short_description = 'Initiated By'
+    
+    def status_badge(self, obj):
+        """Display status with colored badge"""
+        colors = {
+            'OPEN': '#DC2626',
+            'UNDER_REVIEW': '#F59E0B',
+            'RESOLVED': '#10B981',
+            'ESCALATED': '#7C3AED',
+        }
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 4px 8px; '
+            'border-radius: 4px; font-weight: bold; font-size: 11px;">{}</span>',
+            colors.get(obj.status, '#6B7280'),
+            obj.get_status_display()
+        )
+    status_badge.short_description = 'Status'
+    
+    def priority_badge(self, obj):
+        """Display priority with colored badge"""
+        priority_config = {
+            1: ('Low', '#10B981'),
+            2: ('Medium', '#F59E0B'),
+            3: ('High', '#DC2626'),
+        }
+        label, color = priority_config.get(obj.priority, ('Unknown', '#6B7280'))
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 2px 6px; '
+            'border-radius: 12px; font-size: 11px;">{}</span>',
+            color, label
+        )
+    priority_badge.short_description = 'Priority'
+    
+    def duration_display(self, obj):
+        """Display how long the dispute has been open"""
+        hours = obj.duration_hours
+        if hours < 1:
+            return format_html('<span style="color: #10B981;">< 1 hora</span>')
+        elif hours < 24:
+            return format_html('<span style="color: #F59E0B;">{} horas</span>', int(hours))
+        else:
+            days = int(hours / 24)
+            return format_html('<span style="color: #DC2626;">{} días</span>', days)
+    duration_display.short_description = 'Duration'
+    
+    def resolution_display(self, obj):
+        """Display resolution info"""
+        if not obj.is_resolved:
+            return format_html('<span style="color: #999;">Pending</span>')
+        
+        resolution_text = obj.get_resolution_type_display() if obj.resolution_type else 'Resolved'
+        if obj.resolution_amount:
+            resolution_text += f' (${obj.resolution_amount})'
+        
+        return format_html(
+            '<span style="color: #10B981;">{}</span>',
+            resolution_text
+        )
+    resolution_display.short_description = 'Resolution'
+    
+    def trade_details(self, obj):
+        """Display detailed trade information"""
+        trade = obj.trade
+        return format_html("""
+            <div style="background: #f5f5f5; padding: 15px; border-radius: 5px;">
+                <h4 style="margin-top: 0;">Trade Information</h4>
+                <p><strong>Trade ID:</strong> #{}</p>
+                <p><strong>Amount:</strong> {} {} / {} {}</p>
+                <p><strong>Buyer:</strong> {}</p>
+                <p><strong>Seller:</strong> {}</p>
+                <p><strong>Payment Method:</strong> {}</p>
+                <p><strong>Trade Status:</strong> {}</p>
+                <p><strong>Created:</strong> {}</p>
+            </div>
+        """,
+            trade.id,
+            trade.crypto_amount, trade.offer.token_type if trade.offer else 'N/A',
+            trade.fiat_amount, trade.currency_code,
+            trade.buyer_display_name,
+            trade.seller_display_name,
+            trade.payment_method.display_name if trade.payment_method else 'N/A',
+            trade.status,
+            trade.created_at.strftime('%Y-%m-%d %H:%M')
+        )
+    trade_details.short_description = 'Trade Details'
+    
+    def evidence_display(self, obj):
+        """Display evidence URLs as clickable links"""
+        if not obj.evidence_urls:
+            return "No evidence submitted"
+        
+        links = []
+        for i, url in enumerate(obj.evidence_urls):
+            links.append(f'<a href="{url}" target="_blank">Evidence {i+1}</a>')
+        
+        return format_html('<br>'.join(links))
+    evidence_display.short_description = 'Evidence'
+    
+    fieldsets = (
+        ('Dispute Information', {
+            'fields': ('trade', 'status', 'priority', 'reason')
+        }),
+        ('Initiator', {
+            'fields': ('initiator_user', 'initiator_business')
+        }),
+        ('Evidence & Notes', {
+            'fields': ('evidence_urls', 'evidence_display', 'admin_notes')
+        }),
+        ('Resolution', {
+            'fields': ('resolution_type', 'resolution_amount', 'resolution_notes', 'resolved_by')
+        }),
+        ('Timestamps', {
+            'fields': ('opened_at', 'resolved_at', 'last_updated', 'duration_display'),
+            'classes': ('collapse',)
+        }),
+        ('Trade Details', {
+            'fields': ('trade_details',),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    actions = ['mark_under_review', 'resolve_refund_buyer', 'resolve_release_seller', 'escalate_dispute']
+    
+    def mark_under_review(self, request, queryset):
+        """Mark disputes as under review"""
+        updated = queryset.filter(status='OPEN').update(status='UNDER_REVIEW')
+        self.message_user(request, f'{updated} disputes marked as under review.')
+    mark_under_review.short_description = '👁️ Mark as Under Review'
+    
+    def resolve_refund_buyer(self, request, queryset):
+        """Resolve disputes with refund to buyer"""
+        from django.utils import timezone
+        updated = 0
+        for dispute in queryset.filter(status__in=['OPEN', 'UNDER_REVIEW']):
+            dispute.status = 'RESOLVED'
+            dispute.resolution_type = 'REFUND_BUYER'
+            dispute.resolved_at = timezone.now()
+            dispute.resolved_by = request.user
+            dispute.resolution_notes = f"Resolved by {request.user.username} via admin action"
+            dispute.save()
+            
+            # Update trade status
+            dispute.trade.status = 'CANCELLED'
+            dispute.trade.save()
+            
+            updated += 1
+            
+        self.message_user(request, f'{updated} disputes resolved with refund to buyer.')
+    resolve_refund_buyer.short_description = '💰 Resolve - Refund Buyer'
+    
+    def resolve_release_seller(self, request, queryset):
+        """Resolve disputes with release to seller"""
+        from django.utils import timezone
+        updated = 0
+        for dispute in queryset.filter(status__in=['OPEN', 'UNDER_REVIEW']):
+            dispute.status = 'RESOLVED'
+            dispute.resolution_type = 'RELEASE_TO_SELLER'
+            dispute.resolved_at = timezone.now()
+            dispute.resolved_by = request.user
+            dispute.resolution_notes = f"Resolved by {request.user.username} via admin action"
+            dispute.save()
+            
+            # Update trade status
+            dispute.trade.status = 'COMPLETED'
+            dispute.trade.completed_at = timezone.now()
+            dispute.trade.save()
+            
+            updated += 1
+            
+        self.message_user(request, f'{updated} disputes resolved with release to seller.')
+    resolve_release_seller.short_description = '✅ Resolve - Release to Seller'
+    
+    def escalate_dispute(self, request, queryset):
+        """Escalate disputes for higher level review"""
+        updated = queryset.filter(status__in=['OPEN', 'UNDER_REVIEW']).update(
+            status='ESCALATED',
+            priority=3  # Set to high priority
+        )
+        self.message_user(request, f'{updated} disputes escalated.')
+    escalate_dispute.short_description = '🚨 Escalate Dispute'
+
+
+@admin.register(P2PDisputeTransaction)
+class P2PDisputeTransactionAdmin(admin.ModelAdmin):
+    list_display = [
+        'id', 'trade_link', 'dispute_link', 'transaction_type_badge', 'amount_display', 
+        'recipient_display', 'status_badge', 'processed_at'
+    ]
+    list_filter = [
+        'transaction_type', 'status', 'token_type', 'processed_at', 'created_at',
+        ('processed_by', admin.RelatedOnlyFieldListFilter),
+    ]
+    search_fields = [
+        'dispute__trade__id', 'transaction_hash', 'notes',
+        'recipient_user__username', 'recipient_business__name',
+        'processed_by__username'
+    ]
+    readonly_fields = [
+        'dispute', 'trade', 'created_at', 'processed_at', 'transaction_hash',
+        'block_number', 'gas_used', 'trade_details'
+    ]
+    
+    def trade_link(self, obj):
+        """Link to the related trade"""
+        url = reverse('admin:p2p_exchange_p2ptrade_change', args=[obj.trade.pk])
+        return format_html(
+            '<a href="{}" target="_blank" style="color: #1976d2; font-weight: bold;">Trade #{}</a>',
+            url,
+            obj.trade.id
+        )
+    trade_link.short_description = 'Trade'
+    
+    def dispute_link(self, obj):
+        """Link to the related dispute"""
+        url = reverse('admin:p2p_exchange_p2pdispute_change', args=[obj.dispute.pk])
+        return format_html(
+            '<a href="{}" target="_blank">Dispute #{}</a>',
+            url,
+            obj.dispute.id
+        )
+    dispute_link.short_description = 'Dispute'
+    
+    def transaction_type_badge(self, obj):
+        """Display transaction type with colored badge"""
+        colors = {
+            'REFUND': '#10B981',
+            'RELEASE': '#3B82F6',
+            'PARTIAL_REFUND': '#F59E0B',
+            'SPLIT': '#8B5CF6',
+        }
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 4px 8px; '
+            'border-radius: 4px; font-weight: bold; font-size: 11px;">{}</span>',
+            colors.get(obj.transaction_type, '#6B7280'),
+            obj.get_transaction_type_display()
+        )
+    transaction_type_badge.short_description = 'Type'
+    
+    def amount_display(self, obj):
+        """Display amount with token type"""
+        token_emoji = '💵' if obj.token_type == 'cUSD' else '🪙'
+        return format_html(
+            '<span style="font-weight: bold;">{} {} {}</span>',
+            token_emoji, f'{float(obj.amount):.2f}', obj.token_type
+        )
+    amount_display.short_description = 'Amount'
+    
+    def recipient_display(self, obj):
+        """Display transaction recipient"""
+        if obj.recipient_user:
+            return f"👤 {obj.recipient_user.username}"
+        elif obj.recipient_business:
+            return f"🏢 {obj.recipient_business.name}"
+        return "❓ Unknown"
+    recipient_display.short_description = 'Recipient'
+    
+    def status_badge(self, obj):
+        """Display status with colored badge"""
+        colors = {
+            'PENDING': '#F59E0B',
+            'PROCESSING': '#3B82F6',
+            'COMPLETED': '#10B981',
+            'FAILED': '#DC2626',
+            'CANCELLED': '#6B7280',
+        }
+        return format_html(
+            '<span style="background-color: {}; color: white; padding: 4px 8px; '
+            'border-radius: 4px; font-weight: bold; font-size: 11px;">{}</span>',
+            colors.get(obj.status, '#6B7280'),
+            obj.get_status_display()
+        )
+    status_badge.short_description = 'Status'
+    
+    def trade_details(self, obj):
+        """Display trade information"""
+        trade = obj.trade
+        return format_html("""
+            <div style="background: #f5f5f5; padding: 15px; border-radius: 5px;">
+                <h4 style="margin-top: 0;">Trade Information</h4>
+                <p><strong>Trade ID:</strong> #{}</p>
+                <p><strong>Amount:</strong> {} {} / {} {}</p>
+                <p><strong>Buyer:</strong> {}</p>
+                <p><strong>Seller:</strong> {}</p>
+                <p><strong>Status:</strong> {}</p>
+                <hr>
+                <h4>Transaction Details</h4>
+                <p><strong>Type:</strong> {}</p>
+                <p><strong>Amount:</strong> {} {}</p>
+                <p><strong>Recipient:</strong> {}</p>
+                <p><strong>Status:</strong> {}</p>
+                <p><strong>Hash:</strong> {}</p>
+            </div>
+        """,
+            trade.id,
+            trade.crypto_amount, trade.offer.token_type if trade.offer else 'N/A',
+            trade.fiat_amount, trade.currency_code,
+            trade.buyer_display_name,
+            trade.seller_display_name,
+            trade.status,
+            obj.get_transaction_type_display(),
+            obj.amount, obj.token_type,
+            self.recipient_display(obj),
+            obj.get_status_display(),
+            obj.transaction_hash or 'Pending'
+        )
+    trade_details.short_description = 'Details'
+    
+    fieldsets = (
+        ('Transaction Information', {
+            'fields': ('dispute', 'trade', 'transaction_type', 'amount', 'token_type')
+        }),
+        ('Recipient', {
+            'fields': ('recipient_user', 'recipient_business')
+        }),
+        ('Blockchain Details', {
+            'fields': ('transaction_hash', 'block_number', 'gas_used'),
+            'classes': ('collapse',)
+        }),
+        ('Processing', {
+            'fields': ('status', 'processed_by', 'processed_at', 'failure_reason')
+        }),
+        ('Notes', {
+            'fields': ('notes',)
+        }),
+        ('Timestamps', {
+            'fields': ('created_at',),
+            'classes': ('collapse',)
+        }),
+        ('Details', {
+            'fields': ('trade_details',),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def has_add_permission(self, request):
+        """Prevent manual creation - transactions are created through dispute resolution"""
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        """Allow viewing but prevent editing of processed transactions"""
+        if obj and obj.status == 'COMPLETED':
+            return False
+        return super().has_change_permission(request, obj)

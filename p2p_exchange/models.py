@@ -311,10 +311,7 @@ class P2PTrade(SoftDeleteModel):
     crypto_transaction_hash = models.CharField(max_length=66, blank=True)  # Sui transaction hash
     completed_at = models.DateTimeField(null=True, blank=True)
     
-    # Dispute handling
-    dispute_reason = models.TextField(blank=True)
-    disputed_at = models.DateTimeField(null=True, blank=True)
-    resolved_at = models.DateTimeField(null=True, blank=True)
+    # Dispute handling is now tracked in the separate P2PDispute model
     
     # Helper methods for the new design
     @property
@@ -622,6 +619,14 @@ class P2PUserStats(SoftDeleteModel):
 
 class P2PEscrow(SoftDeleteModel):
     """Escrow records for P2P trades (for future Sui blockchain integration)"""
+    
+    RELEASE_TYPES = [
+        ('NORMAL', 'Normal Release to Seller'),      # Standard trade completion
+        ('REFUND', 'Refund to Buyer'),              # Full refund due to dispute/cancellation
+        ('PARTIAL_REFUND', 'Partial Refund'),       # Split payment after dispute
+        ('DISPUTE_RELEASE', 'Dispute Release to Seller'),  # Dispute resolved in favor of seller
+    ]
+    
     trade = models.OneToOneField(P2PTrade, on_delete=models.CASCADE, related_name='escrow')
     
     # Escrow details
@@ -632,17 +637,84 @@ class P2PEscrow(SoftDeleteModel):
     escrow_transaction_hash = models.CharField(max_length=66, blank=True)
     release_transaction_hash = models.CharField(max_length=66, blank=True)
     
-    # Status
-    is_escrowed = models.BooleanField(default=False)
-    is_released = models.BooleanField(default=False)
+    # Status tracking
+    is_escrowed = models.BooleanField(default=False, help_text="Funds are currently held in escrow")
+    is_released = models.BooleanField(default=False, help_text="Funds have been released from escrow")
+    
+    # Release details
+    release_type = models.CharField(
+        max_length=20, 
+        choices=RELEASE_TYPES, 
+        blank=True, 
+        help_text="How the funds were released from escrow"
+    )
+    release_amount = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Amount released (may be less than escrow_amount for partial refunds)"
+    )
+    
+    # Timestamps
     escrowed_at = models.DateTimeField(null=True, blank=True)
     released_at = models.DateTimeField(null=True, blank=True)
     
+    # Dispute resolution tracking
+    resolved_by_dispute = models.BooleanField(
+        default=False, 
+        help_text="True if this escrow was resolved through dispute resolution"
+    )
+    dispute_resolution = models.ForeignKey(
+        'P2PDispute',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='escrow_resolutions',
+        help_text="Link to dispute that resolved this escrow"
+    )
+    
     class Meta:
         ordering = ['-created_at']
+        db_table = 'p2p_escrows'
     
     def __str__(self):
-        return f"Escrow for Trade {self.trade.id}: {self.escrow_amount} {self.token_type}"
+        status = "Escrowed" if self.is_escrowed and not self.is_released else "Released" if self.is_released else "Pending"
+        return f"Escrow for Trade {self.trade.id}: {self.escrow_amount} {self.token_type} ({status})"
+    
+    @property
+    def status_display(self):
+        """Human-readable status"""
+        if not self.is_escrowed:
+            return "Pending Escrow"
+        elif not self.is_released:
+            return "Funds in Escrow"
+        else:
+            release_display = dict(self.RELEASE_TYPES).get(self.release_type, "Released")
+            return f"Released ({release_display})"
+    
+    def release_funds(self, release_type, amount=None, dispute=None, released_by=None):
+        """Helper method to properly release funds with tracking"""
+        from django.utils import timezone
+        
+        if self.is_released:
+            raise ValueError("Funds have already been released")
+        
+        if not self.is_escrowed:
+            raise ValueError("Cannot release funds that are not escrowed")
+        
+        self.is_released = True
+        self.release_type = release_type
+        self.release_amount = amount or self.escrow_amount
+        self.released_at = timezone.now()
+        
+        if dispute:
+            self.resolved_by_dispute = True
+            self.dispute_resolution = dispute
+            
+        self.save()
+        
+        return self
 
 
 class P2PTradeConfirmation(SoftDeleteModel):
@@ -834,3 +906,194 @@ class P2PTradeRating(SoftDeleteModel):
     
     def __str__(self):
         return f"Rating for Trade {self.trade.id}: {self.overall_rating}/5 stars"
+
+
+class P2PDispute(SoftDeleteModel):
+    """Detailed dispute tracking for P2P trades"""
+    
+    DISPUTE_STATUS = [
+        ('OPEN', 'Open'),
+        ('UNDER_REVIEW', 'Under Review'),
+        ('RESOLVED', 'Resolved'),
+        ('ESCALATED', 'Escalated'),
+    ]
+    
+    RESOLUTION_TYPE = [
+        ('REFUND_BUYER', 'Refund to Buyer'),
+        ('RELEASE_TO_SELLER', 'Release to Seller'),
+        ('PARTIAL_REFUND', 'Partial Refund'),
+        ('CANCELLED', 'Trade Cancelled'),
+        ('NO_ACTION', 'No Action Taken'),
+    ]
+    
+    # Trade being disputed
+    trade = models.OneToOneField(P2PTrade, on_delete=models.CASCADE, related_name='dispute_details')
+    
+    # Who initiated the dispute
+    initiator_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='disputes_initiated',
+        null=True,
+        blank=True
+    )
+    initiator_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        related_name='disputes_initiated',
+        null=True,
+        blank=True
+    )
+    
+    # Dispute details
+    reason = models.TextField(help_text="Initial reason for dispute")
+    status = models.CharField(max_length=20, choices=DISPUTE_STATUS, default='OPEN')
+    priority = models.IntegerField(default=1, help_text="1=Low, 2=Medium, 3=High")
+    
+    # Evidence and communication
+    evidence_urls = models.JSONField(default=list, blank=True, help_text="List of evidence URLs")
+    admin_notes = models.TextField(blank=True, help_text="Internal notes from admin/support")
+    
+    # Resolution
+    resolution_type = models.CharField(max_length=20, choices=RESOLUTION_TYPE, null=True, blank=True)
+    resolution_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    resolution_notes = models.TextField(blank=True)
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='disputes_resolved'
+    )
+    
+    # Timestamps
+    opened_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    last_updated = models.DateTimeField(auto_now=True)
+    
+    # Helper properties
+    @property
+    def initiator_type(self):
+        return 'business' if self.initiator_business else 'user'
+    
+    @property
+    def initiator_display_name(self):
+        if self.initiator_business:
+            return self.initiator_business.name
+        elif self.initiator_user:
+            return f"{self.initiator_user.first_name} {self.initiator_user.last_name}".strip() or self.initiator_user.username
+        return "Unknown"
+    
+    @property
+    def is_resolved(self):
+        return self.status == 'RESOLVED'
+    
+    @property
+    def duration_hours(self):
+        """Hours the dispute has been open"""
+        if self.resolved_at:
+            duration = self.resolved_at - self.opened_at
+        else:
+            from django.utils import timezone
+            duration = timezone.now() - self.opened_at
+        return duration.total_seconds() / 3600
+    
+    class Meta:
+        ordering = ['-priority', '-opened_at']
+        indexes = [
+            models.Index(fields=['status', 'priority']),
+            models.Index(fields=['opened_at']),
+            models.Index(fields=['resolved_at']),
+        ]
+    
+    def __str__(self):
+        return f"Dispute for Trade #{self.trade.id} - {self.get_status_display()}"
+    
+    def clean(self):
+        """Validate that either user or business initiated, not both"""
+        if not self.initiator_user and not self.initiator_business:
+            raise ValidationError("Either initiator_user or initiator_business must be set")
+        if self.initiator_user and self.initiator_business:
+            raise ValidationError("Cannot set both initiator_user and initiator_business")
+
+class P2PDisputeTransaction(SoftDeleteModel):
+    """Track financial transactions resulting from dispute resolutions"""
+    
+    TRANSACTION_TYPES = [
+        ('REFUND', 'Refund to Buyer'),
+        ('RELEASE', 'Release to Seller'),
+        ('PARTIAL_REFUND', 'Partial Refund'),
+        ('SPLIT', 'Split Payment'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('PROCESSING', 'Processing'),
+        ('COMPLETED', 'Completed'),
+        ('FAILED', 'Failed'),
+        ('CANCELLED', 'Cancelled'),
+    ]
+    
+    # Related dispute and trade
+    dispute = models.ForeignKey(P2PDispute, on_delete=models.CASCADE, related_name='transactions')
+    trade = models.ForeignKey(P2PTrade, on_delete=models.CASCADE, related_name='dispute_transactions')
+    
+    # Transaction details
+    transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
+    amount = models.DecimalField(max_digits=20, decimal_places=8)
+    token_type = models.CharField(max_length=10)
+    
+    # Recipients
+    recipient_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='dispute_transactions_received',
+        null=True,
+        blank=True
+    )
+    recipient_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        related_name='dispute_transactions_received',
+        null=True,
+        blank=True
+    )
+    
+    # Blockchain details
+    transaction_hash = models.CharField(max_length=66, blank=True)
+    block_number = models.BigIntegerField(null=True, blank=True)
+    gas_used = models.BigIntegerField(null=True, blank=True)
+    
+    # Status and metadata
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    processed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='dispute_transactions_processed'
+    )
+    processed_at = models.DateTimeField(null=True, blank=True)
+    failure_reason = models.TextField(blank=True)
+    
+    # Audit trail
+    notes = models.TextField(blank=True)
+    
+    class Meta:
+        db_table = 'p2p_dispute_transactions'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['dispute', 'status']),
+            models.Index(fields=['transaction_hash']),
+            models.Index(fields=['processed_at']),
+        ]
+    
+    def __str__(self):
+        return f"Dispute Transaction {self.id}: {self.transaction_type} of {self.amount} {self.token_type}"
+    
+    def clean(self):
+        """Validate that either user or business recipient, not both"""
+        if not self.recipient_user and not self.recipient_business:
+            raise ValidationError("Either recipient_user or recipient_business must be set")
+        if self.recipient_user and self.recipient_business:
+            raise ValidationError("Cannot set both recipient_user and recipient_business")
