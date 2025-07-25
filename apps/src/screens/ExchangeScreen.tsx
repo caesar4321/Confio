@@ -342,6 +342,35 @@ interface ActiveTrade {
   hasRating?: boolean;
 }
 
+// Helper function to format date to local time
+const formatLocalDateTime = (dateString: string) => {
+  const date = new Date(dateString);
+  
+  // Format date parts manually for better React Native compatibility
+  const day = date.getDate().toString().padStart(2, '0');
+  const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
+  
+  let hours = date.getHours();
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // 0 should be 12
+  
+  return `${day} ${month} ${year}, ${hours}:${minutes} ${ampm}`;
+};
+
+const formatLocalDate = (dateString: string) => {
+  const date = new Date(dateString);
+  const day = date.getDate().toString().padStart(2, '0');
+  const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
+  
+  return `${day} ${month} ${year}`;
+};
+
 export const ExchangeScreen = () => {
   // Use centralized country selection hook
   const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal } = useCountrySelection();
@@ -596,8 +625,18 @@ export const ExchangeScreen = () => {
         
         // Map status to step
         const getStepFromStatus = (status: string, hasRating?: boolean) => {
-          // If trade is completed or payment confirmed but not rated, we're on the rating step
-          if ((status === 'COMPLETED' || status === 'PAYMENT_CONFIRMED') && !hasRating) {
+          // If trade is completed and rated, show as completed (step 5)
+          if (status === 'COMPLETED' && hasRating) {
+            return 5; // Completed and rated
+          }
+          
+          // If trade is completed but not rated, show rating step
+          if (status === 'COMPLETED' && !hasRating) {
+            return 5; // Rating step
+          }
+          
+          // For crypto released or payment confirmed without rating, show rating step
+          if ((status === 'CRYPTO_RELEASED' || status === 'PAYMENT_CONFIRMED') && !hasRating) {
             return 5; // Rating step
           }
           
@@ -605,9 +644,8 @@ export const ExchangeScreen = () => {
             case 'PENDING': return 1;
             case 'PAYMENT_PENDING': return 2;
             case 'PAYMENT_SENT': return 3;
-            case 'PAYMENT_CONFIRMED': return hasRating ? 5 : 4; // If rated, completed, else funds released
-            case 'CRYPTO_RELEASED': return 4;
-            case 'COMPLETED': return 5; // Completed and rated
+            case 'PAYMENT_CONFIRMED': return 4; // Funds being released
+            case 'CRYPTO_RELEASED': return hasRating ? 5 : 4; // Show step 4 only if not rated yet
             default: return 1;
           }
         };
@@ -1833,10 +1871,7 @@ export const ExchangeScreen = () => {
             <Text style={styles.myOfferTokenType}>{formatTokenType(offer.tokenType)}</Text>
           </View>
           <Text style={styles.myOfferDate}>
-            {new Date(offer.createdAt).toLocaleDateString('es-ES', {
-              day: '2-digit',
-              month: '2-digit'
-            })}
+            {formatLocalDate(offer.createdAt)}
           </Text>
         </View>
 
@@ -1957,6 +1992,12 @@ export const ExchangeScreen = () => {
         }
         if (status === 'COMPLETED' && !hasRating) {
             return "Calificar trader";
+        }
+        if (status === 'CRYPTO_RELEASED' && !hasRating) {
+            return "Calificar trader";
+        }
+        if (status === 'CRYPTO_RELEASED' && hasRating) {
+            return "Intercambio completado";
         }
         const steps: { [key: number]: string } = { 
             1: "Realizar pago", 
@@ -2094,13 +2135,7 @@ export const ExchangeScreen = () => {
                     </View>
                     <View style={styles.completedTradeInfo}>
                         <Text style={styles.completedDateText}>
-                            {new Date(trade.createdAt).toLocaleDateString('es-ES', {
-                                day: '2-digit',
-                                month: 'short',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                            })}
+                            {formatLocalDateTime(trade.completedAt || trade.createdAt)}
                         </Text>
                     </View>
                     <View style={styles.viewDetailsRow}>

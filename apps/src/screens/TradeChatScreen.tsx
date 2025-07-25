@@ -24,7 +24,7 @@ import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
 import { useCurrency } from '../hooks/useCurrency';
 import { useAuth } from '../contexts/AuthContext';
-import { SEND_P2P_MESSAGE, GET_P2P_TRADE, GET_USER_BANK_ACCOUNTS, UPDATE_P2P_TRADE_STATUS } from '../apollo/queries';
+import { SEND_P2P_MESSAGE, GET_P2P_TRADE, GET_USER_BANK_ACCOUNTS, UPDATE_P2P_TRADE_STATUS, CONFIRM_P2P_TRADE_STEP } from '../apollo/queries';
 import { ExchangeRateDisplay } from '../components/ExchangeRateDisplay';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { useCountry } from '../contexts/CountryContext';
@@ -313,6 +313,22 @@ export const TradeChatScreen: React.FC = () => {
           id: cache.identify({ __typename: 'P2PTrade', id: tradeId }),
           fields: {
             status: () => data.updateP2pTradeStatus.trade.status
+          }
+        });
+      }
+    }
+  });
+  
+  // GraphQL mutation for confirming trade steps
+  const [confirmTradeStep, { loading: confirmingTradeStep }] = useMutation(CONFIRM_P2P_TRADE_STEP, {
+    update: (cache, { data }) => {
+      if (data?.confirmP2pTradeStep?.trade) {
+        // Update the GET_P2P_TRADE query in cache
+        cache.modify({
+          id: cache.identify({ __typename: 'P2PTrade', id: tradeId }),
+          fields: {
+            status: () => data.confirmP2pTradeStep.trade.status,
+            escrow: () => data.confirmP2pTradeStep.trade.escrow
           }
         });
       }
@@ -1132,19 +1148,19 @@ export const TradeChatScreen: React.FC = () => {
     setShowConfirmPaidModal(false);
     
     try {
-      // Update trade status to PAYMENT_SENT
-      const { data } = await updateTradeStatus({
+      // Confirm payment sent using the new mutation
+      const { data } = await confirmTradeStep({
         variables: {
           input: {
             tradeId: tradeId,
-            status: 'PAYMENT_SENT',
-            paymentReference: '', // User can add this later if needed
-            paymentNotes: 'Pago marcado como enviado por el comprador'
+            confirmationType: 'PAYMENT_SENT',
+            reference: '', // User can add this later if needed
+            notes: 'Pago marcado como enviado por el comprador'
           }
         }
       });
       
-      if (data?.updateP2pTradeStatus?.success) {
+      if (data?.confirmP2pTradeStep?.success) {
         // Update local state to reflect new status
         setCurrentTradeStep(3);
         
@@ -1158,16 +1174,16 @@ export const TradeChatScreen: React.FC = () => {
         };
         setMessages(prev => [systemMessage, ...prev]); // Add at beginning (descending order)
         
-        // Refetch trade details to get updated status
+        // Refetch trade details to get updated status and escrow info
         if (refetchTradeDetails) {
           refetchTradeDetails();
         }
       } else {
-        const errorMessage = data?.updateP2pTradeStatus?.errors?.join(', ') || 'Error al actualizar el estado';
+        const errorMessage = data?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al actualizar el estado';
         Alert.alert('Error', errorMessage);
       }
     } catch (error) {
-      console.error('Error updating trade status:', error);
+      console.error('Error confirming payment sent:', error);
       Alert.alert('Error', 'No se pudo actualizar el estado del intercambio. Por favor intenta de nuevo.');
     }
   };
@@ -1192,33 +1208,45 @@ export const TradeChatScreen: React.FC = () => {
   
   const confirmReleaseFunds = async () => {
     try {
-      // Update trade status to PAYMENT_CONFIRMED (completed)
-      const { data } = await updateTradeStatus({
+      // First confirm payment received
+      const { data: confirmData } = await confirmTradeStep({
         variables: {
           input: {
             tradeId: tradeId,
-            status: 'PAYMENT_CONFIRMED',
-            paymentNotes: 'Pago confirmado por el vendedor, fondos liberados'
+            confirmationType: 'PAYMENT_RECEIVED',
+            notes: 'Pago confirmado por el vendedor'
           }
         }
       });
       
-      if (data?.updateP2pTradeStatus?.success) {
-        // Update local state to reflect new status
-        setCurrentTradeStep(4);
-        
-        // Add system message
-        const systemMessage: Message = {
-          id: Date.now() + Math.random(), // Use timestamp + random for unique ID
-          sender: 'system',
-          text: '🎉 ¡Intercambio completado exitosamente! Los fondos han sido liberados.',
-          timestamp: new Date(),
-          type: 'system',
-        };
-        setMessages(prev => [systemMessage, ...prev]); // Add at beginning (descending order)
-        
-        // Show success alert and navigate to rating
-        Alert.alert(
+      if (confirmData?.confirmP2pTradeStep?.success) {
+        // Then immediately release the crypto
+        const { data } = await confirmTradeStep({
+          variables: {
+            input: {
+              tradeId: tradeId,
+              confirmationType: 'CRYPTO_RELEASED',
+              notes: 'Fondos liberados al comprador'
+            }
+          }
+        });
+      
+      if (data?.confirmP2pTradeStep?.success) {
+          // Update local state to reflect new status
+          setCurrentTradeStep(4);
+          
+          // Add system message
+          const systemMessage: Message = {
+            id: Date.now() + Math.random(), // Use timestamp + random for unique ID
+            sender: 'system',
+            text: '🎉 ¡Intercambio completado exitosamente! Los fondos han sido liberados.',
+            timestamp: new Date(),
+            type: 'system',
+          };
+          setMessages(prev => [systemMessage, ...prev]); // Add at beginning (descending order)
+          
+          // Show success alert and navigate to rating
+          Alert.alert(
           '¡Éxito!',
           'El intercambio se ha completado exitosamente. Los fondos han sido liberados al comprador.',
           [
@@ -1282,7 +1310,11 @@ export const TradeChatScreen: React.FC = () => {
           refetchTradeDetails();
         }
       } else {
-        const errorMessage = data?.updateP2pTradeStatus?.errors?.join(', ') || 'Error al liberar los fondos';
+        const errorMessage = data?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al liberar los fondos';
+        Alert.alert('Error', errorMessage);
+      }
+      } else {
+        const errorMessage = confirmData?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al confirmar el pago';
         Alert.alert('Error', errorMessage);
       }
     } catch (error) {
