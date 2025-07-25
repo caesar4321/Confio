@@ -23,19 +23,17 @@ class PaymentTransactionType(DjangoObjectType):
         fields = (
             'id',
             'payment_transaction_id',
-            # Legacy user fields
             'payer_user', 
-            'merchant_user',
+            'merchant_account_user',
             'payer_account',
             'merchant_account',
-            # NEW: Business fields
             'payer_business',
             'merchant_business',
             'payer_type',
             'merchant_type',
             'payer_display_name',
             'merchant_display_name',
-            # Transaction details
+            'payer_phone',
             'payer_address',
             'merchant_address', 
             'amount', 
@@ -45,7 +43,8 @@ class PaymentTransactionType(DjangoObjectType):
             'transaction_hash',
             'error_message',
             'created_at', 
-            'updated_at'
+            'updated_at',
+            'invoice'
         )
 
 class InvoiceType(DjangoObjectType):
@@ -55,16 +54,13 @@ class InvoiceType(DjangoObjectType):
         fields = (
             'id',
             'invoice_id',
-            # Legacy user fields
-            'merchant_user',
+            'created_by_user',
             'merchant_account',
             'paid_by_user',
-            # NEW: Business fields
             'merchant_business',
             'merchant_type',
             'merchant_display_name',
             'paid_by_business',
-            # Invoice details
             'amount',
             'token_type',
             'description',
@@ -132,29 +128,25 @@ class CreateInvoice(graphene.Mutation):
             expires_in_hours = input.expires_in_hours or 24
             expires_at = timezone.now() + timedelta(hours=expires_in_hours)
 
-            # Determine merchant type and business details
-            merchant_business = None
-            merchant_type = 'user'  # default to personal
-            merchant_display_name = f"{user.first_name} {user.last_name}".strip() or user.username
-            
-            if active_account.account_type == 'business' and active_account.business:
-                merchant_business = active_account.business
-                merchant_type = 'business'
-                merchant_display_name = active_account.business.name
+            # Only businesses can create invoices
+            if active_account.account_type != 'business' or not active_account.business:
+                return CreateInvoice(
+                    invoice=None,
+                    success=False,
+                    errors=["Only business accounts can create invoices"]
+                )
+                
+            merchant_business = active_account.business
+            merchant_type = 'business'
+            merchant_display_name = merchant_business.name
 
             # Create the invoice
             invoice = Invoice.objects.create(
-                # Legacy user fields (kept for compatibility)
-                merchant_user=user,
+                created_by_user=user,
                 merchant_account=active_account,
-                
-                # NEW: Business fields based on account type
                 merchant_business=merchant_business,
                 merchant_type=merchant_type,
                 merchant_display_name=merchant_display_name,
-                created_by_user=user,  # User who created this invoice
-                
-                # Invoice details
                 amount=input.amount,
                 token_type=input.token_type,
                 description=input.description or '',
@@ -297,7 +289,7 @@ class PayInvoice(graphene.Mutation):
                     )
 
                 # Check if user is trying to pay their own invoice
-                if invoice.merchant_user == user:
+                if invoice.created_by_user == user:
                     return PayInvoice(
                         invoice=None,
                         payment_transaction=None,
@@ -338,7 +330,8 @@ class PayInvoice(graphene.Mutation):
                 # Determine payer type and business details
                 payer_business = None
                 payer_type = 'user'  # default to personal
-                payer_display_name = f"{user.first_name} {user.last_name}".strip() or user.username
+                payer_display_name = f"{user.first_name} {user.last_name}".strip()
+                payer_phone = f"{user.phone_country}{user.phone_number}" if user.phone_country and user.phone_number else ""
                 
                 if payer_account.account_type == 'business' and payer_account.business:
                     payer_business = payer_account.business
@@ -346,33 +339,24 @@ class PayInvoice(graphene.Mutation):
                     payer_display_name = payer_account.business.name
                 
                 # Determine merchant type and business details  
-                merchant_business = None
-                merchant_type = 'user'  # default to personal
-                merchant_display_name = f"{invoice.merchant_user.first_name} {invoice.merchant_user.last_name}".strip() or invoice.merchant_user.username
-                
-                if invoice.merchant_account.account_type == 'business' and invoice.merchant_account.business:
-                    merchant_business = invoice.merchant_account.business
-                    merchant_type = 'business'
-                    merchant_display_name = invoice.merchant_account.business.name
+                # Merchants are ALWAYS businesses for payments
+                merchant_business = invoice.merchant_business or invoice.merchant_account.business
+                merchant_type = 'business'  # Always business for payments
+                merchant_display_name = merchant_business.name if merchant_business else ''
 
                 # Create the payment transaction
                 payment_transaction = PaymentTransaction.objects.create(
-                    # Legacy user fields (kept for compatibility)
                     payer_user=user,
-                    merchant_user=invoice.merchant_user,
                     payer_account=payer_account,
                     merchant_account=invoice.merchant_account,
-                    
-                    # NEW: Business fields based on account type
                     payer_business=payer_business,
                     merchant_business=merchant_business,
-                    merchant_account_user=invoice.merchant_user,  # User associated with merchant account
+                    merchant_account_user=invoice.created_by_user,
                     payer_type=payer_type,
                     merchant_type=merchant_type,
                     payer_display_name=payer_display_name,
                     merchant_display_name=merchant_display_name,
-                    
-                    # Transaction details
+                    payer_phone=payer_phone,
                     payer_address=payer_account.sui_address,
                     merchant_address=invoice.merchant_account.sui_address,
                     amount=invoice.amount,
@@ -429,9 +413,21 @@ class PayInvoice(graphene.Mutation):
             )
 
 class Query(graphene.ObjectType):
-    """Query definitions for invoices"""
+    """Query definitions for invoices and payment transactions"""
     invoice = graphene.Field(InvoiceType, invoice_id=graphene.String())
     invoices = graphene.List(InvoiceType)
+    payment_transactions = graphene.List(PaymentTransactionType)
+    payment_transactions_by_account = graphene.List(
+        PaymentTransactionType,
+        account_type=graphene.String(required=True),
+        account_index=graphene.Int(required=True),
+        limit=graphene.Int()
+    )
+    payment_transactions_with_friend = graphene.List(
+        PaymentTransactionType,
+        friend_user_id=graphene.ID(required=True),
+        limit=graphene.Int()
+    )
 
     def resolve_invoice(self, info, invoice_id):
         # Anyone can view an invoice by ID
@@ -446,8 +442,73 @@ class Query(graphene.ObjectType):
         if not (user and getattr(user, 'is_authenticated', False)):
             return []
         return Invoice.objects.filter(
-            merchant_user=user
+            created_by_user=user
         )
+
+    def resolve_payment_transactions(self, info):
+        """Resolve all payment transactions for the authenticated user"""
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return []
+        
+        from django.db import models
+        return PaymentTransaction.objects.filter(
+            models.Q(payer_user=user) | models.Q(merchant_account_user=user)
+        ).order_by('-created_at')
+
+    def resolve_payment_transactions_by_account(self, info, account_type, account_index, limit=None):
+        """Resolve payment transactions for a specific account"""
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return []
+        
+        from users.models import Account
+        from django.db import models
+        
+        # Get the account for this user
+        try:
+            account = user.accounts.get(
+                account_type=account_type,
+                account_index=account_index
+            )
+        except Account.DoesNotExist:
+            return []
+        
+        # If account has no Sui address, return empty (account not set up yet)
+        if not account.sui_address:
+            return []
+        
+        # Filter transactions by account's Sui address
+        queryset = PaymentTransaction.objects.filter(
+            models.Q(payer_address=account.sui_address) | 
+            models.Q(merchant_address=account.sui_address)
+        ).order_by('-created_at')
+        
+        if limit:
+            queryset = queryset[:limit]
+            
+        return queryset
+
+    def resolve_payment_transactions_with_friend(self, info, friend_user_id, limit=None):
+        """Resolve payment transactions between current user and a specific friend"""
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return []
+        
+        from django.db import models
+        
+        # Get transactions where either:
+        # 1. Current user paid friend's business
+        # 2. Friend paid current user's business
+        queryset = PaymentTransaction.objects.filter(
+            (models.Q(payer_user=user) & models.Q(merchant_account_user=friend_user_id)) |
+            (models.Q(payer_user=friend_user_id) & models.Q(merchant_account_user=user))
+        ).order_by('-created_at')
+        
+        if limit:
+            queryset = queryset[:limit]
+            
+        return queryset
 
 class Mutation(graphene.ObjectType):
     """Mutation definitions for invoices"""

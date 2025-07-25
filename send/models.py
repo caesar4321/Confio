@@ -81,6 +81,18 @@ class SendTransaction(SoftDeleteModel):
         blank=True,
         help_text='Display name for the recipient'
     )
+    
+    # Phone numbers at transaction time
+    sender_phone = models.CharField(
+        max_length=30,
+        blank=True,
+        help_text='Sender phone number at transaction time'
+    )
+    recipient_phone = models.CharField(
+        max_length=30,
+        blank=True,
+        help_text='Recipient phone number at transaction time'
+    )
 
     # Blockchain addresses
     sender_address = models.CharField(max_length=66)  # Sui addresses are 0x + 32 bytes (66 chars total)

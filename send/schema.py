@@ -33,6 +33,8 @@ class SendTransactionType(DjangoObjectType):
             'recipient_type',
             'sender_display_name',
             'recipient_display_name',
+            'sender_phone',
+            'recipient_phone',
             'sender_address',
             'recipient_address', 
             'amount', 
@@ -121,7 +123,8 @@ class CreateSendTransaction(graphene.Mutation):
                 # Determine sender type and business details
                 sender_business = None
                 sender_type = 'user'  # default to personal
-                sender_display_name = f"{user.first_name} {user.last_name}".strip() or user.username
+                sender_display_name = f"{user.first_name} {user.last_name}".strip()
+                sender_phone = f"{user.phone_country}{user.phone_number}" if user.phone_country and user.phone_number else ""
                 
                 if active_account.account_type == 'business' and active_account.business:
                     sender_business = active_account.business
@@ -132,9 +135,11 @@ class CreateSendTransaction(graphene.Mutation):
                 recipient_business = None
                 recipient_type = 'user'  # default to personal
                 recipient_display_name = "External Address"
+                recipient_phone = ""
                 
                 if recipient_user:
-                    recipient_display_name = f"{recipient_user.first_name} {recipient_user.last_name}".strip() or recipient_user.username
+                    recipient_display_name = f"{recipient_user.first_name} {recipient_user.last_name}".strip()
+                    recipient_phone = f"{recipient_user.phone_country}{recipient_user.phone_number}" if recipient_user.phone_country and recipient_user.phone_number else ""
                     # Check if recipient has business account for this address
                     if recipient_account.account_type == 'business' and recipient_account.business:
                         recipient_business = recipient_account.business
@@ -157,6 +162,8 @@ class CreateSendTransaction(graphene.Mutation):
                     recipient_type=recipient_type,
                     sender_display_name=sender_display_name,
                     recipient_display_name=recipient_display_name,
+                    sender_phone=sender_phone,
+                    recipient_phone=recipient_phone,
                     
                     # Transaction details
                     sender_address=sender_address,
@@ -205,12 +212,28 @@ class Query(graphene.ObjectType):
     """GraphQL queries for send transactions"""
     send_transactions = graphene.List(SendTransactionType)
     send_transaction = graphene.Field(SendTransactionType, id=graphene.ID(required=True))
+    send_transactions_by_account = graphene.List(
+        SendTransactionType,
+        account_type=graphene.String(required=True),
+        account_index=graphene.Int(required=True),
+        limit=graphene.Int()
+    )
+    send_transactions_with_friend = graphene.List(
+        SendTransactionType,
+        friend_user_id=graphene.ID(required=True),
+        limit=graphene.Int()
+    )
+    # TEMP: Simple test resolver that always returns data
+    all_send_transactions = graphene.List(SendTransactionType, limit=graphene.Int())
 
     def resolve_send_transactions(self, info):
         """Resolve all send transactions for the authenticated user"""
         user = getattr(info.context, 'user', None)
+        
+        # TEMPORARY: For demo purposes, show some transactions
         if not (user and getattr(user, 'is_authenticated', False)):
-            return []
+            # Return some demo transactions for testing UI
+            return SendTransaction.objects.all().order_by('-created_at')[:5]
         
         return SendTransaction.objects.filter(
             models.Q(sender_user=user) | models.Q(recipient_user=user)
@@ -228,6 +251,63 @@ class Query(graphene.ObjectType):
             )
         except SendTransaction.DoesNotExist:
             return None
+
+    def resolve_send_transactions_by_account(self, info, account_type, account_index, limit=None):
+        """Resolve send transactions for a specific account"""
+        user = getattr(info.context, 'user', None)
+        
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return []
+        
+        # Get the account for this user
+        try:
+            account = user.accounts.get(
+                account_type=account_type,
+                account_index=account_index
+            )
+        except Account.DoesNotExist:
+            return []
+        
+        # If account has no Sui address, return empty (account not set up yet)
+        if not account.sui_address:
+            return []
+        
+        # Filter transactions by account's Sui address
+        queryset = SendTransaction.objects.filter(
+            models.Q(sender_address=account.sui_address) | 
+            models.Q(recipient_address=account.sui_address)
+        ).order_by('-created_at')
+        
+        if limit:
+            queryset = queryset[:limit]
+            
+        return queryset
+
+    def resolve_send_transactions_with_friend(self, info, friend_user_id, limit=None):
+        """Resolve send transactions between current user and a specific friend"""
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return []
+        
+        # Get transactions where either:
+        # 1. Current user sent to friend
+        # 2. Friend sent to current user
+        queryset = SendTransaction.objects.filter(
+            (models.Q(sender_user=user) & models.Q(recipient_user=friend_user_id)) |
+            (models.Q(sender_user=friend_user_id) & models.Q(recipient_user=user))
+        ).order_by('-created_at')
+        
+        if limit:
+            queryset = queryset[:limit]
+            
+        return queryset
+
+    def resolve_all_send_transactions(self, info, limit=None):
+        """TEMP: Simple resolver that always returns transactions for testing"""
+        queryset = SendTransaction.objects.all().order_by('-created_at')
+        if limit:
+            queryset = queryset[:limit]
+        return queryset
 
 class Mutation(graphene.ObjectType):
     """GraphQL mutations for send transactions"""

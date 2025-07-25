@@ -5,6 +5,7 @@ export type AccountType = 'personal' | 'business';
 export interface AccountContext {
   type: AccountType;
   index: number;
+  businessId?: string;
 }
 
 export interface StoredAccount {
@@ -123,6 +124,15 @@ export class AccountManager {
         contextType: context.type,
         contextIndex: context.index
       });
+      
+      // If it's a business account, get the businessId
+      if (context.type === 'business') {
+        const account = await this.getAccount(activeAccountId);
+        if (account?.business?.id) {
+          context.businessId = account.business.id;
+          console.log('AccountManager - Added businessId to context:', context.businessId);
+        }
+      }
       
       return context;
     } catch (error) {

@@ -282,7 +282,8 @@ export const HomeScreen = () => {
                 accountType: 'cusd',
                 accountName: 'Confío Dollar',
                 accountSymbol: '$cUSD',
-                accountBalance: mockBalances.cusd
+                accountBalance: mockBalances.cusd,
+                accountAddress: activeAccount?.suiAddress || ''
               })}
             >
               <View style={styles.walletLogoContainer}>
@@ -304,7 +305,8 @@ export const HomeScreen = () => {
                 accountType: 'confio',
                 accountName: 'Confío',
                 accountSymbol: '$CONFIO',
-                accountBalance: mockBalances.confio
+                accountBalance: mockBalances.confio,
+                accountAddress: activeAccount?.suiAddress || ''
               })}
             >
               <View style={styles.walletLogoContainer}>

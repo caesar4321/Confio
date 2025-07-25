@@ -780,6 +780,54 @@ class UpdateAccountSuiAddress(graphene.Mutation):
 			logger.error(f"Error updating account Sui address: {str(e)}")
 			return UpdateAccountSuiAddress(success=False, error="Error interno del servidor")
 
+class SwitchAccountToken(graphene.Mutation):
+	"""Generate a new JWT token with updated account context"""
+	class Arguments:
+		account_type = graphene.String(required=True)
+		account_index = graphene.Int(required=True)
+	
+	token = graphene.String()
+	payload = graphene.JSONString()
+	
+	@classmethod
+	def mutate(cls, root, info, account_type, account_index):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			raise Exception("Authentication required")
+		
+		try:
+			# Validate account exists
+			from .models import Account
+			account = Account.objects.get(
+				user=user,
+				account_type=account_type,
+				account_index=account_index
+			)
+			
+			# Create context with account info
+			class MockContext:
+				def __init__(self, account_type, account_index):
+					self.active_account_type = account_type
+					self.active_account_index = account_index
+			
+			context = MockContext(account_type, account_index)
+			
+			# Generate new token with account context
+			new_payload = jwt_payload_handler(user, context)
+			new_token = jwt_encode(new_payload)
+			
+			return SwitchAccountToken(
+				token=new_token,
+				payload=new_payload
+			)
+			
+		except Account.DoesNotExist:
+			raise Exception("Account not found")
+		except Exception as e:
+			logger.error(f"Error switching account token: {str(e)}")
+			raise Exception(str(e))
+
+
 class RefreshToken(graphene.Mutation):
 	class Arguments:
 		refreshToken = graphene.String(required=True)
@@ -816,15 +864,29 @@ class RefreshToken(graphene.Mutation):
 			if user.auth_token_version != token_version:
 				raise Exception("Token version mismatch")
 			
-			# Generate new access token
-			new_access_token = jwt_encode(jwt_payload_handler(user))
+			# Extract account context from refresh token
+			account_type = payload.get('account_type', 'personal')
+			account_index = payload.get('account_index', 0)
+			business_id = payload.get('business_id')
+			
+			# Create a mock context object with account info
+			class MockContext:
+				def __init__(self, account_type, account_index):
+					self.active_account_type = account_type
+					self.active_account_index = account_index
+			
+			context = MockContext(account_type, account_index)
+			
+			# Generate new access token with account context
+			new_payload = jwt_payload_handler(user, context)
+			new_access_token = jwt_encode(new_payload)
 			
 			# Calculate refresh expiration
 			refresh_exp = int((datetime.utcnow() + timedelta(days=365)).timestamp())
 			
 			return RefreshToken(
 				token=new_access_token,
-				payload=jwt_payload_handler(user),
+				payload=new_payload,
 				refreshExpiresIn=refresh_exp
 			)
 		except Exception as e:
@@ -1066,6 +1128,7 @@ class Mutation(graphene.ObjectType):
 	update_user_profile = UpdateUserProfile.Field()
 	invalidate_auth_tokens = InvalidateAuthTokens.Field()
 	refresh_token = RefreshToken.Field()
+	switch_account_token = SwitchAccountToken.Field()
 	submit_identity_verification = SubmitIdentityVerification.Field()
 	approve_identity_verification = ApproveIdentityVerification.Field()
 	reject_identity_verification = RejectIdentityVerification.Field()
