@@ -334,13 +334,28 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         // Update the active account context state
         setActiveAccountContext(newActiveContext);
         
-        // Force Apollo client to refresh its headers by clearing the cache
+        // Clear Apollo cache without cancelling in-flight queries
         // This ensures that subsequent requests use the updated account context
         try {
-          await apolloClient.resetStore();
+          // Stop all active queries first to prevent "store reset while query was in flight" error
+          apolloClient.stop();
+          
+          // Clear the cache
+          await apolloClient.clearStore();
+          
           console.log('useAccountManager - Apollo cache cleared after account switch');
+          
+          // Note: Components will refetch their data automatically when they detect
+          // the account change through React context
         } catch (error) {
-          console.log('useAccountManager - Error clearing Apollo cache (non-critical):', error);
+          console.log('useAccountManager - Error clearing Apollo cache:', error);
+          // If clearStore fails, try to at least evict the cache
+          try {
+            apolloClient.cache.evict({});
+            apolloClient.cache.gc();
+          } catch (evictError) {
+            console.log('useAccountManager - Error evicting cache:', evictError);
+          }
         }
         
         // Note: Profile refresh is handled by AuthContext, not here

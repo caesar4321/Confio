@@ -28,6 +28,7 @@ import { useCountrySelection } from '../hooks/useCountrySelection';
 import { useCurrency } from '../hooks/useCurrency';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS, GET_MY_P2P_TRADES, GET_MY_P2P_OFFERS, GET_USER_BANK_ACCOUNTS, UPDATE_P2P_OFFER } from '../apollo/queries';
+import { formatLocalDateTime, formatLocalDate } from '../utils/dateUtils';
 import { useAccount } from '../contexts/AccountContext';
 import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -342,34 +343,6 @@ interface ActiveTrade {
   hasRating?: boolean;
 }
 
-// Helper function to format date to local time
-const formatLocalDateTime = (dateString: string) => {
-  const date = new Date(dateString);
-  
-  // Format date parts manually for better React Native compatibility
-  const day = date.getDate().toString().padStart(2, '0');
-  const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-  const month = months[date.getMonth()];
-  const year = date.getFullYear();
-  
-  let hours = date.getHours();
-  const minutes = date.getMinutes().toString().padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12;
-  hours = hours ? hours : 12; // 0 should be 12
-  
-  return `${day} ${month} ${year}, ${hours}:${minutes} ${ampm}`;
-};
-
-const formatLocalDate = (dateString: string) => {
-  const date = new Date(dateString);
-  const day = date.getDate().toString().padStart(2, '0');
-  const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-  const month = months[date.getMonth()];
-  const year = date.getFullYear();
-  
-  return `${day} ${month} ${year}`;
-};
 
 export const ExchangeScreen = () => {
   // Use centralized country selection hook
@@ -464,6 +437,7 @@ export const ExchangeScreen = () => {
     fetchPolicy: 'network-only', // Always fetch fresh data from server
     notifyOnNetworkStatusChange: true, // Enable to track network status
     skip: !activeAccount || !activeAccount.id, // Skip if no account or no ID
+    errorPolicy: 'all', // Continue to show data even if there's an error
     // Removed pollInterval - now using focus-based refresh and manual refresh instead
   });
   
@@ -481,7 +455,13 @@ export const ExchangeScreen = () => {
       activeAccount: activeAccount ? { id: activeAccount.id, type: activeAccount.type } : null
     });
     if (tradesError) {
-      console.error('[ExchangeScreen] Trades query error:', tradesError);
+      // Check if this is a store reset error (happens during account switching)
+      if (tradesError.message?.includes('Store reset while query was in flight')) {
+        console.log('[ExchangeScreen] Store reset error detected - this is expected during account switching');
+        // The query will automatically retry after the store reset
+      } else {
+        console.error('[ExchangeScreen] Trades query error:', tradesError);
+      }
     }
   }, [tradesLoading, tradesError, myTradesData, tradesQueryVariables, activeAccount]);
 
@@ -491,7 +471,8 @@ export const ExchangeScreen = () => {
       accountId: activeAccount?.id 
     },
     skip: !activeAccount?.id,
-    fetchPolicy: 'cache-and-network'
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all' // Continue to show data even if there's an error
   });
 
   // Fetch my P2P offers for the active account
@@ -501,7 +482,8 @@ export const ExchangeScreen = () => {
     },
     fetchPolicy: 'cache-and-network',
     notifyOnNetworkStatusChange: false,
-    skip: !activeAccount || !activeAccount.id // Skip if no account or no ID
+    skip: !activeAccount || !activeAccount.id, // Skip if no account or no ID
+    errorPolicy: 'all' // Continue to show data even if there's an error
   });
 
   // Force refetch trades when active account changes
@@ -752,6 +734,7 @@ export const ExchangeScreen = () => {
           currencyCode: trade.currencyCode,
           hasRating: trade.hasRating || false,
           createdAt: trade.createdAt,
+          completedAt: trade.completedAt, // Add completedAt for syncing dates
         };
         
         // Debug logging for trade 14
@@ -2116,6 +2099,7 @@ export const ExchangeScreen = () => {
                                 status: trade.status,
                                 hasRating: trade.hasRating,
                                 createdAt: trade.createdAt,
+                                completedAt: trade.completedAt,
                             }
                         });
                     }}
@@ -2190,6 +2174,7 @@ export const ExchangeScreen = () => {
                                     status: trade.status,
                                     hasRating: trade.hasRating,
                                     createdAt: trade.createdAt,
+                                    completedAt: trade.completedAt,
                                 }
                             });
                         }}
