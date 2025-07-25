@@ -16,7 +16,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   StatusBar,
-  type TextInput as TextInputType,
+  TextInput as TextInputType,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
