@@ -1,5 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform, Alert, ScrollView, Image } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  Platform, 
+  Alert, 
+  ScrollView, 
+  Image,
+  RefreshControl,
+  Animated,
+  Dimensions,
+  Vibration
+} from 'react-native';
 import { Gradient } from '../components/common/Gradient';
 import { AuthService } from '../services/authService';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -16,6 +29,9 @@ import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { ProfileMenu } from '../components/ProfileMenu';
 import { useAccount } from '../contexts/AccountContext';
 import { getCountryByIso } from '../utils/countries';
+import { WalletCardSkeleton } from '../components/SkeletonLoader';
+import { useQuery } from '@apollo/client';
+import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
@@ -55,12 +71,26 @@ interface Account {
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
+interface QuickAction {
+  id: string;
+  label: string;
+  icon: string;
+  color: string;
+  route: () => void;
+}
+
 export const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const { setCurrentAccountAvatar, profileMenu } = useHeader();
   const { signOut, userProfile } = useAuth();
   const [suiAddress, setSuiAddress] = React.useState<string>('');
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  // Animation values
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.95)).current;
+  const balanceAnim = useRef(new Animated.Value(0)).current;
   
   // Use account context
   const {
@@ -72,23 +102,29 @@ export const HomeScreen = () => {
     refreshAccounts,
   } = useAccount();
   
-  // Only show loading for initial data load, not for account loading
-  const isLoading = false; // accountsLoading;
-  
-  // Debug initial state
-  console.log('HomeScreen initial render:', { 
-    showProfileMenu: profileMenu.showProfileMenu, 
-    activeAccount: activeAccount?.id,
-    activeAccountType: activeAccount?.type,
-    activeAccountIndex: activeAccount?.index,
-    activeAccountName: activeAccount?.name,
-    activeAccountAvatar: activeAccount?.avatar,
-    accountsCount: accounts.length,
-    accounts: accounts.map(acc => ({ id: acc.id, name: acc.name, avatar: acc.avatar, type: acc.type })),
-    isLoading: accountsLoading,
-    userProfileLoaded: !!userProfile,
-    userProfileName: userProfile?.firstName || userProfile?.username
+  // Fetch real balances
+  const { data: cUSDBalanceData, loading: cUSDLoading, refetch: refetchCUSD } = useQuery(GET_ACCOUNT_BALANCE, {
+    variables: { tokenType: 'cUSD' },
+    fetchPolicy: 'cache-and-network',
   });
+  
+  const { data: confioBalanceData, loading: confioLoading, refetch: refetchConfio } = useQuery(GET_ACCOUNT_BALANCE, {
+    variables: { tokenType: 'CONFIO' },
+    fetchPolicy: 'cache-and-network',
+  });
+  
+  // Parse balances safely
+  const cUSDBalance = parseFloat(cUSDBalanceData?.accountBalance || '0');
+  const confioBalance = parseFloat(confioBalanceData?.accountBalance || '0');
+  
+  // Calculate portfolio value (mock exchange rate for now)
+  const confioToUSD = 0.1; // TODO: Fetch real exchange rate
+  const totalUSDValue = cUSDBalance + (confioBalance * confioToUSD);
+  const localExchangeRate = 35.5; // TODO: Fetch real VES rate
+  const totalLocalValue = totalUSDValue * localExchangeRate;
+  
+  // Only show loading for initial data load
+  const isLoading = accountsLoading && !accounts.length;
   
   // No more mock accounts - we fetch from server
 
@@ -133,18 +169,84 @@ export const HomeScreen = () => {
     userProfileName: userProfile?.firstName || userProfile?.username
   });
 
-  // Mock balances - replace with real data later
-  const mockBalances = {
-    cusd: "3,542.75",
-    confio: "234.18"
-  };
+  // Pull to refresh handler
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    // Add haptic feedback
+    if (Platform.OS === 'ios') {
+      Vibration.vibrate(10);
+    }
+    
+    try {
+      await Promise.all([
+        refreshAccounts(),
+        refetchCUSD(),
+        refetchConfio(),
+      ]);
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshAccounts, refetchCUSD, refetchConfio]);
+  
+  // Quick actions configuration
+  const quickActions: QuickAction[] = [
+    {
+      id: 'send',
+      label: 'Enviar',
+      icon: 'send',
+      color: '#10b981',
+      route: () => navigation.navigate('BottomTabs', { screen: 'Contacts' }),
+    },
+    {
+      id: 'receive',
+      label: 'Recibir',
+      icon: 'download',
+      color: '#3b82f6',
+      route: () => navigation.navigate('ConfioAddress'),
+    },
+    {
+      id: 'exchange',
+      label: 'Intercambiar',
+      icon: 'refresh-cw',
+      color: '#8b5cf6',
+      route: () => navigation.navigate('BottomTabs', { screen: 'Exchange' }),
+    },
+    {
+      id: 'pay',
+      label: 'Pagar',
+      icon: 'credit-card',
+      color: '#f59e0b',
+      route: () => navigation.navigate('BottomTabs', { screen: 'Scan', params: { mode: 'pagar' } }),
+    },
+  ];
 
-  // Mock exchange rates - replace with real data later
-  const mockLocalCurrency = {
-    name: "Bolívares",
-    rate: 35.5,
-    symbol: "Bs."
-  };
+  // Entrance animation
+  React.useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        friction: 8,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [fadeAnim, scaleAnim]);
+  
+  // Balance animation when value changes
+  React.useEffect(() => {
+    Animated.timing(balanceAnim, {
+      toValue: showLocalCurrency ? 1 : 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+  }, [showLocalCurrency, balanceAnim]);
 
   React.useEffect(() => {
     console.log('HomeScreen - useEffect triggered for data loading');
@@ -242,85 +344,208 @@ export const HomeScreen = () => {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#F3F4F6' }}>
-      {/* Balance Card Section - mint background, rounded bottom border */}
-      <View style={{
-        backgroundColor: '#34d399',
-        paddingTop: 12,
-        paddingBottom: 32,
-        paddingHorizontal: 20,
-        borderBottomLeftRadius: 32,
-        borderBottomRightRadius: 32,
-      }}>
-        <Text style={{ fontSize: 15, color: '#fff', opacity: 0.8 }}>Tu saldo en:</Text>
-        <Text style={{ fontSize: 15, color: '#fff', opacity: 0.8, marginBottom: 4 }}>Dólares estadounidenses</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Text style={{ fontSize: 32, fontWeight: 'bold', color: '#fff' }}>${mockBalances.cusd}</Text>
-          <TouchableOpacity style={{
-            marginLeft: 8,
-            backgroundColor: 'rgba(255,255,255,0.2)',
-            borderRadius: 16,
-            paddingHorizontal: 12,
-            paddingVertical: 4,
-          }}>
-            <Text style={{ color: '#fff', fontSize: 12 }}>Ver en Bs. 5.000.000,00</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Wallets Section - light grey background */}
-      <ScrollView style={{ flex: 1, backgroundColor: '#F3F4F6' }} contentContainerStyle={{ paddingHorizontal: 0 }} showsHorizontalScrollIndicator={false}>
+    <View style={styles.container}>
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#fff"
+            colors={['#34d399']}
+          />
+        }
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Enhanced Balance Card Section */}
+        <Animated.View 
+          style={[
+            styles.balanceCard,
+            {
+              opacity: fadeAnim,
+              transform: [{ scale: scaleAnim }],
+            }
+          ]}
+        >
+          <View style={styles.portfolioHeader}>
+            <Text style={styles.portfolioLabel}>Valor Total del Portafolio</Text>
+            <TouchableOpacity 
+              style={styles.currencyToggle}
+              onPress={() => setShowLocalCurrency(!showLocalCurrency)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.currencyToggleText}>
+                {showLocalCurrency ? 'USD' : 'VES'}
+              </Text>
+              <Icon name="chevron-down" size={14} color="#fff" />
+            </TouchableOpacity>
+          </View>
+          
+          <Animated.View 
+            style={[
+              styles.balanceContainer,
+              {
+                opacity: balanceAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [1, 0.3],
+                }),
+              }
+            ]}
+          >
+            <Text style={styles.currencySymbol}>
+              {showLocalCurrency ? 'Bs.' : '$'}
+            </Text>
+            <Text style={styles.balanceAmount}>
+              {showLocalCurrency 
+                ? totalLocalValue.toLocaleString('es-VE', { 
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2 
+                  })
+                : totalUSDValue.toLocaleString('en-US', { 
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2 
+                  })
+              }
+            </Text>
+          </Animated.View>
+          
+          {/* Portfolio change indicator */}
+          <View style={styles.changeContainer}>
+            <Icon name="trending-up" size={16} color="#10f981" />
+            <Text style={styles.changeText}>+2.5% hoy</Text>
+          </View>
+        </Animated.View>
         
-        <View style={styles.walletsHeader}>
-          <Text style={styles.walletsTitle}>Mis Cuentas</Text>
-        </View>
-        <View style={{ ...styles.walletsContainer, width: '100%' }}>
-          <View style={{ ...styles.walletCard, width: '100%' }}>
-            <TouchableOpacity 
-              style={styles.walletCardContent}
-              onPress={() => navigation.navigate('AccountDetail', { 
-                accountType: 'cusd',
-                accountName: 'Confío Dollar',
-                accountSymbol: '$cUSD',
-                accountBalance: mockBalances.cusd,
-                accountAddress: activeAccount?.suiAddress || ''
-              })}
+        {/* Quick Actions */}
+        <Animated.View 
+          style={[
+            styles.quickActionsCard,
+            {
+              opacity: fadeAnim,
+              transform: [
+                { 
+                  translateY: fadeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [30, 0],
+                  })
+                }
+              ],
+            }
+          ]}
+        >
+          {quickActions.map((action, index) => (
+            <TouchableOpacity
+              key={action.id}
+              style={styles.actionButton}
+              onPress={action.route}
+              activeOpacity={0.7}
             >
-              <View style={styles.walletLogoContainer}>
-                <Image source={cUSDLogo} style={styles.walletLogo} />
-              </View>
-              <View style={styles.walletInfo}>
-                <Text style={styles.walletName}>Confío Dollar</Text>
-                <Text style={styles.walletSymbol}>$cUSD</Text>
-              </View>
-              <View style={styles.walletBalance}>
-                <Text style={styles.walletBalanceText}>${mockBalances.cusd}</Text>
-              </View>
+              <Animated.View 
+                style={[
+                  styles.actionIcon,
+                  { backgroundColor: action.color },
+                  {
+                    transform: [
+                      {
+                        scale: scaleAnim.interpolate({
+                          inputRange: [0.95, 1],
+                          outputRange: [0.8, 1],
+                        })
+                      }
+                    ]
+                  }
+                ]}
+              >
+                <Icon name={action.icon} size={22} color="#fff" />
+              </Animated.View>
+              <Text style={styles.actionLabel}>{action.label}</Text>
             </TouchableOpacity>
-          </View>
-          <View style={{ ...styles.walletCard, width: '100%' }}>
-            <TouchableOpacity 
-              style={styles.walletCardContent}
-              onPress={() => navigation.navigate('AccountDetail', { 
-                accountType: 'confio',
-                accountName: 'Confío',
-                accountSymbol: '$CONFIO',
-                accountBalance: mockBalances.confio,
-                accountAddress: activeAccount?.suiAddress || ''
-              })}
+          ))}
+        </Animated.View>
+
+        {/* Wallets Section */}
+        <View style={styles.walletsSection}>
+          <Text style={styles.walletsTitle}>Mis Billeteras</Text>
+          
+          {cUSDLoading || confioLoading ? (
+            <>
+              <WalletCardSkeleton />
+              <WalletCardSkeleton />
+            </>
+          ) : (
+            <Animated.View
+              style={{
+                opacity: fadeAnim,
+                transform: [
+                  {
+                    translateY: fadeAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [40, 0],
+                    })
+                  }
+                ]
+              }}
             >
-              <View style={styles.walletLogoContainer}>
-                <Image source={CONFIOLogo} style={styles.walletLogo} />
-              </View>
-              <View style={styles.walletInfo}>
-                <Text style={styles.walletName}>Confío</Text>
-                <Text style={styles.walletSymbol}>$CONFIO</Text>
-              </View>
-              <View style={styles.walletBalance}>
-                <Text style={styles.walletBalanceText}>{mockBalances.confio}</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
+              {/* cUSD Wallet */}
+              <TouchableOpacity 
+                style={styles.walletCard}
+                onPress={() => navigation.navigate('AccountDetail', { 
+                  accountType: 'cusd',
+                  accountName: 'Confío Dollar',
+                  accountSymbol: '$cUSD',
+                  accountBalance: cUSDBalance.toFixed(2),
+                  accountAddress: activeAccount?.suiAddress || ''
+                })}
+                activeOpacity={0.7}
+              >
+                <View style={styles.walletCardContent}>
+                  <View style={styles.walletLogoContainer}>
+                    <Image source={cUSDLogo} style={styles.walletLogo} />
+                  </View>
+                  <View style={styles.walletInfo}>
+                    <Text style={styles.walletName}>Confío Dollar</Text>
+                    <Text style={styles.walletSymbol}>cUSD</Text>
+                  </View>
+                  <View style={styles.walletBalanceContainer}>
+                    <Text style={styles.walletBalanceText}>
+                      ${cUSDBalance.toFixed(2)}
+                    </Text>
+                    <Icon name="chevron-right" size={20} color="#9ca3af" />
+                  </View>
+                </View>
+              </TouchableOpacity>
+
+              {/* CONFIO Wallet */}
+              <TouchableOpacity 
+                style={styles.walletCard}
+                onPress={() => navigation.navigate('AccountDetail', { 
+                  accountType: 'confio',
+                  accountName: 'Confío',
+                  accountSymbol: '$CONFIO',
+                  accountBalance: confioBalance.toFixed(2),
+                  accountAddress: activeAccount?.suiAddress || ''
+                })}
+                activeOpacity={0.7}
+              >
+                <View style={styles.walletCardContent}>
+                  <View style={[styles.walletLogoContainer, { backgroundColor: '#8b5cf6' }]}>
+                    <Image source={CONFIOLogo} style={styles.walletLogo} />
+                  </View>
+                  <View style={styles.walletInfo}>
+                    <Text style={styles.walletName}>Confío</Text>
+                    <Text style={styles.walletSymbol}>CONFIO</Text>
+                  </View>
+                  <View style={styles.walletBalanceContainer}>
+                    <Text style={styles.walletBalanceText}>
+                      {confioBalance.toFixed(2)}
+                    </Text>
+                    <Icon name="chevron-right" size={20} color="#9ca3af" />
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </Animated.View>
+          )}
         </View>
       </ScrollView>
 
@@ -340,7 +565,186 @@ export const HomeScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#f9fafb',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 100,
+  },
+  // Enhanced balance card styles
+  balanceCard: {
+    backgroundColor: '#34d399',
+    paddingTop: 20,
+    paddingBottom: 30,
+    paddingHorizontal: 20,
+    borderBottomLeftRadius: 32,
+    borderBottomRightRadius: 32,
+  },
+  portfolioHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  portfolioLabel: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.95)',
+    fontWeight: '500',
+  },
+  currencyToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  currencyToggleText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginRight: 4,
+  },
+  balanceContainer: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginBottom: 12,
+  },
+  currencySymbol: {
+    fontSize: 24,
+    color: '#fff',
+    marginRight: 6,
+    fontWeight: '500',
+  },
+  balanceAmount: {
+    fontSize: 42,
+    fontWeight: 'bold',
+    color: '#fff',
+    letterSpacing: -1,
+  },
+  changeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  changeText: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 14,
+    marginLeft: 6,
+    fontWeight: '500',
+  },
+  // Quick actions styles
+  quickActionsCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+    backgroundColor: '#fff',
+    marginHorizontal: 20,
+    marginTop: -20,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  actionButton: {
+    alignItems: 'center',
+    paddingHorizontal: 10,
+  },
+  actionIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  actionLabel: {
+    fontSize: 13,
+    color: '#374151',
+    fontWeight: '600',
+  },
+  // Wallets section styles
+  walletsSection: {
+    paddingHorizontal: 20,
+    marginTop: 28,
+  },
+  walletsTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#111827',
+    marginBottom: 16,
+  },
+  walletCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  walletCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  walletLogoContainer: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#10b981',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  walletLogo: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+  },
+  walletInfo: {
+    flex: 1,
+  },
+  walletName: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  walletSymbol: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginTop: 2,
+  },
+  walletBalanceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  walletBalanceText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+    marginRight: 8,
+  },
+  // Loading state
+  loadingText: {
+    color: '#fff',
+    fontSize: 18,
+    textAlign: 'center',
+    marginTop: 40,
+  },
+  // Legacy styles kept for compatibility
+  content: {
+    flex: 1,
   },
   header: {
     paddingTop: 56,
@@ -348,117 +752,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
-    width: '100%',
-  },
-  headerInner: {
-    paddingTop: 56,
-    paddingBottom: 32,
-    paddingHorizontal: 20,
-  },
-  balanceSection: {
-    marginTop: 8,
-  },
-  balanceLabel: {
-    fontSize: 15,
-    color: '#FFFFFF',
-    opacity: 0.8,
-  },
-  balanceSubLabel: {
-    fontSize: 15,
-    color: '#FFFFFF',
-    opacity: 0.8,
-    marginTop: 4,
-  },
-  balanceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-    width: '100%',
-  },
-  balanceAmount: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#FFFFFF',
-  },
-  currencyToggle: {
-    marginLeft: 12,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    flexShrink: 1,
-    maxWidth: 140,
-  },
-  currencyToggleText: {
-    color: '#FFFFFF',
-    fontSize: 12,
-  },
-  content: {
-    flex: 1,
-  },
-  walletsHeader: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-  },
-  walletsTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
-  walletsContainer: {
-    paddingHorizontal: 12,
-  },
-  walletCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-  },
-  walletLogoContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  walletLogo: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-  },
-  walletInfo: {
-    flex: 1,
-  },
-  walletName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
-  walletSymbol: {
-    fontSize: 13,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  walletBalance: {
-    alignItems: 'flex-end',
-  },
-  walletBalanceText: {
-    fontSize: 17,
-    fontWeight: 'bold',
-    color: '#1F2937',
-  },
-  loadingText: {
-    color: '#fff',
-    fontSize: 18,
-    textAlign: 'center',
-    marginTop: 40,
-  },
-  walletCardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
     width: '100%',
   },
 }); 

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated, ViewStyle } from 'react-native';
+import { View, Animated, StyleSheet, ViewStyle } from 'react-native';
+import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 
 interface SkeletonLoaderProps {
   width?: number | string;
@@ -14,156 +15,131 @@ export const SkeletonLoader: React.FC<SkeletonLoaderProps> = ({
   borderRadius = 4,
   style,
 }) => {
-  const shimmerAnim = useRef(new Animated.Value(0)).current;
+  const shimmerValue = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.loop(
-      Animated.sequence([
-        Animated.timing(shimmerAnim, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(shimmerAnim, {
-          toValue: 0,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ])
+      Animated.timing(shimmerValue, {
+        toValue: 1,
+        duration: 1500,
+        useNativeDriver: true,
+      })
     ).start();
-  }, [shimmerAnim]);
+  }, [shimmerValue]);
 
-  const opacity = shimmerAnim.interpolate({
+  const translateX = shimmerValue.interpolate({
     inputRange: [0, 1],
-    outputRange: [0.3, 0.7],
+    outputRange: [-300, 300],
   });
 
+  // Calculate actual dimensions
+  const actualWidth = typeof width === 'number' ? width : 300; // Default width for percentage
+  const actualHeight = height;
+
   return (
-    <Animated.View
+    <View
       style={[
-        styles.skeleton,
+        styles.container,
         {
           width,
           height,
           borderRadius,
-          opacity,
+          overflow: 'hidden',
+          backgroundColor: '#e5e7eb',
         },
         style,
       ]}
-    />
-  );
-};
-
-export const OfferCardSkeleton: React.FC = () => {
-  return (
-    <View style={styles.cardContainer}>
-      <View style={styles.cardHeader}>
-        <View style={styles.userInfo}>
-          <SkeletonLoader width={40} height={40} borderRadius={20} />
-          <View style={styles.userDetails}>
-            <SkeletonLoader width={120} height={16} />
-            <SkeletonLoader width={80} height={12} style={{ marginTop: 4 }} />
-          </View>
-        </View>
-        <SkeletonLoader width={80} height={24} />
-      </View>
-      
-      <View style={styles.cardContent}>
-        <SkeletonLoader width="60%" height={14} />
-        <SkeletonLoader width="40%" height={14} style={{ marginTop: 8 }} />
-      </View>
-      
-      <View style={styles.cardFooter}>
-        <SkeletonLoader width={100} height={32} borderRadius={6} />
-        <SkeletonLoader width={80} height={32} borderRadius={6} />
-      </View>
+    >
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            transform: [{ translateX }],
+          },
+        ]}
+      >
+        <Svg
+          width={actualWidth + 600} // Extra width for the shimmer
+          height={actualHeight}
+          style={StyleSheet.absoluteFillObject}
+        >
+          <Defs>
+            <LinearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <Stop offset="0%" stopColor="#e5e7eb" stopOpacity="1" />
+              <Stop offset="20%" stopColor="#f3f4f6" stopOpacity="1" />
+              <Stop offset="50%" stopColor="#ffffff" stopOpacity="1" />
+              <Stop offset="80%" stopColor="#f3f4f6" stopOpacity="1" />
+              <Stop offset="100%" stopColor="#e5e7eb" stopOpacity="1" />
+            </LinearGradient>
+          </Defs>
+          <Rect
+            x="0"
+            y="0"
+            width={300}
+            height="100%"
+            fill="url(#grad)"
+          />
+        </Svg>
+      </Animated.View>
     </View>
   );
 };
 
-export const TradeCardSkeleton: React.FC = () => {
-  return (
-    <View style={styles.tradeCardContainer}>
-      <View style={styles.tradeHeader}>
-        <View style={styles.tradeStatus}>
-          <SkeletonLoader width={8} height={8} borderRadius={4} />
-          <SkeletonLoader width={100} height={14} style={{ marginLeft: 8 }} />
-        </View>
-        <SkeletonLoader width={60} height={12} />
+export const WalletCardSkeleton: React.FC = () => (
+  <View style={styles.walletCard}>
+    <View style={styles.walletInfo}>
+      <SkeletonLoader width={40} height={40} borderRadius={20} />
+      <View style={styles.walletDetails}>
+        <SkeletonLoader width={120} height={16} style={{ marginBottom: 4 }} />
+        <SkeletonLoader width={60} height={14} />
       </View>
-      
-      <View style={styles.tradeInfo}>
-        <View style={styles.tradeRow}>
-          <SkeletonLoader width={80} height={16} />
-          <SkeletonLoader width={100} height={16} />
-        </View>
-        <View style={styles.tradeRow}>
-          <SkeletonLoader width={60} height={14} />
-          <SkeletonLoader width={80} height={14} />
-        </View>
-      </View>
-      
-      <SkeletonLoader width="100%" height={36} borderRadius={8} style={{ marginTop: 12 }} />
     </View>
-  );
-};
+    <SkeletonLoader width={80} height={20} />
+  </View>
+);
+
+export const TransactionItemSkeleton: React.FC = () => (
+  <View style={styles.transactionItem}>
+    <SkeletonLoader width={40} height={40} borderRadius={20} />
+    <View style={styles.transactionDetails}>
+      <SkeletonLoader width={150} height={16} style={{ marginBottom: 4 }} />
+      <SkeletonLoader width={100} height={14} />
+    </View>
+    <SkeletonLoader width={60} height={18} />
+  </View>
+);
 
 const styles = StyleSheet.create({
-  skeleton: {
-    backgroundColor: '#E5E7EB',
+  container: {
+    backgroundColor: '#e5e7eb',
+    overflow: 'hidden',
   },
-  cardContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  cardHeader: {
+  walletCard: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 12,
     marginBottom: 12,
   },
-  userInfo: {
+  walletInfo: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  userDetails: {
+  walletDetails: {
     marginLeft: 12,
   },
-  cardContent: {
-    marginBottom: 12,
-  },
-  cardFooter: {
+  transactionItem: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  tradeCardContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    alignItems: 'center',
     padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  tradeHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  tradeStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  tradeInfo: {
-    marginBottom: 12,
-  },
-  tradeRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    backgroundColor: '#fff',
     marginBottom: 8,
+    borderRadius: 12,
+  },
+  transactionDetails: {
+    flex: 1,
+    marginLeft: 12,
   },
 });

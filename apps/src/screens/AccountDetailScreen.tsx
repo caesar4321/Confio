@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,12 @@ import {
   Platform,
   Image,
   RefreshControl,
+  FlatList,
+  SectionList,
+  Animated,
+  ActivityIndicator,
+  Dimensions,
+  Vibration,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -23,6 +29,9 @@ import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery } from '@apollo/client';
 import { GET_SEND_TRANSACTIONS_BY_ACCOUNT, GET_PAYMENT_TRANSACTIONS_BY_ACCOUNT } from '../apollo/queries';
+import { TransactionItemSkeleton } from '../components/SkeletonLoader';
+import moment from 'moment';
+import 'moment/locale/es';
 
 // Color palette
 const colors = {
@@ -58,6 +67,16 @@ interface Transaction {
   hash: string;
 }
 
+// Set Spanish locale for moment
+moment.locale('es');
+
+const { width: screenWidth } = Dimensions.get('window');
+
+interface TransactionSection {
+  title: string;
+  data: Transaction[];
+}
+
 export const AccountDetailScreen = () => {
   const navigation = useNavigation<AccountDetailScreenNavigationProp>();
   const route = useRoute<AccountDetailScreenRouteProp>();
@@ -69,6 +88,12 @@ export const AccountDetailScreen = () => {
   const [transactionLimit, setTransactionLimit] = useState(10);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasReachedEnd, setHasReachedEnd] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  
+  // Animation values
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const searchAnim = useRef(new Animated.Value(0)).current;
 
   // Account data from navigation params
   const accountAddress = route.params.accountAddress || '';
@@ -112,6 +137,45 @@ export const AccountDetailScreen = () => {
       limit: transactionLimit
     }
   });
+
+  // Animation entrance
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 400,
+      useNativeDriver: true,
+    }).start();
+  }, [fadeAnim]);
+  
+  // Search animation
+  useEffect(() => {
+    Animated.timing(searchAnim, {
+      toValue: showSearch ? 1 : 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start();
+  }, [showSearch, searchAnim]);
+  
+  // Pull to refresh handler
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    if (Platform.OS === 'ios') {
+      Vibration.vibrate(10);
+    }
+    
+    try {
+      await Promise.all([
+        refetchSend(),
+        refetchPayment(),
+      ]);
+      setTransactionLimit(10);
+      setHasReachedEnd(false);
+    } catch (error) {
+      console.error('Error refreshing transactions:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetchSend, refetchPayment]);
 
   // Transform real transactions into the format expected by the UI
   const formatTransactions = () => {
@@ -167,6 +231,70 @@ export const AccountDetailScreen = () => {
   };
 
   const transactions = formatTransactions();
+  
+  // Filter transactions based on search query
+  const filteredTransactions = useMemo(() => {
+    if (!searchQuery) return transactions;
+    
+    const query = searchQuery.toLowerCase();
+    return transactions.filter(tx => {
+      const title = getTransactionTitle(tx).toLowerCase();
+      const amount = tx.amount.toLowerCase();
+      return title.includes(query) || amount.includes(query);
+    });
+  }, [transactions, searchQuery]);
+  
+  // Group transactions by date
+  const groupedTransactions = useMemo((): TransactionSection[] => {
+    const groups: { [key: string]: Transaction[] } = {};
+    
+    filteredTransactions.forEach(tx => {
+      const date = moment(tx.date);
+      let groupKey: string;
+      let groupTitle: string;
+      
+      if (date.isSame(moment(), 'day')) {
+        groupKey = 'today';
+        groupTitle = 'Hoy';
+      } else if (date.isSame(moment().subtract(1, 'day'), 'day')) {
+        groupKey = 'yesterday';
+        groupTitle = 'Ayer';
+      } else if (date.isSame(moment(), 'week')) {
+        groupKey = 'this_week';
+        groupTitle = 'Esta semana';
+      } else if (date.isSame(moment(), 'month')) {
+        groupKey = date.format('YYYY-MM-DD');
+        groupTitle = date.format('D [de] MMMM');
+      } else {
+        groupKey = date.format('YYYY-MM');
+        groupTitle = date.format('MMMM YYYY');
+      }
+      
+      if (!groups[groupKey]) {
+        groups[groupKey] = [];
+      }
+      groups[groupKey].push(tx);
+    });
+    
+    // Convert to sections array and sort by date
+    return Object.entries(groups)
+      .sort(([keyA], [keyB]) => {
+        if (keyA === 'today') return -1;
+        if (keyB === 'today') return 1;
+        if (keyA === 'yesterday') return -1;
+        if (keyB === 'yesterday') return 1;
+        if (keyA === 'this_week') return -1;
+        if (keyB === 'this_week') return 1;
+        return keyB.localeCompare(keyA);
+      })
+      .map(([key, txs]) => ({
+        title: key === 'today' ? 'Hoy' :
+               key === 'yesterday' ? 'Ayer' :
+               key === 'this_week' ? 'Esta semana' :
+               moment(txs[0].date).format(key.includes('-') ? 'D [de] MMMM' : 'MMMM YYYY'),
+        data: txs,
+      }));
+  }, [filteredTransactions]);
   
   // Check if we've reached the end after loading more
   React.useEffect(() => {
@@ -553,89 +681,168 @@ export const AccountDetailScreen = () => {
           </View>
         )}
 
-        {/* Transactions Section */}
-        <View style={styles.transactionsSection}>
+        {/* Enhanced Transactions Section */}
+        <Animated.View 
+          style={[
+            styles.transactionsSection,
+            {
+              opacity: fadeAnim,
+              transform: [
+                {
+                  translateY: fadeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [20, 0],
+                  })
+                }
+              ]
+            }
+          ]}
+        >
           <View style={styles.transactionsHeader}>
             <Text style={styles.transactionsTitle}>Historial de transacciones</Text>
             <View style={styles.transactionsFilters}>
-              <TouchableOpacity style={styles.filterButton}>
-                <Icon name="filter" size={16} color="#6b7280" />
+              <TouchableOpacity 
+                style={[styles.filterButton, showSearch && styles.filterButtonActive]}
+                onPress={() => setShowSearch(!showSearch)}
+              >
+                <Icon name="search" size={16} color={showSearch ? account.textColor : "#6b7280"} />
               </TouchableOpacity>
               <TouchableOpacity style={styles.filterButton}>
-                <Icon name="calendar" size={16} color="#6b7280" />
+                <Icon name="filter" size={16} color="#6b7280" />
               </TouchableOpacity>
             </View>
           </View>
 
+          {/* Search Bar */}
+          {showSearch && (
+            <Animated.View 
+              style={[
+                styles.searchContainer,
+                {
+                  opacity: searchAnim,
+                  transform: [
+                    {
+                      translateY: searchAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [-10, 0],
+                      })
+                    }
+                  ]
+                }
+              ]}
+            >
+              <Icon name="search" size={18} color="#9ca3af" style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Buscar transacciones..."
+                placeholderTextColor="#9ca3af"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <Icon name="x" size={18} color="#9ca3af" />
+                </TouchableOpacity>
+              )}
+            </Animated.View>
+          )}
+
           <View style={styles.transactionsList}>
             {(sendLoading || paymentLoading) ? (
-              <View style={styles.loadingContainer}>
-                <Text style={styles.loadingText}>Cargando transacciones...</Text>
-              </View>
-            ) : transactions.length === 0 ? (
+              <>
+                <TransactionItemSkeleton />
+                <TransactionItemSkeleton />
+                <TransactionItemSkeleton />
+              </>
+            ) : filteredTransactions.length === 0 ? (
               <View style={styles.emptyTransactionsContainer}>
-                <Icon name="inbox" size={32} color="#9ca3af" />
-                <Text style={styles.emptyTransactionsText}>No hay transacciones aún</Text>
-                <Text style={styles.emptyTransactionsSubtext}>
-                  Tus transacciones aparecerán aquí cuando realices envíos o pagos
+                <Icon name={searchQuery ? "search" : "inbox"} size={48} color="#e5e7eb" />
+                <Text style={styles.emptyTransactionsText}>
+                  {searchQuery ? "No se encontraron transacciones" : "No hay transacciones aún"}
                 </Text>
+                <Text style={styles.emptyTransactionsSubtext}>
+                  {searchQuery 
+                    ? "Intenta con otros términos de búsqueda" 
+                    : "Tus transacciones aparecerán aquí cuando realices envíos o pagos"}
+                </Text>
+                {!searchQuery && (
+                  <TouchableOpacity 
+                    style={styles.emptyActionButton}
+                    onPress={handleSend}
+                  >
+                    <Icon name="send" size={16} color="#fff" />
+                    <Text style={styles.emptyActionButtonText}>Hacer mi primera transacción</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ) : (
-              transactions.map((transaction, index) => (
-                <TransactionItem 
-                  key={index} 
-                  transaction={transaction} 
-                  onPress={() => {
-                    const params = {
-                      transactionType: transaction.type,
-                      transactionData: {
-                        type: transaction.type,
-                        from: transaction.from,
-                        to: transaction.to,
-                        amount: transaction.amount,
-                        currency: transaction.currency,
-                        date: transaction.date,
-                        time: transaction.time,
-                        status: transaction.status,
-                        hash: transaction.hash,
-                        // Add additional fields that TransactionDetailScreen expects
-                        fromAddress: transaction.from ? '0x1a2b3c4d...7890abcd' : undefined,
-                        toAddress: transaction.to ? '0x9876543a...bcdef123' : undefined,
-                        blockNumber: '2,847,392',
-                        gasUsed: '21,000',
-                        gasFee: '0.001',
-                        confirmations: 127,
-                        note: transaction.type === 'received' ? 'Pago por almuerzo - Gracias! 🍕' : 
-                              transaction.type === 'sent' ? 'Pago servicios freelance' : undefined,
-                        avatar: transaction.from ? transaction.from.charAt(0) : 
-                               transaction.to ? transaction.to.charAt(0) : undefined,
-                        location: transaction.type === 'payment' ? 'Av. Libertador, Caracas' : undefined,
-                        merchantId: transaction.type === 'payment' ? 'SUP001' : undefined,
-                        exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1.00 cUSD' : undefined
-                      }
-                    };
-                    // @ts-ignore - Navigation type mismatch, but works at runtime
-                    navigation.navigate('TransactionDetail', params);
-                  }} 
-                />
-              ))
+              <>
+                {/* Grouped Transactions */}
+                {groupedTransactions.map((section, sectionIndex) => (
+                  <View key={sectionIndex}>
+                    <Text style={styles.sectionHeader}>{section.title}</Text>
+                    {section.data.map((transaction, index) => (
+                      <TransactionItem 
+                        key={`${sectionIndex}-${index}`} 
+                        transaction={transaction} 
+                        onPress={() => {
+                          const params = {
+                            transactionType: transaction.type,
+                            transactionData: {
+                              type: transaction.type,
+                              from: transaction.from,
+                              to: transaction.to,
+                              amount: transaction.amount,
+                              currency: transaction.currency,
+                              date: transaction.date,
+                              time: transaction.time,
+                              status: transaction.status,
+                              hash: transaction.hash,
+                              // Add additional fields that TransactionDetailScreen expects
+                              fromAddress: transaction.from ? '0x1a2b3c4d...7890abcd' : undefined,
+                              toAddress: transaction.to ? '0x9876543a...bcdef123' : undefined,
+                              blockNumber: '2,847,392',
+                              gasUsed: '21,000',
+                              gasFee: '0.001',
+                              confirmations: 127,
+                              note: transaction.type === 'received' ? 'Pago por almuerzo - Gracias! 🍕' : 
+                                    transaction.type === 'sent' ? 'Pago servicios freelance' : undefined,
+                              avatar: transaction.from ? transaction.from.charAt(0) : 
+                                     transaction.to ? transaction.to.charAt(0) : undefined,
+                              location: transaction.type === 'payment' ? 'Av. Libertador, Caracas' : undefined,
+                              merchantId: transaction.type === 'payment' ? 'SUP001' : undefined,
+                              exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1.00 cUSD' : undefined
+                            }
+                          };
+                          // @ts-ignore - Navigation type mismatch, but works at runtime
+                          navigation.navigate('TransactionDetail', params);
+                        }} 
+                      />
+                    ))}
+                  </View>
+                ))}
+              </>
             )}
           </View>
 
-          {transactions.length > 0 && !hasReachedEnd && (
+          {filteredTransactions.length > 0 && !hasReachedEnd && !searchQuery && (
             <TouchableOpacity 
               style={styles.viewMoreButton}
               onPress={loadMoreTransactions}
               disabled={loadingMore}
             >
               {loadingMore ? (
-                <Text style={styles.viewMoreButtonText}>Cargando...</Text>
+                <ActivityIndicator size="small" color={account.color} />
               ) : (
-                <Text style={styles.viewMoreButtonText}>Ver más</Text>
+                <Text style={[styles.viewMoreButtonText, { color: account.textColor }]}>
+                  Ver más transacciones
+                </Text>
               )}
             </TouchableOpacity>
           )}
-        </View>
+        </Animated.View>
       </ScrollView>
 
       <ExchangeModal />
@@ -1109,5 +1316,59 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
     maxWidth: 280,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1f2937',
+    padding: 0,
+  },
+  sectionHeader: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6b7280',
+    marginTop: 16,
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  emptyActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#34d399',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
+    marginTop: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  emptyActionButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  filterButtonActive: {
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
 }); 
