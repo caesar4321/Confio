@@ -95,6 +95,7 @@ export const useSelectedCountryRate = () => {
     const currencyMap: { [key: string]: string } = {
       'VE': 'VES', 'AR': 'ARS', 'CO': 'COP', 'PE': 'PEN', 'CL': 'CLP',
       'BO': 'BOB', 'UY': 'UYU', 'PY': 'PYG', 'BR': 'BRL', 'MX': 'MXN',
+      'DO': 'DOP',
       'US': 'USD', 'CA': 'CAD', 'GB': 'GBP', 'JP': 'JPY', 'CN': 'CNY',
       'KR': 'KRW', 'IN': 'INR', 'SG': 'SGD', 'AU': 'AUD', 'TH': 'THB',
       'PH': 'PHP', 'MY': 'MYR', 'ID': 'IDR', 'VN': 'VND',
