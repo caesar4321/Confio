@@ -572,7 +572,7 @@ export const AccountDetailScreen = () => {
               style={styles.actionButton}
               onPress={handleSend}
             >
-              <View style={[styles.actionIcon, { backgroundColor: colors.primary }]}>
+              <View style={[styles.actionIcon, styles.actionIconPrimary]}>
                 <Icon name="send" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Enviar</Text>
@@ -587,7 +587,7 @@ export const AccountDetailScreen = () => {
                 });
               }}
             >
-              <View style={[styles.actionIcon, { backgroundColor: colors.primary }]}>
+              <View style={[styles.actionIcon, styles.actionIconPrimary]}>
                 <Icon name="download" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Recibir</Text>
@@ -603,7 +603,7 @@ export const AccountDetailScreen = () => {
                 });
               }}
             >
-              <View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}>
+              <View style={[styles.actionIcon, styles.actionIconSecondary]}>
                 <Icon name="shopping-bag" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Pagar</Text>
@@ -616,7 +616,7 @@ export const AccountDetailScreen = () => {
                 navigation.navigate('BottomTabs', { screen: 'Exchange' });
               }}
             >
-              <View style={[styles.actionIcon, { backgroundColor: colors.accent }]}>
+              <View style={[styles.actionIcon, styles.actionIconAccent]}>
                 <Icon name="refresh-cw" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Intercambio</Text>
@@ -963,20 +963,28 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     alignItems: 'center',
-    flex: 1,
+    width: 52,
+    marginHorizontal: 8,
   },
   actionIcon: {
     width: 52,
     height: 52,
+    minWidth: 52,
+    minHeight: 52,
     borderRadius: 26,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    overflow: 'hidden',
+  },
+  actionIconPrimary: {
+    backgroundColor: '#34D399',
+  },
+  actionIconSecondary: {
+    backgroundColor: '#8b5cf6',
+  },
+  actionIconAccent: {
+    backgroundColor: '#3b82f6',
   },
   actionButtonText: {
     fontSize: 12,
