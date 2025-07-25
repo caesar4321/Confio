@@ -1071,14 +1071,20 @@ export const ExchangeScreen = () => {
     lastScrollY.current = 0;
   }, []);
 
-  // Refetch trades when screen is focused
+  // Refetch trades and offers when screen is focused
   useFocusEffect(
     React.useCallback(() => {
-      if (refetchTrades && activeAccount?.id) {
-        console.log('[ExchangeScreen] Screen focused, refetching trades');
-        refetchTrades();
+      if (activeAccount?.id) {
+        console.log('[ExchangeScreen] Screen focused, refetching data');
+        if (refetchTrades) {
+          refetchTrades();
+        }
+        // Also refetch offers to get updated favorite status
+        if (refetch) {
+          refetch();
+        }
       }
-    }, [refetchTrades, activeAccount?.id])
+    }, [refetchTrades, refetch, activeAccount?.id])
   );
 
 
