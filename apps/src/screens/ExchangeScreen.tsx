@@ -1011,7 +1011,7 @@ export const ExchangeScreen = () => {
   // Removed forceHeaderVisible state as it was causing unnecessary re-renders
   // State for header height - start with reasonable defaults to prevent layout shift
   // Fixed header heights - don't change with filters
-  const HEADER_HEIGHT_OFFERS = Platform.OS === 'ios' ? 340 : 360; // Adjusted for iOS
+  const HEADER_HEIGHT_OFFERS = Platform.OS === 'ios' ? 384 : 404; // Adjusted for quick filters
   const HEADER_HEIGHT_OTHER = Platform.OS === 'ios' ? 140 : 160; // Adjusted for iOS
   
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
@@ -1669,30 +1669,24 @@ export const ExchangeScreen = () => {
             disabled={isOwnOffer}
           >
             <View style={styles.avatarContainer}>
-              <Text style={styles.avatarText}>{userName.charAt(0)}</Text>
+              <Text style={styles.avatarText}>
+                {userName.split(' ').slice(0, 2).map(word => word.charAt(0)).join('').toUpperCase()}
+              </Text>
               {activityStatus.isActive && <View style={styles.onlineIndicator} />}
             </View>
             <View style={styles.userInfoContainer}>
               <View style={styles.userNameContainer}>
                 <Text style={styles.userName} numberOfLines={1} ellipsizeMode="tail">{userName}</Text>
                 <View style={styles.traderBadges}>
-                  {isHighRated && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>⭐</Text>
-                    </View>
-                  )}
-                  {isNewTrader && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>🆕</Text>
-                    </View>
-                  )}
-                  {isFastResponder && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>⚡</Text>
-                    </View>
-                  )}
                   {isVerified && (
                     <Icon name="shield" size={16} color={colors.accent} style={styles.verifiedIcon} />
+                  )}
+                  {(isHighRated || isNewTrader || isFastResponder) && (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>
+                        {isHighRated ? '⭐' : isNewTrader ? '🆕' : '⚡'}
+                      </Text>
+                    </View>
                   )}
                 </View>
                 {/* Add a visible star for ALL offers to test rendering */}
@@ -3158,7 +3152,7 @@ export const ExchangeScreen = () => {
       }
       
       return (
-        <View style={[styles.offersList, { padding: 16 }]}>
+        <View style={[styles.offersList, { padding: 16, paddingTop: 8 }]}>
           {offers.map((offer: any) => (
             <OfferCard key={offer.id} offer={offer} crypto={selectedCrypto} />
           ))}
@@ -3816,7 +3810,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   avatarText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#4B5563',
   },
@@ -5029,7 +5023,8 @@ const styles = StyleSheet.create({
   },
   quickFilters: {
     height: 44,
-    paddingHorizontal: 16,
+    paddingLeft: 16,
+    paddingRight: 24, // Extra padding on right to prevent cutoff
     paddingVertical: 8,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
@@ -5038,6 +5033,7 @@ const styles = StyleSheet.create({
   quickFiltersContent: {
     alignItems: 'center',
     gap: 8,
+    paddingRight: 16, // Extra padding at end of scroll
   },
   filterChip: {
     flexDirection: 'row',
