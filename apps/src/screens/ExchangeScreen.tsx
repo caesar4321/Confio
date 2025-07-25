@@ -2872,7 +2872,7 @@ export const ExchangeScreen = () => {
                                     <View style={[styles.checkbox, filterFavorites && styles.checkboxChecked]}>
                                         {filterFavorites && <Icon name="check" size={12} color="#fff" />}
                                     </View>
-                                    <Text style={[styles.checkboxLabel, { fontSize: 13 }]}>Solo favoritos</Text>
+                                    <Text style={[styles.checkboxLabel, { fontSize: 12 }]}>★ Favoritos</Text>
                                 </TouchableOpacity>
                             </View>
 
