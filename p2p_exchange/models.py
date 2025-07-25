@@ -1097,3 +1097,79 @@ class P2PDisputeTransaction(SoftDeleteModel):
             raise ValidationError("Either recipient_user or recipient_business must be set")
         if self.recipient_user and self.recipient_business:
             raise ValidationError("Cannot set both recipient_user and recipient_business")
+
+
+class P2PFavoriteTrader(SoftDeleteModel):
+    """Track favorite traders for users in their specific account context"""
+    
+    # User who is favoriting
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='favorite_traders'
+    )
+    
+    # Account context - which account is adding the favorite
+    # This allows personal and business accounts to have separate favorites
+    favoriter_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        related_name='business_favorite_traders',
+        null=True,
+        blank=True,
+        help_text="If favoriting from a business account"
+    )
+    
+    # Trader being favorited (could be user or business)
+    favorite_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='favorited_by_users',
+        null=True,
+        blank=True
+    )
+    
+    favorite_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        related_name='favorited_by_users',
+        null=True,
+        blank=True
+    )
+    
+    # Optional note about why favorited
+    note = models.TextField(blank=True, help_text="Personal note about this trader")
+    
+    class Meta:
+        db_table = 'p2p_favorite_traders'
+        unique_together = [
+            ('user', 'favoriter_business', 'favorite_user'),
+            ('user', 'favoriter_business', 'favorite_business'),
+        ]
+        indexes = [
+            models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['favoriter_business', 'created_at']),
+        ]
+    
+    def clean(self):
+        super().clean()
+        # Ensure either favorite_user or favorite_business is set, but not both
+        if not self.favorite_user and not self.favorite_business:
+            raise ValidationError("Either favorite_user or favorite_business must be set")
+        if self.favorite_user and self.favorite_business:
+            raise ValidationError("Cannot set both favorite_user and favorite_business")
+        
+        # Account-specific validation
+        if self.favoriter_business:
+            # Business account favoriting - no restrictions on favoriting own personal account
+            # This is valid: business can favorite the owner's personal account
+            pass
+        else:
+            # Personal account favoriting
+            # Prevent users from favoriting their own personal account
+            if self.favorite_user and self.favorite_user == self.user:
+                raise ValidationError("Cannot favorite your own personal account")
+    
+    def __str__(self):
+        favorite = self.favorite_user or self.favorite_business
+        return f"{self.user} → {favorite}"

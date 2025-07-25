@@ -497,8 +497,8 @@ export const GET_INVOICES = gql`
 
 // P2P Exchange Queries
 export const GET_P2P_OFFERS = gql`
-  query GetP2POffers($exchangeType: String, $tokenType: String, $paymentMethod: String, $countryCode: String) {
-    p2pOffers(exchangeType: $exchangeType, tokenType: $tokenType, paymentMethod: $paymentMethod, countryCode: $countryCode) {
+  query GetP2POffers($exchangeType: String, $tokenType: String, $paymentMethod: String, $countryCode: String, $favoritesOnly: Boolean) {
+    p2pOffers(exchangeType: $exchangeType, tokenType: $tokenType, paymentMethod: $paymentMethod, countryCode: $countryCode, favoritesOnly: $favoritesOnly) {
       id
       user {
         id
@@ -554,6 +554,7 @@ export const GET_P2P_OFFERS = gql`
         lastSeenOnline
         avgRating
       }
+      isFavorite
       createdAt
     }
   }
@@ -1166,6 +1167,16 @@ export const DISPUTE_P2P_TRADE = gql`
       }
       success
       errors
+    }
+  }
+`;
+
+export const TOGGLE_FAVORITE_TRADER = gql`
+  mutation ToggleFavoriteTrader($traderUserId: ID, $traderBusinessId: ID, $note: String) {
+    toggleFavoriteTrader(traderUserId: $traderUserId, traderBusinessId: $traderBusinessId, note: $note) {
+      success
+      isFavorite
+      message
     }
   }
 `;

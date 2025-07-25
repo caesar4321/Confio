@@ -21,13 +21,13 @@ import {
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Icon from 'react-native-vector-icons/Feather';
-import { useQuery, useMutation } from '@apollo/client';
+import { useQuery, useMutation, gql } from '@apollo/client';
 import { MainStackParamList } from '../types/navigation';
 import { countries, Country } from '../utils/countries';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { useCurrency } from '../hooks/useCurrency';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
-import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS, GET_MY_P2P_TRADES, GET_MY_P2P_OFFERS, GET_USER_BANK_ACCOUNTS, UPDATE_P2P_OFFER } from '../apollo/queries';
+import { GET_P2P_OFFERS, GET_P2P_PAYMENT_METHODS, GET_MY_P2P_TRADES, GET_MY_P2P_OFFERS, GET_USER_BANK_ACCOUNTS, UPDATE_P2P_OFFER, TOGGLE_FAVORITE_TRADER } from '../apollo/queries';
 import { formatLocalDateTime, formatLocalDate } from '../utils/dateUtils';
 import { useAccount } from '../contexts/AccountContext';
 import { useCountry } from '../contexts/CountryContext';
@@ -384,6 +384,7 @@ export const ExchangeScreen = () => {
   const [filterVerified, setFilterVerified] = useState(false);
   const [filterOnline, setFilterOnline] = useState(false);
   const [filterHighVolume, setFilterHighVolume] = useState(false);
+  const [filterFavorites, setFilterFavorites] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const scrollY = useRef(new Animated.Value(0)).current;
   const refreshRotation = useRef(new Animated.Value(0)).current;
@@ -399,7 +400,8 @@ export const ExchangeScreen = () => {
       exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY', // If user wants to buy, show sell offers
       tokenType: selectedCrypto,
       paymentMethod: null, // Will be properly set in useEffect when we have payment methods data
-      countryCode: selectedCountry?.[2] // Pass the selected country code (e.g., 'AS', 'VE', etc.)
+      countryCode: selectedCountry?.[2], // Pass the selected country code (e.g., 'AS', 'VE', etc.)
+      favoritesOnly: filterFavorites // Add favorites filter
     },
     fetchPolicy: 'cache-and-network', // Use cache while fetching new data
     notifyOnNetworkStatusChange: false, // Prevent re-renders on network status changes
@@ -1493,15 +1495,37 @@ export const ExchangeScreen = () => {
   const OfferCard = ({ offer, crypto }: { offer: any, crypto: 'cUSD' | 'CONFIO' }) => {
     // State for expanded payment methods
     const [isExpanded, setIsExpanded] = useState(false);
+    const [isFavoriting, setIsFavoriting] = useState(false);
+    
+    // Get user from auth context
+    const { profileData } = useAuth();
+    const user = profileData?.userProfile;
     
     // Check if this is the user's own offer
     const isOwnOffer = checkIfOwnOffer(offer);
+    
+    // Define mutation inline to avoid import issues
+    const TOGGLE_FAVORITE_MUTATION = gql`
+      mutation ToggleFavoriteTrader($traderUserId: ID, $traderBusinessId: ID, $note: String) {
+        toggleFavoriteTrader(traderUserId: $traderUserId, traderBusinessId: $traderBusinessId, note: $note) {
+          success
+          isFavorite
+          message
+        }
+      }
+    `;
+    
+    // Add mutation hook
+    const [toggleFavorite] = useMutation(TOGGLE_FAVORITE_MUTATION);
     
     // Debug logging for badge rendering
     console.log('[DEBUG] OfferCard render:', {
       offerId: offer.id,
       isOwnOffer,
-      shouldShowBadge: isOwnOffer === true
+      shouldShowBadge: isOwnOffer === true,
+      shouldShowFavorite: !isOwnOffer && !!user,
+      hasUser: !!user,
+      isFavorite: offer.isFavorite
     });
     
     // Extract user info from the real offer structure
@@ -1539,6 +1563,65 @@ export const ExchangeScreen = () => {
     
     const activityStatus = getActivityStatus();
     
+    // Handle toggle favorite
+    const handleToggleFavorite = async () => {
+      console.log('[handleToggleFavorite] Called with conditions:', {
+        isOwnOffer,
+        hasUser: !!user,
+        isFavoriting,
+        willReturn: isOwnOffer || !user || isFavoriting
+      });
+      
+      if (isOwnOffer || !user || isFavoriting) return;
+      
+      try {
+        setIsFavoriting(true);
+        
+        // Determine if we're favoriting a user or business
+        // Only send one ID - prioritize business if it exists
+        let mutationVariables = {};
+        if (offer.offerBusiness?.id) {
+          mutationVariables = { traderBusinessId: offer.offerBusiness.id };
+        } else if (offer.offerUser?.id) {
+          mutationVariables = { traderUserId: offer.offerUser.id };
+        } else if (offer.user?.id) {
+          // Fallback to old user field
+          mutationVariables = { traderUserId: offer.user.id };
+        } else {
+          console.error('[handleToggleFavorite] No trader ID found!');
+          Alert.alert('Error', 'No se pudo identificar al trader');
+          return;
+        }
+        
+        console.log('[handleToggleFavorite] Sending mutation with:', {
+          ...mutationVariables,
+          offerId: offer.id
+        });
+        
+        const { data } = await toggleFavorite({
+          variables: mutationVariables
+        });
+        
+        console.log('[handleToggleFavorite] Mutation response:', data);
+        
+        if (data?.toggleFavoriteTrader?.success) {
+          console.log('[handleToggleFavorite] Success! New isFavorite status:', data.toggleFavoriteTrader.isFavorite);
+          // Refetch offers to update isFavorite status
+          await refetch();
+          console.log('[handleToggleFavorite] Refetch completed');
+        } else {
+          console.log('[handleToggleFavorite] Failed! Response:', data);
+          const message = data?.toggleFavoriteTrader?.message || 'No se pudo actualizar el favorito';
+          Alert.alert('Error', message);
+        }
+      } catch (error) {
+        console.error('Error toggling favorite:', error);
+        Alert.alert('Error', 'Ocurrió un error al actualizar el favorito');
+      } finally {
+        setIsFavoriting(false);
+      }
+    };
+    
     return (
       <View style={styles.offerCard}>
         {/* Own Offer Badge */}
@@ -1565,6 +1648,21 @@ export const ExchangeScreen = () => {
                 {isVerified && (
                   <Icon name="shield" size={16} color={colors.accent} style={styles.verifiedIcon} />
                 )}
+                {/* Add a visible star for ALL offers to test rendering */}
+                <TouchableOpacity 
+                  style={styles.favoriteButtonName}
+                  onPress={() => {
+                    console.log('[Star Button] Pressed. Current isFavorite:', offer.isFavorite);
+                    handleToggleFavorite();
+                  }}
+                  disabled={isFavoriting || isOwnOffer}
+                >
+                  <Icon 
+                    name="star" 
+                    size={18} 
+                    color={offer.isFavorite ? '#FBBF24' : (isOwnOffer ? '#E5E7EB' : '#9CA3AF')} 
+                  />
+                </TouchableOpacity>
               </View>
               <Text style={styles.tradeCount}>
                 {completedTrades === 0 ? 'Nuevo trader' : `${completedTrades} operaciones`}
@@ -2601,22 +2699,22 @@ export const ExchangeScreen = () => {
                             <TouchableOpacity
                                 style={[
                                     styles.filterButton, 
-                                    (showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume) && styles.activeFilterButton
+                                    (showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume || filterFavorites) && styles.activeFilterButton
                                 ]}
                                 onPress={() => setShowAdvancedFilters(!showAdvancedFilters)}
                             >
                                 <Icon
                                     name="filter"
                                     size={12}
-                                    color={(showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume) ? colors.primary : '#6B7280'}
+                                    color={(showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume || filterFavorites) ? colors.primary : '#6B7280'}
                                 />
-                                {(minRate || maxRate || filterVerified || filterOnline || filterHighVolume) && (
+                                {(minRate || maxRate || filterVerified || filterOnline || filterHighVolume || filterFavorites) && (
                                     <View style={styles.filterIndicator} />
                                 )}
                             </TouchableOpacity>
                             
                             {/* Quick clear filters button - only show when filters are active */}
-                            {(amount || minRate || maxRate || filterVerified || filterOnline || filterHighVolume || selectedPaymentMethod !== 'Todos los métodos') && (
+                            {(amount || minRate || maxRate || filterVerified || filterOnline || filterHighVolume || filterFavorites || selectedPaymentMethod !== 'Todos los métodos') && (
                                 <TouchableOpacity 
                                     style={styles.quickClearButton}
                                     onPress={() => {
@@ -2627,6 +2725,7 @@ export const ExchangeScreen = () => {
                                         setFilterVerified(false);
                                         setFilterOnline(false);
                                         setFilterHighVolume(false);
+                                        setFilterFavorites(false);
                                         setSelectedPaymentMethod('Todos los métodos');
                                         
                                         // Also clear the filter inputs
@@ -2745,6 +2844,15 @@ export const ExchangeScreen = () => {
                                     </View>
                                     <Text style={styles.checkboxLabel}>+100 ops</Text>
                                 </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={styles.checkboxItem}
+                                    onPress={() => setFilterFavorites(!filterFavorites)}
+                                >
+                                    <View style={[styles.checkbox, filterFavorites && styles.checkboxChecked]}>
+                                        {filterFavorites && <Icon name="check" size={12} color="#fff" />}
+                                    </View>
+                                    <Text style={styles.checkboxLabel}>Solo favoritos</Text>
+                                </TouchableOpacity>
                             </View>
 
                             <View style={styles.filterActions}>
@@ -2758,6 +2866,7 @@ export const ExchangeScreen = () => {
                                         setFilterVerified(false);
                                         setFilterOnline(false);
                                         setFilterHighVolume(false);
+                                        setFilterFavorites(false);
                                         setSelectedPaymentMethod('Todos los métodos');
                                         
                                         // Also clear the filter inputs
@@ -2791,7 +2900,8 @@ export const ExchangeScreen = () => {
                                             exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
                                             tokenType: selectedCrypto,
                                             paymentMethod: paymentMethodName,
-                                            countryCode: selectedCountry?.[2]
+                                            countryCode: selectedCountry?.[2],
+                                            favoritesOnly: filterFavorites
                                         });
                                     }}
                                 >
@@ -3445,6 +3555,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E5E7EB',
     position: 'relative', // Important for absolute positioned badge
+    overflow: 'visible', // Ensure star button isn't clipped
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -3475,6 +3586,30 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     letterSpacing: 0.5,
     marginLeft: 4,
+  },
+  favoriteButton: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    zIndex: 10,
+    padding: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  favoriteButtonInline: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  favoriteButtonName: {
+    padding: 4,
+    marginLeft: 8,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
   },
   offerHeader: {
     flexDirection: 'row',
@@ -3565,6 +3700,7 @@ const styles = StyleSheet.create({
   offerRateContainer: {
     alignItems: 'flex-end',
     marginLeft: 8,
+    flexDirection: 'column',
   },
   rateSection: {
     alignItems: 'flex-end',
