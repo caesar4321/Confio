@@ -1480,7 +1480,7 @@ export const ExchangeScreen = () => {
       navigation.navigate('TraderProfile', { 
         trader: traderData,
         crypto: selectedCrypto,
-        offer: { ...offer, isFavorite: localIsFavorite }
+        offer: { ...offer, isFavorite: offer.isFavorite }
       });
     } else if (action === 'trade') {
       // Navigate to TradeConfirm screen
