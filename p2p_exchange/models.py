@@ -405,7 +405,15 @@ class P2PTrade(SoftDeleteModel):
         ]
     
     def __str__(self):
-        return f"Trade {self.id}: {self.crypto_amount} {self.offer.token_type} @ {self.rate_used} {self.currency_code}"
+        token_type = self.offer.token_type if self.offer else 'UNKNOWN'
+        # Format token type nicely
+        if token_type == 'CUSD':
+            token_display = 'cUSD'
+        elif token_type == 'CONFIO':
+            token_display = 'CONFIO'
+        else:
+            token_display = token_type
+        return f"Trade {self.id}: {self.crypto_amount} {token_display} ⇄ {self.fiat_amount} {self.currency_code}"
 
 class P2PMessage(SoftDeleteModel):
     """Chat messages between traders"""

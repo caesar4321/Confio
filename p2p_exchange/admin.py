@@ -44,8 +44,9 @@ class P2PPaymentMethodAdmin(admin.ModelAdmin):
 @admin.register(P2POffer)
 class P2POfferAdmin(admin.ModelAdmin):
     list_display = [
-        'id', 'offer_entity_display', 'exchange_type', 'token_type', 'country_display', 'rate_display', 
-        'available_amount', 'status', 'created_at'
+        'id', 'offer_entity_display', 'exchange_type_display', 'token_type_display', 
+        'country_display', 'rate_display', 'amount_range_display', 
+        'available_amount_display', 'payment_methods_count', 'status_display', 'created_at'
     ]
     list_filter = [
         'exchange_type', 'token_type', 'country_code', 'status', 'created_at',
@@ -60,8 +61,12 @@ class P2POfferAdmin(admin.ModelAdmin):
         'offer_user__username', 'offer_user__email', 'offer_business__name',
         'user__username', 'user__email', 'country_code', 'account__business__name'
     ]
-    readonly_fields = ['created_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at', 'exchange_type_display', 'token_type_display', 
+                      'rate_display', 'amount_range_display', 'available_amount_display']
     filter_horizontal = ['payment_methods']
+    list_per_page = 50
+    date_hierarchy = 'created_at'
+    actions = ['activate_offers', 'pause_offers', 'refresh_available_amount']
     
     def offer_entity_display(self, obj):
         """Display offer entity (User or Business) using new direct relationships"""
@@ -88,6 +93,24 @@ class P2POfferAdmin(admin.ModelAdmin):
         return f"{flag} {obj.country_code}"
     country_display.short_description = 'Country'
     
+    def exchange_type_display(self, obj):
+        """Display exchange type with colored badge"""
+        if obj.exchange_type == 'BUY':
+            return format_html('<span style="background-color: #10B981; color: white; padding: 2px 8px; border-radius: 4px;">COMPRA</span>')
+        else:
+            return format_html('<span style="background-color: #3B82F6; color: white; padding: 2px 8px; border-radius: 4px;">VENTA</span>')
+    exchange_type_display.short_description = 'Tipo'
+    
+    def token_type_display(self, obj):
+        """Display token type with proper formatting"""
+        if obj.token_type == 'cUSD':
+            return format_html('<span style="font-weight: bold;">💵 cUSD</span>')
+        elif obj.token_type == 'CONFIO':
+            return format_html('<span style="font-weight: bold;">🪙 CONFIO</span>')
+        else:
+            return format_html('<span style="font-weight: bold;">❓ {}</span>', obj.token_type)
+    token_type_display.short_description = 'Cripto'
+    
     def rate_display(self, obj):
         """Display rate with currency"""
         # Use the stored currency_code if available, otherwise fall back to mapping
@@ -103,35 +126,111 @@ class P2POfferAdmin(admin.ModelAdmin):
                 'JM': 'JMD', 'TT': 'TTD'
             }
             currency = country_currencies.get(obj.country_code, 'USD')
-        return f"{obj.rate:,.2f} {currency}"
-    rate_display.short_description = 'Rate'
+        
+        # Add exchange direction indicator
+        if obj.exchange_type == 'BUY':
+            # User is buying crypto, so rate is fiat per crypto
+            return format_html('<strong>{}</strong> {} / {}', 
+                f'{float(obj.rate):,.2f}', currency, 
+                obj.token_type)
+        else:
+            # User is selling crypto, so rate is fiat per crypto
+            return format_html('<strong>{}</strong> {} / {}', 
+                f'{float(obj.rate):,.2f}', currency,
+                obj.token_type)
+    rate_display.short_description = 'Tasa'
+    
+    def amount_range_display(self, obj):
+        """Display min-max amount range"""
+        token = obj.token_type
+        return format_html('<span style="color: #6B7280;">{} - {} {}</span>', 
+                         f'{float(obj.min_amount):,.0f}', f'{float(obj.max_amount):,.0f}', token)
+    amount_range_display.short_description = 'Límites'
+    
+    def available_amount_display(self, obj):
+        """Display available amount with color coding"""
+        token = obj.token_type
+        percentage = (obj.available_amount / obj.max_amount * 100) if obj.max_amount > 0 else 0
+        
+        # Color code based on availability
+        if percentage > 75:
+            color = '#10B981'  # Green
+        elif percentage > 25:
+            color = '#F59E0B'  # Yellow
+        else:
+            color = '#EF4444'  # Red
+            
+        return format_html('<span style="color: {}; font-weight: bold;">{} {}</span>', 
+                         color, f'{float(obj.available_amount):,.0f}', token)
+    available_amount_display.short_description = 'Disponible'
+    
+    def payment_methods_count(self, obj):
+        """Display payment methods count with icons"""
+        count = obj.payment_methods.count()
+        if count == 0:
+            return format_html('<span style="color: #EF4444;">⚠️ Sin métodos</span>')
+        elif count == 1:
+            return format_html('<span>💳 {} método</span>', count)
+        else:
+            return format_html('<span>💳 {} métodos</span>', count)
+    payment_methods_count.short_description = 'Métodos de Pago'
+    
+    def status_display(self, obj):
+        """Display status with colored badge"""
+        status_colors = {
+            'ACTIVE': '#10B981',
+            'PAUSED': '#F59E0B', 
+            'COMPLETED': '#6B7280',
+            'CANCELLED': '#EF4444'
+        }
+        color = status_colors.get(obj.status, '#6B7280')
+        status_text = obj.get_status_display()
+        return format_html('<span style="background-color: {}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">{}</span>', 
+                         color, status_text)
+    status_display.short_description = 'Estado'
     
     fieldsets = (
-        ('Offer Creator (Direct Relationships)', {
+        ('👤 Creador de la Oferta', {
             'fields': ('offer_user', 'offer_business'),
-            'description': 'New clean relationship model - directly links users or businesses'
+            'description': 'Usuario o negocio que creó esta oferta'
         }),
-        ('Legacy Offer Creator (Deprecated)', {
-            'fields': ('user', 'account'),
-            'classes': ('collapse',),
-            'description': 'Old indirect relationship model - will be removed in future'
+        ('📊 Información Básica', {
+            'fields': (
+                ('exchange_type', 'token_type'),
+                ('country_code', 'currency_code'),
+                'status'
+            ),
+            'description': 'Tipo de intercambio y monedas involucradas'
         }),
-        ('Basic Info', {
-            'fields': ('exchange_type', 'token_type', 'country_code', 'status')
+        ('💰 Precios y Límites', {
+            'fields': (
+                'rate',
+                ('min_amount', 'max_amount'),
+                'available_amount'
+            ),
+            'description': 'Tasa de cambio y límites de transacción'
         }),
-        ('Pricing', {
-            'fields': ('rate', 'min_amount', 'max_amount', 'available_amount')
+        ('💳 Métodos de Pago y Términos', {
+            'fields': (
+                'payment_methods',
+                'terms',
+                'response_time_minutes'
+            ),
+            'description': 'Métodos de pago aceptados y condiciones del trader'
         }),
-        ('Payment & Terms', {
-            'fields': ('payment_methods', 'terms', 'response_time_minutes')
-        }),
-        ('Auto-complete', {
+        ('🤖 Configuración Automática', {
             'fields': ('auto_complete_enabled', 'auto_complete_time_minutes'),
-            'classes': ('collapse',)
+            'classes': ('collapse',),
+            'description': 'Completar operaciones automáticamente después del tiempo especificado'
         }),
-        ('Timestamps', {
+        ('📅 Fechas', {
             'fields': ('created_at', 'updated_at'),
             'classes': ('collapse',)
+        }),
+        ('🔧 Sistema Legacy (Obsoleto)', {
+            'fields': ('user', 'account'),
+            'classes': ('collapse',),
+            'description': 'Campos antiguos - no usar para nuevos registros'
         }),
     )
     
@@ -188,30 +287,78 @@ class P2POfferAdmin(admin.ModelAdmin):
                 kwargs["queryset"] = P2PPaymentMethod.objects.filter(name__in=method_names)
         
         return super().formfield_for_manytomany(db_field, request, **kwargs)
+    
+    def activate_offers(self, request, queryset):
+        """Activate selected offers"""
+        updated = queryset.update(status='ACTIVE')
+        self.message_user(request, f'{updated} ofertas activadas exitosamente.')
+    activate_offers.short_description = '✅ Activar ofertas seleccionadas'
+    
+    def pause_offers(self, request, queryset):
+        """Pause selected offers"""
+        updated = queryset.update(status='PAUSED')
+        self.message_user(request, f'{updated} ofertas pausadas exitosamente.')
+    pause_offers.short_description = '⏸️ Pausar ofertas seleccionadas'
+    
+    def refresh_available_amount(self, request, queryset):
+        """Refresh available amount to max amount"""
+        for offer in queryset:
+            offer.available_amount = offer.max_amount
+            offer.save()
+        self.message_user(request, f'{queryset.count()} ofertas actualizadas con cantidad máxima disponible.')
+    refresh_available_amount.short_description = '🔄 Restablecer cantidad disponible'
 
 @admin.register(P2PTrade)
 class P2PTradeAdmin(admin.ModelAdmin):
-    list_display = [
-        'id', 'buyer_entity_display', 'seller_entity_display', 
-        'trade_type_display', 'crypto_amount', 'fiat_amount_display', 
-        'country_code', 'status', 'rating_display', 'created_at', 'expires_at'
-    ]
-    list_filter = [
-        'status', 'offer__token_type', 'country_code', 'currency_code', 
-        'created_at', 'expires_at',
-        ('buyer_user', admin.RelatedOnlyFieldListFilter),
-        ('buyer_business', admin.RelatedOnlyFieldListFilter),
-        ('seller_user', admin.RelatedOnlyFieldListFilter),
-        ('seller_business', admin.RelatedOnlyFieldListFilter),
-    ]
+    list_display = ['id', 'crypto_amount_display', 'country_display', 'trade_summary', 'status_display', 'time_remaining', 'created_at', 'completed_at']
+    list_filter = ['status', 'created_at', 'completed_at', 'offer__token_type', 'country_code', 'payment_method']
     search_fields = [
-        'buyer_user__username', 'seller_user__username', 'offer__user__username',
-        'buyer_business__name', 'seller_business__name'
+        'id', 'buyer_user__username', 'seller_user__username', 'offer__user__username',
+        'buyer_business__name', 'seller_business__name', 'payment_reference'
     ]
-    readonly_fields = [
-        'created_at', 'updated_at', 'completed_at', 
-        'disputed_at', 'resolved_at', 'rating_link'
-    ]
+    readonly_fields = ['created_at', 'updated_at', 'crypto_amount_display', 'country_display', 'status_display', 'time_remaining', 'trade_summary', 'rating_link']
+    list_per_page = 50
+    date_hierarchy = 'created_at'
+    actions = ['mark_as_completed', 'mark_as_disputed']
+    
+    fieldsets = (
+        ('Trade Parties', {
+            'fields': (
+                ('buyer_user', 'buyer_business'),
+                ('seller_user', 'seller_business'),
+            )
+        }),
+        ('Trade Details', {
+            'fields': (
+                'offer',
+                ('crypto_amount', 'crypto_amount_display'),
+                ('fiat_amount', 'fiat_amount_display'),
+                'rate_used',
+                ('country_code', 'currency_code'),
+                'payment_method',
+            ),
+            'description': 'Trade amounts and currencies'
+        }),
+        ('Status & Timing', {
+            'fields': (
+                'status',
+                'expires_at',
+                ('payment_reference', 'payment_notes'),
+                'crypto_transaction_hash',
+                ('created_at', 'completed_at'),
+                ('disputed_at', 'dispute_reason'),
+                'resolved_at',
+            )
+        }),
+        ('Rating', {
+            'fields': ('rating_link',),
+            'classes': ('collapse',)
+        }),
+        ('Metadata', {
+            'fields': ('updated_at',),
+            'classes': ('collapse',)
+        }),
+    )
     
     def buyer_entity_display(self, obj):
         """Display buyer entity (User or Business) using new direct relationships"""
@@ -251,6 +398,24 @@ class P2PTradeAdmin(admin.ModelAdmin):
         else:
             return f"{buyer_type}↔️{seller_type} Mixed/Legacy"
     trade_type_display.short_description = 'Trade Type'
+    
+    def crypto_amount_display(self, obj):
+        """Display crypto amount with currency type"""
+        if obj.offer:
+            token_type = obj.offer.token_type
+            # Format token type for display
+            if token_type == 'cUSD':
+                token_display = 'cUSD'
+            elif token_type == 'CONFIO':
+                token_display = 'CONFIO'
+            else:
+                token_display = token_type
+            
+            # Add appropriate emoji
+            crypto_emoji = '💵' if token_type == 'cUSD' else '🪙'
+            return f"{crypto_emoji} {obj.crypto_amount:,.2f} {token_display}"
+        return f"❓ {obj.crypto_amount:,.2f}"
+    crypto_amount_display.short_description = 'Crypto Amount'
     
     def fiat_amount_display(self, obj):
         """Display fiat amount with currency code"""
@@ -311,38 +476,149 @@ class P2PTradeAdmin(admin.ModelAdmin):
             return "No rating yet"
     rating_link.short_description = 'Rating Details'
     
+    def country_display(self, obj):
+        """Display country with flag emoji"""
+        country_flags = {
+            'VE': '🇻🇪 Venezuela',
+            'CO': '🇨🇴 Colombia',
+            'AR': '🇦🇷 Argentina',
+            'MX': '🇲🇽 México',
+            'PE': '🇵🇪 Perú',
+            'CL': '🇨🇱 Chile',
+            'EC': '🇪🇨 Ecuador',
+            'BO': '🇧🇴 Bolivia',
+            'UY': '🇺🇾 Uruguay',
+            'PY': '🇵🇾 Paraguay',
+            'BR': '🇧🇷 Brasil',
+            'US': '🇺🇸 Estados Unidos',
+        }
+        return country_flags.get(obj.country_code, f'{obj.country_code}')
+    country_display.short_description = 'País'
+    
+    def status_display(self, obj):
+        """Display status with colored badges"""
+        status_colors = {
+            'PENDING': '<span style="color: #FFA500; font-weight: bold;">⏳ PENDIENTE</span>',
+            'PAYMENT_PENDING': '<span style="color: #FF6347; font-weight: bold;">💳 PAGO PENDIENTE</span>',
+            'PAYMENT_SENT': '<span style="color: #4169E1; font-weight: bold;">📤 PAGO ENVIADO</span>',
+            'PAYMENT_CONFIRMED': '<span style="color: #32CD32; font-weight: bold;">✅ PAGO CONFIRMADO</span>',
+            'CRYPTO_RELEASED': '<span style="color: #228B22; font-weight: bold;">🚀 CRYPTO LIBERADO</span>',
+            'COMPLETED': '<span style="color: #006400; font-weight: bold;">✅ COMPLETADO</span>',
+            'DISPUTED': '<span style="color: #DC143C; font-weight: bold;">⚠️ DISPUTADO</span>',
+            'CANCELLED': '<span style="color: #8B0000; font-weight: bold;">❌ CANCELADO</span>',
+            'EXPIRED': '<span style="color: #696969; font-weight: bold;">⏰ EXPIRADO</span>',
+        }
+        return format_html(status_colors.get(obj.status, obj.status))
+    status_display.short_description = 'Estado'
+    
+    def time_remaining(self, obj):
+        """Display time remaining until expiry"""
+        if obj.status in ['COMPLETED', 'CANCELLED', 'EXPIRED']:
+            return '-'
+        
+        from django.utils import timezone
+        now = timezone.now()
+        remaining = obj.expires_at - now
+        
+        if remaining.total_seconds() < 0:
+            return format_html('<span style="color: red; font-weight: bold;">EXPIRADO</span>')
+        
+        hours = int(remaining.total_seconds() // 3600)
+        minutes = int((remaining.total_seconds() % 3600) // 60)
+        
+        if hours > 0:
+            return format_html('<span style="color: #FF8C00;">{} h {} min</span>', hours, minutes)
+        else:
+            color = 'red' if minutes < 15 else '#FF8C00'
+            return format_html('<span style="color: {}; font-weight: bold;">{} min</span>', color, minutes)
+    time_remaining.short_description = 'Tiempo restante'
+    
+    def trade_summary(self, obj):
+        """Display a summary of the trade"""
+        buyer = obj.buyer_display_name
+        seller = obj.seller_display_name
+        
+        if obj.offer and obj.offer.exchange_type == 'BUY':
+            # Original offer was to buy crypto, so trade seller is offer creator
+            direction = f"{buyer} → {seller}"
+        else:
+            # Original offer was to sell crypto, so trade buyer is offer creator
+            direction = f"{seller} → {buyer}"
+        
+        return format_html(
+            '<div style="line-height: 1.5;">' +
+            '<strong>{}</strong><br/>' +
+            '<span style="color: #666;">Método: {}</span>' +
+            '</div>',
+            direction,
+            obj.payment_method.display_name if obj.payment_method else 'N/A'
+        )
+    trade_summary.short_description = 'Resumen'
+    
     fieldsets = (
-        ('Trade Participants (Direct Relationships)', {
+        ('🤝 Participantes del Intercambio', {
             'fields': ('offer', 'buyer_user', 'buyer_business', 'seller_user', 'seller_business'),
-            'description': 'New clean relationship model - directly links users or businesses'
+            'description': 'Usuarios o negocios participando en este intercambio'
         }),
-        ('Legacy Trade Participants (Deprecated)', {
-            'fields': ('buyer', 'buyer_account', 'seller', 'seller_account'),
-            'classes': ('collapse',),
-            'description': 'Old indirect relationship model - will be removed in future'
-        }),
-        ('Trade Details', {
+        ('💰 Detalles del Intercambio', {
             'fields': (
-                'crypto_amount', 'fiat_amount', 'rate_used', 
-                'country_code', 'currency_code',
-                'payment_method', 'status', 'expires_at'
-            )
+                ('crypto_amount', 'crypto_amount_display'),
+                ('fiat_amount', 'rate_used'),
+                ('country_code', 'currency_code'),
+                'payment_method',
+                ('status', 'status_display'),
+                ('expires_at', 'time_remaining')
+            ),
+            'description': 'Montos, tasas y estado de la transacción'
         }),
-        ('Payment Info', {
-            'fields': ('payment_reference', 'payment_notes')
+        ('💳 Información de Pago', {
+            'fields': ('payment_reference', 'payment_notes'),
+            'description': 'Referencia de pago y notas adicionales'
         }),
-        ('Completion', {
-            'fields': ('crypto_transaction_hash', 'completed_at', 'rating_link')
+        ('✅ Finalización', {
+            'fields': ('crypto_transaction_hash', 'completed_at', 'rating_link'),
+            'description': 'Detalles de la transacción completada'
         }),
-        ('Dispute Handling', {
+        ('⚠️ Manejo de Disputas', {
             'fields': ('dispute_reason', 'disputed_at', 'resolved_at'),
-            'classes': ('collapse',)
+            'classes': ('collapse',),
+            'description': 'Información sobre disputas si las hay'
         }),
-        ('Timestamps', {
+        ('📅 Marcas de Tiempo', {
             'fields': ('created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
+        ('🔧 Participantes Legacy (Obsoleto)', {
+            'fields': ('buyer', 'buyer_account', 'seller', 'seller_account'),
+            'classes': ('collapse',),
+            'description': 'Campos antiguos - no usar para nuevos registros'
+        }),
     )
+    
+    # Admin actions
+    def mark_as_completed(self, request, queryset):
+        """Mark selected trades as completed"""
+        from django.utils import timezone
+        updated = queryset.filter(
+            status__in=['PAYMENT_CONFIRMED', 'CRYPTO_RELEASED']
+        ).update(
+            status='COMPLETED',
+            completed_at=timezone.now()
+        )
+        self.message_user(request, f'{updated} trades marked as completed.')
+    mark_as_completed.short_description = '✅ Marcar como completado'
+    
+    def mark_as_disputed(self, request, queryset):
+        """Mark selected trades as disputed"""
+        from django.utils import timezone
+        updated = queryset.exclude(
+            status__in=['COMPLETED', 'CANCELLED', 'EXPIRED']
+        ).update(
+            status='DISPUTED',
+            disputed_at=timezone.now()
+        )
+        self.message_user(request, f'{updated} trades marked as disputed.')
+    mark_as_disputed.short_description = '⚠️ Marcar como disputado'
 
 @admin.register(P2PMessage)
 class P2PMessageAdmin(admin.ModelAdmin):

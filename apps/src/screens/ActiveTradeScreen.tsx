@@ -18,6 +18,7 @@ import { MainStackParamList } from '../types/navigation';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { useQuery } from '@apollo/client';
 import { GET_P2P_TRADE } from '../apollo/queries';
+import { formatLocalDateTime } from '../utils/dateUtils';
 
 type ActiveTradeRouteProp = RouteProp<MainStackParamList, 'ActiveTrade'>;
 type ActiveTradeNavigationProp = NativeStackNavigationProp<MainStackParamList, 'ActiveTrade'>;
@@ -43,26 +44,10 @@ interface ActiveTrade {
   tradeType: 'buy' | 'sell';
   status?: string;
   hasRating?: boolean;
+  createdAt?: string;
+  completedAt?: string;
 }
 
-// Helper function to format date to local time
-const formatLocalDateTime = (dateString: string) => {
-  const date = new Date(dateString);
-  
-  // Format date parts manually for better React Native compatibility
-  const day = date.getDate().toString().padStart(2, '0');
-  const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-  const month = months[date.getMonth()];
-  const year = date.getFullYear();
-  
-  let hours = date.getHours();
-  const minutes = date.getMinutes().toString().padStart(2, '0');
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12;
-  hours = hours ? hours : 12; // 0 should be 12
-  
-  return `${day} ${month} ${year}, ${hours}:${minutes} ${ampm}`;
-};
 
 export const ActiveTradeScreen: React.FC = () => {
   try {
@@ -653,7 +638,7 @@ export const ActiveTradeScreen: React.FC = () => {
             </View>
             <View style={styles.transactionDetailsRow}>
               <Text style={styles.transactionDetailsLabel}>Fecha de finalización:</Text>
-              <Text style={styles.transactionDetailsValue}>{formatLocalDateTime(fullTradeData?.completedAt || trade.completedAt || new Date().toISOString())}</Text>
+              <Text style={styles.transactionDetailsValue}>{formatLocalDateTime(fullTradeData?.completedAt || trade.completedAt || trade.createdAt || new Date().toISOString())}</Text>
             </View>
             <View style={styles.transactionDetailsRow}>
               <Text style={styles.transactionDetailsLabel}>Cantidad:</Text>
@@ -711,7 +696,7 @@ export const ActiveTradeScreen: React.FC = () => {
           </View>
           <View style={styles.transactionDetailsRow}>
             <Text style={styles.transactionDetailsLabel}>Fecha de finalización:</Text>
-            <Text style={styles.transactionDetailsValue}>{formatLocalDateTime(fullTradeData?.completedAt || trade.completedAt || new Date().toISOString())}</Text>
+            <Text style={styles.transactionDetailsValue}>{formatLocalDateTime(fullTradeData?.completedAt || trade.completedAt || trade.createdAt || new Date().toISOString())}</Text>
           </View>
           <View style={styles.transactionDetailsRow}>
             <Text style={styles.transactionDetailsLabel}>Cantidad:</Text>
@@ -769,7 +754,7 @@ export const ActiveTradeScreen: React.FC = () => {
                 crypto: formatCrypto(trade.crypto || 'cUSD'),
                 totalPaid: trade.totalBs,
                 method: fullTradeData?.paymentMethod?.displayName || trade.paymentMethod || 'N/A',
-                date: formatLocalDateTime(fullTradeData?.completedAt || trade.completedAt || new Date().toISOString()),
+                date: formatLocalDateTime(fullTradeData?.completedAt || trade.completedAt || trade.createdAt || new Date().toISOString()),
                 duration: '8 minutos', // Replace with real data if available
               }
             });
