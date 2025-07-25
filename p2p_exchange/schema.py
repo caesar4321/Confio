@@ -237,6 +237,14 @@ class P2POfferType(DjangoObjectType):
             if active_account and active_account.business:
                 favoriter_business = active_account.business
         
+        # Debug logging
+        print(f"\n[DEBUG] resolve_is_favorite for offer {self.id}")
+        print(f"  Active account: {active_account_type} (index: {active_account_index})")
+        print(f"  User: {user.id}")
+        print(f"  Favoriter business: {favoriter_business.id if favoriter_business else 'None'}")
+        print(f"  Offer user: {self.offer_user.id if self.offer_user else 'None'}")
+        print(f"  Offer business: {self.offer_business.id if self.offer_business else 'None'}")
+        
         # Check if the offer creator is in user's favorites based on account context
         if self.offer_user:
             if favoriter_business:
@@ -2294,11 +2302,19 @@ class Query(graphene.ObjectType):
                         user=user,
                         favoriter_business=favoriter_business
                     ).values_list('favorite_user_id', 'favorite_business_id')
+                    print(f"\n[DEBUG] Favorites query (business {favoriter_business.id}):")
+                    print(f"  Found {len(favorite_users)} favorites")
+                    for fav_user_id, fav_business_id in favorite_users:
+                        print(f"  - User: {fav_user_id}, Business: {fav_business_id}")
                 else:
                     favorite_users = P2PFavoriteTrader.objects.filter(
                         user=user,
                         favoriter_business__isnull=True
                     ).values_list('favorite_user_id', 'favorite_business_id')
+                    print(f"\n[DEBUG] Favorites query (personal account):")
+                    print(f"  Found {len(favorite_users)} favorites")
+                    for fav_user_id, fav_business_id in favorite_users:
+                        print(f"  - User: {fav_user_id}, Business: {fav_business_id}")
                 
                 # Build query for favorite offers
                 favorite_q = Q()
