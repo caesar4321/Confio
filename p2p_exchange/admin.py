@@ -1536,11 +1536,33 @@ class P2PDisputeTransactionAdmin(admin.ModelAdmin):
 
 @admin.register(P2PFavoriteTrader)
 class P2PFavoriteTraderAdmin(admin.ModelAdmin):
-    list_display = ['user', 'favorite_trader_display', 'trader_type', 'note_preview', 'created_at']
-    list_filter = ['created_at']
-    search_fields = ['user__username', 'user__email', 'favorite_user__username', 'favorite_business__name', 'note']
+    list_display = ['user', 'favoriter_context', 'favorite_trader_display', 'trader_type', 'note_preview', 'created_at']
+    list_filter = [
+        'created_at',
+        ('favoriter_business', admin.RelatedOnlyFieldListFilter),
+        ('favorite_user', admin.RelatedOnlyFieldListFilter),
+        ('favorite_business', admin.RelatedOnlyFieldListFilter),
+    ]
+    search_fields = [
+        'user__username', 'user__email', 
+        'favoriter_business__name',
+        'favorite_user__username', 'favorite_business__name', 
+        'note'
+    ]
     readonly_fields = ['created_at', 'updated_at']
-    raw_id_fields = ['user', 'favorite_user', 'favorite_business']
+    raw_id_fields = ['user', 'favoriter_business', 'favorite_user', 'favorite_business']
+    
+    def favoriter_context(self, obj):
+        """Display the context from which the favorite was added"""
+        if obj.favoriter_business:
+            return format_html(
+                '<span style="background-color: #3B82F6; color: white; padding: 2px 6px; border-radius: 12px; font-size: 11px;">🏢 {}</span>',
+                obj.favoriter_business.name
+            )
+        return format_html(
+            '<span style="background-color: #10B981; color: white; padding: 2px 6px; border-radius: 12px; font-size: 11px;">👤 Personal</span>'
+        )
+    favoriter_context.short_description = 'Added From'
     
     def favorite_trader_display(self, obj):
         """Display the favorited trader with appropriate icon"""
@@ -1550,10 +1572,11 @@ class P2PFavoriteTraderAdmin(admin.ModelAdmin):
                 obj.favorite_business.name
             )
         elif obj.favorite_user:
+            name = f"{obj.favorite_user.first_name or ''} {obj.favorite_user.last_name or ''}".strip()
+            display_name = name if name else obj.favorite_user.username
             return format_html(
-                '<span>👤 {} {}</span>',
-                obj.favorite_user.first_name or '',
-                obj.favorite_user.last_name or ''
+                '<span>👤 {}</span>',
+                display_name
             )
         return '-'
     favorite_trader_display.short_description = 'Favorite Trader'
@@ -1576,17 +1599,22 @@ class P2PFavoriteTraderAdmin(admin.ModelAdmin):
     note_preview.short_description = 'Note'
     
     fieldsets = (
-        ('User', {
-            'fields': ('user',)
+        ('👤 Favoriting User', {
+            'fields': ('user',),
+            'description': 'User who is adding this favorite'
         }),
-        ('Favorite Trader', {
+        ('🏢 Account Context', {
+            'fields': ('favoriter_business',),
+            'description': 'If favoriting from a business account, select the business. Leave empty for personal account favorites.'
+        }),
+        ('⭐ Favorite Trader', {
             'fields': ('favorite_user', 'favorite_business'),
-            'description': 'Only one of these should be filled'
+            'description': 'The trader being favorited - only one should be filled'
         }),
-        ('Details', {
+        ('📝 Details', {
             'fields': ('note',)
         }),
-        ('Timestamps', {
+        ('📅 Timestamps', {
             'fields': ('created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
