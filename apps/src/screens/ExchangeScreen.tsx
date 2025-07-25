@@ -607,6 +607,11 @@ export const ExchangeScreen = () => {
         
         // Map status to step
         const getStepFromStatus = (status: string, hasRating?: boolean) => {
+          // Handle disputed trades
+          if (status === 'DISPUTED') {
+            return 0; // Special case for disputed trades
+          }
+          
           // If trade is completed and rated, show as completed (step 5)
           if (status === 'COMPLETED' && hasRating) {
             return 5; // Completed and rated
@@ -628,6 +633,8 @@ export const ExchangeScreen = () => {
             case 'PAYMENT_SENT': return 3;
             case 'PAYMENT_CONFIRMED': return 4; // Funds being released
             case 'CRYPTO_RELEASED': return hasRating ? 5 : 4; // Show step 4 only if not rated yet
+            case 'CANCELLED': return 0; // Special case for cancelled trades
+            case 'EXPIRED': return 0; // Special case for expired trades
             default: return 1;
           }
         };
@@ -716,7 +723,7 @@ export const ExchangeScreen = () => {
           crypto: trade.offer?.tokenType === 'CUSD' ? 'cUSD' : (trade.offer?.tokenType || 'cUSD'),
           totalBs: `${formatNumber(trade.fiatAmount)} ${trade.currencyCode || currency.code}`,
           step: getStepFromStatus(trade.status, trade.hasRating),
-          totalSteps: (trade.status === 'COMPLETED' || trade.status === 'PAYMENT_CONFIRMED') ? 5 : 4, // 5 steps for completed or payment confirmed trades
+          totalSteps: 5, // Always 5 steps
           timeRemaining,
           status: trade.status, // Keep original case for proper comparison
           paymentMethod: trade.paymentMethod?.isActive === false ? 
