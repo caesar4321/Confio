@@ -813,10 +813,11 @@ export const ExchangeScreen = () => {
         exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
         tokenType: selectedCrypto,
         paymentMethod: paymentMethodName,
-        countryCode: selectedCountry?.[2]
+        countryCode: selectedCountry?.[2],
+        favoritesOnly: filterFavorites
       });
     }
-  }, [activeTab, selectedCrypto, selectedPaymentMethod, selectedCountry, refetch, paymentMethodsData]);
+  }, [activeTab, selectedCrypto, selectedPaymentMethod, selectedCountry, refetch, paymentMethodsData, filterFavorites]);
 
   // Note: Payment method name conversion is now done inline in refetch calls to avoid hoisting issues
 
@@ -834,11 +835,12 @@ export const ExchangeScreen = () => {
       exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
       tokenType: selectedCrypto,
       paymentMethod: paymentMethodName,
-      countryCode: selectedCountry?.[2]
+      countryCode: selectedCountry?.[2],
+      favoritesOnly: filterFavorites
       // Note: Additional filters like amount, minRate, maxRate could be added here
       // when the backend GraphQL schema supports them
     });
-  }, [activeTab, selectedCrypto, selectedPaymentMethod, selectedCountry, paymentMethodsData, refetch]);
+  }, [activeTab, selectedCrypto, selectedPaymentMethod, selectedCountry, paymentMethodsData, refetch, filterFavorites]);
 
   // Filter offers client-side by amount and advanced filters
   const filteredOffers = React.useMemo(() => {
@@ -1159,7 +1161,8 @@ export const ExchangeScreen = () => {
           exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
           tokenType: selectedCrypto,
           paymentMethod: paymentMethodName,
-          countryCode: selectedCountry?.[2]
+          countryCode: selectedCountry?.[2],
+          favoritesOnly: filterFavorites
         });
       }
     } catch (error) {
@@ -2720,18 +2723,48 @@ export const ExchangeScreen = () => {
                             <TouchableOpacity
                                 style={[
                                     styles.filterButton, 
-                                    (showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume || filterFavorites) && styles.activeFilterButton
+                                    (showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume) && styles.activeFilterButton
                                 ]}
                                 onPress={() => setShowAdvancedFilters(!showAdvancedFilters)}
                             >
                                 <Icon
                                     name="filter"
                                     size={12}
-                                    color={(showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume || filterFavorites) ? colors.primary : '#6B7280'}
+                                    color={(showAdvancedFilters || minRate || maxRate || filterVerified || filterOnline || filterHighVolume) ? colors.primary : '#6B7280'}
                                 />
-                                {(minRate || maxRate || filterVerified || filterOnline || filterHighVolume || filterFavorites) && (
+                                {(minRate || maxRate || filterVerified || filterOnline || filterHighVolume) && (
                                     <View style={styles.filterIndicator} />
                                 )}
+                            </TouchableOpacity>
+                            
+                            {/* Favorites filter button */}
+                            <TouchableOpacity
+                                style={[
+                                    styles.filterButton,
+                                    filterFavorites && styles.activeFilterButton
+                                ]}
+                                onPress={() => {
+                                    setFilterFavorites(!filterFavorites);
+                                    // Immediately refetch with favorites filter
+                                    let paymentMethodName = null;
+                                    if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
+                                        const method = paymentMethodsData.p2pPaymentMethods.find((pm: any) => pm.displayName === selectedPaymentMethod);
+                                        paymentMethodName = method?.name || null;
+                                    }
+                                    refetch({
+                                        exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
+                                        tokenType: selectedCrypto,
+                                        paymentMethod: paymentMethodName,
+                                        countryCode: selectedCountry?.[2],
+                                        favoritesOnly: !filterFavorites
+                                    });
+                                }}
+                            >
+                                <Icon
+                                    name="star"
+                                    size={12}
+                                    color={filterFavorites ? colors.primary : '#6B7280'}
+                                />
                             </TouchableOpacity>
                             
                             {/* Quick clear filters button - only show when filters are active */}
@@ -2746,7 +2779,6 @@ export const ExchangeScreen = () => {
                                         setFilterVerified(false);
                                         setFilterOnline(false);
                                         setFilterHighVolume(false);
-                                        setFilterFavorites(false);
                                         setSelectedPaymentMethod('Todos los métodos');
                                         
                                         // Also clear the filter inputs
@@ -2772,7 +2804,8 @@ export const ExchangeScreen = () => {
                                         exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
                                         tokenType: selectedCrypto,
                                         paymentMethod: paymentMethodName,
-                                        countryCode: selectedCountry?.[2]
+                                        countryCode: selectedCountry?.[2],
+                                        favoritesOnly: filterFavorites
                                     });
                                     // Also refresh trades if viewing trades tab
                                     if (activeList === 'trades' && refetchTrades) {
@@ -2865,15 +2898,6 @@ export const ExchangeScreen = () => {
                                     </View>
                                     <Text style={styles.checkboxLabel}>+100 ops</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity 
-                                    style={styles.checkboxItem}
-                                    onPress={() => setFilterFavorites(!filterFavorites)}
-                                >
-                                    <View style={[styles.checkbox, filterFavorites && styles.checkboxChecked]}>
-                                        {filterFavorites && <Icon name="check" size={12} color="#fff" />}
-                                    </View>
-                                    <Text style={[styles.checkboxLabel, { fontSize: 12 }]}>★ Favoritos</Text>
-                                </TouchableOpacity>
                             </View>
 
                             <View style={styles.filterActions}>
@@ -2887,7 +2911,6 @@ export const ExchangeScreen = () => {
                                         setFilterVerified(false);
                                         setFilterOnline(false);
                                         setFilterHighVolume(false);
-                                        setFilterFavorites(false);
                                         setSelectedPaymentMethod('Todos los métodos');
                                         
                                         // Also clear the filter inputs
@@ -2921,8 +2944,7 @@ export const ExchangeScreen = () => {
                                             exchangeType: activeTab === 'buy' ? 'SELL' : 'BUY',
                                             tokenType: selectedCrypto,
                                             paymentMethod: paymentMethodName,
-                                            countryCode: selectedCountry?.[2],
-                                            favoritesOnly: filterFavorites
+                                            countryCode: selectedCountry?.[2]
                                         });
                                     }}
                                 >
