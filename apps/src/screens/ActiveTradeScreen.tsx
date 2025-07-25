@@ -690,8 +690,16 @@ export const ActiveTradeScreen: React.FC = () => {
     // Get full trade data from GraphQL query
     const fullTradeData = tradeDetailsData?.p2pTrade;
     
+    console.log('[ActiveTradeScreen] renderStep4 - trade data:', {
+      tradeId: trade.id,
+      status: trade.status,
+      hasRating: trade.hasRating,
+      step: trade.step,
+      willShowRatedUI: (trade.status === 'COMPLETED' || trade.status === 'CRYPTO_RELEASED' || trade.status === 'PAYMENT_CONFIRMED') && trade.hasRating
+    });
+    
     // If trade is already completed (rated), show different UI
-    if (trade.status === 'COMPLETED' && trade.hasRating) {
+    if ((trade.status === 'COMPLETED' || trade.status === 'CRYPTO_RELEASED' || trade.status === 'PAYMENT_CONFIRMED') && trade.hasRating) {
       return (
         <View style={styles.stepCard}>
           <View style={styles.successHeader}>
@@ -796,6 +804,12 @@ export const ActiveTradeScreen: React.FC = () => {
         
         <View style={styles.successButtons}>
           <TouchableOpacity style={styles.primaryButton} onPress={() => {
+            // Check if already rated
+            if (trade.hasRating) {
+              Alert.alert('Ya calificado', 'Ya has calificado este intercambio.');
+              return;
+            }
+            
             // Determine who is rating whom based on current user's role
             const iAmBuyer = trade.tradeType === 'buy';
             const fullTradeData = tradeDetailsData?.p2pTrade;
@@ -809,6 +823,7 @@ export const ActiveTradeScreen: React.FC = () => {
               tradeType: trade.tradeType,
               counterpartyInfo,
               counterpartyStats,
+              hasRating: trade.hasRating,
               // Fallback to original data if full data not loaded
               usingFallback: !fullTradeData,
             });
