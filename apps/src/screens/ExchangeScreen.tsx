@@ -36,6 +36,8 @@ import { ExchangeRateDisplay } from '../components/ExchangeRateDisplay';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { getCurrencySymbol, getCurrencyForCountry } from '../utils/currencyMapping';
 import { useNumberFormat } from '../utils/numberFormatting';
+import { EmptyState } from '../components/EmptyState';
+import { OfferCardSkeleton, TradeCardSkeleton } from '../components/SkeletonLoader';
 
 // Colors from the design
 const colors = {
@@ -1562,6 +1564,10 @@ export const ExchangeScreen = () => {
     const successRate = parseFloat(userStats.successRate || '0'); // Convert string to number
     const responseTime = userStats.avgResponseTime || offer.responseTimeMinutes || null;
     const isVerified = userStats.isVerified || false;
+    const avgRating = parseFloat(userStats.avgRating || '0');
+    const isNewTrader = completedTrades < 5;
+    const isHighRated = avgRating >= 4.5 && completedTrades >= 10;
+    const isFastResponder = responseTime && responseTime <= 15;
     
     // Calculate simple activity status instead of real-time online
     const getActivityStatus = () => {
@@ -1669,9 +1675,26 @@ export const ExchangeScreen = () => {
             <View style={styles.userInfoContainer}>
               <View style={styles.userNameContainer}>
                 <Text style={styles.userName} numberOfLines={1} ellipsizeMode="tail">{userName}</Text>
-                {isVerified && (
-                  <Icon name="shield" size={16} color={colors.accent} style={styles.verifiedIcon} />
-                )}
+                <View style={styles.traderBadges}>
+                  {isHighRated && (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>⭐</Text>
+                    </View>
+                  )}
+                  {isNewTrader && (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>🆕</Text>
+                    </View>
+                  )}
+                  {isFastResponder && (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>⚡</Text>
+                    </View>
+                  )}
+                  {isVerified && (
+                    <Icon name="shield" size={16} color={colors.accent} style={styles.verifiedIcon} />
+                  )}
+                </View>
                 {/* Add a visible star for ALL offers to test rendering */}
                 <TouchableOpacity 
                   style={styles.favoriteButtonName}
@@ -1701,6 +1724,7 @@ export const ExchangeScreen = () => {
           </TouchableOpacity>
           <View style={styles.offerRateContainer}>
             <View style={styles.rateSection}>
+              <Text style={styles.rateLabel}>{activeTab === 'buy' ? 'Compras a' : 'Vendes a'}</Text>
               <Text style={styles.rateValue}>{formatAmount.withCode(offer.rate)}</Text>
               {/* Market Rate Comparison - Only for cUSD, not CONFIO */}
               {marketRate && selectedCrypto === 'cUSD' && (() => {
@@ -1755,13 +1779,15 @@ export const ExchangeScreen = () => {
         </View>
 
       <View style={styles.offerDetails}>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Límite por operación</Text>
-          <Text style={styles.detailValue}>{offer.minAmount} - {offer.maxAmount} {crypto}</Text>
-        </View>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Disponible</Text>
-          <Text style={styles.detailValue}>{offer.availableAmount} {crypto}</Text>
+        <View style={styles.limitsContainer}>
+          <View style={styles.limitBox}>
+            <Text style={styles.limitLabel}>Límites</Text>
+            <Text style={styles.limitValue}>{offer.minAmount} - {offer.maxAmount} {crypto}</Text>
+          </View>
+          <View style={styles.availableBox}>
+            <Text style={styles.availableLabel}>Disponible</Text>
+            <Text style={styles.availableValue}>{offer.availableAmount} {crypto}</Text>
+          </View>
         </View>
         <TouchableOpacity 
           style={styles.detailRow}
@@ -1844,7 +1870,7 @@ export const ExchangeScreen = () => {
                 style={styles.detailsButton}
                 onPress={() => handleSelectOffer(offer, 'profile')}
             >
-              <Text style={styles.detailsButtonText}>Ver Perfil</Text>
+              <Text style={styles.detailsButtonText}>Perfil</Text>
             </TouchableOpacity>
             <TouchableOpacity 
                 style={styles.buyButton}
@@ -2968,6 +2994,87 @@ export const ExchangeScreen = () => {
                         </View>
                         </>
                     )}
+                    
+                    {/* Quick Filter Chips */}
+                    <ScrollView 
+                        horizontal 
+                        style={styles.quickFilters}
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.quickFiltersContent}
+                    >
+                        <TouchableOpacity 
+                            style={[styles.filterChip, filterVerified && styles.filterChipActive]}
+                            onPress={() => setFilterVerified(!filterVerified)}
+                        >
+                            <Icon name="shield" size={12} color={filterVerified ? '#fff' : '#6B7280'} />
+                            <Text style={[styles.filterChipText, filterVerified && styles.filterChipTextActive]}>
+                                Verificados
+                            </Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity 
+                            style={[styles.filterChip, filterHighVolume && styles.filterChipActive]}
+                            onPress={() => setFilterHighVolume(!filterHighVolume)}
+                        >
+                            <Icon name="trending-up" size={12} color={filterHighVolume ? '#fff' : '#6B7280'} />
+                            <Text style={[styles.filterChipText, filterHighVolume && styles.filterChipTextActive]}>
+                                +100 trades
+                            </Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity 
+                            style={[styles.filterChip, filterOnline && styles.filterChipActive]}
+                            onPress={() => setFilterOnline(!filterOnline)}
+                        >
+                            <Icon name="activity" size={12} color={filterOnline ? '#fff' : '#6B7280'} />
+                            <Text style={[styles.filterChipText, filterOnline && styles.filterChipTextActive]}>
+                                Activos
+                            </Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity 
+                            style={[
+                                styles.filterChip, 
+                                (marketRate && selectedCrypto === 'cUSD' && activeTab === 'buy') && styles.filterChipActive
+                            ]}
+                            onPress={() => {
+                                if (marketRate && selectedCrypto === 'cUSD') {
+                                    const maxAcceptableRate = marketRate * 1.02; // 2% above market
+                                    setMaxRate(maxAcceptableRate.toFixed(2));
+                                    maxRateInputRef.current?.setNativeProps({ text: maxAcceptableRate.toFixed(2) });
+                                }
+                            }}
+                            disabled={!marketRate || selectedCrypto !== 'cUSD'}
+                        >
+                            <Icon name="percent" size={12} color={marketRate && selectedCrypto === 'cUSD' ? '#6B7280' : '#D1D5DB'} />
+                            <Text style={[
+                                styles.filterChipText, 
+                                marketRate && selectedCrypto === 'cUSD' && styles.filterChipTextActive
+                            ]}>
+                                Mejor tasa
+                            </Text>
+                        </TouchableOpacity>
+                        
+                        {(filterVerified || filterOnline || filterHighVolume || minRate || maxRate) && (
+                            <TouchableOpacity 
+                                style={[styles.filterChip, styles.clearChip]}
+                                onPress={() => {
+                                    setFilterVerified(false);
+                                    setFilterOnline(false);
+                                    setFilterHighVolume(false);
+                                    setMinRate('');
+                                    setMaxRate('');
+                                    minRateInputRef.current?.clear();
+                                    maxRateInputRef.current?.clear();
+                                }}
+                            >
+                                <Icon name="x" size={12} color="#EF4444" />
+                                <Text style={[styles.filterChipText, { color: '#EF4444' }]}>
+                                    Limpiar
+                                </Text>
+                            </TouchableOpacity>
+                        )}
+                    </ScrollView>
                 </>
             )}
         </Animated.View>
@@ -2983,8 +3090,10 @@ export const ExchangeScreen = () => {
       
       if (offersLoading) {
         return (
-          <View style={[styles.offersList, { padding: 16 }]}>
-            <Text style={styles.loadingText}>Cargando ofertas...</Text>
+          <View style={styles.offersList}>
+            <OfferCardSkeleton />
+            <OfferCardSkeleton />
+            <OfferCardSkeleton />
           </View>
         );
       }
@@ -3002,31 +3111,48 @@ export const ExchangeScreen = () => {
         const hasAmount = amount && amount.trim() !== '';
         const hasRateFilters = (minRate && minRate.trim() !== '') || (maxRate && maxRate.trim() !== '');
         const hasAdvancedFilters = filterVerified || filterOnline || filterHighVolume;
-        const hasAnyFilters = hasAmount || hasRateFilters || hasAdvancedFilters;
+        const hasAnyFilters = hasAmount || hasRateFilters || hasAdvancedFilters || filterFavorites;
         
-        let emptyMessage = 'No hay ofertas disponibles';
         if (hasAnyFilters) {
-          emptyMessage = 'No hay ofertas que coincidan con los filtros aplicados';
-        }
-        
-        return (
-          <View style={[styles.offersList, { padding: 16 }]}>
-            <Text style={styles.emptyText}>{emptyMessage}</Text>
-            {hasAnyFilters && (
-              <TouchableOpacity 
-                style={styles.clearFiltersButton}
-                onPress={() => {
+          return (
+            <View style={styles.offersList}>
+              <EmptyState
+                icon="search"
+                title="Sin resultados"
+                subtitle="No encontramos ofertas que coincidan con tus filtros"
+                actionLabel="Limpiar filtros"
+                onAction={() => {
                   setAmount('');
                   setMinRate('');
                   setMaxRate('');
                   setFilterVerified(false);
                   setFilterOnline(false);
                   setFilterHighVolume(false);
+                  setFilterFavorites(false);
+                  setSelectedPaymentMethod('Todos los métodos');
                 }}
-              >
-                <Text style={styles.clearFiltersText}>Limpiar filtros</Text>
-              </TouchableOpacity>
-            )}
+              />
+            </View>
+          );
+        }
+        
+        return (
+          <View style={styles.offersList}>
+            <EmptyState
+              icon="trending-up"
+              title={activeTab === 'buy' ? 'No hay vendedores' : 'No hay compradores'}
+              subtitle={activeTab === 'buy' 
+                ? 'Sé el primero en crear una oferta de venta' 
+                : 'Sé el primero en crear una oferta de compra'}
+              actionLabel="Crear oferta"
+              onAction={() => navigation.navigate('CreateOffer')}
+              tips={[
+                'Las mejores tasas aparecen primero',
+                'Verifica la reputación del trader antes de comerciar',
+                'Usa métodos de pago que conozcas bien',
+                filterFavorites ? 'Marca traders como favoritos para encontrarlos fácilmente' : undefined
+              ].filter(Boolean) as string[]}
+            />
           </View>
         );
       }
@@ -3044,9 +3170,10 @@ export const ExchangeScreen = () => {
       return (
         <View style={[styles.offersList, { padding: 16 }]}>
           {tradesLoading && !myTradesData ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={styles.loadingText}>Cargando intercambios...</Text>
+            <View style={[styles.offersList, { paddingTop: 0 }]}>
+              <TradeCardSkeleton />
+              <TradeCardSkeleton />
+              <TradeCardSkeleton />
             </View>
           ) : tradesError ? (
             <View style={styles.emptyState}>
@@ -3081,13 +3208,18 @@ export const ExchangeScreen = () => {
               )}
             </>
           ) : (
-            <View style={styles.emptyState}>
-              <Icon name="inbox" size={48} color="#9CA3AF" style={styles.emptyIcon} />
-              <Text style={styles.emptyTitle}>No hay intercambios</Text>
-              <Text style={styles.emptyText}>
-                Cuando inicies un intercambio, aparecerá aquí. Podrás ver tanto intercambios activos como tu historial completo.
-              </Text>
-            </View>
+            <EmptyState
+              icon="credit-card"
+              title="No tienes intercambios activos"
+              subtitle="Explora las ofertas disponibles y comienza tu primer intercambio."
+              actionLabel="Ver Ofertas"
+              onAction={() => setActiveList('offers')}
+              tips={[
+                'Filtra ofertas por método de pago que tengas configurado',
+                'Compara tasas entre diferentes traders',
+                'Marca tus traders favoritos para encontrarlos más rápido'
+              ]}
+            />
           )}
         </View>
       );
@@ -3096,10 +3228,11 @@ export const ExchangeScreen = () => {
     if (activeList === 'myOffers') {
       const myOffers = myOffersData?.myP2pOffers || [];
 
-      if (myOffersLoading) {
+      if (myOffersLoading && !myOffersData) {
         return (
           <View style={[styles.offersList, { padding: 16 }]}>
-            <Text style={styles.loadingText}>Cargando mis ofertas...</Text>
+            <OfferCardSkeleton />
+            <OfferCardSkeleton />
           </View>
         );
       }
@@ -3121,19 +3254,18 @@ export const ExchangeScreen = () => {
               ))}
             </>
           ) : (
-            <View style={styles.emptyState}>
-              <Icon name="plus-circle" size={48} color="#9CA3AF" style={styles.emptyIcon} />
-              <Text style={styles.emptyTitle}>No tienes ofertas</Text>
-              <Text style={styles.emptyText}>
-                Crea tu primera oferta para comenzar a intercambiar.
-              </Text>
-              <TouchableOpacity 
-                style={styles.createOfferButton}
-                onPress={() => navigation.navigate('CreateOffer')}
-              >
-                <Text style={styles.createOfferButtonText}>Crear Oferta</Text>
-              </TouchableOpacity>
-            </View>
+            <EmptyState
+              icon="plus-circle"
+              title="No tienes ofertas activas"
+              subtitle="Crea ofertas para que otros traders puedan intercambiar contigo."
+              actionLabel="Crear Oferta"
+              onAction={() => navigation.navigate('CreateOffer')}
+              tips={[
+                'Ofrece tasas competitivas para atraer más traders',
+                'Mantén múltiples ofertas activas para diferentes montos',
+                'Responde rápido a los mensajes para mejorar tu reputación'
+              ]}
+            />
           )}
         </View>
       );
@@ -3713,6 +3845,21 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     flexShrink: 0, // Prevent the icon from shrinking
   },
+  traderBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 6,
+    gap: 4,
+  },
+  badge: {
+    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  badgeText: {
+    fontSize: 12,
+  },
   userInfoContainer: {
     flex: 1,
     marginLeft: 12,
@@ -3756,9 +3903,14 @@ const styles = StyleSheet.create({
   rateSection: {
     alignItems: 'flex-end',
   },
+  rateLabel: {
+    fontSize: 11,
+    color: '#6B7280',
+    marginBottom: 2,
+  },
   rateValue: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 24,
+    fontWeight: '800',
     color: '#1F2937',
   },
   rateComparison: {
@@ -3815,6 +3967,43 @@ const styles = StyleSheet.create({
     color: '#1F2937',
     flex: 1,
     textAlign: 'right',
+  },
+  limitsContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 8,
+  },
+  limitBox: {
+    flex: 1,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    padding: 10,
+  },
+  limitLabel: {
+    fontSize: 11,
+    color: '#6B7280',
+    marginBottom: 4,
+  },
+  limitValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  availableBox: {
+    flex: 1,
+    backgroundColor: '#F0FDF4',
+    borderRadius: 8,
+    padding: 10,
+  },
+  availableLabel: {
+    fontSize: 11,
+    color: '#059669',
+    marginBottom: 4,
+  },
+  availableValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#059669',
   },
   paymentMethodsContainer: {
     flex: 1,
@@ -4837,5 +5026,44 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  quickFilters: {
+    height: 44,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  quickFiltersContent: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  filterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    gap: 4,
+  },
+  filterChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  filterChipTextActive: {
+    color: '#fff',
+  },
+  clearChip: {
+    backgroundColor: '#FEE2E2',
+    borderColor: '#FECACA',
   },
 }); 
