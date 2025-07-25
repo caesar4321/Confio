@@ -86,10 +86,11 @@ export const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const { setCurrentAccountAvatar, profileMenu } = useHeader();
   const { signOut, userProfile } = useAuth();
-  const { userCountry } = useCountry();
+  const { userCountry, selectedCountry } = useCountry();
   const { currency, formatAmount, exchangeRate } = useCurrency();
-  const { rate: marketRate } = useSelectedCountryRate();
+  const { rate: marketRate, loading: rateLoading } = useSelectedCountryRate();
   const [suiAddress, setSuiAddress] = React.useState<string>('');
+  // Show local currency by default if not in US and rate is available
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   
@@ -127,9 +128,33 @@ export const HomeScreen = () => {
   // CONFIO value is not determined yet
   const totalUSDValue = cUSDBalance;
   
-  // Use real exchange rate from API, fallback to 1 if not available
+  // Use real exchange rate from API only - no fallbacks
   const localExchangeRate = marketRate || 1;
   const totalLocalValue = totalUSDValue * localExchangeRate;
+  
+  // Don't show local currency option if exchange rate is not available
+  const canShowLocalCurrency = marketRate !== null && marketRate !== 1 && currency.code !== 'USD';
+  
+  // Debug exchange rate
+  console.log('HomeScreen - Exchange rate:', {
+    marketRate,
+    rateLoading,
+    localExchangeRate,
+    totalUSDValue,
+    totalLocalValue,
+    currency: currency.code,
+    currencySymbol: currency.symbol,
+    userCountry,
+    userCountryISO: userCountry?.[2],
+    selectedCountry,
+    selectedCountryISO: selectedCountry?.[2],
+    showLocalCurrency,
+    formattedLocal: formatAmount.plain(totalLocalValue),
+    formattedUSD: totalUSDValue.toLocaleString('en-US', { 
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2 
+    })
+  });
   
   // Only show loading for initial data load
   const isLoading = accountsLoading && !accounts.length;
@@ -261,6 +286,13 @@ export const HomeScreen = () => {
       useNativeDriver: true,
     }).start();
   }, [showLocalCurrency, balanceAnim]);
+  
+  // Reset to USD if exchange rate is not available
+  React.useEffect(() => {
+    if (!canShowLocalCurrency && showLocalCurrency) {
+      setShowLocalCurrency(false);
+    }
+  }, [canShowLocalCurrency, showLocalCurrency]);
 
   React.useEffect(() => {
     console.log('HomeScreen - useEffect triggered for data loading');
@@ -389,16 +421,18 @@ export const HomeScreen = () => {
                 {showLocalCurrency ? `En ${currency.name}` : 'En Dólares'}
               </Text>
             </View>
-            <TouchableOpacity 
-              style={styles.currencyToggle}
-              onPress={() => setShowLocalCurrency(!showLocalCurrency)}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.currencyToggleText}>
-                {showLocalCurrency ? currency.code : 'USD'}
-              </Text>
-              <Icon name="chevron-down" size={14} color="#fff" />
-            </TouchableOpacity>
+            {canShowLocalCurrency && (
+              <TouchableOpacity 
+                style={styles.currencyToggle}
+                onPress={() => setShowLocalCurrency(!showLocalCurrency)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.currencyToggleText}>
+                  {showLocalCurrency ? currency.code : 'USD'}
+                </Text>
+                <Icon name="chevron-down" size={14} color="#fff" />
+              </TouchableOpacity>
+            )}
           </View>
           
           <Animated.View 

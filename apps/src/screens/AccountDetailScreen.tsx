@@ -16,6 +16,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Vibration,
+  Pressable,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -92,6 +93,8 @@ export const AccountDetailScreen = () => {
   const [hasReachedEnd, setHasReachedEnd] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showMoreOptionsModal, setShowMoreOptionsModal] = useState(false);
   
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -443,7 +446,10 @@ export const AccountDetailScreen = () => {
             </View>
             <View style={styles.feeRow}>
               <Text style={styles.feeLabel}>Comisión de plataforma</Text>
-              <Text style={styles.feeValue}>Gratis</Text>
+              <View style={styles.feeValueContainer}>
+                <Text style={styles.feeValue}>Gratis</Text>
+                <Text style={styles.feeValueNote}>• Cubierto por Confío</Text>
+              </View>
             </View>
             <View style={styles.feeDivider} />
             <View style={styles.feeRow}>
@@ -661,7 +667,7 @@ export const AccountDetailScreen = () => {
           <View style={styles.usdcSection}>
             <View style={styles.sectionHeaderContainer}>
               <Text style={styles.sectionTitle}>Gestión Avanzada</Text>
-              <TouchableOpacity style={styles.helpButton}>
+              <TouchableOpacity style={styles.helpButton} onPress={() => setShowHelpModal(true)}>
                 <Icon name="help-circle" size={18} color="#6b7280" />
               </TouchableOpacity>
             </View>
@@ -726,7 +732,7 @@ export const AccountDetailScreen = () => {
                 
                 <TouchableOpacity
                   style={styles.usdcMoreButton}
-                  onPress={() => navigation.navigate('USDCManage')}
+                  onPress={() => setShowMoreOptionsModal(true)}
                 >
                   <Icon name="more-horizontal" size={20} color="#6b7280" />
                 </TouchableOpacity>
@@ -904,6 +910,164 @@ export const AccountDetailScreen = () => {
       </ScrollView>
 
       <ExchangeModal />
+      
+      {/* Help Modal */}
+      <Modal
+        visible={showHelpModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowHelpModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity 
+            style={styles.modalBackdrop} 
+            activeOpacity={1}
+            onPress={() => setShowHelpModal(false)}
+          />
+          <View style={styles.helpModalContent}>
+            <View style={styles.helpModalHeader}>
+              <Text style={styles.helpModalTitle}>¿Qué es la Gestión Avanzada?</Text>
+              <TouchableOpacity onPress={() => setShowHelpModal(false)}>
+                <Icon name="x" size={24} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView 
+              style={styles.helpModalBody}
+              contentContainerStyle={styles.helpModalScrollContent}
+              showsVerticalScrollIndicator={true}
+              bounces={true}
+            >
+              <View style={styles.helpSection}>
+                <Icon name="info" size={20} color="#3b82f6" style={styles.helpIcon} />
+                <View style={styles.helpTextContainer}>
+                  <Text style={styles.helpSectionTitle}>USDC en Sui Network</Text>
+                  <Text style={styles.helpSectionText}>
+                    USDC es una moneda estable respaldada 1:1 por dólares estadounidenses. 
+                    Puedes depositar USDC desde la red Sui y convertirlo a cUSD sin comisiones.
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.helpSection}>
+                <Icon name="shield" size={20} color="#10b981" style={styles.helpIcon} />
+                <View style={styles.helpTextContainer}>
+                  <Text style={styles.helpSectionTitle}>¿Por qué es seguro?</Text>
+                  <Text style={styles.helpSectionText}>
+                    • USDC está respaldado por Circle, una empresa regulada{'\n'}
+                    • La conversión a cUSD es instantánea y sin pérdidas{'\n'}
+                    • Tus fondos siempre están bajo tu control
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.helpSection}>
+                <Icon name="users" size={20} color="#8b5cf6" style={styles.helpIcon} />
+                <View style={styles.helpTextContainer}>
+                  <Text style={styles.helpSectionTitle}>¿Para quién es?</Text>
+                  <Text style={styles.helpSectionText}>
+                    Esta función es para usuarios avanzados que ya tienen USDC en wallets 
+                    de Sui como Sui Wallet, Binance o exchanges compatibles.
+                  </Text>
+                </View>
+              </View>
+              
+              <View style={styles.helpSection}>
+                <Icon name="zap" size={20} color="#f59e0b" style={styles.helpIcon} />
+                <View style={styles.helpTextContainer}>
+                  <Text style={styles.helpSectionTitle}>Beneficios</Text>
+                  <Text style={styles.helpSectionText}>
+                    • Sin comisiones de conversión (cubierto por Confío){'\n'}
+                    • Transacciones instantáneas{'\n'}
+                    • Mayor liquidez para tus operaciones
+                  </Text>
+                </View>
+              </View>
+            </ScrollView>
+            
+            <TouchableOpacity 
+              style={styles.helpModalButton}
+              onPress={() => setShowHelpModal(false)}
+            >
+              <Text style={styles.helpModalButtonText}>Entendido</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+      
+      {/* More Options Modal */}
+      <Modal
+        visible={showMoreOptionsModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowMoreOptionsModal(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay} 
+          activeOpacity={1} 
+          onPress={() => setShowMoreOptionsModal(false)}
+        >
+          <View style={styles.moreOptionsModalContent}>
+            <View style={styles.moreOptionsHandle} />
+            
+            <Text style={styles.moreOptionsTitle}>Más opciones</Text>
+            
+            <TouchableOpacity 
+              style={styles.moreOptionsItem}
+              onPress={() => {
+                setShowMoreOptionsModal(false);
+                navigation.navigate('USDCManage');
+              }}
+            >
+              <Icon name="settings" size={20} color="#1f2937" />
+              <Text style={styles.moreOptionsItemText}>Gestionar USDC</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.moreOptionsItem}
+              onPress={() => {
+                setShowMoreOptionsModal(false);
+                // Navigate to withdrawal screen
+                Alert.alert('Próximamente', 'La función de retiro estará disponible pronto');
+              }}
+            >
+              <Icon name="arrow-up-circle" size={20} color="#1f2937" />
+              <Text style={styles.moreOptionsItemText}>Retirar USDC a Sui</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.moreOptionsItem}
+              onPress={() => {
+                setShowMoreOptionsModal(false);
+                // Show transaction history
+                Alert.alert('Historial', 'Ver historial completo de conversiones USDC/cUSD');
+              }}
+            >
+              <Icon name="clock" size={20} color="#1f2937" />
+              <Text style={styles.moreOptionsItemText}>Historial de conversiones</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.moreOptionsItem}
+              onPress={() => {
+                setShowMoreOptionsModal(false);
+                // Open support
+                Alert.alert('Soporte', 'Contactar soporte para ayuda con USDC');
+              }}
+            >
+              <Icon name="help-circle" size={20} color="#1f2937" />
+              <Text style={styles.moreOptionsItemText}>Obtener ayuda</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.moreOptionsItem, styles.moreOptionsCancelItem]}
+              onPress={() => setShowMoreOptionsModal(false)}
+            >
+              <Text style={styles.moreOptionsCancelText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 };
@@ -980,7 +1144,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     flexDirection: 'row',
-    justifyContent: 'space-evenly',
+    justifyContent: 'space-between',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -996,26 +1160,15 @@ const styles = StyleSheet.create({
   actionButton: {
     alignItems: 'center',
     flex: 1,
+    paddingHorizontal: 4,
   },
   actionIcon: {
-    width: 52,
-    height: 52,
-    minWidth: 52,
-    minHeight: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
-    overflow: 'hidden',
-  },
-  actionIconPrimary: {
-    backgroundColor: '#34D399',
-  },
-  actionIconSecondary: {
-    backgroundColor: '#8b5cf6',
-  },
-  actionIconAccent: {
-    backgroundColor: '#3b82f6',
   },
   actionButtonText: {
     fontSize: 12,
@@ -1285,10 +1438,16 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   modalContent: {
     backgroundColor: '#ffffff',
@@ -1391,6 +1550,15 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     color: '#1f2937',
+  },
+  feeValueContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  feeValueNote: {
+    fontSize: 11,
+    color: '#6b7280',
+    marginLeft: 4,
   },
   feeDivider: {
     height: 1,
@@ -1504,5 +1672,139 @@ const styles = StyleSheet.create({
     backgroundColor: '#f3f4f6',
     borderWidth: 1,
     borderColor: '#e5e7eb',
+  },
+  // Help Modal Styles
+  helpModalContent: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    maxWidth: 380,
+    width: '90%',
+    height: '70%', // Fixed height to ensure scrolling works
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 12,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
+  },
+  helpModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  helpModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1f2937',
+  },
+  helpModalBody: {
+    flex: 1,
+    marginBottom: 10,
+  },
+  helpModalScrollContent: {
+    padding: 20,
+    paddingBottom: 20,
+  },
+  helpSection: {
+    flexDirection: 'row',
+    marginBottom: 24,
+  },
+  helpIcon: {
+    marginRight: 12,
+    marginTop: 2,
+  },
+  helpTextContainer: {
+    flex: 1,
+  },
+  helpSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  helpSectionText: {
+    fontSize: 14,
+    color: '#6b7280',
+    lineHeight: 20,
+  },
+  helpModalButton: {
+    backgroundColor: colors.primary,
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginHorizontal: 20,
+    marginTop: 10,
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  helpModalButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  // More Options Modal Styles
+  moreOptionsModalContent: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
+  },
+  moreOptionsHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#e5e7eb',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  moreOptionsTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  moreOptionsItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  moreOptionsItemText: {
+    fontSize: 16,
+    color: '#1f2937',
+    marginLeft: 16,
+  },
+  moreOptionsCancelItem: {
+    marginTop: 8,
+    borderBottomWidth: 0,
+    justifyContent: 'center',
+  },
+  moreOptionsCancelText: {
+    fontSize: 16,
+    color: '#6b7280',
+    textAlign: 'center',
+    fontWeight: '500',
   },
 }); 
