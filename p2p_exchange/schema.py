@@ -2258,6 +2258,7 @@ class Query(graphene.ObjectType):
     p2p_payment_methods = graphene.List(P2PPaymentMethodType, country_code=graphene.String())
 
     def resolve_p2p_offers(self, info, exchange_type=None, token_type=None, payment_method=None, country_code=None, favorites_only=False):
+        print(f"\n[DEBUG] resolve_p2p_offers called with favorites_only={favorites_only}")
         queryset = P2POffer.objects.filter(status='ACTIVE').select_related('user')
         
         if exchange_type:
@@ -2329,8 +2330,13 @@ class Query(graphene.ObjectType):
                 if favorite_user_ids:
                     favorite_q |= Q(user_id__in=favorite_user_ids)
                 
+                # Debug the query
+                print(f"\n[DEBUG] Favorite query Q object: {favorite_q}")
+                print(f"[DEBUG] Queryset before filter: {queryset.count()} offers")
+                
                 if favorite_q:
                     queryset = queryset.filter(favorite_q)
+                    print(f"[DEBUG] Queryset after filter: {queryset.count()} offers")
                 else:
                     # No favorites, return empty
                     return []
