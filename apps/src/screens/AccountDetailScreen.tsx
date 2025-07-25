@@ -573,7 +573,7 @@ export const AccountDetailScreen = () => {
               onPress={handleSend}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.primary }]}>
-                <Icon name="send" size={22} color="#ffffff" />
+                <Icon name="send" size={20} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Enviar</Text>
             </TouchableOpacity>
@@ -588,7 +588,7 @@ export const AccountDetailScreen = () => {
               }}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.primary }]}>
-                <Icon name="download" size={22} color="#ffffff" />
+                <Icon name="download" size={20} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Recibir</Text>
             </TouchableOpacity>
@@ -604,7 +604,7 @@ export const AccountDetailScreen = () => {
               }}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}>
-                <Icon name="shopping-bag" size={22} color="#ffffff" />
+                <Icon name="shopping-bag" size={20} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Pagar</Text>
             </TouchableOpacity>
@@ -617,7 +617,7 @@ export const AccountDetailScreen = () => {
               }}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.accent }]}>
-                <Icon name="refresh-cw" size={22} color="#ffffff" />
+                <Icon name="refresh-cw" size={20} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Intercambio</Text>
             </TouchableOpacity>
@@ -968,12 +968,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   actionIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
+    overflow: 'hidden',
+    backgroundColor: 'transparent',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
