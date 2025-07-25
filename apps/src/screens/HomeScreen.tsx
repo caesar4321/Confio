@@ -117,9 +117,9 @@ export const HomeScreen = () => {
   const cUSDBalance = parseFloat(cUSDBalanceData?.accountBalance || '0');
   const confioBalance = parseFloat(confioBalanceData?.accountBalance || '0');
   
-  // Calculate portfolio value (mock exchange rate for now)
-  const confioToUSD = 0.1; // TODO: Fetch real exchange rate
-  const totalUSDValue = cUSDBalance + (confioBalance * confioToUSD);
+  // Calculate portfolio value - Only include cUSD for now
+  // CONFIO value is not determined yet
+  const totalUSDValue = cUSDBalance;
   const localExchangeRate = 35.5; // TODO: Fetch real VES rate
   const totalLocalValue = totalUSDValue * localExchangeRate;
   
@@ -211,7 +211,13 @@ export const HomeScreen = () => {
       label: 'Pagar',
       icon: 'shopping-bag',
       color: '#8b5cf6',
-      route: () => navigation.navigate('BottomTabs', { screen: 'Scan' }),
+      route: () => {
+        // For business accounts, navigate to Charge screen instead of Scan
+        const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
+        navigation.navigate('BottomTabs', { 
+          screen: isBusinessAccount ? 'Charge' : 'Scan' 
+        } as any);
+      },
     },
     {
       id: 'exchange',
@@ -370,7 +376,7 @@ export const HomeScreen = () => {
         >
           <View style={styles.portfolioHeader}>
             <View style={styles.portfolioTitleContainer}>
-              <Text style={styles.portfolioLabel}>Valor Total del Portafolio</Text>
+              <Text style={styles.portfolioLabel}>Mi Saldo Total</Text>
               <Text style={styles.portfolioSubLabel}>
                 {showLocalCurrency ? 'En Bolívares Venezolanos' : 'En Dólares Estadounidenses'}
               </Text>

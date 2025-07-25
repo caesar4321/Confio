@@ -32,6 +32,7 @@ import { GET_SEND_TRANSACTIONS_BY_ACCOUNT, GET_PAYMENT_TRANSACTIONS_BY_ACCOUNT }
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import moment from 'moment';
 import 'moment/locale/es';
+import { useAccount } from '../contexts/AccountContext';
 
 // Color palette
 const colors = {
@@ -81,6 +82,7 @@ export const AccountDetailScreen = () => {
   const navigation = useNavigation<AccountDetailScreenNavigationProp>();
   const route = useRoute<AccountDetailScreenRouteProp>();
   const { formatNumber, formatCurrency } = useNumberFormat();
+  const { activeAccount } = useAccount();
   const [showBalance, setShowBalance] = useState(true);
   const [showExchangeModal, setShowExchangeModal] = useState(false);
   const [exchangeAmount, setExchangeAmount] = useState('');
@@ -599,7 +601,10 @@ export const AccountDetailScreen = () => {
               style={styles.actionButton}
               onPress={() => {
                 // @ts-ignore - Navigation type mismatch, but should work at runtime
-                navigation.navigate('BottomTabs', { screen: 'Scan' });
+                const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
+                navigation.navigate('BottomTabs', { 
+                  screen: isBusinessAccount ? 'Charge' : 'Scan' 
+                });
               }}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}>
