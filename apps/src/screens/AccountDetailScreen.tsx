@@ -572,7 +572,15 @@ export const AccountDetailScreen = () => {
               style={styles.actionButton}
               onPress={handleSend}
             >
-              <View style={[styles.actionIcon, styles.actionIconPrimary]}>
+              <View style={{
+                width: 52,
+                height: 52,
+                borderRadius: 26,
+                backgroundColor: colors.primary,
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginBottom: 8,
+              }}>
                 <Icon name="send" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Enviar</Text>
@@ -587,7 +595,15 @@ export const AccountDetailScreen = () => {
                 });
               }}
             >
-              <View style={[styles.actionIcon, styles.actionIconPrimary]}>
+              <View style={{
+                width: 52,
+                height: 52,
+                borderRadius: 26,
+                backgroundColor: colors.primary,
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginBottom: 8,
+              }}>
                 <Icon name="download" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Recibir</Text>
@@ -603,7 +619,15 @@ export const AccountDetailScreen = () => {
                 });
               }}
             >
-              <View style={[styles.actionIcon, styles.actionIconSecondary]}>
+              <View style={{
+                width: 52,
+                height: 52,
+                borderRadius: 26,
+                backgroundColor: colors.secondary,
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginBottom: 8,
+              }}>
                 <Icon name="shopping-bag" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Pagar</Text>
@@ -616,7 +640,15 @@ export const AccountDetailScreen = () => {
                 navigation.navigate('BottomTabs', { screen: 'Exchange' });
               }}
             >
-              <View style={[styles.actionIcon, styles.actionIconAccent]}>
+              <View style={{
+                width: 52,
+                height: 52,
+                borderRadius: 26,
+                backgroundColor: colors.accent,
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginBottom: 8,
+              }}>
                 <Icon name="refresh-cw" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Intercambio</Text>
@@ -963,8 +995,7 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     alignItems: 'center',
-    width: 52,
-    marginHorizontal: 8,
+    flex: 1,
   },
   actionIcon: {
     width: 52,
