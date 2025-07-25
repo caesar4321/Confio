@@ -1679,14 +1679,7 @@ export const ExchangeScreen = () => {
                 <Text style={styles.userName} numberOfLines={1} ellipsizeMode="tail">{userName}</Text>
                 <View style={styles.userActionsRow}>
                   {isVerified && (
-                    <Icon name="shield" size={14} color={colors.accent} style={styles.verifiedIcon} />
-                  )}
-                  {(isHighRated || isNewTrader || isFastResponder) && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>
-                        {isHighRated ? '⭐' : isNewTrader ? '🆕' : '⚡'}
-                      </Text>
-                    </View>
+                    <Icon name="shield" size={16} color={colors.accent} style={styles.verifiedIcon} />
                   )}
                   <TouchableOpacity 
                     style={styles.favoriteButton}
@@ -1698,7 +1691,7 @@ export const ExchangeScreen = () => {
                   >
                     <Icon 
                       name="star" 
-                      size={16} 
+                      size={18} 
                       color={localIsFavorite ? '#FBBF24' : (isOwnOffer ? '#E5E7EB' : '#9CA3AF')} 
                     />
                   </TouchableOpacity>
@@ -1706,6 +1699,8 @@ export const ExchangeScreen = () => {
               </View>
               <Text style={styles.tradeCount}>
                 {completedTrades === 0 ? 'Nuevo trader' : `${completedTrades} operaciones`}
+                {isHighRated && ' • ⭐ Top'}
+                {isFastResponder && ' • ⚡ Rápido'}
               </Text>
               <Text style={styles.successRate}>
                 {completedTrades === 0 ? 'Sin historial' : `${Number(successRate).toFixed(1)}% completado`}
@@ -3797,9 +3792,9 @@ const styles = StyleSheet.create({
     marginRight: 12, // Add more margin to prevent overlap with rate
   },
   avatarContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.neutralDark,
     justifyContent: 'center',
     alignItems: 'center',
@@ -3807,9 +3802,9 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   avatarText: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#4B5563',
+    color: '#fff',
   },
   onlineIndicator: {
     position: 'absolute',
@@ -3830,7 +3825,7 @@ const styles = StyleSheet.create({
   userActionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 8,
     flexShrink: 0,
   },
   userNameContainer: {
@@ -3838,11 +3833,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   userName: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
     color: '#1F2937',
     flex: 1,
-    minWidth: 100, // Ensure minimum width for name
   },
   verifiedIcon: {
     marginLeft: 2,
@@ -3869,9 +3863,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   tradeCount: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#6B7280',
     fontWeight: '400',
+    marginTop: 2,
   },
   bullet: {
     fontSize: 12,
@@ -3879,12 +3874,12 @@ const styles = StyleSheet.create({
     marginHorizontal: 4,
   },
   successRate: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#10B981',
     fontWeight: '500',
   },
   activityStatus: {
-    fontSize: 11,
+    fontSize: 12,
     color: '#9CA3AF', // gray-400 for inactive
     fontWeight: '400',
   },
@@ -3906,8 +3901,8 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   rateValue: {
-    fontSize: 24,
-    fontWeight: '800',
+    fontSize: 22,
+    fontWeight: '700',
     color: '#1F2937',
   },
   rateComparison: {
