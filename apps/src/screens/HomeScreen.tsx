@@ -215,7 +215,7 @@ export const HomeScreen = () => {
     },
     {
       id: 'exchange',
-      label: 'Intercambiar',
+      label: 'Intercambio',
       icon: 'refresh-cw',
       color: '#3b82f6',
       route: () => navigation.navigate('BottomTabs', { screen: 'Exchange' }),
@@ -369,14 +369,19 @@ export const HomeScreen = () => {
           ]}
         >
           <View style={styles.portfolioHeader}>
-            <Text style={styles.portfolioLabel}>Valor Total del Portafolio</Text>
+            <View style={styles.portfolioTitleContainer}>
+              <Text style={styles.portfolioLabel}>Valor Total del Portafolio</Text>
+              <Text style={styles.portfolioSubLabel}>
+                {showLocalCurrency ? 'En Bolívares Venezolanos' : 'En Dólares Estadounidenses'}
+              </Text>
+            </View>
             <TouchableOpacity 
               style={styles.currencyToggle}
               onPress={() => setShowLocalCurrency(!showLocalCurrency)}
               activeOpacity={0.7}
             >
               <Text style={styles.currencyToggleText}>
-                {showLocalCurrency ? 'VES' : 'USD'}
+                {showLocalCurrency ? 'Bs.' : 'USD'}
               </Text>
               <Icon name="chevron-down" size={14} color="#fff" />
             </TouchableOpacity>
@@ -588,10 +593,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  portfolioTitleContainer: {
+    flex: 1,
+  },
   portfolioLabel: {
     fontSize: 16,
     color: 'rgba(255,255,255,0.95)',
     fontWeight: '500',
+  },
+  portfolioSubLabel: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.7)',
+    marginTop: 2,
   },
   currencyToggle: {
     flexDirection: 'row',
