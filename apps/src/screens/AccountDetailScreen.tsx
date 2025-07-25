@@ -573,7 +573,7 @@ export const AccountDetailScreen = () => {
               onPress={handleSend}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.primary }]}>
-                <Icon name="send" size={20} color="#ffffff" />
+                <Icon name="send" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Enviar</Text>
             </TouchableOpacity>
@@ -588,7 +588,7 @@ export const AccountDetailScreen = () => {
               }}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.primary }]}>
-                <Icon name="download" size={20} color="#ffffff" />
+                <Icon name="download" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Recibir</Text>
             </TouchableOpacity>
@@ -604,7 +604,7 @@ export const AccountDetailScreen = () => {
               }}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}>
-                <Icon name="shopping-bag" size={20} color="#ffffff" />
+                <Icon name="shopping-bag" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Pagar</Text>
             </TouchableOpacity>
@@ -617,7 +617,7 @@ export const AccountDetailScreen = () => {
               }}
             >
               <View style={[styles.actionIcon, { backgroundColor: colors.accent }]}>
-                <Icon name="refresh-cw" size={20} color="#ffffff" />
+                <Icon name="refresh-cw" size={22} color="#ffffff" />
               </View>
               <Text style={styles.actionButtonText}>Intercambio</Text>
             </TouchableOpacity>
@@ -948,7 +948,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'space-evenly',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -964,15 +964,19 @@ const styles = StyleSheet.create({
   actionButton: {
     alignItems: 'center',
     flex: 1,
-    paddingHorizontal: 4,
   },
   actionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   actionButtonText: {
     fontSize: 12,
