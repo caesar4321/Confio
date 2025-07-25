@@ -609,7 +609,7 @@ const styles = StyleSheet.create({
   },
   portfolioSubLabel: {
     fontSize: 13,
-    color: 'rgba(255,255,255,0.9)',
+    color: '#ffffff',
     marginTop: 2,
     fontWeight: '400',
   },
