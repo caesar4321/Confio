@@ -2335,7 +2335,14 @@ class Query(graphene.ObjectType):
                     # No favorites, return empty
                     return []
         
-        return queryset.order_by('-created_at')
+        result = queryset.order_by('-created_at')
+        
+        # Debug: Log what offers are being returned
+        print(f"\n[DEBUG] resolve_p2p_offers returning {result.count()} offers")
+        for offer in result[:10]:  # First 10 to avoid too much logging
+            print(f"  - Offer {offer.id}: user={offer.offer_user_id}, business={offer.offer_business_id}")
+        
+        return result
 
     def resolve_p2p_offer(self, info, id):
         try:
