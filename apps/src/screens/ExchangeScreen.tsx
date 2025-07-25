@@ -3793,8 +3793,8 @@ const styles = StyleSheet.create({
   offerUser: {
     flexDirection: 'row',
     alignItems: 'flex-start', // Changed from 'center' to allow proper height
-    flex: 1,
-    marginRight: 8, // Add some margin to prevent overlap with rate
+    flex: 2, // Give more flex weight to user section
+    marginRight: 12, // Add more margin to prevent overlap with rate
   },
   avatarContainer: {
     width: 40,
@@ -3831,6 +3831,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    flexShrink: 0,
   },
   userNameContainer: {
     flexDirection: 'row',
@@ -3841,7 +3842,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1F2937',
     flex: 1,
-    marginRight: 8,
+    minWidth: 100, // Ensure minimum width for name
   },
   verifiedIcon: {
     marginLeft: 2,
