@@ -3025,34 +3025,47 @@ export const ExchangeScreen = () => {
                             </Text>
                         </TouchableOpacity>
                         
-                        {marketRate && selectedCrypto === 'cUSD' && activeTab === 'buy' && (
-                            <TouchableOpacity 
-                                style={[
-                                    styles.filterChip, 
-                                    maxRate && styles.filterChipActive
-                                ]}
-                                onPress={() => {
-                                    if (maxRate) {
-                                        // Toggle off
-                                        setMaxRate('');
-                                        maxRateInputRef.current?.clear();
-                                    } else {
-                                        // Toggle on
-                                        const maxAcceptableRate = marketRate * 1.02; // 2% above market
-                                        setMaxRate(maxAcceptableRate.toFixed(2));
-                                        maxRateInputRef.current?.setNativeProps({ text: maxAcceptableRate.toFixed(2) });
+                        <TouchableOpacity 
+                            style={[
+                                styles.filterChip, 
+                                (minRate || maxRate) && styles.filterChipActive
+                            ]}
+                            onPress={() => {
+                                if (minRate || maxRate) {
+                                    // Toggle off
+                                    setMinRate('');
+                                    setMaxRate('');
+                                    minRateInputRef.current?.clear();
+                                    maxRateInputRef.current?.clear();
+                                } else {
+                                    // Toggle on - find best rate from current offers
+                                    const rates = filteredOffers.map(offer => parseFloat(offer.rate)).filter(rate => !isNaN(rate));
+                                    if (rates.length > 0) {
+                                        if (activeTab === 'buy') {
+                                            // For buying, we want the lowest rate
+                                            const bestRate = Math.min(...rates);
+                                            const maxAcceptableRate = bestRate * 1.05; // 5% above best rate
+                                            setMaxRate(maxAcceptableRate.toFixed(2));
+                                            maxRateInputRef.current?.setNativeProps({ text: maxAcceptableRate.toFixed(2) });
+                                        } else {
+                                            // For selling, we want the highest rate
+                                            const bestRate = Math.max(...rates);
+                                            const minAcceptableRate = bestRate * 0.95; // 5% below best rate
+                                            setMinRate(minAcceptableRate.toFixed(2));
+                                            minRateInputRef.current?.setNativeProps({ text: minAcceptableRate.toFixed(2) });
+                                        }
                                     }
-                                }}
-                            >
-                                <Icon name="percent" size={12} color={maxRate ? '#fff' : '#6B7280'} />
-                                <Text style={[
-                                    styles.filterChipText, 
-                                    maxRate && styles.filterChipTextActive
-                                ]}>
-                                    Mejor tasa
-                                </Text>
-                            </TouchableOpacity>
-                        )}
+                                }
+                            }}
+                        >
+                            <Icon name="percent" size={12} color={(minRate || maxRate) ? '#fff' : '#6B7280'} />
+                            <Text style={[
+                                styles.filterChipText, 
+                                (minRate || maxRate) && styles.filterChipTextActive
+                            ]}>
+                                Mejor tasa
+                            </Text>
+                        </TouchableOpacity>
                         
                         {(filterVerified || filterOnline || filterHighVolume || minRate || maxRate) && (
                             <TouchableOpacity 
