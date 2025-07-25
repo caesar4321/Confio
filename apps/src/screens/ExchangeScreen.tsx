@@ -1479,7 +1479,8 @@ export const ExchangeScreen = () => {
       
       navigation.navigate('TraderProfile', { 
         trader: traderData,
-        crypto: selectedCrypto 
+        crypto: selectedCrypto,
+        offer: { ...offer, isFavorite: localIsFavorite }
       });
     } else if (action === 'trade') {
       // Navigate to TradeConfirm screen
@@ -1496,6 +1497,12 @@ export const ExchangeScreen = () => {
     // State for expanded payment methods
     const [isExpanded, setIsExpanded] = useState(false);
     const [isFavoriting, setIsFavoriting] = useState(false);
+    const [localIsFavorite, setLocalIsFavorite] = useState(offer.isFavorite);
+    
+    // Update local state when offer prop changes
+    React.useEffect(() => {
+      setLocalIsFavorite(offer.isFavorite);
+    }, [offer.isFavorite]);
     
     // Get user from auth context
     const { profileData } = useAuth();
@@ -1577,6 +1584,10 @@ export const ExchangeScreen = () => {
       try {
         setIsFavoriting(true);
         
+        // Optimistic update
+        const newFavoriteStatus = !localIsFavorite;
+        setLocalIsFavorite(newFavoriteStatus);
+        
         // Determine if we're favoriting a user or business
         // Only send one ID - prioritize business if it exists
         let mutationVariables = {};
@@ -1590,6 +1601,7 @@ export const ExchangeScreen = () => {
         } else {
           console.error('[handleToggleFavorite] No trader ID found!');
           Alert.alert('Error', 'No se pudo identificar al trader');
+          setLocalIsFavorite(!newFavoriteStatus); // Revert on error
           return;
         }
         
@@ -1606,11 +1618,14 @@ export const ExchangeScreen = () => {
         
         if (data?.toggleFavoriteTrader?.success) {
           console.log('[handleToggleFavorite] Success! New isFavorite status:', data.toggleFavoriteTrader.isFavorite);
-          // Refetch offers to update isFavorite status
-          await refetch();
-          console.log('[handleToggleFavorite] Refetch completed');
+          // Update with server response
+          setLocalIsFavorite(data.toggleFavoriteTrader.isFavorite);
+          // Refetch offers to update isFavorite status across all instances
+          refetch();
         } else {
           console.log('[handleToggleFavorite] Failed! Response:', data);
+          // Revert on failure
+          setLocalIsFavorite(!newFavoriteStatus);
           const message = data?.toggleFavoriteTrader?.message || 'No se pudo actualizar el favorito';
           Alert.alert('Error', message);
         }
@@ -1660,7 +1675,7 @@ export const ExchangeScreen = () => {
                   <Icon 
                     name="star" 
                     size={18} 
-                    color={offer.isFavorite ? '#FBBF24' : (isOwnOffer ? '#E5E7EB' : '#9CA3AF')} 
+                    color={localIsFavorite ? '#FBBF24' : (isOwnOffer ? '#E5E7EB' : '#9CA3AF')} 
                   />
                 </TouchableOpacity>
               </View>
@@ -2851,7 +2866,7 @@ export const ExchangeScreen = () => {
                                     <View style={[styles.checkbox, filterFavorites && styles.checkboxChecked]}>
                                         {filterFavorites && <Icon name="check" size={12} color="#fff" />}
                                     </View>
-                                    <Text style={styles.checkboxLabel}>Solo favoritos</Text>
+                                    <Text style={[styles.checkboxLabel, { fontSize: 13 }]}>Solo favoritos</Text>
                                 </TouchableOpacity>
                             </View>
 
