@@ -88,5 +88,7 @@
 	<string>We need access to save QR codes to your photo library</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Confío needs access to your contacts to show familiar names in your transactions. Your contacts are stored locally and never sent to our servers.</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>Confío will send you important notifications about your transactions, received payments, and security alerts.</string>
 </dict>
 </plist>
