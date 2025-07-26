@@ -39,6 +39,7 @@ import 'moment/locale/es';
 import { useAccount } from '../contexts/AccountContext';
 import * as Keychain from 'react-native-keychain';
 import { useContactNameSync } from '../hooks/useContactName';
+import { TransactionFilterModal, TransactionFilters } from '../components/TransactionFilterModal';
 
 // Color palette
 const colors = {
@@ -112,6 +113,29 @@ export const AccountDetailScreen = () => {
   const [showSearch, setShowSearch] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showMoreOptionsModal, setShowMoreOptionsModal] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [transactionFilters, setTransactionFilters] = useState<TransactionFilters>({
+    types: {
+      sent: true,
+      received: true,
+      payment: true,
+      exchange: true,
+    },
+    currencies: {
+      cUSD: true,
+      CONFIO: true,
+      USDC: true,
+    },
+    status: {
+      completed: true,
+      pending: true,
+    },
+    timeRange: 'all',
+    amountRange: {
+      min: '',
+      max: '',
+    },
+  });
   
   // Save balance visibility preference for this account type
   const saveBalanceVisibility = async (isVisible: boolean) => {
@@ -417,29 +441,80 @@ export const AccountDetailScreen = () => {
   // Use unified transactions if available, fallback to legacy format
   const transactions = unifiedTransactionsData ? formatUnifiedTransactions() : formatTransactions();
   
-  // Filter transactions based on search query
+  // Filter transactions based on search query and filters
   const filteredTransactions = useMemo(() => {
-    if (!searchQuery) return transactions;
+    let filtered = transactions;
     
-    const query = searchQuery.toLowerCase();
-    return transactions.filter(tx => {
-      const title = getTransactionTitle(tx).toLowerCase();
-      const amount = tx.amount.toLowerCase();
-      const currency = tx.currency.toLowerCase();
-      const hash = tx.hash.toLowerCase();
-      const date = moment(tx.date).format('DD/MM/YYYY').toLowerCase();
-      const fromPhone = (tx.fromPhone || '').toLowerCase();
-      const toPhone = (tx.toPhone || '').toLowerCase();
-      
-      return title.includes(query) || 
-             amount.includes(query) ||
-             currency.includes(query) ||
-             hash.includes(query) ||
-             date.includes(query) ||
-             fromPhone.includes(query) ||
-             toPhone.includes(query);
+    // Apply search query filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(tx => {
+        const title = getTransactionTitle(tx).toLowerCase();
+        const amount = tx.amount.toLowerCase();
+        const currency = tx.currency.toLowerCase();
+        const hash = tx.hash.toLowerCase();
+        const date = moment(tx.date).format('DD/MM/YYYY').toLowerCase();
+        const fromPhone = (tx.fromPhone || '').toLowerCase();
+        const toPhone = (tx.toPhone || '').toLowerCase();
+        
+        return title.includes(query) || 
+               amount.includes(query) ||
+               currency.includes(query) ||
+               hash.includes(query) ||
+               date.includes(query) ||
+               fromPhone.includes(query) ||
+               toPhone.includes(query);
+      });
+    }
+    
+    // Apply type filters
+    filtered = filtered.filter(tx => {
+      return transactionFilters.types[tx.type];
     });
-  }, [transactions, searchQuery]);
+    
+    // Apply currency filters
+    filtered = filtered.filter(tx => {
+      const currency = tx.currency === 'cUSD' ? 'cUSD' : tx.currency;
+      return transactionFilters.currencies[currency as keyof typeof transactionFilters.currencies] ?? true;
+    });
+    
+    // Apply status filters
+    filtered = filtered.filter(tx => {
+      return transactionFilters.status[tx.status];
+    });
+    
+    // Apply time range filter
+    if (transactionFilters.timeRange !== 'all') {
+      const now = moment();
+      filtered = filtered.filter(tx => {
+        const txDate = moment(tx.date);
+        switch (transactionFilters.timeRange) {
+          case 'today':
+            return txDate.isSame(now, 'day');
+          case 'week':
+            return txDate.isSame(now, 'week');
+          case 'month':
+            return txDate.isSame(now, 'month');
+          case 'year':
+            return txDate.isSame(now, 'year');
+          default:
+            return true;
+        }
+      });
+    }
+    
+    // Apply amount range filter
+    if (transactionFilters.amountRange.min || transactionFilters.amountRange.max) {
+      filtered = filtered.filter(tx => {
+        const amount = Math.abs(parseFloat(tx.amount.replace(/[^0-9.-]/g, '')));
+        const min = transactionFilters.amountRange.min ? parseFloat(transactionFilters.amountRange.min) : 0;
+        const max = transactionFilters.amountRange.max ? parseFloat(transactionFilters.amountRange.max) : Infinity;
+        return amount >= min && amount <= max;
+      });
+    }
+    
+    return filtered;
+  }, [transactions, searchQuery, transactionFilters]);
   
   // Group transactions by date
   const groupedTransactions = useMemo((): TransactionSection[] => {
@@ -727,6 +802,16 @@ export const AccountDetailScreen = () => {
   const handleSend = () => {
     // @ts-ignore - Navigation type mismatch, but should work at runtime
     navigation.navigate('BottomTabs', { screen: 'Contacts' });
+  };
+  
+  const hasActiveFilters = () => {
+    const allTypesSelected = Object.values(transactionFilters.types).every(v => v);
+    const allCurrenciesSelected = Object.values(transactionFilters.currencies).every(v => v);
+    const allStatusSelected = Object.values(transactionFilters.status).every(v => v);
+    const noAmountRange = !transactionFilters.amountRange.min && !transactionFilters.amountRange.max;
+    const allTimeRange = transactionFilters.timeRange === 'all';
+
+    return !(allTypesSelected && allCurrenciesSelected && allStatusSelected && noAmountRange && allTimeRange);
   };
 
   const loadMoreTransactions = async () => {
@@ -1026,8 +1111,21 @@ export const AccountDetailScreen = () => {
               >
                 <Icon name="search" size={16} color={showSearch ? account.textColor : "#6b7280"} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.filterButton}>
-                <Icon name="filter" size={16} color="#6b7280" />
+              <TouchableOpacity 
+                style={[
+                  styles.filterButton,
+                  hasActiveFilters() && styles.filterButtonActive
+                ]}
+                onPress={() => setShowFilterModal(true)}
+              >
+                <Icon 
+                  name="filter" 
+                  size={16} 
+                  color={hasActiveFilters() ? account.textColor : "#6b7280"} 
+                />
+                {hasActiveFilters() && (
+                  <View style={[styles.filterDot, { backgroundColor: account.color }]} />
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -1313,6 +1411,18 @@ export const AccountDetailScreen = () => {
           </View>
         </TouchableOpacity>
       </Modal>
+      
+      {/* Transaction Filter Modal */}
+      <TransactionFilterModal
+        visible={showFilterModal}
+        onClose={() => setShowFilterModal(false)}
+        onApply={setTransactionFilters}
+        currentFilters={transactionFilters}
+        theme={{
+          primary: account.color,
+          secondary: colors.secondary,
+        }}
+      />
     </View>
   );
 };
@@ -1603,6 +1713,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     borderRadius: 8,
     marginLeft: 8,
+    position: 'relative',
+  },
+  filterDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   transactionsList: {
   },
