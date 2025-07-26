@@ -187,8 +187,6 @@ export class ContactService {
               confioUsersMap.set(userInfo.phoneNumber, {
                 userId: userInfo.userId,
                 username: userInfo.username,
-                firstName: userInfo.firstName,
-                lastName: userInfo.lastName,
                 suiAddress: userInfo.activeAccountSuiAddress
               });
             }
@@ -304,13 +302,8 @@ export class ContactService {
               contact.confioUsername = userInfo.username;
               contact.confioSuiAddress = userInfo.suiAddress;
               
-              // If the Confío user has a name, use it instead of the device contact name
-              if (userInfo.firstName || userInfo.lastName) {
-                const confioName = `${userInfo.firstName || ''} ${userInfo.lastName || ''}`.trim();
-                if (confioName) {
-                  contact.name = confioName;
-                }
-              }
+              // Keep the local contact name - don't replace with Confío user's profile name
+              // Users should see the names they have saved in their contacts
             }
           });
         });

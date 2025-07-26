@@ -25,8 +25,6 @@ export const CHECK_USERS_BY_PHONES = gql`
       phoneNumber
       userId
       username
-      firstName
-      lastName
       isOnConfio
       activeAccountId
       activeAccountSuiAddress
