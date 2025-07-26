@@ -6026,6 +6026,11 @@ levn@^0.4.1:
     prelude-ls "^1.2.1"
     type-check "~0.4.0"
 
+libphonenumber-js@^1.11.7:
+  version "1.12.10"
+  resolved "https://registry.npmjs.org/libphonenumber-js/-/libphonenumber-js-1.12.10.tgz"
+  integrity sha512-E91vHJD61jekHHR/RF/E83T/CMoaLXT7cwYA75T4gim4FZjnM6hbJjVIGg7chqlSqRsSvQ3izGmOjHy1SQzcGQ==
+
 lighthouse-logger@^1.0.0:
   version "1.4.2"
   resolved "https://registry.npmjs.org/lighthouse-logger/-/lighthouse-logger-1.4.2.tgz"
@@ -7082,6 +7087,11 @@ react-native-buffer@^6.0.3:
     ieee754 "^1.2.1"
     react-native-fast-base64 "^0.1.1"
 
+react-native-contacts@^7.0.8:
+  version "7.0.8"
+  resolved "https://registry.npmjs.org/react-native-contacts/-/react-native-contacts-7.0.8.tgz"
+  integrity sha512-Zfkdpw1uQVRb8v1m+ogknzjyfEs9k63o2sPAYvxZ8ZJff31D45G8+uZb6VcM4tIe3ELH9EDvh93nd515kFvRYQ==
+
 react-native-dotenv@^3.4.11:
   version "3.4.11"
   resolved "https://registry.npmjs.org/react-native-dotenv/-/react-native-dotenv-3.4.11.tgz"
@@ -7206,7 +7216,7 @@ react-native-worklets-core@*, react-native-worklets-core@^1.5.0:
   dependencies:
     string-hash-64 "^1.0.3"
 
-react-native@*, react-native@>=0.56, react-native@>=0.59, react-native@>=0.59.0, react-native@>=0.63.4, react-native@0.79.3:
+react-native@*, react-native@>=0.56, react-native@>=0.59, react-native@>=0.59.0, react-native@>=0.63.4, react-native@>=0.64.0, react-native@0.79.3:
   version "0.79.3"
   resolved "https://registry.npmjs.org/react-native/-/react-native-0.79.3.tgz"
   integrity sha512-EzH1+9gzdyEo9zdP6u7Sh3Jtf5EOMwzy+TK65JysdlgAzfEVfq4mNeXcAZ6SmD+CW6M7ARJbvXLyTD0l2S5rpg==

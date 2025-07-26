@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { enableScreens } from 'react-native-screens';
 import { ApolloProvider } from '@apollo/client';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
@@ -13,9 +13,14 @@ import { CountryProvider } from './contexts/CountryContext';
 import { AuthNavigator } from './navigation/AuthNavigator';
 import { MainNavigator } from './navigation/MainNavigator';
 import { RootStackParamList } from './types/navigation';
+import { initializeApp } from './services/appInitializer';
 
 // Enable screens before any navigation setup
 enableScreens();
+
+// Initialize app services immediately
+console.log('[PERF] App.tsx loaded, initializing app services');
+initializeApp();
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 

@@ -1,0 +1,15 @@
+diff --git a/node_modules/react-native/Libraries/TurboModule/TurboModuleRegistry.js b/node_modules/react-native/Libraries/TurboModule/TurboModuleRegistry.js
+index 2d262ef..5ca087c 100644
+--- a/node_modules/react-native/Libraries/TurboModule/TurboModuleRegistry.js
++++ b/node_modules/react-native/Libraries/TurboModule/TurboModuleRegistry.js
+@@ -44,6 +44,10 @@ export function get<T: TurboModule>(name: string): ?T {
+ 
+ export function getEnforcing<T: TurboModule>(name: string): T {
+   const module = requireModule<T>(name);
++  // Special handling for DebuggingOverlay to avoid unsupported param errors
++  if (name === 'DebuggingOverlay' && module == null) {
++    return ({}: any);
++  }
+   invariant(
+     module != null,
+     `TurboModuleRegistry.getEnforcing(...): '${name}' could not be found. ` +

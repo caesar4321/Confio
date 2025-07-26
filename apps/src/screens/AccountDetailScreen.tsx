@@ -37,6 +37,7 @@ import moment from 'moment';
 import 'moment/locale/es';
 import { useAccount } from '../contexts/AccountContext';
 import * as Keychain from 'react-native-keychain';
+import { useContactName } from '../hooks/useContactName';
 
 // Color palette
 const colors = {
@@ -473,14 +474,50 @@ export const AccountDetailScreen = () => {
     const formattedDate = moment(transaction.date).format('DD/MM/YYYY');
     const formattedTime = transaction.time;
     
+    // Get contact name for sender or recipient
+    const phoneToCheck = transaction.type === 'received' ? transaction.fromPhone : transaction.toPhone;
+    const fallbackName = transaction.type === 'received' ? transaction.from : transaction.to;
+    const contactInfo = useContactName(phoneToCheck, fallbackName);
+    
+    // Create enhanced transaction title with contact name
+    const getEnhancedTransactionTitle = () => {
+      let baseTitle = '';
+      switch(transaction.type) {
+        case 'received':
+          baseTitle = `Recibido de ${contactInfo.displayName}`;
+          break;
+        case 'sent':
+          baseTitle = `Enviado a ${contactInfo.displayName}`;
+          break;
+        case 'exchange':
+          baseTitle = `Intercambio ${transaction.from} → ${transaction.to}`;
+          break;
+        case 'payment':
+          if (transaction.amount.startsWith('+')) {
+            baseTitle = `Pago recibido de ${contactInfo.displayName}`;
+          } else {
+            baseTitle = `Pago a ${contactInfo.displayName}`;
+          }
+          break;
+        default:
+          baseTitle = 'Transacción';
+      }
+      return baseTitle;
+    };
+    
     return (
       <TouchableOpacity style={styles.transactionItem} onPress={onPress}>
         <View style={styles.transactionIconContainer}>
           {getTransactionIcon(transaction)}
         </View>
         <View style={styles.transactionInfo}>
-          <Text style={styles.transactionTitle}>{getTransactionTitle(transaction)}</Text>
-          <Text style={styles.transactionDate}>{formattedDate} • {formattedTime}</Text>
+          <Text style={styles.transactionTitle}>{getEnhancedTransactionTitle()}</Text>
+          <View style={styles.transactionSubtitleContainer}>
+            <Text style={styles.transactionDate}>{formattedDate} • {formattedTime}</Text>
+            {contactInfo.isFromContacts && contactInfo.originalName && (
+              <Text style={styles.originalName}> • {contactInfo.originalName}</Text>
+            )}
+          </View>
         </View>
         <View style={styles.transactionAmount}>
           <Text style={[
@@ -1531,6 +1568,15 @@ const styles = StyleSheet.create({
   transactionDate: {
     fontSize: 12,
     color: '#6b7280',
+  },
+  transactionSubtitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  originalName: {
+    color: '#D1D5DB',
+    fontSize: 11,
+    fontStyle: 'italic',
   },
   transactionAmount: {
     alignItems: 'flex-end',
