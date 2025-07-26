@@ -94,6 +94,12 @@ class UnifiedTransaction(models.Model):
     # Address fields for easy filtering
     from_address = models.CharField(max_length=66)
     to_address = models.CharField(max_length=66)
+    
+    # Invitation tracking fields
+    is_invitation = models.BooleanField(default=False)
+    invitation_claimed = models.BooleanField(default=False)
+    invitation_reverted = models.BooleanField(default=False)
+    invitation_expires_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         managed = False  # Don't create/delete this table, it's a view

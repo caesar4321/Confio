@@ -118,6 +118,25 @@ class SendTransaction(SoftDeleteModel):
         null=True,
         help_text='Optional key to prevent duplicate transactions'
     )
+    
+    # Invitation tracking
+    is_invitation = models.BooleanField(
+        default=False,
+        help_text='True if this transaction includes an invitation to join Confío'
+    )
+    invitation_claimed = models.BooleanField(
+        default=False,
+        help_text='True if the invitation was claimed by the recipient'
+    )
+    invitation_reverted = models.BooleanField(
+        default=False,
+        help_text='True if the invitation expired and funds were returned to sender'
+    )
+    invitation_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text='When the invitation expires (7 days after creation)'
+    )
 
     class Meta:
         ordering = ['-created_at']

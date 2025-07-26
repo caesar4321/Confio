@@ -54,6 +54,10 @@ interface Transaction {
   time: string;
   status: string;
   hash: string;
+  isInvitation?: boolean;
+  invitationClaimed?: boolean;
+  invitationReverted?: boolean;
+  invitationExpiresAt?: string;
 }
 
 export const FriendDetailScreen = () => {
@@ -72,7 +76,7 @@ export const FriendDetailScreen = () => {
     name: route.params?.friendName || 'Friend',
     avatar: route.params?.friendAvatar || 'F',
     phone: route.params?.friendPhone || '',
-    isOnConfio: route.params?.isOnConfio || true,
+    isOnConfio: route.params?.isOnConfio ?? true, // Use ?? to handle false properly
   };
 
   // Check if this is a device contact (not a real Confío user)
@@ -84,13 +88,14 @@ export const FriendDetailScreen = () => {
     skip: isDeviceContact || !friend.isOnConfio,
   });
   
-  // Get real transaction data from GraphQL (only if it's a real user)
+  // Get real transaction data from GraphQL
   const { data: sendTransactionsData, loading: sendLoading, refetch: refetchSend, fetchMore: fetchMoreSend } = useQuery(GET_SEND_TRANSACTIONS_WITH_FRIEND, {
     variables: {
-      friendUserId: friend.id,
+      friendUserId: !isDeviceContact && friend.isOnConfio ? friend.id : undefined,
+      friendPhone: !friend.isOnConfio ? friend.phone : undefined,
       limit: transactionLimit
     },
-    skip: isDeviceContact || !friend.isOnConfio // Skip query for device contacts or non-Confío users
+    skip: false // Always run the query now
   });
 
   const { data: paymentTransactionsData, loading: paymentLoading, refetch: refetchPayment, fetchMore: fetchMorePayment } = useQuery(GET_PAYMENT_TRANSACTIONS_WITH_FRIEND, {
@@ -98,7 +103,7 @@ export const FriendDetailScreen = () => {
       friendUserId: friend.id,
       limit: transactionLimit
     },
-    skip: isDeviceContact || !friend.isOnConfio // Skip query for device contacts or non-Confío users
+    skip: isDeviceContact || !friend.isOnConfio // Skip query for device contacts or non-Confío users - payments only work with Confío users
   });
 
   // Transform real transactions into the format expected by the UI
@@ -107,8 +112,17 @@ export const FriendDetailScreen = () => {
 
     // Add send transactions
     if (sendTransactionsData?.sendTransactionsWithFriend) {
+      console.log('[FriendDetail] Raw send transactions:', sendTransactionsData.sendTransactionsWithFriend);
       sendTransactionsData.sendTransactionsWithFriend.forEach((tx: any) => {
         const currentUserIsSender = tx.senderUser?.id !== friend.id;
+        
+        console.log('[FriendDetail] Processing tx:', {
+          id: tx.id,
+          isInvitation: tx.isInvitation,
+          recipientUser: tx.recipientUser,
+          recipientPhone: tx.recipientPhone,
+          currentUserIsSender
+        });
         
         allTransactions.push({
           type: currentUserIsSender ? 'sent' : 'received',
@@ -119,7 +133,11 @@ export const FriendDetailScreen = () => {
           date: new Date(tx.createdAt).toISOString().split('T')[0],
           time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
           status: tx.status === 'CONFIRMED' ? 'completed' : 'pending',
-          hash: tx.transactionHash || 'pending'
+          hash: tx.transactionHash || 'pending',
+          isInvitation: tx.isInvitation || false,
+          invitationClaimed: tx.invitationClaimed || false,
+          invitationReverted: tx.invitationReverted || false,
+          invitationExpiresAt: tx.invitationExpiresAt
         });
       });
     }
@@ -191,18 +209,33 @@ export const FriendDetailScreen = () => {
   };
 
   const TransactionItem = ({ transaction, onPress }: { transaction: Transaction; onPress: () => void }) => {
-    const isExternalWallet = !friend.isOnConfio && transaction.type === 'sent';
+    // Use the isInvitation field from the transaction
+    const isInvitationTransaction = transaction.isInvitation || false;
+    
+    // Debug logging
+    if (transaction.type === 'sent') {
+      console.log('[FriendDetail] Transaction:', {
+        to: transaction.to,
+        isInvitation: transaction.isInvitation,
+        isInvitationTransaction,
+        friendIsOnConfio: friend.isOnConfio
+      });
+    }
     
     return (
-      <TouchableOpacity style={[styles.transactionItem, isExternalWallet && styles.externalTransactionItem]} onPress={onPress}>
-        <View style={[styles.transactionIconContainer, isExternalWallet && styles.externalIconContainer]}>
+      <TouchableOpacity style={[styles.transactionItem, isInvitationTransaction && styles.invitedTransactionItem]} onPress={onPress}>
+        <View style={[styles.transactionIconContainer, isInvitationTransaction && styles.invitedIconContainer]}>
           {getTransactionIcon(transaction)}
         </View>
         <View style={styles.transactionInfo}>
           <Text style={styles.transactionTitle}>{getTransactionTitle(transaction)}</Text>
           <Text style={styles.transactionDate}>{transaction.date} • {transaction.time}</Text>
-          {isExternalWallet && (
-            <Text style={styles.externalWalletNote}>Enviado a wallet externo</Text>
+          {isInvitationTransaction && transaction.type === 'sent' && (
+            <Text style={styles.invitedNote}>
+              {transaction.invitationClaimed ? '✅ Invitación reclamada' :
+               transaction.invitationReverted ? '❌ Expiró - Fondos devueltos' :
+               '⚠️ Tu amigo tiene 7 días para reclamar • Avísale ya'}
+            </Text>
           )}
         </View>
         <View style={styles.transactionAmount}>
@@ -257,17 +290,19 @@ export const FriendDetailScreen = () => {
     setTransactionLimit(20); // Reset to initial limit
     setHasReachedEnd(false); // Reset end flag
     
-    // Don't refetch for device contacts or non-Confío users
-    if (isDeviceContact || !friend.isOnConfio) {
+    // Don't refetch for device contacts
+    if (isDeviceContact) {
       setRefreshing(false);
       return;
     }
     
     try {
-      await Promise.all([
-        refetchSend(),
-        refetchPayment()
-      ]);
+      const promises = [refetchSend()];
+      // Only refetch payments for Confío users
+      if (friend.isOnConfio) {
+        promises.push(refetchPayment());
+      }
+      await Promise.all(promises);
     } catch (error) {
       console.error('Error refreshing transactions:', error);
     } finally {
@@ -278,8 +313,8 @@ export const FriendDetailScreen = () => {
   const loadMoreTransactions = async () => {
     if (loadingMore || hasReachedEnd) return;
     
-    // Don't fetch more for device contacts or non-Confío users
-    if (isDeviceContact || !friend.isOnConfio) {
+    // Don't fetch more for device contacts
+    if (isDeviceContact) {
       return;
     }
     
@@ -287,22 +322,34 @@ export const FriendDetailScreen = () => {
     const newLimit = transactionLimit + 10;
     
     try {
-      await Promise.all([
+      const promises = [
         fetchMoreSend({
-          variables: { limit: newLimit },
-          updateQuery: (prev, { fetchMoreResult }) => {
-            if (!fetchMoreResult) return prev;
-            return fetchMoreResult;
-          }
-        }),
-        fetchMorePayment({
-          variables: { limit: newLimit },
+          variables: { 
+            friendUserId: !isDeviceContact && friend.isOnConfio ? friend.id : undefined,
+            friendPhone: !friend.isOnConfio ? friend.phone : undefined,
+            limit: newLimit 
+          },
           updateQuery: (prev, { fetchMoreResult }) => {
             if (!fetchMoreResult) return prev;
             return fetchMoreResult;
           }
         })
-      ]);
+      ];
+      
+      // Only fetch more payments for Confío users
+      if (friend.isOnConfio) {
+        promises.push(
+          fetchMorePayment({
+            variables: { limit: newLimit },
+            updateQuery: (prev, { fetchMoreResult }) => {
+              if (!fetchMoreResult) return prev;
+              return fetchMoreResult;
+            }
+          })
+        );
+      }
+      
+      await Promise.all(promises);
       
       // Update the limit to trigger re-render
       setTransactionLimit(newLimit);
@@ -343,9 +390,12 @@ export const FriendDetailScreen = () => {
           {friend.phone && (
             <Text style={styles.friendPhone}>{friend.phone}</Text>
           )}
-          <View style={styles.friendStatus}>
-            <View style={[styles.statusIndicator, { backgroundColor: friend.isOnConfio ? colors.primary : '#9ca3af' }]} />
-            <Text style={styles.statusText}>
+          <View style={[
+            styles.friendStatus, 
+            { backgroundColor: friend.isOnConfio ? 'rgba(52, 211, 153, 0.2)' : 'rgba(239, 68, 68, 0.2)' }
+          ]}>
+            <View style={[styles.statusIndicator, { backgroundColor: friend.isOnConfio ? colors.primary : '#ef4444' }]} />
+            <Text style={[styles.statusText, { color: friend.isOnConfio ? colors.primary : '#ef4444' }]}>
               {friend.isOnConfio ? 'En Confío' : 'No está en Confío'}
             </Text>
           </View>
@@ -429,6 +479,7 @@ export const FriendDetailScreen = () => {
                               transaction.type === 'sent' ? `Envío a ${friend.name}` : 
                               `Pago a ${friend.name}`,
                         avatar: friend.avatar,
+                        isInvitedFriend: transaction.isInvitation || false, // Use transaction's invitation status
                       }
                     };
                     // @ts-ignore - Navigation type mismatch, but works at runtime
@@ -569,6 +620,9 @@ const styles = StyleSheet.create({
   friendStatus: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
   },
   statusIndicator: {
     width: 8,
@@ -577,9 +631,9 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   statusText: {
-    fontSize: 12,
-    color: '#10b981',
-    marginRight: 4,
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 6,
   },
   sendButtonContainer: {
     paddingHorizontal: 16,
@@ -655,9 +709,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#f3f4f6',
   },
-  externalTransactionItem: {
-    backgroundColor: colors.violetLight,
-    borderColor: colors.secondary,
+  invitedTransactionItem: {
+    backgroundColor: '#fef2f2', // Light red background
+    borderColor: '#ef4444',
   },
   transactionIconContainer: {
     width: 40,
@@ -668,7 +722,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 12,
   },
-  externalIconContainer: {
+  invitedIconContainer: {
     backgroundColor: colors.secondary + '20',
   },
   transactionInfo: {
@@ -683,11 +737,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6b7280',
   },
-  externalWalletNote: {
-    fontSize: 11,
-    color: colors.secondary,
+  invitedNote: {
+    fontSize: 12,
+    color: '#dc2626',
     marginTop: 2,
-    fontStyle: 'italic',
+    fontWeight: 'bold',
   },
   transactionAmount: {
     alignItems: 'flex-end',

@@ -77,6 +77,10 @@ interface Transaction {
   time: string;
   status: string;
   hash: string;
+  isInvitation?: boolean;
+  invitationClaimed?: boolean;
+  invitationReverted?: boolean;
+  invitationExpiresAt?: string;
 }
 
 // Set Spanish locale for moment
@@ -262,6 +266,17 @@ export const AccountDetailScreen = () => {
           type = tx.direction === 'sent' ? 'sent' : 'received';
         }
         
+        // Debug logging for invitation transactions
+        if (type === 'sent' && tx.isInvitation) {
+          console.log('[AccountDetail] Invitation transaction found:', {
+            id: tx.id,
+            to: tx.displayCounterparty,
+            isInvitation: tx.isInvitation,
+            invitationClaimed: tx.invitationClaimed,
+            invitationReverted: tx.invitationReverted
+          });
+        }
+        
         allTransactions.push({
           type,
           from: tx.direction === 'received' ? tx.displayCounterparty : undefined,
@@ -273,7 +288,11 @@ export const AccountDetailScreen = () => {
           date: tx.createdAt, // Keep full timestamp for proper sorting
           time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
           status: tx.status.toLowerCase() === 'confirmed' ? 'completed' : 'pending',
-          hash: tx.transactionHash || 'pending'
+          hash: tx.transactionHash || 'pending',
+          isInvitation: tx.isInvitation || false,
+          invitationClaimed: tx.invitationClaimed || false,
+          invitationReverted: tx.invitationReverted || false,
+          invitationExpiresAt: tx.invitationExpiresAt
         });
       });
     }
@@ -533,7 +552,8 @@ export const AccountDetailScreen = () => {
                  transaction.to ? transaction.to.charAt(0) : undefined,
           location: transaction.type === 'payment' ? 'Av. Libertador, Caracas' : undefined,
           merchantId: transaction.type === 'payment' ? 'SUP001' : undefined,
-          exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1 cUSD' : undefined
+          exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1 cUSD' : undefined,
+          isInvitedFriend: transaction.isInvitation || false
         }
       };
       // @ts-ignore - Navigation type mismatch, but works at runtime
@@ -541,7 +561,7 @@ export const AccountDetailScreen = () => {
     };
     
     return (
-      <TouchableOpacity style={styles.transactionItem} onPress={handlePress}>
+      <TouchableOpacity style={[styles.transactionItem, transaction.isInvitation && styles.invitedTransactionItem]} onPress={handlePress}>
         <View style={styles.transactionIconContainer}>
           {getTransactionIcon(transaction)}
         </View>
@@ -553,6 +573,13 @@ export const AccountDetailScreen = () => {
               <Text style={styles.originalName}> • {contactInfo.originalName}</Text>
             )}
           </View>
+          {transaction.isInvitation && transaction.type === 'sent' && (
+            <Text style={styles.invitationNote}>
+              {transaction.invitationClaimed ? '✅ Invitación reclamada' :
+               transaction.invitationReverted ? '❌ Expiró - Fondos devueltos' :
+               '⚠️ Tu amigo tiene 7 días para reclamar • Avísale ya'}
+            </Text>
+          )}
         </View>
         <View style={styles.transactionAmount}>
           <Text style={[
@@ -1550,6 +1577,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#f3f4f6',
   },
+  invitedTransactionItem: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#ef4444',
+  },
   transactionIconContainer: {
     width: 40,
     height: 40,
@@ -1579,6 +1610,12 @@ const styles = StyleSheet.create({
     color: '#D1D5DB',
     fontSize: 11,
     fontStyle: 'italic',
+  },
+  invitationNote: {
+    fontSize: 12,
+    color: '#dc2626',
+    marginTop: 2,
+    fontWeight: 'bold',
   },
   transactionAmount: {
     alignItems: 'flex-end',

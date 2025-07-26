@@ -475,14 +475,18 @@ export const GET_SEND_TRANSACTIONS_BY_ACCOUNT = gql`
       transactionHash
       createdAt
       updatedAt
+      isInvitation
+      invitationClaimed
+      invitationReverted
+      invitationExpiresAt
     }
   }
 `;
 
 // NEW: Get send transactions with a specific friend
 export const GET_SEND_TRANSACTIONS_WITH_FRIEND = gql`
-  query GetSendTransactionsWithFriend($friendUserId: ID!, $limit: Int) {
-    sendTransactionsWithFriend(friendUserId: $friendUserId, limit: $limit) {
+  query GetSendTransactionsWithFriend($friendUserId: ID, $friendPhone: String, $limit: Int) {
+    sendTransactionsWithFriend(friendUserId: $friendUserId, friendPhone: $friendPhone, limit: $limit) {
       id
       senderUser {
         id
@@ -521,6 +525,10 @@ export const GET_SEND_TRANSACTIONS_WITH_FRIEND = gql`
       transactionHash
       createdAt
       updatedAt
+      isInvitation
+      invitationClaimed
+      invitationReverted
+      invitationExpiresAt
     }
   }
 `;
@@ -1987,6 +1995,12 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
       description
       invoiceId
       paymentTransactionId
+      
+      # Invitation fields
+      isInvitation
+      invitationClaimed
+      invitationReverted
+      invitationExpiresAt
     }
   }
 `;
