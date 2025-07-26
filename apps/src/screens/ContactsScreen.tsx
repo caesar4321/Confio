@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform, Modal, Image, RefreshControl, ActivityIndicator, SectionList, Alert, Linking } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -28,6 +28,63 @@ const colors = {
   neutralDark: '#f3f4f6',
   dark: '#111827',
 };
+
+// Memoized ContactCard component moved outside to prevent recreation
+interface ContactCardProps {
+  contact: any;
+  isOnConfio?: boolean;
+  onPress: (contact: any) => void;
+  onSendPress: (contact: any) => void;
+  onInvitePress: (contact: any) => void;
+}
+
+const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, onInvitePress }: ContactCardProps) => (
+  <TouchableOpacity style={styles.contactCard} onPress={() => onPress(contact)}>
+    <View style={[
+      styles.avatarContainer,
+      { backgroundColor: isOnConfio ? colors.primaryLight : '#e5e7eb' }
+    ]}>
+      <Text style={[
+        styles.avatarText,
+        { color: isOnConfio ? colors.primaryDark : '#6b7280' }
+      ]}>
+        {contact.avatar}
+      </Text>
+    </View>
+    
+    <View style={styles.contactInfo}>
+      <Text style={styles.contactName}>{contact.name}</Text>
+      <Text style={styles.contactPhone}>{contact.phone}</Text>
+    </View>
+    
+    {isOnConfio ? (
+      <TouchableOpacity
+        style={styles.sendButton}
+        onPress={(e) => {
+          e.stopPropagation();
+          onSendPress(contact);
+        }}
+      >
+        <Icon name="send" size={20} color="#fff" />
+      </TouchableOpacity>
+    ) : (
+      <TouchableOpacity
+        style={styles.inviteButton}
+        onPress={(e) => {
+          e.stopPropagation();
+          onInvitePress(contact);
+        }}
+      >
+        <Icon name="gift" size={16} color="#fff" style={{ marginRight: 6 }} />
+        <Text style={styles.inviteButtonText}>Enviar & Invitar</Text>
+      </TouchableOpacity>
+    )}
+  </TouchableOpacity>
+), (prevProps, nextProps) => {
+  // Custom comparison to prevent unnecessary re-renders
+  return prevProps.contact.id === nextProps.contact.id &&
+         prevProps.isOnConfio === nextProps.isOnConfio;
+});
 
 export const ContactsScreen = () => {
   const navigation = useNavigation<ContactsScreenNavigationProp>();
@@ -336,49 +393,18 @@ export const ContactsScreen = () => {
     });
   };
 
-  const ContactCard = ({ contact, isOnConfio = false }: { contact: any; isOnConfio?: boolean }) => (
-    <TouchableOpacity style={styles.contactCard} onPress={() => handleFriendPress(contact)}>
-      <View style={[
-        styles.avatarContainer,
-        { backgroundColor: isOnConfio ? colors.primaryLight : '#e5e7eb' }
-      ]}>
-        <Text style={[
-          styles.avatarText,
-          { color: isOnConfio ? colors.primaryDark : '#6b7280' }
-        ]}>
-          {contact.avatar}
-        </Text>
-      </View>
-      
-      <View style={styles.contactInfo}>
-        <Text style={styles.contactName}>{contact.name}</Text>
-        <Text style={styles.contactPhone}>{contact.phone}</Text>
-      </View>
-      
-      {isOnConfio ? (
-        <TouchableOpacity
-          style={styles.sendButton}
-          onPress={(e) => {
-            e.stopPropagation(); // Prevent triggering the card press
-            handleSendToFriend(contact);
-          }}
-        >
-          <Icon name="send" size={20} color="#fff" />
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity
-          style={styles.inviteButton}
-          onPress={(e) => {
-            e.stopPropagation(); // Prevent triggering the card press
-            handleInviteFriend(contact);
-          }}
-        >
-          <Icon name="gift" size={16} color="#fff" style={{ marginRight: 6 }} />
-          <Text style={styles.inviteButtonText}>Enviar & Invitar</Text>
-        </TouchableOpacity>
-      )}
-    </TouchableOpacity>
-  );
+  // Memoized callbacks to prevent recreation on every render
+  const handleFriendPressCallback = useCallback((contact: any) => {
+    handleFriendPress(contact);
+  }, []);
+  
+  const handleSendToFriendCallback = useCallback((contact: any) => {
+    handleSendToFriend(contact);
+  }, []);
+  
+  const handleInviteFriendCallback = useCallback((contact: any) => {
+    handleInviteFriend(contact);
+  }, []);
 
   const TokenSelectionModal = () => (
     <Modal
@@ -587,7 +613,7 @@ export const ContactsScreen = () => {
     return sectionData;
   }, [filteredConfioFriends, filteredNonConfioFriends]);
 
-  const renderSectionHeader = ({ section }) => (
+  const renderSectionHeader = useCallback(({ section }) => (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>{section.title}</Text>
@@ -613,11 +639,17 @@ export const ContactsScreen = () => {
         </View>
       )}
     </View>
-  );
+  ), []);
 
-  const renderItem = ({ item, section }) => (
-    <ContactCard contact={item} isOnConfio={section.isConfio} />
-  );
+  const renderItem = useCallback(({ item, section }) => (
+    <ContactCard 
+      contact={item} 
+      isOnConfio={section.isConfio}
+      onPress={handleFriendPressCallback}
+      onSendPress={handleSendToFriendCallback}
+      onInvitePress={handleInviteFriendCallback}
+    />
+  ), [handleFriendPressCallback, handleSendToFriendCallback, handleInviteFriendCallback]);
 
   const ListHeaderComponent = () => (
     <>
@@ -845,6 +877,12 @@ export const ContactsScreen = () => {
           ListHeaderComponent={ListHeaderComponent}
           ListEmptyComponent={ListEmptyComponent}
           keyExtractor={(item, index) => item.id || `contact-${index}`}
+          getItemLayout={(data, index) => (
+            {length: 80, offset: 80 * index, index}
+          )}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={10}
           stickySectionHeadersEnabled={false}
           contentContainerStyle={{ paddingBottom: 24 }}
           refreshControl={
