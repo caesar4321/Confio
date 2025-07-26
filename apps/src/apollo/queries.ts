@@ -34,6 +34,27 @@ export const CHECK_USERS_BY_PHONES = gql`
   }
 `;
 
+// Test mutation to create users (only in DEBUG mode)
+export const CREATE_TEST_USERS = gql`
+  mutation CreateTestUsers($phoneNumbers: [String!]!) {
+    createTestUsers(phoneNumbers: $phoneNumbers) {
+      success
+      error
+      createdCount
+      usersCreated {
+        phoneNumber
+        userId
+        username
+        firstName
+        lastName
+        isOnConfio
+        activeAccountId
+        activeAccountSuiAddress
+      }
+    }
+  }
+`;
+
 // Business Profile Query
 export const GET_BUSINESS_PROFILE = gql`
   query GetBusinessProfile($businessId: ID!) {

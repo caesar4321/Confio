@@ -1172,6 +1172,98 @@ class DeleteBankInfo(graphene.Mutation):
 			return DeleteBankInfo(success=False, error="Error interno del servidor")
 
 
+class CreateTestUsers(graphene.Mutation):
+	"""Test mutation to create users based on phone numbers - FOR TESTING ONLY"""
+	class Arguments:
+		phone_numbers = graphene.List(graphene.String, required=True)
+	
+	success = graphene.Boolean()
+	error = graphene.String()
+	created_count = graphene.Int()
+	users_created = graphene.List(UserByPhoneType)
+	
+	@classmethod
+	def mutate(cls, root, info, phone_numbers):
+		# Only allow in development/testing
+		from django.conf import settings
+		if not settings.DEBUG:
+			return CreateTestUsers(
+				success=False, 
+				error="This mutation is only available in DEBUG mode",
+				created_count=0,
+				users_created=[]
+			)
+		
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return CreateTestUsers(success=False, error="Authentication required", created_count=0, users_created=[])
+		
+		created_users = []
+		
+		for phone in phone_numbers:
+			# Clean the phone number
+			cleaned_phone = ''.join(filter(str.isdigit, phone))
+			if not cleaned_phone:
+				continue
+			
+			# Check if user already exists
+			existing_user = User.objects.filter(phone_number=cleaned_phone).first()
+			if existing_user:
+				continue
+			
+			# Create a test user
+			try:
+				# Generate a unique username based on phone
+				base_username = f"test_{cleaned_phone[-6:]}"
+				username = base_username
+				counter = 1
+				while User.objects.filter(username=username).exists():
+					username = f"{base_username}_{counter}"
+					counter += 1
+				
+				# Create the user
+				new_user = User.objects.create(
+					username=username,
+					phone_number=cleaned_phone,
+					phone_country='VE',  # Default to Venezuela
+					first_name=f"Test",
+					last_name=f"User {cleaned_phone[-4:]}",
+					email=f"test_{cleaned_phone}@example.com"
+				)
+				
+				# Create personal account
+				from .models import Account
+				personal_account = Account.objects.create(
+					user=new_user,
+					account_type='personal',
+					account_index=0,
+					sui_address=f"0xtest{cleaned_phone[-8:]}{'0' * 56}"  # Mock Sui address
+				)
+				
+				created_users.append(UserByPhoneType(
+					phone_number=phone,
+					user_id=new_user.id,
+					username=new_user.username,
+					first_name=new_user.first_name,
+					last_name=new_user.last_name,
+					is_on_confio=True,
+					active_account_id=personal_account.id,
+					active_account_sui_address=personal_account.sui_address
+				))
+				
+				logger.info(f"Created test user: {username} for phone: {cleaned_phone}")
+			except Exception as e:
+				logger.error(f"Error creating test user for {phone}: {str(e)}")
+				continue
+		
+		return CreateTestUsers(
+			success=True,
+			error=None,
+			created_count=len(created_users),
+			users_created=created_users
+		)
+
+
 class SetDefaultBankInfo(graphene.Mutation):
 	class Arguments:
 		bank_info_id = graphene.ID(required=True)
@@ -1223,3 +1315,6 @@ class Mutation(graphene.ObjectType):
 	update_bank_info = UpdateBankInfo.Field()
 	delete_bank_info = DeleteBankInfo.Field()
 	set_default_bank_info = SetDefaultBankInfo.Field()
+	
+	# Test mutations (only in DEBUG mode)
+	create_test_users = CreateTestUsers.Field()

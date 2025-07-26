@@ -9,7 +9,8 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import ContactService, { contactService } from '../services/contactService';
 import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { useContactNames } from '../hooks/useContactName';
-import { useApolloClient } from '@apollo/client';
+import { useApolloClient, useMutation } from '@apollo/client';
+import { CREATE_TEST_USERS } from '../apollo/queries';
 
 type ContactsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -138,6 +139,9 @@ export const ContactsScreen = () => {
   const navigation = useNavigation<ContactsScreenNavigationProp>();
   const apolloClient = useApolloClient();
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Test users mutation
+  const [createTestUsers] = useMutation(CREATE_TEST_USERS);
   
   // Stable callback for search updates
   const handleSearchChange = useCallback((text: string) => {
@@ -345,6 +349,58 @@ export const ContactsScreen = () => {
     setShowPermissionModal(false);
     setHasContactPermission(false);
     await contactService.storePermissionStatus('denied');
+  };
+
+  // Handle test user creation (DEBUG only)
+  const handleCreateTestUsers = async () => {
+    if (!__DEV__) {
+      Alert.alert('Error', 'Esta función solo está disponible en modo desarrollo');
+      return;
+    }
+    
+    Alert.alert(
+      'Crear Usuarios de Prueba',
+      '¿Quieres crear usuarios de prueba para todos tus contactos que no están en Confío?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Crear',
+          onPress: async () => {
+            try {
+              // Get all non-Confío contacts
+              const nonConfioPhones = contactsData.nonConfioFriends
+                .map(contact => contact.phone)
+                .filter(phone => phone && phone.trim() !== '');
+              
+              if (nonConfioPhones.length === 0) {
+                Alert.alert('Sin contactos', 'No hay contactos que no estén en Confío');
+                return;
+              }
+              
+              console.log(`[TEST] Creating test users for ${nonConfioPhones.length} phone numbers`);
+              
+              const result = await createTestUsers({
+                variables: { phoneNumbers: nonConfioPhones }
+              });
+              
+              if (result.data?.createTestUsers?.success) {
+                const createdCount = result.data.createTestUsers.createdCount;
+                Alert.alert(
+                  'Éxito',
+                  `Se crearon ${createdCount} usuarios de prueba.\n\nAhora sincroniza los contactos para verlos.`,
+                  [{ text: 'OK', onPress: () => handleRefresh() }]
+                );
+              } else {
+                Alert.alert('Error', result.data?.createTestUsers?.error || 'Error al crear usuarios de prueba');
+              }
+            } catch (error) {
+              console.error('Error creating test users:', error);
+              Alert.alert('Error', 'No se pudieron crear los usuarios de prueba');
+            }
+          }
+        }
+      ]
+    );
   };
 
   // Handle pull to refresh
@@ -940,6 +996,19 @@ export const ContactsScreen = () => {
               />
             </TouchableOpacity>
           </View>
+          
+          {/* Test button - only in development */}
+          {__DEV__ && contactsData.nonConfioFriends.length > 0 && (
+            <TouchableOpacity 
+              style={styles.testButton}
+              onPress={handleCreateTestUsers}
+            >
+              <Icon name="user-plus" size={16} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.testButtonText}>
+                Crear {contactsData.nonConfioFriends.length} usuarios de prueba
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
         
         <SectionList
@@ -1029,6 +1098,20 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  testButton: {
+    backgroundColor: '#8b5cf6',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginTop: 12,
+  },
+  testButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   searchIcon: {
     marginRight: 12,
