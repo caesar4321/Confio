@@ -1010,8 +1010,12 @@ export const AccountDetailScreen = () => {
                             transactionType: transaction.type,
                             transactionData: {
                               type: transaction.type,
-                              from: transaction.from,
-                              to: transaction.to,
+                              from: transaction.type === 'received' || (transaction.type === 'payment' && transaction.amount.startsWith('+')) 
+                                ? contactInfo.displayName 
+                                : transaction.from,
+                              to: transaction.type === 'sent' || (transaction.type === 'payment' && transaction.amount.startsWith('-')) 
+                                ? contactInfo.displayName 
+                                : transaction.to,
                               amount: transaction.amount,
                               currency: transaction.currency,
                               date: moment(transaction.date).format('DD/MM/YYYY'),
