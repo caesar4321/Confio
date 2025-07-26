@@ -7,6 +7,7 @@ import QRCode from 'react-native-qrcode-svg';
 import USDCLogo from '../assets/png/USDC.png';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import { useAccount } from '../contexts/AccountContext';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -148,13 +149,14 @@ const DepositScreen = () => {
   const route = useRoute();
   const insets = useSafeAreaInsets();
   const [copied, setCopied] = useState(false);
+  const { activeAccount } = useAccount();
   
   // Get token type from route params, default to 'usdc' for backward compatibility
   const tokenType: TokenType = (route.params as RouteParams)?.tokenType || 'usdc';
   const config = tokenConfig[tokenType];
   
-  // This is the same Sui address for all tokens
-  const depositAddress = "0x1a2b3c4d5e6f7890abcdef1234567890abcdef12";
+  // Use the real Sui address from the active account
+  const depositAddress = activeAccount?.suiAddress || "0x0000000000000000000000000000000000000000";
 
   const handleCopy = async () => {
     await Clipboard.setString(depositAddress);

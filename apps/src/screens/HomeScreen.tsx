@@ -38,6 +38,8 @@ import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
+const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
+const BALANCE_VISIBILITY_KEY = 'balance_visibility';
 
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
   if (!phoneNumber) return '';
@@ -93,6 +95,7 @@ export const HomeScreen = () => {
   // Show local currency by default if not in US and rate is available
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [showBalance, setShowBalance] = useState(true);
   
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -112,12 +115,14 @@ export const HomeScreen = () => {
   // Fetch real balances
   const { data: cUSDBalanceData, loading: cUSDLoading, refetch: refetchCUSD } = useQuery(GET_ACCOUNT_BALANCE, {
     variables: { tokenType: 'cUSD' },
-    fetchPolicy: 'cache-and-network',
+    fetchPolicy: 'cache-first', // Use cache-first to prevent unnecessary network requests
+    skip: !isInitialized, // Don't fetch until initialized
   });
   
   const { data: confioBalanceData, loading: confioLoading, refetch: refetchConfio } = useQuery(GET_ACCOUNT_BALANCE, {
     variables: { tokenType: 'CONFIO' },
-    fetchPolicy: 'cache-and-network',
+    fetchPolicy: 'cache-first', // Use cache-first to prevent unnecessary network requests
+    skip: !isInitialized, // Don't fetch until initialized
   });
   
   // Parse balances safely
@@ -156,8 +161,11 @@ export const HomeScreen = () => {
     })
   });
   
-  // Only show loading for initial data load
-  const isLoading = accountsLoading && !accounts.length;
+  // Track initialization state
+  const [isInitialized, setIsInitialized] = useState(false);
+  
+  // Only show loading on very first load
+  const isLoading = !isInitialized && accountsLoading;
   
   // No more mock accounts - we fetch from server
 
@@ -175,6 +183,39 @@ export const HomeScreen = () => {
 
   // Only use stored accounts - no mock accounts
   const displayAccounts = accountMenuItems;
+
+  // Save balance visibility preference to Keychain
+  const saveBalanceVisibility = async (isVisible: boolean) => {
+    try {
+      await Keychain.setInternetCredentials(
+        PREFERENCES_KEYCHAIN_SERVICE,
+        BALANCE_VISIBILITY_KEY,
+        isVisible.toString()
+      );
+    } catch (error) {
+      console.error('Error saving balance visibility preference:', error);
+    }
+  };
+
+  // Load balance visibility preference from Keychain
+  const loadBalanceVisibility = async () => {
+    try {
+      const credentials = await Keychain.getInternetCredentials(PREFERENCES_KEYCHAIN_SERVICE);
+      if (credentials && credentials.username === BALANCE_VISIBILITY_KEY) {
+        setShowBalance(credentials.password === 'true');
+      }
+    } catch (error) {
+      // No saved preference, default to showing balance
+      console.log('No saved balance visibility preference, using default');
+    }
+  };
+
+  // Toggle balance visibility and save preference
+  const toggleBalanceVisibility = () => {
+    const newVisibility = !showBalance;
+    setShowBalance(newVisibility);
+    saveBalanceVisibility(newVisibility);
+  };
 
   const currentAccount = activeAccount ? {
     ...activeAccount,
@@ -229,14 +270,14 @@ export const HomeScreen = () => {
       id: 'send',
       label: 'Enviar',
       icon: 'send',
-      color: '#10b981',
+      color: '#34D399',
       route: () => navigation.navigate('BottomTabs', { screen: 'Contacts' }),
     },
     {
       id: 'receive',
       label: 'Recibir',
       icon: 'download',
-      color: '#10b981',
+      color: '#34D399',
       route: () => navigation.navigate('USDCDeposit', { tokenType: 'cusd' }),
     },
     {
@@ -261,22 +302,27 @@ export const HomeScreen = () => {
     },
   ];
 
-  // Entrance animation
+  // Entrance animation - only run after initialization
   React.useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 600,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        friction: 8,
-        tension: 40,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [fadeAnim, scaleAnim]);
+    if (isInitialized && !isLoading) {
+      // Small delay to ensure smooth transition
+      setTimeout(() => {
+        Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          Animated.spring(scaleAnim, {
+            toValue: 1,
+            friction: 8,
+            tension: 40,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }, 50);
+    }
+  }, [fadeAnim, scaleAnim, isInitialized, isLoading]);
   
   // Balance animation when value changes
   React.useEffect(() => {
@@ -294,36 +340,45 @@ export const HomeScreen = () => {
     }
   }, [canShowLocalCurrency, showLocalCurrency]);
 
+  // Combined initialization effect
   React.useEffect(() => {
-    console.log('HomeScreen - useEffect triggered for data loading');
+    let mounted = true;
     
-    const loadData = async () => {
+    const initializeHomeScreen = async () => {
+      if (!mounted) return;
+      
       try {
-        console.log('HomeScreen - Starting data load');
+        // Load balance visibility preference first
+        await loadBalanceVisibility();
+        
+        // Initialize auth service
         const authService = AuthService.getInstance();
-        
-        console.log('HomeScreen - Got AuthService instance, calling initialize');
-        
-        // Ensure AuthService is initialized
         await authService.initialize();
         
-        console.log('HomeScreen - AuthService initialized, getting zkLogin address');
+        if (!mounted) return;
         
         const address = await authService.getZkLoginAddress();
         setSuiAddress(address);
         
-        console.log('HomeScreen - Data load completed, address:', address);
       } catch (error) {
-        console.error('HomeScreen - Error loading data:', error);
+        console.error('HomeScreen - Error during initialization:', error);
+      } finally {
+        if (mounted) {
+          // Mark as initialized after a small delay to prevent flash
+          setTimeout(() => {
+            if (mounted) {
+              setIsInitialized(true);
+            }
+          }, 100);
+        }
       }
     };
 
-    loadData();
-  }, []);
-
-  // Add a simple useEffect to test if useEffect is working at all
-  React.useEffect(() => {
-    console.log('HomeScreen - Component mounted');
+    initializeHomeScreen();
+    
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   // Update header when account changes or user profile updates
@@ -346,12 +401,23 @@ export const HomeScreen = () => {
     console.log('showProfileMenu changed to:', profileMenu.showProfileMenu);
   }, [profileMenu.showProfileMenu]);
 
-  // Refresh accounts when screen comes into focus (e.g., after creating a business account)
+  // Only refresh accounts when coming from specific screens
+  const [hasInitialLoad, setHasInitialLoad] = useState(false);
+  
   useFocusEffect(
     React.useCallback(() => {
-      console.log('HomeScreen - Screen focused, refreshing accounts');
-      refreshAccounts();
-    }, [refreshAccounts])
+      // Only refresh if we've done the initial load and are coming back
+      if (hasInitialLoad) {
+        console.log('HomeScreen - Screen refocused, checking if refresh needed');
+        // Only refresh if we're coming from screens that might have changed data
+        const currentRoute = navigation.getState()?.routes?.slice(-2, -1)?.[0]?.name;
+        if (currentRoute === 'CreateBusiness' || currentRoute === 'EditBusiness' || currentRoute === 'EditProfile') {
+          refreshAccounts();
+        }
+      } else {
+        setHasInitialLoad(true);
+      }
+    }, [hasInitialLoad, refreshAccounts, navigation])
   );
 
   const handleAccountSwitch = async (accountId: string) => {
@@ -421,18 +487,27 @@ export const HomeScreen = () => {
                 {showLocalCurrency ? `En ${currency.name}` : 'En Dólares'}
               </Text>
             </View>
-            {canShowLocalCurrency && (
+            <View style={styles.portfolioActions}>
               <TouchableOpacity 
-                style={styles.currencyToggle}
-                onPress={() => setShowLocalCurrency(!showLocalCurrency)}
+                style={styles.eyeToggle}
+                onPress={toggleBalanceVisibility}
                 activeOpacity={0.7}
               >
-                <Text style={styles.currencyToggleText}>
-                  {showLocalCurrency ? currency.code : 'USD'}
-                </Text>
-                <Icon name="chevron-down" size={14} color="#fff" />
+                <Icon name={showBalance ? 'eye' : 'eye-off'} size={18} color="#fff" />
               </TouchableOpacity>
-            )}
+              {canShowLocalCurrency && (
+                <TouchableOpacity 
+                  style={styles.currencyToggle}
+                  onPress={() => setShowLocalCurrency(!showLocalCurrency)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.currencyToggleText}>
+                    {showLocalCurrency ? currency.code : 'USD'}
+                  </Text>
+                  <Icon name="chevron-down" size={14} color="#fff" />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
           
           <Animated.View 
@@ -450,12 +525,15 @@ export const HomeScreen = () => {
               {showLocalCurrency ? currency.symbol : '$'}
             </Text>
             <Text style={styles.balanceAmount}>
-              {showLocalCurrency 
-                ? formatAmount.plain(totalLocalValue)
-                : totalUSDValue.toLocaleString('en-US', { 
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2 
-                  })
+              {showBalance 
+                ? (showLocalCurrency 
+                    ? formatAmount.plain(totalLocalValue)
+                    : totalUSDValue.toLocaleString('en-US', { 
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2 
+                      })
+                  )
+                : '••••••'
               }
             </Text>
           </Animated.View>
@@ -559,7 +637,7 @@ export const HomeScreen = () => {
                   </View>
                   <View style={styles.walletBalanceContainer}>
                     <Text style={styles.walletBalanceText}>
-                      ${cUSDBalance.toFixed(2)}
+                      {showBalance ? `$${cUSDBalance.toFixed(2)}` : '••••'}
                     </Text>
                     <Icon name="chevron-right" size={20} color="#9ca3af" />
                   </View>
@@ -588,7 +666,7 @@ export const HomeScreen = () => {
                   </View>
                   <View style={styles.walletBalanceContainer}>
                     <Text style={styles.walletBalanceText}>
-                      {confioBalance.toFixed(2)}
+                      {showBalance ? confioBalance.toFixed(2) : '••••'}
                     </Text>
                     <Icon name="chevron-right" size={20} color="#9ca3af" />
                   </View>
@@ -650,6 +728,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255,255,255,0.7)',
     marginTop: 2,
+  },
+  portfolioActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  eyeToggle: {
+    padding: 6,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
   },
   currencyToggle: {
     flexDirection: 'row',

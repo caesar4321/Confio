@@ -17,6 +17,8 @@ import {
   Dimensions,
   Vibration,
   Pressable,
+  Alert,
+  Linking,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -34,6 +36,7 @@ import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import moment from 'moment';
 import 'moment/locale/es';
 import { useAccount } from '../contexts/AccountContext';
+import * as Keychain from 'react-native-keychain';
 
 // Color palette
 const colors = {
@@ -53,6 +56,10 @@ const colors = {
     secondary: '#6B7280', // gray-500
   },
 };
+
+// Keychain constants for storing balance visibility
+const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
+const ACCOUNT_BALANCE_VISIBILITY_PREFIX = 'account_balance_visibility_';
 
 type AccountDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type AccountDetailScreenRouteProp = RouteProp<MainStackParamList, 'AccountDetail'>;
@@ -96,6 +103,44 @@ export const AccountDetailScreen = () => {
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showMoreOptionsModal, setShowMoreOptionsModal] = useState(false);
   
+  // Save balance visibility preference for this account type
+  const saveBalanceVisibility = async (isVisible: boolean) => {
+    try {
+      // Use account type in the service name for proper isolation
+      const service = `${PREFERENCES_KEYCHAIN_SERVICE}.${route.params.accountType}`;
+      await Keychain.setInternetCredentials(
+        service,
+        'balance_visibility',
+        isVisible.toString()
+      );
+    } catch (error) {
+      console.error('Error saving balance visibility preference:', error);
+    }
+  };
+
+  // Load balance visibility preference for this account type
+  const loadBalanceVisibility = async () => {
+    try {
+      // Use account type in the service name for proper isolation
+      const service = `${PREFERENCES_KEYCHAIN_SERVICE}.${route.params.accountType}`;
+      const result = await Keychain.getInternetCredentials(service);
+      
+      if (result && result.password) {
+        setShowBalance(result.password === 'true');
+      }
+    } catch (error) {
+      // No saved preference, default to showing balance
+      console.log('No saved balance visibility preference for account:', route.params.accountType);
+    }
+  };
+
+  // Toggle balance visibility and save preference
+  const toggleBalanceVisibility = () => {
+    const newVisibility = !showBalance;
+    setShowBalance(newVisibility);
+    saveBalanceVisibility(newVisibility);
+  };
+  
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const searchAnim = useRef(new Animated.Value(0)).current;
@@ -111,7 +156,7 @@ export const AccountDetailScreen = () => {
     textColor: route.params.accountType === 'cusd' ? colors.primaryText : colors.secondaryText,
     address: accountAddress,
     addressShort: accountAddress ? `${accountAddress.slice(0, 6)}...${accountAddress.slice(-6)}` : '',
-    exchangeRate: "1 USDC = 1.00 cUSD",
+    exchangeRate: "1 USDC = 1 cUSD",
     description: route.params.accountType === 'cusd' 
       ? "Moneda estable respaldada 1:1 por dólares estadounidenses (USD)"
               : "Moneda de gobernanza de Confío"
@@ -151,6 +196,11 @@ export const AccountDetailScreen = () => {
       useNativeDriver: true,
     }).start();
   }, [fadeAnim]);
+  
+  // Load balance visibility preference on mount
+  useEffect(() => {
+    loadBalanceVisibility();
+  }, [route.params.accountType]);
   
   // Search animation
   useEffect(() => {
@@ -425,7 +475,7 @@ export const AccountDetailScreen = () => {
             <View style={styles.exchangeInputContainer}>
               <View style={styles.exchangeInputHeader}>
                 <Text style={styles.exchangeInputLabel}>A</Text>
-                <Text style={styles.exchangeInputLabel}>Tasa: 1 USDC = 1.00 cUSD</Text>
+                <Text style={styles.exchangeInputLabel}>Tasa: 1 USDC = 1 cUSD</Text>
               </View>
               <View style={styles.exchangeInput}>
                 <Text style={styles.exchangeInputText}>
@@ -442,20 +492,20 @@ export const AccountDetailScreen = () => {
           <View style={styles.feeContainer}>
             <View style={styles.feeRow}>
               <Text style={styles.feeLabel}>Comisión de red</Text>
-              <Text style={styles.feeValue}>$0.02</Text>
+              <View style={styles.feeValueContainer}>
+                <Text style={styles.feeValueFree}>Gratis</Text>
+                <Text style={styles.feeValueNote}>• Cubierto por Confío</Text>
+              </View>
             </View>
             <View style={styles.feeRow}>
               <Text style={styles.feeLabel}>Comisión de plataforma</Text>
-              <View style={styles.feeValueContainer}>
-                <Text style={styles.feeValue}>Gratis</Text>
-                <Text style={styles.feeValueNote}>• Cubierto por Confío</Text>
-              </View>
+              <Text style={styles.feeValue}>$0.00</Text>
             </View>
             <View style={styles.feeDivider} />
             <View style={styles.feeRow}>
               <Text style={styles.feeTotalLabel}>Total a recibir</Text>
               <Text style={styles.feeTotalValue}>
-                {exchangeAmount ? formatNumber(parseFloat(exchangeAmount) - 0.02) : formatNumber(0)} cUSD
+                {exchangeAmount || '0.00'} cUSD
               </Text>
             </View>
           </View>
@@ -552,7 +602,7 @@ export const AccountDetailScreen = () => {
             <Text style={styles.balanceText}>
               {showBalance ? `$${account.balance}` : account.balanceHidden}
             </Text>
-            <TouchableOpacity onPress={() => setShowBalance(!showBalance)}>
+            <TouchableOpacity onPress={toggleBalanceVisibility}>
               <Icon
                 name={showBalance ? 'eye' : 'eye-off'}
                 size={20}
@@ -699,7 +749,7 @@ export const AccountDetailScreen = () => {
               <View style={styles.exchangeRateInfo}>
                 <Icon name="info" size={14} color="#3b82f6" />
                 <Text style={styles.exchangeRateText}>
-                  1 USDC = 1.00 cUSD • Sin comisión
+                  1 USDC = 1 cUSD • Sin comisión
                 </Text>
               </View>
 
@@ -877,7 +927,7 @@ export const AccountDetailScreen = () => {
                                      transaction.to ? transaction.to.charAt(0) : undefined,
                               location: transaction.type === 'payment' ? 'Av. Libertador, Caracas' : undefined,
                               merchantId: transaction.type === 'payment' ? 'SUP001' : undefined,
-                              exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1.00 cUSD' : undefined
+                              exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1 cUSD' : undefined
                             }
                           };
                           // @ts-ignore - Navigation type mismatch, but works at runtime
@@ -1016,19 +1066,18 @@ export const AccountDetailScreen = () => {
               style={styles.moreOptionsItem}
               onPress={() => {
                 setShowMoreOptionsModal(false);
-                navigation.navigate('USDCManage');
+                navigation.navigate('USDCConversion');
               }}
             >
-              <Icon name="settings" size={20} color="#1f2937" />
-              <Text style={styles.moreOptionsItemText}>Gestionar USDC</Text>
+              <Icon name="refresh-cw" size={20} color="#1f2937" />
+              <Text style={styles.moreOptionsItemText}>Convertir USDC ↔ cUSD</Text>
             </TouchableOpacity>
             
             <TouchableOpacity 
               style={styles.moreOptionsItem}
               onPress={() => {
                 setShowMoreOptionsModal(false);
-                // Navigate to withdrawal screen
-                Alert.alert('Próximamente', 'La función de retiro estará disponible pronto');
+                navigation.navigate('USDCWithdraw');
               }}
             >
               <Icon name="arrow-up-circle" size={20} color="#1f2937" />
@@ -1039,8 +1088,7 @@ export const AccountDetailScreen = () => {
               style={styles.moreOptionsItem}
               onPress={() => {
                 setShowMoreOptionsModal(false);
-                // Show transaction history
-                Alert.alert('Historial', 'Ver historial completo de conversiones USDC/cUSD');
+                navigation.navigate('USDCHistory');
               }}
             >
               <Icon name="clock" size={20} color="#1f2937" />
@@ -1051,12 +1099,36 @@ export const AccountDetailScreen = () => {
               style={styles.moreOptionsItem}
               onPress={() => {
                 setShowMoreOptionsModal(false);
-                // Open support
-                Alert.alert('Soporte', 'Contactar soporte para ayuda con USDC');
+                Alert.alert(
+                  'Tutorial de USDC',
+                  'Mira nuestro video tutorial sobre cómo usar USDC en Confío',
+                  [
+                    {
+                      text: 'Cancelar',
+                      style: 'cancel',
+                    },
+                    {
+                      text: 'Ver Tutorial',
+                      onPress: async () => {
+                        // Replace with your actual TikTok video URL
+                        const tiktokUrl = 'https://www.tiktok.com/@confioapp/video/YOUR_VIDEO_ID';
+                        const canOpen = await Linking.canOpenURL(tiktokUrl);
+                        if (canOpen) {
+                          await Linking.openURL(tiktokUrl);
+                        } else {
+                          Alert.alert(
+                            'Error',
+                            'No se pudo abrir el video tutorial. Por favor, busca @confioapp en TikTok.'
+                          );
+                        }
+                      },
+                    },
+                  ]
+                );
               }}
             >
-              <Icon name="help-circle" size={20} color="#1f2937" />
-              <Text style={styles.moreOptionsItemText}>Obtener ayuda</Text>
+              <Icon name="play-circle" size={20} color="#1f2937" />
+              <Text style={styles.moreOptionsItemText}>Ver tutorial</Text>
             </TouchableOpacity>
             
             <TouchableOpacity 
@@ -1554,6 +1626,12 @@ const styles = StyleSheet.create({
   feeValueContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  feeValueFree: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primary,
+    marginRight: 4,
   },
   feeValueNote: {
     fontSize: 11,

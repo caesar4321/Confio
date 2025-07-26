@@ -47,6 +47,7 @@ const USDCManageScreen = () => {
   const minWithdraw = "5.00";
 
   const isUSDCToCUSD = exchangeDirection === 'usdc-to-cusd';
+  const showWithdrawSection = activeTab === 'withdraw';
   const maxAmount = isUSDCToCUSD ? availableUSDC : availableCUSD;
   const networkFee = 0.02;
   const withdrawalFee = isUSDCToCUSD ? 0 : 0.50;
@@ -76,6 +77,7 @@ const USDCManageScreen = () => {
   const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [confirmAmount, setConfirmAmount] = useState('');
 
   const handleExchange = () => {
     const amount = activeTab === 'exchange' ? exchangeAmount : withdrawalAmount;
@@ -89,6 +91,7 @@ const USDCManageScreen = () => {
       setShowError(true);
       return;
     }
+    setConfirmAmount(amount);
     setShowConfirm(true);
   };
 
@@ -795,7 +798,7 @@ const styles = StyleSheet.create({
           <TouchableOpacity 
             onPress={() => {
               setExchangeDirection('usdc-to-cusd');
-              setShowWithdrawSection(false);
+              setActiveTab('exchange');
             }}
             style={[
               styles.toggleButton,
@@ -812,7 +815,7 @@ const styles = StyleSheet.create({
           <TouchableOpacity 
             onPress={() => {
               setExchangeDirection('cusd-to-usdc');
-              setShowWithdrawSection(false);
+              setActiveTab('exchange');
             }}
             style={[
               styles.toggleButton,
@@ -827,7 +830,7 @@ const styles = StyleSheet.create({
           </TouchableOpacity>
           
           <TouchableOpacity 
-            onPress={() => setShowWithdrawSection(true)}
+            onPress={() => setActiveTab('withdraw')}
             style={[
               styles.toggleButton,
               showWithdrawSection && styles.toggleButtonActive,
@@ -1194,7 +1197,7 @@ const styles = StyleSheet.create({
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Confirmar Intercambio</Text>
             <Text style={styles.modalText}>
-              ¿Estás seguro que deseas intercambiar {amount} cUSD por USDC?
+              ¿Estás seguro que deseas intercambiar {confirmAmount} cUSD por USDC?
             </Text>
             <View style={styles.modalActions}>
               <TouchableOpacity 
@@ -1229,7 +1232,7 @@ const styles = StyleSheet.create({
             </View>
             <Text style={styles.modalTitle}>¡Intercambio Exitoso!</Text>
             <Text style={styles.modalText}>
-              Tu intercambio de {amount} cUSD a USDC se ha completado correctamente.
+              Tu intercambio de {confirmAmount} cUSD a USDC se ha completado correctamente.
             </Text>
           </View>
         </View>
