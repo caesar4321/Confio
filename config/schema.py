@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, graphene.ObjectType):
 	# Override the legalDocument field to make it public
 	legalDocument = users_schema.Query.legalDocument
+	# Expose the user query
+	user = users_schema.Query.user
 
 class Mutation(
 	users_schema.Mutation,
