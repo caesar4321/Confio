@@ -265,7 +265,7 @@ export const AccountDetailScreen = () => {
           to: tx.direction === 'sent' ? tx.displayCounterparty : undefined,
           amount: tx.displayAmount,
           currency: tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType,
-          date: new Date(tx.createdAt).toISOString().split('T')[0],
+          date: tx.createdAt, // Keep full timestamp for proper sorting
           time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
           status: tx.status.toLowerCase() === 'confirmed' ? 'completed' : 'pending',
           hash: tx.transactionHash || 'pending'
@@ -273,8 +273,8 @@ export const AccountDetailScreen = () => {
       });
     }
     
-    // Sort by date (newest first)
-    return allTransactions.sort((a, b) => new Date(b.date + ' ' + b.time).getTime() - new Date(a.date + ' ' + a.time).getTime());
+    // Don't sort here - rely on server ordering which is more accurate
+    return allTransactions;
   };
 
   // LEGACY: Transform real transactions into the format expected by the UI (backup)
@@ -452,6 +452,10 @@ export const AccountDetailScreen = () => {
   };
 
   const TransactionItem = ({ transaction, onPress }: { transaction: Transaction; onPress: () => void }) => {
+    // Format the date properly
+    const formattedDate = moment(transaction.date).format('DD/MM/YYYY');
+    const formattedTime = transaction.time;
+    
     return (
       <TouchableOpacity style={styles.transactionItem} onPress={onPress}>
         <View style={styles.transactionIconContainer}>
@@ -459,7 +463,7 @@ export const AccountDetailScreen = () => {
         </View>
         <View style={styles.transactionInfo}>
           <Text style={styles.transactionTitle}>{getTransactionTitle(transaction)}</Text>
-          <Text style={styles.transactionDate}>{transaction.date} • {transaction.time}</Text>
+          <Text style={styles.transactionDate}>{formattedDate} • {formattedTime}</Text>
         </View>
         <View style={styles.transactionAmount}>
           <Text style={[
@@ -956,8 +960,9 @@ export const AccountDetailScreen = () => {
                               to: transaction.to,
                               amount: transaction.amount,
                               currency: transaction.currency,
-                              date: transaction.date,
+                              date: moment(transaction.date).format('DD/MM/YYYY'),
                               time: transaction.time,
+                              timestamp: transaction.date, // Pass full timestamp for relative time calculation
                               status: transaction.status,
                               hash: transaction.hash,
                               // Add additional fields that TransactionDetailScreen expects

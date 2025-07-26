@@ -19,6 +19,8 @@ import { MainStackParamList } from '../types/navigation';
 import Icon from 'react-native-vector-icons/Feather';
 import USDCLogo from '../assets/png/USDC.png';
 import cUSDLogo from '../assets/png/cUSD.png';
+import moment from 'moment';
+import 'moment/locale/es';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -774,7 +776,11 @@ export const TransactionDetailScreen = () => {
                 <Icon name="clock" size={20} color="#9ca3af" style={styles.infoIcon} />
                 <View style={styles.infoContent}>
                   <Text style={styles.infoTitle}>{currentTx.date} • {currentTx.time}</Text>
-                  <Text style={styles.infoSubtitle}>Hace 3 días</Text>
+                  <Text style={styles.infoSubtitle}>
+                    {currentTx.timestamp 
+                      ? moment(currentTx.timestamp).locale('es').fromNow()
+                      : moment(currentTx.date, 'DD/MM/YYYY').locale('es').fromNow()}
+                  </Text>
                 </View>
               </View>
 
