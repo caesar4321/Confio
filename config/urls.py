@@ -14,6 +14,11 @@ from django.conf.urls.static import static
 import json
 import logging
 
+# Customize admin site
+admin.site.site_header = "Confío Admin"
+admin.site.site_title = "Confío Admin Portal"
+admin.site.index_title = "Welcome to Confío Administration"
+
 logger = logging.getLogger(__name__)
 
 class LoggingGraphQLView(GraphQLView):

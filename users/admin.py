@@ -233,10 +233,10 @@ class BankAdmin(admin.ModelAdmin):
 
 @admin.register(BankInfo)
 class BankInfoAdmin(admin.ModelAdmin):
-    list_display = ('account', 'full_bank_name', 'account_holder_name', 'account_type', 'masked_account', 'verification_status', 'is_default', 'created_at')
-    list_filter = ('account_type', 'is_verified', 'is_default', 'is_public', 'created_at')
-    search_fields = ('account_holder_name', 'account__user__username', 'account__user__email', 'account_number', 'phone_number', 'email')
-    readonly_fields = ('created_at', 'updated_at', 'masked_account')
+    list_display = ('account', 'payment_method_display', 'account_holder_name', 'account_type', 'masked_account', 'verification_status', 'is_default', 'created_at')
+    list_filter = ('account_type', 'is_verified', 'is_default', 'is_public', 'payment_method__country_code', 'created_at')
+    search_fields = ('account_holder_name', 'account__user__username', 'account__user__email', 'account_number', 'phone_number', 'email', 'payment_method__display_name')
+    readonly_fields = ('created_at', 'updated_at', 'masked_account', 'full_bank_name')
     
     fieldsets = (
         ('Account Information', {
@@ -262,6 +262,21 @@ class BankInfoAdmin(admin.ModelAdmin):
         }),
     )
     
+    def payment_method_display(self, obj):
+        """Display payment method with country flag"""
+        if obj.payment_method:
+            country_flags = {
+                'VE': '🇻🇪', 'CO': '🇨🇴', 'AR': '🇦🇷', 'PE': '🇵🇪', 'CL': '🇨🇱',
+                'BR': '🇧🇷', 'MX': '🇲🇽', 'US': '🇺🇸', 'DO': '🇩🇴', 'PA': '🇵🇦',
+                'EC': '🇪🇨', 'BO': '🇧🇴', 'UY': '🇺🇾', 'PY': '🇵🇾', 'GT': '🇬🇹',
+                'HN': '🇭🇳', 'SV': '🇸🇻', 'NI': '🇳🇮', 'CR': '🇨🇷', 'CU': '🇨🇺',
+                'JM': '🇯🇲', 'TT': '🇹🇹'
+            }
+            flag = country_flags.get(obj.payment_method.country_code, '🌐')
+            return f"{flag} {obj.payment_method.display_name}"
+        return obj.full_bank_name()
+    payment_method_display.short_description = "Payment Method"
+    
     def masked_account(self, obj):
         return obj.get_masked_account_number()
     masked_account.short_description = "Account Number"
@@ -271,12 +286,21 @@ class BankInfoAdmin(admin.ModelAdmin):
             return format_html('<span style="color: green;">✓ Verified</span>')
         return format_html('<span style="color: orange;">Unverified</span>')
     verification_status.short_description = "Verification"
+    
+    def get_queryset(self, request):
+        """Optimize queries"""
+        return super().get_queryset(request).select_related(
+            'account__user', 'account__business', 'payment_method', 'bank__country', 'country'
+        )
 
 @admin.register(UnifiedTransaction)
 class UnifiedTransactionAdmin(admin.ModelAdmin):
-    list_display = ('transaction_hash_short', 'transaction_type', 'amount_display', 'token_type', 'status_display', 'sender_display_name', 'counterparty_display_name', 'created_at')
+    list_display = ('transaction_hash_short', 'type_display', 'amount_display', 'token_type', 'status_display', 'sender_info', 'counterparty_info', 'created_at')
     list_filter = ('transaction_type', 'token_type', 'status', 'sender_type', 'counterparty_type', 'created_at')
-    search_fields = ('transaction_hash', 'sender_display_name', 'counterparty_display_name', 'description', 'sender_address', 'counterparty_address')
+    search_fields = ('transaction_hash', 'sender_display_name', 'counterparty_display_name', 'description', 'sender_address', 'counterparty_address', 'sender_phone', 'counterparty_phone')
+    date_hierarchy = 'created_at'
+    list_per_page = 50
+    
     # This is a view, so everything should be read-only
     readonly_fields = (
         'transaction_type', 'created_at', 'updated_at', 'deleted_at', 'amount', 'token_type', 
@@ -293,13 +317,17 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
             'fields': ('transaction_type', 'status', 'transaction_hash', 'amount', 'token_type', 'created_at')
         }),
         ('Sender Information', {
-            'fields': ('sender_display_name', 'sender_type', 'sender_address', 'sender_phone')
+            'fields': ('sender_display_name', 'sender_type', 'sender_address', 'sender_phone', 'sender_user', 'sender_business')
         }),
         ('Counterparty Information', {
-            'fields': ('counterparty_display_name', 'counterparty_type', 'counterparty_address', 'counterparty_phone')
+            'fields': ('counterparty_display_name', 'counterparty_type', 'counterparty_address', 'counterparty_phone', 'counterparty_user', 'counterparty_business')
         }),
         ('Additional Details', {
             'fields': ('description', 'invoice_id', 'payment_transaction_id', 'error_message'),
+            'classes': ('collapse',)
+        }),
+        ('Raw Addresses', {
+            'fields': ('from_address', 'to_address'),
             'classes': ('collapse',)
         }),
     )
@@ -315,13 +343,81 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
     
     def transaction_hash_short(self, obj):
         if obj.transaction_hash:
-            return f"{obj.transaction_hash[:10]}..."
-        return "Pending"
+            return format_html(
+                '<span title="{}" style="font-family: monospace;">{}</span>',
+                obj.transaction_hash,
+                f"{obj.transaction_hash[:10]}..."
+            )
+        return format_html('<span style="color: orange;">Pending</span>')
     transaction_hash_short.short_description = "Hash"
     
+    def type_display(self, obj):
+        """Display transaction type with icon"""
+        icons = {
+            'send': '📤',
+            'payment': '🛒'
+        }
+        colors = {
+            'send': '#3B82F6',
+            'payment': '#8B5CF6'
+        }
+        icon = icons.get(obj.transaction_type, '📄')
+        color = colors.get(obj.transaction_type, '#6B7280')
+        return format_html(
+            '<span style="color: {};">{} {}</span>',
+            color,
+            icon,
+            obj.transaction_type.title()
+        )
+    type_display.short_description = "Type"
+    
     def amount_display(self, obj):
-        return f"{obj.amount} {obj.token_type}"
+        """Display amount with better formatting"""
+        try:
+            from decimal import Decimal
+            amount = Decimal(obj.amount)
+            return format_html(
+                '<span style="font-weight: bold; font-size: 1.1em;">{:,.2f}</span> {}',
+                amount,
+                obj.token_type
+            )
+        except:
+            return f"{obj.amount} {obj.token_type}"
     amount_display.short_description = "Amount"
+    
+    def sender_info(self, obj):
+        """Display sender with type badge and phone"""
+        if obj.sender_type == 'business':
+            type_badge = format_html(
+                '<span style="background-color: #3B82F6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px;">BUSINESS</span> '
+            )
+        else:
+            type_badge = format_html(
+                '<span style="background-color: #10B981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px;">PERSONAL</span> '
+            )
+        
+        name_part = format_html('<strong>{}</strong>', obj.sender_display_name or 'Unknown')
+        phone_part = format_html('<br><small>📱 {}</small>', obj.sender_phone) if obj.sender_phone else ''
+        
+        return format_html('{}{}{}', type_badge, name_part, phone_part)
+    sender_info.short_description = "Sender"
+    
+    def counterparty_info(self, obj):
+        """Display counterparty with type badge and phone"""
+        if obj.counterparty_type == 'business':
+            type_badge = format_html(
+                '<span style="background-color: #3B82F6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px;">BUSINESS</span> '
+            )
+        else:
+            type_badge = format_html(
+                '<span style="background-color: #10B981; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px;">PERSONAL</span> '
+            )
+        
+        name_part = format_html('<strong>{}</strong>', obj.counterparty_display_name or 'Unknown')
+        phone_part = format_html('<br><small>📱 {}</small>', obj.counterparty_phone) if obj.counterparty_phone else ''
+        
+        return format_html('{}{}{}', type_badge, name_part, phone_part)
+    counterparty_info.short_description = "Counterparty"
     
     def status_display(self, obj):
         colors = {
@@ -332,9 +428,18 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
             'SIGNED': 'purple',
             'SUBMITTED': 'teal'
         }
+        icons = {
+            'CONFIRMED': '✅',
+            'PENDING': '⏳',
+            'FAILED': '❌',
+            'SPONSORING': '💰',
+            'SIGNED': '✍️',
+            'SUBMITTED': '📤'
+        }
         return format_html(
-            '<span style="color: {}; font-weight: bold;">{}</span>',
+            '<span style="color: {}; font-weight: bold;">{} {}</span>',
             colors.get(obj.status, 'black'),
+            icons.get(obj.status, ''),
             obj.status
         )
     status_display.short_description = "Status"
