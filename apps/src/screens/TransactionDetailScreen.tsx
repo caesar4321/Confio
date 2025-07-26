@@ -10,7 +10,8 @@ import {
   Alert,
   Linking,
   StatusBar,
-  Image
+  Image,
+  Clipboard
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -128,9 +129,8 @@ export const TransactionDetailScreen = () => {
   const isInvitedFriend = currentTx.isInvitedFriend || false;
 
   const handleCopy = (text: string, type: string) => {
-    // In React Native, you'd use Clipboard API
-    // For now, we'll just show an alert
-    Alert.alert('Copiado', 'Texto copiado al portapapeles');
+    Clipboard.setString(text);
+    Alert.alert('Copiado', 'Dirección copiada al portapapeles');
     setCopied(type);
     setTimeout(() => setCopied(''), 2000);
   };

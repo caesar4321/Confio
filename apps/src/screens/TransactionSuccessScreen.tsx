@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Clipboard } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -82,7 +82,8 @@ export const TransactionSuccessScreen = () => {
   );
 
   const handleCopy = () => {
-    // In a real app, you'd copy the transaction ID
+    Clipboard.setString(transactionId);
+    Alert.alert('Copiado', 'ID de transacción copiado al portapapeles');
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

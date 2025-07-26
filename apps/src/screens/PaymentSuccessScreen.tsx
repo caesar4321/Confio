@@ -9,6 +9,7 @@ import {
   Dimensions,
   Alert,
   Platform,
+  Clipboard,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -63,7 +64,10 @@ export const PaymentSuccessScreen = () => {
   };
 
   const handleCopy = () => {
-    // In a real app, you'd copy the transaction ID
+    if (transactionData.transactionHash) {
+      Clipboard.setString(transactionData.transactionHash);
+      Alert.alert('Copiado', 'ID de transacción copiado al portapapeles');
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

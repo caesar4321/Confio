@@ -19,6 +19,7 @@ import {
   Pressable,
   Alert,
   Linking,
+  Clipboard,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -801,7 +802,12 @@ export const AccountDetailScreen = () => {
           <Text style={styles.balanceDescription}>{account.description}</Text>
           <View style={styles.addressContainer}>
             <Text style={styles.addressText}>{account.addressShort}</Text>
-            <TouchableOpacity>
+            <TouchableOpacity onPress={() => {
+              if (account.address) {
+                Clipboard.setString(account.address);
+                Alert.alert('Copiado', 'Dirección copiada al portapapeles');
+              }
+            }}>
               <Icon name="copy" size={16} color="#ffffff" style={styles.copyIcon} />
             </TouchableOpacity>
           </View>
