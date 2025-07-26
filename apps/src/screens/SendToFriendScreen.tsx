@@ -59,6 +59,8 @@ type Friend = {
   isOnConfio: boolean;
   phone: string;
   suiAddress?: string;
+  userId?: string;
+  id?: string; // Some screens pass 'id' instead of 'userId'
 };
 
 export const SendToFriendScreen = () => {
@@ -108,34 +110,24 @@ export const SendToFriendScreen = () => {
     try {
       console.log('SendToFriendScreen: Navigating to TransactionProcessing');
       
-      // Use real Sui address if available, otherwise generate a valid external address
-      let friendSuiAddress = friend.suiAddress;
-      
-      if (!friendSuiAddress) {
-        if (friend.isOnConfio) {
-          // This shouldn't happen - Confío users should have addresses
-          console.error('SendToFriendScreen: Confío user without Sui address', {
-            friend,
-            friendSuiAddress: friend.suiAddress,
-            hasAddress: !!friend.suiAddress,
-            addressType: typeof friend.suiAddress
-          });
-          friendSuiAddress = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
-        } else {
-          // Generate a deterministic but valid Sui address for external wallets
-          // Using phone number to create a consistent address
-          const phoneHash = friend.phone ? 
-            Array.from(friend.phone).reduce((hash, char) => ((hash << 5) - hash) + char.charCodeAt(0), 0) : 0;
-          const hexPart = Math.abs(phoneHash).toString(16).padStart(16, '0');
-          friendSuiAddress = `0x${hexPart}${'0'.repeat(48)}`; // Valid 66-char Sui address
-        }
+      // For idempotency key, we need a stable identifier
+      // For Confío users, use their user ID; for non-Confío, use phone number hash
+      let recipientIdentifier: string;
+      if (friend.isOnConfio && (friend.userId || friend.id)) {
+        recipientIdentifier = friend.userId || friend.id || 'unknown';
+      } else if (friend.phone) {
+        // For non-Confío users, create a hash of the phone number
+        const phoneHash = Array.from(friend.phone).reduce((hash, char) => ((hash << 5) - hash) + char.charCodeAt(0), 0);
+        recipientIdentifier = Math.abs(phoneHash).toString(16).padStart(8, '0');
+      } else {
+        recipientIdentifier = 'unknown';
       }
       
       // Generate idempotency key to prevent double-spending
-      const minuteTimestamp = Math.floor(Date.now() / 60000);
-      const recipientSuffix = friendSuiAddress.slice(-8);
+      // Use full timestamp (not just minute) to allow multiple transactions
+      const timestamp = Date.now();
       const amountStr = amount.replace('.', '');
-      const idempotencyKey = `send_${recipientSuffix}_${amountStr}_${config.name}_${minuteTimestamp}`;
+      const idempotencyKey = `send_${recipientIdentifier}_${amountStr}_${config.name}_${timestamp}`;
       
       // Navigate to processing screen with transaction data
       (navigation as any).replace('TransactionProcessing', {
@@ -145,9 +137,10 @@ export const SendToFriendScreen = () => {
           currency: config.name,
           recipient: friend.name,
           recipientPhone: friend.phone,
+          recipientUserId: friend.userId || friend.id, // Pass user ID if available
           action: 'Enviando',
           isOnConfio: friend.isOnConfio,
-          recipientAddress: friendSuiAddress,
+          // recipientAddress removed - server will determine this
           memo: `Send ${amount} ${config.name} to ${friend.name}${friend.phone ? ` (${friend.phone})` : ''}`,
           idempotencyKey: idempotencyKey
         }

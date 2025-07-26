@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Platform, Animated, ScrollView, BackHandler } from 'react-native';
+import { View, Text, StyleSheet, Platform, Animated, ScrollView, BackHandler, Alert } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -35,9 +35,11 @@ interface TransactionData {
   sendTransactionId?: string;
   recipientAddress?: string;
   recipientPhone?: string;
+  recipientUserId?: string;
   invoiceId?: string;
   memo?: string;
   idempotencyKey?: string; // Pass idempotency key from calling screen
+  transactionId?: string; // Store transaction ID after successful processing
 }
 
 export const TransactionProcessingScreen = () => {
@@ -74,15 +76,23 @@ export const TransactionProcessingScreen = () => {
   // Use idempotency key from transactionData, or generate one as fallback
   const idempotencyKey = transactionData.idempotencyKey || (() => {
     // Fallback: generate idempotency key if not provided
-    const minuteTimestamp = Math.floor(Date.now() / 60000);
+    const timestamp = Date.now();
     if (transactionData.type === 'payment' && transactionData.invoiceId) {
-      return `pay_${transactionData.invoiceId}_${minuteTimestamp}`;
-    } else if (transactionData.type === 'sent' && transactionData.recipientAddress) {
-      const recipientSuffix = transactionData.recipientAddress.slice(-8);
+      return `pay_${transactionData.invoiceId}_${timestamp}`;
+    } else if (transactionData.type === 'sent') {
+      // Use recipient identifier (phone, userId, or address)
+      let recipientId = 'unknown';
+      if (transactionData.recipientUserId) {
+        recipientId = transactionData.recipientUserId;
+      } else if (transactionData.recipientPhone) {
+        recipientId = transactionData.recipientPhone.replace(/\D/g, '').slice(-8);
+      } else if (transactionData.recipientAddress) {
+        recipientId = transactionData.recipientAddress.slice(-8);
+      }
       const amountStr = transactionData.amount.replace('.', '');
-      return `send_${recipientSuffix}_${amountStr}_${transactionData.currency}_${minuteTimestamp}`;
+      return `send_${recipientId}_${amountStr}_${transactionData.currency}_${timestamp}`;
     } else {
-      return `tx_unknown_${minuteTimestamp}`;
+      return `tx_unknown_${timestamp}`;
     }
   })();
 
@@ -168,9 +178,16 @@ export const TransactionProcessingScreen = () => {
         if (transactionData.type === 'payment' && transactionData.invoiceId) {
           console.log('TransactionProcessingScreen: Starting payment processing');
           await processPayment();
-        } else if (transactionData.type === 'sent' && transactionData.recipientAddress) {
+        } else if (transactionData.type === 'sent') {
           console.log('TransactionProcessingScreen: Starting send processing');
           await processSend();
+        } else {
+          console.error('TransactionProcessingScreen: Unknown transaction type or missing data:', {
+            type: transactionData.type,
+            hasRecipient: !!transactionData.recipient,
+            hasRecipientPhone: !!transactionData.recipientPhone,
+            hasRecipientUserId: !!transactionData.recipientUserId
+          });
         }
       } catch (error) {
         console.error('TransactionProcessingScreen: Error in initializeProcessing:', error);
@@ -231,7 +248,7 @@ export const TransactionProcessingScreen = () => {
 
     const processSend = async () => {
       try {
-        console.log('TransactionProcessingScreen: Processing send transaction to:', transactionData.recipientAddress);
+        console.log('TransactionProcessingScreen: Processing send transaction to:', transactionData.recipient);
         
         // Step 1: Verifying transaction
         setCurrentStep(0);
@@ -245,33 +262,119 @@ export const TransactionProcessingScreen = () => {
         setCurrentStep(2);
         console.log('TransactionProcessingScreen: Calling createSendTransaction mutation with idempotency key:', idempotencyKey);
         
-        const { data } = await createSendTransaction({
-          variables: {
-            input: {
-              recipientAddress: transactionData.recipientAddress,
-              amount: transactionData.amount,
-              tokenType: transactionData.currency,
-              memo: transactionData.memo || `Send ${transactionData.amount} ${transactionData.currency} to ${transactionData.recipient}`,
-              idempotencyKey: idempotencyKey,
-              recipientDisplayName: transactionData.recipient,
-              recipientPhone: transactionData.recipientPhone
-            }
-          }
+        // Prepare input based on available recipient data - IMPORTANT: The GraphQL schema expects camelCase
+        const mutationInput: any = {
+          amount: transactionData.amount,
+          tokenType: transactionData.currency,
+          memo: transactionData.memo || `Send ${transactionData.amount} ${transactionData.currency} to ${transactionData.recipient}`,
+          idempotencyKey: idempotencyKey,
+          recipientDisplayName: transactionData.recipient
+        };
+        
+        // Use the appropriate recipient identifier
+        if (transactionData.recipientUserId && transactionData.isOnConfio) {
+          // For Confío users, prefer user ID
+          mutationInput.recipientUserId = transactionData.recipientUserId;
+          console.log('TransactionProcessingScreen: Using recipient user ID:', transactionData.recipientUserId);
+        } else if (transactionData.recipientPhone) {
+          // For any user with phone number (Confío or not)
+          mutationInput.recipientPhone = transactionData.recipientPhone;
+          console.log('TransactionProcessingScreen: Using recipient phone:', transactionData.recipientPhone);
+        } else if (transactionData.recipientAddress) {
+          // Fallback to address (legacy)
+          mutationInput.recipientAddress = transactionData.recipientAddress;
+          console.log('TransactionProcessingScreen: WARNING - Using legacy recipient address:', transactionData.recipientAddress);
+        }
+        
+        console.log('TransactionProcessingScreen: Sending mutation with input:', JSON.stringify(mutationInput, null, 2));
+        
+        const mutationVariables = {
+          input: mutationInput
+        };
+        console.log('TransactionProcessingScreen: Full mutation variables:', JSON.stringify(mutationVariables, null, 2));
+        
+        const { data, errors } = await createSendTransaction({
+          variables: mutationVariables
         });
 
-        console.log('TransactionProcessingScreen: Send mutation response:', data);
+        console.log('TransactionProcessingScreen: Send mutation raw response:', { data, errors });
+        console.log('TransactionProcessingScreen: Response data structure:', JSON.stringify(data, null, 2));
         
-        if (data?.createSendTransaction?.success) {
-          console.log('TransactionProcessingScreen: Send successful');
-          // The transaction is already marked as confirmed in the backend
-          // Just wait for the UI to complete
+        // Check for GraphQL errors first
+        if (errors && errors.length > 0) {
+          console.error('TransactionProcessingScreen: GraphQL errors:', errors);
+          const errorMessage = errors.map(e => e.message).join('\n');
+          Alert.alert(
+            'Error al enviar',
+            errorMessage || 'Error al procesar la transacción',
+            [{ text: 'OK', onPress: () => navigation.goBack() }]
+          );
+          return;
+        }
+        
+        // Check the mutation response
+        if (data?.createSendTransaction?.sendTransaction) {
+          console.log('TransactionProcessingScreen: Send successful!');
+          console.log('TransactionProcessingScreen: Transaction object:', data.createSendTransaction.sendTransaction);
+          console.log('TransactionProcessingScreen: Transaction ID:', data.createSendTransaction.sendTransaction.id);
+          
+          // Store the transaction ID for success screen
+          if (transactionData) {
+            transactionData.transactionId = data.createSendTransaction.sendTransaction.id;
+          }
+          
+          // Log success metrics
+          console.log('TransactionProcessingScreen: Transaction created successfully:', {
+            id: data.createSendTransaction.sendTransaction.id,
+            amount: transactionData.amount,
+            recipient: transactionData.recipient,
+            recipientUserId: transactionData.recipientUserId,
+            recipientPhone: transactionData.recipientPhone
+          });
+        } else if (data?.createSendTransaction?.errors && data.createSendTransaction.errors.length > 0) {
+          console.error('TransactionProcessingScreen: Send failed with mutation errors:', data.createSendTransaction.errors);
+          // Show error to user
+          Alert.alert(
+            'Error al enviar',
+            data.createSendTransaction.errors.join('\n'),
+            [{ text: 'OK', onPress: () => navigation.goBack() }]
+          );
+          return;
+        } else if (data?.createSendTransaction) {
+          // The mutation returned but with unexpected structure
+          console.error('TransactionProcessingScreen: Unexpected mutation response structure:', data.createSendTransaction);
+          console.error('TransactionProcessingScreen: Keys in response:', Object.keys(data.createSendTransaction));
+          
+          Alert.alert(
+            'Error',
+            'La transacción no se pudo completar correctamente. Por favor, inténtalo de nuevo.',
+            [{ text: 'OK', onPress: () => navigation.goBack() }]
+          );
+          return;
         } else {
-          console.error('TransactionProcessingScreen: Send failed:', data?.createSendTransaction?.errors);
-          // Handle send failure
+          console.error('TransactionProcessingScreen: No createSendTransaction in response:', data);
+          Alert.alert(
+            'Error',
+            'Error inesperado al procesar la transacción.',
+            [{ text: 'OK', onPress: () => navigation.goBack() }]
+          );
+          return;
         }
       } catch (error) {
         console.error('TransactionProcessingScreen: Error processing send:', error);
-        // Handle error
+        console.error('TransactionProcessingScreen: Error details:', {
+          message: error.message,
+          networkError: error.networkError,
+          graphQLErrors: error.graphQLErrors,
+          stack: error.stack
+        });
+        
+        // Show error to user
+        Alert.alert(
+          'Error de conexión',
+          'No se pudo conectar con el servidor. Por favor, verifica tu conexión e inténtalo de nuevo.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
       }
     };
 
