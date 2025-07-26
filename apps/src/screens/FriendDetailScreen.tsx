@@ -9,6 +9,7 @@ import {
   Image,
   RefreshControl,
   Modal,
+  TextInput,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -21,6 +22,9 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery } from '@apollo/client';
 import { GET_SEND_TRANSACTIONS_WITH_FRIEND, GET_PAYMENT_TRANSACTIONS_WITH_FRIEND, GET_USER_BY_ID } from '../apollo/queries';
+import { TransactionFilterModal, TransactionFilters } from '../components/TransactionFilterModal';
+import moment from 'moment';
+import 'moment/locale/es';
 
 // Color palette
 const colors = {
@@ -71,6 +75,31 @@ export const FriendDetailScreen = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasReachedEnd, setHasReachedEnd] = useState(false);
   const [showTokenSelection, setShowTokenSelection] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [transactionFilters, setTransactionFilters] = useState<TransactionFilters>({
+    types: {
+      sent: true,
+      received: true,
+      payment: true,
+      exchange: true,
+    },
+    currencies: {
+      cUSD: true,
+      CONFIO: true,
+      USDC: true,
+    },
+    status: {
+      completed: true,
+      pending: true,
+    },
+    timeRange: 'all',
+    amountRange: {
+      min: '',
+      max: '',
+    },
+  });
 
   // Friend data from navigation params
   const friend = {
@@ -170,6 +199,87 @@ export const FriendDetailScreen = () => {
   };
 
   const transactions = formatTransactions();
+  
+  // Filter transactions based on search query and filters
+  const filteredTransactions = React.useMemo(() => {
+    let filtered = transactions;
+    
+    // Apply search query filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(tx => {
+        const title = getTransactionTitle(tx).toLowerCase();
+        const amount = tx.amount.toLowerCase();
+        const currency = tx.currency.toLowerCase();
+        const hash = tx.hash.toLowerCase();
+        const date = moment(tx.date).format('DD/MM/YYYY').toLowerCase();
+        
+        return title.includes(query) || 
+               amount.includes(query) ||
+               currency.includes(query) ||
+               hash.includes(query) ||
+               date.includes(query);
+      });
+    }
+    
+    // Apply type filters
+    filtered = filtered.filter(tx => {
+      return transactionFilters.types[tx.type];
+    });
+    
+    // Apply currency filters
+    filtered = filtered.filter(tx => {
+      const currency = tx.currency === 'cUSD' ? 'cUSD' : tx.currency;
+      return transactionFilters.currencies[currency as keyof typeof transactionFilters.currencies] ?? true;
+    });
+    
+    // Apply status filters
+    filtered = filtered.filter(tx => {
+      return transactionFilters.status[tx.status];
+    });
+    
+    // Apply time range filter
+    if (transactionFilters.timeRange !== 'all') {
+      const now = moment();
+      filtered = filtered.filter(tx => {
+        const txDate = moment(tx.date);
+        switch (transactionFilters.timeRange) {
+          case 'today':
+            return txDate.isSame(now, 'day');
+          case 'week':
+            return txDate.isSame(now, 'week');
+          case 'month':
+            return txDate.isSame(now, 'month');
+          case 'year':
+            return txDate.isSame(now, 'year');
+          default:
+            return true;
+        }
+      });
+    }
+    
+    // Apply amount range filter
+    if (transactionFilters.amountRange.min || transactionFilters.amountRange.max) {
+      filtered = filtered.filter(tx => {
+        const amount = Math.abs(parseFloat(tx.amount.replace(/[^0-9.-]/g, '')));
+        const min = transactionFilters.amountRange.min ? parseFloat(transactionFilters.amountRange.min) : 0;
+        const max = transactionFilters.amountRange.max ? parseFloat(transactionFilters.amountRange.max) : Infinity;
+        return amount >= min && amount <= max;
+      });
+    }
+    
+    return filtered;
+  }, [transactions, searchQuery, transactionFilters]);
+  
+  const hasActiveFilters = () => {
+    const allTypesSelected = Object.values(transactionFilters.types).every(v => v);
+    const allCurrenciesSelected = Object.values(transactionFilters.currencies).every(v => v);
+    const allStatusSelected = Object.values(transactionFilters.status).every(v => v);
+    const noAmountRange = !transactionFilters.amountRange.min && !transactionFilters.amountRange.max;
+    const allTimeRange = transactionFilters.timeRange === 'all';
+
+    return !(allTypesSelected && allCurrenciesSelected && allStatusSelected && noAmountRange && allTimeRange);
+  };
   
   // Check if we've reached the end after loading more
   React.useEffect(() => {
@@ -430,32 +540,80 @@ export const FriendDetailScreen = () => {
               {friend.isOnConfio ? `Historial con ${friend.name}` : 'Historial de envíos'}
             </Text>
             <View style={styles.transactionsFilters}>
-              <TouchableOpacity style={styles.filterButton}>
-                <Icon name="filter" size={16} color="#6b7280" />
+              <TouchableOpacity 
+                style={[
+                  styles.filterButton,
+                  showSearch && styles.filterButtonActive
+                ]}
+                onPress={() => setShowSearch(!showSearch)}
+              >
+                <Icon name="search" size={16} color={showSearch ? colors.primary : "#6b7280"} />
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[
+                  styles.filterButton,
+                  hasActiveFilters() && styles.filterButtonActive
+                ]}
+                onPress={() => setShowFilterModal(true)}
+              >
+                <Icon 
+                  name="filter" 
+                  size={16} 
+                  color={hasActiveFilters() ? colors.primary : "#6b7280"} 
+                />
+                {hasActiveFilters() && (
+                  <View style={styles.filterDot} />
+                )}
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Search Bar */}
+          {showSearch && (
+            <View style={styles.searchContainer}>
+              <Icon name="search" size={18} color="#9ca3af" style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Buscar transacciones..."
+                placeholderTextColor="#9ca3af"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery('')}>
+                  <Icon name="x" size={18} color="#9ca3af" />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
 
           <View style={styles.transactionsList}>
             {(sendLoading || paymentLoading) ? (
               <View style={styles.loadingContainer}>
                 <Text style={styles.loadingText}>Cargando transacciones...</Text>
               </View>
-            ) : transactions.length === 0 ? (
+            ) : filteredTransactions.length === 0 ? (
               <View style={styles.emptyTransactionsContainer}>
                 <Icon name="inbox" size={32} color="#9ca3af" />
                 <Text style={styles.emptyTransactionsText}>
-                  {friend.isOnConfio ? 'No hay transacciones aún' : 'Tu amigo no está en Confío'}
+                  {searchQuery || hasActiveFilters() 
+                    ? 'No se encontraron transacciones'
+                    : friend.isOnConfio ? 'No hay transacciones aún' : 'Tu amigo no está en Confío'
+                  }
                 </Text>
                 <Text style={styles.emptyTransactionsSubtext}>
-                  {!friend.isOnConfio ? 
-                    `Cuando envíes dinero a ${friend.name}, recibirá una invitación para unirse a Confío` :
-                    `Aquí aparecerán las transacciones que realices con ${friend.name}`
+                  {searchQuery || hasActiveFilters()
+                    ? 'Intenta cambiar los filtros o términos de búsqueda'
+                    : !friend.isOnConfio ? 
+                      `Cuando envíes dinero a ${friend.name}, recibirá una invitación para unirse a Confío` :
+                      `Aquí aparecerán las transacciones que realices con ${friend.name}`
                   }
                 </Text>
               </View>
             ) : (
-              transactions.map((transaction, index) => (
+              filteredTransactions.map((transaction, index) => (
                 <TransactionItem 
                   key={index} 
                   transaction={transaction} 
@@ -494,7 +652,7 @@ export const FriendDetailScreen = () => {
             )}
           </View>
 
-          {transactions.length > 0 && !hasReachedEnd && (
+          {transactions.length > 0 && !hasReachedEnd && !searchQuery && !hasActiveFilters() && (
             <TouchableOpacity 
               style={styles.viewMoreButton}
               onPress={loadMoreTransactions}
@@ -575,6 +733,18 @@ export const FriendDetailScreen = () => {
           </View>
         </View>
       </Modal>
+      
+      {/* Transaction Filter Modal */}
+      <TransactionFilterModal
+        visible={showFilterModal}
+        onClose={() => setShowFilterModal(false)}
+        onApply={setTransactionFilters}
+        currentFilters={transactionFilters}
+        theme={{
+          primary: colors.primary,
+          secondary: colors.secondary,
+        }}
+      />
     </View>
   );
 };
@@ -699,6 +869,42 @@ const styles = StyleSheet.create({
     padding: 8,
     backgroundColor: '#ffffff',
     borderRadius: 8,
+    marginLeft: 8,
+    position: 'relative',
+  },
+  filterButtonActive: {
+    backgroundColor: '#f3f4f6',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  filterDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.primary,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1f2937',
+    padding: 0,
   },
   transactionsList: {
     gap: 8,
