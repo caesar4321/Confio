@@ -535,20 +535,14 @@ export const ContactsScreen = () => {
   );
 
   const handleFriendPress = (contact: any) => {
-    if (contact.isOnConfio) {
-      // For Confío users, show transaction history
-      navigation.navigate('FriendDetail', {
-        friendId: contact.userId || contact.id, // Use real user ID if available
-        friendName: contact.name,
-        friendAvatar: contact.avatar,
-        friendPhone: contact.phone,
-        isOnConfio: contact.isOnConfio || false
-      });
-    } else {
-      // For non-Confío users, show token selection modal
-      setSelectedFriend(contact);
-      setShowFriendTokenSelection(true);
-    }
+    // Navigate all friends to FriendDetail, regardless of Confío status
+    navigation.navigate('FriendDetail', {
+      friendId: contact.userId || contact.id,
+      friendName: contact.name,
+      friendAvatar: contact.avatar,
+      friendPhone: contact.phone,
+      isOnConfio: contact.isOnConfio || false
+    });
   };
 
   // Memoized callbacks to prevent recreation on every render

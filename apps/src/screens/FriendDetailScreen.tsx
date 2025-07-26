@@ -191,14 +191,19 @@ export const FriendDetailScreen = () => {
   };
 
   const TransactionItem = ({ transaction, onPress }: { transaction: Transaction; onPress: () => void }) => {
+    const isExternalWallet = !friend.isOnConfio && transaction.type === 'sent';
+    
     return (
-      <TouchableOpacity style={styles.transactionItem} onPress={onPress}>
-        <View style={styles.transactionIconContainer}>
+      <TouchableOpacity style={[styles.transactionItem, isExternalWallet && styles.externalTransactionItem]} onPress={onPress}>
+        <View style={[styles.transactionIconContainer, isExternalWallet && styles.externalIconContainer]}>
           {getTransactionIcon(transaction)}
         </View>
         <View style={styles.transactionInfo}>
           <Text style={styles.transactionTitle}>{getTransactionTitle(transaction)}</Text>
           <Text style={styles.transactionDate}>{transaction.date} • {transaction.time}</Text>
+          {isExternalWallet && (
+            <Text style={styles.externalWalletNote}>Enviado a wallet externo</Text>
+          )}
         </View>
         <View style={styles.transactionAmount}>
           <Text style={[
@@ -349,18 +354,27 @@ export const FriendDetailScreen = () => {
         {/* Send Button */}
         <View style={styles.sendButtonContainer}>
           <TouchableOpacity 
-            style={styles.sendButton}
+            style={[styles.sendButton, !friend.isOnConfio && styles.inviteButton]}
             onPress={handleSendMoney}
           >
             <Icon name="send" size={20} color="#ffffff" style={{ marginRight: 8 }} />
-            <Text style={styles.sendButtonText}>Enviar</Text>
+            <Text style={styles.sendButtonText}>
+              {friend.isOnConfio ? 'Enviar' : 'Enviar & Invitar'}
+            </Text>
           </TouchableOpacity>
+          {!friend.isOnConfio && (
+            <Text style={styles.inviteNote}>
+              Tu amigo recibirá el dinero y una invitación a Confío
+            </Text>
+          )}
         </View>
 
         {/* Transactions Section */}
         <View style={styles.transactionsSection}>
           <View style={styles.transactionsHeader}>
-            <Text style={styles.transactionsTitle}>Historial con {friend.name}</Text>
+            <Text style={styles.transactionsTitle}>
+              {friend.isOnConfio ? `Historial con ${friend.name}` : 'Historial de envíos'}
+            </Text>
             <View style={styles.transactionsFilters}>
               <TouchableOpacity style={styles.filterButton}>
                 <Icon name="filter" size={16} color="#6b7280" />
@@ -376,10 +390,12 @@ export const FriendDetailScreen = () => {
             ) : transactions.length === 0 ? (
               <View style={styles.emptyTransactionsContainer}>
                 <Icon name="inbox" size={32} color="#9ca3af" />
-                <Text style={styles.emptyTransactionsText}>No hay transacciones aún</Text>
+                <Text style={styles.emptyTransactionsText}>
+                  {friend.isOnConfio ? 'No hay transacciones aún' : 'Tu amigo no está en Confío'}
+                </Text>
                 <Text style={styles.emptyTransactionsSubtext}>
-                  {isDeviceContact ? 
-                    `Invita a ${friend.name} a Confío para empezar a enviar dinero` :
+                  {!friend.isOnConfio ? 
+                    `Cuando envíes dinero a ${friend.name}, recibirá una invitación para unirse a Confío` :
                     `Aquí aparecerán las transacciones que realices con ${friend.name}`
                   }
                 </Text>
@@ -588,10 +604,19 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  inviteButton: {
+    backgroundColor: colors.secondary,
+  },
   sendButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#ffffff',
+  },
+  inviteNote: {
+    fontSize: 12,
+    color: colors.secondary,
+    textAlign: 'center',
+    marginTop: 8,
   },
   transactionsSection: {
     paddingHorizontal: 16,
@@ -630,6 +655,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#f3f4f6',
   },
+  externalTransactionItem: {
+    backgroundColor: colors.violetLight,
+    borderColor: colors.secondary,
+  },
   transactionIconContainer: {
     width: 40,
     height: 40,
@@ -638,6 +667,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+  },
+  externalIconContainer: {
+    backgroundColor: colors.secondary + '20',
   },
   transactionInfo: {
     flex: 1,
@@ -650,6 +682,12 @@ const styles = StyleSheet.create({
   transactionDate: {
     fontSize: 12,
     color: '#6b7280',
+  },
+  externalWalletNote: {
+    fontSize: 11,
+    color: colors.secondary,
+    marginTop: 2,
+    fontStyle: 'italic',
   },
   transactionAmount: {
     alignItems: 'flex-end',
