@@ -13,13 +13,19 @@ User = get_user_model()
 
 class SendTransactionInput(graphene.InputObjectType):
     """Input type for creating a send transaction"""
-    recipient_address = graphene.String(required=True, description="Sui address of the recipient")
+    # Recipient identification - use ONE of these
+    recipient_user_id = graphene.ID(description="User ID of the recipient (for Confío users)")
+    recipient_phone = graphene.String(description="Phone number of the recipient (for any user)")
+    recipient_address = graphene.String(description="Sui address of the recipient (DEPRECATED - use phone or user ID)")
+    
+    # Transaction details
     amount = graphene.String(required=True, description="Amount to send (e.g., '10.50')")
     token_type = graphene.String(required=True, description="Type of token to send (e.g., 'cUSD', 'CONFIO')")
     memo = graphene.String(description="Optional memo for the transaction")
     idempotency_key = graphene.String(description="Optional idempotency key to prevent duplicate sends")
-    recipient_display_name = graphene.String(description="Display name for the recipient (for external wallets)")
-    recipient_phone = graphene.String(description="Phone number of the recipient (for external wallets)")
+    
+    # Display info (for UI purposes only)
+    recipient_display_name = graphene.String(description="Display name for the recipient (for UI)")
 
 class SendTransactionType(DjangoObjectType):
     """GraphQL type for SendTransaction model"""
@@ -100,9 +106,8 @@ class CreateSendTransaction(graphene.Mutation):
                 else:
                     print(f"CreateSendTransaction: No idempotency key provided")
 
-                # Validate the transaction
+                # Validate the transaction amount
                 validate_transaction_amount(input.amount)
-                validate_recipient(input.recipient_address)
 
                 # Get the sender's active account with row-level locking
                 active_account = user.accounts.select_for_update().filter(
@@ -119,12 +124,87 @@ class CreateSendTransaction(graphene.Mutation):
                 
                 sender_address = active_account.sui_address
 
-                # Try to find recipient user by their Sui address
-                try:
-                    recipient_account = Account.objects.get(sui_address=input.recipient_address)
-                    recipient_user = recipient_account.user
-                except Account.DoesNotExist:
-                    recipient_user = None
+                # Find recipient and their Sui address
+                recipient_user = None
+                recipient_account = None
+                recipient_address = None
+                
+                # Priority 1: Lookup by user ID (most reliable for Confío users)
+                if hasattr(input, 'recipient_user_id') and input.recipient_user_id:
+                    print(f"CreateSendTransaction: Looking up recipient by user ID: {input.recipient_user_id}")
+                    try:
+                        recipient_user = User.objects.get(id=input.recipient_user_id)
+                        # Get recipient's active personal account
+                        recipient_account = recipient_user.accounts.filter(
+                            account_type='personal',
+                            account_index=0
+                        ).first()
+                        if recipient_account and recipient_account.sui_address:
+                            recipient_address = recipient_account.sui_address
+                            print(f"CreateSendTransaction: Found recipient address by user ID: {recipient_address}")
+                        else:
+                            return CreateSendTransaction(
+                                send_transaction=None,
+                                success=False,
+                                errors=["Recipient's Sui address not found"]
+                            )
+                    except User.DoesNotExist:
+                        return CreateSendTransaction(
+                            send_transaction=None,
+                            success=False,
+                            errors=["Recipient user not found"]
+                        )
+                
+                # Priority 2: Lookup by phone number
+                elif hasattr(input, 'recipient_phone') and input.recipient_phone:
+                    print(f"CreateSendTransaction: Looking up recipient by phone: {input.recipient_phone}")
+                    # Clean and normalize phone number - remove all non-digits
+                    cleaned_phone = ''.join(filter(str.isdigit, input.recipient_phone))
+                    
+                    # Try to find user by phone
+                    try:
+                        recipient_user = User.objects.get(phone_number=cleaned_phone)
+                        # Get recipient's active personal account
+                        recipient_account = recipient_user.accounts.filter(
+                            account_type='personal',
+                            account_index=0
+                        ).first()
+                        if recipient_account and recipient_account.sui_address:
+                            recipient_address = recipient_account.sui_address
+                            print(f"CreateSendTransaction: Found recipient address by phone: {recipient_address}")
+                        else:
+                            # Confío user without address - shouldn't happen
+                            return CreateSendTransaction(
+                                send_transaction=None,
+                                success=False,
+                                errors=["Recipient's Sui address not found"]
+                            )
+                    except User.DoesNotExist:
+                        # Non-Confío user - create invitation transaction
+                        print(f"CreateSendTransaction: Phone number not found in Confío - creating invitation")
+                        # Generate a deterministic external address for this phone number
+                        import hashlib
+                        phone_hash = hashlib.sha256(cleaned_phone.encode()).hexdigest()
+                        recipient_address = f"0x{phone_hash[:64]}"
+                        # recipient_user remains None for invitation transactions
+                
+                # Priority 3: Legacy - direct Sui address (DEPRECATED)
+                elif hasattr(input, 'recipient_address') and input.recipient_address:
+                    print(f"CreateSendTransaction: WARNING - Using deprecated recipient_address field")
+                    recipient_address = input.recipient_address
+                    validate_recipient(recipient_address)
+                    # Try to find recipient user by their Sui address
+                    try:
+                        recipient_account = Account.objects.get(sui_address=recipient_address)
+                        recipient_user = recipient_account.user
+                    except Account.DoesNotExist:
+                        recipient_user = None
+                else:
+                    return CreateSendTransaction(
+                        send_transaction=None,
+                        success=False,
+                        errors=["Recipient identification required (user ID or phone number)"]
+                    )
 
                 # Determine sender type and business details
                 sender_business = None
@@ -157,6 +237,10 @@ class CreateSendTransaction(graphene.Mutation):
                         recipient_display_name = input.recipient_display_name
                     if hasattr(input, 'recipient_phone') and input.recipient_phone:
                         recipient_phone = input.recipient_phone
+                    # For non-Confío users, ensure we store the phone number
+                    if not recipient_phone and hasattr(input, 'recipient_phone') and input.recipient_phone:
+                        # Clean and normalize phone number - remove all non-digits
+                        recipient_phone = ''.join(filter(str.isdigit, input.recipient_phone))
 
                 # Use amount as provided by frontend (no automatic conversion)
                 amount_str = str(input.amount)
@@ -185,7 +269,7 @@ class CreateSendTransaction(graphene.Mutation):
                     
                     # Transaction details
                     sender_address=sender_address,
-                    recipient_address=input.recipient_address,
+                    recipient_address=recipient_address,  # Use the determined address
                     amount=amount_str,
                     token_type=input.token_type,
                     memo=input.memo or '',

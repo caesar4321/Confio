@@ -27,6 +27,7 @@ interface TransactionData {
   currency: string;
   recipient?: string;
   recipientPhone?: string;
+  recipientUserId?: string;
   sender?: string;
   recipientAddress?: string;
   senderAddress?: string;
@@ -93,7 +94,8 @@ export const TransactionSuccessScreen = () => {
         avatar: transactionData.recipient?.charAt(0) || 'F',
         phone: transactionData.recipientPhone || '', // Use actual phone number from transaction
         isOnConfio: Boolean(transactionData.isOnConfio), // Ensure proper boolean conversion
-        suiAddress: transactionData.recipientAddress // Include the Sui address!
+        userId: transactionData.recipientUserId, // Pass user ID if available
+        // suiAddress removed - server will determine this
       };
       
       console.log('TransactionSuccessScreen: handleSendAgain - friend data:', friendData);
@@ -184,6 +186,13 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
               : `Recibido de ${transactionData.sender}`
             }
           </Text>
+          
+          {transactionData.type === 'sent' && !transactionData.isOnConfio && (
+            <View style={styles.invitationNotice}>
+              <Icon name="alert-triangle" size={16} color="#fff" style={{ marginRight: 6 }} />
+              <Text style={styles.invitationNoticeText}>Tu amigo tiene 7 días para reclamar</Text>
+            </View>
+          )}
         </View>
       </View>
 
@@ -325,51 +334,36 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
           });
           return transactionData.type === 'sent' && !isOnConfio;
         })() && (
-          <View style={styles.remittanceContainer}>
-            <Text style={styles.sectionTitle}>Invitación de Remesa</Text>
+          <View style={[styles.remittanceContainer, styles.invitationCard]}>
+            <View style={styles.invitationHeader}>
+              <Icon name="alert-circle" size={24} color="#ef4444" />
+              <Text style={[styles.sectionTitle, styles.invitationCardTitle]}>¡Acción Requerida!</Text>
+            </View>
             
             <View style={styles.remittanceContent}>
-              <View style={styles.remittanceHeader}>
-                <View style={styles.remittanceIconContainer}>
-                  <Icon name="gift" size={24} color={colors.secondary} />
-                </View>
-                <View style={styles.remittanceInfo}>
-                  <Text style={styles.remittanceTitle}>¡Dinero enviado con invitación!</Text>
-                  <Text style={styles.remittanceSubtitle}>
-                    {transactionData.recipient} recibirá una invitación para reclamar ${transactionData.amount} {formatCurrency(transactionData.currency)}
-                  </Text>
-                </View>
-              </View>
+              <Text style={[styles.remittanceCardText, { fontWeight: 'bold', color: '#dc2626' }]}>
+                ⏰ Tu amigo tiene solo 7 días para reclamar el dinero o se perderá
+              </Text>
               
-              <View style={styles.remittanceDetails}>
+              <View style={[styles.remittanceDetailsBox, { backgroundColor: '#fef2f2', borderColor: '#ef4444' }]}>
+                <Text style={[styles.remittanceDetailsTitle, { color: '#dc2626' }]}>¡Avísale ahora mismo!</Text>
                 <View style={styles.remittanceDetailRow}>
-                  <Icon name="clock" size={16} color={colors.warning} />
-                  <Text style={styles.remittanceDetailText}>
-                    <Text style={styles.remittanceBold}>7 días</Text> para reclamar el dinero
-                  </Text>
+                  <Text style={styles.remittanceDetailText}>1. Envíale un mensaje con el link de invitación</Text>
                 </View>
                 <View style={styles.remittanceDetailRow}>
-                  <Icon name="smartphone" size={16} color={colors.accent} />
-                  <Text style={styles.remittanceDetailText}>
-                    Debe descargar Confío y crear una cuenta
-                  </Text>
+                  <Text style={styles.remittanceDetailText}>2. Ayúdale a crear su cuenta en Confío</Text>
                 </View>
                 <View style={styles.remittanceDetailRow}>
-                  <Icon name="check-circle" size={16} color={colors.success} />
-                  <Text style={styles.remittanceDetailText}>
-                    Transferencia <Text style={styles.remittanceBold}>100% gratuita</Text>
-                  </Text>
+                  <Text style={styles.remittanceDetailText}>3. Una vez registrado, recibirá el dinero al instante</Text>
                 </View>
               </View>
               
               <TouchableOpacity 
-                style={[styles.actionButton, { backgroundColor: colors.secondary }]}
+                style={styles.shareButton}
                 onPress={handleShareInvitation}
               >
-                <Icon name="share" size={16} color="#ffffff" />
-                <Text style={styles.actionButtonText}>
-                  Compartir invitación con {transactionData.recipient}
-                </Text>
+                <Icon name="share-2" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.shareButtonText}>Compartir invitación por WhatsApp</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -502,6 +496,20 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#ffffff',
     opacity: 0.9,
+  },
+  invitationNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  invitationNoticeText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
   },
   content: {
     paddingHorizontal: 16,
@@ -821,48 +829,66 @@ const styles = StyleSheet.create({
       },
     }),
   },
+  invitationCard: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#ef4444',
+    borderWidth: 2,
+  },
+  invitationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  invitationCardTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#ef4444',
+    marginLeft: 12,
+    marginBottom: 0,
+  },
   remittanceContent: {
     gap: 16,
   },
-  remittanceHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  remittanceCardText: {
+    fontSize: 16,
+    color: '#1f2937',
+    marginBottom: 16,
+    lineHeight: 24,
   },
-  remittanceIconContainer: {
-    width: 48,
-    height: 48,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
+  remittanceDetailsBox: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    marginBottom: 16,
   },
-  remittanceInfo: {
-    flex: 1,
-  },
-  remittanceTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: colors.text.primary,
-    marginBottom: 8,
-  },
-  remittanceSubtitle: {
+  remittanceDetailsTitle: {
     fontSize: 14,
-    color: '#6B7280',
-  },
-  remittanceDetails: {
-    gap: 12,
+    fontWeight: '600',
+    color: '#dc2626',
+    marginBottom: 12,
   },
   remittanceDetailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    marginBottom: 8,
   },
   remittanceDetailText: {
     fontSize: 14,
-    color: '#6B7280',
-    marginLeft: 8,
+    color: '#1f2937',
   },
-  remittanceBold: {
-    fontWeight: 'bold',
+  shareButton: {
+    backgroundColor: '#25D366', // WhatsApp green
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    marginTop: 4,
+  },
+  shareButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 }); 

@@ -21,8 +21,7 @@ import USDCLogo from '../assets/png/USDC.png';
 import cUSDLogo from '../assets/png/cUSD.png';
 import moment from 'moment';
 import 'moment/locale/es';
-import { useQuery, useLazyQuery } from '@apollo/client';
-import { CHECK_USERS_BY_PHONES } from '../apollo/queries';
+import { useQuery } from '@apollo/client';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -48,32 +47,6 @@ export const TransactionDetailScreen = () => {
   const insets = useSafeAreaInsets();
   const [copied, setCopied] = useState('');
   const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
-  
-  // Lazy query to look up friend's Sui address when needed
-  const [checkUsersByPhones, { loading: lookupLoading }] = useLazyQuery(CHECK_USERS_BY_PHONES);
-
-  // Helper function to look up friend's Sui address by phone
-  const lookupFriendSuiAddress = async (phone: string): Promise<string | null> => {
-    if (!phone) return null;
-    
-    try {
-      const result = await checkUsersByPhones({
-        variables: { phoneNumbers: [phone] }
-      });
-      
-      const userInfo = result.data?.checkUsersByPhones?.[0];
-      if (userInfo?.isOnConfio && userInfo.activeAccountSuiAddress) {
-        console.log('[TransactionDetail] Found Sui address for phone:', phone, userInfo.activeAccountSuiAddress);
-        return userInfo.activeAccountSuiAddress;
-      }
-      
-      console.log('[TransactionDetail] No Sui address found for phone:', phone);
-      return null;
-    } catch (error) {
-      console.error('[TransactionDetail] Error looking up Sui address:', error);
-      return null;
-    }
-  };
 
   // Get transaction type from route params
   const { transactionType, transactionData } = route.params;
@@ -1061,27 +1034,21 @@ export const TransactionDetailScreen = () => {
               {(currentTx.type === 'received' || currentTx.type === 'sent') && (
                 <TouchableOpacity 
                   style={styles.primaryAction}
-                  disabled={lookupLoading}
-                  onPress={async () => {
+                  onPress={() => {
                     // Navigate to SendToFriend screen
                     const friendName = currentTx.type === 'received' ? currentTx.from : currentTx.to;
                     const friendPhone = currentTx.type === 'received' ? currentTx.fromPhone : currentTx.toPhone;
-                    let friendAddress = currentTx.type === 'received' ? currentTx.fromAddress : currentTx.toAddress;
                     
                     // Debug logging to understand the data
                     console.log('[TransactionDetail] Navigation data:', {
                       transactionType: currentTx.type,
                       friendName,
                       friendPhone,
-                      friendAddress,
-                      isInvitedFriend: currentTx.isInvitedFriend,
-                      fromAddress: currentTx.fromAddress,
-                      toAddress: currentTx.toAddress,
-                      currentTx: currentTx
+                      isInvitedFriend: currentTx.isInvitedFriend
                     });
                     
                     // For navigation, we need to determine if this is a Confío user
-                    // If it's an invited friend (non-Confío user), we shouldn't have a suiAddress
+                    // If it's an invited friend (non-Confío user), we shouldn't navigate
                     // Note: isInvitedFriend means they are NOT on Confío (invitation transaction)
                     if (currentTx.isInvitedFriend) {
                       // This is a non-Confío friend, navigate differently
@@ -1091,44 +1058,17 @@ export const TransactionDetailScreen = () => {
                         [{ text: 'OK' }]
                       );
                     } else {
-                      // This is a Confío user - ensure we have a valid Sui address
-                      if (!friendAddress || friendAddress.length < 66) {
-                        console.log('[TransactionDetail] Missing or invalid Sui address, attempting lookup by phone:', friendPhone);
-                        
-                        if (friendPhone) {
-                          // Try to look up the Sui address by phone number
-                          const lookedUpAddress = await lookupFriendSuiAddress(friendPhone);
-                          if (lookedUpAddress) {
-                            friendAddress = lookedUpAddress;
-                            console.log('[TransactionDetail] Successfully looked up Sui address:', friendAddress);
-                          }
-                        }
-                        
-                        // If we still don't have a valid address, show error
-                        if (!friendAddress || friendAddress.length < 66) {
-                          console.error('[TransactionDetail] No valid Sui address found for Confío user');
-                          Alert.alert(
-                            'Error',
-                            'No se pudo obtener la dirección del destinatario. Por favor, intenta nuevamente.',
-                            [{ text: 'OK' }]
-                          );
-                          return;
-                        }
-                      }
-                      
+                      // This is a Confío user - we just need their phone number
+                      // The server will look up their current active Sui address
                       const friendData = {
                         name: friendName || 'Amigo',
                         avatar: currentTx.avatar || friendName?.charAt(0) || 'A',
                         isOnConfio: true,
                         phone: friendPhone || '',
-                        suiAddress: friendAddress
+                        // No userId here, but server can look up by phone
                       };
                       
-                      console.log('[TransactionDetail] Navigating to SendToFriend with data:', {
-                        friendData,
-                        tokenType: currentTx.currency.toLowerCase() === 'cusd' ? 'cusd' : 'confio',
-                        friendAddressLength: friendAddress?.length
-                      });
+                      console.log('[TransactionDetail] Navigating to SendToFriend with data:', friendData);
                       
                       navigation.navigate('SendToFriend', {
                         friend: friendData,
@@ -1139,8 +1079,7 @@ export const TransactionDetailScreen = () => {
                 >
                   <Icon name="user" size={16} color="#fff" style={styles.actionIcon} />
                   <Text style={styles.primaryActionText}>
-                    {lookupLoading ? 'Buscando dirección...' : 
-                     currentTx.type === 'received' ? `Enviar a ${currentTx.from}` : `Enviar de nuevo a ${currentTx.to}`}
+                    {currentTx.type === 'received' ? `Enviar a ${currentTx.from}` : `Enviar de nuevo a ${currentTx.to}`}
                   </Text>
                 </TouchableOpacity>
               )}
