@@ -269,11 +269,18 @@ export const AccountDetailScreen = () => {
           type = tx.direction === 'sent' ? 'sent' : 'received';
         }
         
-        // Fix invitation detection: if we have a counterpartyUser, it's not an invitation
+        // Fix invitation detection: 
+        // 1. If we have a counterpartyUser, it's not an invitation
+        // 2. If it's marked as invitation but has no phone (external wallet), it's not a real invitation
         let isActualInvitation = tx.isInvitation || false;
         if (isActualInvitation && tx.counterpartyUser && tx.counterpartyUser.id) {
           // If there's a counterparty user, this is not really an invitation
           console.log('[AccountDetail] Correcting invitation flag - counterparty user exists:', tx.counterpartyUser.id);
+          isActualInvitation = false;
+        }
+        // Check if it's an external wallet send (no phone number)
+        if (isActualInvitation && tx.direction === 'sent' && !tx.counterpartyPhone) {
+          console.log('[AccountDetail] Not an invitation - external wallet send (no phone)');
           isActualInvitation = false;
         }
         
@@ -599,6 +606,12 @@ export const AccountDetailScreen = () => {
               {transaction.invitationClaimed ? '✅ Invitación reclamada' :
                transaction.invitationReverted ? '❌ Expiró - Fondos devueltos' :
                '⚠️ Tu amigo tiene 7 días para reclamar • Avísale ya'}
+            </Text>
+          )}
+          {/* Show external wallet indicator for sends to addresses without phone */}
+          {transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && (
+            <Text style={styles.externalWalletNote}>
+              <Icon name="external-link" size={12} color="#3B82F6" /> Wallet externa
             </Text>
           )}
         </View>
@@ -1642,6 +1655,12 @@ const styles = StyleSheet.create({
     color: '#dc2626',
     marginTop: 2,
     fontWeight: 'bold',
+  },
+  externalWalletNote: {
+    fontSize: 12,
+    color: '#1E40AF',
+    marginTop: 2,
+    fontWeight: '500',
   },
   transactionAmount: {
     alignItems: 'flex-end',

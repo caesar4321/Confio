@@ -59,10 +59,11 @@ export const SendWithAddressScreen = () => {
   const insets = useSafeAreaInsets();
   const { formatNumber } = useNumberFormat();
   const tokenType: TokenType = (route.params as any)?.tokenType || 'cusd';
+  const prefilledAddress = (route.params as any)?.prefilledAddress || '';
   const config = tokenConfig[tokenType];
 
   const [amount, setAmount] = useState('');
-  const [destination, setDestination] = useState('');
+  const [destination, setDestination] = useState(prefilledAddress);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');

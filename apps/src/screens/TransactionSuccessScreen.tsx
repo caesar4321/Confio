@@ -89,24 +89,34 @@ export const TransactionSuccessScreen = () => {
   };
 
   const handleSendAgain = () => {
-    if (transactionData.type === 'sent' && transactionData.recipient) {
-      const friendData = { 
-        name: transactionData.recipient, 
-        avatar: transactionData.recipient?.charAt(0) || 'F',
-        phone: transactionData.recipientPhone || '', // Use actual phone number from transaction
-        isOnConfio: Boolean(transactionData.isOnConfio), // Ensure proper boolean conversion
-        userId: transactionData.recipientUserId, // Pass user ID if available
-        // suiAddress removed - server will determine this
-      };
-      
-      console.log('TransactionSuccessScreen: handleSendAgain - friend data:', friendData);
-      console.log('TransactionSuccessScreen: transactionData.isOnConfio:', transactionData.isOnConfio);
-      console.log('TransactionSuccessScreen: transactionData.recipientAddress:', transactionData.recipientAddress);
-      
-      (navigation as any).navigate('SendToFriend', { 
-        friend: friendData,
-        tokenType: transactionData.currency.toLowerCase() === 'cusd' ? 'cusd' : 'confio' // Use same currency as original transaction
-      });
+    if (transactionData.type === 'sent') {
+      // Check if it's an external wallet send (has address but no phone)
+      if (transactionData.recipientAddress && !transactionData.recipientPhone) {
+        console.log('TransactionSuccessScreen: handleSendAgain - navigating to SendWithAddress');
+        (navigation as any).navigate('SendWithAddress', {
+          tokenType: transactionData.currency.toLowerCase() === 'cusd' ? 'cusd' : 'confio',
+          prefilledAddress: transactionData.recipientAddress
+        });
+      } else if (transactionData.recipient) {
+        // Friend or invitation send
+        const friendData = { 
+          name: transactionData.recipient, 
+          avatar: transactionData.recipient?.charAt(0) || 'F',
+          phone: transactionData.recipientPhone || '', // Use actual phone number from transaction
+          isOnConfio: Boolean(transactionData.isOnConfio), // Ensure proper boolean conversion
+          userId: transactionData.recipientUserId, // Pass user ID if available
+          // suiAddress removed - server will determine this
+        };
+        
+        console.log('TransactionSuccessScreen: handleSendAgain - friend data:', friendData);
+        console.log('TransactionSuccessScreen: transactionData.isOnConfio:', transactionData.isOnConfio);
+        console.log('TransactionSuccessScreen: transactionData.recipientAddress:', transactionData.recipientAddress);
+        
+        (navigation as any).navigate('SendToFriend', { 
+          friend: friendData,
+          tokenType: transactionData.currency.toLowerCase() === 'cusd' ? 'cusd' : 'confio' // Use same currency as original transaction
+        });
+      }
     }
   };
 
@@ -188,7 +198,7 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
             }
           </Text>
           
-          {transactionData.type === 'sent' && !transactionData.isOnConfio && (
+          {transactionData.type === 'sent' && !transactionData.isOnConfio && transactionData.recipientPhone && (
             <View style={styles.invitationNotice}>
               <Icon name="alert-triangle" size={16} color="#fff" style={{ marginRight: 6 }} />
               <Text style={styles.invitationNoticeText}>Tu amigo tiene 7 días para reclamar</Text>
@@ -225,17 +235,15 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
                     : transactionData.sender}
                 </Text>
                 {/* Show phone number for friend transactions, address for external wallets */}
-                {transactionData.recipient ? (
-                  transactionData.recipientPhone && transactionData.recipientPhone.trim() !== '' && (
-                    <Text style={styles.participantDetails}>
-                      {transactionData.recipientPhone}
-                    </Text>
-                  )
-                ) : (
+                {transactionData.recipientPhone && transactionData.recipientPhone.trim() !== '' ? (
                   <Text style={styles.participantDetails}>
-                    {transactionData.recipientAddress} {/* Show wallet address for external transactions */}
+                    {transactionData.recipientPhone}
                   </Text>
-                )}
+                ) : transactionData.recipientAddress ? (
+                  <Text style={styles.participantDetails}>
+                    {`${transactionData.recipientAddress.slice(0, 6)}...${transactionData.recipientAddress.slice(-6)}`}
+                  </Text>
+                ) : null}
               </View>
               <View style={styles.participantIcon}>
                 <Icon 
@@ -324,16 +332,18 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
           </View>
         </View>
 
-        {/* Remittance Invitation Section - Only for non-Confío friends */}
+        {/* Remittance Invitation Section - Only for non-Confío friends with phone numbers */}
         {(() => {
           const isOnConfio = Boolean(transactionData.isOnConfio);
+          const hasPhone = Boolean(transactionData.recipientPhone);
           console.log('TransactionSuccessScreen: Checking invitation box condition:', {
             type: transactionData.type,
             isOnConfio: transactionData.isOnConfio,
             isOnConfioBoolean: isOnConfio,
-            shouldShow: transactionData.type === 'sent' && !isOnConfio
+            hasPhone: hasPhone,
+            shouldShow: transactionData.type === 'sent' && !isOnConfio && hasPhone
           });
-          return transactionData.type === 'sent' && !isOnConfio;
+          return transactionData.type === 'sent' && !isOnConfio && hasPhone;
         })() && (
           <View style={[styles.remittanceContainer, styles.invitationCard]}>
             <View style={styles.invitationHeader}>
@@ -407,7 +417,10 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
               >
                 <Icon name="user" size={16} color="#ffffff" />
                 <Text style={styles.actionButtonText}>
-                  Enviar de nuevo a {transactionData.recipient}
+                  {transactionData.recipientAddress && !transactionData.recipientPhone 
+                    ? `Enviar de nuevo a ${transactionData.recipientAddress.slice(0, 6)}...${transactionData.recipientAddress.slice(-4)}`
+                    : `Enviar de nuevo a ${transactionData.recipient}`
+                  }
                 </Text>
               </TouchableOpacity>
             )}
