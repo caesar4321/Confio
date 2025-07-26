@@ -8,6 +8,7 @@ import {
   Platform,
   Image,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -63,6 +64,7 @@ export const FriendDetailScreen = () => {
   const [transactionLimit, setTransactionLimit] = useState(20);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasReachedEnd, setHasReachedEnd] = useState(false);
+  const [showTokenSelection, setShowTokenSelection] = useState(false);
 
   // Friend data from navigation params
   const friend = {
@@ -73,19 +75,24 @@ export const FriendDetailScreen = () => {
     isOnConfio: route.params?.isOnConfio || true,
   };
 
-  // Get real transaction data from GraphQL
+  // Check if this is a device contact (not a real Confío user)
+  const isDeviceContact = friend.id.startsWith('contact_');
+  
+  // Get real transaction data from GraphQL (only if it's a real user)
   const { data: sendTransactionsData, loading: sendLoading, refetch: refetchSend, fetchMore: fetchMoreSend } = useQuery(GET_SEND_TRANSACTIONS_WITH_FRIEND, {
     variables: {
       friendUserId: friend.id,
       limit: transactionLimit
-    }
+    },
+    skip: isDeviceContact || !friend.isOnConfio // Skip query for device contacts or non-Confío users
   });
 
   const { data: paymentTransactionsData, loading: paymentLoading, refetch: refetchPayment, fetchMore: fetchMorePayment } = useQuery(GET_PAYMENT_TRANSACTIONS_WITH_FRIEND, {
     variables: {
       friendUserId: friend.id,
       limit: transactionLimit
-    }
+    },
+    skip: isDeviceContact || !friend.isOnConfio // Skip query for device contacts or non-Confío users
   });
 
   // Transform real transactions into the format expected by the UI
@@ -206,7 +213,13 @@ export const FriendDetailScreen = () => {
   };
 
   const handleSendMoney = () => {
-    // Navigate to SendToFriend screen
+    // Show token selection modal
+    setShowTokenSelection(true);
+  };
+
+  const handleTokenSelect = (tokenType: 'cusd' | 'confio') => {
+    setShowTokenSelection(false);
+    // Navigate to SendToFriend screen with selected token
     navigation.navigate('SendToFriend', { 
       friend: {
         name: friend.name,
@@ -214,7 +227,7 @@ export const FriendDetailScreen = () => {
         isOnConfio: friend.isOnConfio,
         phone: friend.phone
       },
-      tokenType: 'cusd' 
+      tokenType: tokenType 
     });
   };
 
@@ -222,6 +235,13 @@ export const FriendDetailScreen = () => {
     setRefreshing(true);
     setTransactionLimit(20); // Reset to initial limit
     setHasReachedEnd(false); // Reset end flag
+    
+    // Don't refetch for device contacts or non-Confío users
+    if (isDeviceContact || !friend.isOnConfio) {
+      setRefreshing(false);
+      return;
+    }
+    
     try {
       await Promise.all([
         refetchSend(),
@@ -236,6 +256,11 @@ export const FriendDetailScreen = () => {
 
   const loadMoreTransactions = async () => {
     if (loadingMore || hasReachedEnd) return;
+    
+    // Don't fetch more for device contacts or non-Confío users
+    if (isDeviceContact || !friend.isOnConfio) {
+      return;
+    }
     
     setLoadingMore(true);
     const newLimit = transactionLimit + 10;
@@ -305,29 +330,14 @@ export const FriendDetailScreen = () => {
           </View>
         </View>
 
-        {/* Action Buttons */}
-        <View style={styles.actionButtonsContainer}>
+        {/* Send Button */}
+        <View style={styles.sendButtonContainer}>
           <TouchableOpacity 
-            style={styles.actionButton}
+            style={styles.sendButton}
             onPress={handleSendMoney}
           >
-            <View style={[styles.actionIcon, { backgroundColor: colors.primary }]}>
-              <Icon name="send" size={20} color="#ffffff" />
-            </View>
-            <Text style={styles.actionButtonText}>Enviar Dinero</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={() => {
-              // Navigate to create invoice for this friend
-              navigation.navigate('CreateInvoice');
-            }}
-          >
-            <View style={[styles.actionIcon, { backgroundColor: colors.secondary }]}>
-              <Icon name="file-text" size={20} color="#ffffff" />
-            </View>
-            <Text style={styles.actionButtonText}>Solicitar Pago</Text>
+            <Icon name="send" size={20} color="#ffffff" style={{ marginRight: 8 }} />
+            <Text style={styles.sendButtonText}>Enviar</Text>
           </TouchableOpacity>
         </View>
 
@@ -352,7 +362,10 @@ export const FriendDetailScreen = () => {
                 <Icon name="inbox" size={32} color="#9ca3af" />
                 <Text style={styles.emptyTransactionsText}>No hay transacciones aún</Text>
                 <Text style={styles.emptyTransactionsSubtext}>
-                  Aquí aparecerán las transacciones que realices con {friend.name}
+                  {isDeviceContact ? 
+                    `Invita a ${friend.name} a Confío para empezar a enviar dinero` :
+                    `Aquí aparecerán las transacciones que realices con ${friend.name}`
+                  }
                 </Text>
               </View>
             ) : (
@@ -409,6 +422,72 @@ export const FriendDetailScreen = () => {
           )}
         </View>
       </ScrollView>
+      
+      {/* Token Selection Modal */}
+      <Modal
+        visible={showTokenSelection}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowTokenSelection(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Selecciona la moneda</Text>
+              <TouchableOpacity onPress={() => setShowTokenSelection(false)}>
+                <Icon name="x" size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.modalSubtitle}>
+              ¿Qué moneda quieres enviar a {friend.name}?
+            </Text>
+            
+            <View style={styles.tokenOptions}>
+              <TouchableOpacity 
+                style={styles.tokenOption}
+                onPress={() => handleTokenSelect('cusd')}
+              >
+                <View style={styles.tokenInfo}>
+                  <Image source={cUSDLogo} style={styles.tokenLogo} />
+                  <View style={styles.tokenDetails}>
+                    <Text style={styles.tokenName}>Confío Dollar</Text>
+                    <Text style={styles.tokenSymbol}>$cUSD</Text>
+                    <Text style={styles.tokenDescription}>
+                      Moneda estable para pagos diarios
+                    </Text>
+                  </View>
+                </View>
+                <Icon name="chevron-right" size={20} color="#6B7280" />
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.tokenOption}
+                onPress={() => handleTokenSelect('confio')}
+              >
+                <View style={styles.tokenInfo}>
+                  <Image source={CONFIOLogo} style={styles.tokenLogo} />
+                  <View style={styles.tokenDetails}>
+                    <Text style={styles.tokenName}>Confío</Text>
+                    <Text style={styles.tokenSymbol}>$CONFIO</Text>
+                    <Text style={styles.tokenDescription}>
+                      Moneda de gobernanza y utilidad
+                    </Text>
+                  </View>
+                </View>
+                <Icon name="chevron-right" size={20} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.cancelButton}
+              onPress={() => setShowTokenSelection(false)}
+            >
+              <Text style={styles.cancelButtonText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -470,43 +549,33 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     opacity: 0.9,
   },
-  actionButtonsContainer: {
-    flexDirection: 'row',
+  sendButtonContainer: {
     paddingHorizontal: 16,
     marginBottom: 16,
-    gap: 12,
   },
-  actionButton: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
+  sendButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 12,
     padding: 16,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     ...Platform.select({
       ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
+        shadowColor: colors.primary,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
       },
       android: {
-        elevation: 2,
+        elevation: 4,
       },
     }),
   },
-  actionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  actionButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1f2937',
-    textAlign: 'center',
+  sendButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
   },
   transactionsSection: {
     paddingHorizontal: 16,
@@ -632,6 +701,87 @@ const styles = StyleSheet.create({
   },
   viewMoreButtonText: {
     fontSize: 14,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 24,
+    width: '90%',
+    maxWidth: 400,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1f2937',
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: '#6b7280',
+    marginBottom: 24,
+  },
+  tokenOptions: {
+    marginBottom: 16,
+  },
+  tokenOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  tokenInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  tokenLogo: {
+    width: 48,
+    height: 48,
+    marginRight: 16,
+  },
+  tokenDetails: {
+    flex: 1,
+  },
+  tokenName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 2,
+  },
+  tokenSymbol: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 4,
+  },
+  tokenDescription: {
+    fontSize: 12,
+    color: '#9ca3af',
+  },
+  cancelButton: {
+    backgroundColor: '#f3f4f6',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
     fontWeight: '600',
     color: '#6b7280',
   },
