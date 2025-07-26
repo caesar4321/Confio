@@ -6,6 +6,7 @@ The `urlpatterns` list routes URLs to views. For more information please see:
 from django.contrib import admin
 from django.urls import path, include, re_path
 from django.views.decorators.csrf import csrf_exempt
+from django.contrib.admin.views.decorators import staff_member_required
 from graphene_django.views import GraphQLView
 from .views import terms_view, privacy_view, deletion_view
 from django.views.generic import TemplateView
@@ -37,12 +38,21 @@ class LoggingGraphQLView(GraphQLView):
                 logger.error("Error parsing GraphQL request: %s", str(e))
         return super().dispatch(request, *args, **kwargs)
 
+from .admin_dashboard import ConfioAdminSite
+
+# Create simple dashboard views without custom admin site
+confio_admin = ConfioAdminSite()
+
 urlpatterns = [
+    path('admin/dashboard/', staff_member_required(confio_admin.dashboard_view), name='admin_dashboard'),
+    path('admin/p2p-analytics/', staff_member_required(confio_admin.p2p_analytics_view), name='admin_p2p_analytics'),
+    path('admin/user-analytics/', staff_member_required(confio_admin.user_analytics_view), name='admin_user_analytics'),
+    path('admin/transaction-analytics/', staff_member_required(confio_admin.transaction_analytics_view), name='admin_transaction_analytics'),
     path('admin/', admin.site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
     path('prover/', include('prover.urls')),
-    re_path(r'^.*$', TemplateView.as_view(template_name='index.html')),
     path('terms/', terms_view, name='terms'),
     path('privacy/', privacy_view, name='privacy'),
     path('deletion/', deletion_view, name='deletion'),
+    re_path(r'^.*$', TemplateView.as_view(template_name='index.html')),
 ] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT) + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

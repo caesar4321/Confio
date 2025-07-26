@@ -7,8 +7,22 @@ from django.contrib.auth import get_user_model
 
 logger = logging.getLogger(__name__)
 
-def jwt_payload_handler(user, context=None):
-    """Add auth_token_version and account context to the JWT payload"""
+def jwt_payload_handler(*args, **kwargs):
+    """Add auth_token_version and account context to the JWT payload
+    
+    This function supports both old and new versions of django-graphql-jwt:
+    - Old version: only passes user as argument
+    - New version: passes user and context as arguments
+    """
+    # Handle both calling conventions
+    if len(args) == 1:
+        user = args[0]
+        context = kwargs.get('context', None)
+    elif len(args) == 2:
+        user = args[0]
+        context = args[1]
+    else:
+        raise ValueError("jwt_payload_handler expects 1 or 2 positional arguments")
     logger.info(f"jwt_payload_handler called with user: id={user.id}, username={user.username}, auth_token_version={getattr(user, 'auth_token_version', None)}")
     
     # Ensure user has auth_token_version
@@ -66,6 +80,12 @@ def jwt_payload_handler(user, context=None):
     }
     logger.info(f"Generated JWT payload: {payload}")
     return payload
+
+
+# Wrapper function for backward compatibility with older django-graphql-jwt versions
+def jwt_payload_handler_legacy(user):
+    """Legacy version that only accepts user argument"""
+    return jwt_payload_handler(user, context=None)
 
 def refresh_token_payload_handler(user, account_type='personal', account_index=0, business_id=None):
     """Generate a refresh token payload with longer expiration and account context"""

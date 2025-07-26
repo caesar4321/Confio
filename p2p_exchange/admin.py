@@ -3,6 +3,9 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.db import models
+from django.utils import timezone
+from django.contrib import messages
+from config.admin_mixins import EnhancedAdminMixin, BulkUpdateMixin, InlineCountMixin
 from .models import (
     P2PPaymentMethod, 
     P2POffer, 
@@ -17,7 +20,7 @@ from .models import (
 )
 
 @admin.register(P2PPaymentMethod)
-class P2PPaymentMethodAdmin(admin.ModelAdmin):
+class P2PPaymentMethodAdmin(EnhancedAdminMixin, BulkUpdateMixin, admin.ModelAdmin):
     list_display = ['name', 'display_name', 'country_display', 'provider_type', 'is_active', 'offer_count', 'created_at']
     list_filter = ['is_active', 'provider_type', 'country_code', 'created_at']
     search_fields = ['name', 'display_name', 'country_code']
@@ -45,7 +48,7 @@ class P2PPaymentMethodAdmin(admin.ModelAdmin):
         return super().get_queryset(request).prefetch_related('offers').select_related('bank__country', 'country')
 
 @admin.register(P2POffer)
-class P2POfferAdmin(admin.ModelAdmin):
+class P2POfferAdmin(EnhancedAdminMixin, admin.ModelAdmin):
     list_display = [
         'id', 'offer_entity_display', 'exchange_type_display', 'token_type_display', 
         'country_display', 'rate_display', 'amount_range_display', 
@@ -332,7 +335,7 @@ class DisputedTradeFilter(admin.SimpleListFilter):
         return queryset
 
 @admin.register(P2PTrade)
-class P2PTradeAdmin(admin.ModelAdmin):
+class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
     list_display = ['id', 'crypto_amount_display', 'country_display', 'trade_summary', 'status_display', 'dispute_indicator', 'time_remaining', 'created_at', 'completed_at']
     list_filter = [DisputedTradeFilter, 'status', 'created_at', 'completed_at', 'offer__token_type', 'country_code', 'payment_method']
     search_fields = [
