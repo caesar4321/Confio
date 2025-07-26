@@ -397,19 +397,31 @@ export const ContactsScreen = () => {
                 return;
               }
               
-              console.log(`[TEST] Creating test users for ${nonConfioPhones.length} phone numbers`);
+              console.log(`[TEST] Creating test users for ${nonConfioPhones.length} phone numbers:`, nonConfioPhones);
               
               const result = await createTestUsers({
                 variables: { phoneNumbers: nonConfioPhones }
               });
               
+              console.log('[TEST] Mutation result:', result);
+              
               if (result.data?.createTestUsers?.success) {
                 const createdCount = result.data.createTestUsers.createdCount;
-                Alert.alert(
-                  'Éxito',
-                  `Se crearon ${createdCount} usuarios de prueba.\n\nAhora sincroniza los contactos para verlos.`,
-                  [{ text: 'OK', onPress: () => handleRefresh() }]
-                );
+                const errorMsg = result.data.createTestUsers.error;
+                
+                if (createdCount > 0) {
+                  Alert.alert(
+                    'Éxito',
+                    `Se crearon ${createdCount} usuarios de prueba.\n\nAhora sincroniza los contactos para verlos.`,
+                    [{ text: 'OK', onPress: () => handleRefresh() }]
+                  );
+                } else {
+                  Alert.alert(
+                    'Sin usuarios creados',
+                    errorMsg || 'No se crearon usuarios nuevos. Es posible que todos los números ya existan en la base de datos.',
+                    [{ text: 'OK' }]
+                  );
+                }
               } else {
                 Alert.alert('Error', result.data?.createTestUsers?.error || 'Error al crear usuarios de prueba');
               }

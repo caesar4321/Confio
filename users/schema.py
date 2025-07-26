@@ -1199,16 +1199,34 @@ class CreateTestUsers(graphene.Mutation):
 			return CreateTestUsers(success=False, error="Authentication required", created_count=0, users_created=[])
 		
 		created_users = []
+		skipped_reasons = []
 		
 		for phone in phone_numbers:
 			# Clean the phone number
 			cleaned_phone = ''.join(filter(str.isdigit, phone))
 			if not cleaned_phone:
+				skipped_reasons.append(f"{phone}: Empty after cleaning")
 				continue
 			
-			# Check if user already exists
+			# Check if user already exists (try multiple formats)
+			existing_user = None
+			
+			# Try exact match
 			existing_user = User.objects.filter(phone_number=cleaned_phone).first()
+			
+			# Try without country code (last 10 digits for Venezuelan numbers)
+			if not existing_user and len(cleaned_phone) > 10:
+				phone_without_code = cleaned_phone[-10:]
+				existing_user = User.objects.filter(phone_number=phone_without_code).first()
+			
+			# Try with Venezuelan country code
+			if not existing_user and not cleaned_phone.startswith('58'):
+				phone_with_ve_code = '58' + cleaned_phone
+				existing_user = User.objects.filter(phone_number=phone_with_ve_code).first()
+			
 			if existing_user:
+				skipped_reasons.append(f"{phone}: User already exists with username {existing_user.username}")
+				logger.info(f"User already exists for phone {cleaned_phone}: {existing_user.username}")
 				continue
 			
 			# Create a test user
@@ -1256,11 +1274,52 @@ class CreateTestUsers(graphene.Mutation):
 				logger.error(f"Error creating test user for {phone}: {str(e)}")
 				continue
 		
+		# Build summary message
+		summary = f"Created {len(created_users)} users."
+		if skipped_reasons:
+			summary += f" Skipped {len(skipped_reasons)} phones: " + "; ".join(skipped_reasons[:5])
+			if len(skipped_reasons) > 5:
+				summary += f" and {len(skipped_reasons) - 5} more..."
+		
 		return CreateTestUsers(
 			success=True,
-			error=None,
+			error=summary if skipped_reasons else None,
 			created_count=len(created_users),
 			users_created=created_users
+		)
+
+
+class DeleteTestUsers(graphene.Mutation):
+	"""Delete test users - FOR TESTING ONLY"""
+	class Arguments:
+		pass  # No arguments needed, deletes all test users
+	
+	success = graphene.Boolean()
+	error = graphene.String()
+	deleted_count = graphene.Int()
+	
+	@classmethod
+	def mutate(cls, root, info):
+		# Only allow in development/testing
+		from django.conf import settings
+		if not settings.DEBUG:
+			return DeleteTestUsers(
+				success=False, 
+				error="This mutation is only available in DEBUG mode",
+				deleted_count=0
+			)
+		
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return DeleteTestUsers(success=False, error="Authentication required", deleted_count=0)
+		
+		# Delete all test users (username starts with 'test_')
+		deleted_count = User.objects.filter(username__startswith='test_').delete()[0]
+		
+		return DeleteTestUsers(
+			success=True,
+			error=None,
+			deleted_count=deleted_count
 		)
 
 
@@ -1318,3 +1377,4 @@ class Mutation(graphene.ObjectType):
 	
 	# Test mutations (only in DEBUG mode)
 	create_test_users = CreateTestUsers.Field()
+	delete_test_users = DeleteTestUsers.Field()
