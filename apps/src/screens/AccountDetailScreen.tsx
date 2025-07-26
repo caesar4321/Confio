@@ -469,7 +469,7 @@ export const AccountDetailScreen = () => {
     }
   }, [sendTransactionsData, paymentTransactionsData, transactionLimit, loadingMore, route.params.accountType]);
 
-  const TransactionItem = ({ transaction, onPress }: { transaction: Transaction; onPress: () => void }) => {
+  const TransactionItem = ({ transaction }: { transaction: Transaction }) => {
     // Format the date properly
     const formattedDate = moment(transaction.date).format('DD/MM/YYYY');
     const formattedTime = transaction.time;
@@ -505,8 +505,43 @@ export const AccountDetailScreen = () => {
       return baseTitle;
     };
     
+    const navigation = useNavigation();
+    
+    const handlePress = () => {
+      const params = {
+        transactionType: transaction.type,
+        transactionData: {
+          type: transaction.type,
+          from: transaction.type === 'received' || (transaction.type === 'payment' && transaction.amount.startsWith('+')) 
+            ? contactInfo.displayName 
+            : transaction.from,
+          to: transaction.type === 'sent' || (transaction.type === 'payment' && transaction.amount.startsWith('-')) 
+            ? contactInfo.displayName 
+            : transaction.to,
+          amount: transaction.amount,
+          currency: transaction.currency,
+          date: moment(transaction.date).format('DD/MM/YYYY'),
+          time: transaction.time,
+          timestamp: transaction.date,
+          status: transaction.status,
+          hash: transaction.hash,
+          fromAddress: transaction.from ? '0x1a2b3c4d...7890abcd' : undefined,
+          toAddress: transaction.to ? '0x9e8f7c6b...5432dcba' : undefined,
+          note: transaction.type === 'received' ? 'Pago por almuerzo - Gracias! 🍕' : 
+                transaction.type === 'sent' ? 'Pago servicios freelance' : undefined,
+          avatar: transaction.from ? transaction.from.charAt(0) : 
+                 transaction.to ? transaction.to.charAt(0) : undefined,
+          location: transaction.type === 'payment' ? 'Av. Libertador, Caracas' : undefined,
+          merchantId: transaction.type === 'payment' ? 'SUP001' : undefined,
+          exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1 cUSD' : undefined
+        }
+      };
+      // @ts-ignore - Navigation type mismatch, but works at runtime
+      navigation.navigate('TransactionDetail', params);
+    };
+    
     return (
-      <TouchableOpacity style={styles.transactionItem} onPress={onPress}>
+      <TouchableOpacity style={styles.transactionItem} onPress={handlePress}>
         <View style={styles.transactionIconContainer}>
           {getTransactionIcon(transaction)}
         </View>
@@ -1005,43 +1040,6 @@ export const AccountDetailScreen = () => {
                       <TransactionItem 
                         key={`${sectionIndex}-${index}`} 
                         transaction={transaction} 
-                        onPress={() => {
-                          const params = {
-                            transactionType: transaction.type,
-                            transactionData: {
-                              type: transaction.type,
-                              from: transaction.type === 'received' || (transaction.type === 'payment' && transaction.amount.startsWith('+')) 
-                                ? contactInfo.displayName 
-                                : transaction.from,
-                              to: transaction.type === 'sent' || (transaction.type === 'payment' && transaction.amount.startsWith('-')) 
-                                ? contactInfo.displayName 
-                                : transaction.to,
-                              amount: transaction.amount,
-                              currency: transaction.currency,
-                              date: moment(transaction.date).format('DD/MM/YYYY'),
-                              time: transaction.time,
-                              timestamp: transaction.date, // Pass full timestamp for relative time calculation
-                              status: transaction.status,
-                              hash: transaction.hash,
-                              // Add additional fields that TransactionDetailScreen expects
-                              fromAddress: transaction.from ? '0x1a2b3c4d...7890abcd' : undefined,
-                              toAddress: transaction.to ? '0x9876543a...bcdef123' : undefined,
-                              blockNumber: '2,847,392',
-                              gasUsed: '21,000',
-                              gasFee: '0.001',
-                              confirmations: 127,
-                              note: transaction.type === 'received' ? 'Pago por almuerzo - Gracias! 🍕' : 
-                                    transaction.type === 'sent' ? 'Pago servicios freelance' : undefined,
-                              avatar: transaction.from ? transaction.from.charAt(0) : 
-                                     transaction.to ? transaction.to.charAt(0) : undefined,
-                              location: transaction.type === 'payment' ? 'Av. Libertador, Caracas' : undefined,
-                              merchantId: transaction.type === 'payment' ? 'SUP001' : undefined,
-                              exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1 cUSD' : undefined
-                            }
-                          };
-                          // @ts-ignore - Navigation type mismatch, but works at runtime
-                          navigation.navigate('TransactionDetail', params);
-                        }} 
                       />
                     ))}
                   </View>
