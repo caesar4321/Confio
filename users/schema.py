@@ -1275,11 +1275,18 @@ class CreateTestUsers(graphene.Mutation):
 				
 				# Create personal account
 				from .models import Account
+				import hashlib
+				
+				# Generate a valid Sui address using hash of phone number
+				# Sui addresses are 0x + 64 hex characters (32 bytes)
+				phone_hash = hashlib.sha256(cleaned_phone.encode()).hexdigest()
+				test_sui_address = f"0x{phone_hash}"
+				
 				personal_account = Account.objects.create(
 					user=new_user,
 					account_type='personal',
 					account_index=0,
-					sui_address=f"0xtest{cleaned_phone[-8:]}{'0' * 56}"  # Mock Sui address
+					sui_address=test_sui_address  # Valid Sui address format
 				)
 				
 				created_users.append(UserByPhoneType(
