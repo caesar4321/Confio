@@ -185,6 +185,16 @@ class InvalidateAuthTokens(graphene.Mutation):
 		except Exception as e:
 			return InvalidateAuthTokens(success=False, error=str(e))
 
+class UserByPhoneType(graphene.ObjectType):
+	phone_number = graphene.String()
+	user_id = graphene.ID()
+	username = graphene.String()
+	first_name = graphene.String()
+	last_name = graphene.String()
+	is_on_confio = graphene.Boolean()
+	active_account_id = graphene.ID()
+	active_account_sui_address = graphene.String()
+
 class Query(graphene.ObjectType):
 	me = graphene.Field(UserType)
 	business = graphene.Field(BusinessType, id=graphene.ID(required=True))
@@ -204,6 +214,9 @@ class Query(graphene.ObjectType):
 	banks = graphene.List(BankType, country_code=graphene.String())
 	user_bank_accounts = graphene.List(BankInfoType, account_id=graphene.ID())
 	bank_info = graphene.Field(BankInfoType, id=graphene.ID(required=True))
+	
+	# Contact sync queries
+	check_users_by_phones = graphene.List(UserByPhoneType, phone_numbers=graphene.List(graphene.String, required=True))
 
 	def resolve_legalDocument(self, info, docType, language=None):
 		logger.info(f"Received legal document request for type: {docType}, language: {language}")
@@ -378,6 +391,68 @@ class Query(graphene.ObjectType):
 			)
 		except BankInfo.DoesNotExist:
 			return None
+
+	def resolve_check_users_by_phones(self, info, phone_numbers):
+		"""Check which phone numbers belong to Confío users"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return []
+		
+		results = []
+		
+		# Clean and normalize phone numbers
+		for phone in phone_numbers:
+			# Clean the phone number - remove all non-digits
+			cleaned_phone = ''.join(filter(str.isdigit, phone))
+			
+			if not cleaned_phone:
+				continue
+			
+			# Try to find user by phone number
+			# Check both with and without country code
+			found_user = None
+			
+			# First, try exact match
+			found_user = User.objects.filter(phone_number=cleaned_phone).first()
+			
+			# If not found, try without country code (last 10 digits for Venezuelan numbers)
+			if not found_user and len(cleaned_phone) > 10:
+				phone_without_code = cleaned_phone[-10:]
+				found_user = User.objects.filter(phone_number=phone_without_code).first()
+			
+			# If not found, try with Venezuelan country code
+			if not found_user and not cleaned_phone.startswith('58'):
+				phone_with_ve_code = '58' + cleaned_phone
+				found_user = User.objects.filter(phone_number=phone_with_ve_code).first()
+			
+			if found_user:
+				# Get the user's active account
+				active_account = found_user.accounts.filter(account_type='personal', account_index=0).first()
+				
+				results.append(UserByPhoneType(
+					phone_number=phone,  # Return original phone number for matching
+					user_id=found_user.id,
+					username=found_user.username,
+					first_name=found_user.first_name,
+					last_name=found_user.last_name,
+					is_on_confio=True,
+					active_account_id=active_account.id if active_account else None,
+					active_account_sui_address=active_account.sui_address if active_account else None
+				))
+			else:
+				# User not found on Confío
+				results.append(UserByPhoneType(
+					phone_number=phone,
+					user_id=None,
+					username=None,
+					first_name=None,
+					last_name=None,
+					is_on_confio=False,
+					active_account_id=None,
+					active_account_sui_address=None
+				))
+		
+		return results
 
 class UpdatePhoneNumber(graphene.Mutation):
 	class Arguments:

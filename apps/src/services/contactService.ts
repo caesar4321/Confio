@@ -10,6 +10,10 @@ interface StoredContact {
   normalizedPhones: string[];
   avatar?: string;
   lastSynced: string;
+  isOnConfio?: boolean;
+  confioUserId?: string;
+  confioUsername?: string;
+  confioSuiAddress?: string;
 }
 
 interface ContactMap {
@@ -19,6 +23,8 @@ interface ContactMap {
 const CONTACTS_KEYCHAIN_SERVICE = 'com.confio.contacts';
 const CONTACTS_KEYCHAIN_KEY = 'user_contacts';
 const CONTACT_PERMISSION_STATUS_KEY = 'contact_permission_status';
+const LAST_SYNC_TIME_KEY = 'last_sync_time';
+const SYNC_INTERVAL_HOURS = 1; // Sync every 1 hour
 
 export class ContactService {
   private static instance: ContactService;
@@ -149,9 +155,60 @@ export class ContactService {
   }
 
   /**
+   * Check which phone numbers are Confío users
+   */
+  async checkConfioUsers(phoneNumbers: string[], apolloClient?: any): Promise<Map<string, any>> {
+    const confioUsersMap = new Map<string, any>();
+    
+    if (!apolloClient || phoneNumbers.length === 0) {
+      return confioUsersMap;
+    }
+    
+    try {
+      // Import the query dynamically to avoid circular dependencies
+      const { CHECK_USERS_BY_PHONES } = await import('../apollo/queries');
+      
+      // Query the server in batches of 50 phone numbers
+      const batchSize = 50;
+      const totalBatches = Math.ceil(phoneNumbers.length / batchSize);
+      console.log(`[SYNC] Will check users in ${totalBatches} batches`);
+      
+      for (let i = 0; i < phoneNumbers.length; i += batchSize) {
+        const batch = phoneNumbers.slice(i, i + batchSize);
+        const batchNum = Math.floor(i / batchSize) + 1;
+        console.log(`[SYNC] Checking batch ${batchNum}/${totalBatches} with ${batch.length} phone numbers`);
+        
+        const result = await apolloClient.query({
+          query: CHECK_USERS_BY_PHONES,
+          variables: { phoneNumbers: batch },
+          fetchPolicy: 'network-only'
+        });
+        
+        if (result.data?.checkUsersByPhones) {
+          result.data.checkUsersByPhones.forEach((userInfo: any) => {
+            if (userInfo.isOnConfio) {
+              confioUsersMap.set(userInfo.phoneNumber, {
+                userId: userInfo.userId,
+                username: userInfo.username,
+                firstName: userInfo.firstName,
+                lastName: userInfo.lastName,
+                suiAddress: userInfo.activeAccountSuiAddress
+              });
+            }
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error checking Confío users:', error);
+    }
+    
+    return confioUsersMap;
+  }
+
+  /**
    * Sync contacts from device and store in keychain
    */
-  async syncContacts(): Promise<boolean> {
+  async syncContacts(apolloClient?: any): Promise<boolean> {
     try {
       const hasPermission = await this.hasContactPermission();
       if (!hasPermission) {
@@ -169,6 +226,7 @@ export class ContactService {
       
       // Process and normalize contacts
       const contactMap: ContactMap = {};
+      const allPhoneNumbers: string[] = [];
       
       for (const contact of contacts) {
         if (!contact || !contact.phoneNumbers || contact.phoneNumbers.length === 0) {
@@ -186,6 +244,7 @@ export class ContactService {
         contact.phoneNumbers.forEach(phoneObj => {
           const phone = phoneObj.number;
           phones.push(phone);
+          allPhoneNumbers.push(phone); // Collect all phone numbers for batch checking
           
           // Try to normalize the phone number
           try {
@@ -219,6 +278,7 @@ export class ContactService {
             normalizedPhones,
             avatar: contact.hasThumbnail ? contact.thumbnailPath : undefined,
             lastSynced: new Date().toISOString(),
+            isOnConfio: false, // Default to false, will be updated later
           };
 
           // Map by all normalized phone numbers for easy lookup
@@ -226,6 +286,38 @@ export class ContactService {
             contactMap[phone] = storedContact;
           });
         }
+      }
+      
+      // Check which contacts are Confío users
+      if (apolloClient && allPhoneNumbers.length > 0) {
+        console.log(`[SYNC] Checking ${allPhoneNumbers.length} phone numbers against Confío database...`);
+        const startCheck = Date.now();
+        const confioUsersMap = await this.checkConfioUsers(allPhoneNumbers, apolloClient);
+        console.log(`[SYNC] Checked users in ${Date.now() - startCheck}ms`);
+        
+        // Update contacts with Confío user information
+        confioUsersMap.forEach((userInfo, phoneNumber) => {
+          // Find all contacts that match this phone number
+          Object.keys(contactMap).forEach(key => {
+            const contact = contactMap[key];
+            if (contact.phoneNumbers && (contact.phoneNumbers.includes(phoneNumber) || contact.normalizedPhones.includes(phoneNumber))) {
+              contact.isOnConfio = true;
+              contact.confioUserId = userInfo.userId;
+              contact.confioUsername = userInfo.username;
+              contact.confioSuiAddress = userInfo.suiAddress;
+              
+              // If the Confío user has a name, use it instead of the device contact name
+              if (userInfo.firstName || userInfo.lastName) {
+                const confioName = `${userInfo.firstName || ''} ${userInfo.lastName || ''}`.trim();
+                if (confioName) {
+                  contact.name = confioName;
+                }
+              }
+            }
+          });
+        });
+        
+        console.log(`Found ${confioUsersMap.size} Confío users among contacts`);
       }
 
       // Store in keychain
@@ -239,6 +331,13 @@ export class ContactService {
       // Update cache
       this.contactsCache = contactMap;
       this.lastSyncTime = new Date();
+      
+      // Store last sync time in keychain
+      await Keychain.setInternetCredentials(
+        CONTACTS_KEYCHAIN_SERVICE + '_sync_time',
+        LAST_SYNC_TIME_KEY,
+        this.lastSyncTime.toISOString()
+      );
 
       // Create array of unique contacts for faster retrieval
       const uniqueContactsMap = new Map<string, StoredContact>();
@@ -569,13 +668,31 @@ export class ContactService {
   /**
    * Check if we should sync contacts (e.g., once per day)
    */
-  shouldSyncContacts(): boolean {
-    if (!this.lastSyncTime) {
+  async shouldSyncContacts(): Promise<boolean> {
+    try {
+      // First check in-memory cache
+      if (this.lastSyncTime) {
+        const hoursSinceLastSync = (new Date().getTime() - this.lastSyncTime.getTime()) / (1000 * 60 * 60);
+        return hoursSinceLastSync >= SYNC_INTERVAL_HOURS;
+      }
+      
+      // Check persisted last sync time
+      const credentials = await Keychain.getInternetCredentials(CONTACTS_KEYCHAIN_SERVICE + '_sync_time');
+      if (credentials && credentials.username === LAST_SYNC_TIME_KEY) {
+        const lastSyncTimeStr = credentials.password;
+        const lastSyncTime = new Date(lastSyncTimeStr);
+        this.lastSyncTime = lastSyncTime; // Update in-memory cache
+        
+        const hoursSinceLastSync = (new Date().getTime() - lastSyncTime.getTime()) / (1000 * 60 * 60);
+        return hoursSinceLastSync >= SYNC_INTERVAL_HOURS;
+      }
+      
+      // No sync time found, should sync
       return true;
+    } catch (error) {
+      console.error('Error checking last sync time:', error);
+      return true; // Sync on error
     }
-    
-    const hoursSinceLastSync = (new Date().getTime() - this.lastSyncTime.getTime()) / (1000 * 60 * 60);
-    return hoursSinceLastSync >= 24; // Sync once per day
   }
 
   /**

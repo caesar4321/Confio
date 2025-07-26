@@ -9,6 +9,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import ContactService, { contactService } from '../services/contactService';
 import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { useContactNames } from '../hooks/useContactName';
+import { useApolloClient } from '@apollo/client';
 
 type ContactsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -135,6 +136,7 @@ const SearchInput = React.memo(({
 
 export const ContactsScreen = () => {
   const navigation = useNavigation<ContactsScreenNavigationProp>();
+  const apolloClient = useApolloClient();
   const [searchTerm, setSearchTerm] = useState('');
   
   // Stable callback for search updates
@@ -224,10 +226,11 @@ export const ContactsScreen = () => {
         }
         
         // Check if we should sync in background
-        if (contactService.shouldSyncContacts()) {
+        const shouldSync = await contactService.shouldSyncContacts();
+        if (shouldSync) {
           console.log('[PERF] Starting background sync');
           // Sync in background without blocking UI
-          contactService.syncContacts().then(async () => {
+          contactService.syncContacts(apolloClient).then(async () => {
             console.log('[PERF] Background sync completed');
             // Refresh display with new data
             const updatedContacts = await contactService.getAllContacts();
@@ -249,6 +252,8 @@ export const ContactsScreen = () => {
     }
   };
 
+  // No longer need the query here since contacts are checked during sync
+
   // Display contacts from cache or fresh sync - OPTIMIZED WITH SINGLE STATE UPDATE
   const displayContacts = async (allContacts: any[]) => {
     const startTime = Date.now();
@@ -262,24 +267,25 @@ export const ContactsScreen = () => {
     console.log(`[PERF] Starting to format ${allContacts.length} contacts`);
     const formatStart = Date.now();
     
-    // TODO: Match with actual Confío users from API
-    // For now, we'll show all contacts as non-Confío friends
+    // Format contacts using the cached Confío status
     const formattedContacts = allContacts.map((contact, index) => ({
-      id: `contact_${index}`,
+      id: contact.isOnConfio && contact.confioUserId ? contact.confioUserId : `contact_${index}`,
       name: contact.name || 'Sin nombre',
       avatar: contact.name ? contact.name.charAt(0).toUpperCase() : '?',
       phone: contact.phoneNumbers && contact.phoneNumbers[0] ? contact.phoneNumbers[0] : '',
-      isOnConfio: false
+      isOnConfio: contact.isOnConfio || false,
+      userId: contact.confioUserId || null,
+      suiAddress: contact.confioSuiAddress || null
     }));
     
     console.log(`[PERF] Formatting took ${Date.now() - formatStart}ms`);
     
-    // For demo purposes, mark some as Confío users (you'd get this from API)
+    // Split into Confío users and non-Confío users
     const splitStart = Date.now();
-    const confioUsers = formattedContacts.slice(0, Math.floor(formattedContacts.length * 0.3));
-    const nonConfioUsers = formattedContacts.slice(Math.floor(formattedContacts.length * 0.3));
+    const confioUsers = formattedContacts.filter(contact => contact.isOnConfio);
+    const nonConfioUsers = formattedContacts.filter(contact => !contact.isOnConfio);
     
-    confioUsers.forEach(user => user.isOnConfio = true);
+    console.log(`[PERF] Found ${confioUsers.length} Confío users and ${nonConfioUsers.length} non-Confío users`);
     console.log(`[PERF] Splitting contacts took ${Date.now() - splitStart}ms`);
     
     // SINGLE STATE UPDATE - This is the key optimization!
@@ -299,7 +305,7 @@ export const ContactsScreen = () => {
   const syncContacts = async () => {
     setIsLoadingContacts(true);
     try {
-      const success = await contactService.syncContacts();
+      const success = await contactService.syncContacts(apolloClient);
       console.log('Sync success:', success);
       
       if (success) {
@@ -405,7 +411,12 @@ export const ContactsScreen = () => {
 
   const handleSendToFriend = (friend: any) => {
     console.log('ContactsScreen: handleSendToFriend called with friend:', friend.name);
-    setSelectedFriend(friend);
+    // Include Sui address if available
+    const friendWithAddress = {
+      ...friend,
+      suiAddress: friend.suiAddress || null
+    };
+    setSelectedFriend(friendWithAddress);
     setShowFriendTokenSelection(true);
   };
 
@@ -442,7 +453,7 @@ export const ContactsScreen = () => {
     if (contact.isOnConfio) {
       // For Confío users, show transaction history
       navigation.navigate('FriendDetail', {
-        friendId: contact.id || `friend_${contact.name}`, // Use contact ID or generate one
+        friendId: contact.userId || contact.id, // Use real user ID if available
         friendName: contact.name,
         friendAvatar: contact.avatar,
         friendPhone: contact.phone,
