@@ -10,6 +10,7 @@ import {
   SafeAreaView,
   Platform,
   StatusBar,
+  Clipboard,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -108,7 +109,8 @@ export const BusinessPaymentSuccessScreen = () => {
   });
 
   const handleCopy = () => {
-    // In a real app, you'd copy the transaction ID
+    Clipboard.setString(paymentData.paymentTransactionId);
+    Alert.alert('Copiado', 'ID de transacción copiado al portapapeles');
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -175,7 +177,10 @@ export const BusinessPaymentSuccessScreen = () => {
                   <Text style={styles.addressText} numberOfLines={1}>
                     {paymentData.payerAddress}
                   </Text>
-                  <TouchableOpacity style={styles.copyButton}>
+                  <TouchableOpacity onPress={() => {
+                    Clipboard.setString(paymentData.payerAddress);
+                    Alert.alert('Copiado', 'Dirección copiada al portapapeles');
+                  }} style={styles.copyButton}>
                     <Icon name="copy" size={16} color={colors.accent} />
                   </TouchableOpacity>
                 </View>
