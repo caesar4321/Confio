@@ -1,14 +1,37 @@
 from django.contrib import admin
 from django.contrib import messages
 from django.utils.html import format_html
+from django.db.models import Q
+from config.admin_mixins import EnhancedAdminMixin
 from .models import SendTransaction
 
+class SendTypeFilter(admin.SimpleListFilter):
+    title = 'Send Type'
+    parameter_name = 'send_type'
+
+    def lookups(self, request, model_admin):
+        return (
+            ('confio_friend', 'Confío Friend'),
+            ('non_confio_friend', 'Non-Confío Friend'),
+            ('external_wallet', 'External Wallet'),
+        )
+
+    def queryset(self, request, queryset):
+        if self.value() == 'confio_friend':
+            return queryset.filter(recipient_user__isnull=False)
+        elif self.value() == 'non_confio_friend':
+            return queryset.filter(recipient_user__isnull=True, recipient_phone__isnull=False).exclude(recipient_phone='')
+        elif self.value() == 'external_wallet':
+            return queryset.filter(recipient_user__isnull=True).filter(Q(recipient_phone__isnull=True) | Q(recipient_phone=''))
+        return queryset
+
 @admin.register(SendTransaction)
-class SendTransactionAdmin(admin.ModelAdmin):
+class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
     """Admin configuration for SendTransaction model"""
     list_display = [
         'id',
         'sender_display',
+        'recipient_type_display',
         'recipient_display', 
         'amount_display', 
         'token_type', 
@@ -17,10 +40,12 @@ class SendTransactionAdmin(admin.ModelAdmin):
         'transaction_hash_display'
     ]
     list_filter = [
+        SendTypeFilter,
         'status', 
         'token_type',
         'sender_type',
         'recipient_type', 
+        'is_invitation',
         'created_at', 
         'updated_at',
         'sender_user__is_active',
@@ -97,6 +122,31 @@ class SendTransactionAdmin(admin.ModelAdmin):
     sender_display.short_description = "Sender"
     sender_display.admin_order_field = 'sender_user__username'
     
+    def recipient_type_display(self, obj):
+        """Display the type of send transaction with colored badge"""
+        if obj.recipient_user:
+            # Send to Confío friend
+            return format_html(
+                '<span style="background-color: #10B981; color: white; padding: 3px 8px; '
+                'border-radius: 12px; font-size: 11px; font-weight: 600; '
+                'text-transform: uppercase; letter-spacing: 0.5px;">👥 Confío Friend</span>'
+            )
+        elif obj.recipient_user is None and obj.recipient_phone:
+            # Send to non-Confío friend (invitation via phone)
+            return format_html(
+                '<span style="background-color: #F59E0B; color: white; padding: 3px 8px; '
+                'border-radius: 12px; font-size: 11px; font-weight: 600; '
+                'text-transform: uppercase; letter-spacing: 0.5px;">📧 Non-Confío Friend</span>'
+            )
+        else:
+            # External wallet address (direct address, not invitation)
+            return format_html(
+                '<span style="background-color: #6B7280; color: white; padding: 3px 8px; '
+                'border-radius: 12px; font-size: 11px; font-weight: 600; '
+                'text-transform: uppercase; letter-spacing: 0.5px;">🔗 External Wallet</span>'
+            )
+    recipient_type_display.short_description = "Send Type"
+    
     def recipient_display(self, obj):
         """Display recipient with type indicator and colored badge"""
         if obj.recipient_business:
@@ -114,6 +164,15 @@ class SendTransactionAdmin(admin.ModelAdmin):
                 obj.recipient_user.first_name or obj.recipient_user.username,
                 obj.recipient_user.last_name or ''
             )
+        else:
+            # External wallet - show truncated address
+            if obj.recipient_address:
+                return format_html(
+                    '<span style="background-color: #6B7280; color: white; padding: 2px 6px; '
+                    'border-radius: 4px; font-size: 11px; margin-right: 4px;">EXTERNAL</span>'
+                    '<code>{}</code>',
+                    f"{obj.recipient_address[:8]}...{obj.recipient_address[-6:]}"
+                )
         return "Unknown Recipient"
     recipient_display.short_description = "Recipient"
     recipient_display.admin_order_field = 'recipient_user__username'

@@ -521,17 +521,23 @@ export const ContactsScreen = () => {
 
   // Filter friends based on search term - Memoized to prevent keyboard dismissal
   const filteredConfioFriends = useMemo(() => 
-    contactsData.friends.filter(friend =>
-      friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      friend.phone.includes(searchTerm)
-    ), [contactsData.friends, searchTerm]
+    contactsData.friends
+      .filter(friend =>
+        friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        friend.phone.includes(searchTerm)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name)), 
+    [contactsData.friends, searchTerm]
   );
 
   const filteredNonConfioFriends = useMemo(() =>
-    contactsData.nonConfioFriends.filter(friend =>
-      friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      friend.phone.includes(searchTerm)
-    ), [contactsData.nonConfioFriends, searchTerm]
+    contactsData.nonConfioFriends
+      .filter(friend =>
+        friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        friend.phone.includes(searchTerm)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [contactsData.nonConfioFriends, searchTerm]
   );
 
   const handleFriendPress = (contact: any) => {

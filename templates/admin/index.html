@@ -1,0 +1,83 @@
+{% extends "admin/index.html" %}
+{% load static %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .dashboard-link {
+        background: linear-gradient(135deg, #34d399, #059669);
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: 600;
+        display: inline-block;
+        margin-bottom: 20px;
+        transition: all 0.2s;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .dashboard-link:hover {
+        background: linear-gradient(135deg, #059669, #047857);
+        color: white;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+    
+    .dashboard-section {
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    
+    .dashboard-section h3 {
+        margin-top: 0;
+        color: #1f2937;
+        font-size: 18px;
+        font-weight: 600;
+    }
+    
+    .quick-links {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
+        margin-top: 16px;
+    }
+    
+    .quick-link {
+        background: #f9fafb;
+        color: #374151;
+        padding: 8px 16px;
+        border-radius: 6px;
+        text-decoration: none;
+        font-size: 14px;
+        transition: all 0.2s;
+        border: 1px solid #e5e7eb;
+    }
+    
+    .quick-link:hover {
+        background: #f3f4f6;
+        color: #1f2937;
+        border-color: #d1d5db;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-section">
+    <h3>📊 Analytics Dashboard</h3>
+    <p>Access comprehensive analytics and insights for your Confío platform.</p>
+    <a href="{% url 'admin_dashboard' %}" class="dashboard-link">🚀 Open Dashboard</a>
+    
+    <div class="quick-links">
+        <a href="{% url 'admin_p2p_analytics' %}" class="quick-link">📈 P2P Analytics</a>
+        <a href="{% url 'admin_user_analytics' %}" class="quick-link">👥 User Analytics</a>
+        <a href="{% url 'admin_transaction_analytics' %}" class="quick-link">💰 Transaction Analytics</a>
+    </div>
+</div>
+
+{{ block.super }}
+{% endblock %}

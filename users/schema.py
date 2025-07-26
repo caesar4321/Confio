@@ -981,6 +981,7 @@ class RefreshToken(graphene.Mutation):
 			context = MockContext(account_type, account_index)
 			
 			# Generate new access token with account context
+			from users.jwt import jwt_payload_handler
 			new_payload = jwt_payload_handler(user, context)
 			new_access_token = jwt_encode(new_payload)
 			

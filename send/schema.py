@@ -248,7 +248,7 @@ class CreateSendTransaction(graphene.Mutation):
                 # Calculate invitation expiry if this is an invitation
                 from datetime import timedelta
                 invitation_expires_at = None
-                if recipient_user is None:
+                if recipient_user is None and bool(recipient_phone):
                     invitation_expires_at = timezone.now() + timedelta(days=7)
                 
                 # Create the send transaction
@@ -275,7 +275,7 @@ class CreateSendTransaction(graphene.Mutation):
                     memo=input.memo or '',
                     status='PENDING',
                     idempotency_key=input.idempotency_key,
-                    is_invitation=(recipient_user is None),  # Mark as invitation if no recipient user
+                    is_invitation=(recipient_user is None and bool(recipient_phone)),  # Only invitations for phone-based sends
                     invitation_expires_at=invitation_expires_at
                 )
 

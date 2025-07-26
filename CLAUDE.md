@@ -40,6 +40,8 @@
 5. **Consider Latin American context** for financial features
 6. **Test with Venezuelan payment methods** as primary use case
 7. **FlatList Implementation Rule**: When implementing a FlatList in React Native, ALWAYS include proper pagination mechanisms to ensure all items load. FlatList has built-in virtualization that may not render all items without proper configuration.
+8. **Use react-native-svg instead of react-native-linear-gradient**: For all gradient needs, use react-native-svg which is already installed. All gradient effects (linear, radial, etc.) can be achieved with SVG.
+9. **Use react-native-keychain instead of AsyncStorage**: For secure storage needs, use the existing react-native-keychain implementation. Do not add AsyncStorage as a dependency.
 
 ### Development Environment
 - **Python Virtual Environment**: Always use `myvenv/bin/python` for Python commands
