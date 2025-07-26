@@ -1198,10 +1198,28 @@ class CreateTestUsers(graphene.Mutation):
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return CreateTestUsers(success=False, error="Authentication required", created_count=0, users_created=[])
 		
+		import random
+		
 		created_users = []
 		skipped_reasons = []
 		
+		# Randomly select 30% of phone numbers to be Confío users
+		total_phones = len(phone_numbers)
+		confio_count = int(total_phones * 0.3)  # 30% will be Confío users
+		
+		# Shuffle the phone numbers and select the first 30%
+		shuffled_phones = phone_numbers.copy()
+		random.shuffle(shuffled_phones)
+		confio_phones = set(shuffled_phones[:confio_count])
+		
+		logger.info(f"Creating test users for {confio_count} out of {total_phones} contacts (30%)")
+		
 		for phone in phone_numbers:
+			# Only process phones that should be Confío users
+			if phone not in confio_phones:
+				skipped_reasons.append(f"{phone}: Not selected as Confío user (70% are external)")
+				continue
+			
 			# Clean the phone number
 			cleaned_phone = ''.join(filter(str.isdigit, phone))
 			if not cleaned_phone:
@@ -1231,22 +1249,28 @@ class CreateTestUsers(graphene.Mutation):
 			
 			# Create a test user
 			try:
-				# Generate a unique username based on phone
-				base_username = f"test_{cleaned_phone[-6:]}"
+				# Generate a unique username based on phone (max 66 chars)
+				# Use last 6 digits of phone for base username
+				phone_suffix = cleaned_phone[-6:] if len(cleaned_phone) >= 6 else cleaned_phone
+				base_username = f"test_{phone_suffix}"
 				username = base_username
 				counter = 1
 				while User.objects.filter(username=username).exists():
 					username = f"{base_username}_{counter}"
 					counter += 1
+					# Ensure username doesn't exceed 66 chars
+					if len(username) > 66:
+						username = f"t_{phone_suffix}_{counter}"
 				
-				# Create the user
+				# Create the user with a unique firebase_uid
 				new_user = User.objects.create(
 					username=username,
 					phone_number=cleaned_phone,
 					phone_country='VE',  # Default to Venezuela
 					first_name=f"Test",
 					last_name=f"User {cleaned_phone[-4:]}",
-					email=f"test_{cleaned_phone}@example.com"
+					email=f"{username}@test.com",  # Use shorter email based on username
+					firebase_uid=f"test_uid_{cleaned_phone}"  # Unique firebase UID for test users
 				)
 				
 				# Create personal account
@@ -1275,15 +1299,11 @@ class CreateTestUsers(graphene.Mutation):
 				continue
 		
 		# Build summary message
-		summary = f"Created {len(created_users)} users."
-		if skipped_reasons:
-			summary += f" Skipped {len(skipped_reasons)} phones: " + "; ".join(skipped_reasons[:5])
-			if len(skipped_reasons) > 5:
-				summary += f" and {len(skipped_reasons) - 5} more..."
+		summary = f"Created {len(created_users)} test users from {total_phones} contacts ({confio_count} selected as Confío users - 30%)"
 		
 		return CreateTestUsers(
 			success=True,
-			error=summary if skipped_reasons else None,
+			error=summary,  # Using error field to return the informative message
 			created_count=len(created_users),
 			users_created=created_users
 		)

@@ -252,7 +252,9 @@ export const TransactionProcessingScreen = () => {
               amount: transactionData.amount,
               tokenType: transactionData.currency,
               memo: transactionData.memo || `Send ${transactionData.amount} ${transactionData.currency} to ${transactionData.recipient}`,
-              idempotencyKey: idempotencyKey
+              idempotencyKey: idempotencyKey,
+              recipientDisplayName: transactionData.recipient,
+              recipientPhone: transactionData.recipientPhone
             }
           }
         });

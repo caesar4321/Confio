@@ -18,6 +18,8 @@ class SendTransactionInput(graphene.InputObjectType):
     token_type = graphene.String(required=True, description="Type of token to send (e.g., 'cUSD', 'CONFIO')")
     memo = graphene.String(description="Optional memo for the transaction")
     idempotency_key = graphene.String(description="Optional idempotency key to prevent duplicate sends")
+    recipient_display_name = graphene.String(description="Display name for the recipient (for external wallets)")
+    recipient_phone = graphene.String(description="Phone number of the recipient (for external wallets)")
 
 class SendTransactionType(DjangoObjectType):
     """GraphQL type for SendTransaction model"""
@@ -145,6 +147,12 @@ class CreateSendTransaction(graphene.Mutation):
                         recipient_business = recipient_account.business
                         recipient_type = 'business'
                         recipient_display_name = recipient_account.business.name
+                else:
+                    # For external wallets, use the provided display name and phone if available
+                    if hasattr(input, 'recipient_display_name') and input.recipient_display_name:
+                        recipient_display_name = input.recipient_display_name
+                    if hasattr(input, 'recipient_phone') and input.recipient_phone:
+                        recipient_phone = input.recipient_phone
 
                 # Use amount as provided by frontend (no automatic conversion)
                 amount_str = str(input.amount)

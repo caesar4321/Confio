@@ -412,7 +412,7 @@ export const ContactsScreen = () => {
                 if (createdCount > 0) {
                   Alert.alert(
                     'Éxito',
-                    `Se crearon ${createdCount} usuarios de prueba.\n\nAhora sincroniza los contactos para verlos.`,
+                    errorMsg || `Se crearon ${createdCount} usuarios de prueba.\n\nAhora sincroniza los contactos para verlos.`,
                     [{ text: 'OK', onPress: () => handleRefresh() }]
                   );
                 } else {
