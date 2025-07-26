@@ -1030,3 +1030,6 @@ def ensure_single_default_bank_account(sender, instance, **kwargs):
             account=instance.account,
             is_default=True
         ).exclude(id=instance.id).update(is_default=False)
+
+# Import view models
+from .models_views import UnifiedTransaction

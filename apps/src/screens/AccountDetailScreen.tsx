@@ -31,7 +31,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery } from '@apollo/client';
-import { GET_SEND_TRANSACTIONS_BY_ACCOUNT, GET_PAYMENT_TRANSACTIONS_BY_ACCOUNT } from '../apollo/queries';
+import { GET_SEND_TRANSACTIONS_BY_ACCOUNT, GET_PAYMENT_TRANSACTIONS_BY_ACCOUNT, GET_UNIFIED_TRANSACTIONS } from '../apollo/queries';
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import moment from 'moment';
 import 'moment/locale/es';
@@ -188,6 +188,18 @@ export const AccountDetailScreen = () => {
     }
   });
 
+  // NEW: Unified transactions query (replaces the two above)
+  const { data: unifiedTransactionsData, loading: unifiedLoading, refetch: refetchUnified } = useQuery(GET_UNIFIED_TRANSACTIONS, {
+    variables: { 
+      accountType: 'personal',
+      accountIndex: 0,
+      limit: transactionLimit,
+      offset: 0,
+      tokenTypes: route.params.accountType === 'cusd' ? ['cUSD', 'CUSD'] : ['CONFIO']
+    },
+    skip: false // Enable unified transactions
+  });
+
   // Animation entrance
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -222,6 +234,7 @@ export const AccountDetailScreen = () => {
       await Promise.all([
         refetchSend(),
         refetchPayment(),
+        refetchUnified(),
       ]);
       setTransactionLimit(10);
       setHasReachedEnd(false);
@@ -230,9 +243,41 @@ export const AccountDetailScreen = () => {
     } finally {
       setRefreshing(false);
     }
-  }, [refetchSend, refetchPayment]);
+  }, [refetchSend, refetchPayment, refetchUnified]);
 
-  // Transform real transactions into the format expected by the UI
+  // NEW: Transform unified transactions into the format expected by the UI
+  const formatUnifiedTransactions = () => {
+    const allTransactions: Transaction[] = [];
+
+    if (unifiedTransactionsData?.unifiedTransactions) {
+      unifiedTransactionsData.unifiedTransactions.forEach((tx: any) => {
+        // Determine transaction type based on both transactionType and direction
+        let type: 'sent' | 'received' | 'payment' = 'sent';
+        if (tx.transactionType.toLowerCase() === 'payment') {
+          type = 'payment';
+        } else {
+          type = tx.direction === 'sent' ? 'sent' : 'received';
+        }
+        
+        allTransactions.push({
+          type,
+          from: tx.direction === 'received' ? tx.displayCounterparty : undefined,
+          to: tx.direction === 'sent' ? tx.displayCounterparty : undefined,
+          amount: tx.displayAmount,
+          currency: tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType,
+          date: new Date(tx.createdAt).toISOString().split('T')[0],
+          time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+          status: tx.status.toLowerCase() === 'confirmed' ? 'completed' : 'pending',
+          hash: tx.transactionHash || 'pending'
+        });
+      });
+    }
+    
+    // Sort by date (newest first)
+    return allTransactions.sort((a, b) => new Date(b.date + ' ' + b.time).getTime() - new Date(a.date + ' ' + a.time).getTime());
+  };
+
+  // LEGACY: Transform real transactions into the format expected by the UI (backup)
   const formatTransactions = () => {
     const allTransactions: Transaction[] = [];
     // Handle both cUSD and CUSD variations
@@ -285,7 +330,8 @@ export const AccountDetailScreen = () => {
     return allTransactions.sort((a, b) => new Date(b.date + ' ' + b.time).getTime() - new Date(a.date + ' ' + a.time).getTime());
   };
 
-  const transactions = formatTransactions();
+  // Use unified transactions if available, fallback to legacy format
+  const transactions = unifiedTransactionsData ? formatUnifiedTransactions() : formatTransactions();
   
   // Filter transactions based on search query
   const filteredTransactions = useMemo(() => {
@@ -864,7 +910,7 @@ export const AccountDetailScreen = () => {
           )}
 
           <View style={styles.transactionsList}>
-            {(sendLoading || paymentLoading) ? (
+            {(sendLoading || paymentLoading || unifiedLoading) ? (
               <>
                 <TransactionItemSkeleton />
                 <TransactionItemSkeleton />

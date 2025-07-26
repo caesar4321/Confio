@@ -1895,3 +1895,63 @@ export const SET_DEFAULT_BANK_INFO = gql`
     }
   }
 `;
+
+// NEW: Unified transactions query using database view
+export const GET_UNIFIED_TRANSACTIONS = gql`
+  query GetUnifiedTransactions($accountType: String!, $accountIndex: Int!, $limit: Int, $offset: Int, $tokenTypes: [String]) {
+    unifiedTransactions(accountType: $accountType, accountIndex: $accountIndex, limit: $limit, offset: $offset, tokenTypes: $tokenTypes) {
+      id
+      transactionType
+      createdAt
+      updatedAt
+      amount
+      tokenType
+      status
+      transactionHash
+      errorMessage
+      
+      # Computed fields from user perspective
+      direction
+      displayAmount
+      displayCounterparty
+      displayDescription
+      
+      # Original transaction data
+      senderUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      senderBusiness {
+        id
+        name
+        category
+      }
+      senderType
+      senderDisplayName
+      senderPhone
+      senderAddress
+      
+      counterpartyUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      counterpartyBusiness {
+        id
+        name
+        category
+      }
+      counterpartyType
+      counterpartyDisplayName
+      counterpartyPhone
+      counterpartyAddress
+      
+      description
+      invoiceId
+      paymentTransactionId
+    }
+  }
+`;
