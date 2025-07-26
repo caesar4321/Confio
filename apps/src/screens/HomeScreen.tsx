@@ -561,12 +561,6 @@ export const HomeScreen = () => {
               }
             </Text>
           </Animated.View>
-          
-          {/* Portfolio change indicator */}
-          <View style={styles.changeContainer}>
-            <Icon name="trending-up" size={16} color="#10f981" />
-            <Text style={styles.changeText}>+2.5% hoy</Text>
-          </View>
         </Animated.View>
         
         {/* Quick Actions */}
@@ -793,16 +787,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
     letterSpacing: -1,
-  },
-  changeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  changeText: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: 14,
-    marginLeft: 6,
-    fontWeight: '500',
   },
   // Quick actions styles
   quickActionsCard: {
