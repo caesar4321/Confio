@@ -163,6 +163,7 @@ dependencies {
     implementation project(':react-native-safe-area-context')
     implementation project(':react-native-cameraroll')
     implementation project(':react-native-contacts')
+    implementation project(':@react-native-firebase_messaging')
 
     // Add Google Sign-In dependencies
     implementation 'com.google.android.gms:play-services-auth:20.7.0'

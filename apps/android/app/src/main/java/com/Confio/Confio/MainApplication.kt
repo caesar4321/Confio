@@ -17,6 +17,7 @@ import com.mrousavy.camera.react.CameraPackage
 import fr.greweb.reactnativeviewshot.RNViewShotPackage
 import com.reactnativecommunity.cameraroll.CameraRollPackage
 import com.rt2zz.reactnativecontacts.ReactNativeContacts
+import io.invertase.firebase.messaging.ReactNativeFirebaseMessagingPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -31,6 +32,7 @@ class MainApplication : Application(), ReactApplication {
               add(RNViewShotPackage())
               add(CameraRollPackage())
               add(ReactNativeContacts())
+              add(ReactNativeFirebaseMessagingPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"
