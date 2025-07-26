@@ -58,6 +58,7 @@ type Friend = {
   avatar: string;
   isOnConfio: boolean;
   phone: string;
+  suiAddress?: string;
 };
 
 export const SendToFriendScreen = () => {
@@ -104,11 +105,10 @@ export const SendToFriendScreen = () => {
     try {
       console.log('SendToFriendScreen: Navigating to TransactionProcessing');
       
-      // For now, use a mock Sui address for the friend
-      // In a real implementation, this would come from the friend's profile
-      const friendSuiAddress = friend.isOnConfio 
-        ? '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef' // Mock address
-        : '0x0000000000000000000000000000000000000000000000000000000000000000'; // External address
+      // Use real Sui address if available, otherwise use mock address
+      const friendSuiAddress = friend.suiAddress || (friend.isOnConfio 
+        ? '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef' // Mock address for demo
+        : '0x0000000000000000000000000000000000000000000000000000000000000000'); // External address
       
       // Generate idempotency key to prevent double-spending
       const minuteTimestamp = Math.floor(Date.now() / 60000);

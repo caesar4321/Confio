@@ -18,6 +18,22 @@ export const GET_ME = gql`
   }
 `;
 
+// Check users by phone numbers
+export const CHECK_USERS_BY_PHONES = gql`
+  query CheckUsersByPhones($phoneNumbers: [String!]!) {
+    checkUsersByPhones(phoneNumbers: $phoneNumbers) {
+      phoneNumber
+      userId
+      username
+      firstName
+      lastName
+      isOnConfio
+      activeAccountId
+      activeAccountSuiAddress
+    }
+  }
+`;
+
 // Business Profile Query
 export const GET_BUSINESS_PROFILE = gql`
   query GetBusinessProfile($businessId: ID!) {
