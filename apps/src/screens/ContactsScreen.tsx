@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform, Modal, Image, RefreshControl, ActivityIndicator, SectionList, Alert, Linking } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -86,9 +86,61 @@ const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, o
          prevProps.isOnConfio === nextProps.isOnConfio;
 });
 
+// Create isolated SearchInput component to prevent keyboard issues
+const SearchInput = React.memo(({ 
+  onSearchChange 
+}: { 
+  onSearchChange: (text: string) => void;
+}) => {
+  const [localValue, setLocalValue] = useState('');
+  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  
+  // Update local state when typing
+  const handleLocalChange = useCallback((text: string) => {
+    setLocalValue(text);
+    
+    // Debounce the parent update
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+    
+    debounceTimer.current = setTimeout(() => {
+      onSearchChange(text);
+    }, 300); // 300ms debounce
+  }, [onSearchChange]);
+  
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+    };
+  }, []);
+  
+  return (
+    <TextInput 
+      style={styles.searchInput}
+      placeholder="Buscar contactos..." 
+      placeholderTextColor="#6b7280"
+      value={localValue}
+      onChangeText={handleLocalChange}
+      autoCorrect={false}
+      autoCapitalize="none"
+      returnKeyType="search"
+      blurOnSubmit={false}
+    />
+  );
+});
+
 export const ContactsScreen = () => {
   const navigation = useNavigation<ContactsScreenNavigationProp>();
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Stable callback for search updates
+  const handleSearchChange = useCallback((text: string) => {
+    setSearchTerm(text);
+  }, []);
   const [showTokenSelection, setShowTokenSelection] = useState(false);
   const [showSendTokenSelection, setShowSendTokenSelection] = useState(false);
   const [showFriendTokenSelection, setShowFriendTokenSelection] = useState(false);
@@ -371,15 +423,19 @@ export const ContactsScreen = () => {
     setShowFriendTokenSelection(true);
   };
 
-  // Filter friends based on search term
-  const filteredConfioFriends = contactsData.friends.filter(friend =>
-    friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    friend.phone.includes(searchTerm)
+  // Filter friends based on search term - Memoized to prevent keyboard dismissal
+  const filteredConfioFriends = useMemo(() => 
+    contactsData.friends.filter(friend =>
+      friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      friend.phone.includes(searchTerm)
+    ), [contactsData.friends, searchTerm]
   );
 
-  const filteredNonConfioFriends = contactsData.nonConfioFriends.filter(friend =>
-    friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    friend.phone.includes(searchTerm)
+  const filteredNonConfioFriends = useMemo(() =>
+    contactsData.nonConfioFriends.filter(friend =>
+      friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      friend.phone.includes(searchTerm)
+    ), [contactsData.nonConfioFriends, searchTerm]
   );
 
   const handleFriendPress = (contact: any) => {
@@ -651,57 +707,10 @@ export const ContactsScreen = () => {
     />
   ), [handleFriendPressCallback, handleSendToFriendCallback, handleInviteFriendCallback]);
 
-  const ListHeaderComponent = () => (
-    <>
-      {/* Search Bar */}
-      <View style={styles.searchSection}>
-        <View style={styles.searchBarContainer}>
-          <View style={styles.searchBar}>
-            <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
-            <TextInput 
-              style={styles.searchInput}
-              placeholder="Buscar contactos..." 
-              placeholderTextColor="#6b7280"
-              value={searchTerm}
-              onChangeText={setSearchTerm}
-            />
-          </View>
-          
-          {/* Manual sync button - always visible */}
-          <TouchableOpacity 
-            style={styles.syncButton}
-            onPress={async () => {
-              if (hasContactPermission) {
-                handleRefresh();
-              } else {
-                // Check if permission was previously denied
-                const status = await contactService.getStoredPermissionStatus();
-                if (status === 'denied' && Platform.OS === 'ios') {
-                  // On iOS, guide to settings
-                  Alert.alert(
-                    'Permisos de Contactos',
-                    'Para sincronizar contactos, ve a Configuración > Confío > Contactos y activa el acceso.',
-                    [
-                      { text: 'Cancelar', style: 'cancel' },
-                      { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
-                    ]
-                  );
-                } else {
-                  // First time or Android, show modal
-                  setShowPermissionModal(true);
-                }
-              }
-            }}
-            disabled={isLoadingContacts || refreshing}
-          >
-            <Icon 
-              name={hasContactPermission ? "refresh-cw" : "shield"} 
-              size={20} 
-              color={isLoadingContacts || refreshing ? "#9ca3af" : colors.primary} 
-            />
-          </TouchableOpacity>
-        </View>
-      </View>
+  // Create a stable header component that won't cause re-renders
+  const ListHeaderComponent = useMemo(() => {
+    const HeaderContent = () => (
+      <>
 
       {/* Send/Receive Options */}
       <View style={styles.actionSection}>
@@ -773,9 +782,12 @@ export const ContactsScreen = () => {
         </View>
       </View>
     </>
-  );
+    );
+    
+    return HeaderContent;
+  }, [searchTerm, hasContactPermission, isLoadingContacts, refreshing, contactsData.friends.length, contactsData.nonConfioFriends.length, handleSendWithAddress, handleRefresh]);
 
-  const ListEmptyComponent = () => {
+  const ListEmptyComponent = useCallback(() => {
     if (searchTerm) {
       return (
         <View style={styles.emptyState}>
@@ -865,11 +877,57 @@ export const ContactsScreen = () => {
     }
     
     return null;
-  };
+  }, [searchTerm, isInitialLoad, isLoadingContacts, hasContactPermission, handleRefresh]);
 
   return (
     <>
       <View style={styles.container}>
+        {/* Move search bar outside of SectionList to prevent keyboard issues */}
+        <View style={styles.searchSection}>
+          <View style={styles.searchBarContainer}>
+            <View style={styles.searchBar}>
+              <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
+              <SearchInput 
+                onSearchChange={handleSearchChange}
+              />
+            </View>
+            
+            {/* Manual sync button - always visible */}
+            <TouchableOpacity 
+              style={styles.syncButton}
+              onPress={async () => {
+                if (hasContactPermission) {
+                  handleRefresh();
+                } else {
+                  // Check if permission was previously denied
+                  const status = await contactService.getStoredPermissionStatus();
+                  if (status === 'denied' && Platform.OS === 'ios') {
+                    // On iOS, guide to settings
+                    Alert.alert(
+                      'Permisos de Contactos',
+                      'Para sincronizar contactos, ve a Configuración > Confío > Contactos y activa el acceso.',
+                      [
+                        { text: 'Cancelar', style: 'cancel' },
+                        { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
+                      ]
+                    );
+                  } else {
+                    // First time or Android, show modal
+                    setShowPermissionModal(true);
+                  }
+                }
+              }}
+              disabled={isLoadingContacts || refreshing}
+            >
+              <Icon 
+                name={hasContactPermission ? "refresh-cw" : "shield"} 
+                size={20} 
+                color={isLoadingContacts || refreshing ? "#9ca3af" : colors.primary} 
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+        
         <SectionList
           sections={sections}
           renderItem={renderItem}
@@ -934,6 +992,8 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 12,
     backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
   },
   searchBarContainer: {
     flexDirection: 'row',
