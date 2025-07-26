@@ -92,11 +92,13 @@ export const TransactionSuccessScreen = () => {
         name: transactionData.recipient, 
         avatar: transactionData.recipient?.charAt(0) || 'F',
         phone: transactionData.recipientPhone || '', // Use actual phone number from transaction
-        isOnConfio: Boolean(transactionData.isOnConfio) // Ensure proper boolean conversion
+        isOnConfio: Boolean(transactionData.isOnConfio), // Ensure proper boolean conversion
+        suiAddress: transactionData.recipientAddress // Include the Sui address!
       };
       
       console.log('TransactionSuccessScreen: handleSendAgain - friend data:', friendData);
       console.log('TransactionSuccessScreen: transactionData.isOnConfio:', transactionData.isOnConfio);
+      console.log('TransactionSuccessScreen: transactionData.recipientAddress:', transactionData.recipientAddress);
       
       (navigation as any).navigate('SendToFriend', { 
         friend: friendData,

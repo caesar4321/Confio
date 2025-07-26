@@ -70,8 +70,11 @@ export const SendToFriendScreen = () => {
   const friend: Friend = (route.params as any)?.friend || { name: 'Friend', avatar: 'F', isOnConfio: true, phone: '' };
   
   // Debug log to check friend data
+  console.log('SendToFriendScreen: route.params:', route.params);
   console.log('SendToFriendScreen: friend data:', friend);
   console.log('SendToFriendScreen: friend.isOnConfio:', friend.isOnConfio);
+  console.log('SendToFriendScreen: friend.suiAddress:', friend.suiAddress);
+  console.log('SendToFriendScreen: friend.suiAddress length:', friend.suiAddress?.length);
   const [tokenType, setTokenType] = useState<TokenType>((route.params as any)?.tokenType || 'cusd');
   const config = tokenConfig[tokenType];
 
@@ -111,7 +114,12 @@ export const SendToFriendScreen = () => {
       if (!friendSuiAddress) {
         if (friend.isOnConfio) {
           // This shouldn't happen - Confío users should have addresses
-          console.error('SendToFriendScreen: Confío user without Sui address');
+          console.error('SendToFriendScreen: Confío user without Sui address', {
+            friend,
+            friendSuiAddress: friend.suiAddress,
+            hasAddress: !!friend.suiAddress,
+            addressType: typeof friend.suiAddress
+          });
           friendSuiAddress = '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
         } else {
           // Generate a deterministic but valid Sui address for external wallets

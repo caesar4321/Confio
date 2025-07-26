@@ -58,6 +58,8 @@ interface Transaction {
   invitationClaimed?: boolean;
   invitationReverted?: boolean;
   invitationExpiresAt?: string;
+  senderAddress?: string;
+  recipientAddress?: string;
 }
 
 export const FriendDetailScreen = () => {
@@ -137,7 +139,9 @@ export const FriendDetailScreen = () => {
           isInvitation: tx.isInvitation || false,
           invitationClaimed: tx.invitationClaimed || false,
           invitationReverted: tx.invitationReverted || false,
-          invitationExpiresAt: tx.invitationExpiresAt
+          invitationExpiresAt: tx.invitationExpiresAt,
+          senderAddress: tx.senderAddress,
+          recipientAddress: tx.recipientAddress
         });
       });
     }
@@ -469,8 +473,8 @@ export const FriendDetailScreen = () => {
                         status: transaction.status,
                         hash: transaction.hash,
                         // Add additional fields that TransactionDetailScreen expects
-                        fromAddress: transaction.from ? '0x1a2b3c4d...7890abcd' : undefined,
-                        toAddress: transaction.to ? '0x9876543a...bcdef123' : undefined,
+                        fromAddress: transaction.type === 'received' ? transaction.senderAddress : undefined,
+                        toAddress: transaction.type === 'sent' ? transaction.recipientAddress : undefined,
                         blockNumber: '2,847,392',
                         gasUsed: '21,000',
                         gasFee: '0.001',
