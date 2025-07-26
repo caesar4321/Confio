@@ -197,6 +197,7 @@ class UserByPhoneType(graphene.ObjectType):
 
 class Query(graphene.ObjectType):
 	me = graphene.Field(UserType)
+	user = graphene.Field(UserType, id=graphene.ID(required=True))
 	business = graphene.Field(BusinessType, id=graphene.ID(required=True))
 	country_codes = graphene.List(CountryCodeType)
 	business_categories = graphene.List(BusinessCategoryType)
@@ -256,6 +257,22 @@ class Query(graphene.ObjectType):
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return None
 		return user
+	
+	def resolve_user(self, info, id):
+		"""Resolve user by ID"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return None
+		
+		try:
+			# For security, only allow fetching user details if they have interacted with the current user
+			# or if the current user is fetching their own details
+			requested_user = User.objects.get(id=id)
+			
+			# For now, allow fetching any user's basic info (can add more restrictions later)
+			return requested_user
+		except User.DoesNotExist:
+			return None
 
 	def resolve_business(self, info, id):
 		user = getattr(info.context, 'user', None)

@@ -1992,3 +1992,24 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
     }
   }
 `;
+
+// User Query by ID
+export const GET_USER_BY_ID = gql`
+  query GetUserById($id: ID!) {
+    user(id: $id) {
+      id
+      username
+      firstName
+      lastName
+      phoneNumber
+      phoneCountry
+      accounts {
+        id
+        accountType
+        accountIndex
+        suiAddress
+        displayName
+      }
+    }
+  }
+`;

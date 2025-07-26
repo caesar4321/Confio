@@ -20,7 +20,7 @@ import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery } from '@apollo/client';
-import { GET_SEND_TRANSACTIONS_WITH_FRIEND, GET_PAYMENT_TRANSACTIONS_WITH_FRIEND } from '../apollo/queries';
+import { GET_SEND_TRANSACTIONS_WITH_FRIEND, GET_PAYMENT_TRANSACTIONS_WITH_FRIEND, GET_USER_BY_ID } from '../apollo/queries';
 
 // Color palette
 const colors = {
@@ -78,6 +78,12 @@ export const FriendDetailScreen = () => {
   // Check if this is a device contact (not a real Confío user)
   const isDeviceContact = friend.id.startsWith('contact_');
   
+  // Fetch user details if it's a Confío user
+  const { data: userData } = useQuery(GET_USER_BY_ID, {
+    variables: { id: friend.id },
+    skip: isDeviceContact || !friend.isOnConfio,
+  });
+  
   // Get real transaction data from GraphQL (only if it's a real user)
   const { data: sendTransactionsData, loading: sendLoading, refetch: refetchSend, fetchMore: fetchMoreSend } = useQuery(GET_SEND_TRANSACTIONS_WITH_FRIEND, {
     variables: {
@@ -112,7 +118,7 @@ export const FriendDetailScreen = () => {
           currency: tx.tokenType,
           date: new Date(tx.createdAt).toISOString().split('T')[0],
           time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
-          status: tx.status.toLowerCase() === 'confirmed' ? 'completed' : 'pending',
+          status: tx.status === 'CONFIRMED' ? 'completed' : 'pending',
           hash: tx.transactionHash || 'pending'
         });
       });
@@ -131,7 +137,7 @@ export const FriendDetailScreen = () => {
           currency: tx.tokenType,
           date: new Date(tx.createdAt).toISOString().split('T')[0],
           time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
-          status: tx.status.toLowerCase() === 'confirmed' ? 'completed' : 'pending',
+          status: tx.status === 'CONFIRMED' ? 'completed' : 'pending',
           hash: tx.transactionHash || 'pending'
         });
       });
@@ -219,13 +225,23 @@ export const FriendDetailScreen = () => {
 
   const handleTokenSelect = (tokenType: 'cusd' | 'confio') => {
     setShowTokenSelection(false);
+    
+    // Get the active account's Sui address from the user data
+    let suiAddress = undefined;
+    if (userData?.user?.accounts && userData.user.accounts.length > 0) {
+      // Get the personal account (accountIndex 0) by default
+      const personalAccount = userData.user.accounts.find((acc: any) => acc.accountType === 'personal' && acc.accountIndex === 0);
+      suiAddress = personalAccount?.suiAddress;
+    }
+    
     // Navigate to SendToFriend screen with selected token
     navigation.navigate('SendToFriend', { 
       friend: {
         name: friend.name,
         avatar: friend.avatar,
         isOnConfio: friend.isOnConfio,
-        phone: friend.phone
+        phone: friend.phone,
+        suiAddress: suiAddress
       },
       tokenType: tokenType 
     });
@@ -545,9 +561,9 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   statusText: {
-    fontSize: 14,
-    color: '#ffffff',
-    opacity: 0.9,
+    fontSize: 12,
+    color: '#10b981',
+    marginRight: 4,
   },
   sendButtonContainer: {
     paddingHorizontal: 16,
