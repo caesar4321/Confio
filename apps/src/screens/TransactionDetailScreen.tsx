@@ -124,6 +124,7 @@ export const TransactionDetailScreen = () => {
   };
 
   const currentTx = transactionData || transactions[transactionType];
+  const isInvitedFriend = currentTx.isInvitedFriend || false;
 
   const handleCopy = (text: string, type: string) => {
     // In React Native, you'd use Clipboard API
@@ -659,6 +660,80 @@ export const TransactionDetailScreen = () => {
       color: '#6B7280',
       fontSize: 14,
     },
+    invitationNotice: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 12,
+      backgroundColor: '#ef4444',
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 20,
+    },
+    invitationText: {
+      color: '#fff',
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    invitationCard: {
+      backgroundColor: '#fef2f2',
+      borderColor: '#ef4444',
+      borderWidth: 2,
+    },
+    invitationHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    invitationCardTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: colors.secondary,
+      marginLeft: 12,
+    },
+    invitationCardText: {
+      fontSize: 16,
+      color: '#1f2937',
+      marginBottom: 16,
+      lineHeight: 24,
+    },
+    invitationInfoBox: {
+      backgroundColor: '#fff',
+      borderRadius: 12,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: colors.secondary + '20',
+    },
+    invitationInfoTitle: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.secondary,
+      marginBottom: 12,
+    },
+    invitationInfoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    invitationInfoText: {
+      fontSize: 14,
+      color: '#4b5563',
+      flex: 1,
+    },
+    shareButton: {
+      backgroundColor: '#25D366', // WhatsApp green
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 14,
+      paddingHorizontal: 20,
+      borderRadius: 12,
+      marginTop: 16,
+    },
+    shareButtonText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '600',
+    },
   });
 
   return (
@@ -699,6 +774,13 @@ export const TransactionDetailScreen = () => {
               <Icon name="check-circle" size={16} color={statusColors.text} style={styles.statusIcon} />
               <Text style={[styles.statusText, { color: statusColors.text }]}>Completado</Text>
             </View>
+            
+            {isInvitedFriend && currentTx.type === 'sent' && (
+              <View style={styles.invitationNotice}>
+                <Icon name="alert-triangle" size={16} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.invitationText}>Tu amigo tiene 7 días para reclamar</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -868,6 +950,43 @@ export const TransactionDetailScreen = () => {
               </View>
             </View>
           </View>
+
+          {/* Invitation Info Card for non-Confío friends */}
+          {isInvitedFriend && currentTx.type === 'sent' && (
+            <View style={[styles.card, styles.invitationCard]}>
+              <View style={styles.invitationHeader}>
+                <Icon name="alert-circle" size={24} color="#ef4444" />
+                <Text style={[styles.invitationCardTitle, { color: '#ef4444' }]}>¡Acción Requerida!</Text>
+              </View>
+              
+              <Text style={[styles.invitationCardText, { fontWeight: 'bold', color: '#dc2626' }]}>
+                ⏰ Tu amigo tiene solo 7 días para reclamar el dinero o se perderá
+              </Text>
+              
+              <View style={[styles.invitationInfoBox, { backgroundColor: '#fef2f2', borderColor: '#ef4444' }]}>
+                <Text style={[styles.invitationInfoTitle, { color: '#dc2626' }]}>¡Avísale ahora mismo!</Text>
+                <View style={styles.invitationInfoRow}>
+                  <Text style={styles.invitationInfoText}>1. Envíale un mensaje con el link de invitación</Text>
+                </View>
+                <View style={styles.invitationInfoRow}>
+                  <Text style={styles.invitationInfoText}>2. Ayúdale a crear su cuenta en Confío</Text>
+                </View>
+                <View style={styles.invitationInfoRow}>
+                  <Text style={styles.invitationInfoText}>3. Una vez registrado, recibirá el dinero al instante</Text>
+                </View>
+              </View>
+              
+              <TouchableOpacity style={styles.shareButton} onPress={() => {
+                Alert.alert(
+                  'Compartir invitación',
+                  `Comparte este mensaje:\n\n¡Hola! Te envié ${currentTx.amount} ${currentTx.currency} por Confío. Tienes 7 días para reclamarlo. Descarga la app aquí: [link]`
+                );
+              }}>
+                <Icon name="share-2" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.shareButtonText}>Compartir invitación por WhatsApp</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* Confío Value Proposition */}
           {(currentTx.type === 'received' || currentTx.type === 'sent') && (

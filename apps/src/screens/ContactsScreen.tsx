@@ -796,7 +796,7 @@ export const ContactsScreen = () => {
   const renderItem = useCallback(({ item, section }) => (
     <ContactCard 
       contact={item} 
-      isOnConfio={section.isConfio}
+      isOnConfio={item.isOnConfio || false}
       onPress={handleFriendPressCallback}
       onSendPress={handleSendToFriendCallback}
       onInvitePress={handleInviteFriendCallback}

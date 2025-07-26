@@ -45,7 +45,11 @@ class SendTransactionType(DjangoObjectType):
             'status',
             'created_at', 
             'updated_at', 
-            'transaction_hash'
+            'transaction_hash',
+            'is_invitation',
+            'invitation_claimed',
+            'invitation_reverted',
+            'invitation_expires_at'
         )
 
 class CreateSendTransaction(graphene.Mutation):
@@ -157,6 +161,12 @@ class CreateSendTransaction(graphene.Mutation):
                 # Use amount as provided by frontend (no automatic conversion)
                 amount_str = str(input.amount)
                 
+                # Calculate invitation expiry if this is an invitation
+                from datetime import timedelta
+                invitation_expires_at = None
+                if recipient_user is None:
+                    invitation_expires_at = timezone.now() + timedelta(days=7)
+                
                 # Create the send transaction
                 send_transaction = SendTransaction.objects.create(
                     # Legacy user fields (kept for compatibility)
@@ -180,7 +190,9 @@ class CreateSendTransaction(graphene.Mutation):
                     token_type=input.token_type,
                     memo=input.memo or '',
                     status='PENDING',
-                    idempotency_key=input.idempotency_key
+                    idempotency_key=input.idempotency_key,
+                    is_invitation=(recipient_user is None),  # Mark as invitation if no recipient user
+                    invitation_expires_at=invitation_expires_at
                 )
 
                 # TODO: Implement sponsored transaction logic here
@@ -228,7 +240,8 @@ class Query(graphene.ObjectType):
     )
     send_transactions_with_friend = graphene.List(
         SendTransactionType,
-        friend_user_id=graphene.ID(required=True),
+        friend_user_id=graphene.ID(required=False),
+        friend_phone=graphene.String(required=False),
         limit=graphene.Int()
     )
     # TEMP: Simple test resolver that always returns data
@@ -291,19 +304,29 @@ class Query(graphene.ObjectType):
             
         return queryset
 
-    def resolve_send_transactions_with_friend(self, info, friend_user_id, limit=None):
+    def resolve_send_transactions_with_friend(self, info, friend_user_id=None, friend_phone=None, limit=None):
         """Resolve send transactions between current user and a specific friend"""
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return []
         
-        # Get transactions where either:
-        # 1. Current user sent to friend
-        # 2. Friend sent to current user
-        queryset = SendTransaction.objects.filter(
-            (models.Q(sender_user=user) & models.Q(recipient_user=friend_user_id)) |
-            (models.Q(sender_user=friend_user_id) & models.Q(recipient_user=user))
-        ).order_by('-created_at')
+        # Build the query based on whether we have a user ID or phone number
+        if friend_user_id and not friend_user_id.startswith('contact_'):
+            # Regular Confío user - search by user ID
+            queryset = SendTransaction.objects.filter(
+                (models.Q(sender_user=user) & models.Q(recipient_user=friend_user_id)) |
+                (models.Q(sender_user=friend_user_id) & models.Q(recipient_user=user))
+            ).order_by('-created_at')
+        elif friend_phone:
+            # Non-Confío friend - search by phone number
+            # ONLY show transactions where current user sent to this phone number
+            # We don't show received transactions from phone numbers as they can change
+            queryset = SendTransaction.objects.filter(
+                models.Q(sender_user=user) & models.Q(recipient_phone=friend_phone)
+            ).order_by('-created_at')
+        else:
+            # No valid identifier provided
+            return []
         
         if limit:
             queryset = queryset[:limit]

@@ -40,6 +40,10 @@ class UnifiedTransactionType(DjangoObjectType):
             'description',
             'invoice_id',
             'payment_transaction_id',
+            'is_invitation',
+            'invitation_claimed',
+            'invitation_reverted',
+            'invitation_expires_at',
         ]
     
     def resolve_direction(self, info):
