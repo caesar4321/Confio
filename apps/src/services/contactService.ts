@@ -6,7 +6,8 @@ import { parsePhoneNumber } from 'libphonenumber-js';
 interface StoredContact {
   id: string;
   name: string;
-  phones: string[];
+  phoneNumbers: string[]; // Primary field for phone numbers
+  phones?: string[]; // Legacy field for backward compatibility
   normalizedPhones: string[];
   avatar?: string;
   lastSynced: string;
@@ -464,7 +465,9 @@ export class ContactService {
     const cache: ContactMap = {};
     for (const contact of this.contactsArray) {
       // Add entries for all phone numbers and their variations
-      for (const phone of contact.phones || []) {
+      // Use phoneNumbers field (correct field name) instead of phones
+      const phoneNumbers = contact.phoneNumbers || contact.phones || [];
+      for (const phone of phoneNumbers) {
         // Direct phone number
         cache[phone] = contact;
         
@@ -485,6 +488,13 @@ export class ContactService {
           }
         } catch (e) {
           // Parsing failed, continue
+        }
+      }
+      
+      // Also add normalized phones for better matching
+      if (contact.normalizedPhones) {
+        for (const phone of contact.normalizedPhones) {
+          cache[phone] = contact;
         }
       }
     }

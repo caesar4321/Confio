@@ -81,6 +81,8 @@ interface Transaction {
   invitationClaimed?: boolean;
   invitationReverted?: boolean;
   invitationExpiresAt?: string;
+  senderAddress?: string;
+  recipientAddress?: string;
 }
 
 // Set Spanish locale for moment
@@ -266,17 +268,31 @@ export const AccountDetailScreen = () => {
           type = tx.direction === 'sent' ? 'sent' : 'received';
         }
         
-        // Debug logging for invitation transactions
-        if (type === 'sent' && tx.isInvitation) {
-          console.log('[AccountDetail] Invitation transaction found:', {
-            id: tx.id,
-            to: tx.displayCounterparty,
-            isInvitation: tx.isInvitation,
-            invitationClaimed: tx.invitationClaimed,
-            invitationReverted: tx.invitationReverted
-          });
+        // Fix invitation detection: if we have a counterpartyUser, it's not an invitation
+        let isActualInvitation = tx.isInvitation || false;
+        if (isActualInvitation && tx.counterpartyUser && tx.counterpartyUser.id) {
+          // If there's a counterparty user, this is not really an invitation
+          console.log('[AccountDetail] Correcting invitation flag - counterparty user exists:', tx.counterpartyUser.id);
+          isActualInvitation = false;
         }
         
+        // Debug logging
+        console.log('[AccountDetail] Transaction:', {
+          id: tx.id,
+          type: type,
+          direction: tx.direction,
+          displayCounterparty: tx.displayCounterparty,
+          senderPhone: tx.senderPhone,
+          counterpartyPhone: tx.counterpartyPhone,
+          isInvitation: tx.isInvitation,
+          isActualInvitation: isActualInvitation,
+          senderAddress: tx.senderAddress,
+          counterpartyAddress: tx.counterpartyAddress,
+          counterpartyUser: tx.counterpartyUser
+        });
+        
+        // For proper contact name lookup, we need to pass the phone numbers
+        // The displayCounterparty is the DB name, but we want local contact names
         allTransactions.push({
           type,
           from: tx.direction === 'received' ? tx.displayCounterparty : undefined,
@@ -289,10 +305,12 @@ export const AccountDetailScreen = () => {
           time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
           status: tx.status.toLowerCase() === 'confirmed' ? 'completed' : 'pending',
           hash: tx.transactionHash || 'pending',
-          isInvitation: tx.isInvitation || false,
+          isInvitation: isActualInvitation,
           invitationClaimed: tx.invitationClaimed || false,
           invitationReverted: tx.invitationReverted || false,
-          invitationExpiresAt: tx.invitationExpiresAt
+          invitationExpiresAt: tx.invitationExpiresAt,
+          senderAddress: tx.senderAddress,
+          recipientAddress: tx.counterpartyAddress // Note: unified view uses counterpartyAddress
         });
       });
     }
@@ -544,8 +562,10 @@ export const AccountDetailScreen = () => {
           timestamp: transaction.date,
           status: transaction.status,
           hash: transaction.hash,
-          fromAddress: transaction.from ? '0x1a2b3c4d...7890abcd' : undefined,
-          toAddress: transaction.to ? '0x9e8f7c6b...5432dcba' : undefined,
+          fromAddress: transaction.type === 'received' ? transaction.senderAddress : undefined,
+          toAddress: transaction.type === 'sent' ? transaction.recipientAddress : undefined,
+          fromPhone: transaction.fromPhone,
+          toPhone: transaction.toPhone,
           note: transaction.type === 'received' ? 'Pago por almuerzo - Gracias! 🍕' : 
                 transaction.type === 'sent' ? 'Pago servicios freelance' : undefined,
           avatar: transaction.from ? transaction.from.charAt(0) : 
@@ -553,7 +573,7 @@ export const AccountDetailScreen = () => {
           location: transaction.type === 'payment' ? 'Av. Libertador, Caracas' : undefined,
           merchantId: transaction.type === 'payment' ? 'SUP001' : undefined,
           exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1 cUSD' : undefined,
-          isInvitedFriend: transaction.isInvitation || false
+          isInvitedFriend: transaction.isInvitation || false // true means friend is NOT on Confío
         }
       };
       // @ts-ignore - Navigation type mismatch, but works at runtime
