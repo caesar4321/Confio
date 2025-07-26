@@ -68,6 +68,8 @@ interface Transaction {
   type: 'received' | 'sent' | 'exchange' | 'payment';
   from?: string;
   to?: string;
+  fromPhone?: string;
+  toPhone?: string;
   amount: string;
   currency: string;
   date: string;
@@ -263,6 +265,8 @@ export const AccountDetailScreen = () => {
           type,
           from: tx.direction === 'received' ? tx.displayCounterparty : undefined,
           to: tx.direction === 'sent' ? tx.displayCounterparty : undefined,
+          fromPhone: tx.direction === 'received' ? tx.senderPhone : undefined,
+          toPhone: tx.direction === 'sent' ? tx.counterpartyPhone : undefined,
           amount: tx.displayAmount,
           currency: tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType,
           date: tx.createdAt, // Keep full timestamp for proper sorting
@@ -330,6 +334,40 @@ export const AccountDetailScreen = () => {
     return allTransactions.sort((a, b) => new Date(b.date + ' ' + b.time).getTime() - new Date(a.date + ' ' + a.time).getTime());
   };
 
+  // Helper functions for transaction display
+  const getTransactionTitle = (transaction: Transaction) => {
+    switch(transaction.type) {
+      case 'received':
+        return `Recibido de ${transaction.from}`;
+      case 'sent':
+        return `Enviado a ${transaction.to}`;
+      case 'exchange':
+        return `Intercambio ${transaction.from} → ${transaction.to}`;
+      case 'payment':
+        // If amount is positive, it's a payment received
+        return transaction.amount.startsWith('+') 
+          ? `Pago recibido de ${transaction.from}` 
+          : `Pago a ${transaction.to}`;
+      default:
+        return 'Transacción';
+    }
+  };
+
+  const getTransactionIcon = (transaction: Transaction) => {
+    switch(transaction.type) {
+      case 'received':
+        return <Icon name="arrow-down" size={20} color="#10B981" />;
+      case 'sent':
+        return <Icon name="arrow-up" size={20} color="#EF4444" />;
+      case 'exchange':
+        return <Icon name="refresh-cw" size={20} color="#3B82F6" />;
+      case 'payment':
+        return <Icon name="shopping-bag" size={20} color="#8B5CF6" />;
+      default:
+        return <Icon name="arrow-up" size={20} color="#6B7280" />;
+    }
+  };
+
   // Use unified transactions if available, fallback to legacy format
   const transactions = unifiedTransactionsData ? formatUnifiedTransactions() : formatTransactions();
   
@@ -341,7 +379,19 @@ export const AccountDetailScreen = () => {
     return transactions.filter(tx => {
       const title = getTransactionTitle(tx).toLowerCase();
       const amount = tx.amount.toLowerCase();
-      return title.includes(query) || amount.includes(query);
+      const currency = tx.currency.toLowerCase();
+      const hash = tx.hash.toLowerCase();
+      const date = moment(tx.date).format('DD/MM/YYYY').toLowerCase();
+      const fromPhone = (tx.fromPhone || '').toLowerCase();
+      const toPhone = (tx.toPhone || '').toLowerCase();
+      
+      return title.includes(query) || 
+             amount.includes(query) ||
+             currency.includes(query) ||
+             hash.includes(query) ||
+             date.includes(query) ||
+             fromPhone.includes(query) ||
+             toPhone.includes(query);
     });
   }, [transactions, searchQuery]);
   
@@ -417,39 +467,6 @@ export const AccountDetailScreen = () => {
       setHasReachedEnd(true);
     }
   }, [sendTransactionsData, paymentTransactionsData, transactionLimit, loadingMore, route.params.accountType]);
-
-  const getTransactionTitle = (transaction: Transaction) => {
-    switch(transaction.type) {
-      case 'received':
-        return `Recibido de ${transaction.from}`;
-      case 'sent':
-        return `Enviado a ${transaction.to}`;
-      case 'exchange':
-        return `Intercambio ${transaction.from} → ${transaction.to}`;
-      case 'payment':
-        // If amount is positive, it's a payment received
-        return transaction.amount.startsWith('+') 
-          ? `Pago recibido de ${transaction.from}` 
-          : `Pago a ${transaction.to}`;
-      default:
-        return 'Transacción';
-    }
-  };
-
-  const getTransactionIcon = (transaction: Transaction) => {
-    switch(transaction.type) {
-      case 'received':
-        return <Icon name="arrow-down" size={20} color="#10B981" />;
-      case 'sent':
-        return <Icon name="arrow-up" size={20} color="#EF4444" />;
-      case 'exchange':
-        return <Icon name="refresh-cw" size={20} color="#3B82F6" />;
-      case 'payment':
-        return <Icon name="shopping-bag" size={20} color="#8B5CF6" />;
-      default:
-        return <Icon name="arrow-up" size={20} color="#6B7280" />;
-    }
-  };
 
   const TransactionItem = ({ transaction, onPress }: { transaction: Transaction; onPress: () => void }) => {
     // Format the date properly
