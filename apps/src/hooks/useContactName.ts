@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { contactService } from '../services/contactService';
 
 interface ContactInfo {
@@ -58,6 +58,47 @@ export function useContactName(
   }, [phoneNumber, fallbackName]);
 
   return contactInfo;
+}
+
+/**
+ * Hook to get contact name from local contacts - SYNCHRONOUS version for better performance
+ * This version doesn't cause re-renders and is much faster for lists
+ */
+export function useContactNameSync(
+  phoneNumber?: string | null,
+  fallbackName?: string | null
+): ContactInfo {
+  return useMemo(() => {
+    if (!phoneNumber) {
+      return {
+        displayName: fallbackName || 'Unknown',
+        isFromContacts: false,
+      };
+    }
+
+    try {
+      const contact = contactService.getContactByPhoneSync(phoneNumber);
+      
+      if (contact) {
+        return {
+          displayName: contact.name,
+          isFromContacts: true,
+          originalName: fallbackName || phoneNumber,
+        };
+      } else {
+        return {
+          displayName: fallbackName || phoneNumber,
+          isFromContacts: false,
+        };
+      }
+    } catch (error) {
+      console.error('Error loading contact name:', error);
+      return {
+        displayName: fallbackName || phoneNumber,
+        isFromContacts: false,
+      };
+    }
+  }, [phoneNumber, fallbackName]);
 }
 
 /**

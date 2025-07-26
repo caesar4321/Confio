@@ -37,7 +37,7 @@ import moment from 'moment';
 import 'moment/locale/es';
 import { useAccount } from '../contexts/AccountContext';
 import * as Keychain from 'react-native-keychain';
-import { useContactName } from '../hooks/useContactName';
+import { useContactNameSync } from '../hooks/useContactName';
 
 // Color palette
 const colors = {
@@ -477,7 +477,7 @@ export const AccountDetailScreen = () => {
     // Get contact name for sender or recipient
     const phoneToCheck = transaction.type === 'received' ? transaction.fromPhone : transaction.toPhone;
     const fallbackName = transaction.type === 'received' ? transaction.from : transaction.to;
-    const contactInfo = useContactName(phoneToCheck, fallbackName);
+    const contactInfo = useContactNameSync(phoneToCheck, fallbackName);
     
     // Create enhanced transaction title with contact name
     const getEnhancedTransactionTitle = () => {

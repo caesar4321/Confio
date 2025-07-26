@@ -27,8 +27,10 @@ export class ContactService {
   private lastSyncTime: Date | null = null;
 
   private constructor() {
-    // Preload contacts immediately when service is created
-    this.preloadContacts();
+    // Preload contacts asynchronously to avoid blocking
+    setTimeout(() => {
+      this.preloadContacts();
+    }, 50);
   }
 
   static getInstance(): ContactService {
@@ -372,7 +374,88 @@ export class ContactService {
   }
 
   /**
-   * Get contact name by phone number
+   * Build cache from array - synchronous for performance
+   */
+  private buildCacheFromArray(): void {
+    if (!this.contactsArray || this.contactsArray.length === 0) return;
+
+    const cache: ContactMap = {};
+    for (const contact of this.contactsArray) {
+      // Add entries for all phone numbers and their variations
+      for (const phone of contact.phones || []) {
+        // Direct phone number
+        cache[phone] = contact;
+        
+        // Cleaned version
+        const cleaned = phone.replace(/\D/g, '');
+        if (cleaned) {
+          cache[cleaned] = contact;
+        }
+        
+        // Try to parse and add variations
+        try {
+          const parsed = parsePhoneNumber(phone, 'VE');
+          if (parsed && parsed.isValid()) {
+            const e164 = parsed.format('E.164');
+            const withoutPlus = e164.substring(1);
+            cache[e164] = contact;
+            cache[withoutPlus] = contact;
+          }
+        } catch (e) {
+          // Parsing failed, continue
+        }
+      }
+    }
+    this.contactsCache = cache;
+  }
+
+  /**
+   * Get contact by phone number - SYNCHRONOUS for performance
+   */
+  getContactByPhoneSync(phoneNumber: string): StoredContact | null {
+    if (!phoneNumber) return null;
+
+    // Build cache from array if not available
+    if (!this.contactsCache && this.contactsArray && this.contactsArray.length > 0) {
+      this.buildCacheFromArray();
+    }
+
+    if (!this.contactsCache) return null;
+
+    // Try direct lookup
+    if (this.contactsCache[phoneNumber]) {
+      return this.contactsCache[phoneNumber];
+    }
+
+    // Try cleaned lookup
+    const cleaned = phoneNumber.replace(/\D/g, '');
+    if (cleaned && this.contactsCache[cleaned]) {
+      return this.contactsCache[cleaned];
+    }
+
+    // Try normalized lookup
+    try {
+      const parsed = parsePhoneNumber(phoneNumber, 'VE');
+      if (parsed && parsed.isValid()) {
+        const e164 = parsed.format('E.164');
+        const withoutPlus = e164.substring(1);
+        
+        if (this.contactsCache[e164]) {
+          return this.contactsCache[e164];
+        }
+        if (this.contactsCache[withoutPlus]) {
+          return this.contactsCache[withoutPlus];
+        }
+      }
+    } catch (error) {
+      // Parsing failed, continue
+    }
+
+    return null;
+  }
+
+  /**
+   * Get contact name by phone number - ASYNC version (use sync version for better performance)
    */
   async getContactByPhone(phoneNumber: string): Promise<StoredContact | null> {
     try {
