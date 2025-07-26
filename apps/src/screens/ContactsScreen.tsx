@@ -9,10 +9,30 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import ContactService, { contactService } from '../services/contactService';
 import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { useContactNames } from '../hooks/useContactName';
-import { useApolloClient, useMutation } from '@apollo/client';
-import { CREATE_TEST_USERS } from '../apollo/queries';
+import { useApolloClient, useMutation, gql } from '@apollo/client';
 
 type ContactsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
+
+// Test mutation to create users (only in DEBUG mode)
+const CREATE_TEST_USERS = gql`
+  mutation CreateTestUsers($phoneNumbers: [String!]!) {
+    createTestUsers(phoneNumbers: $phoneNumbers) {
+      success
+      error
+      createdCount
+      usersCreated {
+        phoneNumber
+        userId
+        username
+        firstName
+        lastName
+        isOnConfio
+        activeAccountId
+        activeAccountSuiAddress
+      }
+    }
+  }
+`;
 
 const colors = {
   primary: '#34d399', // emerald-400
