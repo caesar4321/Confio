@@ -439,14 +439,20 @@ export const ContactsScreen = () => {
   );
 
   const handleFriendPress = (contact: any) => {
-    // Navigate to friend detail screen to show transaction history
-    navigation.navigate('FriendDetail', {
-      friendId: contact.id || `friend_${contact.name}`, // Use contact ID or generate one
-      friendName: contact.name,
-      friendAvatar: contact.avatar,
-      friendPhone: contact.phone,
-      isOnConfio: contact.isOnConfio || false
-    });
+    if (contact.isOnConfio) {
+      // For Confío users, show transaction history
+      navigation.navigate('FriendDetail', {
+        friendId: contact.id || `friend_${contact.name}`, // Use contact ID or generate one
+        friendName: contact.name,
+        friendAvatar: contact.avatar,
+        friendPhone: contact.phone,
+        isOnConfio: contact.isOnConfio || false
+      });
+    } else {
+      // For non-Confío users, show token selection modal
+      setSelectedFriend(contact);
+      setShowFriendTokenSelection(true);
+    }
   };
 
   // Memoized callbacks to prevent recreation on every render

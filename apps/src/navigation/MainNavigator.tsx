@@ -18,6 +18,7 @@ import { USDCHistoryScreen } from '../screens/USDCHistoryScreen';
 import { USDCConversionScreen } from '../screens/USDCConversionScreen';
 import { SendWithAddressScreen } from '../screens/SendWithAddressScreen';
 import { SendToFriendScreen } from '../screens/SendToFriendScreen';
+import { FriendDetailScreen } from '../screens/FriendDetailScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
 import { TransactionProcessingScreen } from '../screens/TransactionProcessingScreen';
 import { TransactionSuccessScreen } from '../screens/TransactionSuccessScreen';
@@ -179,6 +180,11 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="SendToFriend"
         component={SendToFriendScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="FriendDetail"
+        component={FriendDetailScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
