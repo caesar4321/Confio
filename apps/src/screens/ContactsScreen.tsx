@@ -1,11 +1,14 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Platform, Modal, Image } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform, Modal, Image, RefreshControl, ActivityIndicator, SectionList, Alert, Linking } from 'react-native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import Icon from 'react-native-vector-icons/Feather';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import ContactService, { contactService } from '../services/contactService';
+import { ContactPermissionModal } from '../components/ContactPermissionModal';
+import { useContactNames } from '../hooks/useContactName';
 
 type ContactsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -33,21 +36,245 @@ export const ContactsScreen = () => {
   const [showSendTokenSelection, setShowSendTokenSelection] = useState(false);
   const [showFriendTokenSelection, setShowFriendTokenSelection] = useState(false);
   const [selectedFriend, setSelectedFriend] = useState<any>(null);
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [isLoadingContacts, setIsLoadingContacts] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [contactsFromDevice, setContactsFromDevice] = useState<any[]>([]);
+  const [hasContactPermission, setHasContactPermission] = useState<boolean | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   
-  // Mock data
-  const friends = [
-    { id: "1", name: "Evelyn", isOnConfio: true, avatar: "E", phone: "+58 412-123-4567" },
-    { id: "2", name: "Julian", isOnConfio: true, avatar: "J", phone: "+58 414-987-6543" },
-    { id: "3", name: "Olivia", isOnConfio: true, avatar: "O", phone: "+58 416-555-1234" },
-    { id: "4", name: "Susy", isOnConfio: true, avatar: "S", phone: "+58 418-777-8888" }
-  ];
+  // Batch all contact state into a single object for performance
+  const [contactsData, setContactsData] = useState<{
+    friends: any[];
+    nonConfioFriends: any[];
+    allContacts: any[];
+    isLoaded: boolean;
+  }>({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: false });
 
-  const nonConfioFriends = [
-    { id: "5", name: "Boris", avatar: "B", phone: "+58 412-111-2222" },
-    { id: "6", name: "Jeffrey", avatar: "J", phone: "+58 414-333-4444" },
-    { id: "7", name: "Juan", avatar: "J", phone: "+58 416-555-6666" },
-    { id: "8", name: "Yadira", avatar: "Y", phone: "+58 418-999-0000" }
-  ];
+  // Check contact permission on mount
+  useEffect(() => {
+    console.log('[PERF] ContactsScreen mounted');
+    const startTime = Date.now();
+    checkContactPermission().then(() => {
+      console.log(`[PERF] checkContactPermission completed in ${Date.now() - startTime}ms`);
+    });
+  }, []);
+
+  // Monitor contact loading in background
+  useEffect(() => {
+    if (isInitialLoad && hasContactPermission && !contactsData.isLoaded) {
+      console.log('[PERF] Starting contact loading monitor');
+      let checkCount = 0;
+      
+      // Check for contacts every 100ms until loaded
+      const checkInterval = setInterval(async () => {
+        checkCount++;
+        const checkStart = Date.now();
+        const contacts = await contactService.getAllContacts();
+        console.log(`[PERF] Check #${checkCount}: getAllContacts took ${Date.now() - checkStart}ms, got ${contacts.length} contacts`);
+        
+        if (contacts.length > 0) {
+          const displayStart = Date.now();
+          await displayContacts(contacts);
+          console.log(`[PERF] displayContacts took ${Date.now() - displayStart}ms`);
+          setIsInitialLoad(false);
+          clearInterval(checkInterval);
+        }
+      }, 100);
+
+      // Clear interval after 5 seconds to prevent infinite checking
+      setTimeout(() => {
+        clearInterval(checkInterval);
+        setIsInitialLoad(false);
+      }, 5000);
+
+      return () => clearInterval(checkInterval);
+    }
+  }, [hasContactPermission, isInitialLoad, contactsData.isLoaded]);
+
+  // Check and request contact permission
+  const checkContactPermission = async () => {
+    try {
+      const hasPermission = await contactService.hasContactPermission();
+      setHasContactPermission(hasPermission);
+      
+      if (hasPermission) {
+        console.log('[PERF] Has permission, getting initial contacts');
+        const getContactsStart = Date.now();
+        
+        // Get initial contacts (may be empty if still loading)
+        const contacts = await contactService.getAllContacts();
+        console.log(`[PERF] Initial getAllContacts took ${Date.now() - getContactsStart}ms, got ${contacts.length} contacts`);
+        
+        if (contacts.length > 0) {
+          // Display immediately if available
+          const displayStart = Date.now();
+          await displayContacts(contacts);
+          console.log(`[PERF] Initial displayContacts took ${Date.now() - displayStart}ms`);
+          setIsInitialLoad(false);
+        }
+        
+        // Check if we should sync in background
+        if (contactService.shouldSyncContacts()) {
+          console.log('[PERF] Starting background sync');
+          // Sync in background without blocking UI
+          contactService.syncContacts().then(async () => {
+            console.log('[PERF] Background sync completed');
+            // Refresh display with new data
+            const updatedContacts = await contactService.getAllContacts();
+            if (updatedContacts.length > 0) {
+              await displayContacts(updatedContacts);
+            }
+          });
+        }
+      } else {
+        // Check if user has previously denied
+        const storedStatus = await contactService.getStoredPermissionStatus();
+        if (!storedStatus || storedStatus === 'pending') {
+          // Show permission modal if not previously denied
+          setShowPermissionModal(true);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking contact permission:', error);
+    }
+  };
+
+  // Display contacts from cache or fresh sync - OPTIMIZED WITH SINGLE STATE UPDATE
+  const displayContacts = async (allContacts: any[]) => {
+    const startTime = Date.now();
+    
+    if (allContacts.length === 0) {
+      console.log('No contacts to display');
+      setContactsData({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: true });
+      return;
+    }
+    
+    console.log(`[PERF] Starting to format ${allContacts.length} contacts`);
+    const formatStart = Date.now();
+    
+    // TODO: Match with actual Confío users from API
+    // For now, we'll show all contacts as non-Confío friends
+    const formattedContacts = allContacts.map((contact, index) => ({
+      id: `contact_${index}`,
+      name: contact.name || 'Sin nombre',
+      avatar: contact.name ? contact.name.charAt(0).toUpperCase() : '?',
+      phone: contact.phoneNumbers && contact.phoneNumbers[0] ? contact.phoneNumbers[0] : '',
+      isOnConfio: false
+    }));
+    
+    console.log(`[PERF] Formatting took ${Date.now() - formatStart}ms`);
+    
+    // For demo purposes, mark some as Confío users (you'd get this from API)
+    const splitStart = Date.now();
+    const confioUsers = formattedContacts.slice(0, Math.floor(formattedContacts.length * 0.3));
+    const nonConfioUsers = formattedContacts.slice(Math.floor(formattedContacts.length * 0.3));
+    
+    confioUsers.forEach(user => user.isOnConfio = true);
+    console.log(`[PERF] Splitting contacts took ${Date.now() - splitStart}ms`);
+    
+    // SINGLE STATE UPDATE - This is the key optimization!
+    const setStateStart = Date.now();
+    setContactsData({
+      friends: confioUsers,
+      nonConfioFriends: nonConfioUsers,
+      allContacts: allContacts,
+      isLoaded: true
+    });
+    console.log(`[PERF] setState call took ${Date.now() - setStateStart}ms`);
+    
+    console.log(`[PERF] Total displayContacts time: ${Date.now() - startTime}ms`);
+  };
+
+  // Sync contacts with device
+  const syncContacts = async () => {
+    setIsLoadingContacts(true);
+    try {
+      const success = await contactService.syncContacts();
+      console.log('Sync success:', success);
+      
+      if (success) {
+        // Get all contacts from device
+        const allContacts = await contactService.getAllContacts();
+        console.log('Retrieved contacts:', allContacts.length);
+        
+        await displayContacts(allContacts);
+      }
+    } catch (error) {
+      console.error('Error syncing contacts:', error);
+      // Show empty state with sync button if error occurs
+    } finally {
+      setIsLoadingContacts(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Handle permission allow
+  const handlePermissionAllow = async () => {
+    setShowPermissionModal(false);
+    const granted = await contactService.requestContactPermission();
+    
+    if (granted) {
+      setHasContactPermission(true);
+      await contactService.storePermissionStatus('granted');
+      await syncContacts();
+    } else {
+      setHasContactPermission(false);
+      await contactService.storePermissionStatus('denied');
+      
+      // On iOS, if permission is denied, we need to guide user to settings
+      if (Platform.OS === 'ios') {
+        setTimeout(() => {
+          Alert.alert(
+            'Permisos de Contactos',
+            'Para usar esta función, ve a Configuración > Confío > Contactos y activa el acceso.',
+            [
+              { text: 'Cancelar', style: 'cancel' },
+              { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
+            ]
+          );
+        }, 500);
+      }
+    }
+  };
+
+  // Handle permission deny
+  const handlePermissionDeny = async () => {
+    setShowPermissionModal(false);
+    setHasContactPermission(false);
+    await contactService.storePermissionStatus('denied');
+  };
+
+  // Handle pull to refresh
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    setIsLoadingContacts(true);
+    
+    // Clear existing contacts to show loading state
+    setContactsData({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: false });
+    
+    if (hasContactPermission) {
+      await syncContacts();
+    } else {
+      // If no permission, try requesting again
+      const granted = await contactService.requestContactPermission();
+      if (granted) {
+        setHasContactPermission(true);
+        await syncContacts();
+      }
+    }
+    
+    setRefreshing(false);
+    setIsLoadingContacts(false);
+  };
+
+  // Use focus effect to refresh contacts when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      // Don't auto-sync on focus, just use cached data
+      // Users can manually refresh if needed
+    }, [hasContactPermission])
+  );
 
   const handleReceiveWithAddress = () => {
     setShowTokenSelection(true);
@@ -88,12 +315,12 @@ export const ContactsScreen = () => {
   };
 
   // Filter friends based on search term
-  const filteredConfioFriends = friends.filter(friend =>
+  const filteredConfioFriends = contactsData.friends.filter(friend =>
     friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     friend.phone.includes(searchTerm)
   );
 
-  const filteredNonConfioFriends = nonConfioFriends.filter(friend =>
+  const filteredNonConfioFriends = contactsData.nonConfioFriends.filter(friend =>
     friend.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     friend.phone.includes(searchTerm)
   );
@@ -334,28 +561,151 @@ export const ContactsScreen = () => {
     </Modal>
   );
 
-  return (
-    <ScrollView 
-      style={styles.container} 
-      keyboardShouldPersistTaps="handled"
-      contentContainerStyle={{ paddingBottom: 24 }}
-    >
+  // Prepare sections for SectionList
+  const sections = useMemo(() => {
+    const sectionData = [];
+    
+    if (filteredConfioFriends.length > 0) {
+      sectionData.push({
+        title: 'Amigos en Confío',
+        count: filteredConfioFriends.length,
+        data: filteredConfioFriends,
+        isConfio: true
+      });
+    }
+    
+    if (filteredNonConfioFriends.length > 0) {
+      sectionData.push({
+        title: 'Invita a tus amigos',
+        count: filteredNonConfioFriends.length,
+        data: filteredNonConfioFriends,
+        isConfio: false,
+        showInfo: true
+      });
+    }
+    
+    return sectionData;
+  }, [filteredConfioFriends, filteredNonConfioFriends]);
+
+  const renderSectionHeader = ({ section }) => (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>{section.title}</Text>
+        <View style={styles.sectionCount}>
+          <Text style={styles.sectionCountText}>{section.count}</Text>
+        </View>
+      </View>
+      
+      {section.showInfo && (
+        <View style={styles.infoCard}>
+          <View style={styles.infoCardContent}>
+            <View style={styles.infoIconContainer}>
+              <Icon name="clock" size={16} color="#fff" />
+            </View>
+            <View style={styles.infoTextContainer}>
+              <Text style={styles.infoTitle}>Envío con invitación</Text>
+              <Text style={styles.infoDescription}>
+                Envía dinero y tu amigo recibirá una invitación por WhatsApp. 
+                Tendrá <Text style={styles.infoBold}>7 días</Text> para crear su cuenta y reclamar el dinero.
+              </Text>
+            </View>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+
+  const renderItem = ({ item, section }) => (
+    <ContactCard contact={item} isOnConfio={section.isConfio} />
+  );
+
+  const ListHeaderComponent = () => (
+    <>
       {/* Search Bar */}
       <View style={styles.searchSection}>
-        <View style={styles.searchBar}>
-          <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
-          <TextInput 
-            style={styles.searchInput}
-            placeholder="Buscar contactos..." 
-            placeholderTextColor="#6b7280"
-            value={searchTerm}
-            onChangeText={setSearchTerm}
-          />
+        <View style={styles.searchBarContainer}>
+          <View style={styles.searchBar}>
+            <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
+            <TextInput 
+              style={styles.searchInput}
+              placeholder="Buscar contactos..." 
+              placeholderTextColor="#6b7280"
+              value={searchTerm}
+              onChangeText={setSearchTerm}
+            />
+          </View>
+          
+          {/* Manual sync button - always visible */}
+          <TouchableOpacity 
+            style={styles.syncButton}
+            onPress={async () => {
+              if (hasContactPermission) {
+                handleRefresh();
+              } else {
+                // Check if permission was previously denied
+                const status = await contactService.getStoredPermissionStatus();
+                if (status === 'denied' && Platform.OS === 'ios') {
+                  // On iOS, guide to settings
+                  Alert.alert(
+                    'Permisos de Contactos',
+                    'Para sincronizar contactos, ve a Configuración > Confío > Contactos y activa el acceso.',
+                    [
+                      { text: 'Cancelar', style: 'cancel' },
+                      { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
+                    ]
+                  );
+                } else {
+                  // First time or Android, show modal
+                  setShowPermissionModal(true);
+                }
+              }
+            }}
+            disabled={isLoadingContacts || refreshing}
+          >
+            <Icon 
+              name={hasContactPermission ? "refresh-cw" : "shield"} 
+              size={20} 
+              color={isLoadingContacts || refreshing ? "#9ca3af" : colors.primary} 
+            />
+          </TouchableOpacity>
         </View>
       </View>
 
       {/* Send/Receive Options */}
       <View style={styles.actionSection}>
+        {/* Show permission prompt if user denied but there are no contacts */}
+        {hasContactPermission === false && contactsData.friends.length === 0 && contactsData.nonConfioFriends.length === 0 && (
+          <TouchableOpacity 
+            style={styles.permissionPrompt}
+            onPress={async () => {
+              const status = await contactService.getStoredPermissionStatus();
+              if (status === 'denied' && Platform.OS === 'ios') {
+                Alert.alert(
+                  'Permisos de Contactos',
+                  'Para ver los nombres de tus amigos, ve a Configuración > Confío > Contactos y activa el acceso.',
+                  [
+                    { text: 'Cancelar', style: 'cancel' },
+                    { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
+                  ]
+                );
+              } else {
+                setShowPermissionModal(true);
+              }
+            }}
+          >
+            <View style={styles.permissionPromptIcon}>
+              <Icon name="shield" size={20} color={colors.primary} />
+            </View>
+            <View style={styles.permissionPromptContent}>
+              <Text style={styles.permissionPromptTitle}>Activar contactos</Text>
+              <Text style={styles.permissionPromptText}>
+                Permite el acceso para ver los nombres de tus amigos
+              </Text>
+            </View>
+            <Icon name="chevron-right" size={20} color="#9ca3af" />
+          </TouchableOpacity>
+        )}
+        
         <View style={styles.actionButtons}>
           <TouchableOpacity 
             style={styles.actionButton}
@@ -390,61 +740,12 @@ export const ContactsScreen = () => {
           </TouchableOpacity>
         </View>
       </View>
+    </>
+  );
 
-      {/* Friends on Confío */}
-      {filteredConfioFriends.length > 0 && (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Amigos en Confío</Text>
-            <View style={styles.sectionCount}>
-              <Text style={styles.sectionCountText}>{filteredConfioFriends.length}</Text>
-            </View>
-          </View>
-          
-          <View style={styles.contactsList}>
-            {filteredConfioFriends.map((friend, index) => (
-              <ContactCard key={index} contact={friend} isOnConfio={true} />
-            ))}
-          </View>
-        </View>
-      )}
-
-      {/* Friends not on Confío */}
-      {filteredNonConfioFriends.length > 0 && (
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Invita a tus amigos</Text>
-            <View style={styles.sectionCount}>
-              <Text style={styles.sectionCountText}>{filteredNonConfioFriends.length}</Text>
-            </View>
-          </View>
-          
-          {/* Info Card */}
-          <View style={styles.infoCard}>
-            <View style={styles.infoCardContent}>
-              <View style={styles.infoIconContainer}>
-                <Icon name="clock" size={16} color="#fff" />
-              </View>
-              <View style={styles.infoTextContainer}>
-                <Text style={styles.infoTitle}>Envío con invitación</Text>
-                <Text style={styles.infoDescription}>
-                  Envía dinero y tu amigo recibirá una invitación por WhatsApp. 
-                  Tendrá <Text style={styles.infoBold}>7 días</Text> para crear su cuenta y reclamar el dinero.
-                </Text>
-              </View>
-            </View>
-          </View>
-          
-          <View style={styles.contactsList}>
-            {filteredNonConfioFriends.map((friend, index) => (
-              <ContactCard key={index} contact={friend} isOnConfio={false} />
-            ))}
-          </View>
-        </View>
-      )}
-
-      {/* Empty State */}
-      {filteredConfioFriends.length === 0 && filteredNonConfioFriends.length === 0 && searchTerm && (
+  const ListEmptyComponent = () => {
+    if (searchTerm) {
+      return (
         <View style={styles.emptyState}>
           <View style={styles.emptyIconContainer}>
             <Icon name="users" size={32} color="#9ca3af" />
@@ -454,12 +755,134 @@ export const ContactsScreen = () => {
             No hay contactos que coincidan con "{searchTerm}"
           </Text>
         </View>
-      )}
+      );
+    }
+    
+    if (!isInitialLoad && !isLoadingContacts) {
+      return (
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIconContainer}>
+            <Icon name="users" size={32} color="#9ca3af" />
+          </View>
+          <Text style={styles.emptyTitle}>
+            {hasContactPermission === false ? 'Acceso a contactos denegado' : 'No hay contactos'}
+          </Text>
+          <Text style={styles.emptyDescription}>
+            {hasContactPermission === false 
+              ? 'Permite el acceso a tus contactos para enviar dinero fácilmente a tus amigos' 
+              : 'Sincroniza tus contactos para empezar a enviar dinero'}
+          </Text>
+          
+          <View style={styles.emptyButtonsContainer}>
+            {hasContactPermission === false ? (
+              <TouchableOpacity 
+                style={styles.permissionButton}
+                onPress={async () => {
+                  // Check if permission was previously denied
+                  const status = await contactService.getStoredPermissionStatus();
+                  if (status === 'denied' && Platform.OS === 'ios') {
+                    // On iOS, guide to settings
+                    Alert.alert(
+                      'Permisos de Contactos',
+                      'Para usar los contactos, ve a Configuración > Confío > Contactos y activa el acceso.',
+                      [
+                        { text: 'Cancelar', style: 'cancel' },
+                        { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
+                      ]
+                    );
+                  } else {
+                    // First time or Android, show modal
+                    setShowPermissionModal(true);
+                  }
+                }}
+              >
+                <Icon name="shield" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.permissionButtonText}>Permitir acceso a contactos</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity 
+                style={styles.permissionButton}
+                onPress={handleRefresh}
+              >
+                <Icon name="refresh-cw" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.permissionButtonText}>Sincronizar contactos</Text>
+              </TouchableOpacity>
+            )}
+            
+            {/* Button to guide to settings on iOS or show modal on Android */}
+            {hasContactPermission === false && (
+              <TouchableOpacity 
+                style={styles.secondaryButton}
+                onPress={async () => {
+                  const status = await contactService.getStoredPermissionStatus();
+                  if (status === 'denied' && Platform.OS === 'ios') {
+                    Linking.openSettings();
+                  } else {
+                    setShowPermissionModal(true);
+                  }
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  {Platform.OS === 'ios' ? 'Abrir Configuración' : 'Ver información de privacidad'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      );
+    }
+    
+    return null;
+  };
 
-      <TokenSelectionModal />
-      <SendTokenSelectionModal />
-      <FriendTokenSelectionModal />
-    </ScrollView>
+  return (
+    <>
+      <View style={styles.container}>
+        <SectionList
+          sections={sections}
+          renderItem={renderItem}
+          renderSectionHeader={renderSectionHeader}
+          ListHeaderComponent={ListHeaderComponent}
+          ListEmptyComponent={ListEmptyComponent}
+          keyExtractor={(item, index) => item.id || `contact-${index}`}
+          stickySectionHeadersEnabled={false}
+          contentContainerStyle={{ paddingBottom: 24 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.primary}
+            />
+          }
+          initialNumToRender={20}
+          maxToRenderPerBatch={10}
+          windowSize={21}
+          removeClippedSubviews={true}
+        />
+        
+        <TokenSelectionModal />
+        <SendTokenSelectionModal />
+        <FriendTokenSelectionModal />
+      </View>
+
+      {/* Beautiful Contact Permission Modal */}
+      <ContactPermissionModal
+        visible={showPermissionModal}
+        onAllow={handlePermissionAllow}
+        onDeny={handlePermissionDeny}
+        onClose={() => setShowPermissionModal(false)}
+      />
+      
+      {/* Loading overlay - only show for manual refresh */}
+      {(isLoadingContacts || (isInitialLoad && hasContactPermission && !contactsData.isLoaded)) && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>
+            {isInitialLoad ? 'Cargando contactos...' : 'Sincronizando contactos...'}
+          </Text>
+        </View>
+      )}
+    </>
   );
 };
 
@@ -474,13 +897,26 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     backgroundColor: '#fff',
   },
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   searchBar: {
+    flex: 1,
     backgroundColor: '#f9fafb',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderRadius: 16,
+  },
+  syncButton: {
+    backgroundColor: '#f9fafb',
+    padding: 12,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   searchIcon: {
     marginRight: 12,
@@ -563,7 +999,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 8,
-    paddingHorizontal: 4,
+    paddingHorizontal: 20,
   },
   avatarContainer: {
     width: 48,
@@ -773,4 +1209,81 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#6B7280',
   },
-}); 
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 999,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#6B7280',
+  },
+  permissionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 999,
+    marginTop: 24,
+  },
+  permissionButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  emptyButtonsContainer: {
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  secondaryButton: {
+    marginTop: 12,
+    paddingVertical: 8,
+  },
+  secondaryButtonText: {
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: '500',
+    textDecorationLine: 'underline',
+  },
+  permissionPrompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primaryLight,
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  permissionPromptIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  permissionPromptContent: {
+    flex: 1,
+  },
+  permissionPromptTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.primaryDark,
+    marginBottom: 2,
+  },
+  permissionPromptText: {
+    fontSize: 13,
+    color: colors.primaryDark,
+    opacity: 0.8,
+  },
+});

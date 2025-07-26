@@ -16,6 +16,7 @@ import com.th3rdwave.safeareacontext.SafeAreaContextPackage
 import com.mrousavy.camera.react.CameraPackage
 import fr.greweb.reactnativeviewshot.RNViewShotPackage
 import com.reactnativecommunity.cameraroll.CameraRollPackage
+import com.rt2zz.reactnativecontacts.ReactNativeContacts
 
 class MainApplication : Application(), ReactApplication {
 
@@ -29,6 +30,7 @@ class MainApplication : Application(), ReactApplication {
               add(CameraPackage())
               add(RNViewShotPackage())
               add(CameraRollPackage())
+              add(ReactNativeContacts())
             }
 
         override fun getJSMainModuleName(): String = "index"

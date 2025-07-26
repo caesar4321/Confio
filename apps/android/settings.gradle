@@ -80,3 +80,6 @@ project(':react-native-view-shot').projectDir = new File(rootProject.projectDir,
 
 include ':react-native-cameraroll'
 project(':react-native-cameraroll').projectDir = new File(rootProject.projectDir, '../node_modules/@react-native-camera-roll/camera-roll/android')
+
+include ':react-native-contacts'
+project(':react-native-contacts').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-contacts/android')

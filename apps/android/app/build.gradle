@@ -118,6 +118,19 @@ android {
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
+    packagingOptions {
+        pickFirst '**/libjsi.so'
+        pickFirst '**/libc++_shared.so'
+        pickFirst '**/libfbjni.so'
+        pickFirst '**/libreact_nativemodule_core.so'
+        pickFirst '**/libturbomodulejsijni.so'
+        pickFirst '**/libfolly_json.so'
+        pickFirst '**/libfolly_runtime.so'
+        pickFirst '**/libglog.so'
+        pickFirst '**/libhermes.so'
+        pickFirst '**/libreactnativejni.so'
+        pickFirst '**/libreactnative.so'
+    }
 }
 
 dependencies {
@@ -149,6 +162,7 @@ dependencies {
     implementation project(':react-native-screens')
     implementation project(':react-native-safe-area-context')
     implementation project(':react-native-cameraroll')
+    implementation project(':react-native-contacts')
 
     // Add Google Sign-In dependencies
     implementation 'com.google.android.gms:play-services-auth:20.7.0'
