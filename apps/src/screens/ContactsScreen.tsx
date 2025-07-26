@@ -225,20 +225,7 @@ export const ContactsScreen = () => {
           setIsInitialLoad(false);
         }
         
-        // Check if we should sync in background
-        const shouldSync = await contactService.shouldSyncContacts();
-        if (shouldSync) {
-          console.log('[PERF] Starting background sync');
-          // Sync in background without blocking UI
-          contactService.syncContacts(apolloClient).then(async () => {
-            console.log('[PERF] Background sync completed');
-            // Refresh display with new data
-            const updatedContacts = await contactService.getAllContacts();
-            if (updatedContacts.length > 0) {
-              await displayContacts(updatedContacts);
-            }
-          });
-        }
+        // No automatic sync - users will use pull-to-refresh or sync button
       } else {
         // Check if user has previously denied
         const storedStatus = await contactService.getStoredPermissionStatus();
@@ -369,9 +356,9 @@ export const ContactsScreen = () => {
     setContactsData({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: false });
     
     if (hasContactPermission) {
-      // Force sync on manual refresh
-      console.log('[SYNC] Manual refresh - forcing sync');
-      const success = await contactService.syncContacts(apolloClient, true);
+      // Manual refresh - always sync
+      console.log('[SYNC] Manual refresh - syncing contacts');
+      const success = await contactService.syncContacts(apolloClient);
       if (success) {
         const allContacts = await contactService.getAllContacts();
         await displayContacts(allContacts);
@@ -381,7 +368,7 @@ export const ContactsScreen = () => {
       const granted = await contactService.requestContactPermission();
       if (granted) {
         setHasContactPermission(true);
-        const success = await contactService.syncContacts(apolloClient, true);
+        const success = await contactService.syncContacts(apolloClient);
         if (success) {
           const allContacts = await contactService.getAllContacts();
           await displayContacts(allContacts);
@@ -924,7 +911,7 @@ export const ContactsScreen = () => {
               style={styles.syncButton}
               onPress={async () => {
                 if (hasContactPermission) {
-                  handleRefresh(); // This already forces sync
+                  handleRefresh(); // This will sync contacts
                 } else {
                   // Check if permission was previously denied
                   const status = await contactService.getStoredPermissionStatus();

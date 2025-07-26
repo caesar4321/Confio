@@ -23,14 +23,11 @@ interface ContactMap {
 const CONTACTS_KEYCHAIN_SERVICE = 'com.confio.contacts';
 const CONTACTS_KEYCHAIN_KEY = 'user_contacts';
 const CONTACT_PERMISSION_STATUS_KEY = 'contact_permission_status';
-const LAST_SYNC_TIME_KEY = 'last_sync_time';
-const SYNC_INTERVAL_HOURS = 0.0083; // Sync every 30 seconds (0.0083 * 60 = 0.5 min = 30 sec)
 
 export class ContactService {
   private static instance: ContactService;
   private contactsCache: ContactMap | null = null;
   private contactsArray: StoredContact[] | null = null;
-  private lastSyncTime: Date | null = null;
 
   private constructor() {
     // Preload contacts asynchronously to avoid blocking
@@ -208,17 +205,8 @@ export class ContactService {
   /**
    * Sync contacts from device and store in keychain
    * @param apolloClient - Apollo client for GraphQL queries
-   * @param force - Force sync even if recently synced
    */
-  async syncContacts(apolloClient?: any, force: boolean = false): Promise<boolean> {
-    // Check if we should skip sync (unless forced)
-    if (!force) {
-      const shouldSync = await this.shouldSyncContacts();
-      if (!shouldSync) {
-        console.log('[SYNC] Skipping sync - recently synced');
-        return true;
-      }
-    }
+  async syncContacts(apolloClient?: any): Promise<boolean> {
     try {
       const hasPermission = await this.hasContactPermission();
       if (!hasPermission) {
@@ -340,14 +328,6 @@ export class ContactService {
 
       // Update cache
       this.contactsCache = contactMap;
-      this.lastSyncTime = new Date();
-      
-      // Store last sync time in keychain
-      await Keychain.setInternetCredentials(
-        CONTACTS_KEYCHAIN_SERVICE + '_sync_time',
-        LAST_SYNC_TIME_KEY,
-        this.lastSyncTime.toISOString()
-      );
 
       // Create array of unique contacts for faster retrieval
       const uniqueContactsMap = new Map<string, StoredContact>();
@@ -669,41 +649,11 @@ export class ContactService {
     try {
       await Keychain.resetInternetCredentials(CONTACTS_KEYCHAIN_SERVICE);
       this.contactsCache = null;
-      this.lastSyncTime = null;
     } catch (error) {
       console.error('Error clearing contacts:', error);
     }
   }
 
-  /**
-   * Check if we should sync contacts (e.g., once per day)
-   */
-  async shouldSyncContacts(): Promise<boolean> {
-    try {
-      // First check in-memory cache
-      if (this.lastSyncTime) {
-        const hoursSinceLastSync = (new Date().getTime() - this.lastSyncTime.getTime()) / (1000 * 60 * 60);
-        return hoursSinceLastSync >= SYNC_INTERVAL_HOURS;
-      }
-      
-      // Check persisted last sync time
-      const credentials = await Keychain.getInternetCredentials(CONTACTS_KEYCHAIN_SERVICE + '_sync_time');
-      if (credentials && credentials.username === LAST_SYNC_TIME_KEY) {
-        const lastSyncTimeStr = credentials.password;
-        const lastSyncTime = new Date(lastSyncTimeStr);
-        this.lastSyncTime = lastSyncTime; // Update in-memory cache
-        
-        const hoursSinceLastSync = (new Date().getTime() - lastSyncTime.getTime()) / (1000 * 60 * 60);
-        return hoursSinceLastSync >= SYNC_INTERVAL_HOURS;
-      }
-      
-      // No sync time found, should sync
-      return true;
-    } catch (error) {
-      console.error('Error checking last sync time:', error);
-      return true; // Sync on error
-    }
-  }
 
   /**
    * Get contacts count for quick UI updates
