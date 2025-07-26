@@ -113,17 +113,41 @@ export const HomeScreen = () => {
   } = useAccount();
   
   // Fetch real balances
-  const { data: cUSDBalanceData, loading: cUSDLoading, refetch: refetchCUSD } = useQuery(GET_ACCOUNT_BALANCE, {
+  const { data: cUSDBalanceData, loading: cUSDLoading, error: cUSDError, refetch: refetchCUSD } = useQuery(GET_ACCOUNT_BALANCE, {
     variables: { tokenType: 'cUSD' },
-    fetchPolicy: 'cache-first', // Use cache-first to prevent unnecessary network requests
-    skip: !isInitialized, // Don't fetch until initialized
+    fetchPolicy: 'network-only', // Force network request to bypass any cache issues
   });
   
-  const { data: confioBalanceData, loading: confioLoading, refetch: refetchConfio } = useQuery(GET_ACCOUNT_BALANCE, {
+  const { data: confioBalanceData, loading: confioLoading, error: confioError, refetch: refetchConfio } = useQuery(GET_ACCOUNT_BALANCE, {
     variables: { tokenType: 'CONFIO' },
-    fetchPolicy: 'cache-first', // Use cache-first to prevent unnecessary network requests
-    skip: !isInitialized, // Don't fetch until initialized
+    fetchPolicy: 'network-only', // Force network request to bypass any cache issues
   });
+  
+  // Log any errors and data for debugging
+  useEffect(() => {
+    console.log('Balance query status:', {
+      isInitialized,
+      cUSDLoading,
+      confioLoading,
+      cUSDData: cUSDBalanceData,
+      confioData: confioBalanceData,
+      cUSDError: cUSDError?.message,
+      confioError: confioError?.message,
+    });
+    
+    if (cUSDError) {
+      console.error('Error fetching cUSD balance:', cUSDError);
+    }
+    if (confioError) {
+      console.error('Error fetching CONFIO balance:', confioError);
+    }
+    if (cUSDBalanceData) {
+      console.log('cUSD balance data:', cUSDBalanceData);
+    }
+    if (confioBalanceData) {
+      console.log('CONFIO balance data:', confioBalanceData);
+    }
+  }, [isInitialized, cUSDLoading, confioLoading, cUSDError, confioError, cUSDBalanceData, confioBalanceData]);
   
   // Parse balances safely
   const cUSDBalance = parseFloat(cUSDBalanceData?.accountBalance || '0');

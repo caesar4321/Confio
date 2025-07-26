@@ -309,7 +309,12 @@ class Query(graphene.ObjectType):
 	def resolve_account_balance(self, info, token_type):
 		"""Resolve account balance for a specific token type"""
 		user = getattr(info.context, 'user', None)
+		
+		# Log authentication status for debugging
+		print(f"AccountBalance resolver - User: {user}, Authenticated: {getattr(user, 'is_authenticated', False) if user else False}")
+		
 		if not (user and getattr(user, 'is_authenticated', False)):
+			print(f"AccountBalance resolver - Returning 0 for unauthenticated user")
 			return "0"
 		
 		# Normalize token type
@@ -325,7 +330,9 @@ class Query(graphene.ObjectType):
 			'USDC': '458.22'
 		}
 		
-		return mock_balances.get(normalized_token_type, '0')
+		balance = mock_balances.get(normalized_token_type, '0')
+		print(f"AccountBalance resolver - Returning {balance} for {normalized_token_type}")
+		return balance
 
 	def resolve_countries(self, info, is_active=None):
 		"""Resolve available countries for bank accounts"""

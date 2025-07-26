@@ -21,8 +21,13 @@ class LoggingGraphQLView(GraphQLView):
         if request.method == 'POST':
             try:
                 body = json.loads(request.body)
-                logger.info("GraphQL Query: %s", body.get('query', ''))
+                query = body.get('query', '')
+                logger.info("GraphQL Query: %s", query)
                 logger.info("GraphQL Variables: %s", body.get('variables', {}))
+                
+                # Log balance queries specifically
+                if 'accountBalance' in query:
+                    logger.info(f"BALANCE QUERY DETECTED - User: {request.user}, Authenticated: {request.user.is_authenticated}")
             except Exception as e:
                 logger.error("Error parsing GraphQL request: %s", str(e))
         return super().dispatch(request, *args, **kwargs)
