@@ -19,7 +19,7 @@
     "@react-native-camera-roll/camera-roll": "^7.10.0",
     "@react-native-firebase/app": "^22.2.0",
     "@react-native-firebase/auth": "^22.2.0",
-    "@react-native-firebase/messaging": "^22.2.0",
+    "@react-native-firebase/messaging": "22.2.0",
     "@react-native-google-signin/google-signin": "^14.0.1",
     "@react-navigation/bottom-tabs": "^7.3.14",
     "@react-navigation/native": "^7.1.10",
@@ -29,10 +29,12 @@
     "graphql": "^16.0.0",
     "graphql-ws": "^6.0.6",
     "jwt-decode": "^4.0.0",
+    "libphonenumber-js": "^1.11.7",
     "moment": "^2.30.1",
     "react": "19.0.0",
     "react-native": "0.79.3",
     "react-native-buffer": "^6.0.3",
+    "react-native-contacts": "^7.0.8",
     "react-native-fs": "^2.20.0",
     "react-native-get-random-values": "^1.9.0",
     "react-native-keychain": "^10.0.0",
@@ -47,9 +49,7 @@
     "react-native-vision-camera": "^4.6.4",
     "react-native-worklets-core": "^1.5.0",
     "rxjs": "^7.8.2",
-    "text-encoding": "^0.7.0",
-    "react-native-contacts": "^7.0.8",
-    "libphonenumber-js": "^1.11.7"
+    "text-encoding": "^0.7.0"
   },
   "devDependencies": {
     "@babel/core": "^7.27.4",
