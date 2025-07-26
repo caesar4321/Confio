@@ -49,6 +49,8 @@ export const MainNavigator = () => {
   // Hook for push notification prompt
   const { showModal, handleAllow, handleDeny } = usePushNotificationPrompt();
   
+  console.log('[MainNavigator] Push notification modal visible:', showModal);
+  
   return (
     <>
       <Stack.Navigator
