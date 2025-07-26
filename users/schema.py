@@ -41,6 +41,7 @@ class UserType(DjangoObjectType):
 	is_identity_verified = graphene.Boolean()
 	last_verified_date = graphene.DateTime()
 	verification_status = graphene.String()
+	accounts = graphene.List(lambda: AccountType)
 	
 	class Meta:
 		model = User
@@ -54,6 +55,9 @@ class UserType(DjangoObjectType):
 	
 	def resolve_verification_status(self, info):
 		return self.verification_status
+	
+	def resolve_accounts(self, info):
+		return Account.objects.filter(user=self).select_related('business')
 
 class IdentityVerificationType(DjangoObjectType):
 	class Meta:
