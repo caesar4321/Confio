@@ -145,6 +145,9 @@ export type MainStackParamList = {
   };
   USDCDeposit: { tokenType?: 'usdc' | 'cusd' | 'confio' };
   USDCManage: undefined;
+  USDCWithdraw: undefined;
+  USDCHistory: undefined;
+  USDCConversion: undefined;
   SendWithAddress: { tokenType: 'cusd' | 'confio' };
   SendToFriend: { 
     friend: { name: string; avatar: string; isOnConfio: boolean; phone: string };

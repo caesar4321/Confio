@@ -98,7 +98,7 @@ export const TransactionDetailScreen = () => {
       gasUsed: '45,000',
       gasFee: '0.002',
       confirmations: 456,
-      exchangeRate: '1 USDC = 1.00 cUSD',
+      exchangeRate: '1 USDC = 1 cUSD',
       avatar: null
     },
     payment: {

@@ -13,6 +13,9 @@ import PhoneVerificationScreen from '../screens/PhoneVerificationScreen';
 import { AccountDetailScreen } from '../screens/AccountDetailScreen';
 import DepositScreen from '../screens/DepositScreen';
 import USDCManageScreen from '../screens/USDCManageScreen';
+import { USDCWithdrawScreen } from '../screens/USDCWithdrawScreen';
+import { USDCHistoryScreen } from '../screens/USDCHistoryScreen';
+import { USDCConversionScreen } from '../screens/USDCConversionScreen';
 import { SendWithAddressScreen } from '../screens/SendWithAddressScreen';
 import { SendToFriendScreen } from '../screens/SendToFriendScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
@@ -150,6 +153,21 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="USDCManage"
         component={USDCManageScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="USDCWithdraw"
+        component={USDCWithdrawScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="USDCHistory"
+        component={USDCHistoryScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="USDCConversion"
+        component={USDCConversionScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen
