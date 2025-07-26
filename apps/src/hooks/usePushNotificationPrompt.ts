@@ -1,138 +1,99 @@
-import { useState, useEffect, useRef } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { useState, useEffect } from 'react';
+import { Platform, Linking } from 'react-native';
 import { pushNotificationService } from '../services/pushNotificationService';
-
-const PROMPT_DELAY_MS = 30000; // 30 seconds delay before showing prompt
-const SESSION_TIME_THRESHOLD_MS = 20000; // Show after 20 seconds of active use
 
 interface UsePushNotificationPromptReturn {
   showModal: boolean;
   handleAllow: () => Promise<void>;
   handleDeny: () => Promise<void>;
+  checkAndShowPrompt: () => Promise<void>;
+  needsSettings: boolean;
 }
 
 export function usePushNotificationPrompt(): UsePushNotificationPromptReturn {
   const [showModal, setShowModal] = useState(false);
-  const [hasChecked, setHasChecked] = useState(false);
-  const sessionStartTime = useRef<Date>(new Date());
-  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const activeTimeRef = useRef<number>(0);
+  const [hasInitialized, setHasInitialized] = useState(false);
+  const [needsSettings, setNeedsSettings] = useState(false);
 
+  // Initialize the service on mount
   useEffect(() => {
-    console.log('[PushNotification] Hook initialized');
-    // Initialize push notification service
-    pushNotificationService.initialize();
+    if (!hasInitialized) {
+      console.log('[PushNotification] Initializing service...');
+      pushNotificationService.initialize();
+      setHasInitialized(true);
+    }
+  }, [hasInitialized]);
 
-    // Check if we should show the prompt
-    const checkPromptStatus = async () => {
-      if (hasChecked) return;
-      
-      console.log('[PushNotification] Checking prompt status...');
+  // Function to check and show prompt
+  const checkAndShowPrompt = async () => {
+    console.log('[PushNotification] checkAndShowPrompt called');
+    
+    try {
       const shouldShow = await pushNotificationService.shouldShowPermissionPrompt();
       console.log('[PushNotification] Should show prompt:', shouldShow);
       
-      if (!shouldShow) {
-        setHasChecked(true);
-        return;
+      if (shouldShow) {
+        // Check if iOS user needs to go to settings
+        const requiresSettings = await pushNotificationService.needsToOpenSettings();
+        setNeedsSettings(requiresSettings);
+        console.log('[PushNotification] Needs settings:', requiresSettings);
+        
+        console.log('[PushNotification] Showing modal immediately');
+        setShowModal(true);
+      } else {
+        console.log('[PushNotification] Not showing modal - permission already granted');
       }
-
-      // Set up the delayed prompt
-      console.log('[PushNotification] Scheduling prompt...');
-      schedulePrompt();
-      setHasChecked(true);
-    };
-
-    // Handle app state changes to track active usage time
-    const handleAppStateChange = (nextAppState: AppStateStatus) => {
-      if (appStateRef.current.match(/inactive|background/) && nextAppState === 'active') {
-        // App has come to foreground
-        sessionStartTime.current = new Date();
-      } else if (appStateRef.current === 'active' && nextAppState.match(/inactive|background/)) {
-        // App has gone to background
-        const sessionDuration = new Date().getTime() - sessionStartTime.current.getTime();
-        activeTimeRef.current += sessionDuration;
-      }
-      appStateRef.current = nextAppState;
-    };
-
-    const appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
-
-    // Schedule the prompt
-    const schedulePrompt = () => {
-      // Clear any existing timeout
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-
-      // Set up new timeout
-      console.log(`[PushNotification] Setting timeout for ${PROMPT_DELAY_MS}ms (${PROMPT_DELAY_MS/1000} seconds)`);
-      timeoutRef.current = setTimeout(async () => {
-        // Check if user has been active enough
-        const currentSessionDuration = new Date().getTime() - sessionStartTime.current.getTime();
-        const totalActiveTime = activeTimeRef.current + currentSessionDuration;
-        console.log(`[PushNotification] Timeout fired! Active time: ${totalActiveTime}ms, Threshold: ${SESSION_TIME_THRESHOLD_MS}ms`);
-
-        if (totalActiveTime >= SESSION_TIME_THRESHOLD_MS) {
-          // User has been active enough, show the prompt
-          console.log('[PushNotification] User has been active enough, checking if should show...');
-          const shouldShow = await pushNotificationService.shouldShowPermissionPrompt();
-          console.log('[PushNotification] Should show (in timeout):', shouldShow);
-          if (shouldShow) {
-            console.log('[PushNotification] Showing modal!');
-            setShowModal(true);
-            await pushNotificationService.markPromptAsShown();
-          }
-        } else {
-          // User hasn't been active enough, reschedule
-          const remainingTime = SESSION_TIME_THRESHOLD_MS - totalActiveTime;
-          console.log(`[PushNotification] User not active enough, rescheduling for ${remainingTime}ms`);
-          timeoutRef.current = setTimeout(async () => {
-            const shouldShow = await pushNotificationService.shouldShowPermissionPrompt();
-            if (shouldShow) {
-              console.log('[PushNotification] Showing modal after reschedule!');
-              setShowModal(true);
-              await pushNotificationService.markPromptAsShown();
-            }
-          }, remainingTime);
-        }
-      }, PROMPT_DELAY_MS);
-    };
-
-    checkPromptStatus();
-
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      appStateSubscription.remove();
-    };
-  }, [hasChecked]);
+    } catch (error) {
+      console.error('[PushNotification] Error checking prompt status:', error);
+    }
+  };
 
   const handleAllow = async () => {
     try {
-      const granted = await pushNotificationService.requestPermission();
-      if (granted) {
-        console.log('Push notifications enabled');
-        // You might want to subscribe to topics here
-        await pushNotificationService.subscribeToTopic('general');
-        await pushNotificationService.subscribeToTopic('transactions');
+      console.log('[PushNotification] User clicked allow');
+      
+      // If iOS needs settings, open settings instead
+      if (needsSettings && Platform.OS === 'ios') {
+        console.log('[PushNotification] Opening iOS settings...');
+        Linking.openSettings();
+      } else {
+        const granted = await pushNotificationService.requestPermission();
+        if (granted) {
+          console.log('[PushNotification] Push notifications enabled');
+          // Subscribe to topics
+          await pushNotificationService.subscribeToTopic('general');
+          await pushNotificationService.subscribeToTopic('transactions');
+        } else {
+          console.log('[PushNotification] Permission was not granted');
+          // Save denial status so we know to show settings prompt next time on iOS
+          await pushNotificationService.savePermissionStatus('denied');
+        }
       }
     } catch (error) {
-      console.error('Failed to enable push notifications:', error);
+      console.error('[PushNotification] Failed to enable push notifications:', error);
     } finally {
       setShowModal(false);
+      setNeedsSettings(false);
     }
   };
 
   const handleDeny = async () => {
     try {
-      // Mark as denied in storage
-      await pushNotificationService.markPromptAsShown();
+      // Just close the modal - we'll ask again next time
+      // For a finance app, push notifications are too important to give up
+      console.log('[PushNotification] User denied, but we\'ll ask again');
+      
+      // Only save denied status if this was the first time asking
+      // This prevents iOS from being permanently blocked
+      const storedStatus = await pushNotificationService.getStoredPermissionStatus();
+      if (!storedStatus || storedStatus === 'not_asked') {
+        await pushNotificationService.savePermissionStatus('denied');
+      }
     } catch (error) {
-      console.error('Failed to save denial:', error);
+      console.error('[PushNotification] Failed to handle denial:', error);
     } finally {
       setShowModal(false);
+      setNeedsSettings(false);
     }
   };
 
@@ -140,5 +101,7 @@ export function usePushNotificationPrompt(): UsePushNotificationPromptReturn {
     showModal,
     handleAllow,
     handleDeny,
+    checkAndShowPrompt,
+    needsSettings,
   };
 }

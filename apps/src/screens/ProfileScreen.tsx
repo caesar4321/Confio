@@ -7,6 +7,8 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { getCountryByIso } from '../utils/countries';
+import { usePushNotificationPrompt } from '../hooks/usePushNotificationPrompt';
+import { PushNotificationModal } from '../components/PushNotificationModal';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -45,6 +47,8 @@ export const ProfileScreen = () => {
   const { signOut, userProfile, isUserProfileLoading } = useAuth();
   const { activeAccount, accounts, isLoading: accountsLoading, refreshAccounts } = useAccount();
   const navigation = useNavigation<ProfileScreenNavigationProp>();
+  const { showModal, handleAllow, handleDeny, checkAndShowPrompt, needsSettings } = usePushNotificationPrompt();
+  const [hasCheckedThisFocus, setHasCheckedThisFocus] = React.useState(false);
 
   // Debug active account changes to ensure real-time updates
   React.useEffect(() => {
@@ -61,8 +65,22 @@ export const ProfileScreen = () => {
     React.useCallback(() => {
       console.log('ProfileScreen - Screen focused, refreshing accounts');
       refreshAccounts();
+      
+      // Reset the check flag when screen loses focus
+      return () => {
+        setHasCheckedThisFocus(false);
+      };
     }, [refreshAccounts])
   );
+  
+  // Separate effect for push notification check to avoid infinite loop
+  React.useEffect(() => {
+    if (!hasCheckedThisFocus && !showModal) {
+      console.log('[ProfileScreen] Checking push notification permission...');
+      setHasCheckedThisFocus(true);
+      checkAndShowPrompt();
+    }
+  }, [hasCheckedThisFocus, showModal, checkAndShowPrompt]);
 
   const handleLegalDocumentPress = (docType: 'terms' | 'privacy' | 'deletion') => {
     navigation.navigate('LegalDocument', { docType });
@@ -169,7 +187,8 @@ export const ProfileScreen = () => {
   const displayInfo = getDisplayInfo();
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
+    <>
+      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
       {/* Header Section */}
       <View style={styles.header}>
         <View style={styles.profileInfo}>
@@ -372,6 +391,15 @@ export const ProfileScreen = () => {
         <Text style={styles.signOutText}>Cerrar Sesión</Text>
       </TouchableOpacity>
     </ScrollView>
+    
+    {/* Push Notification Permission Modal */}
+    <PushNotificationModal
+      visible={showModal}
+      onAllow={handleAllow}
+      onDeny={handleDeny}
+      needsSettings={needsSettings}
+    />
+  </>
   );
 };
 

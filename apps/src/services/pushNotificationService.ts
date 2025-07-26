@@ -24,9 +24,14 @@ export class PushNotificationService {
    * Initialize push notification service
    */
   async initialize(): Promise<void> {
-    if (this.isInitialized) return;
+    if (this.isInitialized) {
+      console.log('[PushNotificationService] Already initialized, skipping');
+      return;
+    }
 
     try {
+      console.log('[PushNotificationService] Initializing push notification service...');
+      
       // Register background handler
       messaging().setBackgroundMessageHandler(async (remoteMessage) => {
         console.log('Message handled in the background!', remoteMessage);
@@ -53,6 +58,7 @@ export class PushNotificationService {
       }
 
       this.isInitialized = true;
+      console.log('[PushNotificationService] Initialization complete');
     } catch (error) {
       console.error('Failed to initialize push notifications:', error);
     }
@@ -123,6 +129,26 @@ export class PushNotificationService {
   }
 
   /**
+   * Check if user needs to go to settings to enable permissions (iOS only)
+   */
+  async needsToOpenSettings(): Promise<boolean> {
+    try {
+      if (Platform.OS !== 'ios') {
+        return false;
+      }
+      
+      const authStatus = await messaging().hasPermission();
+      const storedStatus = await this.getStoredPermissionStatus();
+      
+      // On iOS, if permission was denied, user must go to settings
+      return authStatus === messaging.AuthorizationStatus.DENIED && storedStatus === 'denied';
+    } catch (error) {
+      console.error('Failed to check if needs settings:', error);
+      return false;
+    }
+  }
+
+  /**
    * Get and save FCM token
    */
   async getAndSaveFCMToken(): Promise<string | null> {
@@ -146,7 +172,7 @@ export class PushNotificationService {
   /**
    * Save permission status
    */
-  private async savePermissionStatus(status: 'granted' | 'denied' | 'not_asked'): Promise<void> {
+  async savePermissionStatus(status: 'granted' | 'denied' | 'not_asked'): Promise<void> {
     try {
       await Keychain.setInternetCredentials(
         NOTIFICATION_PERMISSION_KEY,
@@ -181,22 +207,39 @@ export class PushNotificationService {
     try {
       console.log('[PushNotificationService] Checking if should show prompt...');
       
-      // Check if permission was already asked
+      // First check actual system permission status
+      const hasSystemPermission = await this.hasPermission();
+      console.log('[PushNotificationService] System permission granted:', hasSystemPermission);
+      
+      if (hasSystemPermission) {
+        // Update stored status if needed
+        await this.savePermissionStatus('granted');
+        console.log('[PushNotificationService] Permission already granted at system level, not showing prompt');
+        return false;
+      }
+      
+      // Check if permission was already denied in our storage
       const permissionStatus = await this.getStoredPermissionStatus();
-      console.log('[PushNotificationService] Permission status:', permissionStatus);
-      if (permissionStatus === 'granted' || permissionStatus === 'denied') {
-        console.log('[PushNotificationService] Permission already granted/denied, not showing prompt');
+      console.log('[PushNotificationService] Stored permission status:', permissionStatus);
+      
+      if (permissionStatus === 'granted') {
+        console.log('[PushNotificationService] Permission already granted (stored), not showing prompt');
         return false;
       }
-
-      // Check if prompt was already shown
-      const promptShown = await Keychain.getInternetCredentials(NOTIFICATION_PROMPT_SHOWN_KEY);
-      console.log('[PushNotificationService] Prompt shown before:', promptShown?.password);
-      if (promptShown && promptShown.password === 'true') {
-        console.log('[PushNotificationService] Prompt already shown, not showing again');
-        return false;
+      
+      // On iOS, check if we've already asked for permission
+      // iOS only allows asking once, after that user must go to settings
+      if (Platform.OS === 'ios' && permissionStatus === 'denied') {
+        const authStatus = await messaging().hasPermission();
+        if (authStatus === messaging.AuthorizationStatus.DENIED) {
+          console.log('[PushNotificationService] iOS permission permanently denied, cannot show system prompt');
+          // Still show our custom prompt to guide user to settings
+          return true;
+        }
       }
 
+      // For a finance app, we show the prompt until permission is granted
+      // Push notifications are critical for transaction alerts and security
       console.log('[PushNotificationService] Should show prompt: true');
       return true;
     } catch (error) {
@@ -206,25 +249,13 @@ export class PushNotificationService {
   }
 
   /**
-   * Mark that the permission prompt was shown
+   * Mark that the permission prompt was shown (deprecated - we no longer track this)
+   * Keeping method for backward compatibility but it does nothing
    */
   async markPromptAsShown(): Promise<void> {
-    try {
-      await Keychain.setInternetCredentials(
-        NOTIFICATION_PROMPT_SHOWN_KEY,
-        'prompt_shown',
-        'true'
-      );
-      
-      // Also save timestamp
-      await Keychain.setInternetCredentials(
-        NOTIFICATION_PROMPT_TIMESTAMP_KEY,
-        'timestamp',
-        new Date().toISOString()
-      );
-    } catch (error) {
-      console.error('Failed to mark prompt as shown:', error);
-    }
+    // We no longer mark the prompt as shown since we want to keep asking
+    // until the user grants permission for this critical finance app feature
+    console.log('[PushNotificationService] markPromptAsShown called (no-op)');
   }
 
   /**
