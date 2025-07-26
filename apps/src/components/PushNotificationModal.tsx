@@ -29,13 +29,16 @@ interface PushNotificationModalProps {
   visible: boolean;
   onAllow: () => void;
   onDeny: () => void;
+  needsSettings?: boolean;
 }
 
 export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
   visible,
   onAllow,
   onDeny,
+  needsSettings = false,
 }) => {
+  console.log('[PushNotificationModal] Component rendered with visible:', visible);
   const slideAnim = useRef(new Animated.Value(height)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -125,9 +128,13 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
 
             {/* Content */}
             <View style={styles.content}>
-              <Text style={styles.title}>Mantente informado</Text>
+              <Text style={styles.title}>
+                {needsSettings ? 'Activa las notificaciones' : 'Mantente informado'}
+              </Text>
               <Text style={styles.subtitle}>
-                Recibe notificaciones importantes sobre tus transacciones
+                {needsSettings 
+                  ? 'Para recibir alertas importantes, ve a Configuración y activa las notificaciones para Confío'
+                  : 'Recibe notificaciones importantes sobre tus transacciones'}
               </Text>
 
               {/* Features */}
@@ -184,7 +191,9 @@ export const PushNotificationModal: React.FC<PushNotificationModalProps> = ({
                   onPress={onAllow}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.allowButtonText}>Permitir notificaciones</Text>
+                  <Text style={styles.allowButtonText}>
+                    {needsSettings ? 'Ir a configuración' : 'Permitir notificaciones'}
+                  </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity

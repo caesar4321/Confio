@@ -35,8 +35,6 @@ import { CreateOfferScreen } from '../screens/CreateOfferScreen';
 import { BankInfoScreen } from '../screens/BankInfoScreen';
 import { AchievementsScreen } from '../screens/AchievementsScreen';
 import { ConfioTokenInfoScreen } from '../screens/ConfioTokenInfoScreen';
-import { PushNotificationModal } from '../components/PushNotificationModal';
-import { usePushNotificationPrompt } from '../hooks/usePushNotificationPrompt';
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
 console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
@@ -44,22 +42,16 @@ console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSu
 const Stack = createNativeStackNavigator<MainStackParamList>();
 
 export const MainNavigator = () => {
-  console.log('MainNavigator: Component rendering');
-  
-  // Hook for push notification prompt
-  const { showModal, handleAllow, handleDeny } = usePushNotificationPrompt();
-  
-  console.log('[MainNavigator] Push notification modal visible:', showModal);
+  console.log('MainNavigator: Component rendering at:', new Date().toISOString());
   
   return (
-    <>
-      <Stack.Navigator
-        screenOptions={{
-          headerShown: false,
-          animation: 'none',
-          presentation: 'transparentModal'
-        }}
-      >
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: false,
+        animation: 'none',
+        presentation: 'transparentModal'
+      }}
+    >
       <Stack.Screen name="BottomTabs" component={BottomTabNavigator} />
       <Stack.Screen 
         name="LegalDocument" 
@@ -287,13 +279,5 @@ export const MainNavigator = () => {
         options={{ headerShown: false }}
       />
     </Stack.Navigator>
-      
-      {/* Push Notification Permission Modal */}
-      <PushNotificationModal
-        visible={showModal}
-        onAllow={handleAllow}
-        onDeny={handleDeny}
-      />
-    </>
   );
 }; 
