@@ -369,13 +369,23 @@ export const ContactsScreen = () => {
     setContactsData({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: false });
     
     if (hasContactPermission) {
-      await syncContacts();
+      // Force sync on manual refresh
+      console.log('[SYNC] Manual refresh - forcing sync');
+      const success = await contactService.syncContacts(apolloClient, true);
+      if (success) {
+        const allContacts = await contactService.getAllContacts();
+        await displayContacts(allContacts);
+      }
     } else {
       // If no permission, try requesting again
       const granted = await contactService.requestContactPermission();
       if (granted) {
         setHasContactPermission(true);
-        await syncContacts();
+        const success = await contactService.syncContacts(apolloClient, true);
+        if (success) {
+          const allContacts = await contactService.getAllContacts();
+          await displayContacts(allContacts);
+        }
       }
     }
     
@@ -914,7 +924,7 @@ export const ContactsScreen = () => {
               style={styles.syncButton}
               onPress={async () => {
                 if (hasContactPermission) {
-                  handleRefresh();
+                  handleRefresh(); // This already forces sync
                 } else {
                   // Check if permission was previously denied
                   const status = await contactService.getStoredPermissionStatus();

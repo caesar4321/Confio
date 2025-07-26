@@ -24,7 +24,7 @@ const CONTACTS_KEYCHAIN_SERVICE = 'com.confio.contacts';
 const CONTACTS_KEYCHAIN_KEY = 'user_contacts';
 const CONTACT_PERMISSION_STATUS_KEY = 'contact_permission_status';
 const LAST_SYNC_TIME_KEY = 'last_sync_time';
-const SYNC_INTERVAL_HOURS = 1; // Sync every 1 hour
+const SYNC_INTERVAL_HOURS = 0.0083; // Sync every 30 seconds (0.0083 * 60 = 0.5 min = 30 sec)
 
 export class ContactService {
   private static instance: ContactService;
@@ -207,8 +207,18 @@ export class ContactService {
 
   /**
    * Sync contacts from device and store in keychain
+   * @param apolloClient - Apollo client for GraphQL queries
+   * @param force - Force sync even if recently synced
    */
-  async syncContacts(apolloClient?: any): Promise<boolean> {
+  async syncContacts(apolloClient?: any, force: boolean = false): Promise<boolean> {
+    // Check if we should skip sync (unless forced)
+    if (!force) {
+      const shouldSync = await this.shouldSyncContacts();
+      if (!shouldSync) {
+        console.log('[SYNC] Skipping sync - recently synced');
+        return true;
+      }
+    }
     try {
       const hasPermission = await this.hasContactPermission();
       if (!hasPermission) {
