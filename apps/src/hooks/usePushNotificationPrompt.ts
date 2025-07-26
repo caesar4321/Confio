@@ -20,6 +20,7 @@ export function usePushNotificationPrompt(): UsePushNotificationPromptReturn {
   const activeTimeRef = useRef<number>(0);
 
   useEffect(() => {
+    console.log('[PushNotification] Hook initialized');
     // Initialize push notification service
     pushNotificationService.initialize();
 
@@ -27,13 +28,17 @@ export function usePushNotificationPrompt(): UsePushNotificationPromptReturn {
     const checkPromptStatus = async () => {
       if (hasChecked) return;
       
+      console.log('[PushNotification] Checking prompt status...');
       const shouldShow = await pushNotificationService.shouldShowPermissionPrompt();
+      console.log('[PushNotification] Should show prompt:', shouldShow);
+      
       if (!shouldShow) {
         setHasChecked(true);
         return;
       }
 
       // Set up the delayed prompt
+      console.log('[PushNotification] Scheduling prompt...');
       schedulePrompt();
       setHasChecked(true);
     };
@@ -61,24 +66,31 @@ export function usePushNotificationPrompt(): UsePushNotificationPromptReturn {
       }
 
       // Set up new timeout
+      console.log(`[PushNotification] Setting timeout for ${PROMPT_DELAY_MS}ms (${PROMPT_DELAY_MS/1000} seconds)`);
       timeoutRef.current = setTimeout(async () => {
         // Check if user has been active enough
         const currentSessionDuration = new Date().getTime() - sessionStartTime.current.getTime();
         const totalActiveTime = activeTimeRef.current + currentSessionDuration;
+        console.log(`[PushNotification] Timeout fired! Active time: ${totalActiveTime}ms, Threshold: ${SESSION_TIME_THRESHOLD_MS}ms`);
 
         if (totalActiveTime >= SESSION_TIME_THRESHOLD_MS) {
           // User has been active enough, show the prompt
+          console.log('[PushNotification] User has been active enough, checking if should show...');
           const shouldShow = await pushNotificationService.shouldShowPermissionPrompt();
+          console.log('[PushNotification] Should show (in timeout):', shouldShow);
           if (shouldShow) {
+            console.log('[PushNotification] Showing modal!');
             setShowModal(true);
             await pushNotificationService.markPromptAsShown();
           }
         } else {
           // User hasn't been active enough, reschedule
           const remainingTime = SESSION_TIME_THRESHOLD_MS - totalActiveTime;
+          console.log(`[PushNotification] User not active enough, rescheduling for ${remainingTime}ms`);
           timeoutRef.current = setTimeout(async () => {
             const shouldShow = await pushNotificationService.shouldShowPermissionPrompt();
             if (shouldShow) {
+              console.log('[PushNotification] Showing modal after reschedule!');
               setShowModal(true);
               await pushNotificationService.markPromptAsShown();
             }

@@ -179,18 +179,25 @@ export class PushNotificationService {
    */
   async shouldShowPermissionPrompt(): Promise<boolean> {
     try {
+      console.log('[PushNotificationService] Checking if should show prompt...');
+      
       // Check if permission was already asked
       const permissionStatus = await this.getStoredPermissionStatus();
+      console.log('[PushNotificationService] Permission status:', permissionStatus);
       if (permissionStatus === 'granted' || permissionStatus === 'denied') {
+        console.log('[PushNotificationService] Permission already granted/denied, not showing prompt');
         return false;
       }
 
       // Check if prompt was already shown
       const promptShown = await Keychain.getInternetCredentials(NOTIFICATION_PROMPT_SHOWN_KEY);
+      console.log('[PushNotificationService] Prompt shown before:', promptShown?.password);
       if (promptShown && promptShown.password === 'true') {
+        console.log('[PushNotificationService] Prompt already shown, not showing again');
         return false;
       }
 
+      console.log('[PushNotificationService] Should show prompt: true');
       return true;
     } catch (error) {
       console.error('Failed to check if should show prompt:', error);
