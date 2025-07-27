@@ -392,7 +392,7 @@ Confío supports four main categories of transactions, each with distinct types 
 Direct transfers between users with different recipient types:
 
 - **👥 Confío Friend** - Send to existing Confío users
-  - Recipient has a registered Confío account with an allocated Sui address
+  - Recipient has a registered Confío account with their deterministic non-custodial Sui address
   - Instant delivery to their wallet
   - Real-time notifications
 
