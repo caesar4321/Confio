@@ -392,19 +392,22 @@ Confío supports four main categories of transactions, each with distinct types 
 Direct transfers between users with different recipient types:
 
 - **👥 Confío Friend** - Send to existing Confío users
-  - Recipient has a registered Confío account
+  - Recipient has a registered Confío account with an allocated Sui address
   - Instant delivery to their wallet
   - Real-time notifications
 
 - **📧 Non-Confío Friend** - Invite new users via phone number
   - Recipient receives invitation via phone/WhatsApp
   - Funds held in smart contract until claimed
+  - When the invitee claims the funds, it's released to the invitee's Sui wallet address
   - 7-day expiration period before reversion
 
 - **🔗 External Wallet** - Direct blockchain transfers
   - Send to any Sui wallet address
   - No invitation or registration required
-  - Direct on-chain transaction
+  - Pure on-chain transaction
+
+**Note**: Businesses cannot receive personal payments with Send feature to maintain clear separation between commercial and personal finances.
 
 ### Payment Transactions
 Commercial transactions for business operations:
@@ -413,13 +416,14 @@ Commercial transactions for business operations:
   - Users pay businesses for goods/services
   - QR code and invoice-based payments
   - Receipt generation and tracking
+  - 0.9% merchant fee automatically deducted via smart contract
+  - Merchant receives 99.1% of payment amount
 
 - **Business → Business** - B2B transactions
   - Inter-business payments and settlements
   - Supply chain and vendor payments
   - Commercial invoicing system
-
-**Note**: Businesses cannot receive personal payments to maintain clear separation between commercial and personal finances.
+  - 0.9% fee for receiving business
 
 ### Exchange Transactions
 P2P trading platform for buying/selling crypto with fiat:
@@ -431,15 +435,24 @@ P2P trading platform for buying/selling crypto with fiat:
   - Business → Personal (B2P)
   - Trade cUSD or CONFIO tokens for fiat currency
   - Local payment methods (bank transfers, mobile money)
-  - Escrow-protected transactions
+  - Smart contract based escrow-protected transactions
 
 ### Conversion Transactions  
 Currency conversion within the same account:
 
 - **USDC ↔ cUSD** - Convert between stablecoin types
   - Available for both personal and business accounts
-  - Real-time conversion rates
+  - 1:1 conversion rate (always)
   - Seamless currency switching for user convenience
+
+### Transaction Fees
+
+- **Send**: Free (including Sui network fees - sponsored by Confío)
+- **Payment**: 0.9% merchant fee (automatically deducted via smart contract)
+- **Exchange**: Free (including Sui network fees - sponsored by Confío)
+- **Conversion**: Free (including Sui network fees - sponsored by Confío)
+
+All Sui blockchain network fees are covered by Confío through sponsored transactions, ensuring users never need to hold SUI tokens for gas fees.
 
 ## 🏪 P2P Trading Platform
 
