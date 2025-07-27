@@ -242,34 +242,11 @@ class UnifiedTransactionTable(models.Model):
                 return 'USDC'
         return None
     
-    def get_to_amount(self):
-        """Extract to_amount from conversion description"""
-        if self.transaction_type == 'conversion' and self.description:
-            import re
-            # Match the amount after the arrow
-            match = re.search(r'→\s*([\d.]+)\s*(?:cUSD|USDC)', self.description)
-            if match:
-                return match.group(1)
-        return None
-    
-    def get_from_token(self):
-        """For conversions, determine from token"""
-        if self.transaction_type == 'conversion':
-            conversion_type = self.get_conversion_type()
-            if conversion_type == 'usdc_to_cusd':
-                return 'USDC'
-            elif conversion_type == 'cusd_to_usdc':
-                return 'cUSD'
-        return None
-    
-    def get_to_token(self):
-        """For conversions, determine to token"""
-        if self.transaction_type == 'conversion':
-            conversion_type = self.get_conversion_type()
-            if conversion_type == 'usdc_to_cusd':
-                return 'cUSD'
-            elif conversion_type == 'cusd_to_usdc':
-                return 'USDC'
+    @property
+    def p2p_trade_id(self):
+        """Return P2P trade ID if this is an exchange transaction"""
+        if self.transaction_type == 'exchange' and self.p2p_trade:
+            return self.p2p_trade.id
         return None
 
     def __str__(self):

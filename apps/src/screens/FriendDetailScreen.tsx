@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -21,7 +21,8 @@ import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery } from '@apollo/client';
-import { GET_SEND_TRANSACTIONS_WITH_FRIEND, GET_PAYMENT_TRANSACTIONS_WITH_FRIEND, GET_USER_BY_ID } from '../apollo/queries';
+import { GET_UNIFIED_TRANSACTIONS_WITH_FRIEND, GET_ME } from '../apollo/queries';
+import { useAccount } from '../contexts/AccountContext';
 import { TransactionFilterModal, TransactionFilters } from '../components/TransactionFilterModal';
 import moment from 'moment';
 import 'moment/locale/es';
@@ -49,41 +50,90 @@ type FriendDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParam
 type FriendDetailScreenRouteProp = RouteProp<MainStackParamList, 'FriendDetail'>;
 
 interface Transaction {
-  type: 'received' | 'sent' | 'payment';
+  id: string;
+  type: 'sent' | 'received' | 'payment' | 'exchange';
   from?: string;
   to?: string;
   amount: string;
   currency: string;
   date: string;
   time: string;
-  status: string;
+  status: 'completed' | 'pending';
   hash: string;
-  isInvitation?: boolean;
-  invitationClaimed?: boolean;
-  invitationReverted?: boolean;
+  isInvitation: boolean;
+  invitationClaimed: boolean;
+  invitationReverted: boolean;
   invitationExpiresAt?: string;
   senderAddress?: string;
   recipientAddress?: string;
+  description?: string;
+  p2pTradeId?: string;
 }
 
-export const FriendDetailScreen = () => {
+interface Friend {
+  id?: string;
+  name: string;
+  phone?: string;
+  avatar: string;
+  isOnConfio: boolean;
+}
+
+moment.locale('es');
+
+export function FriendDetailScreen() {
   const navigation = useNavigation<FriendDetailScreenNavigationProp>();
   const route = useRoute<FriendDetailScreenRouteProp>();
-  const { formatNumber } = useNumberFormat();
-  const [refreshing, setRefreshing] = useState(false);
-  const [transactionLimit, setTransactionLimit] = useState(20);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [hasReachedEnd, setHasReachedEnd] = useState(false);
-  const [showTokenSelection, setShowTokenSelection] = useState(false);
-  const [showFilterModal, setShowFilterModal] = useState(false);
+  const { formatCurrency } = useNumberFormat();
+  const { activeAccount } = useAccount();
+  
+  // Safely extract route params with defaults
+  const params = route.params || {};
+  const {
+    friendId = '',
+    friendName = '',
+    friendAvatar = '👤',
+    friendPhone,
+    isOnConfio = false
+  } = params;
+  
+  // Construct friend object from route params
+  const friend: Friend = {
+    id: friendId,
+    name: friendName,
+    avatar: friendAvatar,
+    phone: friendPhone,
+    isOnConfio: isOnConfio
+  };
+  
+  // Early return with error state if essential params are missing
+  if (!friendName) {
+    return (
+      <View style={styles.container}>
+        <Header
+          navigation={navigation}
+          title="Error"
+          backgroundColor={colors.primary}
+          isLight={true}
+          showBackButton={true}
+        />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Error: Friend data not found</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // State for transaction filtering
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
   const [transactionFilters, setTransactionFilters] = useState<TransactionFilters>({
     types: {
       sent: true,
       received: true,
       payment: true,
       exchange: true,
+      conversion: true,
     },
     currencies: {
       cUSD: true,
@@ -101,108 +151,106 @@ export const FriendDetailScreen = () => {
     },
   });
 
-  // Friend data from navigation params
-  const friend = {
-    id: route.params?.friendId || '1',
-    name: route.params?.friendName || 'Friend',
-    avatar: route.params?.friendAvatar || 'F',
-    phone: route.params?.friendPhone || '',
-    isOnConfio: route.params?.isOnConfio ?? true, // Use ?? to handle false properly
+  // State management
+  const [showTokenSelection, setShowTokenSelection] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [transactionLimit, setTransactionLimit] = useState(20);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasReachedEnd, setHasReachedEnd] = useState(false);
+
+  // Check if this is a device contact (not on Confío)
+  const isDeviceContact = !friend.isOnConfio;
+
+  // Get current user data for navigation
+  const { data: userData } = useQuery(GET_ME, {
+    skip: false,
+    fetchPolicy: 'cache-first',
+  });
+
+  // Use friend-specific unified transactions query
+  const queryVariables = {
+    friendUserId: friend.isOnConfio ? friend.id : null,
+    friendPhone: friend.phone,
+    limit: transactionLimit,
+    offset: 0,
   };
 
-  // Check if this is a device contact (not a real Confío user)
-  const isDeviceContact = friend.id.startsWith('contact_');
-  
-  // Fetch user details if it's a Confío user
-  const { data: userData } = useQuery(GET_USER_BY_ID, {
-    variables: { id: friend.id },
-    skip: isDeviceContact || !friend.isOnConfio,
-  });
-  
-  // Get real transaction data from GraphQL
-  const { data: sendTransactionsData, loading: sendLoading, refetch: refetchSend, fetchMore: fetchMoreSend } = useQuery(GET_SEND_TRANSACTIONS_WITH_FRIEND, {
-    variables: {
-      friendUserId: !isDeviceContact && friend.isOnConfio ? friend.id : undefined,
-      friendPhone: !friend.isOnConfio ? friend.phone : undefined,
-      limit: transactionLimit
+  const { 
+    data: unifiedTransactionsData, 
+    loading: unifiedLoading, 
+    error: unifiedError,
+    refetch: unifiedRefetch,
+    fetchMore,
+    networkStatus
+  } = useQuery(GET_UNIFIED_TRANSACTIONS_WITH_FRIEND, {
+    variables: queryVariables,
+    fetchPolicy: 'cache-first',
+    notifyOnNetworkStatusChange: true,
+    skip: false,
+    onCompleted: (data) => {
+      console.log('FriendDetailScreen - Friend transactions query completed:', {
+        hasData: !!data,
+        transactionCount: data?.unifiedTransactionsWithFriend?.length || 0
+      });
     },
-    skip: false // Always run the query now
+    onError: (error) => {
+      console.error('Unified transactions query error:', error);
+    }
   });
 
-  const { data: paymentTransactionsData, loading: paymentLoading, refetch: refetchPayment, fetchMore: fetchMorePayment } = useQuery(GET_PAYMENT_TRANSACTIONS_WITH_FRIEND, {
-    variables: {
-      friendUserId: friend.id,
-      limit: transactionLimit
-    },
-    skip: isDeviceContact || !friend.isOnConfio // Skip query for device contacts or non-Confío users - payments only work with Confío users
-  });
+  // Get friend transactions directly from the friend-specific query (no client-side filtering needed)
+  const friendTransactions = useMemo(() => {
+    return unifiedTransactionsData?.unifiedTransactionsWithFriend || [];
+  }, [unifiedTransactionsData]);
 
-  // Transform real transactions into the format expected by the UI
-  const formatTransactions = () => {
+  // Transform unified transactions into the format expected by the UI
+  const formatTransactions = useCallback(() => {
     const allTransactions: Transaction[] = [];
 
-    // Add send transactions
-    if (sendTransactionsData?.sendTransactionsWithFriend) {
-      console.log('[FriendDetail] Raw send transactions:', sendTransactionsData.sendTransactionsWithFriend);
-      sendTransactionsData.sendTransactionsWithFriend.forEach((tx: any) => {
-        const currentUserIsSender = tx.senderUser?.id !== friend.id;
-        
-        console.log('[FriendDetail] Processing tx:', {
-          id: tx.id,
-          isInvitation: tx.isInvitation,
-          recipientUser: tx.recipientUser,
-          recipientPhone: tx.recipientPhone,
-          currentUserIsSender
-        });
-        
-        allTransactions.push({
-          type: currentUserIsSender ? 'sent' : 'received',
-          from: currentUserIsSender ? undefined : friend.name,
-          to: currentUserIsSender ? friend.name : undefined,
-          amount: currentUserIsSender ? `-${tx.amount}` : `+${tx.amount}`,
-          currency: tx.tokenType,
-          date: new Date(tx.createdAt).toISOString().split('T')[0],
-          time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
-          status: tx.status === 'CONFIRMED' ? 'completed' : 'pending',
-          hash: tx.transactionHash || 'pending',
-          isInvitation: tx.isInvitation || false,
-          invitationClaimed: tx.invitationClaimed || false,
-          invitationReverted: tx.invitationReverted || false,
-          invitationExpiresAt: tx.invitationExpiresAt,
-          senderAddress: tx.senderAddress,
-          recipientAddress: tx.recipientAddress
-        });
+    friendTransactions.forEach((tx: any) => {
+      const transactionType = tx.transactionType.toLowerCase();
+      
+      // Determine transaction direction from current user perspective
+      const isCurrentUserSender = tx.direction === 'sent';
+      
+      allTransactions.push({
+        id: tx.id,
+        type: transactionType === 'exchange' ? 'exchange' : 
+              transactionType === 'payment' ? 'payment' :
+              isCurrentUserSender ? 'sent' : 'received',
+        from: isCurrentUserSender ? undefined : friend.name,
+        to: isCurrentUserSender ? friend.name : undefined,
+        amount: tx.displayAmount || tx.amount,
+        currency: tx.tokenType?.toUpperCase() || 'CONFIO',
+        date: new Date(tx.createdAt).toISOString().split('T')[0],
+        time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+        status: tx.status === 'CONFIRMED' ? 'completed' : 'pending',
+        hash: tx.transactionHash || tx.id || 'pending',
+        isInvitation: tx.isInvitation || false,
+        invitationClaimed: tx.invitationClaimed || false,
+        invitationReverted: tx.invitationReverted || false,
+        invitationExpiresAt: tx.invitationExpiresAt,
+        senderAddress: tx.senderAddress,
+        recipientAddress: tx.counterpartyAddress,
+        description: tx.description,
+        p2pTradeId: tx.p2pTradeId
       });
-    }
-
-    // Add payment transactions
-    if (paymentTransactionsData?.paymentTransactionsWithFriend) {
-      paymentTransactionsData.paymentTransactionsWithFriend.forEach((tx: any) => {
-        const currentUserIsPayer = tx.payerUser?.id !== friend.id;
-        
-        allTransactions.push({
-          type: 'payment',
-          from: undefined,
-          to: currentUserIsPayer ? friend.name : undefined,
-          amount: currentUserIsPayer ? `-${tx.amount}` : `+${tx.amount}`,
-          currency: tx.tokenType,
-          date: new Date(tx.createdAt).toISOString().split('T')[0],
-          time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
-          status: tx.status === 'CONFIRMED' ? 'completed' : 'pending',
-          hash: tx.transactionHash || 'pending'
-        });
-      });
-    }
+    });
 
     // Sort by date (newest first)
     return allTransactions.sort((a, b) => new Date(b.date + ' ' + b.time).getTime() - new Date(a.date + ' ' + a.time).getTime());
-  };
-
+  }, [friendTransactions, friend.name]);
+  
   const transactions = formatTransactions();
   
   // Filter transactions based on search query and filters
-  const filteredTransactions = React.useMemo(() => {
+  const filteredTransactions = useMemo(() => {
     let filtered = transactions;
+    
+    // Safety check for transactionFilters
+    if (!transactionFilters) {
+      return filtered;
+    }
     
     // Apply search query filter
     if (searchQuery) {
@@ -223,23 +271,29 @@ export const FriendDetailScreen = () => {
     }
     
     // Apply type filters
-    filtered = filtered.filter(tx => {
-      return transactionFilters.types[tx.type];
-    });
+    if (transactionFilters.types) {
+      filtered = filtered.filter(tx => {
+        return transactionFilters.types[tx.type];
+      });
+    }
     
     // Apply currency filters
-    filtered = filtered.filter(tx => {
-      const currency = tx.currency === 'cUSD' ? 'cUSD' : tx.currency;
-      return transactionFilters.currencies[currency as keyof typeof transactionFilters.currencies] ?? true;
-    });
+    if (transactionFilters.currencies) {
+      filtered = filtered.filter(tx => {
+        const currency = tx.currency === 'cUSD' ? 'cUSD' : tx.currency;
+        return transactionFilters.currencies[currency as keyof typeof transactionFilters.currencies] ?? true;
+      });
+    }
     
     // Apply status filters
-    filtered = filtered.filter(tx => {
-      return transactionFilters.status[tx.status];
-    });
+    if (transactionFilters.status) {
+      filtered = filtered.filter(tx => {
+        return transactionFilters.status[tx.status];
+      });
+    }
     
     // Apply time range filter
-    if (transactionFilters.timeRange !== 'all') {
+    if (transactionFilters.timeRange && transactionFilters.timeRange !== 'all') {
       const now = moment();
       filtered = filtered.filter(tx => {
         const txDate = moment(tx.date);
@@ -259,7 +313,7 @@ export const FriendDetailScreen = () => {
     }
     
     // Apply amount range filter
-    if (transactionFilters.amountRange.min || transactionFilters.amountRange.max) {
+    if (transactionFilters.amountRange && (transactionFilters.amountRange.min || transactionFilters.amountRange.max)) {
       filtered = filtered.filter(tx => {
         const amount = Math.abs(parseFloat(tx.amount.replace(/[^0-9.-]/g, '')));
         const min = transactionFilters.amountRange.min ? parseFloat(transactionFilters.amountRange.min) : 0;
@@ -271,32 +325,23 @@ export const FriendDetailScreen = () => {
     return filtered;
   }, [transactions, searchQuery, transactionFilters]);
   
-  const hasActiveFilters = () => {
-    const allTypesSelected = Object.values(transactionFilters.types).every(v => v);
-    const allCurrenciesSelected = Object.values(transactionFilters.currencies).every(v => v);
-    const allStatusSelected = Object.values(transactionFilters.status).every(v => v);
-    const noAmountRange = !transactionFilters.amountRange.min && !transactionFilters.amountRange.max;
-    const allTimeRange = transactionFilters.timeRange === 'all';
-
-    return !(allTypesSelected && allCurrenciesSelected && allStatusSelected && noAmountRange && allTimeRange);
-  };
-  
-  // Check if we've reached the end after loading more
-  React.useEffect(() => {
-    if (loadingMore) return;
+  const hasActiveFilters = useCallback(() => {
+    // Safety check for transactionFilters
+    if (!transactionFilters) return false;
     
-    // If we have transactions and the count is less than the limit,
-    // it means we've loaded all available transactions
-    const totalCount = (sendTransactionsData?.sendTransactionsWithFriend?.length || 0) + 
-                      (paymentTransactionsData?.paymentTransactionsWithFriend?.length || 0);
+    // Check if any filter is non-default
+    const defaultFilters: TransactionFilters = {
+      types: { sent: true, received: true, payment: true, exchange: true, conversion: true },
+      currencies: { cUSD: true, CONFIO: true, USDC: true },
+      status: { completed: true, pending: true },
+      timeRange: 'all',
+      amountRange: { min: '', max: '' }
+    };
     
-    // If we have fewer transactions than the limit, we've reached the end
-    if (totalCount > 0 && totalCount < transactionLimit) {
-      setHasReachedEnd(true);
-    }
-  }, [sendTransactionsData, paymentTransactionsData, transactionLimit, loadingMore]);
+    return JSON.stringify(transactionFilters) !== JSON.stringify(defaultFilters);
+  }, [transactionFilters]);
 
-  const getTransactionTitle = (transaction: Transaction) => {
+  const getTransactionTitle = useCallback((transaction: Transaction) => {
     switch(transaction.type) {
       case 'received':
         return `Recibido de ${transaction.from}`;
@@ -304,12 +349,14 @@ export const FriendDetailScreen = () => {
         return `Enviado a ${transaction.to}`;
       case 'payment':
         return `Pago a ${transaction.to}`;
+      case 'exchange':
+        return 'Intercambio P2P';
       default:
         return 'Transacción';
     }
-  };
+  }, []);
 
-  const getTransactionIcon = (transaction: Transaction) => {
+  const getTransactionIcon = useCallback((transaction: Transaction) => {
     switch(transaction.type) {
       case 'received':
         return <Icon name="arrow-down" size={20} color="#10B981" />;
@@ -317,12 +364,14 @@ export const FriendDetailScreen = () => {
         return <Icon name="arrow-up" size={20} color="#EF4444" />;
       case 'payment':
         return <Icon name="shopping-bag" size={20} color="#8B5CF6" />;
+      case 'exchange':
+        return <Icon name="repeat" size={20} color="#8B5CF6" />;
       default:
         return <Icon name="arrow-up" size={20} color="#6B7280" />;
     }
-  };
+  }, []);
 
-  const TransactionItem = ({ transaction, onPress }: { transaction: Transaction; onPress: () => void }) => {
+  const TransactionItem = memo(({ transaction, onPress }: { transaction: Transaction; onPress: () => void }) => {
     // Use the isInvitation field from the transaction
     const isInvitationTransaction = transaction.isInvitation || false;
     
@@ -368,21 +417,21 @@ export const FriendDetailScreen = () => {
         </View>
       </TouchableOpacity>
     );
-  };
+  });
 
-  const handleSendMoney = () => {
+  const handleSendMoney = useCallback(() => {
     // Show token selection modal
     setShowTokenSelection(true);
-  };
+  }, []);
 
-  const handleTokenSelect = (tokenType: 'cusd' | 'confio') => {
+  const handleTokenSelect = useCallback((tokenType: 'cusd' | 'confio') => {
     setShowTokenSelection(false);
     
     // Get the active account's Sui address from the user data
     let suiAddress = undefined;
-    if (userData?.user?.accounts && userData.user.accounts.length > 0) {
+    if (userData?.me?.accounts && userData.me.accounts.length > 0) {
       // Get the personal account (accountIndex 0) by default
-      const personalAccount = userData.user.accounts.find((acc: any) => acc.accountType === 'personal' && acc.accountIndex === 0);
+      const personalAccount = userData.me.accounts.find((acc: any) => acc.accountType === 'personal' && acc.accountIndex === 0);
       suiAddress = personalAccount?.suiAddress;
     }
     
@@ -392,87 +441,59 @@ export const FriendDetailScreen = () => {
         name: friend.name,
         avatar: friend.avatar,
         isOnConfio: friend.isOnConfio,
-        phone: friend.phone,
-        suiAddress: suiAddress
+        phone: friend.phone || ''
       },
       tokenType: tokenType 
     });
-  };
+  }, [friend, navigation, userData]);
 
-  const onRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     setTransactionLimit(20); // Reset to initial limit
     setHasReachedEnd(false); // Reset end flag
     
-    // Don't refetch for device contacts
-    if (isDeviceContact) {
-      setRefreshing(false);
-      return;
-    }
-    
     try {
-      const promises = [refetchSend()];
-      // Only refetch payments for Confío users
-      if (friend.isOnConfio) {
-        promises.push(refetchPayment());
-      }
-      await Promise.all(promises);
+      await unifiedRefetch();
     } catch (error) {
       console.error('Error refreshing transactions:', error);
     } finally {
       setRefreshing(false);
     }
-  };
+  }, [unifiedRefetch]);
 
-  const loadMoreTransactions = async () => {
-    if (loadingMore || hasReachedEnd) return;
-    
-    // Don't fetch more for device contacts
-    if (isDeviceContact) {
-      return;
-    }
+  const loadMoreTransactions = useCallback(async () => {
+    if (loadingMore || hasReachedEnd || networkStatus === 3) return;
     
     setLoadingMore(true);
     const newLimit = transactionLimit + 10;
     
     try {
-      const promises = [
-        fetchMoreSend({
-          variables: { 
-            friendUserId: !isDeviceContact && friend.isOnConfio ? friend.id : undefined,
-            friendPhone: !friend.isOnConfio ? friend.phone : undefined,
-            limit: newLimit 
-          },
-          updateQuery: (prev, { fetchMoreResult }) => {
-            if (!fetchMoreResult) return prev;
-            return fetchMoreResult;
-          }
-        })
-      ];
-      
-      // Only fetch more payments for Confío users
-      if (friend.isOnConfio) {
-        promises.push(
-          fetchMorePayment({
-            variables: { limit: newLimit },
-            updateQuery: (prev, { fetchMoreResult }) => {
-              if (!fetchMoreResult) return prev;
-              return fetchMoreResult;
-            }
-          })
-        );
-      }
-      
-      await Promise.all(promises);
+      await fetchMore({
+        variables: {
+          accountType: 'personal',
+          accountIndex: 0,
+          limit: newLimit,
+          offset: 0,
+        },
+        updateQuery: (prev, { fetchMoreResult }) => {
+          if (!fetchMoreResult) return prev;
+          return fetchMoreResult;
+        }
+      });
       
       // Update the limit to trigger re-render
       setTransactionLimit(newLimit);
+      
+      // Check if we've reached the end
+      if (friendTransactions.length < newLimit) {
+        setHasReachedEnd(true);
+      }
     } catch (error) {
       console.error('Error loading more transactions:', error);
     } finally {
       setLoadingMore(false);
     }
-  };
+  }, [loadingMore, hasReachedEnd, networkStatus, fetchMore, transactionLimit, friendTransactions.length]);
 
   return (
     <View style={styles.container}>
@@ -495,8 +516,8 @@ export const FriendDetailScreen = () => {
           />
         }
       >
-        {/* Friend Info Section */}
-        <View style={styles.friendSection}>
+        {/* Friend Info Section with Emerald Background */}
+        <View style={[styles.friendSection, { backgroundColor: colors.primary }]}>
           <View style={styles.friendAvatarContainer}>
             <Text style={styles.friendAvatarText}>{friend.avatar}</Text>
           </View>
@@ -506,10 +527,10 @@ export const FriendDetailScreen = () => {
           )}
           <View style={[
             styles.friendStatus, 
-            { backgroundColor: friend.isOnConfio ? 'rgba(52, 211, 153, 0.2)' : 'rgba(239, 68, 68, 0.2)' }
+            { backgroundColor: friend.isOnConfio ? 'rgba(255, 255, 255, 0.2)' : 'rgba(239, 68, 68, 0.2)' }
           ]}>
-            <View style={[styles.statusIndicator, { backgroundColor: friend.isOnConfio ? colors.primary : '#ef4444' }]} />
-            <Text style={[styles.statusText, { color: friend.isOnConfio ? colors.primary : '#ef4444' }]}>
+            <View style={[styles.statusIndicator, { backgroundColor: friend.isOnConfio ? '#ffffff' : '#ef4444' }]} />
+            <Text style={[styles.statusText, { color: friend.isOnConfio ? '#ffffff' : '#ef4444' }]}>
               {friend.isOnConfio ? 'En Confío' : 'No está en Confío'}
             </Text>
           </View>
@@ -590,7 +611,7 @@ export const FriendDetailScreen = () => {
           )}
 
           <View style={styles.transactionsList}>
-            {(sendLoading || paymentLoading) ? (
+            {unifiedLoading ? (
               <View style={styles.loadingContainer}>
                 <Text style={styles.loadingText}>Cargando transacciones...</Text>
               </View>
@@ -615,37 +636,47 @@ export const FriendDetailScreen = () => {
             ) : (
               filteredTransactions.map((transaction, index) => (
                 <TransactionItem 
-                  key={index} 
+                  key={`${transaction.id}-${index}`}
                   transaction={transaction} 
                   onPress={() => {
-                    const params = {
-                      transactionType: transaction.type,
-                      transactionData: {
-                        type: transaction.type,
-                        from: transaction.from,
-                        to: transaction.to,
-                        amount: transaction.amount,
-                        currency: transaction.currency,
-                        date: transaction.date,
-                        time: transaction.time,
-                        status: transaction.status,
-                        hash: transaction.hash,
-                        // Add additional fields that TransactionDetailScreen expects
-                        fromAddress: transaction.type === 'received' ? transaction.senderAddress : undefined,
-                        toAddress: transaction.type === 'sent' ? transaction.recipientAddress : undefined,
-                        blockNumber: '2,847,392',
-                        gasUsed: '21,000',
-                        gasFee: '0.001',
-                        confirmations: 127,
-                        note: transaction.type === 'received' ? `Pago de ${friend.name}` : 
-                              transaction.type === 'sent' ? `Envío a ${friend.name}` : 
-                              `Pago a ${friend.name}`,
-                        avatar: friend.avatar,
-                        isInvitedFriend: transaction.isInvitation || false, // Use transaction's invitation status
-                      }
-                    };
-                    // @ts-ignore - Navigation type mismatch, but works at runtime
-                    navigation.navigate('TransactionDetail', params);
+                    // Handle P2P trade navigation
+                    if (transaction.type === 'exchange' && transaction.p2pTradeId) {
+                      navigation.navigate('ActiveTrade', { 
+                        trade: { 
+                          id: transaction.p2pTradeId 
+                        } 
+                      });
+                    } else {
+                      // Handle regular transaction navigation
+                      const params = {
+                        transactionType: transaction.type,
+                        transactionData: {
+                          type: transaction.type,
+                          from: transaction.from,
+                          to: transaction.to,
+                          amount: transaction.amount,
+                          currency: transaction.currency,
+                          date: transaction.date,
+                          time: transaction.time,
+                          status: transaction.status,
+                          hash: transaction.hash,
+                          // Add additional fields that TransactionDetailScreen expects
+                          fromAddress: transaction.type === 'received' ? transaction.senderAddress : undefined,
+                          toAddress: transaction.type === 'sent' ? transaction.recipientAddress : undefined,
+                          blockNumber: '2,847,392',
+                          gasUsed: '21,000',
+                          gasFee: '0.001',
+                          confirmations: 127,
+                          note: transaction.type === 'received' ? `Pago de ${friend.name}` : 
+                                transaction.type === 'sent' ? `Envío a ${friend.name}` : 
+                                `Pago a ${friend.name}`,
+                          avatar: friend.avatar,
+                          isInvitedFriend: transaction.isInvitation || false, // Use transaction's invitation status
+                        }
+                      };
+                      // @ts-ignore - Navigation type mismatch, but works at runtime
+                      navigation.navigate('TransactionDetail', params);
+                    }
                   }} 
                 />
               ))
@@ -678,104 +709,101 @@ export const FriendDetailScreen = () => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Selecciona la moneda</Text>
+              <Text style={styles.modalTitle}>Elige el token a enviar</Text>
               <TouchableOpacity onPress={() => setShowTokenSelection(false)}>
-                <Icon name="x" size={24} color="#6B7280" />
-              </TouchableOpacity>
-            </View>
-            
-            <Text style={styles.modalSubtitle}>
-              ¿Qué moneda quieres enviar a {friend.name}?
-            </Text>
-            
-            <View style={styles.tokenOptions}>
-              <TouchableOpacity 
-                style={styles.tokenOption}
-                onPress={() => handleTokenSelect('cusd')}
-              >
-                <View style={styles.tokenInfo}>
-                  <Image source={cUSDLogo} style={styles.tokenLogo} />
-                  <View style={styles.tokenDetails}>
-                    <Text style={styles.tokenName}>Confío Dollar</Text>
-                    <Text style={styles.tokenSymbol}>$cUSD</Text>
-                    <Text style={styles.tokenDescription}>
-                      Moneda estable para pagos diarios
-                    </Text>
-                  </View>
-                </View>
-                <Icon name="chevron-right" size={20} color="#6B7280" />
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.tokenOption}
-                onPress={() => handleTokenSelect('confio')}
-              >
-                <View style={styles.tokenInfo}>
-                  <Image source={CONFIOLogo} style={styles.tokenLogo} />
-                  <View style={styles.tokenDetails}>
-                    <Text style={styles.tokenName}>Confío</Text>
-                    <Text style={styles.tokenSymbol}>$CONFIO</Text>
-                    <Text style={styles.tokenDescription}>
-                      Moneda de gobernanza y utilidad
-                    </Text>
-                  </View>
-                </View>
-                <Icon name="chevron-right" size={20} color="#6B7280" />
+                <Icon name="x" size={24} color="#6b7280" />
               </TouchableOpacity>
             </View>
             
             <TouchableOpacity 
-              style={styles.cancelButton}
-              onPress={() => setShowTokenSelection(false)}
+              style={styles.tokenOption}
+              onPress={() => handleTokenSelect('cusd')}
             >
-              <Text style={styles.cancelButtonText}>Cancelar</Text>
+              <View style={styles.tokenInfo}>
+                <Image source={cUSDLogo} style={styles.tokenLogo} />
+                <View style={styles.tokenDetails}>
+                  <Text style={styles.tokenName}>Confío Dollar</Text>
+                  <Text style={styles.tokenSymbol}>$cUSD</Text>
+                  <Text style={styles.tokenDescription}>
+                    Moneda estable para pagos diarios
+                  </Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.tokenOption}
+              onPress={() => handleTokenSelect('confio')}
+            >
+              <View style={styles.tokenInfo}>
+                <Image source={CONFIOLogo} style={styles.tokenLogo} />
+                <View style={styles.tokenDetails}>
+                  <Text style={styles.tokenName}>Confío</Text>
+                  <Text style={styles.tokenSymbol}>$CONFIO</Text>
+                  <Text style={styles.tokenDescription}>
+                    Moneda de gobernanza y utilidad
+                  </Text>
+                </View>
+              </View>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
-      
+
       {/* Transaction Filter Modal */}
       <TransactionFilterModal
         visible={showFilterModal}
         onClose={() => setShowFilterModal(false)}
         onApply={setTransactionFilters}
-        currentFilters={transactionFilters}
-        theme={{
-          primary: colors.primary,
-          secondary: colors.secondary,
+        currentFilters={transactionFilters || {
+          types: { sent: true, received: true, payment: true, exchange: true, conversion: true },
+          currencies: { cUSD: true, CONFIO: true, USDC: true },
+          status: { completed: true, pending: true },
+          timeRange: 'all',
+          amountRange: { min: '', max: '' }
         }}
       />
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.neutralDark,
+    backgroundColor: '#ffffff',
   },
   scrollView: {
     flex: 1,
   },
-  friendSection: {
-    backgroundColor: colors.primary,
-    paddingTop: 20,
-    paddingBottom: 32,
-    paddingHorizontal: 20,
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16,
+    padding: 24,
+  },
+  errorText: {
+    fontSize: 16,
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  friendSection: {
+    alignItems: 'center',
+    paddingTop: 12,
+    paddingBottom: 24,
+    paddingHorizontal: 20,
   },
   friendAvatarContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: '#ffffff',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
+    padding: 8,
   },
   friendAvatarText: {
-    fontSize: 32,
+    fontSize: 24,
     fontWeight: 'bold',
     color: colors.primary,
   },
@@ -783,20 +811,21 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#ffffff',
-    marginBottom: 8,
+    marginBottom: 4,
+    textAlign: 'center',
   },
   friendPhone: {
     fontSize: 16,
-    color: '#ffffff',
-    opacity: 0.8,
+    color: 'rgba(255, 255, 255, 0.8)',
     marginBottom: 12,
+    textAlign: 'center',
   },
   friendStatus: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 16,
+    borderRadius: 20,
   },
   statusIndicator: {
     width: 8,
@@ -806,81 +835,76 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 6,
+    fontWeight: '500',
   },
   sendButtonContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 16,
+    padding: 24,
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
   },
   sendButton: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    ...Platform.select({
-      ios: {
-        shadowColor: colors.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
+    backgroundColor: colors.primary,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    marginBottom: 8,
   },
   inviteButton: {
-    backgroundColor: colors.secondary,
+    backgroundColor: colors.primary, // Use same emerald color as regular send button
   },
   sendButtonText: {
+    color: '#ffffff',
     fontSize: 16,
     fontWeight: '600',
-    color: '#ffffff',
   },
   inviteNote: {
     fontSize: 12,
-    color: colors.secondary,
+    color: colors.text.secondary,
     textAlign: 'center',
-    marginTop: 8,
+    lineHeight: 16,
   },
   transactionsSection: {
-    paddingHorizontal: 16,
-    paddingBottom: 24,
+    flex: 1,
+    backgroundColor: '#ffffff',
   },
   transactionsHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
   },
   transactionsTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#1f2937',
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text.primary,
   },
   transactionsFilters: {
     flexDirection: 'row',
     gap: 8,
   },
   filterButton: {
-    padding: 8,
-    backgroundColor: '#ffffff',
-    borderRadius: 8,
-    marginLeft: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#f9fafb',
+    justifyContent: 'center',
+    alignItems: 'center',
     position: 'relative',
   },
   filterButtonActive: {
-    backgroundColor: '#f3f4f6',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    backgroundColor: colors.primaryLight,
   },
   filterDot: {
     position: 'absolute',
-    top: 6,
-    right: 6,
+    top: 8,
+    right: 8,
     width: 6,
     height: 6,
     borderRadius: 3,
@@ -889,63 +913,95 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 16,
+    marginHorizontal: 24,
+    marginVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#e5e7eb',
   },
   searchIcon: {
-    marginRight: 8,
+    marginRight: 12,
   },
   searchInput: {
     flex: 1,
-    fontSize: 14,
-    color: '#1f2937',
+    fontSize: 16,
+    color: colors.text.primary,
     padding: 0,
   },
   transactionsList: {
-    gap: 8,
+    paddingHorizontal: 24,
+  },
+  loadingContainer: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: colors.text.secondary,
+  },
+  emptyTransactionsContainer: {
+    paddingVertical: 40,
+    alignItems: 'center',
+  },
+  emptyTransactionsText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: colors.text.primary,
+    marginTop: 12,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyTransactionsSubtext: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: 20,
   },
   transactionItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
+    paddingVertical: 16,
+    paddingHorizontal: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
   },
   invitedTransactionItem: {
-    backgroundColor: '#fef2f2', // Light red background
+    backgroundColor: '#fef2f2',
     borderColor: '#ef4444',
+    borderWidth: 1,
+    borderRadius: 12,
+    marginVertical: 4,
+    paddingHorizontal: 16,
+    borderBottomWidth: 0,
   },
   transactionIconContainer: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.neutralDark,
+    backgroundColor: '#f9fafb',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
   },
   invitedIconContainer: {
-    backgroundColor: colors.secondary + '20',
+    backgroundColor: '#fef2f2',
   },
   transactionInfo: {
     flex: 1,
   },
   transactionTitle: {
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '500',
-    color: '#1f2937',
+    color: colors.text.primary,
+    marginBottom: 4,
   },
   transactionDate: {
-    fontSize: 12,
-    color: '#6b7280',
+    fontSize: 14,
+    color: colors.text.secondary,
   },
   invitedNote: {
     fontSize: 12,
@@ -958,7 +1014,8 @@ const styles = StyleSheet.create({
   },
   transactionAmountText: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
+    marginBottom: 4,
   },
   positiveAmount: {
     color: '#10b981',
@@ -971,56 +1028,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginLeft: 4,
-  },
-  loadingContainer: {
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: {
-    fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-  },
-  emptyTransactionsContainer: {
-    padding: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyTransactionsText: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#1f2937',
-    marginTop: 16,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  emptyTransactionsSubtext: {
-    fontSize: 14,
-    color: '#6b7280',
-    textAlign: 'center',
-    lineHeight: 20,
-    maxWidth: 280,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginLeft: 6,
   },
   viewMoreButton: {
-    backgroundColor: '#ffffff',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
+    paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 16,
-    marginHorizontal: 16,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    marginTop: 8,
+    marginBottom: 24,
   },
   viewMoreButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontSize: 16,
+    color: colors.primary,
+    fontWeight: '500',
   },
   modalOverlay: {
     flex: 1,
@@ -1029,49 +1051,38 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
     padding: 24,
-    width: '90%',
+    margin: 24,
     maxWidth: 400,
+    width: '100%',
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#1f2937',
-  },
-  modalSubtitle: {
-    fontSize: 16,
-    color: '#6b7280',
     marginBottom: 24,
   },
-  tokenOptions: {
-    marginBottom: 16,
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.text.primary,
   },
   tokenOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
     borderRadius: 12,
+    padding: 16,
     marginBottom: 12,
   },
   tokenInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
   },
   tokenLogo: {
-    width: 48,
-    height: 48,
+    width: 40,
+    height: 40,
     marginRight: 16,
   },
   tokenDetails: {
@@ -1080,27 +1091,18 @@ const styles = StyleSheet.create({
   tokenName: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 2,
+    color: colors.text.primary,
+    marginBottom: 4,
   },
   tokenSymbol: {
     fontSize: 14,
-    color: '#6b7280',
+    fontWeight: '500',
+    color: colors.primary,
     marginBottom: 4,
   },
   tokenDescription: {
     fontSize: 12,
-    color: '#9ca3af',
-  },
-  cancelButton: {
-    backgroundColor: '#f3f4f6',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#6b7280',
+    color: colors.text.secondary,
+    lineHeight: 16,
   },
 });
