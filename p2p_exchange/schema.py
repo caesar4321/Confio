@@ -2208,7 +2208,7 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                     f'trade_chat_{trade.id}',
                     {
                         'type': 'trade_status_update',
-                        'status': new_status,
+                        'status': trade.status,
                         'updated_by': str(user.id),
                         'payment_reference': '',
                         'payment_notes': ''
