@@ -108,3 +108,21 @@ export const GET_UNIFIED_USDC_TRANSACTIONS = gql`
     }
   }
 `;
+
+export const CREATE_USDC_WITHDRAWAL = gql`
+  mutation CreateUSDCWithdrawal($input: USDCWithdrawalInput!) {
+    createUsdcWithdrawal(input: $input) {
+      withdrawal {
+        id
+        withdrawalId
+        amount
+        destinationAddress
+        serviceFee
+        status
+        createdAt
+      }
+      success
+      errors
+    }
+  }
+`;

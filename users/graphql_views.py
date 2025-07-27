@@ -191,10 +191,14 @@ class UnifiedTransactionQuery(graphene.ObjectType):
                 Q(counterparty_business=account.business)
             )
         else:
-            # For personal accounts, filter by user relationships
+            # For personal accounts, filter by user relationships BUT exclude business transactions
             queryset = UnifiedTransaction.objects.filter(
-                Q(sender_user=user) | 
-                Q(counterparty_user=user)
+                Q(
+                    Q(sender_user=user) & Q(sender_business__isnull=True)
+                ) | 
+                Q(
+                    Q(counterparty_user=user) & Q(counterparty_business__isnull=True)
+                )
             )
         
         # Filter by token types if provided
