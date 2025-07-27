@@ -195,6 +195,15 @@ export const AccountDetailScreen = () => {
       ? "Moneda estable respaldada 1:1 por dólares estadounidenses (USD)"
               : "Moneda de gobernanza de Confío"
   };
+  
+  // Debug logging
+  console.log('AccountDetailScreen - Account info:', {
+    activeAccountType: activeAccount?.type,
+    activeAccountIndex: activeAccount?.index,
+    activeAccountAddress: activeAccount?.suiAddress,
+    paramAddress: accountAddress,
+    accountName: account.name
+  });
 
   // USDC balance data (shown only for cUSD account)
   const usdcAccount = route.params.accountType === 'cusd' ? {
@@ -208,17 +217,37 @@ export const AccountDetailScreen = () => {
   // Get real transaction data from GraphQL
   const { data: sendTransactionsData, loading: sendLoading, refetch: refetchSend, fetchMore: fetchMoreSend } = useQuery(GET_SEND_TRANSACTIONS_BY_ACCOUNT, {
     variables: {
-      accountType: 'personal', // Use 'personal' to match backend account_type field
-      accountIndex: 0, // Default account index
+      accountType: activeAccount?.type || 'personal',
+      accountIndex: activeAccount?.index || 0,
       limit: transactionLimit
     }
   });
 
   const { data: paymentTransactionsData, loading: paymentLoading, refetch: refetchPayment, fetchMore: fetchMorePayment } = useQuery(GET_PAYMENT_TRANSACTIONS_BY_ACCOUNT, {
     variables: {
-      accountType: 'personal', // Use 'personal' to match backend account_type field
-      accountIndex: 0, // Default account index
+      accountType: activeAccount?.type || 'personal',
+      accountIndex: activeAccount?.index || 0,
       limit: transactionLimit
+    },
+    onCompleted: (data) => {
+      console.log('Payment transactions query completed:', {
+        accountType: activeAccount?.type || 'personal',
+        accountIndex: activeAccount?.index || 0,
+        transactionCount: data?.paymentTransactionsByAccount?.length || 0
+      });
+      // Log first transaction details if any
+      if (data?.paymentTransactionsByAccount?.length > 0) {
+        const firstTx = data.paymentTransactionsByAccount[0];
+        console.log('First payment transaction:', {
+          id: firstTx.id,
+          payerDisplayName: firstTx.payerDisplayName,
+          merchantDisplayName: firstTx.merchantDisplayName,
+          payerUser: firstTx.payerUser,
+          merchantBusiness: firstTx.merchantBusiness,
+          payerAddress: firstTx.payerAddress,
+          merchantAddress: firstTx.merchantAddress
+        });
+      }
     }
   });
 
@@ -247,6 +276,16 @@ export const AccountDetailScreen = () => {
   useEffect(() => {
     loadBalanceVisibility();
   }, [route.params.accountType]);
+  
+  // Refetch transactions when active account changes
+  useEffect(() => {
+    if (activeAccount) {
+      console.log('AccountDetailScreen - Active account changed, refetching transactions');
+      refetchSend();
+      refetchPayment();
+      refetchUnified();
+    }
+  }, [activeAccount?.id, activeAccount?.type, activeAccount?.index]);
   
   // Search animation
   useEffect(() => {
@@ -325,10 +364,22 @@ export const AccountDetailScreen = () => {
         
         // For proper contact name lookup, we need to pass the phone numbers
         // The displayCounterparty is the DB name, but we want local contact names
+        // Debug payment transaction
+        if (type === 'payment') {
+          console.log('Unified payment transaction:', {
+            id: tx.id,
+            type,
+            direction: tx.direction,
+            displayCounterparty: tx.displayCounterparty,
+            shouldSetFrom: (type === 'payment' && tx.direction === 'received'),
+            shouldSetTo: (type === 'payment' && tx.direction === 'sent')
+          });
+        }
+        
         allTransactions.push({
           type,
-          from: tx.direction === 'received' ? tx.displayCounterparty : undefined,
-          to: tx.direction === 'sent' ? tx.displayCounterparty : undefined,
+          from: (type === 'payment' && tx.direction === 'received') || (type === 'received') ? tx.displayCounterparty : undefined,
+          to: (type === 'payment' && tx.direction === 'sent') || (type === 'sent') ? tx.displayCounterparty : undefined,
           fromPhone: tx.direction === 'received' ? tx.senderPhone : undefined,
           toPhone: tx.direction === 'sent' ? tx.counterpartyPhone : undefined,
           amount: tx.displayAmount,
@@ -366,8 +417,8 @@ export const AccountDetailScreen = () => {
           
           allTransactions.push({
             type: currentUserIsSender ? 'sent' : 'received',
-            from: currentUserIsSender ? undefined : (tx.senderDisplayName || ''),
-            to: currentUserIsSender ? (tx.recipientDisplayName || '') : undefined,
+            from: currentUserIsSender ? undefined : (tx.senderDisplayName || tx.senderUser?.username || 'Unknown'),
+            to: currentUserIsSender ? (tx.recipientDisplayName || tx.recipientUser?.username || 'Unknown') : undefined,
             amount: currentUserIsSender ? `-${tx.amount}` : `+${tx.amount}`,
             currency: tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType,
             date: new Date(tx.createdAt).toISOString().split('T')[0],
@@ -386,10 +437,36 @@ export const AccountDetailScreen = () => {
           const currentUserIsPayer = tx.payerAddress === account.address;
           const currentUserIsMerchant = tx.merchantAddress === account.address;
           
+          // Debug logging for payment transactions
+          console.log('Payment transaction processing:', {
+            txId: tx.id,
+            currentUserIsPayer,
+            currentUserIsMerchant,
+            payerDisplayName: tx.payerDisplayName,
+            merchantDisplayName: tx.merchantDisplayName,
+            displayNameUsed: currentUserIsMerchant ? displayName : (currentUserIsPayer ? displayName : 'N/A'),
+            role: currentUserIsMerchant ? 'merchant' : (currentUserIsPayer ? 'payer' : 'neither')
+          });
+          
+          // Determine the display name based on who we are in the transaction
+          let displayName = 'Unknown';
+          if (currentUserIsMerchant) {
+            // We received payment - show payer's name
+            displayName = tx.payerDisplayName || 
+                         (tx.payerUser ? `${tx.payerUser.firstName} ${tx.payerUser.lastName}`.trim() : '') ||
+                         tx.payerUser?.username || 
+                         'Unknown';
+          } else if (currentUserIsPayer) {
+            // We made payment - show merchant's name
+            displayName = tx.merchantDisplayName || 
+                         tx.merchantBusiness?.name || 
+                         'Unknown';
+          }
+          
           allTransactions.push({
             type: 'payment',
-            from: currentUserIsMerchant ? (tx.payerDisplayName || '') : undefined,
-            to: currentUserIsPayer ? (tx.merchantDisplayName || '') : undefined,
+            from: currentUserIsMerchant ? displayName : undefined,
+            to: currentUserIsPayer ? displayName : undefined,
             amount: currentUserIsPayer ? `-${tx.amount}` : `+${tx.amount}`,
             currency: tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType,
             date: new Date(tx.createdAt).toISOString().split('T')[0],
@@ -406,6 +483,17 @@ export const AccountDetailScreen = () => {
 
   // Helper functions for transaction display
   const getTransactionTitle = (transaction: Transaction) => {
+    // Debug payment transactions
+    if (transaction.type === 'payment') {
+      console.log('Getting title for payment transaction:', {
+        type: transaction.type,
+        from: transaction.from,
+        to: transaction.to,
+        amount: transaction.amount,
+        startsWithPlus: transaction.amount.startsWith('+')
+      });
+    }
+    
     switch(transaction.type) {
       case 'received':
         return `Recibido de ${transaction.from}`;
@@ -416,8 +504,8 @@ export const AccountDetailScreen = () => {
       case 'payment':
         // If amount is positive, it's a payment received
         return transaction.amount.startsWith('+') 
-          ? `Pago recibido de ${transaction.from}` 
-          : `Pago a ${transaction.to}`;
+          ? `Pago recibido de ${transaction.from || 'Unknown'}` 
+          : `Pago a ${transaction.to || 'Unknown'}`;
       default:
         return 'Transacción';
     }
@@ -440,6 +528,24 @@ export const AccountDetailScreen = () => {
 
   // Use unified transactions if available, fallback to legacy format
   const transactions = unifiedTransactionsData ? formatUnifiedTransactions() : formatTransactions();
+  
+  // Debug which data source is being used
+  console.log('AccountDetailScreen - Transaction source:', {
+    usingUnified: !!unifiedTransactionsData,
+    unifiedCount: unifiedTransactionsData?.unifiedTransactions?.length || 0,
+    formattedCount: transactions.length,
+    firstTransaction: transactions[0]
+  });
+  
+  // Debug the actual transaction object
+  if (transactions.length > 0 && transactions[0].type === 'payment') {
+    console.log('First payment transaction details:', {
+      type: transactions[0].type,
+      from: transactions[0].from,
+      to: transactions[0].to,
+      amount: transactions[0].amount
+    });
+  }
   
   // Filter transactions based on search query and filters
   const filteredTransactions = useMemo(() => {
@@ -614,9 +720,11 @@ export const AccountDetailScreen = () => {
           break;
         case 'payment':
           if (transaction.amount.startsWith('+')) {
-            baseTitle = `Pago recibido de ${contactInfo.displayName}`;
+            // For received payments, use the from field directly (already has the payer's name)
+            baseTitle = `Pago recibido de ${transaction.from || contactInfo.displayName}`;
           } else {
-            baseTitle = `Pago a ${contactInfo.displayName}`;
+            // For sent payments, use the to field directly (already has the merchant's name)
+            baseTitle = `Pago a ${transaction.to || contactInfo.displayName}`;
           }
           break;
         default:
@@ -632,11 +740,15 @@ export const AccountDetailScreen = () => {
         transactionType: transaction.type,
         transactionData: {
           type: transaction.type,
-          from: transaction.type === 'received' || (transaction.type === 'payment' && transaction.amount.startsWith('+')) 
-            ? contactInfo.displayName 
+          from: transaction.type === 'received' 
+            ? contactInfo.displayName
+            : (transaction.type === 'payment' && transaction.amount.startsWith('+'))
+            ? transaction.from
             : transaction.from,
-          to: transaction.type === 'sent' || (transaction.type === 'payment' && transaction.amount.startsWith('-')) 
-            ? contactInfo.displayName 
+          to: transaction.type === 'sent' 
+            ? contactInfo.displayName
+            : (transaction.type === 'payment' && transaction.amount.startsWith('-'))
+            ? transaction.to
             : transaction.to,
           amount: transaction.amount,
           currency: transaction.currency,
