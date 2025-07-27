@@ -6,12 +6,13 @@ from send import schema as send_schema
 from payments import schema as payments_schema
 from p2p_exchange import schema as p2p_exchange_schema
 from exchange_rates import schema as exchange_rates_schema
+from conversion import schema as conversion_schema
 import graphene
 import logging
 
 logger = logging.getLogger(__name__)
 
-class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, graphene.ObjectType):
+class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, graphene.ObjectType):
 	# Override the legalDocument field to make it public
 	legalDocument = users_schema.Query.legalDocument
 	# Expose the user query
@@ -25,6 +26,7 @@ class Mutation(
 	payments_schema.Mutation,
 	p2p_exchange_schema.Mutation,
 	exchange_rates_schema.Mutation,
+	conversion_schema.Mutation,
 	graphene.ObjectType
 ):
 	pass
@@ -54,6 +56,7 @@ types = [
 	p2p_exchange_schema.P2PPaymentMethodType,
 	p2p_exchange_schema.P2PUserStatsType,
 	exchange_rates_schema.ExchangeRateType,
+	conversion_schema.ConversionType,
 ]
 
 schema = graphene.Schema(

@@ -205,7 +205,7 @@
         <span class="alert-icon">🚨</span>
         <div>
             <strong>{{ escalated_disputes }} Escalated Disputes</strong> require immediate attention.
-            <a href="{% url 'admin:p2p_exchange_p2pdispute_changelist' %}?status__exact=ESCALATED">View all</a>
+            <a href="{% url 'confio_admin:p2p_exchange_p2pdispute_changelist' %}?status__exact=ESCALATED">View all</a>
         </div>
     </div>
     {% endif %}
@@ -215,17 +215,17 @@
         <span class="alert-icon">⚠️</span>
         <div>
             <strong>{{ open_disputes }} Open Disputes</strong> are pending review.
-            <a href="{% url 'admin:p2p_exchange_p2pdispute_changelist' %}?status__in=OPEN,UNDER_REVIEW">Review disputes</a>
+            <a href="{% url 'confio_admin:p2p_exchange_p2pdispute_changelist' %}?status__in=OPEN,UNDER_REVIEW">Review disputes</a>
         </div>
     </div>
     {% endif %}
     
     <!-- Quick Actions -->
     <div class="quick-actions">
-        <a href="{% url 'admin_p2p_analytics' %}" class="action-button">P2P Analytics</a>
-        <a href="{% url 'admin_user_analytics' %}" class="action-button secondary">User Analytics</a>
-        <a href="{% url 'admin_transaction_analytics' %}" class="action-button secondary">Transaction Analytics</a>
-        <a href="{% url 'admin:p2p_exchange_p2poffer_add' %}" class="action-button secondary">Create Test Offer</a>
+        <a href="{% url 'confio_admin:p2p_analytics' %}" class="action-button">P2P Analytics</a>
+        <a href="{% url 'confio_admin:user_analytics' %}" class="action-button secondary">User Analytics</a>
+        <a href="{% url 'confio_admin:transaction_analytics' %}" class="action-button secondary">Transaction Analytics</a>
+        <a href="{% url 'confio_admin:p2p_exchange_p2poffer_add' %}" class="action-button secondary">Create Test Offer</a>
     </div>
     
     <!-- Key Metrics -->
@@ -283,6 +283,42 @@
         </div>
     </div>
     
+    <!-- Conversion Volume -->
+    <h2 class="section-title">USDC ↔ cUSD Conversions</h2>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">USDC → cUSD Volume</div>
+            <div class="metric-value">${{ usdc_to_cusd_volume|floatformat:0|intcomma }}</div>
+            <div class="metric-change">This month</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-label">Net USDC Inflow</div>
+            <div class="metric-value {% if net_usdc_inflow < 0 %}negative{% endif %}">
+                {% if net_usdc_inflow >= 0 %}+{% endif %}${{ net_usdc_inflow|floatformat:0|intcomma }}
+            </div>
+            <div class="metric-change">
+                {% if net_usdc_inflow >= 0 %}
+                    More USDC → cUSD
+                {% else %}
+                    More cUSD → USDC
+                {% endif %}
+            </div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-label">Circulating cUSD</div>
+            <div class="metric-value">${{ circulating_cusd|floatformat:0|intcomma }}</div>
+            <div class="metric-change">Total supply</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-label">Conversions Today</div>
+            <div class="metric-value">{{ conversions_today|intcomma }}</div>
+            <div class="metric-change">{{ conversions_this_week }} this week</div>
+        </div>
+    </div>
+    
     <!-- Top Countries -->
     <h2 class="section-title">Top P2P Countries</h2>
     <div class="data-table">
@@ -335,7 +371,7 @@
                 {% for trade in recent_trades %}
                 <tr>
                     <td>
-                        <a href="{% url 'admin:p2p_exchange_p2ptrade_change' trade.id %}">
+                        <a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' trade.id %}">
                             #{{ trade.id }}
                         </a>
                     </td>
@@ -379,12 +415,12 @@
                 {% for dispute in recent_disputes %}
                 <tr>
                     <td>
-                        <a href="{% url 'admin:p2p_exchange_p2pdispute_change' dispute.id %}">
+                        <a href="{% url 'confio_admin:p2p_exchange_p2pdispute_change' dispute.id %}">
                             #{{ dispute.id }}
                         </a>
                     </td>
                     <td>
-                        <a href="{% url 'admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">
+                        <a href="{% url 'confio_admin:p2p_exchange_p2ptrade_change' dispute.trade.id %}">
                             Trade #{{ dispute.trade.id }}
                         </a>
                     </td>

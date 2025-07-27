@@ -102,6 +102,40 @@ class ConfioAdminSite(admin.AdminSite):
             created_at__gte=today_start
         ).exclude(status='FAILED').count()
         
+        # Conversion metrics
+        from conversion.models import Conversion
+        context['conversions_today'] = Conversion.objects.filter(
+            created_at__gte=today_start
+        ).count()
+        context['conversions_this_week'] = Conversion.objects.filter(
+            created_at__gte=week_start
+        ).count()
+        
+        # Monthly volumes
+        conversions_volume = Conversion.objects.filter(
+            created_at__gte=month_start,
+            status='COMPLETED'
+        ).aggregate(
+            usdc_to_cusd=Sum('from_amount', filter=Q(conversion_type='usdc_to_cusd')),
+            cusd_to_usdc=Sum('from_amount', filter=Q(conversion_type='cusd_to_usdc'))
+        )
+        context['usdc_to_cusd_volume'] = conversions_volume['usdc_to_cusd'] or Decimal('0')
+        context['cusd_to_usdc_volume'] = conversions_volume['cusd_to_usdc'] or Decimal('0')
+        
+        # Calculate net USDC inflow (positive means more USDC → cUSD)
+        context['net_usdc_inflow'] = context['usdc_to_cusd_volume'] - context['cusd_to_usdc_volume']
+        
+        # Calculate circulating cUSD (cumulative net conversions)
+        all_conversions = Conversion.objects.filter(
+            status='COMPLETED'
+        ).aggregate(
+            total_usdc_to_cusd=Sum('to_amount', filter=Q(conversion_type='usdc_to_cusd')),
+            total_cusd_to_usdc=Sum('from_amount', filter=Q(conversion_type='cusd_to_usdc'))
+        )
+        total_minted = all_conversions['total_usdc_to_cusd'] or Decimal('0')
+        total_burned = all_conversions['total_cusd_to_usdc'] or Decimal('0')
+        context['circulating_cusd'] = total_minted - total_burned
+        
         # Country breakdown for P2P
         country_stats = P2POffer.objects.filter(
             status='ACTIVE'
@@ -320,7 +354,7 @@ confio_admin_site = ConfioAdminSite(name='confio_admin')
 
 # Re-register all models with the custom admin site
 from django.contrib.auth.models import Group
-from users.admin import UserAdmin, AccountAdmin, BusinessAdmin, IdentityVerificationAdmin, CountryAdmin, BankAdmin, BankInfoAdmin
+from users.admin import UserAdmin, AccountAdmin, BusinessAdmin, IdentityVerificationAdmin, CountryAdmin, BankAdmin, BankInfoAdmin, UnifiedTransactionAdmin
 from p2p_exchange.admin import (
     P2PPaymentMethodAdmin, P2POfferAdmin, P2PTradeAdmin, 
     P2PMessageAdmin, P2PUserStatsAdmin, P2PEscrowAdmin,
@@ -329,6 +363,7 @@ from p2p_exchange.admin import (
 )
 from payments.admin import PaymentTransactionAdmin, InvoiceAdmin
 from send.admin import SendTransactionAdmin
+from conversion.admin import ConversionAdmin
 
 # Register with custom admin site
 confio_admin_site.register(Group)
@@ -339,6 +374,10 @@ confio_admin_site.register(IdentityVerification, IdentityVerificationAdmin)
 confio_admin_site.register(Country, CountryAdmin)
 confio_admin_site.register(Bank, BankAdmin)
 confio_admin_site.register(BankInfo, BankInfoAdmin)
+
+# Unified Transaction View
+from users.models_views import UnifiedTransaction
+confio_admin_site.register(UnifiedTransaction, UnifiedTransactionAdmin)
 
 # P2P models
 from p2p_exchange.models import (
@@ -365,3 +404,7 @@ confio_admin_site.register(PaymentTransaction, PaymentTransactionAdmin)
 # Send models
 from send.models import SendTransaction
 confio_admin_site.register(SendTransaction, SendTransactionAdmin)
+
+# Conversion models
+from conversion.models import Conversion
+confio_admin_site.register(Conversion, ConversionAdmin)

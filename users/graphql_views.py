@@ -13,6 +13,22 @@ class UnifiedTransactionType(DjangoObjectType):
     display_counterparty = graphene.String(description="Name of the counterparty from user perspective")
     display_description = graphene.String(description="Transaction description")
     
+    # Override nullable fields
+    error_message = graphene.String(description="Error message if transaction failed")
+    sender_phone = graphene.String(description="Sender phone number")
+    counterparty_phone = graphene.String(description="Counterparty phone number")
+    description = graphene.String(description="Transaction description")
+    invoice_id = graphene.String(description="Invoice ID for payments")
+    payment_transaction_id = graphene.String(description="Payment transaction ID")
+    transaction_hash = graphene.String(description="Transaction hash on blockchain")
+    
+    # Add conversion-specific computed fields
+    conversion_type = graphene.String(description="Conversion type (usdc_to_cusd or cusd_to_usdc)")
+    from_amount = graphene.String(description="Amount being converted from")
+    to_amount = graphene.String(description="Amount being converted to")
+    from_token = graphene.String(description="Token being converted from")
+    to_token = graphene.String(description="Token being converted to")
+    
     class Meta:
         model = UnifiedTransaction
         fields = [
@@ -24,22 +40,16 @@ class UnifiedTransactionType(DjangoObjectType):
             'token_type',
             'status',
             'transaction_hash',
-            'error_message',
             'sender_user',
             'sender_business',
             'sender_type',
             'sender_display_name',
-            'sender_phone',
             'sender_address',
             'counterparty_user',
             'counterparty_business',
             'counterparty_type',
             'counterparty_display_name',
-            'counterparty_phone',
             'counterparty_address',
-            'description',
-            'invoice_id',
-            'payment_transaction_id',
             'is_invitation',
             'invitation_claimed',
             'invitation_reverted',
@@ -48,6 +58,10 @@ class UnifiedTransactionType(DjangoObjectType):
     
     def resolve_direction(self, info):
         """Resolve transaction direction based on current user's address"""
+        # Conversions are always "self" transactions
+        if self.transaction_type == 'conversion':
+            return 'conversion'
+            
         # Get the user's address from the transaction context
         user_address = getattr(self, '_user_address', None)
         
@@ -62,6 +76,10 @@ class UnifiedTransactionType(DjangoObjectType):
     def resolve_display_amount(self, info):
         """Resolve formatted amount based on direction"""
         try:
+            # Handle conversions
+            if self.transaction_type == 'conversion':
+                return str(self.amount)
+                
             # Get direction directly
             user_address = getattr(self, '_user_address', None)
             if user_address and hasattr(self, 'get_direction_for_address'):
@@ -77,6 +95,10 @@ class UnifiedTransactionType(DjangoObjectType):
     def resolve_display_counterparty(self, info):
         """Resolve counterparty name based on direction"""
         try:
+            # Handle conversions (no counterparty)
+            if self.transaction_type == 'conversion':
+                return 'Confío System'
+                
             # Get direction directly
             user_address = getattr(self, '_user_address', None)
             if user_address and hasattr(self, 'get_direction_for_address'):
@@ -92,6 +114,10 @@ class UnifiedTransactionType(DjangoObjectType):
     def resolve_display_description(self, info):
         """Resolve description with proper context"""
         try:
+            # Handle conversions with their description
+            if self.transaction_type == 'conversion':
+                return self.description or 'Conversión'
+                
             if self.transaction_type == 'payment':
                 # Get direction directly
                 user_address = getattr(self, '_user_address', None)
@@ -104,6 +130,26 @@ class UnifiedTransactionType(DjangoObjectType):
         except Exception as e:
             print(f"Error in resolve_display_description: {e}")
         return self.description or ''
+    
+    def resolve_conversion_type(self, info):
+        """Extract conversion type from description"""
+        return self.get_conversion_type()
+    
+    def resolve_from_amount(self, info):
+        """For conversions, this is the amount field"""
+        return self.get_from_amount()
+    
+    def resolve_to_amount(self, info):
+        """Extract to_amount from conversion description"""
+        return self.get_to_amount()
+    
+    def resolve_from_token(self, info):
+        """For conversions, determine from token"""
+        return self.get_from_token()
+    
+    def resolve_to_token(self, info):
+        """For conversions, determine to token"""
+        return self.get_to_token()
 
 
 class UnifiedTransactionQuery(graphene.ObjectType):
@@ -137,11 +183,19 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         except Account.DoesNotExist:
             return []
         
-        # Base query - all transactions involving this address
-        queryset = UnifiedTransaction.objects.filter(
-            Q(sender_address=account.sui_address) | 
-            Q(counterparty_address=account.sui_address)
-        )
+        # Base query - all transactions involving this account
+        if account.account_type == 'business' and account.business:
+            # For business accounts, filter by business relationships
+            queryset = UnifiedTransaction.objects.filter(
+                Q(sender_business=account.business) | 
+                Q(counterparty_business=account.business)
+            )
+        else:
+            # For personal accounts, filter by user relationships
+            queryset = UnifiedTransaction.objects.filter(
+                Q(sender_user=user) | 
+                Q(counterparty_user=user)
+            )
         
         # Filter by token types if provided
         if token_types:

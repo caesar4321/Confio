@@ -355,11 +355,13 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
         """Display transaction type with icon"""
         icons = {
             'send': '📤',
-            'payment': '🛒'
+            'payment': '🛒',
+            'conversion': '🔄'
         }
         colors = {
             'send': '#3B82F6',
-            'payment': '#8B5CF6'
+            'payment': '#8B5CF6',
+            'conversion': '#34D399'
         }
         icon = icons.get(obj.transaction_type, '📄')
         color = colors.get(obj.transaction_type, '#6B7280')
@@ -404,7 +406,12 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
     
     def counterparty_info(self, obj):
         """Display counterparty with type badge and phone"""
-        if obj.counterparty_type == 'business':
+        # Special case for conversions - show SYSTEM badge
+        if obj.transaction_type == 'conversion' and obj.counterparty_display_name == 'Confío System':
+            type_badge = format_html(
+                '<span style="background-color: #6B7280; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px;">SYSTEM</span> '
+            )
+        elif obj.counterparty_type == 'business':
             type_badge = format_html(
                 '<span style="background-color: #3B82F6; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px;">BUSINESS</span> '
             )
