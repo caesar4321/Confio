@@ -3,7 +3,7 @@ from graphene_django import DjangoObjectType
 from django.core.exceptions import ValidationError
 from django.db import models
 from .models import USDCDeposit, USDCWithdrawal
-from .models_views import UnifiedUSDCTransaction
+from .models_unified import UnifiedUSDCTransactionTable
 from django.conf import settings
 from django.utils import timezone
 from decimal import Decimal
@@ -57,9 +57,9 @@ class USDCWithdrawalType(DjangoObjectType):
 
 
 class UnifiedUSDCTransactionType(DjangoObjectType):
-    """GraphQL type for UnifiedUSDCTransaction view"""
+    """GraphQL type for UnifiedUSDCTransactionTable"""
     class Meta:
-        model = UnifiedUSDCTransaction
+        model = UnifiedUSDCTransactionTable
         fields = (
             'transaction_id',
             'transaction_type',
@@ -409,7 +409,7 @@ class Query(graphene.ObjectType):
         account_index = getattr(info.context, 'active_account_index', 0)
         
         # Filter by user and account context
-        queryset = UnifiedUSDCTransaction.objects.filter(actor_user=user)
+        queryset = UnifiedUSDCTransactionTable.objects.filter(actor_user=user)
         
         # Filter by business if active account is business
         if account_type == 'business':

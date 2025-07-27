@@ -69,6 +69,7 @@ type AccountDetailScreenNavigationProp = NativeStackNavigationProp<MainStackPara
 type AccountDetailScreenRouteProp = RouteProp<MainStackParamList, 'AccountDetail'>;
 
 interface Transaction {
+  id?: string;
   type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion';
   from?: string;
   to?: string;
@@ -90,6 +91,8 @@ interface Transaction {
   conversionType?: string;
   isExternalDeposit?: boolean;
   senderType?: string;
+  secondaryCurrency?: string;
+  p2pTradeId?: string;
 }
 
 // Set Spanish locale for moment
@@ -109,9 +112,11 @@ export const AccountDetailScreen = () => {
   const { activeAccount } = useAccount();
   const [showBalance, setShowBalance] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [transactionLimit, setTransactionLimit] = useState(10);
+  const [transactionLimit, setTransactionLimit] = useState(20);
+  const [transactionOffset, setTransactionOffset] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasReachedEnd, setHasReachedEnd] = useState(false);
+  const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
@@ -231,13 +236,13 @@ export const AccountDetailScreen = () => {
     accountType: activeAccount?.type || 'personal',
     accountIndex: activeAccount?.index || 0,
     limit: transactionLimit,
-    offset: 0,
+    offset: 0, // Always start with offset 0 for initial query
     tokenTypes: route.params.accountType === 'cusd' ? ['cUSD', 'CUSD', 'USDC'] : ['CONFIO']
   };
   
   console.log('AccountDetailScreen - GraphQL query variables:', queryVariables);
   
-  const { data: unifiedTransactionsData, loading: unifiedLoading, error: unifiedError, refetch: refetchUnified } = useQuery(GET_UNIFIED_TRANSACTIONS, {
+  const { data: unifiedTransactionsData, loading: unifiedLoading, error: unifiedError, refetch: refetchUnified, fetchMore } = useQuery(GET_UNIFIED_TRANSACTIONS, {
     variables: queryVariables,
     skip: false, // Enable unified transactions
     onCompleted: (data) => {
@@ -307,8 +312,16 @@ export const AccountDetailScreen = () => {
     }
     
     try {
-      await refetchUnified();
-      setTransactionLimit(10);
+      const { data } = await refetchUnified({
+        accountType: activeAccount?.type || 'personal',
+        accountIndex: activeAccount?.index || 0,
+        limit: 20,
+        offset: 0,
+        tokenTypes: route.params.accountType === 'cusd' ? ['cUSD', 'CUSD', 'USDC'] : ['CONFIO']
+      });
+      setAllTransactions(data?.unifiedTransactions || []);
+      setTransactionLimit(20);
+      setTransactionOffset(0);
       setHasReachedEnd(false);
     } catch (error) {
       console.error('Error refreshing transactions:', error);
@@ -319,16 +332,18 @@ export const AccountDetailScreen = () => {
 
   // NEW: Transform unified transactions into the format expected by the UI
   const formatUnifiedTransactions = () => {
-    const allTransactions: Transaction[] = [];
+    const formattedTransactions: Transaction[] = [];
 
-    if (unifiedTransactionsData?.unifiedTransactions) {
-      unifiedTransactionsData.unifiedTransactions.forEach((tx: any) => {
+    if (allTransactions.length > 0) {
+      allTransactions.forEach((tx: any) => {
         // Determine transaction type based on both transactionType and direction
-        let type: 'sent' | 'received' | 'payment' | 'conversion' = 'sent';
+        let type: 'sent' | 'received' | 'payment' | 'conversion' | 'exchange' = 'sent';
         if (tx.transactionType.toLowerCase() === 'payment') {
           type = 'payment';
         } else if (tx.transactionType.toLowerCase() === 'conversion') {
           type = 'conversion';
+        } else if (tx.transactionType.toLowerCase() === 'exchange') {
+          type = 'exchange';
         } else {
           type = tx.direction === 'sent' ? 'sent' : 'received';
         }
@@ -461,20 +476,37 @@ export const AccountDetailScreen = () => {
         
         // Format the from field - truncate address if it's an external deposit
         let fromDisplay = undefined;
+        let toDisplay = undefined;
+        
         if (isConversion) {
           fromDisplay = conversionType === 'usdc_to_cusd' ? 'USDC' : conversionType === 'cusd_to_usdc' ? 'cUSD' : undefined;
+          toDisplay = conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined;
+        } else if (type === 'exchange') {
+          // For P2P exchanges, from is the seller, to is the buyer
+          if (tx.direction === 'sent') {
+            // User is seller (sending crypto)
+            fromDisplay = 'Tú (vendedor)';
+            toDisplay = tx.displayCounterparty || 'Comprador';
+          } else {
+            // User is buyer (receiving crypto)
+            fromDisplay = tx.displayCounterparty || 'Vendedor';
+            toDisplay = 'Tú (comprador)';
+          }
         } else if ((type === 'payment' && tx.direction === 'received') || (type === 'received')) {
           fromDisplay = tx.displayCounterparty;
           // Truncate external wallet addresses
           if (isExternalDeposit && fromDisplay && fromDisplay.startsWith('0x') && fromDisplay.length > 20) {
             fromDisplay = `${fromDisplay.slice(0, 10)}...${fromDisplay.slice(-6)}`;
           }
+        } else if ((type === 'payment' && tx.direction === 'sent') || (type === 'sent')) {
+          toDisplay = tx.displayCounterparty;
         }
         
         const finalTransaction = {
+          id: tx.id,
           type,
           from: fromDisplay,
-          to: isConversion ? (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined) : ((type === 'payment' && tx.direction === 'sent') || (type === 'sent') ? tx.displayCounterparty : undefined),
+          to: toDisplay,
           fromPhone: isConversion ? undefined : (tx.direction === 'received' ? tx.senderPhone : undefined),
           toPhone: isConversion ? undefined : (tx.direction === 'sent' ? tx.counterpartyPhone : undefined),
           amount: isConversion ? conversionAmount : tx.displayAmount,
@@ -494,7 +526,8 @@ export const AccountDetailScreen = () => {
           isExternalDeposit, // Add this flag for the UI to show the "Wallet externa" tag
           senderType: tx.senderType,
           description: isConversion ? tx.description : undefined,
-          conversionType: isConversion ? conversionType : undefined
+          conversionType: isConversion ? conversionType : undefined,
+          p2pTradeId: type === 'exchange' ? tx.p2pTradeId : undefined
         };
         
         // Debug final transaction for external deposits
@@ -517,12 +550,12 @@ export const AccountDetailScreen = () => {
           });
         }
         
-        allTransactions.push(finalTransaction);
+        formattedTransactions.push(finalTransaction);
       });
     }
     
     // Don't sort here - rely on server ordering which is more accurate
-    return allTransactions;
+    return formattedTransactions;
   };
 
 
@@ -595,7 +628,10 @@ export const AccountDetailScreen = () => {
   console.log('AccountDetailScreen - Transaction source:', {
     usingUnified: !!unifiedTransactionsData,
     unifiedCount: unifiedTransactionsData?.unifiedTransactions?.length || 0,
+    allTransactionsCount: allTransactions.length,
     formattedCount: transactions.length,
+    hasReachedEnd,
+    loadingMore,
     firstTransaction: transactions[0],
     rawData: unifiedTransactionsData?.unifiedTransactions?.slice(0, 2)
   });
@@ -737,17 +773,21 @@ export const AccountDetailScreen = () => {
       }));
   }, [filteredTransactions]);
   
-  // Check if we've reached the end after loading more
+  // Set initial transactions when data loads
   React.useEffect(() => {
-    if (loadingMore) return;
-    
-    // If we have transactions and the count is less than the limit,
-    // it means we've loaded all available transactions
     const unifiedTransactions = unifiedTransactionsData?.unifiedTransactions || [];
     
-    // If we have fewer unified transactions than the limit, we've reached the end
-    if (unifiedTransactions.length > 0 && unifiedTransactions.length < transactionLimit) {
-      setHasReachedEnd(true);
+    // Only set initial transactions if we're not loading more (i.e., this is the initial load or refresh)
+    if (!loadingMore && unifiedTransactions.length > 0) {
+      console.log('Setting initial transactions:', unifiedTransactions.length);
+      setAllTransactions(unifiedTransactions);
+      
+      // If we have fewer transactions than the limit, we've reached the end
+      if (unifiedTransactions.length < transactionLimit) {
+        setHasReachedEnd(true);
+      } else {
+        setHasReachedEnd(false);
+      }
     }
   }, [unifiedTransactionsData, transactionLimit, loadingMore]);
 
@@ -851,8 +891,19 @@ export const AccountDetailScreen = () => {
           isInvitedFriend: transaction.isInvitation || false // true means friend is NOT on Confío
         }
       };
-      // @ts-ignore - Navigation type mismatch, but works at runtime
-      navigation.navigate('TransactionDetail', params);
+      // Navigate to different screens based on transaction type
+      if (transaction.type === 'exchange' && transaction.p2pTradeId) {
+        // Navigate to ActiveTrade screen for P2P trades
+        // @ts-ignore - Navigation type mismatch, but works at runtime
+        navigation.navigate('ActiveTrade', { 
+          trade: { 
+            id: transaction.p2pTradeId 
+          } 
+        });
+      } else {
+        // @ts-ignore - Navigation type mismatch, but works at runtime
+        navigation.navigate('TransactionDetail', params);
+      }
     };
     
     return (
@@ -1115,32 +1166,76 @@ export const AccountDetailScreen = () => {
   };
   */
 
-  const loadMoreTransactions = async () => {
-    if (loadingMore || hasReachedEnd) return;
+  const loadMoreTransactions = useCallback(async () => {
+    if (loadingMore || hasReachedEnd || !fetchMore) {
+      console.log('loadMoreTransactions - Skipping:', { loadingMore, hasReachedEnd, hasFetchMore: !!fetchMore });
+      return;
+    }
+    
+    console.log('loadMoreTransactions - Current state:', {
+      allTransactionsLength: allTransactions.length,
+      hasReachedEnd,
+      loadingMore
+    });
     
     setLoadingMore(true);
-    const newLimit = transactionLimit + 10;
     
     try {
-      // Store the current filtered transaction count
-      const prevTransactionCount = transactions.length;
+      // Calculate new offset
+      const newOffset = allTransactions.length;
       
-      await refetchUnified({
-        ...queryVariables,
-        limit: newLimit
+      console.log('loadMoreTransactions - Fetching with offset:', newOffset);
+      
+      // Fetch more transactions with the new offset
+      const { data } = await fetchMore({
+        variables: {
+          accountType: activeAccount?.type || 'personal',
+          accountIndex: activeAccount?.index || 0,
+          limit: transactionLimit,
+          offset: newOffset,
+          tokenTypes: route.params.accountType === 'cusd' ? ['cUSD', 'CUSD', 'USDC'] : ['CONFIO']
+        },
+        updateQuery: (prev, { fetchMoreResult }) => {
+          console.log('loadMoreTransactions - fetchMoreResult:', {
+            hasResult: !!fetchMoreResult,
+            newTransactionsCount: fetchMoreResult?.unifiedTransactions?.length || 0,
+            prevCount: prev?.unifiedTransactions?.length || 0
+          });
+          
+          if (!fetchMoreResult) return prev;
+          
+          if (fetchMoreResult.unifiedTransactions.length === 0) {
+            setHasReachedEnd(true);
+            return prev;
+          }
+          
+          // Append new transactions to allTransactions state
+          const newTransactions = fetchMoreResult.unifiedTransactions;
+          
+          // Check if we've reached the end
+          if (newTransactions.length < transactionLimit) {
+            console.log('Reached end - got fewer transactions than limit:', newTransactions.length, '<', transactionLimit);
+            setHasReachedEnd(true);
+          }
+          
+          setAllTransactions(prevTxs => {
+            console.log('Appending transactions:', prevTxs.length, '+', newTransactions.length);
+            return [...prevTxs, ...newTransactions];
+          });
+          
+          // Return updated query result for Apollo cache
+          return {
+            ...prev,
+            unifiedTransactions: [...(prev.unifiedTransactions || []), ...newTransactions]
+          };
+        }
       });
-      
-      // Update the limit to trigger re-render
-      setTransactionLimit(newLimit);
-      
-      // We'll check if we got new transactions after the component re-renders
-      // by comparing the transaction count in a useEffect
     } catch (error) {
       console.error('Error loading more transactions:', error);
     } finally {
       setLoadingMore(false);
     }
-  };
+  }, [loadingMore, hasReachedEnd, fetchMore, allTransactions.length, activeAccount, transactionLimit, route.params.accountType]);
 
   return (
     <View style={styles.container}>
@@ -1152,57 +1247,46 @@ export const AccountDetailScreen = () => {
         showBackButton={true}
       />
 
-      <ScrollView 
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={account.color}
-            colors={[account.color]}
+      {/* Balance Section */}
+      <View style={[styles.balanceSection, { backgroundColor: account.color }]}>
+        <View style={styles.balanceIconContainer}>
+          <Image 
+            source={route.params.accountType === 'cusd' ? cUSDLogo : CONFIOLogo} 
+            style={styles.balanceLogo} 
           />
-        }
-      >
-        {/* Balance Section */}
-        <View style={[styles.balanceSection, { backgroundColor: account.color }]}>
-          <View style={styles.balanceIconContainer}>
-            <Image 
-              source={route.params.accountType === 'cusd' ? cUSDLogo : CONFIOLogo} 
-              style={styles.balanceLogo} 
-            />
-          </View>
-
-          <View style={styles.balanceRow}>
-            <Text style={styles.balanceText}>
-              {showBalance ? `$${account.balance}` : account.balanceHidden}
-            </Text>
-            <TouchableOpacity onPress={toggleBalanceVisibility}>
-              <Icon
-                name={showBalance ? 'eye' : 'eye-off'}
-                size={20}
-                color="#ffffff"
-                style={styles.eyeIcon}
-              />
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.balanceDescription}>{account.description}</Text>
-          <View style={styles.addressContainer}>
-            <Text style={styles.addressText}>{account.addressShort}</Text>
-            <TouchableOpacity onPress={() => {
-              if (account.address) {
-                Clipboard.setString(account.address);
-                Alert.alert('Copiado', 'Dirección copiada al portapapeles');
-              }
-            }}>
-              <Icon name="copy" size={16} color="#ffffff" style={styles.copyIcon} />
-            </TouchableOpacity>
-          </View>
         </View>
 
-        {/* Action Buttons */}
-        <View style={styles.actionButtonsContainer}>
-          <View style={styles.actionButtons}>
+        <View style={styles.balanceRow}>
+          <Text style={styles.balanceText}>
+            {showBalance ? `$${account.balance}` : account.balanceHidden}
+          </Text>
+          <TouchableOpacity onPress={toggleBalanceVisibility}>
+            <Icon
+              name={showBalance ? 'eye' : 'eye-off'}
+              size={20}
+              color="#ffffff"
+              style={styles.eyeIcon}
+            />
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.balanceDescription}>{account.description}</Text>
+        <View style={styles.addressContainer}>
+          <Text style={styles.addressText}>{account.addressShort}</Text>
+          <TouchableOpacity onPress={() => {
+            if (account.address) {
+              Clipboard.setString(account.address);
+              Alert.alert('Copiado', 'Dirección copiada al portapapeles');
+            }
+          }}>
+            <Icon name="copy" size={16} color="#ffffff" style={styles.copyIcon} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Action Buttons */}
+      <View style={styles.actionButtonsContainer}>
+        <View style={styles.actionButtons}>
             <TouchableOpacity 
               style={styles.actionButton}
               onPress={handleSend}
@@ -1289,10 +1373,91 @@ export const AccountDetailScreen = () => {
               <Text style={styles.actionButtonText}>Intercambio</Text>
             </TouchableOpacity>
           </View>
-        </View>
-
-        {/* USDC Balance Section - Only show for cUSD account */}
-        {route.params.accountType === 'cusd' && usdcAccount && (
+      </View>
+      <SectionList
+        style={styles.scrollView}
+        sections={groupedTransactions}
+        keyExtractor={(item, index) => `${item.id || item.transactionHash || index}-${index}`}
+        renderItem={({ item }) => <TransactionItem transaction={item} />}
+        renderSectionHeader={({ section: { title } }) => (
+          <Text style={styles.sectionHeader}>{title}</Text>
+        )}
+        ListEmptyComponent={() => {
+          if (unifiedLoading) {
+            return (
+              <View style={styles.transactionsList}>
+                <TransactionItemSkeleton />
+                <TransactionItemSkeleton />
+                <TransactionItemSkeleton />
+              </View>
+            );
+          }
+          
+          return (
+            <View style={styles.emptyTransactionsContainer}>
+              <Icon name={searchQuery ? "search" : "inbox"} size={48} color="#e5e7eb" />
+              <Text style={styles.emptyTransactionsText}>
+                {searchQuery ? "No se encontraron transacciones" : "No hay transacciones aún"}
+              </Text>
+              <Text style={styles.emptyTransactionsSubtext}>
+                {searchQuery 
+                  ? "Intenta con otros términos de búsqueda" 
+                  : "Tus transacciones aparecerán aquí cuando realices envíos o pagos"}
+              </Text>
+              {!searchQuery && (
+                <TouchableOpacity 
+                  style={styles.emptyActionButton}
+                  onPress={handleSend}
+                >
+                  <Icon name="send" size={16} color="#fff" />
+                  <Text style={styles.emptyActionButtonText}>Hacer mi primera transacción</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          );
+        }}
+        ListFooterComponent={() => {
+          if (!unifiedLoading && allTransactions.length >= transactionLimit && !hasReachedEnd) {
+            return (
+              <TouchableOpacity 
+                style={styles.loadMoreButton}
+                onPress={loadMoreTransactions}
+                disabled={loadingMore}
+              >
+                {loadingMore ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Text style={[styles.loadMoreText, { color: account.color }]}>
+                    Ver más transacciones
+                  </Text>
+                )}
+              </TouchableOpacity>
+            );
+          }
+          return null;
+        }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={account.color}
+            colors={[account.color]}
+          />
+        }
+        onEndReached={() => {
+          if (!loadingMore && !hasReachedEnd && filteredTransactions.length > 0 && !searchQuery) {
+            console.log('onEndReached triggered - loading more');
+            loadMoreTransactions();
+          }
+        }}
+        onEndReachedThreshold={0.3}
+        stickySectionHeadersEnabled={false}
+        showsVerticalScrollIndicator={true}
+        contentContainerStyle={filteredTransactions.length === 0 ? styles.emptyListContainer : undefined}
+        ListHeaderComponent={() => (
+          <>
+            {/* USDC Balance Section - Only show for cUSD account */}
+            {route.params.accountType === 'cusd' && usdcAccount && (
           <View style={styles.usdcSection}>
             <View style={styles.sectionHeaderContainer}>
               <Text style={styles.sectionTitle}>Gestión Avanzada</Text>
@@ -1375,154 +1540,78 @@ export const AccountDetailScreen = () => {
               Para usuarios avanzados • Requiere conocimiento de wallets Sui
             </Text>
           </View>
-        )}
+            )}
 
-        {/* Enhanced Transactions Section */}
-        <Animated.View 
-          style={[
-            styles.transactionsSection,
-            {
-              opacity: fadeAnim,
-              transform: [
-                {
-                  translateY: fadeAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [20, 0],
-                  })
-                }
-              ]
-            }
-          ]}
-        >
-          <View style={styles.transactionsHeader}>
-            <Text style={styles.transactionsTitle}>Historial de transacciones</Text>
-            <View style={styles.transactionsFilters}>
-              <TouchableOpacity 
-                style={[styles.filterButton, showSearch && styles.filterButtonActive]}
-                onPress={() => setShowSearch(!showSearch)}
-              >
-                <Icon name="search" size={16} color={showSearch ? account.textColor : "#6b7280"} />
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[
-                  styles.filterButton,
-                  hasActiveFilters() && styles.filterButtonActive
-                ]}
-                onPress={() => setShowFilterModal(true)}
-              >
-                <Icon 
-                  name="filter" 
-                  size={16} 
-                  color={hasActiveFilters() ? account.textColor : "#6b7280"} 
-                />
-                {hasActiveFilters() && (
-                  <View style={[styles.filterDot, { backgroundColor: account.color }]} />
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Search Bar */}
-          {showSearch && (
-            <Animated.View 
-              style={[
-                styles.searchContainer,
-                {
-                  opacity: searchAnim,
-                  transform: [
-                    {
-                      translateY: searchAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [-10, 0],
-                      })
-                    }
-                  ]
-                }
-              ]}
-            >
-              <Icon name="search" size={18} color="#9ca3af" style={styles.searchIcon} />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Buscar transacciones..."
-                placeholderTextColor="#9ca3af"
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              {searchQuery.length > 0 && (
-                <TouchableOpacity onPress={() => setSearchQuery('')}>
-                  <Icon name="x" size={18} color="#9ca3af" />
-                </TouchableOpacity>
-              )}
-            </Animated.View>
-          )}
-
-          <View style={styles.transactionsList}>
-            {unifiedLoading ? (
-              <>
-                <TransactionItemSkeleton />
-                <TransactionItemSkeleton />
-                <TransactionItemSkeleton />
-              </>
-            ) : filteredTransactions.length === 0 ? (
-              <View style={styles.emptyTransactionsContainer}>
-                <Icon name={searchQuery ? "search" : "inbox"} size={48} color="#e5e7eb" />
-                <Text style={styles.emptyTransactionsText}>
-                  {searchQuery ? "No se encontraron transacciones" : "No hay transacciones aún"}
-                </Text>
-                <Text style={styles.emptyTransactionsSubtext}>
-                  {searchQuery 
-                    ? "Intenta con otros términos de búsqueda" 
-                    : "Tus transacciones aparecerán aquí cuando realices envíos o pagos"}
-                </Text>
-                {!searchQuery && (
+            {/* Enhanced Transactions Section */}
+            <View style={styles.transactionsSection}>
+              <View style={styles.transactionsHeader}>
+                <Text style={styles.transactionsTitle}>Historial de transacciones</Text>
+                <View style={styles.transactionsFilters}>
                   <TouchableOpacity 
-                    style={styles.emptyActionButton}
-                    onPress={handleSend}
+                    style={[styles.filterButton, showSearch && styles.filterButtonActive]}
+                    onPress={() => setShowSearch(!showSearch)}
                   >
-                    <Icon name="send" size={16} color="#fff" />
-                    <Text style={styles.emptyActionButtonText}>Hacer mi primera transacción</Text>
+                    <Icon name="search" size={16} color={showSearch ? account.textColor : "#6b7280"} />
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[
+                      styles.filterButton,
+                      hasActiveFilters() && styles.filterButtonActive
+                    ]}
+                    onPress={() => setShowFilterModal(true)}
+                  >
+                    <Icon 
+                      name="filter" 
+                      size={16} 
+                      color={hasActiveFilters() ? account.textColor : "#6b7280"} 
+                    />
+                    {hasActiveFilters() && (
+                      <View style={[styles.filterDot, { backgroundColor: account.color }]} />
+                    )}
+                  </TouchableOpacity>
+                </View>
+            </View>
+
+            {/* Search Bar */}
+            {showSearch && (
+              <Animated.View 
+                style={[
+                  styles.searchContainer,
+                  {
+                    opacity: searchAnim,
+                    transform: [
+                      {
+                        translateY: searchAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [-10, 0],
+                        })
+                      }
+                    ]
+                  }
+                ]}
+              >
+                <Icon name="search" size={18} color="#9ca3af" style={styles.searchIcon} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Buscar transacciones..."
+                  placeholderTextColor="#9ca3af"
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearchQuery('')}>
+                    <Icon name="x" size={18} color="#9ca3af" />
                   </TouchableOpacity>
                 )}
-              </View>
-            ) : (
-              <>
-                {/* Grouped Transactions */}
-                {groupedTransactions.map((section, sectionIndex) => (
-                  <View key={sectionIndex}>
-                    <Text style={styles.sectionHeader}>{section.title}</Text>
-                    {section.data.map((transaction, index) => (
-                      <TransactionItem 
-                        key={`${sectionIndex}-${index}`} 
-                        transaction={transaction} 
-                      />
-                    ))}
-                  </View>
-                ))}
-              </>
+              </Animated.View>
             )}
-          </View>
+            </View>
+          </>
+        )}
+      />
 
-          {filteredTransactions.length > 0 && !hasReachedEnd && !searchQuery && (
-            <TouchableOpacity 
-              style={styles.viewMoreButton}
-              onPress={loadMoreTransactions}
-              disabled={loadingMore}
-            >
-              {loadingMore ? (
-                <ActivityIndicator size="small" color={account.color} />
-              ) : (
-                <Text style={[styles.viewMoreButtonText, { color: account.textColor }]}>
-                  Ver más transacciones
-                </Text>
-              )}
-            </TouchableOpacity>
-          )}
-        </Animated.View>
-      </ScrollView>
-
-      
       {/* Help Modal */}
       <Modal
         visible={showHelpModal}
@@ -1714,10 +1803,11 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+    backgroundColor: colors.neutralDark,
   },
   balanceSection: {
     paddingTop: 12,
-    paddingBottom: 32,
+    paddingBottom: 24,
     paddingHorizontal: 20,
     alignItems: 'center',
   },
@@ -1813,7 +1903,7 @@ const styles = StyleSheet.create({
   },
   usdcSection: {
     paddingHorizontal: 16,
-    marginBottom: 16,
+    marginBottom: 0,
   },
   sectionHeaderContainer: {
     flexDirection: 'row',
@@ -1972,7 +2062,8 @@ const styles = StyleSheet.create({
   },
   transactionsSection: {
     paddingHorizontal: 16,
-    paddingBottom: 24,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
   transactionsHeader: {
     flexDirection: 'row',
@@ -2328,8 +2419,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#6b7280',
-    marginTop: 16,
+    marginTop: 8,
     marginBottom: 8,
+    marginHorizontal: 16,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -2605,5 +2697,18 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  emptyListContainer: {
+    flex: 1,
+    paddingTop: 20,
+  },
+  loadMoreButton: {
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadMoreText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 }); 

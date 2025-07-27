@@ -6,7 +6,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('usdc_transactions', '0005_update_unified_view_remove_blockchain'),
+        ('usdc_transactions', '0006_drop_unified_usdc_view'),
     ]
 
     operations = [
