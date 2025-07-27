@@ -2205,10 +2205,13 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                 
                 from asgiref.sync import async_to_sync
                 async_to_sync(channel_layer.group_send)(
-                    f'trade_{trade.id}',
+                    f'trade_chat_{trade.id}',
                     {
                         'type': 'trade_status_update',
-                        'message': message
+                        'status': new_status,
+                        'updated_by': str(user.id),
+                        'payment_reference': '',
+                        'payment_notes': ''
                     }
                 )
             
