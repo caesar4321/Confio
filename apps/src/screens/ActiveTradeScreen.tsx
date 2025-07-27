@@ -89,7 +89,7 @@ export const ActiveTradeScreen: React.FC = () => {
   const [disputeP2PTrade] = useMutation(mutationToUse);
   
   // Fetch full trade details immediately if we only have an ID
-  const { data: tradeDetailsData, loading: tradeDetailsLoading, error: tradeDetailsError } = useQuery(GET_P2P_TRADE, {
+  const { data: tradeDetailsData, loading: tradeDetailsLoading, error: tradeDetailsError, refetch } = useQuery(GET_P2P_TRADE, {
     variables: { id: routeTrade?.id },
     skip: !routeTrade?.id,
     fetchPolicy: 'cache-and-network',

@@ -180,6 +180,7 @@ export const TradeChatScreen: React.FC = () => {
   const { data: tradeDetailsData, loading: tradeLoading, refetch: refetchTradeDetails } = useQuery(GET_P2P_TRADE, {
     variables: { id: tradeId },
     skip: !tradeId,
+    fetchPolicy: 'cache-and-network',
     onCompleted: (data) => {
       console.log('🔍 Trade details loaded:', {
         tradeId,
@@ -247,18 +248,19 @@ export const TradeChatScreen: React.FC = () => {
   
   // Debug logs moved to useEffect to avoid render issues
   useEffect(() => {
-    console.log('Trade type:', tradeType, '- User is:', tradeType === 'sell' ? 'seller' : 'buyer');
+    console.log('Trade type:', computedTradeType, '- User is:', computedTradeType === 'sell' ? 'seller' : 'buyer');
     console.log('🎯 Trade state:', {
       currentTradeStep,
-      tradeType,
+      tradeType: computedTradeType,
+      routeTradeType: tradeType,
       hasSharedPaymentDetails,
       tradeStatus: tradeDetailsData?.p2pTrade?.status,
-      shouldShowMarkAsPaidButton: currentTradeStep === 2 && tradeType === 'buy',
-      shouldShowReleaseFundsButton: currentTradeStep === 3 && tradeType === 'sell',
+      shouldShowMarkAsPaidButton: currentTradeStep === 2 && computedTradeType === 'buy',
+      shouldShowReleaseFundsButton: currentTradeStep === 3 && computedTradeType === 'sell',
       forceUpdate,
       timestamp: new Date().toISOString()
     });
-  }, [currentTradeStep, tradeType, hasSharedPaymentDetails, tradeDetailsData?.p2pTrade?.status, forceUpdate]);
+  }, [currentTradeStep, computedTradeType, tradeType, hasSharedPaymentDetails, tradeDetailsData?.p2pTrade?.status, forceUpdate]);
   
   // Helper function to get step from trade status
   const getStepFromStatus = (status: string) => {
@@ -267,6 +269,8 @@ export const TradeChatScreen: React.FC = () => {
       case 'PAYMENT_PENDING': return 2;
       case 'PAYMENT_SENT': return 3;
       case 'PAYMENT_CONFIRMED': return 4;
+      case 'PAYMENT_RECEIVED': return 4;  // When seller confirms receipt
+      case 'CRYPTO_RELEASED': return 4;   // When crypto is released
       case 'COMPLETED': return 4;
       case 'CANCELLED': return 1;
       default: return 1;
@@ -288,6 +292,77 @@ export const TradeChatScreen: React.FC = () => {
     }
     return false;
   });
+
+  // State for computed trade type
+  const [computedTradeType, setComputedTradeType] = useState(tradeType);
+  const computedTradeTypeRef = useRef(tradeType);
+  
+  // Update ref whenever computedTradeType changes
+  useEffect(() => {
+    computedTradeTypeRef.current = computedTradeType;
+  }, [computedTradeType]);
+  
+  // Update computed trade type when trade data loads
+  useEffect(() => {
+    if (!tradeDetailsData?.p2pTrade || !userProfile?.id) return;
+    
+    const trade = tradeDetailsData.p2pTrade;
+    const myUserId = String(userProfile.id);
+    
+    // Check if I'm the buyer
+    const iAmBuyer = (
+      (trade.buyerUser && String(trade.buyerUser.id) === myUserId) ||
+      (trade.buyer && String(trade.buyer.id) === myUserId)
+    );
+    
+    // Check if I'm the seller
+    const iAmSeller = (
+      (trade.sellerUser && String(trade.sellerUser.id) === myUserId) ||
+      (trade.seller && String(trade.seller.id) === myUserId)
+    );
+    
+    const newComputedType = iAmBuyer ? 'buy' : iAmSeller ? 'sell' : tradeType;
+    
+    console.log('[TradeChatScreen] Computing trade type:', {
+      myUserId,
+      buyerUserId: trade.buyerUser?.id,
+      sellerUserId: trade.sellerUser?.id,
+      iAmBuyer,
+      iAmSeller,
+      oldType: computedTradeType,
+      newType: newComputedType
+    });
+    
+    if (newComputedType !== computedTradeType) {
+      setComputedTradeType(newComputedType);
+    }
+  }, [tradeDetailsData?.p2pTrade, userProfile?.id]);
+
+  // Update trade step when status changes from polling
+  useEffect(() => {
+    if (tradeDetailsData?.p2pTrade?.status) {
+      const newStep = getStepFromStatus(tradeDetailsData.p2pTrade.status);
+      console.log('[TradeChatScreen] Status update detected:', {
+        status: tradeDetailsData.p2pTrade.status,
+        currentStep: currentTradeStep,
+        newStep,
+        computedTradeType,
+      });
+      
+      // Only update if step has changed
+      if (newStep !== currentTradeStep) {
+        setCurrentTradeStep(newStep);
+        
+        // Update payment details shared state based on new step
+        if (newStep >= 2) {
+          setHasSharedPaymentDetails(true);
+        }
+        
+        // Force re-render of action buttons
+        setForceUpdate(prev => prev + 1);
+      }
+    }
+  }, [tradeDetailsData?.p2pTrade?.status]);
   const [forceUpdate, setForceUpdate] = useState(0); // Force update counter
   const [timeRemaining, setTimeRemaining] = useState(900); // 15 minutes in seconds
   const [messages, setMessages] = useState<Message[]>([]);
@@ -593,7 +668,8 @@ export const TradeChatScreen: React.FC = () => {
           fullData: data,
           status: data.status,
           currentTradeStep,
-          tradeType,
+          computedTradeType,
+          routeTradeType: tradeType,
           updatedBy: data.updated_by,
           myUserId: userProfile?.id,
           isOtherUserUpdate: data.updated_by !== String(userProfile?.id)
@@ -606,7 +682,10 @@ export const TradeChatScreen: React.FC = () => {
             receivedStatus: data.status,
             newStep,
             currentStep: currentTradeStep,
-            willUpdate: newStep !== currentTradeStep
+            willUpdate: newStep !== currentTradeStep,
+            computedTradeType: computedTradeTypeRef.current,
+            shouldShowMarkAsPaid: newStep === 2 && computedTradeTypeRef.current === 'buy',
+            shouldShowReleaseFunds: newStep === 3 && computedTradeTypeRef.current === 'sell'
           });
           
           // Update states using functional updates to ensure we get the latest values
@@ -625,6 +704,18 @@ export const TradeChatScreen: React.FC = () => {
           
           // Force a re-render to ensure UI updates
           setForceUpdate(prev => prev + 1);
+          
+          // Log button visibility after state updates
+          setTimeout(() => {
+            console.log('🔘 Button visibility check after WebSocket update:', {
+              step: currentTradeStep,
+              type: computedTradeTypeRef.current,
+              shouldShowMarkAsPaid: currentTradeStep === 2 && computedTradeTypeRef.current === 'buy',
+              shouldShowReleaseFunds: currentTradeStep === 3 && computedTradeTypeRef.current === 'sell',
+              forceUpdate: forceUpdate,
+              timestamp: new Date().toISOString()
+            });
+          }, 100);
             
           // Add a system message for status changes
           // Show message even if we initiated it, as other user needs to see the update
@@ -1559,8 +1650,8 @@ export const TradeChatScreen: React.FC = () => {
 
       {/* Quick Actions - Key prop added to force re-render */}
       {/* For Buyers - Mark as Paid (show in step 2 - PAYMENT_PENDING status) */}
-      {currentTradeStep === 2 && tradeType === 'buy' && (
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      {currentTradeStep === 2 && computedTradeType === 'buy' && (
+        <TouchableWithoutFeedback key={`mark-paid-${currentTradeStep}-${forceUpdate}`} onPress={Keyboard.dismiss}>
           <View style={styles.paymentActionBanner}>
             <View style={styles.paymentActionContent}>
               <View style={styles.paymentActionInfo}>
@@ -1576,8 +1667,8 @@ export const TradeChatScreen: React.FC = () => {
       )}
       
       {/* For Sellers - Release Funds - Key prop added to force re-render */}
-      {currentTradeStep === 3 && tradeType === 'sell' && (
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      {currentTradeStep === 3 && computedTradeType === 'sell' && (
+        <TouchableWithoutFeedback key={`release-funds-${currentTradeStep}-${forceUpdate}`} onPress={Keyboard.dismiss}>
           <View style={[styles.paymentActionBanner, { backgroundColor: '#D1FAE5' }]}>
             <View style={styles.paymentActionContent}>
               <View style={styles.paymentActionInfo}>
