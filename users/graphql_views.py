@@ -1,6 +1,6 @@
 import graphene
 from graphene_django import DjangoObjectType
-from .models_views import UnifiedTransaction
+from .models_unified import UnifiedTransactionTable
 from django.db.models import Q
 
 
@@ -29,8 +29,11 @@ class UnifiedTransactionType(DjangoObjectType):
     from_token = graphene.String(description="Token being converted from")
     to_token = graphene.String(description="Token being converted to")
     
+    # P2P Trade ID for navigation
+    p2p_trade_id = graphene.String(description="P2P Trade ID if this is an exchange transaction")
+    
     class Meta:
-        model = UnifiedTransaction
+        model = UnifiedTransactionTable
         fields = [
             'id',
             'transaction_type',
@@ -61,6 +64,20 @@ class UnifiedTransactionType(DjangoObjectType):
         # Conversions are always "self" transactions
         if self.transaction_type == 'conversion':
             return 'conversion'
+        
+        # P2P exchanges need special handling as they don't have blockchain addresses
+        if self.transaction_type == 'exchange':
+            user = info.context.user if info.context else None
+            if user and user.is_authenticated:
+                # Check if user is sender (seller in the trade)
+                if (self.sender_user and self.sender_user.id == user.id) or \
+                   (self.sender_business and user.accounts.filter(business_id=self.sender_business.id).exists()):
+                    return 'sent'
+                # Check if user is counterparty (buyer in the trade)
+                elif (self.counterparty_user and self.counterparty_user.id == user.id) or \
+                     (self.counterparty_business and user.accounts.filter(business_id=self.counterparty_business.id).exists()):
+                    return 'received'
+            return 'unknown'
             
         # Get the user's address from the transaction context
         user_address = getattr(self, '_user_address', None)
@@ -78,6 +95,20 @@ class UnifiedTransactionType(DjangoObjectType):
         try:
             # Handle conversions
             if self.transaction_type == 'conversion':
+                return str(self.amount)
+            
+            # Handle P2P exchanges
+            if self.transaction_type == 'exchange':
+                user = info.context.user if info.context else None
+                if user and user.is_authenticated:
+                    # Check if user is sender (seller in the trade)
+                    if (self.sender_user and self.sender_user.id == user.id) or \
+                       (self.sender_business and user.accounts.filter(business_id=self.sender_business.id).exists()):
+                        return f'-{self.amount}'
+                    # Check if user is counterparty (buyer in the trade)
+                    elif (self.counterparty_user and self.counterparty_user.id == user.id) or \
+                         (self.counterparty_business and user.accounts.filter(business_id=self.counterparty_business.id).exists()):
+                        return f'+{self.amount}'
                 return str(self.amount)
                 
             # Get direction directly
@@ -98,6 +129,20 @@ class UnifiedTransactionType(DjangoObjectType):
             # Handle conversions (no counterparty)
             if self.transaction_type == 'conversion':
                 return 'Confío System'
+            
+            # Handle P2P exchanges
+            if self.transaction_type == 'exchange':
+                user = info.context.user if info.context else None
+                if user and user.is_authenticated:
+                    # Check if user is sender (seller in the trade)
+                    if (self.sender_user and self.sender_user.id == user.id) or \
+                       (self.sender_business and user.accounts.filter(business_id=self.sender_business.id).exists()):
+                        return self.counterparty_display_name or 'Unknown'
+                    # Check if user is counterparty (buyer in the trade)
+                    elif (self.counterparty_user and self.counterparty_user.id == user.id) or \
+                         (self.counterparty_business and user.accounts.filter(business_id=self.counterparty_business.id).exists()):
+                        return self.sender_display_name or 'Unknown'
+                return 'Unknown'
                 
             # Get direction directly
             user_address = getattr(self, '_user_address', None)
@@ -117,6 +162,10 @@ class UnifiedTransactionType(DjangoObjectType):
             # Handle conversions with their description
             if self.transaction_type == 'conversion':
                 return self.description or 'Conversión'
+            
+            # Handle P2P exchanges with their description
+            if self.transaction_type == 'exchange':
+                return self.description or 'Intercambio P2P'
                 
             if self.transaction_type == 'payment':
                 # Get direction directly
@@ -150,6 +199,12 @@ class UnifiedTransactionType(DjangoObjectType):
     def resolve_to_token(self, info):
         """For conversions, determine to token"""
         return self.get_to_token()
+    
+    def resolve_p2p_trade_id(self, info):
+        """Return P2P Trade ID if this is an exchange transaction"""
+        if self.transaction_type == 'exchange' and self.p2p_trade_id:
+            return str(self.p2p_trade_id)
+        return None
 
 
 class UnifiedTransactionQuery(graphene.ObjectType):
@@ -186,13 +241,13 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         # Base query - all transactions involving this account
         if account.account_type == 'business' and account.business:
             # For business accounts, filter by business relationships
-            queryset = UnifiedTransaction.objects.filter(
+            queryset = UnifiedTransactionTable.objects.filter(
                 Q(sender_business=account.business) | 
                 Q(counterparty_business=account.business)
             )
         else:
             # For personal accounts, filter by user relationships BUT exclude business transactions
-            queryset = UnifiedTransaction.objects.filter(
+            queryset = UnifiedTransactionTable.objects.filter(
                 Q(
                     Q(sender_user=user) & Q(sender_business__isnull=True)
                 ) | 
@@ -204,6 +259,9 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         # Filter by token types if provided
         if token_types:
             queryset = queryset.filter(token_type__in=token_types)
+        
+        # Order by created_at descending to show newest first
+        queryset = queryset.order_by('-created_at')
         
         # Apply pagination and add user address to each transaction for direction calculation
         transactions = list(queryset[offset:offset + limit])

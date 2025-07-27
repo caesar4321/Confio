@@ -1909,6 +1909,9 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
       toAmount
       fromToken
       toToken
+      
+      # P2P Trade ID for navigation
+      p2pTradeId
     }
   }
 `;

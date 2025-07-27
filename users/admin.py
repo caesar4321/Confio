@@ -3,7 +3,7 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from .models import User, Account, Business, IdentityVerification, Country, Bank, BankInfo
-from .models_views import UnifiedTransaction
+from .models_unified import UnifiedTransactionTable
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
@@ -293,28 +293,28 @@ class BankInfoAdmin(admin.ModelAdmin):
             'account__user', 'account__business', 'payment_method', 'bank__country', 'country'
         )
 
-@admin.register(UnifiedTransaction)
+@admin.register(UnifiedTransactionTable)
 class UnifiedTransactionAdmin(admin.ModelAdmin):
-    list_display = ('transaction_hash_short', 'type_display', 'amount_display', 'token_type', 'status_display', 'sender_info', 'counterparty_info', 'created_at')
+    list_display = ('id', 'transaction_hash_short', 'type_display', 'amount_display', 'token_type', 'status_display', 'sender_info', 'counterparty_info', 'created_at', 'transaction_date')
     list_filter = ('transaction_type', 'token_type', 'status', 'sender_type', 'counterparty_type', 'created_at')
     search_fields = ('transaction_hash', 'sender_display_name', 'counterparty_display_name', 'description', 'sender_address', 'counterparty_address', 'sender_phone', 'counterparty_phone')
     date_hierarchy = 'created_at'
     list_per_page = 50
     
-    # This is a view, so everything should be read-only
+    # Now this is a table with foreign keys, we can edit some fields
     readonly_fields = (
-        'transaction_type', 'created_at', 'updated_at', 'deleted_at', 'amount', 'token_type', 
-        'status', 'transaction_hash', 'error_message', 'sender_user', 'sender_business',
-        'sender_type', 'sender_display_name', 'sender_phone', 'sender_address',
-        'counterparty_user', 'counterparty_business', 'counterparty_type',
-        'counterparty_display_name', 'counterparty_phone', 'counterparty_address',
-        'description', 'invoice_id', 'payment_transaction_id', 'from_address', 'to_address'
+        'id', 'send_transaction', 'payment_transaction', 'conversion', 'p2p_trade',
+        'created_at', 'updated_at', 'transaction_date', 'deleted_at',
+        'source_transaction_link'
     )
     ordering = ('-created_at',)
     
     fieldsets = (
         ('Transaction Info', {
-            'fields': ('transaction_type', 'status', 'transaction_hash', 'amount', 'token_type', 'created_at')
+            'fields': ('id', 'transaction_type', 'status', 'transaction_hash', 'amount', 'token_type', 'source_transaction_link')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'transaction_date', 'updated_at', 'deleted_at')
         }),
         ('Sender Information', {
             'fields': ('sender_display_name', 'sender_type', 'sender_address', 'sender_phone', 'sender_user', 'sender_business')
@@ -323,23 +323,27 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
             'fields': ('counterparty_display_name', 'counterparty_type', 'counterparty_address', 'counterparty_phone', 'counterparty_user', 'counterparty_business')
         }),
         ('Additional Details', {
-            'fields': ('description', 'invoice_id', 'payment_transaction_id', 'error_message'),
+            'fields': ('description', 'invoice_id', 'payment_reference_id', 'error_message'),
             'classes': ('collapse',)
         }),
         ('Raw Addresses', {
             'fields': ('from_address', 'to_address'),
             'classes': ('collapse',)
         }),
+        ('Source Transaction Links', {
+            'fields': ('send_transaction', 'payment_transaction', 'conversion', 'p2p_trade'),
+            'classes': ('collapse',)
+        }),
     )
     
     def has_add_permission(self, request):
-        return False  # Can't add to views
+        return False  # Unified transactions are created automatically via signals
     
     def has_change_permission(self, request, obj=None):
-        return False  # Can't modify views
+        return True  # Allow viewing details
     
     def has_delete_permission(self, request, obj=None):
-        return False  # Can't delete from views
+        return False  # Don't allow manual deletion
     
     def transaction_hash_short(self, obj):
         if obj.transaction_hash:
@@ -356,12 +360,14 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
         icons = {
             'send': '📤',
             'payment': '🛒',
-            'conversion': '🔄'
+            'conversion': '🔄',
+            'exchange': '💱'
         }
         colors = {
             'send': '#3B82F6',
             'payment': '#8B5CF6',
-            'conversion': '#34D399'
+            'conversion': '#34D399',
+            'exchange': '#F59E0B'
         }
         icon = icons.get(obj.transaction_type, '📄')
         color = colors.get(obj.transaction_type, '#6B7280')
@@ -378,9 +384,10 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
         try:
             from decimal import Decimal
             amount = Decimal(obj.amount)
+            formatted_amount = f"{amount:,.2f}"
             return format_html(
-                '<span style="font-weight: bold; font-size: 1.1em;">{:,.2f}</span> {}',
-                amount,
+                '<span style="font-weight: bold; font-size: 1.1em;">{}</span> {}',
+                formatted_amount,
                 obj.token_type
             )
         except:
@@ -450,3 +457,37 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
             obj.status
         )
     status_display.short_description = "Status"
+    
+    def source_transaction_link(self, obj):
+        """Display link to source transaction"""
+        if obj.send_transaction:
+            url = reverse('admin:send_sendtransaction_change', args=[obj.send_transaction.id])
+            return format_html('<a href="{}">Send Transaction #{}</a>', url, obj.send_transaction.id)
+        elif obj.payment_transaction:
+            url = reverse('admin:payments_paymenttransaction_change', args=[obj.payment_transaction.id])
+            return format_html('<a href="{}">Payment Transaction #{}</a>', url, obj.payment_transaction.id)
+        elif obj.conversion:
+            url = reverse('admin:conversion_conversion_change', args=[obj.conversion.id])
+            return format_html('<a href="{}">Conversion #{}</a>', url, obj.conversion.id)
+        elif obj.p2p_trade:
+            url = reverse('admin:p2p_exchange_p2ptrade_change', args=[obj.p2p_trade.id])
+            return format_html('<a href="{}">P2P Trade #{}</a>', url, obj.p2p_trade.id)
+        return "No source"
+    source_transaction_link.short_description = "Source"
+    
+    def transaction_date(self, obj):
+        """Display the original transaction date"""
+        if obj.transaction_date:
+            return obj.transaction_date.strftime('%Y-%m-%d %H:%M:%S')
+        return "-"
+    transaction_date.short_description = "Original Date"
+    transaction_date.admin_order_field = 'transaction_date'
+    
+    def get_queryset(self, request):
+        """Optimize queries by using select_related"""
+        return super().get_queryset(request).select_related(
+            'sender_user', 'sender_business',
+            'counterparty_user', 'counterparty_business',
+            'send_transaction', 'payment_transaction', 
+            'conversion', 'p2p_trade'
+        )

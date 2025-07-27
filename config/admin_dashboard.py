@@ -375,9 +375,12 @@ confio_admin_site.register(Country, CountryAdmin)
 confio_admin_site.register(Bank, BankAdmin)
 confio_admin_site.register(BankInfo, BankInfoAdmin)
 
-# Unified Transaction View
-from users.models_views import UnifiedTransaction
-confio_admin_site.register(UnifiedTransaction, UnifiedTransactionAdmin)
+# Unified Transaction Tables
+from users.models_unified import UnifiedTransactionTable
+from usdc_transactions.models_unified import UnifiedUSDCTransactionTable
+from usdc_transactions.admin import UnifiedUSDCTransactionAdmin
+confio_admin_site.register(UnifiedTransactionTable, UnifiedTransactionAdmin)
+confio_admin_site.register(UnifiedUSDCTransactionTable, UnifiedUSDCTransactionAdmin)
 
 # P2P models
 from p2p_exchange.models import (

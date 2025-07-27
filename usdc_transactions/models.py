@@ -246,3 +246,9 @@ class USDCWithdrawal(models.Model):
         self.status = 'FAILED'
         self.error_message = error_message
         self.save()
+
+
+# Import new table models
+from .models_unified import UnifiedUSDCTransactionTable
+
+

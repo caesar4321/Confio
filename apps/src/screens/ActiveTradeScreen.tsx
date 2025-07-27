@@ -21,6 +21,7 @@ import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { useQuery, useMutation, gql } from '@apollo/client';
 import { GET_P2P_TRADE, DISPUTE_P2P_TRADE } from '../apollo/queries';
 import { formatLocalDateTime } from '../utils/dateUtils';
+import { useAuth } from '../contexts/AuthContext';
 
 // Temporary workaround - define mutation locally if import fails
 const DISPUTE_P2P_TRADE_LOCAL = gql`
@@ -72,57 +73,12 @@ interface ActiveTrade {
 export const ActiveTradeScreen: React.FC = () => {
   const navigation = useNavigation<ActiveTradeNavigationProp>();
   const route = useRoute<ActiveTradeRouteProp>();
-  const { trade } = route.params;
+  const { trade: routeTrade } = route.params;
+  const { userProfile } = useAuth();
   
-  // Debug log to see what data we received
-  console.log('[ActiveTradeScreen] Trade data:', {
-    id: trade?.id,
-    step: trade?.step,
-    status: trade?.status,
-    hasRating: trade?.hasRating,
-    tradeType: trade?.tradeType,
-    hasTrader: !!trade?.trader,
-    traderName: trade?.trader?.name,
-    amount: trade?.amount,
-    crypto: trade?.crypto,
-    totalBs: trade?.totalBs,
-    paymentMethod: trade?.paymentMethod,
-  });
-  
-  // Format crypto token for display
-  const formatCrypto = (crypto: string): string => {
-    if (crypto === 'CUSD' || crypto === 'cusd') return 'cUSD';
-    if (crypto === 'CONFIO' || crypto === 'confio') return 'CONFIO';
-    return crypto;
-  };
-  
-  // Safety check
-  if (!trade) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="dark-content" backgroundColor="#fff" />
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-              <Icon name="arrow-left" size={24} color="#374151" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Error</Text>
-          </View>
-        </View>
-        <View style={styles.content}>
-          <View style={styles.stepCard}>
-            <Text style={styles.stepTitle}>Error al cargar el intercambio</Text>
-            <Text style={styles.stepDescription}>
-              No se pudieron cargar los datos del intercambio. Por favor, vuelve a intentarlo.
-            </Text>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-  
-  const [activeTradeStep, setActiveTradeStep] = useState(trade.step || 1);
-  const [timeRemaining, setTimeRemaining] = useState(trade.timeRemaining || 900);
+  // All useState hooks must be called unconditionally
+  const [activeTradeStep, setActiveTradeStep] = useState(1);
+  const [timeRemaining, setTimeRemaining] = useState(900);
   const [spinAnim] = useState(new Animated.Value(0));
   const [showDisputeModal, setShowDisputeModal] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
@@ -130,27 +86,73 @@ export const ActiveTradeScreen: React.FC = () => {
   
   // Mutations - Use local fallback if import fails
   const mutationToUse = DISPUTE_P2P_TRADE || DISPUTE_P2P_TRADE_LOCAL;
-  console.log('[ActiveTradeScreen] Using mutation:', !!mutationToUse, mutationToUse === DISPUTE_P2P_TRADE_LOCAL ? 'local' : 'imported');
   const [disputeP2PTrade] = useMutation(mutationToUse);
   
-  // Fetch full trade details to get buyer/seller stats
-  const { data: tradeDetailsData, loading: tradeDetailsLoading } = useQuery(GET_P2P_TRADE, {
-    variables: { id: trade.id },
-    skip: !trade.id,
+  // Fetch full trade details immediately if we only have an ID
+  const { data: tradeDetailsData, loading: tradeDetailsLoading, error: tradeDetailsError } = useQuery(GET_P2P_TRADE, {
+    variables: { id: routeTrade?.id },
+    skip: !routeTrade?.id,
     fetchPolicy: 'cache-and-network',
   });
   
+  // Use full trade data if available, otherwise use route params
+  const fullTradeData = tradeDetailsData?.p2pTrade;
+  const currentUserId = userProfile?.id;
+  
+  // Determine if current user is buyer or seller
+  const iAmBuyer = fullTradeData ? fullTradeData.buyer?.id === currentUserId : false;
+  const iAmSeller = fullTradeData ? fullTradeData.seller?.id === currentUserId : false;
+  
+  const trade = fullTradeData ? {
+    id: fullTradeData.id,
+    step: fullTradeData.step || 1,
+    status: fullTradeData.status,
+    hasRating: fullTradeData.hasRating || false,
+    tradeType: iAmBuyer ? 'buy' : 'sell', // Current user's perspective
+    trader: iAmBuyer ? {
+      // If I'm buyer, show seller info
+      name: `${fullTradeData.seller?.firstName || ''} ${fullTradeData.seller?.lastName || ''}`.trim() || fullTradeData.seller?.username || 'Vendedor',
+      isOnline: fullTradeData.sellerStats?.isOnline || false,
+      verified: fullTradeData.sellerStats?.isVerified || false,
+      lastSeen: fullTradeData.seller?.lastLogin || null,
+      responseTime: fullTradeData.sellerStats?.avgResponseTime || 'N/A',
+      completedTrades: fullTradeData.sellerStats?.completedTrades || 0,
+      successRate: fullTradeData.sellerStats?.successRate || 0,
+    } : {
+      // If I'm seller, show buyer info
+      name: `${fullTradeData.buyer?.firstName || ''} ${fullTradeData.buyer?.lastName || ''}`.trim() || fullTradeData.buyer?.username || 'Comprador',
+      isOnline: fullTradeData.buyerStats?.isOnline || false,
+      verified: fullTradeData.buyerStats?.isVerified || false,
+      lastSeen: fullTradeData.buyer?.lastLogin || null,
+      responseTime: fullTradeData.buyerStats?.avgResponseTime || 'N/A',
+      completedTrades: fullTradeData.buyerStats?.completedTrades || 0,
+      successRate: fullTradeData.buyerStats?.successRate || 0,
+    },
+    amount: fullTradeData.cryptoAmount || fullTradeData.amount,
+    crypto: fullTradeData.crypto,
+    totalBs: fullTradeData.fiatAmount,
+    countryCode: fullTradeData.countryCode,
+    currencyCode: fullTradeData.currencyCode,
+    paymentMethod: fullTradeData.paymentMethod?.displayName || 'N/A',
+    rate: fullTradeData.exchangeRate || fullTradeData.rate,
+    timeRemaining: 900, // Default 15 minutes
+    createdAt: fullTradeData.createdAt,
+    completedAt: fullTradeData.completedAt,
+  } : routeTrade;
+  
+  // Update activeTradeStep when trade data is loaded
   useEffect(() => {
-    if (tradeDetailsData?.p2pTrade) {
-      console.log('[ActiveTradeScreen] Full trade details loaded:', {
-        tradeId: trade.id,
-        buyerStats: tradeDetailsData.p2pTrade.buyerStats,
-        sellerStats: tradeDetailsData.p2pTrade.sellerStats,
-        buyer: tradeDetailsData.p2pTrade.buyer,
-        seller: tradeDetailsData.p2pTrade.seller,
-      });
+    if (trade?.step) {
+      setActiveTradeStep(trade.step);
     }
-  }, [tradeDetailsData, trade.id]);
+  }, [trade?.step]);
+  
+  // Update timeRemaining when trade data is loaded
+  useEffect(() => {
+    if (trade?.timeRemaining) {
+      setTimeRemaining(trade.timeRemaining);
+    }
+  }, [trade?.timeRemaining]);
 
   // Timer countdown effect
   useEffect(() => {
@@ -182,6 +184,77 @@ export const ActiveTradeScreen: React.FC = () => {
       return () => spin.stop();
     }
   }, [activeTradeStep, spinAnim]);
+  
+  // Debug log to see what data we have
+  console.log('[ActiveTradeScreen] Trade data:', {
+    hasRouteData: !!routeTrade,
+    hasFullData: !!fullTradeData,
+    loading: tradeDetailsLoading,
+    error: tradeDetailsError,
+    tradeId: routeTrade?.id,
+    fullDataStatus: fullTradeData?.status,
+    fullDataStep: fullTradeData?.step,
+  });
+  
+  console.log('[ActiveTradeScreen] Using mutation:', !!mutationToUse, mutationToUse === DISPUTE_P2P_TRADE_LOCAL ? 'local' : 'imported');
+  
+  // Format crypto token for display
+  const formatCrypto = (crypto: string): string => {
+    if (crypto === 'CUSD' || crypto === 'cusd') return 'cUSD';
+    if (crypto === 'CONFIO' || crypto === 'confio') return 'CONFIO';
+    return crypto;
+  };
+  
+  // Show loading state while fetching full trade details
+  if (tradeDetailsLoading && !routeTrade?.step) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <Icon name="arrow-left" size={24} color="#374151" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Cargando intercambio...</Text>
+          </View>
+        </View>
+        <View style={styles.content}>
+          <View style={styles.stepCard}>
+            <View style={styles.loadingCard}>
+              <Animated.View style={styles.spinner} />
+              <Text style={styles.loadingTitle}>Cargando detalles del intercambio</Text>
+              <Text style={styles.loadingSubtitle}>Por favor espera un momento</Text>
+            </View>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+  
+  // Show error if trade data couldn't be loaded
+  if (tradeDetailsError || (!trade && !tradeDetailsLoading)) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <Icon name="arrow-left" size={24} color="#374151" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Error</Text>
+          </View>
+        </View>
+        <View style={styles.content}>
+          <View style={styles.stepCard}>
+            <Text style={styles.stepTitle}>Error al cargar el intercambio</Text>
+            <Text style={styles.stepDescription}>
+              No se pudieron cargar los datos del intercambio. Por favor, vuelve a intentarlo.
+            </Text>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
