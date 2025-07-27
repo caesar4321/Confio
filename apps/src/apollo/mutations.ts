@@ -69,3 +69,42 @@ export const GET_CONVERSIONS = gql`
     }
   }
 `;
+
+export const GET_UNIFIED_USDC_TRANSACTIONS = gql`
+  query GetUnifiedUSDCTransactions($limit: Int, $offset: Int, $transactionType: String) {
+    unifiedUsdcTransactions(limit: $limit, offset: $offset, transactionType: $transactionType) {
+      transactionId
+      transactionType
+      actorType
+      actorDisplayName
+      actorUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      actorBusiness {
+        id
+        name
+      }
+      amount
+      currency
+      secondaryAmount
+      secondaryCurrency
+      exchangeRate
+      networkFee
+      serviceFee
+      sourceAddress
+      destinationAddress
+      network
+      status
+      errorMessage
+      createdAt
+      updatedAt
+      completedAt
+      formattedTitle
+      iconName
+      iconColor
+    }
+  }
+`;

@@ -408,3 +408,9 @@ confio_admin_site.register(SendTransaction, SendTransactionAdmin)
 # Conversion models
 from conversion.models import Conversion
 confio_admin_site.register(Conversion, ConversionAdmin)
+
+# USDC Transaction models
+from usdc_transactions.models import USDCDeposit, USDCWithdrawal
+from usdc_transactions.admin import USDCDepositAdmin, USDCWithdrawalAdmin
+confio_admin_site.register(USDCDeposit, USDCDepositAdmin)
+confio_admin_site.register(USDCWithdrawal, USDCWithdrawalAdmin)

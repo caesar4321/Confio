@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useQuery } from '@apollo/client';
-import { GET_CONVERSIONS } from '../apollo/mutations';
+import { GET_CONVERSIONS, GET_UNIFIED_USDC_TRANSACTIONS } from '../apollo/mutations';
 import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
 import moment from 'moment';
@@ -32,43 +32,68 @@ const colors = {
   },
 };
 
-interface ConversionRecord {
-  id: string;
-  conversionId: string;
-  conversionType: 'usdc_to_cusd' | 'cusd_to_usdc';
-  fromAmount: string;
-  toAmount: string;
-  exchangeRate: string;
-  feeAmount: string;
-  fromToken: string;
-  toToken: string;
-  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
-  createdAt: string;
-  completedAt?: string;
+interface USDCTransactionRecord {
+  transactionId: string;
+  transactionType: 'deposit' | 'withdrawal' | 'conversion';
   actorType: 'user' | 'business';
   actorDisplayName: string;
   actorUser?: {
     id: string;
     username: string;
-    email: string;
+    firstName: string;
+    lastName: string;
   };
   actorBusiness?: {
     id: string;
     name: string;
   };
+  amount: string;
+  currency: string;
+  secondaryAmount?: string;
+  secondaryCurrency?: string;
+  exchangeRate?: string;
+  networkFee: string;
+  serviceFee: string;
+  sourceAddress: string;
+  destinationAddress: string;
+  network: string;
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  errorMessage?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  formattedTitle: string;
+  iconName: string;
+  iconColor: string;
 }
+
+const ITEMS_PER_PAGE = 20;
 
 export const USDCHistoryScreen = () => {
   const navigation = useNavigation();
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [transactions, setTransactions] = useState<USDCTransactionRecord[]>([]);
   
-  // Fetch conversion history from GraphQL
-  const { data, loading, refetch } = useQuery(GET_CONVERSIONS, {
-    variables: { limit: 50 },
-    fetchPolicy: 'cache-and-network',
+  // Fetch unified USDC transaction history from GraphQL
+  const { data, loading, refetch, fetchMore } = useQuery(GET_UNIFIED_USDC_TRANSACTIONS, {
+    variables: { limit: ITEMS_PER_PAGE, offset: 0 },
+    fetchPolicy: 'network-only', // Changed to force fresh data
+    notifyOnNetworkStatusChange: true,
+    onCompleted: (data) => {
+      const newTransactions = data?.unifiedUsdcTransactions || [];
+      console.log('USDC History loaded:', newTransactions.length, 'transactions');
+      console.log('First 5:', newTransactions.slice(0, 5).map(t => ({
+        type: t.transactionType,
+        title: t.formattedTitle,
+        amount: t.amount,
+        currency: t.currency
+      })));
+      setTransactions(newTransactions);
+      setHasMore(newTransactions.length === ITEMS_PER_PAGE);
+    },
   });
-  
-  const conversions: ConversionRecord[] = data?.conversions || [];
   
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -77,26 +102,53 @@ export const USDCHistoryScreen = () => {
     }
     
     try {
-      await refetch();
+      const result = await refetch({ limit: ITEMS_PER_PAGE, offset: 0 });
+      const newTransactions = result.data?.unifiedUsdcTransactions || [];
+      setTransactions(newTransactions);
+      setHasMore(newTransactions.length === ITEMS_PER_PAGE);
     } catch (error) {
-      console.error('Error refreshing conversions:', error);
+      console.error('Error refreshing USDC transactions:', error);
     } finally {
       setRefreshing(false);
     }
   }, [refetch]);
 
-  const getIcon = (type: string) => {
-    return type === 'usdc_to_cusd' ? 'arrow-down-circle' : 'arrow-up-circle';
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || refreshing) return;
+    
+    setLoadingMore(true);
+    try {
+      const result = await fetchMore({
+        variables: {
+          limit: ITEMS_PER_PAGE,
+          offset: transactions.length,
+        },
+      });
+      
+      const moreTransactions = result.data?.unifiedUsdcTransactions || [];
+      if (moreTransactions.length > 0) {
+        setTransactions(prev => [...prev, ...moreTransactions]);
+        setHasMore(moreTransactions.length === ITEMS_PER_PAGE);
+      } else {
+        setHasMore(false);
+      }
+    } catch (error) {
+      console.error('Error loading more transactions:', error);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [fetchMore, transactions.length, loadingMore, hasMore, refreshing]);
+
+  const getIcon = (record: USDCTransactionRecord) => {
+    return record.iconName || 'circle';
   };
 
-  const getIconColor = (type: string) => {
-    return type === 'usdc_to_cusd' ? colors.primary : colors.accent;
+  const getIconColor = (record: USDCTransactionRecord) => {
+    return record.iconColor || colors.text.secondary;
   };
 
-  const getTitle = (record: ConversionRecord) => {
-    return record.conversionType === 'usdc_to_cusd' 
-      ? `USDC → cUSD`
-      : `cUSD → USDC`;
+  const getTitle = (record: USDCTransactionRecord) => {
+    return record.formattedTitle || record.transactionType;
   };
 
   const formatDate = (dateString: string) => {
@@ -143,38 +195,104 @@ export const USDCHistoryScreen = () => {
     }
   };
 
-  const renderItem = ({ item }: { item: ConversionRecord }) => (
-    <TouchableOpacity style={styles.historyItem}>
+  const handleTransactionPress = (transaction: USDCTransactionRecord) => {
+    // Navigate to detail screen with transaction data
+    navigation.navigate('TransactionDetail', {
+      transactionType: transaction.transactionType.toLowerCase(),
+      transactionData: {
+        type: transaction.transactionType.toLowerCase(),
+        transactionId: transaction.transactionId,
+        amount: transaction.amount,
+        currency: transaction.currency,
+        secondaryAmount: transaction.secondaryAmount,
+        secondaryCurrency: transaction.secondaryCurrency,
+        exchangeRate: transaction.exchangeRate,
+        networkFee: transaction.networkFee,
+        serviceFee: transaction.serviceFee,
+        sourceAddress: transaction.sourceAddress,
+        destinationAddress: transaction.destinationAddress,
+        status: transaction.status,
+        errorMessage: transaction.errorMessage,
+        createdAt: transaction.createdAt,
+        completedAt: transaction.completedAt,
+        actorType: transaction.actorType,
+        actorDisplayName: transaction.actorDisplayName,
+        formattedTitle: transaction.formattedTitle,
+        iconName: transaction.iconName,
+        iconColor: transaction.iconColor,
+        // Add any additional fields needed
+        from: transaction.actorDisplayName,
+        to: transaction.actorDisplayName,
+        fromAddress: transaction.sourceAddress,
+        toAddress: transaction.destinationAddress,
+        date: moment(transaction.createdAt).format('YYYY-MM-DD'),
+        time: moment(transaction.createdAt).format('HH:mm'),
+        hash: transaction.transactionId,
+        network: transaction.network || 'SUI',
+      }
+    });
+  };
+
+  const renderItem = ({ item }: { item: USDCTransactionRecord }) => (
+    <TouchableOpacity style={styles.historyItem} onPress={() => handleTransactionPress(item)}>
       <View style={styles.itemHeader}>
-        <View style={[styles.iconContainer, { backgroundColor: getIconColor(item.conversionType) + '20' }]}>
-          <Icon name={getIcon(item.conversionType)} size={24} color={getIconColor(item.conversionType)} />
+        <View style={[styles.iconContainer, { backgroundColor: getIconColor(item) + '20' }]}>
+          <Icon name={getIcon(item)} size={24} color={getIconColor(item)} />
         </View>
         <View style={styles.itemInfo}>
           <Text style={styles.itemTitle}>{getTitle(item)}</Text>
           <Text style={styles.itemDate}>{formatDate(item.createdAt)}</Text>
         </View>
         <View style={styles.amountContainer}>
-          <Text style={styles.fromAmount}>-{item.fromAmount} {item.fromToken}</Text>
-          <Text style={styles.toAmount}>+{item.toAmount} {item.toToken}</Text>
+          {item.transactionType.toLowerCase() === 'conversion' && item.secondaryAmount ? (
+            <>
+              <Text style={styles.fromAmount}>-{item.amount} {item.currency}</Text>
+              <Text style={styles.toAmount}>+{item.secondaryAmount} {item.secondaryCurrency}</Text>
+            </>
+          ) : item.transactionType.toLowerCase() === 'deposit' ? (
+            <Text style={styles.toAmount}>+{item.amount} {item.currency}</Text>
+          ) : (
+            <Text style={styles.fromAmount}>-{item.amount} {item.currency}</Text>
+          )}
         </View>
       </View>
       
       <View style={styles.itemDetails}>
-        <View style={styles.detailRow}>
-          <Text style={styles.detailLabel}>Tasa</Text>
-          <Text style={styles.detailValue}>1 {item.fromToken} = {item.exchangeRate} {item.toToken}</Text>
-        </View>
+        {item.transactionType.toLowerCase() === 'conversion' && item.exchangeRate && (
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Tasa</Text>
+            <Text style={styles.detailValue}>1 {item.currency} = {item.exchangeRate} {item.secondaryCurrency}</Text>
+          </View>
+        )}
+        
+        {item.transactionType.toLowerCase() === 'deposit' && item.sourceAddress && (
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Desde</Text>
+            <Text style={styles.detailValue}>{item.sourceAddress.substring(0, 10)}...{item.sourceAddress.substring(item.sourceAddress.length - 6)}</Text>
+          </View>
+        )}
+        
+        {item.transactionType.toLowerCase() === 'withdrawal' && item.destinationAddress && (
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Hacia</Text>
+            <Text style={styles.detailValue}>{item.destinationAddress.substring(0, 10)}...{item.destinationAddress.substring(item.destinationAddress.length - 6)}</Text>
+          </View>
+        )}
+        
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Comisión</Text>
-          {item.feeAmount === '0' || item.feeAmount === '0.000000' ? (
+          {(parseFloat(item.serviceFee) + parseFloat(item.networkFee)) === 0 ? (
             <View style={styles.feeContainer}>
               <Text style={[styles.detailValue, { color: colors.mint }]}>Gratis</Text>
               <Text style={styles.feeNote}>• Cubierto por Confío</Text>
             </View>
           ) : (
-            <Text style={styles.detailValue}>{item.feeAmount} {item.fromToken}</Text>
+            <Text style={styles.detailValue}>
+              {(parseFloat(item.serviceFee) + parseFloat(item.networkFee)).toFixed(6)} {item.currency}
+            </Text>
           )}
         </View>
+        
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Estado</Text>
           <View style={styles.statusContainer}>
@@ -193,26 +311,37 @@ export const USDCHistoryScreen = () => {
   const EmptyState = () => (
     <View style={styles.emptyContainer}>
       <Icon name="clock" size={48} color="#E5E7EB" />
-      <Text style={styles.emptyTitle}>Sin conversiones aún</Text>
+      <Text style={styles.emptyTitle}>Sin transacciones aún</Text>
       <Text style={styles.emptyText}>
-        Tu historial de conversiones entre USDC y cUSD aparecerá aquí
+        Tu historial de depósitos, retiros y conversiones de USDC aparecerá aquí
       </Text>
     </View>
   );
 
-  if (loading && conversions.length === 0) {
+  const renderFooter = () => {
+    if (!loadingMore) return null;
+    
+    return (
+      <View style={styles.footerLoader}>
+        <ActivityIndicator size="small" color={colors.primary} />
+        <Text style={styles.footerText}>Cargando más transacciones...</Text>
+      </View>
+    );
+  };
+
+  if (loading && transactions.length === 0) {
     return (
       <View style={styles.container}>
         <Header
           navigation={navigation}
-          title="Historial de Conversiones"
+          title="Historial de USDC"
           backgroundColor={colors.accent}
           isLight={true}
           showBackButton={true}
         />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Cargando conversiones...</Text>
+          <Text style={styles.loadingText}>Cargando transacciones...</Text>
         </View>
       </View>
     );
@@ -222,19 +351,22 @@ export const USDCHistoryScreen = () => {
     <View style={styles.container}>
       <Header
         navigation={navigation}
-        title="Historial de Conversiones"
+        title="Historial de USDC"
         backgroundColor={colors.accent}
         isLight={true}
         showBackButton={true}
       />
       
       <FlatList
-        data={conversions}
+        data={transactions}
         renderItem={renderItem}
-        keyExtractor={item => item.id}
+        keyExtractor={item => item.transactionId}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={EmptyState}
+        ListFooterComponent={renderFooter}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -243,6 +375,9 @@ export const USDCHistoryScreen = () => {
             colors={[colors.primary]}
           />
         }
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={21}
       />
     </View>
   );
@@ -384,5 +519,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.text.secondary,
     marginLeft: 4,
+  },
+  footerLoader: {
+    paddingVertical: 20,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  footerText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: colors.text.secondary,
   },
 });

@@ -380,7 +380,6 @@ export const AccountDetailScreen = () => {
         
         // For conversions, prepare default values
         let conversionAmount = tx.amount; // Use raw amount, will be formatted below
-        let conversionCurrency = 'cUSD'; // Default to cUSD for conversions
         let conversionType: string | undefined;
         
         if (isConversion) {
@@ -423,13 +422,11 @@ export const AccountDetailScreen = () => {
             console.log('[Conversion USDC->cUSD]', { toAmount, fromAmount: tx.fromAmount, amount: tx.amount });
             const amount = parseFloat(String(toAmount || tx.fromAmount || tx.amount)).toFixed(2);
             conversionAmount = `+${amount}`;
-            conversionCurrency = 'cUSD';
           } else if (conversionType === 'cusd_to_usdc') {
             // cUSD to USDC: losing cUSD (-)
             console.log('[Conversion cUSD->USDC]', { fromAmount: tx.fromAmount, amount: tx.amount });
             const amount = parseFloat(String(tx.fromAmount || tx.amount)).toFixed(2);
             conversionAmount = `-${amount}`;
-            conversionCurrency = 'cUSD';
           } else {
             // Fallback: no conversion type detected, still format properly
             console.log('[Conversion Unknown Type]', { description: tx.description, amount: tx.amount });
@@ -442,18 +439,19 @@ export const AccountDetailScreen = () => {
               // If showing cUSD amount, it's cUSD to USDC (losing cUSD)
               conversionAmount = `-${amount}`;
             }
-            conversionCurrency = 'cUSD';
           }
         }
         
         const finalTransaction = {
           type,
-          from: isConversion ? undefined : ((type === 'payment' && tx.direction === 'received') || (type === 'received') ? tx.displayCounterparty : undefined),
-          to: isConversion ? undefined : ((type === 'payment' && tx.direction === 'sent') || (type === 'sent') ? tx.displayCounterparty : undefined),
+          from: isConversion ? (conversionType === 'usdc_to_cusd' ? 'USDC' : conversionType === 'cusd_to_usdc' ? 'cUSD' : undefined) : ((type === 'payment' && tx.direction === 'received') || (type === 'received') ? tx.displayCounterparty : undefined),
+          to: isConversion ? (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined) : ((type === 'payment' && tx.direction === 'sent') || (type === 'sent') ? tx.displayCounterparty : undefined),
           fromPhone: isConversion ? undefined : (tx.direction === 'received' ? tx.senderPhone : undefined),
           toPhone: isConversion ? undefined : (tx.direction === 'sent' ? tx.counterpartyPhone : undefined),
           amount: isConversion ? conversionAmount : tx.displayAmount,
-          currency: isConversion ? conversionCurrency : (tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType),
+          currency: isConversion ? (conversionType === 'usdc_to_cusd' ? 'USDC' : conversionType === 'cusd_to_usdc' ? 'cUSD' : undefined) : (tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType),
+          secondaryCurrency: isConversion ? (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined) : undefined,
+          conversionType: conversionType || tx.conversionType,
           date: tx.createdAt, // Keep full timestamp for proper sorting
           time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
           status: tx.status.toLowerCase() === 'confirmed' ? 'completed' : 'pending',
@@ -789,7 +787,8 @@ export const AccountDetailScreen = () => {
             : transaction.to,
           amount: transaction.amount,
           currency: transaction.currency,
-          date: moment(transaction.date).format('DD/MM/YYYY'),
+          secondaryCurrency: transaction.secondaryCurrency,
+          date: moment(transaction.date).format('YYYY-MM-DD'),
           time: transaction.time,
           timestamp: transaction.date,
           status: transaction.status,
@@ -804,7 +803,11 @@ export const AccountDetailScreen = () => {
                  transaction.to ? transaction.to.charAt(0) : undefined,
           location: transaction.type === 'payment' ? 'Av. Libertador, Caracas' : undefined,
           merchantId: transaction.type === 'payment' ? 'SUP001' : undefined,
-          exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1 cUSD' : undefined,
+          exchangeRate: transaction.type === 'exchange' ? '1 USDC = 1 cUSD' : 
+                        transaction.type === 'conversion' ? '1' : undefined,
+          conversionType: transaction.conversionType,
+          formattedTitle: transaction.type === 'conversion' && transaction.conversionType === 'usdc_to_cusd' ? 'USDC → cUSD' :
+                          transaction.type === 'conversion' && transaction.conversionType === 'cusd_to_usdc' ? 'cUSD → USDC' : undefined,
           isInvitedFriend: transaction.isInvitation || false // true means friend is NOT on Confío
         }
       };

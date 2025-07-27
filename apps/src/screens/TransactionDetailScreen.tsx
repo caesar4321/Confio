@@ -52,6 +52,9 @@ export const TransactionDetailScreen = () => {
   // Get transaction type from route params
   const { transactionType, transactionData } = route.params;
 
+  // Check if this is a USDC transaction
+  const isUSDCTransaction = transactionData && ['deposit', 'withdrawal', 'conversion'].includes(transactionData.type);
+
   // Sample transaction data - in real app, this would come from props or API
   const transactions = {
     received: {
@@ -127,17 +130,6 @@ export const TransactionDetailScreen = () => {
 
   const currentTx = transactionData || transactions[transactionType];
   const isInvitedFriend = currentTx.isInvitedFriend || false;
-  
-  // Debug logging
-  console.log('TransactionDetailScreen - Current transaction:', {
-    type: currentTx.type,
-    from: currentTx.from,
-    to: currentTx.to,
-    amount: currentTx.amount,
-    avatar: currentTx.avatar,
-    fromAddress: currentTx.fromAddress,
-    toAddress: currentTx.toAddress
-  });
 
   const handleCopy = (text: string, type: string) => {
     Clipboard.setString(text);
@@ -153,9 +145,14 @@ export const TransactionDetailScreen = () => {
       case 'sent':
         return <Icon name="arrow-up" size={24} color="#ef4444" />;
       case 'exchange':
+      case 'conversion':
         return <Icon name="refresh-cw" size={24} color="#3b82f6" />;
       case 'payment':
         return <Icon name="shopping-bag" size={24} color="#8b5cf6" />;
+      case 'deposit':
+        return <Icon name="arrow-down-circle" size={24} color="#10b981" />;
+      case 'withdrawal':
+        return <Icon name="arrow-up-circle" size={24} color="#ef4444" />;
       default:
         return <Icon name="arrow-up" size={24} color="#6b7280" />;
     }
@@ -169,21 +166,28 @@ export const TransactionDetailScreen = () => {
         return `Enviado a ${tx.to}`;
       case 'exchange':
         return `Intercambio ${tx.from} → ${tx.to}`;
+      case 'conversion':
+        return tx.formattedTitle || `Conversión ${tx.currency || 'USDC'} → ${tx.secondaryCurrency || 'cUSD'}`;
       case 'payment':
         // Check if it's a received payment (positive amount) or sent payment (negative amount)
         return tx.amount.startsWith('+') 
           ? `Pago recibido de ${tx.from}`
           : `Pago a ${tx.to}`;
+      case 'deposit':
+        return tx.formattedTitle || `Depósito ${tx.currency}`;
+      case 'withdrawal':
+        return tx.formattedTitle || `Retiro ${tx.currency}`;
       default:
         return 'Transacción';
     }
   };
 
   const getStatusColor = (status: string) => {
-    switch(status) {
+    switch(status?.toLowerCase()) {
       case 'completed':
         return { text: '#059669', bg: '#d1fae5' };
       case 'pending':
+      case 'processing':
         return { text: '#d97706', bg: '#fef3c7' };
       case 'failed':
         return { text: '#dc2626', bg: '#fee2e2' };
@@ -776,9 +780,9 @@ export const TransactionDetailScreen = () => {
             
             <Text style={[
               styles.amountText,
-              (currentTx.type === 'sent' || currentTx.type === 'payment') && styles.negativeAmount
+              (currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal') && styles.negativeAmount
             ]}>
-              {currentTx.amount} {currentTx.currency}
+              {currentTx.type === 'deposit' ? '+' : currentTx.type === 'withdrawal' ? '-' : ''}{currentTx.amount} {currentTx.currency}
             </Text>
             
             <Text style={styles.transactionTitle}>
@@ -786,8 +790,24 @@ export const TransactionDetailScreen = () => {
             </Text>
             
             <View style={[styles.statusBadge, { backgroundColor: statusColors.bg }]}>
-              <Icon name="check-circle" size={16} color={statusColors.text} style={styles.statusIcon} />
-              <Text style={[styles.statusText, { color: statusColors.text }]}>Completado</Text>
+              {currentTx.status?.toLowerCase() === 'completed' && (
+                <Icon name="check-circle" size={16} color={statusColors.text} style={styles.statusIcon} />
+              )}
+              {currentTx.status?.toLowerCase() === 'pending' && (
+                <Icon name="clock" size={16} color={statusColors.text} style={styles.statusIcon} />
+              )}
+              {currentTx.status?.toLowerCase() === 'processing' && (
+                <Icon name="loader" size={16} color={statusColors.text} style={styles.statusIcon} />
+              )}
+              {currentTx.status?.toLowerCase() === 'failed' && (
+                <Icon name="x-circle" size={16} color={statusColors.text} style={styles.statusIcon} />
+              )}
+              <Text style={[styles.statusText, { color: statusColors.text }]}>
+                {currentTx.status?.toLowerCase() === 'completed' ? 'Completado' :
+                 currentTx.status?.toLowerCase() === 'pending' ? 'Pendiente' :
+                 currentTx.status?.toLowerCase() === 'processing' ? 'Procesando' :
+                 currentTx.status?.toLowerCase() === 'failed' ? 'Fallido' : 'Desconocido'}
+              </Text>
             </View>
             
             {isInvitedFriend && currentTx.type === 'sent' && (
@@ -805,6 +825,101 @@ export const TransactionDetailScreen = () => {
           <View style={styles.card}>
             <View style={styles.cardContent}>
               {/* Participant Info */}
+              {currentTx.type === 'deposit' && (
+                <View style={styles.participantInfo}>
+                  <View style={styles.avatarContainer}>
+                    <Icon name="arrow-down-circle" size={24} color={colors.primary} />
+                  </View>
+                  <View style={styles.participantDetails}>
+                    <Text style={styles.participantName}>Depósito desde wallet externa</Text>
+                    <View style={styles.addressContainer}>
+                      <Text style={styles.addressText}>{currentTx.sourceAddress || currentTx.fromAddress}</Text>
+                      <TouchableOpacity 
+                        onPress={() => handleCopy(currentTx.sourceAddress || currentTx.fromAddress, 'from')}
+                        style={styles.copyButton}
+                      >
+                        {copied === 'from' ? (
+                          <Icon name="check" size={16} color={colors.accent} />
+                        ) : (
+                          <Icon name="copy" size={16} color={colors.accent} />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {currentTx.type === 'withdrawal' && (
+                <View style={styles.participantInfo}>
+                  <View style={styles.avatarContainer}>
+                    <Icon name="arrow-up-circle" size={24} color="#ef4444" />
+                  </View>
+                  <View style={styles.participantDetails}>
+                    <Text style={styles.participantName}>Retiro hacia wallet externa</Text>
+                    <View style={styles.addressContainer}>
+                      <Text style={styles.addressText}>{currentTx.destinationAddress || currentTx.toAddress}</Text>
+                      <TouchableOpacity 
+                        onPress={() => handleCopy(currentTx.destinationAddress || currentTx.toAddress, 'to')}
+                        style={styles.copyButton}
+                      >
+                        {copied === 'to' ? (
+                          <Icon name="check" size={16} color={colors.accent} />
+                        ) : (
+                          <Icon name="copy" size={16} color={colors.accent} />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {currentTx.type === 'conversion' && (
+                <View style={styles.exchangeInfo}>
+                  <View style={styles.exchangeIcons}>
+                    <View style={[styles.exchangeIcon, { backgroundColor: '#fff' }]}>
+                      {(currentTx.currency || '').trim().toUpperCase() === 'USDC' ? (
+                        <Image source={USDCLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
+                      ) : (
+                        <Image source={cUSDLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
+                      )}
+                    </View>
+                    <Icon name="arrow-right" size={16} color="#6b7280" style={styles.exchangeArrow} />
+                    <View style={[styles.exchangeIcon, { backgroundColor: '#fff' }]}>
+                      {(currentTx.secondaryCurrency || '').trim().toUpperCase() === 'USDC' ? (
+                        <Image source={USDCLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
+                      ) : (
+                        <Image source={cUSDLogo} style={{ width: 24, height: 24, resizeMode: 'contain' }} />
+                      )}
+                    </View>
+                  </View>
+                  {currentTx.exchangeRate && (
+                    <Text style={styles.exchangeRate}>
+                      Tasa: {
+                        // Format exchange rate for conversions
+                        (() => {
+                          const rate = currentTx.exchangeRate;
+                          const isOneToOne = parseFloat(rate) === 1 || rate === '1' || rate === '1.000000';
+                          
+                          // For USDC conversions with 1:1 rate
+                          if (((currentTx.currency || '').toUpperCase() === 'USDC' || (currentTx.secondaryCurrency || '').toUpperCase() === 'USDC') && isOneToOne) {
+                            return `1 ${currentTx.currency} = 1 ${currentTx.secondaryCurrency}`;
+                          }
+                          
+                          // If rate already contains '=', use as is
+                          if (rate && rate.includes('=')) {
+                            return rate;
+                          }
+                          
+                          // Format rate without decimals if it's a whole number
+                          const formattedRate = isOneToOne ? '1' : rate;
+                          return `1 ${currentTx.currency} = ${formattedRate} ${currentTx.secondaryCurrency}`;
+                        })()
+                      }
+                    </Text>
+                  )}
+                </View>
+              )}
+
               {currentTx.type === 'received' && (
                 <View style={styles.participantInfo}>
                   <View style={styles.avatarContainer}>
@@ -908,11 +1023,22 @@ export const TransactionDetailScreen = () => {
               <View style={styles.infoRow}>
                 <Icon name="clock" size={20} color="#9ca3af" style={styles.infoIcon} />
                 <View style={styles.infoContent}>
-                  <Text style={styles.infoTitle}>{currentTx.date} • {currentTx.time}</Text>
+                  <Text style={styles.infoTitle}>
+                    {currentTx.date && currentTx.time 
+                      ? `${moment(currentTx.date).format('DD/MM/YYYY')} • ${currentTx.time}`
+                      : currentTx.createdAt 
+                        ? `${moment(currentTx.createdAt).format('DD/MM/YYYY')} • ${moment(currentTx.createdAt).format('HH:mm')}`
+                        : 'Fecha no disponible'
+                    }
+                  </Text>
                   <Text style={styles.infoSubtitle}>
                     {currentTx.timestamp 
                       ? moment(currentTx.timestamp).locale('es').fromNow()
-                      : moment(currentTx.date, 'DD/MM/YYYY').locale('es').fromNow()}
+                      : currentTx.createdAt
+                        ? moment(currentTx.createdAt).locale('es').fromNow()
+                        : currentTx.date 
+                          ? moment(currentTx.date, 'YYYY-MM-DD').locale('es').fromNow()
+                          : ''}
                   </Text>
                 </View>
               </View>
