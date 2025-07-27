@@ -14,6 +14,9 @@ import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
 import { useAccount } from '../contexts/AccountContext';
+import { useMutation, useQuery } from '@apollo/client';
+import { CREATE_USDC_WITHDRAWAL, GET_UNIFIED_USDC_TRANSACTIONS } from '../apollo/mutations';
+import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 
 const colors = {
   primary: '#34D399',
@@ -41,9 +44,49 @@ export const USDCWithdrawScreen = () => {
   const [recipientAddress, setRecipientAddress] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   
-  // Mock USDC balance - in real app, fetch from blockchain
-  const usdcBalance = 458.22;
+  // Fetch USDC balance
+  const { data: balanceData, loading: balanceLoading } = useQuery(GET_ACCOUNT_BALANCE, {
+    variables: { tokenType: 'USDC' },
+    fetchPolicy: 'network-only',
+  });
+  
+  const usdcBalance = balanceData?.accountBalance ? parseFloat(balanceData.accountBalance) : 0;
   const networkFee = 0; // Network fee is covered by Confío
+  
+  // Create withdrawal mutation
+  const [createWithdrawal] = useMutation(CREATE_USDC_WITHDRAWAL, {
+    onCompleted: (data) => {
+      console.log('Withdrawal mutation completed:', data);
+      if (data.createUsdcWithdrawal.success) {
+        // Clear form
+        setWithdrawAmount('');
+        setRecipientAddress('');
+        
+        Alert.alert(
+          'Retiro Iniciado',
+          `Se está procesando el retiro de ${withdrawAmount} USDC a tu wallet.\n\nID de transacción: ${data.createUsdcWithdrawal.withdrawal.withdrawalId}`,
+          [
+            {
+              text: 'Ver historial',
+              onPress: () => {
+                navigation.navigate('USDCHistory');
+              },
+            },
+            {
+              text: 'OK',
+              onPress: () => navigation.goBack(),
+            },
+          ]
+        );
+      } else {
+        Alert.alert('Error', data.createUsdcWithdrawal.errors?.join('\n') || 'No se pudo procesar el retiro');
+      }
+    },
+    onError: (error) => {
+      console.error('Mutation error:', error);
+      Alert.alert('Error', error.message || 'No se pudo procesar el retiro');
+    },
+  });
   
   const handleWithdraw = async () => {
     if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
@@ -62,30 +105,42 @@ export const USDCWithdrawScreen = () => {
       return;
     }
     
-    // Network fee is covered by Confío, so no minimum amount restriction for fees
+    // Minimum withdrawal amount
+    if (amount < 1) {
+      Alert.alert('Error', 'El monto mínimo de retiro es 1 USDC');
+      return;
+    }
+    
+    // Validate Sui address format (basic validation)
+    if (!recipientAddress.startsWith('0x') || recipientAddress.length < 66) {
+      Alert.alert('Error', 'La dirección de Sui debe comenzar con 0x y tener 66 caracteres');
+      return;
+    }
     
     setIsProcessing(true);
     
-    // Simulate withdrawal process
-    setTimeout(() => {
+    try {
+      console.log('Creating withdrawal with:', {
+        amount: withdrawAmount,
+        destinationAddress: recipientAddress,
+        serviceFee: '0',
+      });
+      
+      await createWithdrawal({
+        variables: {
+          input: {
+            amount: withdrawAmount,
+            destinationAddress: recipientAddress,
+            serviceFee: '0', // No service fee for now
+          },
+        },
+      });
+    } catch (error) {
+      console.error('Withdrawal error:', error);
+      Alert.alert('Error', 'No se pudo procesar el retiro. Por favor intenta de nuevo.');
+    } finally {
       setIsProcessing(false);
-      Alert.alert(
-        'Retiro Exitoso',
-        `Se han enviado ${amount.toFixed(2)} USDC a tu wallet de Sui.\n\nTransacción: 0x${Math.random().toString(36).substring(7)}`,
-        [
-          {
-            text: 'Ver en explorador',
-            onPress: () => {
-              // Open block explorer
-            },
-          },
-          {
-            text: 'OK',
-            onPress: () => navigation.goBack(),
-          },
-        ]
-      );
-    }, 2000);
+    }
   };
   
   const totalToReceive = withdrawAmount ? parseFloat(withdrawAmount) : 0;
@@ -104,7 +159,11 @@ export const USDCWithdrawScreen = () => {
         {/* Balance Card */}
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Saldo disponible</Text>
-          <Text style={styles.balanceAmount}>{usdcBalance.toFixed(2)} USDC</Text>
+          {balanceLoading ? (
+            <ActivityIndicator size="small" color={colors.accent} style={{ marginVertical: 8 }} />
+          ) : (
+            <Text style={styles.balanceAmount}>{usdcBalance.toFixed(2)} USDC</Text>
+          )}
           <Text style={styles.balanceNote}>En la red Sui</Text>
         </View>
         
@@ -134,7 +193,8 @@ export const USDCWithdrawScreen = () => {
               />
               <TouchableOpacity
                 style={styles.maxButton}
-                onPress={() => setWithdrawAmount(usdcBalance.toString())}
+                onPress={() => setWithdrawAmount(usdcBalance.toFixed(2))}
+                disabled={balanceLoading || usdcBalance === 0}
               >
                 <Text style={styles.maxButtonText}>MAX</Text>
               </TouchableOpacity>
@@ -155,6 +215,14 @@ export const USDCWithdrawScreen = () => {
             />
             <Text style={styles.inputHint}>Ingresa tu dirección de Sui wallet</Text>
           </View>
+          
+          {/* Minimum amount notice */}
+          {withdrawAmount && parseFloat(withdrawAmount) > 0 && parseFloat(withdrawAmount) < 1 && (
+            <View style={styles.errorContainer}>
+              <Icon name="alert-circle" size={16} color={colors.error} />
+              <Text style={styles.errorText}>El monto mínimo de retiro es 1 USDC</Text>
+            </View>
+          )}
           
           {/* Fee Summary */}
           <View style={styles.feeSummary}>
@@ -187,7 +255,7 @@ export const USDCWithdrawScreen = () => {
               (!withdrawAmount || !recipientAddress || isProcessing) && styles.withdrawButtonDisabled
             ]}
             onPress={handleWithdraw}
-            disabled={!withdrawAmount || !recipientAddress || isProcessing}
+            disabled={!withdrawAmount || !recipientAddress || isProcessing || balanceLoading}
           >
             {isProcessing ? (
               <ActivityIndicator color="#FFFFFF" />
@@ -203,7 +271,7 @@ export const USDCWithdrawScreen = () => {
           <View style={styles.infoContainer}>
             <Icon name="info" size={16} color={colors.text.secondary} />
             <Text style={styles.infoText}>
-              Los retiros se procesan inmediatamente. El tiempo de confirmación depende de la congestión de la red Sui.
+              Los retiros se procesan inmediatamente. Monto mínimo: 1 USDC. El tiempo de confirmación depende de la congestión de la red Sui.
             </Text>
           </View>
         </View>
@@ -426,6 +494,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.text.secondary,
     lineHeight: 16,
+    marginLeft: 8,
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEE2E2',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.error,
     marginLeft: 8,
   },
 });

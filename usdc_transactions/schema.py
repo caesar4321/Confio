@@ -109,8 +109,8 @@ class USDCDepositInput(graphene.InputObjectType):
 class USDCWithdrawalInput(graphene.InputObjectType):
     """Input type for creating a USDC withdrawal"""
     amount = graphene.String(required=True, description="Amount of USDC to withdraw (e.g., '100.50')")
-    destination_address = graphene.String(required=True, description="External wallet address to receive the USDC")
-    service_fee = graphene.String(description="Confío service fee")
+    destinationAddress = graphene.String(required=True, description="External wallet address to receive the USDC")
+    serviceFee = graphene.String(description="Confío service fee")
 
 
 class CreateUSDCDeposit(graphene.Mutation):
@@ -201,8 +201,16 @@ class CreateUSDCWithdrawal(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, input):
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"CreateUSDCWithdrawal mutation called with input: {input}")
+        
         user = getattr(info.context, 'user', None)
+        logger.info(f"User: {user}, Authenticated: {getattr(user, 'is_authenticated', False) if user else False}")
+        
         if not (user and getattr(user, 'is_authenticated', False)):
+            logger.warning("Authentication failed - no user or not authenticated")
             return CreateUSDCWithdrawal(
                 withdrawal=None,
                 success=False,
@@ -210,13 +218,25 @@ class CreateUSDCWithdrawal(graphene.Mutation):
             )
 
         try:
+            # Log context info
+            account_type = getattr(info.context, 'active_account_type', 'personal')
+            account_index = getattr(info.context, 'active_account_index', 0)
+            logger.info(f"Looking for account - Type: {account_type}, Index: {account_index}")
+            
             # Get the user's active account
+            accounts = user.accounts.all()
+            logger.info(f"User has {accounts.count()} accounts")
+            
             active_account = user.accounts.filter(
-                account_type=info.context.active_account_type,
-                account_index=info.context.active_account_index
+                account_type=account_type,
+                account_index=account_index
             ).first()
             
             if not active_account:
+                logger.error(f"Active account not found for user {user.id} with type={account_type}, index={account_index}")
+                # List all accounts for debugging
+                all_accounts = list(user.accounts.all().values('account_type', 'account_index', 'id'))
+                logger.info(f"User's accounts: {all_accounts}")
                 return CreateUSDCWithdrawal(
                     withdrawal=None,
                     success=False,
@@ -235,6 +255,17 @@ class CreateUSDCWithdrawal(graphene.Mutation):
                 actor_type = 'business'
                 actor_display_name = active_account.business.name
 
+            # Log withdrawal details before creation
+            logger.info(f"Creating withdrawal with:")
+            logger.info(f"  actor_user: {user.id}")
+            logger.info(f"  actor_business: {actor_business.id if actor_business else None}")
+            logger.info(f"  actor_type: {actor_type}")
+            logger.info(f"  actor_display_name: {actor_display_name}")
+            logger.info(f"  actor_address: {active_account.sui_address or ''}")
+            logger.info(f"  amount: {input.amount}")
+            logger.info(f"  destination_address: {input.destinationAddress}")
+            logger.info(f"  service_fee: {input.serviceFee or '0'}")
+            
             # Create the withdrawal
             withdrawal = USDCWithdrawal.objects.create(
                 actor_user=user,
@@ -243,10 +274,12 @@ class CreateUSDCWithdrawal(graphene.Mutation):
                 actor_display_name=actor_display_name,
                 actor_address=active_account.sui_address or '',
                 amount=Decimal(input.amount),
-                destination_address=input.destination_address,
-                service_fee=Decimal(input.service_fee or '0'),
+                destination_address=input.destinationAddress,
+                service_fee=Decimal(input.serviceFee or '0'),
                 status='PENDING'
             )
+            
+            logger.info(f"Withdrawal created successfully with ID: {withdrawal.id}, withdrawal_id: {withdrawal.withdrawal_id}")
 
             return CreateUSDCWithdrawal(
                 withdrawal=withdrawal,
@@ -255,12 +288,14 @@ class CreateUSDCWithdrawal(graphene.Mutation):
             )
 
         except ValidationError as e:
+            logger.error(f"ValidationError in CreateUSDCWithdrawal: {str(e)}")
             return CreateUSDCWithdrawal(
                 withdrawal=None,
                 success=False,
                 errors=[str(e)]
             )
         except Exception as e:
+            logger.error(f"Exception in CreateUSDCWithdrawal: {str(e)}", exc_info=True)
             return CreateUSDCWithdrawal(
                 withdrawal=None,
                 success=False,
