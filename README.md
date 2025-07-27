@@ -384,6 +384,63 @@ All queries for account creation/index assignment include soft-deleted rows to p
 #### Example: Why Soft Delete?
 If a business account `business_2` is deleted, the next business account will be `business_3`, not `business_2` again. This ensures that the Sui address for `business_2` is never reused, maintaining cryptographic and financial safety.
 
+## 💸 Transaction Types
+
+Confío supports four main categories of transactions, each with distinct types and flows:
+
+### Send Transactions
+Direct transfers between users with different recipient types:
+
+- **👥 Confío Friend** - Send to existing Confío users
+  - Recipient has a registered Confío account
+  - Instant delivery to their wallet
+  - Real-time notifications
+
+- **📧 Non-Confío Friend** - Invite new users via phone number
+  - Recipient receives invitation via phone/WhatsApp
+  - Funds held in smart contract until claimed
+  - 7-day expiration period before reversion
+
+- **🔗 External Wallet** - Direct blockchain transfers
+  - Send to any Sui wallet address
+  - No invitation or registration required
+  - Direct on-chain transaction
+
+### Payment Transactions
+Commercial transactions for business operations:
+
+- **Personal → Business** - Consumer payments to merchants
+  - Users pay businesses for goods/services
+  - QR code and invoice-based payments
+  - Receipt generation and tracking
+
+- **Business → Business** - B2B transactions
+  - Inter-business payments and settlements
+  - Supply chain and vendor payments
+  - Commercial invoicing system
+
+**Note**: Businesses cannot receive personal payments to maintain clear separation between commercial and personal finances.
+
+### Exchange Transactions
+P2P trading platform for buying/selling crypto with fiat:
+
+- **Any Account Type** - All combinations supported
+  - Personal → Personal (P2P)
+  - Personal → Business (P2B) 
+  - Business → Business (B2B)
+  - Business → Personal (B2P)
+  - Trade cUSD or CONFIO tokens for fiat currency
+  - Local payment methods (bank transfers, mobile money)
+  - Escrow-protected transactions
+
+### Conversion Transactions  
+Currency conversion within the same account:
+
+- **USDC ↔ cUSD** - Convert between stablecoin types
+  - Available for both personal and business accounts
+  - Real-time conversion rates
+  - Seamless currency switching for user convenience
+
 ## 🏪 P2P Trading Platform
 
 Confío includes a comprehensive peer-to-peer trading platform that allows users to buy and sell cryptocurrency using local payment methods.
