@@ -433,55 +433,6 @@ export const GET_SEND_TRANSACTIONS = gql`
   }
 `;
 
-// NEW: Get send transactions by specific account
-export const GET_SEND_TRANSACTIONS_BY_ACCOUNT = gql`
-  query GetSendTransactionsByAccount($accountType: String!, $accountIndex: Int!, $limit: Int) {
-    sendTransactionsByAccount(accountType: $accountType, accountIndex: $accountIndex, limit: $limit) {
-      id
-      senderUser {
-        id
-        username
-        firstName
-        lastName
-      }
-      recipientUser {
-        id
-        username
-        firstName
-        lastName
-      }
-      senderBusiness {
-        id
-        name
-        category
-      }
-      recipientBusiness {
-        id
-        name
-        category
-      }
-      senderType
-      recipientType
-      senderDisplayName
-      recipientDisplayName
-      senderPhone
-      recipientPhone
-      senderAddress
-      recipientAddress
-      amount
-      tokenType
-      memo
-      status
-      transactionHash
-      createdAt
-      updatedAt
-      isInvitation
-      invitationClaimed
-      invitationReverted
-      invitationExpiresAt
-    }
-  }
-`;
 
 // NEW: Get send transactions with a specific friend
 export const GET_SEND_TRANSACTIONS_WITH_FRIEND = gql`
@@ -533,56 +484,6 @@ export const GET_SEND_TRANSACTIONS_WITH_FRIEND = gql`
   }
 `;
 
-// NEW: Get payment transactions by specific account
-export const GET_PAYMENT_TRANSACTIONS_BY_ACCOUNT = gql`
-  query GetPaymentTransactionsByAccount($accountType: String!, $accountIndex: Int!, $limit: Int) {
-    paymentTransactionsByAccount(accountType: $accountType, accountIndex: $accountIndex, limit: $limit) {
-      id
-      paymentTransactionId
-      payerUser {
-        id
-        username
-        firstName
-        lastName
-      }
-      merchantAccountUser {
-        id
-        username
-        firstName
-        lastName
-      }
-      payerBusiness {
-        id
-        name
-        category
-      }
-      merchantBusiness {
-        id
-        name
-        category
-      }
-      payerType
-      merchantType
-      payerDisplayName
-      merchantDisplayName
-      payerPhone
-      payerAddress
-      merchantAddress
-      amount
-      tokenType
-      description
-      status
-      transactionHash
-      createdAt
-      updatedAt
-      invoice {
-        id
-        invoiceId
-        description
-      }
-    }
-  }
-`;
 
 // NEW: Get payment transactions with a specific friend
 export const GET_PAYMENT_TRANSACTIONS_WITH_FRIEND = gql`
