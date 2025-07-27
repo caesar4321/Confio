@@ -950,18 +950,32 @@ export const GET_P2P_TRADE = gql`
           avgRating
         }
       }
-      buyer {
+      buyerUser {
         id
         username
         firstName
         lastName
       }
-      seller {
+      buyerBusiness {
+        id
+        name
+        category
+      }
+      sellerUser {
         id
         username
         firstName
         lastName
       }
+      sellerBusiness {
+        id
+        name
+        category
+      }
+      buyerType
+      sellerType
+      buyerDisplayName
+      sellerDisplayName
       cryptoAmount
       fiatAmount
       rateUsed
