@@ -322,12 +322,6 @@ class Query(graphene.ObjectType):
     """GraphQL queries for send transactions"""
     send_transactions = graphene.List(SendTransactionType)
     send_transaction = graphene.Field(SendTransactionType, id=graphene.ID(required=True))
-    send_transactions_by_account = graphene.List(
-        SendTransactionType,
-        account_type=graphene.String(required=True),
-        account_index=graphene.Int(required=True),
-        limit=graphene.Int()
-    )
     send_transactions_with_friend = graphene.List(
         SendTransactionType,
         friend_user_id=graphene.ID(required=False),
@@ -386,36 +380,6 @@ class Query(graphene.ObjectType):
         except SendTransaction.DoesNotExist:
             return None
 
-    def resolve_send_transactions_by_account(self, info, account_type, account_index, limit=None):
-        """Resolve send transactions for a specific account"""
-        user = getattr(info.context, 'user', None)
-        
-        if not (user and getattr(user, 'is_authenticated', False)):
-            return []
-        
-        # Get the account for this user
-        try:
-            account = user.accounts.get(
-                account_type=account_type,
-                account_index=account_index
-            )
-        except Account.DoesNotExist:
-            return []
-        
-        # If account has no Sui address, return empty (account not set up yet)
-        if not account.sui_address:
-            return []
-        
-        # Filter transactions by account's Sui address
-        queryset = SendTransaction.objects.filter(
-            models.Q(sender_address=account.sui_address) | 
-            models.Q(recipient_address=account.sui_address)
-        ).order_by('-created_at')
-        
-        if limit:
-            queryset = queryset[:limit]
-            
-        return queryset
 
     def resolve_send_transactions_with_friend(self, info, friend_user_id=None, friend_phone=None, limit=None):
         """Resolve send transactions between current user's active account and a specific friend"""

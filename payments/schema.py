@@ -420,12 +420,6 @@ class Query(graphene.ObjectType):
     invoice = graphene.Field(InvoiceType, invoice_id=graphene.String())
     invoices = graphene.List(InvoiceType)
     payment_transactions = graphene.List(PaymentTransactionType)
-    payment_transactions_by_account = graphene.List(
-        PaymentTransactionType,
-        account_type=graphene.String(required=True),
-        account_index=graphene.Int(required=True),
-        limit=graphene.Int()
-    )
     payment_transactions_with_friend = graphene.List(
         PaymentTransactionType,
         friend_user_id=graphene.ID(required=True),
@@ -467,38 +461,6 @@ class Query(graphene.ObjectType):
             models.Q(payer_user=user) | models.Q(merchant_account_user=user)
         ).order_by('-created_at')
 
-    def resolve_payment_transactions_by_account(self, info, account_type, account_index, limit=None):
-        """Resolve payment transactions for a specific account"""
-        user = getattr(info.context, 'user', None)
-        if not (user and getattr(user, 'is_authenticated', False)):
-            return []
-        
-        from users.models import Account
-        from django.db import models
-        
-        # Get the account for this user
-        try:
-            account = user.accounts.get(
-                account_type=account_type,
-                account_index=account_index
-            )
-        except Account.DoesNotExist:
-            return []
-        
-        # If account has no Sui address, return empty (account not set up yet)
-        if not account.sui_address:
-            return []
-        
-        # Filter transactions by account's Sui address
-        queryset = PaymentTransaction.objects.filter(
-            models.Q(payer_address=account.sui_address) | 
-            models.Q(merchant_address=account.sui_address)
-        ).order_by('-created_at')
-        
-        if limit:
-            queryset = queryset[:limit]
-            
-        return queryset
 
     def resolve_payment_transactions_with_friend(self, info, friend_user_id, limit=None):
         """Resolve payment transactions between current user's active account and a specific friend"""
