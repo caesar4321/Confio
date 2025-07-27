@@ -127,6 +127,17 @@ export const TransactionDetailScreen = () => {
 
   const currentTx = transactionData || transactions[transactionType];
   const isInvitedFriend = currentTx.isInvitedFriend || false;
+  
+  // Debug logging
+  console.log('TransactionDetailScreen - Current transaction:', {
+    type: currentTx.type,
+    from: currentTx.from,
+    to: currentTx.to,
+    amount: currentTx.amount,
+    avatar: currentTx.avatar,
+    fromAddress: currentTx.fromAddress,
+    toAddress: currentTx.toAddress
+  });
 
   const handleCopy = (text: string, type: string) => {
     Clipboard.setString(text);
@@ -159,7 +170,10 @@ export const TransactionDetailScreen = () => {
       case 'exchange':
         return `Intercambio ${tx.from} → ${tx.to}`;
       case 'payment':
-        return `Pago a ${tx.to}`;
+        // Check if it's a received payment (positive amount) or sent payment (negative amount)
+        return tx.amount.startsWith('+') 
+          ? `Pago recibido de ${tx.from}`
+          : `Pago a ${tx.to}`;
       default:
         return 'Transacción';
     }
@@ -815,7 +829,7 @@ export const TransactionDetailScreen = () => {
                 </View>
               )}
 
-              {(currentTx.type === 'sent' || currentTx.type === 'payment') && (
+              {currentTx.type === 'sent' && (
                 <View style={styles.participantInfo}>
                   <View style={styles.avatarContainer}>
                     <Text style={styles.avatarText}>{currentTx.avatar}</Text>
@@ -829,6 +843,42 @@ export const TransactionDetailScreen = () => {
                         style={styles.copyButton}
                       >
                         {copied === 'to' ? (
+                          <Icon name="check" size={16} color={colors.accent} />
+                        ) : (
+                          <Icon name="copy" size={16} color={colors.accent} />
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              )}
+              
+              {currentTx.type === 'payment' && (
+                <View style={styles.participantInfo}>
+                  <View style={styles.avatarContainer}>
+                    <Text style={styles.avatarText}>
+                      {currentTx.amount.startsWith('+') 
+                        ? (currentTx.from ? currentTx.from.charAt(0) : 'U')
+                        : (currentTx.to ? currentTx.to.charAt(0) : 'U')
+                      }
+                    </Text>
+                  </View>
+                  <View style={styles.participantDetails}>
+                    <Text style={styles.participantName}>
+                      {currentTx.amount.startsWith('+') ? currentTx.from : currentTx.to}
+                    </Text>
+                    <View style={styles.addressContainer}>
+                      <Text style={styles.addressText}>
+                        {currentTx.amount.startsWith('+') ? currentTx.fromAddress : currentTx.toAddress}
+                      </Text>
+                      <TouchableOpacity 
+                        onPress={() => handleCopy(
+                          currentTx.amount.startsWith('+') ? currentTx.fromAddress : currentTx.toAddress, 
+                          currentTx.amount.startsWith('+') ? 'from' : 'to'
+                        )}
+                        style={styles.copyButton}
+                      >
+                        {copied === (currentTx.amount.startsWith('+') ? 'from' : 'to') ? (
                           <Icon name="check" size={16} color={colors.accent} />
                         ) : (
                           <Icon name="copy" size={16} color={colors.accent} />
@@ -867,8 +917,8 @@ export const TransactionDetailScreen = () => {
                 </View>
               </View>
 
-              {/* Location for payments */}
-              {currentTx.type === 'payment' && currentTx.location && (
+              {/* Location for payments - only show when user is paying a business */}
+              {currentTx.type === 'payment' && currentTx.amount.startsWith('-') && currentTx.location && (
                 <View style={styles.infoRow}>
                   <Icon name="map-pin" size={20} color="#9ca3af" style={styles.infoIcon} />
                   <View style={styles.infoContent}>

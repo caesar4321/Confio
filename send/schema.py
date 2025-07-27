@@ -210,6 +210,9 @@ class CreateSendTransaction(graphene.Mutation):
                 sender_business = None
                 sender_type = 'user'  # default to personal
                 sender_display_name = f"{user.first_name} {user.last_name}".strip()
+                # Fallback to username if no first/last name
+                if not sender_display_name:
+                    sender_display_name = user.username or f"User {user.id}"
                 sender_phone = f"{user.phone_country}{user.phone_number}" if user.phone_country and user.phone_number else ""
                 
                 if active_account.account_type == 'business' and active_account.business:
@@ -225,6 +228,9 @@ class CreateSendTransaction(graphene.Mutation):
                 
                 if recipient_user:
                     recipient_display_name = f"{recipient_user.first_name} {recipient_user.last_name}".strip()
+                    # Fallback to username if no first/last name
+                    if not recipient_display_name:
+                        recipient_display_name = recipient_user.username or f"User {recipient_user.id}"
                     recipient_phone = f"{recipient_user.phone_country}{recipient_user.phone_number}" if recipient_user.phone_country and recipient_user.phone_number else ""
                     # Check if recipient has business account for this address
                     if recipient_account.account_type == 'business' and recipient_account.business:

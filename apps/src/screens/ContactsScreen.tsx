@@ -10,6 +10,7 @@ import ContactService, { contactService } from '../services/contactService';
 import { ContactPermissionModal } from '../components/ContactPermissionModal';
 import { useContactNames } from '../hooks/useContactName';
 import { useApolloClient, useMutation, gql } from '@apollo/client';
+import { useAccount } from '../contexts/AccountContext';
 
 type ContactsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -163,6 +164,12 @@ export const ContactsScreen = () => {
   // Test users mutation
   const [createTestUsers] = useMutation(CREATE_TEST_USERS);
   
+  // Import useAccount to check account type
+  const { activeAccount } = useAccount();
+  
+  // Check if this is a business account
+  const isBusinessAccount = activeAccount?.type === 'business';
+  
   // Stable callback for search updates
   const handleSearchChange = useCallback((text: string) => {
     setSearchTerm(text);
@@ -186,46 +193,52 @@ export const ContactsScreen = () => {
     isLoaded: boolean;
   }>({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: false });
 
-  // Check contact permission on mount
+  // Check contact permission on mount - skip for business accounts
   useEffect(() => {
+    if (isBusinessAccount) {
+      console.log('[PERF] Business account - skipping contact permission check');
+      return;
+    }
     console.log('[PERF] ContactsScreen mounted');
     const startTime = Date.now();
     checkContactPermission().then(() => {
       console.log(`[PERF] checkContactPermission completed in ${Date.now() - startTime}ms`);
     });
-  }, []);
+  }, [isBusinessAccount]);
 
-  // Monitor contact loading in background
+  // Monitor contact loading in background - skip for business accounts
   useEffect(() => {
-    if (isInitialLoad && hasContactPermission && !contactsData.isLoaded) {
-      console.log('[PERF] Starting contact loading monitor');
-      let checkCount = 0;
-      
-      // Check for contacts every 100ms until loaded
-      const checkInterval = setInterval(async () => {
-        checkCount++;
-        const checkStart = Date.now();
-        const contacts = await contactService.getAllContacts();
-        console.log(`[PERF] Check #${checkCount}: getAllContacts took ${Date.now() - checkStart}ms, got ${contacts.length} contacts`);
-        
-        if (contacts.length > 0) {
-          const displayStart = Date.now();
-          await displayContacts(contacts);
-          console.log(`[PERF] displayContacts took ${Date.now() - displayStart}ms`);
-          setIsInitialLoad(false);
-          clearInterval(checkInterval);
-        }
-      }, 100);
-
-      // Clear interval after 5 seconds to prevent infinite checking
-      setTimeout(() => {
-        clearInterval(checkInterval);
-        setIsInitialLoad(false);
-      }, 5000);
-
-      return () => clearInterval(checkInterval);
+    if (isBusinessAccount || !isInitialLoad || !hasContactPermission || contactsData.isLoaded) {
+      return;
     }
-  }, [hasContactPermission, isInitialLoad, contactsData.isLoaded]);
+    
+    console.log('[PERF] Starting contact loading monitor');
+    let checkCount = 0;
+    
+    // Check for contacts every 100ms until loaded
+    const checkInterval = setInterval(async () => {
+      checkCount++;
+      const checkStart = Date.now();
+      const contacts = await contactService.getAllContacts();
+      console.log(`[PERF] Check #${checkCount}: getAllContacts took ${Date.now() - checkStart}ms, got ${contacts.length} contacts`);
+      
+      if (contacts.length > 0) {
+        const displayStart = Date.now();
+        await displayContacts(contacts);
+        console.log(`[PERF] displayContacts took ${Date.now() - displayStart}ms`);
+        setIsInitialLoad(false);
+        clearInterval(checkInterval);
+      }
+    }, 100);
+
+    // Clear interval after 5 seconds to prevent infinite checking
+    setTimeout(() => {
+      clearInterval(checkInterval);
+      setIsInitialLoad(false);
+    }, 5000);
+
+    return () => clearInterval(checkInterval);
+  }, [hasContactPermission, isInitialLoad, contactsData.isLoaded, isBusinessAccount]);
 
   // Check and request contact permission
   const checkContactPermission = async () => {
@@ -314,6 +327,11 @@ export const ContactsScreen = () => {
 
   // Sync contacts with device
   const syncContacts = async () => {
+    // Skip for business accounts
+    if (isBusinessAccount) {
+      return;
+    }
+    
     setIsLoadingContacts(true);
     try {
       const success = await contactService.syncContacts(apolloClient);
@@ -437,6 +455,12 @@ export const ContactsScreen = () => {
 
   // Handle pull to refresh
   const handleRefresh = async () => {
+    // Skip refresh for business accounts
+    if (isBusinessAccount) {
+      setRefreshing(false);
+      return;
+    }
+    
     setRefreshing(true);
     setIsLoadingContacts(true);
     
@@ -747,6 +771,16 @@ export const ContactsScreen = () => {
 
   // Prepare sections for SectionList
   const sections = useMemo(() => {
+    // For business accounts, show employees section
+    if (isBusinessAccount) {
+      return [{
+        title: 'EMPLEADOS',
+        count: 0,
+        data: [],
+        isEmployees: true
+      }];
+    }
+    
     const sectionData = [];
     
     if (filteredConfioFriends.length > 0) {
@@ -769,12 +803,12 @@ export const ContactsScreen = () => {
     }
     
     return sectionData;
-  }, [filteredConfioFriends, filteredNonConfioFriends]);
+  }, [filteredConfioFriends, filteredNonConfioFriends, isBusinessAccount]);
 
   const renderSectionHeader = useCallback(({ section }) => (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{section.title}</Text>
+        <Text style={[styles.sectionTitle, section.isEmployees && styles.employeeSectionTitle]}>{section.title}</Text>
         <View style={styles.sectionCount}>
           <Text style={styles.sectionCountText}>{section.count}</Text>
         </View>
@@ -816,8 +850,30 @@ export const ContactsScreen = () => {
 
       {/* Send/Receive Options */}
       <View style={styles.actionSection}>
-        {/* Show permission prompt if user denied but there are no contacts */}
-        {hasContactPermission === false && contactsData.friends.length === 0 && contactsData.nonConfioFriends.length === 0 && (
+        {/* For business accounts, show the Add Employee button */}
+        {isBusinessAccount && (
+          <TouchableOpacity 
+            style={styles.addEmployeeActionButton}
+            onPress={() => {
+              // TODO: Navigate to add employee screen
+              Alert.alert('Próximamente', 'La función de añadir empleados estará disponible pronto');
+            }}
+          >
+            <View style={styles.actionButtonContent}>
+              <View style={[styles.actionIconContainer, { backgroundColor: colors.violet }]}>
+                <Icon name="user-plus" size={20} color="#fff" />
+              </View>
+              <View style={styles.actionTextContainer}>
+                <Text style={styles.actionButtonTitle}>Añadir empleado</Text>
+                <Text style={styles.actionButtonSubtitle}>Gestiona tu equipo de trabajo</Text>
+              </View>
+            </View>
+            <Icon name="chevron-right" size={20} color="#9ca3af" />
+          </TouchableOpacity>
+        )}
+        
+        {/* Show permission prompt if user denied but there are no contacts - skip for business accounts */}
+        {!isBusinessAccount && hasContactPermission === false && contactsData.friends.length === 0 && contactsData.nonConfioFriends.length === 0 && (
           <TouchableOpacity 
             style={styles.permissionPrompt}
             onPress={async () => {
@@ -887,9 +943,35 @@ export const ContactsScreen = () => {
     );
     
     return HeaderContent;
-  }, [searchTerm, hasContactPermission, isLoadingContacts, refreshing, contactsData.friends.length, contactsData.nonConfioFriends.length, handleSendWithAddress, handleRefresh]);
+  }, [searchTerm, hasContactPermission, isLoadingContacts, refreshing, contactsData.friends.length, contactsData.nonConfioFriends.length, handleSendWithAddress, handleRefresh, isBusinessAccount]);
 
   const ListEmptyComponent = useCallback(() => {
+    // For business accounts, show Add Employee button
+    if (isBusinessAccount) {
+      return (
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIconContainer}>
+            <Icon name="users" size={32} color="#9ca3af" />
+          </View>
+          <Text style={styles.emptyTitle}>Sin empleados</Text>
+          <Text style={styles.emptyDescription}>
+            Añade empleados para gestionar tu negocio
+          </Text>
+          
+          <TouchableOpacity 
+            style={styles.addEmployeeButton}
+            onPress={() => {
+              // TODO: Navigate to add employee screen
+              Alert.alert('Próximamente', 'La función de añadir empleados estará disponible pronto');
+            }}
+          >
+            <Icon name="user-plus" size={20} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.addEmployeeButtonText}>Añadir empleado</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    
     if (searchTerm) {
       return (
         <View style={styles.emptyState}>
@@ -979,69 +1061,71 @@ export const ContactsScreen = () => {
     }
     
     return null;
-  }, [searchTerm, isInitialLoad, isLoadingContacts, hasContactPermission, handleRefresh]);
+  }, [searchTerm, isInitialLoad, isLoadingContacts, hasContactPermission, handleRefresh, isBusinessAccount]);
 
   return (
     <>
       <View style={styles.container}>
         {/* Move search bar outside of SectionList to prevent keyboard issues */}
-        <View style={styles.searchSection}>
-          <View style={styles.searchBarContainer}>
-            <View style={styles.searchBar}>
-              <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
-              <SearchInput 
-                onSearchChange={handleSearchChange}
-              />
+        {!isBusinessAccount && (
+          <View style={styles.searchSection}>
+            <View style={styles.searchBarContainer}>
+              <View style={styles.searchBar}>
+                <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
+                <SearchInput 
+                  onSearchChange={handleSearchChange}
+                />
+              </View>
+              
+              {/* Manual sync button - always visible */}
+              <TouchableOpacity 
+                style={styles.syncButton}
+                onPress={async () => {
+                  if (hasContactPermission) {
+                    handleRefresh(); // This will sync contacts
+                  } else {
+                    // Check if permission was previously denied
+                    const status = await contactService.getStoredPermissionStatus();
+                    if (status === 'denied' && Platform.OS === 'ios') {
+                      // On iOS, guide to settings
+                      Alert.alert(
+                        'Permisos de Contactos',
+                        'Para sincronizar contactos, ve a Configuración > Confío > Contactos y activa el acceso.',
+                        [
+                          { text: 'Cancelar', style: 'cancel' },
+                          { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
+                        ]
+                      );
+                    } else {
+                      // First time or Android, show modal
+                      setShowPermissionModal(true);
+                    }
+                  }
+                }}
+                disabled={isLoadingContacts || refreshing}
+              >
+                <Icon 
+                  name={hasContactPermission ? "refresh-cw" : "shield"} 
+                  size={20} 
+                  color={isLoadingContacts || refreshing ? "#9ca3af" : colors.primary} 
+                />
+              </TouchableOpacity>
             </View>
             
-            {/* Manual sync button - always visible */}
-            <TouchableOpacity 
-              style={styles.syncButton}
-              onPress={async () => {
-                if (hasContactPermission) {
-                  handleRefresh(); // This will sync contacts
-                } else {
-                  // Check if permission was previously denied
-                  const status = await contactService.getStoredPermissionStatus();
-                  if (status === 'denied' && Platform.OS === 'ios') {
-                    // On iOS, guide to settings
-                    Alert.alert(
-                      'Permisos de Contactos',
-                      'Para sincronizar contactos, ve a Configuración > Confío > Contactos y activa el acceso.',
-                      [
-                        { text: 'Cancelar', style: 'cancel' },
-                        { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
-                      ]
-                    );
-                  } else {
-                    // First time or Android, show modal
-                    setShowPermissionModal(true);
-                  }
-                }
-              }}
-              disabled={isLoadingContacts || refreshing}
-            >
-              <Icon 
-                name={hasContactPermission ? "refresh-cw" : "shield"} 
-                size={20} 
-                color={isLoadingContacts || refreshing ? "#9ca3af" : colors.primary} 
-              />
-            </TouchableOpacity>
+            {/* Test button - only in development */}
+            {__DEV__ && contactsData.nonConfioFriends.length > 0 && (
+              <TouchableOpacity 
+                style={styles.testButton}
+                onPress={handleCreateTestUsers}
+              >
+                <Icon name="user-plus" size={16} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.testButtonText}>
+                  Crear {contactsData.nonConfioFriends.length} usuarios de prueba
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
-          
-          {/* Test button - only in development */}
-          {__DEV__ && contactsData.nonConfioFriends.length > 0 && (
-            <TouchableOpacity 
-              style={styles.testButton}
-              onPress={handleCreateTestUsers}
-            >
-              <Icon name="user-plus" size={16} color="#fff" style={{ marginRight: 8 }} />
-              <Text style={styles.testButtonText}>
-                Crear {contactsData.nonConfioFriends.length} usuarios de prueba
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
+        )}
         
         <SectionList
           sections={sections}
@@ -1059,11 +1143,13 @@ export const ContactsScreen = () => {
           stickySectionHeadersEnabled={false}
           contentContainerStyle={{ paddingBottom: 24 }}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor={colors.primary}
-            />
+            !isBusinessAccount ? (
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={colors.primary}
+              />
+            ) : undefined
           }
           initialNumToRender={20}
           maxToRenderPerBatch={10}
@@ -1084,8 +1170,8 @@ export const ContactsScreen = () => {
         onClose={() => setShowPermissionModal(false)}
       />
       
-      {/* Loading overlay - only show for manual refresh */}
-      {(isLoadingContacts || (isInitialLoad && hasContactPermission && !contactsData.isLoaded)) && (
+      {/* Loading overlay - only show for manual refresh and not for business accounts */}
+      {!isBusinessAccount && (isLoadingContacts || (isInitialLoad && hasContactPermission && !contactsData.isLoaded)) && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>
@@ -1512,5 +1598,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.primaryDark,
     opacity: 0.8,
+  },
+  addEmployeeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 999,
+    marginTop: 24,
+  },
+  addEmployeeButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  employeeSectionTitle: {
+    // Same style as sectionTitle but could be customized if needed
+  },
+  addEmployeeActionButton: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f9fafb',
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    marginBottom: 8,
   },
 });

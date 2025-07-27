@@ -331,6 +331,9 @@ class PayInvoice(graphene.Mutation):
                 payer_business = None
                 payer_type = 'user'  # default to personal
                 payer_display_name = f"{user.first_name} {user.last_name}".strip()
+                # Fallback to username if no first/last name
+                if not payer_display_name:
+                    payer_display_name = user.username or f"User {user.id}"
                 payer_phone = f"{user.phone_country}{user.phone_number}" if user.phone_country and user.phone_number else ""
                 
                 if payer_account.account_type == 'business' and payer_account.business:
