@@ -661,7 +661,7 @@ export const GET_INVOICES = gql`
       createdAt
       updatedAt
       isExpired
-      merchantAccountUser {
+      createdByUser {
         id
         username
         firstName
@@ -700,7 +700,7 @@ export const GET_INVOICES = gql`
             address
           }
         }
-        createdByUser {
+        merchantAccountUser {
           id
           username
           firstName
@@ -2022,6 +2022,15 @@ export const GET_USER_BY_ID = gql`
         suiAddress
         displayName
       }
+    }
+  }
+`;
+
+export const SWITCH_ACCOUNT_TOKEN = gql`
+  mutation SwitchAccountToken($accountType: String!, $accountIndex: Int!) {
+    switchAccountToken(accountType: $accountType, accountIndex: $accountIndex) {
+      token
+      payload
     }
   }
 `;

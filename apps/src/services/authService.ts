@@ -1437,7 +1437,7 @@ export class AuthService {
    * Switch to a different account
    * Note: zkLogin data is user-level, not account-level, so we don't clear it
    */
-  public async switchAccount(accountId: string): Promise<void> {
+  public async switchAccount(accountId: string, apolloClient?: any): Promise<void> {
     const accountManager = AccountManager.getInstance();
     
     console.log('AuthService - switchAccount called with accountId:', accountId);
@@ -1464,6 +1464,60 @@ export class AuthService {
     await accountManager.setActiveAccountContext(accountContext);
     
     console.log('AuthService - Active account context set');
+    
+    // If apolloClient is provided, get a new JWT token with the updated account context
+    if (apolloClient) {
+      try {
+        const { SWITCH_ACCOUNT_TOKEN } = await import('../apollo/queries');
+        
+        const { data } = await apolloClient.mutate({
+          mutation: SWITCH_ACCOUNT_TOKEN,
+          variables: {
+            accountType: accountContext.type,
+            accountIndex: accountContext.index
+          }
+        });
+        
+        if (data?.switchAccountToken?.token) {
+          console.log('AuthService - Got new JWT token with account context');
+          
+          // Get existing refresh token
+          const credentials = await Keychain.getGenericPassword({
+            service: AUTH_KEYCHAIN_SERVICE,
+            username: AUTH_KEYCHAIN_USERNAME
+          });
+          
+          let refreshToken = '';
+          if (credentials && credentials.password) {
+            try {
+              const tokens = JSON.parse(credentials.password);
+              refreshToken = tokens.refreshToken || '';
+            } catch (e) {
+              console.error('Error parsing existing tokens:', e);
+            }
+          }
+          
+          // Store the new access token with the existing refresh token
+          await Keychain.setGenericPassword(
+            AUTH_KEYCHAIN_USERNAME,
+            JSON.stringify({
+              accessToken: data.switchAccountToken.token,
+              refreshToken: refreshToken
+            }),
+            {
+              service: AUTH_KEYCHAIN_SERVICE,
+              username: AUTH_KEYCHAIN_USERNAME,
+              accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+            }
+          );
+          
+          console.log('AuthService - Updated JWT token stored');
+        }
+      } catch (error) {
+        console.error('Error getting new JWT token for account switch:', error);
+        // Continue anyway - the account context is set locally
+      }
+    }
     
     // Note: We do NOT clear zkLogin data because:
     // 1. zkLogin authentication is user-level, not account-level

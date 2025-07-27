@@ -23,6 +23,19 @@ admin.site.index_title = "Welcome to Confío Administration"
 logger = logging.getLogger(__name__)
 
 class LoggingGraphQLView(GraphQLView):
+    def get_context(self, request):
+        """Override to add account context to GraphQL context"""
+        context = super().get_context(request)
+        
+        # Copy account context from request to GraphQL context
+        context.active_account_type = getattr(request, 'active_account_type', 'personal')
+        context.active_account_index = getattr(request, 'active_account_index', 0)
+        context.active_business_id = getattr(request, 'active_business_id', None)
+        
+        logger.info(f"GraphQL Context - User: {context.user}, Account Type: {context.active_account_type}, Account Index: {context.active_account_index}")
+        
+        return context
+    
     def dispatch(self, request, *args, **kwargs):
         if request.method == 'POST':
             try:
@@ -30,6 +43,9 @@ class LoggingGraphQLView(GraphQLView):
                 query = body.get('query', '')
                 logger.info("GraphQL Query: %s", query)
                 logger.info("GraphQL Variables: %s", body.get('variables', {}))
+                
+                # Log account context
+                logger.info(f"Request Account Context - Type: {getattr(request, 'active_account_type', 'not set')}, Index: {getattr(request, 'active_account_index', 'not set')}")
                 
                 # Log balance queries specifically
                 if 'accountBalance' in query:

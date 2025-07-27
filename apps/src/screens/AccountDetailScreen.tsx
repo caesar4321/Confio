@@ -225,8 +225,8 @@ export const AccountDetailScreen = () => {
   // NEW: Unified transactions query (replaces the two above)
   const { data: unifiedTransactionsData, loading: unifiedLoading, refetch: refetchUnified } = useQuery(GET_UNIFIED_TRANSACTIONS, {
     variables: { 
-      accountType: 'personal',
-      accountIndex: 0,
+      accountType: activeAccount?.type || 'personal',
+      accountIndex: activeAccount?.index || 0,
       limit: transactionLimit,
       offset: 0,
       tokenTypes: route.params.accountType === 'cusd' ? ['cUSD', 'CUSD'] : ['CONFIO']

@@ -437,12 +437,20 @@ class Query(graphene.ObjectType):
             return None
 
     def resolve_invoices(self, info):
-        # Users can only view their own invoices
+        # Users can only view their own invoices for the active account
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return []
+        
+        # Get active account context
+        account_type = getattr(info.context, 'active_account_type', 'personal')
+        account_index = getattr(info.context, 'active_account_index', 0)
+        
+        # Filter by user and active account
         return Invoice.objects.filter(
-            created_by_user=user
+            created_by_user=user,
+            merchant_account__account_type=account_type,
+            merchant_account__account_index=account_index
         )
 
     def resolve_payment_transactions(self, info):
@@ -490,19 +498,45 @@ class Query(graphene.ObjectType):
         return queryset
 
     def resolve_payment_transactions_with_friend(self, info, friend_user_id, limit=None):
-        """Resolve payment transactions between current user and a specific friend"""
+        """Resolve payment transactions between current user's active account and a specific friend"""
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return []
         
         from django.db import models
         
+        # Get active account context
+        account_type = getattr(info.context, 'active_account_type', 'personal')
+        account_index = getattr(info.context, 'active_account_index', 0)
+        
+        # Get the user's active account
+        try:
+            from users.models import Account
+            user_account = Account.objects.get(
+                user=user,
+                account_type=account_type,
+                account_index=account_index
+            )
+            
+            if not user_account.sui_address:
+                return []
+                
+        except Account.DoesNotExist:
+            return []
+        
+        # Get all accounts for the friend user
+        friend_accounts = Account.objects.filter(user_id=friend_user_id).values_list('sui_address', flat=True)
+        friend_addresses = list(friend_accounts)
+        
+        if not friend_addresses:
+            return []
+        
         # Get transactions where either:
-        # 1. Current user paid friend's business
-        # 2. Friend paid current user's business
+        # 1. Current user's account paid friend's business account
+        # 2. Friend's account paid current user's business account
         queryset = PaymentTransaction.objects.filter(
-            (models.Q(payer_user=user) & models.Q(merchant_account_user=friend_user_id)) |
-            (models.Q(payer_user=friend_user_id) & models.Q(merchant_account_user=user))
+            (models.Q(payer_address=user_account.sui_address) & models.Q(merchant_address__in=friend_addresses)) |
+            (models.Q(payer_address__in=friend_addresses) & models.Q(merchant_address=user_account.sui_address))
         ).order_by('-created_at')
         
         if limit:
