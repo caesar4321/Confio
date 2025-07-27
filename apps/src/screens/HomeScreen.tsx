@@ -3,7 +3,8 @@ import {
   View, 
   Text, 
   StyleSheet, 
-  TouchableOpacity, 
+  TouchableOpacity,
+  Pressable, 
   Platform, 
   Alert, 
   ScrollView, 
@@ -157,9 +158,15 @@ export const HomeScreen = () => {
     }
   }, [isInitialized, cUSDLoading, confioLoading, cUSDError, confioError, cUSDBalanceData, confioBalanceData]);
   
-  // Parse balances safely
-  const cUSDBalance = parseFloat(cUSDBalanceData?.accountBalance || '0');
-  const confioBalance = parseFloat(confioBalanceData?.accountBalance || '0');
+  // Parse balances safely - memoized for performance
+  const cUSDBalance = React.useMemo(() => 
+    parseFloat(cUSDBalanceData?.accountBalance || '0'), 
+    [cUSDBalanceData?.accountBalance]
+  );
+  const confioBalance = React.useMemo(() => 
+    parseFloat(confioBalanceData?.accountBalance || '0'), 
+    [confioBalanceData?.accountBalance]
+  );
   
   // Calculate portfolio value - Only include cUSD for now
   // CONFIO value is not determined yet
@@ -435,6 +442,27 @@ export const HomeScreen = () => {
 
   // Only refresh accounts when coming from specific screens
   const [hasInitialLoad, setHasInitialLoad] = useState(false);
+
+  // Memoized navigation handlers for better performance
+  const navigateToCUSDAccount = useCallback(() => {
+    navigation.navigate('AccountDetail', { 
+      accountType: 'cusd',
+      accountName: 'Confío Dollar',
+      accountSymbol: '$cUSD',
+      accountBalance: cUSDBalance.toFixed(2),
+      accountAddress: activeAccount?.suiAddress || ''
+    });
+  }, [navigation, cUSDBalance, activeAccount?.suiAddress]);
+
+  const navigateToConfioAccount = useCallback(() => {
+    navigation.navigate('AccountDetail', { 
+      accountType: 'confio',
+      accountName: 'Confío',
+      accountSymbol: '$CONFIO',
+      accountBalance: confioBalance.toFixed(2),
+      accountAddress: activeAccount?.suiAddress || ''
+    });
+  }, [navigation, confioBalance, activeAccount?.suiAddress]);
   
   useFocusEffect(
     React.useCallback(() => {
@@ -642,16 +670,12 @@ export const HomeScreen = () => {
               }}
             >
               {/* cUSD Wallet */}
-              <TouchableOpacity 
-                style={styles.walletCard}
-                onPress={() => navigation.navigate('AccountDetail', { 
-                  accountType: 'cusd',
-                  accountName: 'Confío Dollar',
-                  accountSymbol: '$cUSD',
-                  accountBalance: cUSDBalance.toFixed(2),
-                  accountAddress: activeAccount?.suiAddress || ''
-                })}
-                activeOpacity={0.7}
+              <Pressable 
+                style={({ pressed }) => [
+                  styles.walletCard,
+                  pressed && { opacity: 0.7 }
+                ]}
+                onPress={navigateToCUSDAccount}
               >
                 <View style={styles.walletCardContent}>
                   <View style={[styles.walletLogoContainer, { backgroundColor: '#ffffff' }]}>
@@ -668,19 +692,15 @@ export const HomeScreen = () => {
                     <Icon name="chevron-right" size={20} color="#9ca3af" />
                   </View>
                 </View>
-              </TouchableOpacity>
+              </Pressable>
 
               {/* CONFIO Wallet */}
-              <TouchableOpacity 
-                style={styles.walletCard}
-                onPress={() => navigation.navigate('AccountDetail', { 
-                  accountType: 'confio',
-                  accountName: 'Confío',
-                  accountSymbol: '$CONFIO',
-                  accountBalance: confioBalance.toFixed(2),
-                  accountAddress: activeAccount?.suiAddress || ''
-                })}
-                activeOpacity={0.7}
+              <Pressable 
+                style={({ pressed }) => [
+                  styles.walletCard,
+                  pressed && { opacity: 0.7 }
+                ]}
+                onPress={navigateToConfioAccount}
               >
                 <View style={styles.walletCardContent}>
                   <View style={[styles.walletLogoContainer, { backgroundColor: '#8b5cf6' }]}>
@@ -697,7 +717,7 @@ export const HomeScreen = () => {
                     <Icon name="chevron-right" size={20} color="#9ca3af" />
                   </View>
                 </View>
-              </TouchableOpacity>
+              </Pressable>
             </Animated.View>
           )}
         </View>
