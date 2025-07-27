@@ -2001,6 +2001,13 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
       invitationClaimed
       invitationReverted
       invitationExpiresAt
+      
+      # Conversion-specific fields
+      conversionType
+      fromAmount
+      toAmount
+      fromToken
+      toToken
     }
   }
 `;

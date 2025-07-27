@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -16,12 +17,15 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
 import { MainStackParamList } from '../types/navigation';
 import { useAccount } from '../contexts/AccountContext';
+import { useMutation } from '@apollo/client';
+import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations';
 
 const colors = {
   primary: '#34D399',
   secondary: '#8B5CF6',
   accent: '#3B82F6',
   background: '#F9FAFB',
+  mint: '#10b981', // mint color for free fees
   text: {
     primary: '#1F2937',
     secondary: '#6B7280',
@@ -36,6 +40,10 @@ export const USDCConversionScreen = () => {
   const [amount, setAmount] = useState('');
   const [conversionDirection, setConversionDirection] = useState<'usdc_to_cusd' | 'cusd_to_usdc'>('usdc_to_cusd');
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // GraphQL mutations
+  const [convertUsdcToCusd] = useMutation(CONVERT_USDC_TO_CUSD);
+  const [convertCusdToUsdc] = useMutation(CONVERT_CUSD_TO_USDC);
 
   // Mock balances - in real app, fetch from API
   const usdcBalance = 250.00;
@@ -87,27 +95,60 @@ export const USDCConversionScreen = () => {
     if (!validateAmount()) return;
 
     setIsProcessing(true);
+    console.log('[USDCConversionScreen] Starting conversion:', { amount, conversionDirection, sourceCurrency, targetCurrency });
     
     try {
-      // Simulate conversion process
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Choose the appropriate mutation based on conversion direction
+      const mutation = conversionDirection === 'usdc_to_cusd' ? convertUsdcToCusd : convertCusdToUsdc;
       
-      // Show success
-      Alert.alert(
-        'Conversión exitosa',
-        `Has convertido ${amount} ${sourceCurrency} a ${amount} ${targetCurrency}`,
-        [
-          {
-            text: 'Ver historial',
-            onPress: () => navigation.navigate('USDCHistory'),
-          },
-          {
-            text: 'OK',
-            onPress: () => navigation.goBack(),
-          },
-        ]
-      );
+      console.log('[USDCConversionScreen] Calling mutation with amount:', amount);
+      const { data } = await mutation({
+        variables: { amount },
+      });
+      
+      console.log('[USDCConversionScreen] Mutation response:', data);
+      
+      // Check which mutation was called and get the result
+      const mutationResult = conversionDirection === 'usdc_to_cusd' 
+        ? data?.convertUsdcToCusd 
+        : data?.convertCusdToUsdc;
+      
+      if (mutationResult?.success) {
+        // Show success
+        Alert.alert(
+          'Conversión exitosa',
+          `Has convertido ${amount} ${sourceCurrency} a ${amount} ${targetCurrency}`,
+          [
+            {
+              text: 'Ver historial',
+              onPress: () => {
+                // Navigate back and trigger refresh
+                navigation.navigate('AccountDetail', { 
+                  accountType: 'cusd',
+                  refreshTimestamp: Date.now() // Force refresh
+                });
+              },
+            },
+            {
+              text: 'OK',
+              onPress: () => {
+                // Navigate back and trigger refresh
+                navigation.navigate('AccountDetail', { 
+                  accountType: 'cusd',
+                  refreshTimestamp: Date.now() // Force refresh
+                });
+              },
+            },
+          ]
+        );
+      } else {
+        // Show error from mutation
+        const errorMessage = mutationResult?.errors?.join(', ') || 'Error desconocido';
+        console.error('[USDCConversionScreen] Conversion failed:', errorMessage);
+        Alert.alert('Error', `No se pudo completar la conversión: ${errorMessage}`);
+      }
     } catch (error) {
+      console.error('[USDCConversionScreen] Conversion error:', error);
       Alert.alert('Error', 'No se pudo completar la conversión. Por favor intenta de nuevo.');
     } finally {
       setIsProcessing(false);
@@ -205,7 +246,7 @@ export const USDCConversionScreen = () => {
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Comisión de red</Text>
               <View style={styles.feeValueContainer}>
-                <Text style={[styles.infoValue, { color: colors.primary }]}>Gratis</Text>
+                <Text style={[styles.infoValue, { color: colors.mint }]}>Gratis</Text>
                 <Text style={styles.feeValueNote}>• Cubierto por Confío</Text>
               </View>
             </View>

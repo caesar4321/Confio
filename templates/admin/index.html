@@ -70,12 +70,12 @@
 <div class="dashboard-section">
     <h3>📊 Analytics Dashboard</h3>
     <p>Access comprehensive analytics and insights for your Confío platform.</p>
-    <a href="{% url 'admin_dashboard' %}" class="dashboard-link">🚀 Open Dashboard</a>
+    <a href="{% url 'confio_admin:dashboard' %}" class="dashboard-link">🚀 Open Dashboard</a>
     
     <div class="quick-links">
-        <a href="{% url 'admin_p2p_analytics' %}" class="quick-link">📈 P2P Analytics</a>
-        <a href="{% url 'admin_user_analytics' %}" class="quick-link">👥 User Analytics</a>
-        <a href="{% url 'admin_transaction_analytics' %}" class="quick-link">💰 Transaction Analytics</a>
+        <a href="{% url 'confio_admin:p2p_analytics' %}" class="quick-link">📈 P2P Analytics</a>
+        <a href="{% url 'confio_admin:user_analytics' %}" class="quick-link">👥 User Analytics</a>
+        <a href="{% url 'confio_admin:transaction_analytics' %}" class="quick-link">💰 Transaction Analytics</a>
     </div>
 </div>
 

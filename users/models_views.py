@@ -5,12 +5,13 @@ from django.conf import settings
 
 class UnifiedTransaction(models.Model):
     """
-    Unified view of all transactions (send and payment).
+    Unified view of all transactions (send, payment, and conversion).
     This is a database view, not a table, so it's read-only.
     """
     TRANSACTION_TYPES = [
         ('send', 'Send/Receive'),
         ('payment', 'Payment'),
+        ('conversion', 'Conversion'),
     ]
     
     STATUS_CHOICES = [
@@ -147,6 +148,51 @@ class UnifiedTransaction(models.Model):
                 'amount': self.amount,
                 'description': self.description or 'Unknown transaction'
             }
+
+    def get_conversion_type(self):
+        """Extract conversion type from description"""
+        if self.transaction_type == 'conversion' and self.description:
+            if 'USDC → cUSD' in self.description:
+                return 'usdc_to_cusd'
+            elif 'cUSD → USDC' in self.description:
+                return 'cusd_to_usdc'
+        return None
+    
+    def get_from_amount(self):
+        """For conversions, this is the amount field"""
+        if self.transaction_type == 'conversion':
+            return self.amount
+        return None
+    
+    def get_to_amount(self):
+        """Extract to_amount from conversion description"""
+        if self.transaction_type == 'conversion' and self.description:
+            import re
+            # Match the amount after the arrow
+            match = re.search(r'→\s*([\d.]+)\s*(?:cUSD|USDC)', self.description)
+            if match:
+                return match.group(1)
+        return None
+    
+    def get_from_token(self):
+        """For conversions, determine from token"""
+        if self.transaction_type == 'conversion':
+            conversion_type = self.get_conversion_type()
+            if conversion_type == 'usdc_to_cusd':
+                return 'USDC'
+            elif conversion_type == 'cusd_to_usdc':
+                return 'cUSD'
+        return None
+    
+    def get_to_token(self):
+        """For conversions, determine to token"""
+        if self.transaction_type == 'conversion':
+            conversion_type = self.get_conversion_type()
+            if conversion_type == 'usdc_to_cusd':
+                return 'cUSD'
+            elif conversion_type == 'cusd_to_usdc':
+                return 'USDC'
+        return None
 
     def __str__(self):
         return f"{self.transaction_type.upper()}-{self.transaction_hash or 'pending'}: {self.token_type} {self.amount}"

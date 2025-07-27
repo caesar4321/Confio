@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,8 +6,13 @@ import {
   FlatList,
   TouchableOpacity,
   Platform,
+  RefreshControl,
+  ActivityIndicator,
+  Vibration,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { useQuery } from '@apollo/client';
+import { GET_CONVERSIONS } from '../apollo/mutations';
 import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
 import moment from 'moment';
@@ -20,6 +25,7 @@ const colors = {
   secondary: '#8B5CF6',
   accent: '#3B82F6',
   background: '#F9FAFB',
+  mint: '#10b981', // mint color for free fees
   text: {
     primary: '#1F2937',
     secondary: '#6B7280',
@@ -28,71 +34,56 @@ const colors = {
 
 interface ConversionRecord {
   id: string;
-  type: 'usdc_to_cusd' | 'cusd_to_usdc';
+  conversionId: string;
+  conversionType: 'usdc_to_cusd' | 'cusd_to_usdc';
   fromAmount: string;
   toAmount: string;
-  rate: string;
-  fee: string;
-  date: string;
-  time: string;
-  status: 'completed' | 'pending' | 'failed';
-  hash: string;
+  exchangeRate: string;
+  feeAmount: string;
+  fromToken: string;
+  toToken: string;
+  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  createdAt: string;
+  completedAt?: string;
+  actorType: 'user' | 'business';
+  actorDisplayName: string;
+  actorUser?: {
+    id: string;
+    username: string;
+    email: string;
+  };
+  actorBusiness?: {
+    id: string;
+    name: string;
+  };
 }
-
-// Mock conversion history data
-const mockHistory: ConversionRecord[] = [
-  {
-    id: '1',
-    type: 'usdc_to_cusd',
-    fromAmount: '100.00',
-    toAmount: '100.00',
-    rate: '1 USDC = 1 cUSD',
-    fee: '0.00',
-    date: '2025-07-24',
-    time: '14:30',
-    status: 'completed',
-    hash: '0xabc123def456...',
-  },
-  {
-    id: '2',
-    type: 'cusd_to_usdc',
-    fromAmount: '250.00',
-    toAmount: '250.00',
-    rate: '1 cUSD = 1 USDC',
-    fee: '0.00',
-    date: '2025-07-23',
-    time: '09:15',
-    status: 'completed',
-    hash: '0xdef789ghi012...',
-  },
-  {
-    id: '3',
-    type: 'usdc_to_cusd',
-    fromAmount: '500.00',
-    toAmount: '500.00',
-    rate: '1 USDC = 1 cUSD',
-    fee: '0.00',
-    date: '2025-07-22',
-    time: '16:45',
-    status: 'completed',
-    hash: '0xghi345jkl678...',
-  },
-  {
-    id: '4',
-    type: 'usdc_to_cusd',
-    fromAmount: '75.50',
-    toAmount: '75.50',
-    rate: '1 USDC = 1 cUSD',
-    fee: '0.00',
-    date: '2025-07-20',
-    time: '11:20',
-    status: 'completed',
-    hash: '0xjkl901mno234...',
-  },
-];
 
 export const USDCHistoryScreen = () => {
   const navigation = useNavigation();
+  const [refreshing, setRefreshing] = useState(false);
+  
+  // Fetch conversion history from GraphQL
+  const { data, loading, refetch } = useQuery(GET_CONVERSIONS, {
+    variables: { limit: 50 },
+    fetchPolicy: 'cache-and-network',
+  });
+  
+  const conversions: ConversionRecord[] = data?.conversions || [];
+  
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    if (Platform.OS === 'ios') {
+      Vibration.vibrate(10);
+    }
+    
+    try {
+      await refetch();
+    } catch (error) {
+      console.error('Error refreshing conversions:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetch]);
 
   const getIcon = (type: string) => {
     return type === 'usdc_to_cusd' ? 'arrow-down-circle' : 'arrow-up-circle';
@@ -103,56 +94,94 @@ export const USDCHistoryScreen = () => {
   };
 
   const getTitle = (record: ConversionRecord) => {
-    return record.type === 'usdc_to_cusd' 
+    return record.conversionType === 'usdc_to_cusd' 
       ? `USDC → cUSD`
       : `cUSD → USDC`;
   };
 
-  const formatDate = (date: string) => {
-    const momentDate = moment(date);
-    if (momentDate.isSame(moment(), 'day')) {
-      return 'Hoy';
-    } else if (momentDate.isSame(moment().subtract(1, 'day'), 'day')) {
-      return 'Ayer';
+  const formatDate = (dateString: string) => {
+    const date = moment(dateString);
+    const now = moment();
+    
+    if (date.isSame(now, 'day')) {
+      return `Hoy, ${date.format('HH:mm')}`;
+    } else if (date.isSame(now.clone().subtract(1, 'day'), 'day')) {
+      return `Ayer, ${date.format('HH:mm')}`;
+    } else if (date.isAfter(now.clone().subtract(6, 'days'))) {
+      return date.format('dddd, HH:mm');
     } else {
-      return momentDate.format('DD [de] MMMM');
+      return date.format('D [de] MMMM, HH:mm');
+    }
+  };
+  
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'COMPLETED':
+        return colors.primary;
+      case 'PENDING':
+      case 'PROCESSING':
+        return '#f59e0b';
+      case 'FAILED':
+        return '#ef4444';
+      default:
+        return colors.text.secondary;
+    }
+  };
+  
+  const getStatusText = (status: string) => {
+    switch (status) {
+      case 'COMPLETED':
+        return 'Completado';
+      case 'PENDING':
+        return 'Pendiente';
+      case 'PROCESSING':
+        return 'Procesando';
+      case 'FAILED':
+        return 'Fallido';
+      default:
+        return status;
     }
   };
 
   const renderItem = ({ item }: { item: ConversionRecord }) => (
     <TouchableOpacity style={styles.historyItem}>
       <View style={styles.itemHeader}>
-        <View style={[styles.iconContainer, { backgroundColor: getIconColor(item.type) + '20' }]}>
-          <Icon name={getIcon(item.type)} size={24} color={getIconColor(item.type)} />
+        <View style={[styles.iconContainer, { backgroundColor: getIconColor(item.conversionType) + '20' }]}>
+          <Icon name={getIcon(item.conversionType)} size={24} color={getIconColor(item.conversionType)} />
         </View>
         <View style={styles.itemInfo}>
           <Text style={styles.itemTitle}>{getTitle(item)}</Text>
-          <Text style={styles.itemDate}>{formatDate(item.date)} • {item.time}</Text>
+          <Text style={styles.itemDate}>{formatDate(item.createdAt)}</Text>
         </View>
         <View style={styles.amountContainer}>
-          <Text style={styles.fromAmount}>-{item.fromAmount}</Text>
-          <Text style={styles.toAmount}>+{item.toAmount}</Text>
+          <Text style={styles.fromAmount}>-{item.fromAmount} {item.fromToken}</Text>
+          <Text style={styles.toAmount}>+{item.toAmount} {item.toToken}</Text>
         </View>
       </View>
       
       <View style={styles.itemDetails}>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Tasa</Text>
-          <Text style={styles.detailValue}>{item.rate}</Text>
+          <Text style={styles.detailValue}>1 {item.fromToken} = {item.exchangeRate} {item.toToken}</Text>
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Comisión</Text>
-          <Text style={styles.detailValue}>
-            {item.fee === '0.00' ? 'Gratis' : `${item.fee} USDC`}
-          </Text>
+          {item.feeAmount === '0' || item.feeAmount === '0.000000' ? (
+            <View style={styles.feeContainer}>
+              <Text style={[styles.detailValue, { color: colors.mint }]}>Gratis</Text>
+              <Text style={styles.feeNote}>• Cubierto por Confío</Text>
+            </View>
+          ) : (
+            <Text style={styles.detailValue}>{item.feeAmount} {item.fromToken}</Text>
+          )}
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailLabel}>Estado</Text>
           <View style={styles.statusContainer}>
-            <Text style={[styles.statusText, { color: item.status === 'completed' ? colors.primary : colors.text.secondary }]}>
-              {item.status === 'completed' ? 'Completado' : 'Pendiente'}
+            <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
+              {getStatusText(item.status)}
             </Text>
-            {item.status === 'completed' && (
+            {item.status === 'COMPLETED' && (
               <View style={[styles.statusDot, { backgroundColor: colors.primary }]} />
             )}
           </View>
@@ -171,6 +200,24 @@ export const USDCHistoryScreen = () => {
     </View>
   );
 
+  if (loading && conversions.length === 0) {
+    return (
+      <View style={styles.container}>
+        <Header
+          navigation={navigation}
+          title="Historial de Conversiones"
+          backgroundColor={colors.accent}
+          isLight={true}
+          showBackButton={true}
+        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Cargando conversiones...</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Header
@@ -182,12 +229,20 @@ export const USDCHistoryScreen = () => {
       />
       
       <FlatList
-        data={mockHistory}
+        data={conversions}
         renderItem={renderItem}
         keyExtractor={item => item.id}
         contentContainerStyle={styles.listContent}
         ListEmptyComponent={EmptyState}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
       />
     </View>
   );
@@ -310,5 +365,24 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
     paddingHorizontal: 40,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: colors.text.secondary,
+  },
+  feeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  feeNote: {
+    fontSize: 12,
+    color: colors.text.secondary,
+    marginLeft: 4,
   },
 });

@@ -31,8 +31,9 @@ import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
-import { useQuery } from '@apollo/client';
+import { useQuery, useMutation } from '@apollo/client';
 import { GET_SEND_TRANSACTIONS_BY_ACCOUNT, GET_PAYMENT_TRANSACTIONS_BY_ACCOUNT, GET_UNIFIED_TRANSACTIONS } from '../apollo/queries';
+// import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations'; // Removed - handled in USDCConversion screen
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import moment from 'moment';
 import 'moment/locale/es';
@@ -68,7 +69,7 @@ type AccountDetailScreenNavigationProp = NativeStackNavigationProp<MainStackPara
 type AccountDetailScreenRouteProp = RouteProp<MainStackParamList, 'AccountDetail'>;
 
 interface Transaction {
-  type: 'received' | 'sent' | 'exchange' | 'payment';
+  type: 'received' | 'sent' | 'exchange' | 'payment' | 'conversion';
   from?: string;
   to?: string;
   fromPhone?: string;
@@ -85,6 +86,8 @@ interface Transaction {
   invitationExpiresAt?: string;
   senderAddress?: string;
   recipientAddress?: string;
+  description?: string;
+  conversionType?: string;
 }
 
 // Set Spanish locale for moment
@@ -103,8 +106,6 @@ export const AccountDetailScreen = () => {
   const { formatNumber, formatCurrency } = useNumberFormat();
   const { activeAccount } = useAccount();
   const [showBalance, setShowBalance] = useState(true);
-  const [showExchangeModal, setShowExchangeModal] = useState(false);
-  const [exchangeAmount, setExchangeAmount] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [transactionLimit, setTransactionLimit] = useState(10);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -114,12 +115,17 @@ export const AccountDetailScreen = () => {
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showMoreOptionsModal, setShowMoreOptionsModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  // const [showExchangeModal, setShowExchangeModal] = useState(false); // Removed - using USDCConversion screen directly
+  // const [exchangeAmount, setExchangeAmount] = useState(''); // Removed - handled in USDCConversion screen
+  // const [conversionDirection, setConversionDirection] = useState<'usdc_to_cusd' | 'cusd_to_usdc'>('usdc_to_cusd'); // Removed - handled in USDCConversion screen
+  // const [isProcessingConversion, setIsProcessingConversion] = useState(false); // Removed - handled in USDCConversion screen
   const [transactionFilters, setTransactionFilters] = useState<TransactionFilters>({
     types: {
       sent: true,
       received: true,
       payment: true,
       exchange: true,
+      conversion: true,
     },
     currencies: {
       cUSD: true,
@@ -202,7 +208,11 @@ export const AccountDetailScreen = () => {
     activeAccountIndex: activeAccount?.index,
     activeAccountAddress: activeAccount?.suiAddress,
     paramAddress: accountAddress,
-    accountName: account.name
+    accountName: account.name,
+    routeParams: {
+      accountType: route.params.accountType,
+      accountName: route.params.accountName
+    }
   });
 
   // USDC balance data (shown only for cUSD account)
@@ -213,7 +223,7 @@ export const AccountDetailScreen = () => {
     balanceHidden: "•••••••",
     description: "Para usuarios avanzados - depósito directo vía Sui Blockchain"
   } : null;
-
+  
   // Get real transaction data from GraphQL
   const { data: sendTransactionsData, loading: sendLoading, refetch: refetchSend, fetchMore: fetchMoreSend } = useQuery(GET_SEND_TRANSACTIONS_BY_ACCOUNT, {
     variables: {
@@ -252,16 +262,37 @@ export const AccountDetailScreen = () => {
   });
 
   // NEW: Unified transactions query (replaces the two above)
-  const { data: unifiedTransactionsData, loading: unifiedLoading, refetch: refetchUnified } = useQuery(GET_UNIFIED_TRANSACTIONS, {
-    variables: { 
-      accountType: activeAccount?.type || 'personal',
-      accountIndex: activeAccount?.index || 0,
-      limit: transactionLimit,
-      offset: 0,
-      tokenTypes: route.params.accountType === 'cusd' ? ['cUSD', 'CUSD'] : ['CONFIO']
+  const queryVariables = {
+    accountType: activeAccount?.type || 'personal',
+    accountIndex: activeAccount?.index || 0,
+    limit: transactionLimit,
+    offset: 0,
+    tokenTypes: route.params.accountType === 'cusd' ? ['cUSD', 'CUSD', 'USDC'] : ['CONFIO']
+  };
+  
+  console.log('AccountDetailScreen - GraphQL query variables:', queryVariables);
+  
+  const { data: unifiedTransactionsData, loading: unifiedLoading, error: unifiedError, refetch: refetchUnified } = useQuery(GET_UNIFIED_TRANSACTIONS, {
+    variables: queryVariables,
+    skip: false, // Enable unified transactions
+    onCompleted: (data) => {
+      console.log('AccountDetailScreen - Unified query completed:', {
+        hasData: !!data,
+        transactionCount: data?.unifiedTransactions?.length || 0
+      });
     },
-    skip: false // Enable unified transactions
+    onError: (error) => {
+      console.error('AccountDetailScreen - Unified query error:', error);
+    }
   });
+  
+  if (unifiedError) {
+    console.error('AccountDetailScreen - Query error details:', unifiedError);
+  }
+
+  // Conversion mutations
+  // const [convertUsdcToCusd] = useMutation(CONVERT_USDC_TO_CUSD); // Removed - handled in USDCConversion screen
+  // const [convertCusdToUsdc] = useMutation(CONVERT_CUSD_TO_USDC); // Removed - handled in USDCConversion screen
 
   // Animation entrance
   useEffect(() => {
@@ -296,6 +327,15 @@ export const AccountDetailScreen = () => {
     }).start();
   }, [showSearch, searchAnim]);
   
+  // Listen for refresh trigger from navigation params
+  useEffect(() => {
+    // @ts-ignore - route params type
+    if (route.params?.refreshTimestamp) {
+      console.log('AccountDetailScreen - Refresh triggered from navigation');
+      onRefresh();
+    }
+  }, [route.params, onRefresh]);
+  
   // Pull to refresh handler
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -325,9 +365,11 @@ export const AccountDetailScreen = () => {
     if (unifiedTransactionsData?.unifiedTransactions) {
       unifiedTransactionsData.unifiedTransactions.forEach((tx: any) => {
         // Determine transaction type based on both transactionType and direction
-        let type: 'sent' | 'received' | 'payment' = 'sent';
+        let type: 'sent' | 'received' | 'payment' | 'conversion' = 'sent';
         if (tx.transactionType.toLowerCase() === 'payment') {
           type = 'payment';
+        } else if (tx.transactionType.toLowerCase() === 'conversion') {
+          type = 'conversion';
         } else {
           type = tx.direction === 'sent' ? 'sent' : 'received';
         }
@@ -376,14 +418,85 @@ export const AccountDetailScreen = () => {
           });
         }
         
-        allTransactions.push({
+        // Handle conversion transactions
+        const isConversion = type === 'conversion';
+        
+        // For conversions, prepare default values
+        let conversionAmount = tx.amount; // Use raw amount, will be formatted below
+        let conversionCurrency = 'cUSD'; // Default to cUSD for conversions
+        let conversionType: string | undefined;
+        
+        if (isConversion) {
+          console.log('[Conversion Raw Data]', {
+            id: tx.id,
+            description: tx.description,
+            conversionType: tx.conversionType,
+            fromAmount: tx.fromAmount,
+            toAmount: tx.toAmount,
+            fromToken: tx.fromToken,
+            toToken: tx.toToken,
+            displayAmount: tx.displayAmount,
+            tokenType: tx.tokenType
+          });
+          
+          // Parse conversion type from description if server fields not available
+          conversionType = tx.conversionType;
+          console.log('[Conversion Type Detection]', { 
+            txId: tx.id,
+            txConversionType: tx.conversionType,
+            description: tx.description,
+            hasUSDC: tx.description?.includes('USDC'),
+            hasCUSD: tx.description?.includes('cUSD'),
+            hasArrow: tx.description?.includes('→')
+          });
+          if (!conversionType && tx.description) {
+            // The description format is "Conversión: X USDC → Y cUSD"
+            if (tx.description.includes('USDC →') && tx.description.includes('cUSD')) {
+              conversionType = 'usdc_to_cusd';
+            } else if (tx.description.includes('cUSD →') && tx.description.includes('USDC')) {
+              conversionType = 'cusd_to_usdc';
+            }
+          }
+          console.log('[Conversion Type Result]', { txId: tx.id, conversionType });
+          
+          // For cUSD account view, always show cUSD amount with proper sign
+          if (conversionType === 'usdc_to_cusd') {
+            // USDC to cUSD: gaining cUSD (+)
+            const toAmount = tx.toAmount || (tx.description ? tx.description.match(/→\s*([\d.]+)\s*cUSD/)?.[1] : null);
+            console.log('[Conversion USDC->cUSD]', { toAmount, fromAmount: tx.fromAmount, amount: tx.amount });
+            const amount = parseFloat(String(toAmount || tx.fromAmount || tx.amount)).toFixed(2);
+            conversionAmount = `+${amount}`;
+            conversionCurrency = 'cUSD';
+          } else if (conversionType === 'cusd_to_usdc') {
+            // cUSD to USDC: losing cUSD (-)
+            console.log('[Conversion cUSD->USDC]', { fromAmount: tx.fromAmount, amount: tx.amount });
+            const amount = parseFloat(String(tx.fromAmount || tx.amount)).toFixed(2);
+            conversionAmount = `-${amount}`;
+            conversionCurrency = 'cUSD';
+          } else {
+            // Fallback: no conversion type detected, still format properly
+            console.log('[Conversion Unknown Type]', { description: tx.description, amount: tx.amount });
+            // Try to determine direction from token type
+            const amount = parseFloat(String(tx.amount)).toFixed(2);
+            if (tx.tokenType === 'USDC') {
+              // If showing USDC amount, it's USDC to cUSD (gaining cUSD)
+              conversionAmount = `+${amount}`;
+            } else {
+              // If showing cUSD amount, it's cUSD to USDC (losing cUSD)
+              conversionAmount = `-${amount}`;
+            }
+            conversionCurrency = 'cUSD';
+          }
+        }
+        
+        const finalTransaction = {
           type,
-          from: (type === 'payment' && tx.direction === 'received') || (type === 'received') ? tx.displayCounterparty : undefined,
-          to: (type === 'payment' && tx.direction === 'sent') || (type === 'sent') ? tx.displayCounterparty : undefined,
-          fromPhone: tx.direction === 'received' ? tx.senderPhone : undefined,
-          toPhone: tx.direction === 'sent' ? tx.counterpartyPhone : undefined,
-          amount: tx.displayAmount,
-          currency: tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType,
+          from: isConversion ? undefined : ((type === 'payment' && tx.direction === 'received') || (type === 'received') ? tx.displayCounterparty : undefined),
+          to: isConversion ? undefined : ((type === 'payment' && tx.direction === 'sent') || (type === 'sent') ? tx.displayCounterparty : undefined),
+          fromPhone: isConversion ? undefined : (tx.direction === 'received' ? tx.senderPhone : undefined),
+          toPhone: isConversion ? undefined : (tx.direction === 'sent' ? tx.counterpartyPhone : undefined),
+          amount: isConversion ? conversionAmount : tx.displayAmount,
+          currency: isConversion ? conversionCurrency : (tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType),
           date: tx.createdAt, // Keep full timestamp for proper sorting
           time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
           status: tx.status.toLowerCase() === 'confirmed' ? 'completed' : 'pending',
@@ -393,8 +506,23 @@ export const AccountDetailScreen = () => {
           invitationReverted: tx.invitationReverted || false,
           invitationExpiresAt: tx.invitationExpiresAt,
           senderAddress: tx.senderAddress,
-          recipientAddress: tx.counterpartyAddress // Note: unified view uses counterpartyAddress
-        });
+          recipientAddress: tx.counterpartyAddress, // Note: unified view uses counterpartyAddress
+          description: isConversion ? tx.description : undefined,
+          conversionType: isConversion ? conversionType : undefined
+        };
+        
+        // Debug conversion amounts
+        if (isConversion) {
+          console.log('[Conversion Final]', {
+            id: tx.id,
+            amount: finalTransaction.amount,
+            currency: finalTransaction.currency,
+            conversionType: finalTransaction.conversionType,
+            description: finalTransaction.description
+          });
+        }
+        
+        allTransactions.push(finalTransaction);
       });
     }
     
@@ -501,6 +629,21 @@ export const AccountDetailScreen = () => {
         return `Enviado a ${transaction.to}`;
       case 'exchange':
         return `Intercambio ${transaction.from} → ${transaction.to}`;
+      case 'conversion':
+        // Use conversionType field first, fallback to description parsing
+        if (transaction.conversionType === 'usdc_to_cusd') {
+          return 'Conversión USDC a cUSD';
+        } else if (transaction.conversionType === 'cusd_to_usdc') {
+          return 'Conversión cUSD a USDC';
+        } else if (transaction.description) {
+          // Fallback: parse from description
+          if (transaction.description.includes('USDC →') && transaction.description.includes('cUSD')) {
+            return 'Conversión USDC a cUSD';
+          } else if (transaction.description.includes('cUSD →') && transaction.description.includes('USDC')) {
+            return 'Conversión cUSD a USDC';
+          }
+        }
+        return 'Conversión';
       case 'payment':
         // If amount is positive, it's a payment received
         return transaction.amount.startsWith('+') 
@@ -519,6 +662,8 @@ export const AccountDetailScreen = () => {
         return <Icon name="arrow-up" size={20} color="#EF4444" />;
       case 'exchange':
         return <Icon name="refresh-cw" size={20} color="#3B82F6" />;
+      case 'conversion':
+        return <Icon name="repeat" size={20} color="#34D399" />;
       case 'payment':
         return <Icon name="shopping-bag" size={20} color="#8B5CF6" />;
       default:
@@ -534,7 +679,8 @@ export const AccountDetailScreen = () => {
     usingUnified: !!unifiedTransactionsData,
     unifiedCount: unifiedTransactionsData?.unifiedTransactions?.length || 0,
     formattedCount: transactions.length,
-    firstTransaction: transactions[0]
+    firstTransaction: transactions[0],
+    rawData: unifiedTransactionsData?.unifiedTransactions?.slice(0, 2)
   });
   
   // Debug the actual transaction object
@@ -718,6 +864,25 @@ export const AccountDetailScreen = () => {
         case 'exchange':
           baseTitle = `Intercambio ${transaction.from} → ${transaction.to}`;
           break;
+        case 'conversion':
+          // Use short title for conversions based on conversion type
+          if (transaction.conversionType === 'usdc_to_cusd') {
+            baseTitle = 'Conversión USDC a cUSD';
+          } else if (transaction.conversionType === 'cusd_to_usdc') {
+            baseTitle = 'Conversión cUSD a USDC';
+          } else if (transaction.description) {
+            // Fallback: parse from description
+            if (transaction.description.includes('USDC →') && transaction.description.includes('cUSD')) {
+              baseTitle = 'Conversión USDC a cUSD';
+            } else if (transaction.description.includes('cUSD →') && transaction.description.includes('USDC')) {
+              baseTitle = 'Conversión cUSD a USDC';
+            } else {
+              baseTitle = 'Conversión';
+            }
+          } else {
+            baseTitle = 'Conversión';
+          }
+          break;
         case 'payment':
           if (transaction.amount.startsWith('+')) {
             // For received payments, use the from field directly (already has the payer's name)
@@ -818,98 +983,94 @@ export const AccountDetailScreen = () => {
     );
   };
 
-  const ExchangeModal = () => (
-    <Modal
-      visible={showExchangeModal}
-      transparent
-      animationType="fade"
-      onRequestClose={() => setShowExchangeModal(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Intercambiar USDC</Text>
-            <TouchableOpacity onPress={() => setShowExchangeModal(false)}>
-              <Icon name="arrow-left" size={24} color="#6b7280" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.exchangeContainer}>
-            <View style={styles.exchangeInputContainer}>
-              <View style={styles.exchangeInputHeader}>
-                <Text style={styles.exchangeInputLabel}>Desde</Text>
-                <Text style={styles.exchangeInputLabel}>Disponible: {usdcAccount?.balance} USDC</Text>
-              </View>
-              <View style={styles.exchangeInput}>
-                <TextInput
-                  value={exchangeAmount}
-                  onChangeText={setExchangeAmount}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
-                  style={styles.exchangeInputText}
-                />
-                <View style={styles.currencyBadge}>
-                  <Image source={USDCLogo} style={styles.currencyLogo} />
-                  <Text style={styles.currencyText}>USDC</Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.exchangeArrow}>
-              <Icon name="arrow-down" size={20} color="#6b7280" />
-            </View>
-
-            <View style={styles.exchangeInputContainer}>
-              <View style={styles.exchangeInputHeader}>
-                <Text style={styles.exchangeInputLabel}>A</Text>
-                <Text style={styles.exchangeInputLabel}>Tasa: 1 USDC = 1 cUSD</Text>
-              </View>
-              <View style={styles.exchangeInput}>
-                <Text style={styles.exchangeInputText}>
-                  {exchangeAmount || '0.00'}
-                </Text>
-                <View style={styles.currencyBadge}>
-                  <Image source={cUSDLogo} style={styles.currencyLogo} />
-                  <Text style={styles.currencyText}>cUSD</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.feeContainer}>
-            <View style={styles.feeRow}>
-              <Text style={styles.feeLabel}>Comisión de red</Text>
-              <View style={styles.feeValueContainer}>
-                <Text style={styles.feeValueFree}>Gratis</Text>
-                <Text style={styles.feeValueNote}>• Cubierto por Confío</Text>
-              </View>
-            </View>
-            <View style={styles.feeRow}>
-              <Text style={styles.feeLabel}>Comisión de plataforma</Text>
-              <Text style={styles.feeValue}>$0.00</Text>
-            </View>
-            <View style={styles.feeDivider} />
-            <View style={styles.feeRow}>
-              <Text style={styles.feeTotalLabel}>Total a recibir</Text>
-              <Text style={styles.feeTotalValue}>
-                {exchangeAmount || '0.00'} cUSD
-              </Text>
-            </View>
-          </View>
-
-          <TouchableOpacity
-            style={[
-              styles.exchangeButton,
-              !exchangeAmount && styles.exchangeButtonDisabled
-            ]}
-            disabled={!exchangeAmount}
-          >
-            <Text style={styles.exchangeButtonText}>Confirmar Intercambio</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
+  // Handlers for exchange modal - removed, now handled in USDCConversion screen
+  /*
+  const handleConversion = async () => {
+    console.log('handleConversion called', { exchangeAmount, conversionDirection });
+    
+    if (!exchangeAmount || parseFloat(exchangeAmount) <= 0) {
+      console.log('Invalid amount, returning');
+      return;
+    }
+    
+    setIsProcessingConversion(true);
+    
+    try {
+      console.log('Starting conversion:', { direction: conversionDirection, amount: exchangeAmount });
+      console.log('Mutations available:', { convertUsdcToCusd, convertCusdToUsdc });
+      
+      const mutation = conversionDirection === 'usdc_to_cusd' ? convertUsdcToCusd : convertCusdToUsdc;
+      console.log('Selected mutation:', mutation);
+      
+      let data;
+      try {
+        const response = await mutation({
+          variables: {
+            amount: exchangeAmount
+          }
+        });
+        data = response.data;
+        console.log('Mutation response:', response);
+      } catch (mutationError) {
+        console.error('Mutation error:', mutationError);
+        throw mutationError;
+      }
+      
+      const result = conversionDirection === 'usdc_to_cusd' 
+        ? data?.convertUsdcToCusd 
+        : data?.convertCusdToUsdc;
+      
+      console.log('Conversion result:', result);
+      console.log('Conversion data:', data);
+      console.log('Full mutation response:', { data, result, errors: result?.errors });
+      
+      // Check if we even got a result
+      if (!result) {
+        console.error('No result returned from mutation');
+        Alert.alert('Error', 'No se recibió respuesta del servidor');
+        return;
+      }
+      
+      if (result?.success) {
+        Alert.alert(
+          'Conversión exitosa',
+          `Has convertido ${exchangeAmount} ${conversionDirection === 'usdc_to_cusd' ? 'USDC' : 'cUSD'} exitosamente.`,
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                setShowExchangeModal(false);
+                setExchangeAmount('');
+                onRefresh(); // Refresh balances
+              }
+            }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Error',
+          result?.errors?.[0] || 'No se pudo completar la conversión. Por favor intenta de nuevo.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Conversion error:', error);
+      Alert.alert(
+        'Error',
+        'Ocurrió un error al procesar la conversión. Por favor intenta de nuevo.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setIsProcessingConversion(false);
+    }
+  };
+  
+  const toggleConversionDirection = useCallback(() => {
+    setConversionDirection(prev => 
+      prev === 'usdc_to_cusd' ? 'cusd_to_usdc' : 'usdc_to_cusd'
+    );
+  }, []);
+  */
 
   const handleSend = () => {
     // @ts-ignore - Navigation type mismatch, but should work at runtime
@@ -925,6 +1086,113 @@ export const AccountDetailScreen = () => {
 
     return !(allTypesSelected && allCurrenciesSelected && allStatusSelected && noAmountRange && allTimeRange);
   };
+
+  // Exchange Modal removed - now using USDCConversion screen directly
+  /*
+  const renderExchangeModal = () => {
+    return (
+      <Modal
+        visible={showExchangeModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowExchangeModal(false)}
+      >
+        <TouchableOpacity 
+          style={styles.modalOverlay} 
+          activeOpacity={1}
+          onPress={() => setShowExchangeModal(false)}
+        >
+          <TouchableOpacity 
+            activeOpacity={1} 
+            style={styles.exchangeModalContent}
+            onPress={() => {}} // Prevent keyboard dismissal when tapping modal content
+          >
+            <View style={styles.exchangeModalHeader}>
+              <Text style={styles.exchangeModalTitle}>
+                Intercambio {conversionDirection === 'usdc_to_cusd' ? 'USDC → cUSD' : 'cUSD → USDC'}
+              </Text>
+              <TouchableOpacity onPress={() => setShowExchangeModal(false)}>
+                <Icon name="x" size={24} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.exchangeModalBody}>
+              <View style={styles.exchangeInputSection}>
+                <Text style={styles.exchangeLabel}>Cantidad a convertir</Text>
+                <View style={styles.exchangeInputContainer}>
+                  <TextInput
+                    ref={exchangeInputRef}
+                    style={styles.exchangeInput}
+                    value={exchangeAmount}
+                    onChangeText={handleExchangeAmountChange}
+                    placeholder="0.00"
+                    placeholderTextColor="#9ca3af"
+                    keyboardType="numeric"
+                    autoFocus={true}
+                    returnKeyType="done"
+                  />
+                  <Text style={styles.exchangeCurrency}>
+                    {conversionDirection === 'usdc_to_cusd' ? 'USDC' : 'cUSD'}
+                  </Text>
+                </View>
+                
+                <TouchableOpacity 
+                  style={styles.exchangeDirectionButton}
+                  onPress={toggleConversionDirection}
+                >
+                  <Icon name="refresh-cw" size={16} color="#3b82f6" />
+                  <Text style={styles.exchangeDirectionText}>Cambiar dirección</Text>
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.exchangeInfo}>
+                <View style={styles.exchangeInfoRow}>
+                  <Text style={styles.exchangeInfoLabel}>Recibirás</Text>
+                  <Text style={styles.exchangeInfoValue}>
+                    {exchangeAmount || '0'} {conversionDirection === 'usdc_to_cusd' ? 'cUSD' : 'USDC'}
+                  </Text>
+                </View>
+                <View style={styles.exchangeInfoRow}>
+                  <Text style={styles.exchangeInfoLabel}>Tasa de cambio</Text>
+                  <Text style={styles.exchangeInfoValue}>1:1</Text>
+                </View>
+                <View style={styles.exchangeInfoRow}>
+                  <Text style={styles.exchangeInfoLabel}>Comisión</Text>
+                  <Text style={[styles.exchangeInfoValue, { color: colors.primary }]}>Gratis</Text>
+                </View>
+              </View>
+              
+              <TouchableOpacity
+                style={[
+                  styles.exchangeConfirmButton,
+                  (!exchangeAmount || parseFloat(exchangeAmount) <= 0 || isProcessingConversion) && styles.exchangeConfirmButtonDisabled
+                ]}
+                onPress={() => {
+                  console.log('Conversion button pressed');
+                  console.log('Button state:', {
+                    exchangeAmount,
+                    isProcessingConversion,
+                    disabled: !exchangeAmount || parseFloat(exchangeAmount) <= 0 || isProcessingConversion
+                  });
+                  handleConversion();
+                }}
+                disabled={!exchangeAmount || parseFloat(exchangeAmount) <= 0 || isProcessingConversion}
+              >
+                {isProcessingConversion ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Text style={styles.exchangeConfirmButtonText}>
+                    Convertir {exchangeAmount || '0'} {conversionDirection === 'usdc_to_cusd' ? 'USDC' : 'cUSD'}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+    );
+  };
+  */
 
   const loadMoreTransactions = async () => {
     if (loadingMore || hasReachedEnd) return;
@@ -1169,7 +1437,10 @@ export const AccountDetailScreen = () => {
                 
                 <TouchableOpacity
                   style={[styles.usdcActionButton, styles.usdcSecondaryButton]}
-                  onPress={() => setShowExchangeModal(true)}
+                  onPress={() => {
+                    console.log('Convert button pressed - navigating to USDCConversion screen');
+                    navigation.navigate('USDCConversion');
+                  }}
                 >
                   <Icon name="refresh-cw" size={16} color="#fff" style={styles.actionIcon} />
                   <View style={styles.actionTextContainer}>
@@ -1177,7 +1448,7 @@ export const AccountDetailScreen = () => {
                       Convertir
                     </Text>
                     <Text style={[styles.usdcActionSubtext, { color: 'rgba(255,255,255,0.8)' }]}>
-                      A cUSD
+                      USDC ↔ cUSD
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -1342,7 +1613,6 @@ export const AccountDetailScreen = () => {
         </Animated.View>
       </ScrollView>
 
-      <ExchangeModal />
       
       {/* Help Modal */}
       <Modal
@@ -1444,17 +1714,6 @@ export const AccountDetailScreen = () => {
             <View style={styles.moreOptionsHandle} />
             
             <Text style={styles.moreOptionsTitle}>Más opciones</Text>
-            
-            <TouchableOpacity 
-              style={styles.moreOptionsItem}
-              onPress={() => {
-                setShowMoreOptionsModal(false);
-                navigation.navigate('USDCConversion');
-              }}
-            >
-              <Icon name="refresh-cw" size={20} color="#1f2937" />
-              <Text style={styles.moreOptionsItemText}>Convertir USDC ↔ cUSD</Text>
-            </TouchableOpacity>
             
             <TouchableOpacity 
               style={styles.moreOptionsItem}
@@ -2035,6 +2294,16 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: 16,
   },
+  exchangeArrowButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.neutralDark,
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'center',
+    marginVertical: 16,
+  },
   feeContainer: {
     marginBottom: 24,
   },
@@ -2313,5 +2582,119 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     textAlign: 'center',
     fontWeight: '500',
+  },
+  // Exchange Modal Styles
+  exchangeModalContent: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    margin: 20,
+    maxWidth: 400,
+    width: '90%',
+    alignSelf: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 12,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
+  },
+  exchangeModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  exchangeModalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1f2937',
+  },
+  exchangeModalBody: {
+    padding: 20,
+  },
+  exchangeInputSection: {
+    marginBottom: 24,
+  },
+  exchangeLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#6b7280',
+    marginBottom: 8,
+  },
+  exchangeInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f3f4f6',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  exchangeInput: {
+    flex: 1,
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    padding: 0,
+  },
+  exchangeCurrency: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6b7280',
+    marginLeft: 8,
+  },
+  exchangeDirectionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  exchangeDirectionText: {
+    fontSize: 14,
+    color: '#3b82f6',
+    marginLeft: 6,
+    fontWeight: '500',
+  },
+  exchangeInfo: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+  },
+  exchangeInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  exchangeInfoLabel: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  exchangeInfoValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  exchangeConfirmButton: {
+    backgroundColor: colors.accent,
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  exchangeConfirmButtonDisabled: {
+    opacity: 0.5,
+  },
+  exchangeConfirmButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 }); 

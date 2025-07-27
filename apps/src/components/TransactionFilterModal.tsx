@@ -16,6 +16,7 @@ export interface TransactionFilters {
     received: boolean;
     payment: boolean;
     exchange: boolean;
+    conversion: boolean;
   };
   currencies: {
     cUSD: boolean;
@@ -65,6 +66,7 @@ export const TransactionFilterModal = ({
         received: true,
         payment: true,
         exchange: true,
+        conversion: true,
       },
       currencies: {
         cUSD: true,
@@ -208,6 +210,18 @@ export const TransactionFilterModal = ({
                   <Icon name="refresh-cw" size={16} color={filters.types.exchange ? theme.primary : '#6B7280'} />
                   <Text style={[styles.filterChipText, filters.types.exchange && { color: theme.primary }]}>
                     Intercambio
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.filterChip,
+                    filters.types.conversion && { backgroundColor: theme.primary + '20', borderColor: theme.primary }
+                  ]}
+                  onPress={() => toggleType('conversion')}
+                >
+                  <Icon name="repeat" size={16} color={filters.types.conversion ? theme.primary : '#6B7280'} />
+                  <Text style={[styles.filterChipText, filters.types.conversion && { color: theme.primary }]}>
+                    Conversión
                   </Text>
                 </TouchableOpacity>
               </View>

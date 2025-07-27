@@ -50,21 +50,18 @@ class LoggingGraphQLView(GraphQLView):
                 # Log balance queries specifically
                 if 'accountBalance' in query:
                     logger.info(f"BALANCE QUERY DETECTED - User: {request.user}, Authenticated: {request.user.is_authenticated}")
+                
+                # Log conversion mutations specifically
+                if 'convertUsdcToCusd' in query or 'convertCusdToUsdc' in query:
+                    logger.error(f"CONVERSION MUTATION DETECTED - Query: {query[:200]}, Variables: {body.get('variables', {})}")
             except Exception as e:
                 logger.error("Error parsing GraphQL request: %s", str(e))
         return super().dispatch(request, *args, **kwargs)
 
-from .admin_dashboard import ConfioAdminSite
-
-# Create simple dashboard views without custom admin site
-confio_admin = ConfioAdminSite()
+from .admin_dashboard import confio_admin_site
 
 urlpatterns = [
-    path('admin/dashboard/', staff_member_required(confio_admin.dashboard_view), name='admin_dashboard'),
-    path('admin/p2p-analytics/', staff_member_required(confio_admin.p2p_analytics_view), name='admin_p2p_analytics'),
-    path('admin/user-analytics/', staff_member_required(confio_admin.user_analytics_view), name='admin_user_analytics'),
-    path('admin/transaction-analytics/', staff_member_required(confio_admin.transaction_analytics_view), name='admin_transaction_analytics'),
-    path('admin/', admin.site.urls),
+    path('admin/', confio_admin_site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
     path('prover/', include('prover.urls')),
     path('terms/', terms_view, name='terms'),
