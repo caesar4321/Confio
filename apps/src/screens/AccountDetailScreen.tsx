@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback, memo } from 'react';
 import {
   View,
   Text,
@@ -118,6 +118,7 @@ export const AccountDetailScreen = () => {
   const [hasReachedEnd, setHasReachedEnd] = useState(false);
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showMoreOptionsModal, setShowMoreOptionsModal] = useState(false);
@@ -182,11 +183,11 @@ export const AccountDetailScreen = () => {
   };
 
   // Toggle balance visibility and save preference
-  const toggleBalanceVisibility = () => {
+  const toggleBalanceVisibility = useCallback(() => {
     const newVisibility = !showBalance;
     setShowBalance(newVisibility);
     saveBalanceVisibility(newVisibility);
-  };
+  }, [showBalance, saveBalanceVisibility]);
   
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -719,7 +720,16 @@ export const AccountDetailScreen = () => {
     }
     
     return filtered;
-  }, [transactions, searchQuery, transactionFilters]);
+  }, [
+    transactions, 
+    debouncedSearchQuery,
+    transactionFilters.types,
+    transactionFilters.currencies,
+    transactionFilters.status,
+    transactionFilters.timeRange,
+    transactionFilters.amountRange.min,
+    transactionFilters.amountRange.max
+  ]);
   
   // Group transactions by date
   const groupedTransactions = useMemo((): TransactionSection[] => {
@@ -791,7 +801,7 @@ export const AccountDetailScreen = () => {
     }
   }, [unifiedTransactionsData, transactionLimit, loadingMore]);
 
-  const TransactionItem = ({ transaction }: { transaction: Transaction }) => {
+  const TransactionItem = memo(({ transaction }: { transaction: Transaction }) => {
     // Format the date properly
     const formattedDate = moment(transaction.date).format('DD/MM/YYYY');
     const formattedTime = transaction.time;
@@ -953,7 +963,7 @@ export const AccountDetailScreen = () => {
         </View>
       </TouchableOpacity>
     );
-  };
+  });
 
   // Handlers for exchange modal - removed, now handled in USDCConversion screen
   /*
@@ -1044,12 +1054,12 @@ export const AccountDetailScreen = () => {
   }, []);
   */
 
-  const handleSend = () => {
+  const handleSend = useCallback(() => {
     // @ts-ignore - Navigation type mismatch, but should work at runtime
     navigation.navigate('BottomTabs', { screen: 'Contacts' });
-  };
+  }, [navigation]);
   
-  const hasActiveFilters = () => {
+  const hasActiveFilters = useCallback(() => {
     const allTypesSelected = Object.values(transactionFilters.types).every(v => v);
     const allCurrenciesSelected = Object.values(transactionFilters.currencies).every(v => v);
     const allStatusSelected = Object.values(transactionFilters.status).every(v => v);
@@ -1057,7 +1067,7 @@ export const AccountDetailScreen = () => {
     const allTimeRange = transactionFilters.timeRange === 'all';
 
     return !(allTypesSelected && allCurrenciesSelected && allStatusSelected && noAmountRange && allTimeRange);
-  };
+  }, [transactionFilters]);
 
   // Exchange Modal removed - now using USDCConversion screen directly
   /*
@@ -1382,6 +1392,11 @@ export const AccountDetailScreen = () => {
         renderSectionHeader={({ section: { title } }) => (
           <Text style={styles.sectionHeader}>{title}</Text>
         )}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        updateCellsBatchingPeriod={50}
+        windowSize={10}
+        initialNumToRender={10}
         ListEmptyComponent={() => {
           if (unifiedLoading) {
             return (
