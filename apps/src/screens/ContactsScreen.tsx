@@ -111,9 +111,11 @@ const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, o
 
 // Create isolated SearchInput component to prevent keyboard issues
 const SearchInput = React.memo(({ 
-  onSearchChange 
+  onSearchChange,
+  isBusinessAccount 
 }: { 
   onSearchChange: (text: string) => void;
+  isBusinessAccount: boolean;
 }) => {
   const [localValue, setLocalValue] = useState('');
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
@@ -144,7 +146,7 @@ const SearchInput = React.memo(({
   return (
     <TextInput 
       style={styles.searchInput}
-      placeholder="Buscar contactos..." 
+      placeholder={isBusinessAccount ? "Buscar empleados..." : "Buscar contactos..."} 
       placeholderTextColor="#6b7280"
       value={localValue}
       onChangeText={handleLocalChange}
@@ -167,8 +169,9 @@ export const ContactsScreen = () => {
   // Import useAccount to check account type
   const { activeAccount } = useAccount();
   
-  // Check if this is a business account
+  // Check if this is a business account or confirmed personal account
   const isBusinessAccount = activeAccount?.type === 'business';
+  const isPersonalAccount = activeAccount?.type === 'personal';
   
   // Stable callback for search updates
   const handleSearchChange = useCallback((text: string) => {
@@ -193,10 +196,10 @@ export const ContactsScreen = () => {
     isLoaded: boolean;
   }>({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: false });
 
-  // Check contact permission on mount - skip for business accounts
+  // Check contact permission on mount - only for confirmed personal accounts
   useEffect(() => {
-    if (isBusinessAccount) {
-      console.log('[PERF] Business account - skipping contact permission check');
+    if (!isPersonalAccount) {
+      console.log('[PERF] Not personal account - skipping contact permission check');
       return;
     }
     console.log('[PERF] ContactsScreen mounted');
@@ -204,11 +207,11 @@ export const ContactsScreen = () => {
     checkContactPermission().then(() => {
       console.log(`[PERF] checkContactPermission completed in ${Date.now() - startTime}ms`);
     });
-  }, [isBusinessAccount]);
+  }, [isPersonalAccount]);
 
-  // Monitor contact loading in background - skip for business accounts
+  // Monitor contact loading in background - only for personal accounts
   useEffect(() => {
-    if (isBusinessAccount || !isInitialLoad || !hasContactPermission || contactsData.isLoaded) {
+    if (!isPersonalAccount || !isInitialLoad || !hasContactPermission || contactsData.isLoaded) {
       return;
     }
     
@@ -238,7 +241,7 @@ export const ContactsScreen = () => {
     }, 5000);
 
     return () => clearInterval(checkInterval);
-  }, [hasContactPermission, isInitialLoad, contactsData.isLoaded, isBusinessAccount]);
+  }, [hasContactPermission, isInitialLoad, contactsData.isLoaded, isPersonalAccount]);
 
   // Check and request contact permission
   const checkContactPermission = async () => {
@@ -327,8 +330,8 @@ export const ContactsScreen = () => {
 
   // Sync contacts with device
   const syncContacts = async () => {
-    // Skip for business accounts
-    if (isBusinessAccount) {
+    // Only for personal accounts
+    if (!isPersonalAccount) {
       return;
     }
     
@@ -455,8 +458,8 @@ export const ContactsScreen = () => {
 
   // Handle pull to refresh
   const handleRefresh = async () => {
-    // Skip refresh for business accounts
-    if (isBusinessAccount) {
+    // Only refresh for personal accounts
+    if (!isPersonalAccount) {
       setRefreshing(false);
       return;
     }
@@ -830,6 +833,33 @@ export const ContactsScreen = () => {
           </View>
         </View>
       )}
+      
+      {section.isEmployees && section.count === 0 && (
+        <View style={styles.employeeInfoCard}>
+          <View style={styles.infoCardContent}>
+            <View style={[styles.infoIconContainer, { backgroundColor: colors.primary }]}>
+              <Icon name="user-plus" size={16} color="#fff" />
+            </View>
+            <View style={styles.infoTextContainer}>
+              <Text style={styles.infoTitle}>Añade tu primer empleado</Text>
+              <Text style={styles.infoDescription}>
+                Los empleados pueden recibir pagos en nombre de tu negocio. Solo tú, como propietario, tienes control para enviar dinero.
+              </Text>
+            </View>
+          </View>
+          
+          <TouchableOpacity 
+            style={styles.addEmployeeFromInfoButton}
+            onPress={() => {
+              // TODO: Navigate to add employee screen
+              Alert.alert('Próximamente', 'La función de añadir empleados estará disponible pronto');
+            }}
+          >
+            <Icon name="user-plus" size={16} color="#fff" style={{ marginRight: 8 }} />
+            <Text style={styles.addEmployeeFromInfoButtonText}>Añadir empleado</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   ), []);
 
@@ -872,8 +902,8 @@ export const ContactsScreen = () => {
           </TouchableOpacity>
         )}
         
-        {/* Show permission prompt if user denied but there are no contacts - skip for business accounts */}
-        {!isBusinessAccount && hasContactPermission === false && contactsData.friends.length === 0 && contactsData.nonConfioFriends.length === 0 && (
+        {/* Show permission prompt if user denied but there are no contacts - only for personal accounts */}
+        {isPersonalAccount && hasContactPermission === false && contactsData.friends.length === 0 && contactsData.nonConfioFriends.length === 0 && (
           <TouchableOpacity 
             style={styles.permissionPrompt}
             onPress={async () => {
@@ -943,7 +973,7 @@ export const ContactsScreen = () => {
     );
     
     return HeaderContent;
-  }, [searchTerm, hasContactPermission, isLoadingContacts, refreshing, contactsData.friends.length, contactsData.nonConfioFriends.length, handleSendWithAddress, handleRefresh, isBusinessAccount]);
+  }, [searchTerm, hasContactPermission, isLoadingContacts, refreshing, contactsData.friends.length, contactsData.nonConfioFriends.length, handleSendWithAddress, handleRefresh, isBusinessAccount, isPersonalAccount]);
 
   const ListEmptyComponent = useCallback(() => {
     // For business accounts, show Add Employee button
@@ -953,9 +983,9 @@ export const ContactsScreen = () => {
           <View style={styles.emptyIconContainer}>
             <Icon name="users" size={32} color="#9ca3af" />
           </View>
-          <Text style={styles.emptyTitle}>Sin empleados</Text>
+          <Text style={styles.emptyTitle}>Añade tu primer empleado</Text>
           <Text style={styles.emptyDescription}>
-            Añade empleados para gestionar tu negocio
+            Los empleados pueden recibir pagos en nombre de tu negocio. Solo tú, como propietario, tienes control para enviar dinero.
           </Text>
           
           <TouchableOpacity 
@@ -1061,7 +1091,7 @@ export const ContactsScreen = () => {
     }
     
     return null;
-  }, [searchTerm, isInitialLoad, isLoadingContacts, hasContactPermission, handleRefresh, isBusinessAccount]);
+  }, [searchTerm, isInitialLoad, isLoadingContacts, hasContactPermission, handleRefresh, isBusinessAccount, isPersonalAccount]);
 
   return (
     <>
@@ -1073,6 +1103,7 @@ export const ContactsScreen = () => {
                 <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
                 <SearchInput 
                   onSearchChange={handleSearchChange}
+                  isBusinessAccount={isBusinessAccount}
                 />
               </View>
               
@@ -1080,6 +1111,12 @@ export const ContactsScreen = () => {
               <TouchableOpacity 
                 style={styles.syncButton}
                 onPress={async () => {
+                  if (!isPersonalAccount) {
+                    // For business accounts, do nothing for now
+                    // TODO: Implement employee refresh from server
+                    return;
+                  }
+                  
                   if (hasContactPermission) {
                     handleRefresh(); // This will sync contacts
                   } else {
@@ -1101,18 +1138,18 @@ export const ContactsScreen = () => {
                     }
                   }
                 }}
-                disabled={isLoadingContacts || refreshing}
+                disabled={isLoadingContacts || refreshing || !isPersonalAccount}
               >
                 <Icon 
-                  name={hasContactPermission ? "refresh-cw" : "shield"} 
+                  name={isBusinessAccount || hasContactPermission ? "refresh-cw" : "shield"} 
                   size={20} 
                   color={isLoadingContacts || refreshing ? "#9ca3af" : colors.primary} 
                 />
               </TouchableOpacity>
             </View>
             
-            {/* Test button - only in development */}
-            {__DEV__ && contactsData.nonConfioFriends.length > 0 && (
+            {/* Test button - only in development and for personal accounts */}
+            {__DEV__ && isPersonalAccount && contactsData.nonConfioFriends.length > 0 && (
               <TouchableOpacity 
                 style={styles.testButton}
                 onPress={handleCreateTestUsers}
@@ -1124,7 +1161,6 @@ export const ContactsScreen = () => {
               </TouchableOpacity>
             )}
           </View>
-        </View>
         
         <SectionList
           sections={sections}
@@ -1142,7 +1178,7 @@ export const ContactsScreen = () => {
           stickySectionHeadersEnabled={false}
           contentContainerStyle={{ paddingBottom: 24 }}
           refreshControl={
-            !isBusinessAccount ? (
+            isPersonalAccount ? (
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={handleRefresh}
@@ -1169,8 +1205,8 @@ export const ContactsScreen = () => {
         onClose={() => setShowPermissionModal(false)}
       />
       
-      {/* Loading overlay - only show for manual refresh and not for business accounts */}
-      {!isBusinessAccount && (isLoadingContacts || (isInitialLoad && hasContactPermission && !contactsData.isLoaded)) && (
+      {/* Loading overlay - only show for manual refresh and for personal accounts */}
+      {isPersonalAccount && (isLoadingContacts || (isInitialLoad && hasContactPermission && !contactsData.isLoaded)) && (
         <View style={styles.loadingOverlay}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>
@@ -1625,5 +1661,28 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 16,
     marginBottom: 8,
+  },
+  employeeInfoCard: {
+    backgroundColor: colors.primaryLight,
+    borderColor: colors.primary,
+    borderWidth: 1,
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 12,
+  },
+  addEmployeeFromInfoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    marginTop: 12,
+    alignSelf: 'flex-start',
+  },
+  addEmployeeFromInfoButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
   },
 });
