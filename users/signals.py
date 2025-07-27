@@ -125,14 +125,15 @@ def create_unified_transaction_from_p2p_trade(p2p_trade):
         token_type = offer.token_type if offer else 'cUSD'
         
         # Determine sender/counterparty based on trade type
+        # In P2P trades, the crypto sender is always the "sender" in unified transactions
         if offer and offer.exchange_type == 'BUY':
-            # Seller is sending crypto
+            # BUY offer: buyer wants to buy crypto, so seller sends crypto
             sender_user = p2p_trade.seller_user
             sender_business = p2p_trade.seller_business
             counterparty_user = p2p_trade.buyer_user
             counterparty_business = p2p_trade.buyer_business
         else:
-            # Buyer is receiving crypto (seller sending)
+            # SELL offer: seller wants to sell crypto, so seller sends crypto
             sender_user = p2p_trade.seller_user
             sender_business = p2p_trade.seller_business
             counterparty_user = p2p_trade.buyer_user

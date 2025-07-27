@@ -1916,6 +1916,82 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
   }
 `;
 
+// Unified transactions with a specific friend
+export const GET_UNIFIED_TRANSACTIONS_WITH_FRIEND = gql`
+  query GetUnifiedTransactionsWithFriend($friendUserId: ID, $friendPhone: String, $limit: Int, $offset: Int) {
+    unifiedTransactionsWithFriend(friendUserId: $friendUserId, friendPhone: $friendPhone, limit: $limit, offset: $offset) {
+      id
+      transactionType
+      createdAt
+      updatedAt
+      amount
+      tokenType
+      status
+      transactionHash
+      errorMessage
+      
+      # Computed fields from user perspective
+      direction
+      displayAmount
+      displayCounterparty
+      displayDescription
+      
+      # Original transaction data
+      senderUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      senderBusiness {
+        id
+        name
+        category
+      }
+      senderType
+      senderDisplayName
+      senderPhone
+      senderAddress
+      
+      counterpartyUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      counterpartyBusiness {
+        id
+        name
+        category
+      }
+      counterpartyType
+      counterpartyDisplayName
+      counterpartyPhone
+      counterpartyAddress
+      
+      description
+      invoiceId
+      paymentTransactionId
+      
+      # Invitation fields
+      isInvitation
+      invitationClaimed
+      invitationReverted
+      invitationExpiresAt
+      
+      # Conversion-specific fields
+      conversionType
+      fromAmount
+      toAmount
+      fromToken
+      toToken
+      
+      # P2P Trade ID for navigation
+      p2pTradeId
+    }
+  }
+`;
+
 // User Query by ID
 export const GET_USER_BY_ID = gql`
   query GetUserById($id: ID!) {

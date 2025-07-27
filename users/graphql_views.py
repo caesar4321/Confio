@@ -220,6 +220,15 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         description="Get unified transactions for a specific account"
     )
     
+    unified_transactions_with_friend = graphene.List(
+        UnifiedTransactionType,
+        friend_user_id=graphene.ID(),
+        friend_phone=graphene.String(),
+        limit=graphene.Int(default_value=50),
+        offset=graphene.Int(default_value=0),
+        description="Get unified transactions between current user and a specific friend"
+    )
+    
     def resolve_unified_transactions(self, info, account_type, account_index, 
                                    limit=50, offset=0, token_types=None):
         """Resolve unified transactions for the current user's account"""
@@ -259,6 +268,68 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         # Filter by token types if provided
         if token_types:
             queryset = queryset.filter(token_type__in=token_types)
+        
+        # Order by created_at descending to show newest first
+        queryset = queryset.order_by('-created_at')
+        
+        # Apply pagination and add user address to each transaction for direction calculation
+        transactions = list(queryset[offset:offset + limit])
+        
+        # Set the user's address on each transaction for the resolvers
+        for transaction in transactions:
+            transaction._user_address = account.sui_address
+            
+        return transactions
+    
+    def resolve_unified_transactions_with_friend(self, info, friend_user_id=None, friend_phone=None, 
+                                               limit=50, offset=0):
+        """Resolve unified transactions between current user and a specific friend"""
+        user = info.context.user
+        if not user.is_authenticated:
+            return []
+        
+        # Must have either friend_user_id or friend_phone
+        if not friend_user_id and not friend_phone:
+            return []
+        
+        # Get the current user's personal account (assuming friends are always personal)
+        from users.models import Account
+        try:
+            account = Account.objects.get(
+                user=user,
+                account_type='personal',
+                account_index=0
+            )
+        except Account.DoesNotExist:
+            return []
+        
+        # Base query - transactions involving the current user
+        queryset = UnifiedTransactionTable.objects.filter(
+            Q(
+                Q(sender_user=user) & Q(sender_business__isnull=True)
+            ) | 
+            Q(
+                Q(counterparty_user=user) & Q(counterparty_business__isnull=True)
+            )
+        )
+        
+        # Filter by friend criteria
+        friend_conditions = Q()
+        
+        if friend_user_id:
+            # Filter by friend user ID
+            friend_conditions |= Q(
+                Q(sender_user_id=friend_user_id) | Q(counterparty_user_id=friend_user_id)
+            )
+        
+        if friend_phone:
+            # Filter by friend phone number
+            friend_conditions |= Q(
+                Q(sender_phone=friend_phone) | Q(counterparty_phone=friend_phone)
+            )
+        
+        # Apply friend filter
+        queryset = queryset.filter(friend_conditions)
         
         # Order by created_at descending to show newest first
         queryset = queryset.order_by('-created_at')
