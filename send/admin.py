@@ -14,15 +14,18 @@ class SendTypeFilter(admin.SimpleListFilter):
             ('confio_friend', 'Confío Friend'),
             ('non_confio_friend', 'Non-Confío Friend'),
             ('external_wallet', 'External Wallet'),
+            ('external_deposit', 'External Deposit'),
         )
 
     def queryset(self, request, queryset):
         if self.value() == 'confio_friend':
-            return queryset.filter(recipient_user__isnull=False)
+            return queryset.filter(recipient_user__isnull=False).exclude(sender_type='external')
         elif self.value() == 'non_confio_friend':
-            return queryset.filter(recipient_user__isnull=True, recipient_phone__isnull=False).exclude(recipient_phone='')
+            return queryset.filter(recipient_user__isnull=True, recipient_phone__isnull=False).exclude(recipient_phone='').exclude(sender_type='external')
         elif self.value() == 'external_wallet':
-            return queryset.filter(recipient_user__isnull=True).filter(Q(recipient_phone__isnull=True) | Q(recipient_phone=''))
+            return queryset.filter(recipient_user__isnull=True).filter(Q(recipient_phone__isnull=True) | Q(recipient_phone='')).exclude(sender_type='external')
+        elif self.value() == 'external_deposit':
+            return queryset.filter(sender_type='external')
         return queryset
 
 @admin.register(SendTransaction)
@@ -103,7 +106,15 @@ class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
     
     def sender_display(self, obj):
         """Display sender with type indicator and colored badge"""
-        if obj.sender_business:
+        if obj.sender_type == 'external':
+            # External wallet deposit
+            return format_html(
+                '<span style="background-color: #6B7280; color: white; padding: 2px 6px; '
+                'border-radius: 4px; font-size: 11px; margin-right: 4px;">EXTERNAL</span>'
+                '<code style="font-size: 11px;">{}</code>',
+                obj.sender_address[:10] + '...' + obj.sender_address[-6:] if len(obj.sender_address) > 20 else obj.sender_address
+            )
+        elif obj.sender_business:
             return format_html(
                 '<span style="background-color: #3B82F6; color: white; padding: 2px 6px; '
                 'border-radius: 4px; font-size: 11px; margin-right: 4px;">BUSINESS</span>'
@@ -124,7 +135,14 @@ class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
     
     def recipient_type_display(self, obj):
         """Display the type of send transaction with colored badge"""
-        if obj.recipient_user:
+        if obj.sender_type == 'external':
+            # External deposit
+            return format_html(
+                '<span style="background-color: #8B5CF6; color: white; padding: 3px 8px; '
+                'border-radius: 12px; font-size: 11px; font-weight: 600; '
+                'text-transform: uppercase; letter-spacing: 0.5px;">💰 External Deposit</span>'
+            )
+        elif obj.recipient_user:
             # Send to Confío friend
             return format_html(
                 '<span style="background-color: #10B981; color: white; padding: 3px 8px; '

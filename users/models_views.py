@@ -32,6 +32,7 @@ class UnifiedTransaction(models.Model):
     ACCOUNT_TYPE_CHOICES = [
         ('user', 'Personal'),
         ('business', 'Business'),
+        ('external', 'External'),
     ]
 
     # Transaction type
