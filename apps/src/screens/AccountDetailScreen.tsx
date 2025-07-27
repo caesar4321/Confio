@@ -88,6 +88,8 @@ interface Transaction {
   recipientAddress?: string;
   description?: string;
   conversionType?: string;
+  isExternalDeposit?: boolean;
+  senderType?: string;
 }
 
 // Set Spanish locale for moment
@@ -442,9 +444,36 @@ export const AccountDetailScreen = () => {
           }
         }
         
+        // Check if this is an external deposit
+        const isExternalDeposit = type === 'received' && tx.senderType?.toLowerCase() === 'external';
+        
+        // Debug external deposits
+        if (type === 'received' && tx.senderType) {
+          console.log('[External Deposit Debug]', {
+            id: tx.id,
+            type,
+            senderType: tx.senderType,
+            isExternalDeposit,
+            displayCounterparty: tx.displayCounterparty,
+            senderAddress: tx.senderAddress,
+          });
+        }
+        
+        // Format the from field - truncate address if it's an external deposit
+        let fromDisplay = undefined;
+        if (isConversion) {
+          fromDisplay = conversionType === 'usdc_to_cusd' ? 'USDC' : conversionType === 'cusd_to_usdc' ? 'cUSD' : undefined;
+        } else if ((type === 'payment' && tx.direction === 'received') || (type === 'received')) {
+          fromDisplay = tx.displayCounterparty;
+          // Truncate external wallet addresses
+          if (isExternalDeposit && fromDisplay && fromDisplay.startsWith('0x') && fromDisplay.length > 20) {
+            fromDisplay = `${fromDisplay.slice(0, 10)}...${fromDisplay.slice(-6)}`;
+          }
+        }
+        
         const finalTransaction = {
           type,
-          from: isConversion ? (conversionType === 'usdc_to_cusd' ? 'USDC' : conversionType === 'cusd_to_usdc' ? 'cUSD' : undefined) : ((type === 'payment' && tx.direction === 'received') || (type === 'received') ? tx.displayCounterparty : undefined),
+          from: fromDisplay,
           to: isConversion ? (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined) : ((type === 'payment' && tx.direction === 'sent') || (type === 'sent') ? tx.displayCounterparty : undefined),
           fromPhone: isConversion ? undefined : (tx.direction === 'received' ? tx.senderPhone : undefined),
           toPhone: isConversion ? undefined : (tx.direction === 'sent' ? tx.counterpartyPhone : undefined),
@@ -462,9 +491,20 @@ export const AccountDetailScreen = () => {
           invitationExpiresAt: tx.invitationExpiresAt,
           senderAddress: tx.senderAddress,
           recipientAddress: tx.counterpartyAddress, // Note: unified view uses counterpartyAddress
+          isExternalDeposit, // Add this flag for the UI to show the "Wallet externa" tag
+          senderType: tx.senderType,
           description: isConversion ? tx.description : undefined,
           conversionType: isConversion ? conversionType : undefined
         };
+        
+        // Debug final transaction for external deposits
+        if (isExternalDeposit) {
+          console.log('[External Deposit Final]', {
+            from: finalTransaction.from,
+            isExternalDeposit: finalTransaction.isExternalDeposit,
+            senderType: finalTransaction.senderType,
+          });
+        }
         
         // Debug conversion amounts
         if (isConversion) {
@@ -839,6 +879,12 @@ export const AccountDetailScreen = () => {
           {transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && (
             <Text style={styles.externalWalletNote}>
               <Icon name="external-link" size={12} color="#3B82F6" /> Wallet externa
+            </Text>
+          )}
+          {/* Show external wallet indicator for deposits from external wallets */}
+          {transaction.isExternalDeposit && (
+            <Text style={styles.externalWalletNote}>
+              <Icon name="download" size={12} color="#10B981" /> Depósito externo
             </Text>
           )}
         </View>

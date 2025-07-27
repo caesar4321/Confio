@@ -25,7 +25,10 @@ class SendTransaction(SoftDeleteModel):
     sender_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='sent_transactions'
+        related_name='sent_transactions',
+        null=True,
+        blank=True,
+        help_text='User who sent the transaction (null for external deposits)'
     )
     recipient_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -57,6 +60,7 @@ class SendTransaction(SoftDeleteModel):
     ACCOUNT_TYPE_CHOICES = [
         ('user', 'Personal'),
         ('business', 'Business'),
+        ('external', 'External'),
     ]
     
     sender_type = models.CharField(
