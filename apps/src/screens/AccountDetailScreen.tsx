@@ -32,7 +32,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_SEND_TRANSACTIONS_BY_ACCOUNT, GET_PAYMENT_TRANSACTIONS_BY_ACCOUNT, GET_UNIFIED_TRANSACTIONS } from '../apollo/queries';
+import { GET_UNIFIED_TRANSACTIONS } from '../apollo/queries';
 // import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations'; // Removed - handled in USDCConversion screen
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import moment from 'moment';
@@ -224,44 +224,7 @@ export const AccountDetailScreen = () => {
     description: "Para usuarios avanzados - depósito directo vía Sui Blockchain"
   } : null;
   
-  // Get real transaction data from GraphQL
-  const { data: sendTransactionsData, loading: sendLoading, refetch: refetchSend, fetchMore: fetchMoreSend } = useQuery(GET_SEND_TRANSACTIONS_BY_ACCOUNT, {
-    variables: {
-      accountType: activeAccount?.type || 'personal',
-      accountIndex: activeAccount?.index || 0,
-      limit: transactionLimit
-    }
-  });
-
-  const { data: paymentTransactionsData, loading: paymentLoading, refetch: refetchPayment, fetchMore: fetchMorePayment } = useQuery(GET_PAYMENT_TRANSACTIONS_BY_ACCOUNT, {
-    variables: {
-      accountType: activeAccount?.type || 'personal',
-      accountIndex: activeAccount?.index || 0,
-      limit: transactionLimit
-    },
-    onCompleted: (data) => {
-      console.log('Payment transactions query completed:', {
-        accountType: activeAccount?.type || 'personal',
-        accountIndex: activeAccount?.index || 0,
-        transactionCount: data?.paymentTransactionsByAccount?.length || 0
-      });
-      // Log first transaction details if any
-      if (data?.paymentTransactionsByAccount?.length > 0) {
-        const firstTx = data.paymentTransactionsByAccount[0];
-        console.log('First payment transaction:', {
-          id: firstTx.id,
-          payerDisplayName: firstTx.payerDisplayName,
-          merchantDisplayName: firstTx.merchantDisplayName,
-          payerUser: firstTx.payerUser,
-          merchantBusiness: firstTx.merchantBusiness,
-          payerAddress: firstTx.payerAddress,
-          merchantAddress: firstTx.merchantAddress
-        });
-      }
-    }
-  });
-
-  // NEW: Unified transactions query (replaces the two above)
+  // Unified transactions query
   const queryVariables = {
     accountType: activeAccount?.type || 'personal',
     accountIndex: activeAccount?.index || 0,
@@ -312,8 +275,6 @@ export const AccountDetailScreen = () => {
   useEffect(() => {
     if (activeAccount) {
       console.log('AccountDetailScreen - Active account changed, refetching transactions');
-      refetchSend();
-      refetchPayment();
       refetchUnified();
     }
   }, [activeAccount?.id, activeAccount?.type, activeAccount?.index]);
@@ -344,11 +305,7 @@ export const AccountDetailScreen = () => {
     }
     
     try {
-      await Promise.all([
-        refetchSend(),
-        refetchPayment(),
-        refetchUnified(),
-      ]);
+      await refetchUnified();
       setTransactionLimit(10);
       setHasReachedEnd(false);
     } catch (error) {
@@ -356,7 +313,7 @@ export const AccountDetailScreen = () => {
     } finally {
       setRefreshing(false);
     }
-  }, [refetchSend, refetchPayment, refetchUnified]);
+  }, [refetchUnified]);
 
   // NEW: Transform unified transactions into the format expected by the UI
   const formatUnifiedTransactions = () => {
@@ -530,84 +487,6 @@ export const AccountDetailScreen = () => {
     return allTransactions;
   };
 
-  // LEGACY: Transform real transactions into the format expected by the UI (backup)
-  const formatTransactions = () => {
-    const allTransactions: Transaction[] = [];
-    // Handle both cUSD and CUSD variations
-    const currentTokenTypes = route.params.accountType === 'cusd' ? ['cUSD', 'CUSD'] : ['CONFIO'];
-
-    // Add send transactions - filter by token type
-    if (sendTransactionsData?.sendTransactionsByAccount) {
-      sendTransactionsData.sendTransactionsByAccount
-        .filter((tx: any) => currentTokenTypes.includes(tx.tokenType))
-        .forEach((tx: any) => {
-          const currentUserIsSender = tx.senderAddress === account.address;
-          
-          allTransactions.push({
-            type: currentUserIsSender ? 'sent' : 'received',
-            from: currentUserIsSender ? undefined : (tx.senderDisplayName || tx.senderUser?.username || 'Unknown'),
-            to: currentUserIsSender ? (tx.recipientDisplayName || tx.recipientUser?.username || 'Unknown') : undefined,
-            amount: currentUserIsSender ? `-${tx.amount}` : `+${tx.amount}`,
-            currency: tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType,
-            date: new Date(tx.createdAt).toISOString().split('T')[0],
-            time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
-            status: tx.status.toLowerCase() === 'confirmed' ? 'completed' : 'pending',
-            hash: tx.transactionHash || 'pending'
-          });
-        });
-    }
-
-    // Add payment transactions - filter by token type
-    if (paymentTransactionsData?.paymentTransactionsByAccount) {
-      paymentTransactionsData.paymentTransactionsByAccount
-        .filter((tx: any) => currentTokenTypes.includes(tx.tokenType))
-        .forEach((tx: any) => {
-          const currentUserIsPayer = tx.payerAddress === account.address;
-          const currentUserIsMerchant = tx.merchantAddress === account.address;
-          
-          // Debug logging for payment transactions
-          console.log('Payment transaction processing:', {
-            txId: tx.id,
-            currentUserIsPayer,
-            currentUserIsMerchant,
-            payerDisplayName: tx.payerDisplayName,
-            merchantDisplayName: tx.merchantDisplayName,
-            displayNameUsed: currentUserIsMerchant ? displayName : (currentUserIsPayer ? displayName : 'N/A'),
-            role: currentUserIsMerchant ? 'merchant' : (currentUserIsPayer ? 'payer' : 'neither')
-          });
-          
-          // Determine the display name based on who we are in the transaction
-          let displayName = 'Unknown';
-          if (currentUserIsMerchant) {
-            // We received payment - show payer's name
-            displayName = tx.payerDisplayName || 
-                         (tx.payerUser ? `${tx.payerUser.firstName} ${tx.payerUser.lastName}`.trim() : '') ||
-                         tx.payerUser?.username || 
-                         'Unknown';
-          } else if (currentUserIsPayer) {
-            // We made payment - show merchant's name
-            displayName = tx.merchantDisplayName || 
-                         tx.merchantBusiness?.name || 
-                         'Unknown';
-          }
-          
-          allTransactions.push({
-            type: 'payment',
-            from: currentUserIsMerchant ? displayName : undefined,
-            to: currentUserIsPayer ? displayName : undefined,
-            amount: currentUserIsPayer ? `-${tx.amount}` : `+${tx.amount}`,
-            currency: tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType,
-            date: new Date(tx.createdAt).toISOString().split('T')[0],
-            time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
-            status: tx.status.toLowerCase() === 'confirmed' ? 'completed' : 'pending',
-            hash: tx.transactionHash || 'pending'
-          });
-        });
-    }
-
-    // Sort by date (newest first)
-    return allTransactions.sort((a, b) => new Date(b.date + ' ' + b.time).getTime() - new Date(a.date + ' ' + a.time).getTime());
-  };
 
   // Helper functions for transaction display
   const getTransactionTitle = (transaction: Transaction) => {
@@ -672,7 +551,7 @@ export const AccountDetailScreen = () => {
   };
 
   // Use unified transactions if available, fallback to legacy format
-  const transactions = unifiedTransactionsData ? formatUnifiedTransactions() : formatTransactions();
+  const transactions = formatUnifiedTransactions();
   
   // Debug which data source is being used
   console.log('AccountDetailScreen - Transaction source:', {
@@ -826,20 +705,13 @@ export const AccountDetailScreen = () => {
     
     // If we have transactions and the count is less than the limit,
     // it means we've loaded all available transactions
-    const currentTokenTypes = route.params.accountType === 'cusd' ? ['cUSD', 'CUSD'] : ['CONFIO'];
+    const unifiedTransactions = unifiedTransactionsData?.unifiedTransactions || [];
     
-    const sendTransactions = (sendTransactionsData?.sendTransactionsByAccount || [])
-      .filter((tx: any) => currentTokenTypes.includes(tx.tokenType));
-    const paymentTransactions = (paymentTransactionsData?.paymentTransactionsByAccount || [])
-      .filter((tx: any) => currentTokenTypes.includes(tx.tokenType));
-    
-    const totalFilteredCount = sendTransactions.length + paymentTransactions.length;
-    
-    // If we have fewer filtered transactions than the limit, we've reached the end
-    if (totalFilteredCount > 0 && totalFilteredCount < transactionLimit) {
+    // If we have fewer unified transactions than the limit, we've reached the end
+    if (unifiedTransactions.length > 0 && unifiedTransactions.length < transactionLimit) {
       setHasReachedEnd(true);
     }
-  }, [sendTransactionsData, paymentTransactionsData, transactionLimit, loadingMore, route.params.accountType]);
+  }, [unifiedTransactionsData, transactionLimit, loadingMore]);
 
   const TransactionItem = ({ transaction }: { transaction: Transaction }) => {
     // Format the date properly
@@ -1204,22 +1076,10 @@ export const AccountDetailScreen = () => {
       // Store the current filtered transaction count
       const prevTransactionCount = transactions.length;
       
-      await Promise.all([
-        fetchMoreSend({
-          variables: { limit: newLimit },
-          updateQuery: (prev, { fetchMoreResult }) => {
-            if (!fetchMoreResult) return prev;
-            return fetchMoreResult;
-          }
-        }),
-        fetchMorePayment({
-          variables: { limit: newLimit },
-          updateQuery: (prev, { fetchMoreResult }) => {
-            if (!fetchMoreResult) return prev;
-            return fetchMoreResult;
-          }
-        })
-      ]);
+      await refetchUnified({
+        ...queryVariables,
+        limit: newLimit
+      });
       
       // Update the limit to trigger re-render
       setTransactionLimit(newLimit);
@@ -1550,7 +1410,7 @@ export const AccountDetailScreen = () => {
           )}
 
           <View style={styles.transactionsList}>
-            {(sendLoading || paymentLoading || unifiedLoading) ? (
+            {unifiedLoading ? (
               <>
                 <TransactionItemSkeleton />
                 <TransactionItemSkeleton />
