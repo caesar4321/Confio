@@ -757,7 +757,9 @@ export const TradeChatScreen: React.FC = () => {
               
               // Determine who is rating whom based on the current user's role
               const iAmBuyer = tradeType === 'buy';
-              const counterpartyInfo = iAmBuyer ? tradeData?.seller : tradeData?.buyer;
+              const counterpartyInfo = iAmBuyer 
+                ? (tradeData?.sellerUser || tradeData?.seller) 
+                : (tradeData?.buyerUser || tradeData?.buyer);
               
               // Get the actual stats for the counterparty
               const counterpartyStats = iAmBuyer 
@@ -794,7 +796,9 @@ export const TradeChatScreen: React.FC = () => {
               navigation.navigate('TraderRating', {
                 tradeId,
                 trader: {
-                  name: `${counterpartyInfo?.firstName || ''} ${counterpartyInfo?.lastName || ''}`.trim() || counterpartyInfo?.username || 'Usuario',
+                  name: iAmBuyer 
+                    ? (tradeData?.sellerDisplayName || `${counterpartyInfo?.firstName || ''} ${counterpartyInfo?.lastName || ''}`.trim() || counterpartyInfo?.username || 'Vendedor')
+                    : (tradeData?.buyerDisplayName || `${counterpartyInfo?.firstName || ''} ${counterpartyInfo?.lastName || ''}`.trim() || counterpartyInfo?.username || 'Comprador'),
                   verified: stats.isVerified || false,
                   completedTrades: stats.completedTrades || 0,
                   successRate: stats.successRate || 0,
@@ -1376,7 +1380,9 @@ export const TradeChatScreen: React.FC = () => {
                 
                 // Determine who is rating whom based on the current user's role
                 const iAmSeller = tradeType === 'sell';
-                const counterpartyInfo = iAmSeller ? tradeData?.buyer : tradeData?.seller;
+                const counterpartyInfo = iAmSeller 
+                  ? (tradeData?.buyerUser || tradeData?.buyer) 
+                  : (tradeData?.sellerUser || tradeData?.seller);
                 
                 // Get the actual stats for the counterparty
                 const counterpartyStats = iAmSeller 
@@ -1410,7 +1416,9 @@ export const TradeChatScreen: React.FC = () => {
                 navigation.navigate('TraderRating', {
                   tradeId,
                   trader: {
-                    name: `${counterpartyInfo?.firstName || ''} ${counterpartyInfo?.lastName || ''}`.trim() || counterpartyInfo?.username || 'Usuario',
+                    name: iAmSeller 
+                      ? (tradeData?.buyerDisplayName || `${counterpartyInfo?.firstName || ''} ${counterpartyInfo?.lastName || ''}`.trim() || counterpartyInfo?.username || 'Comprador')
+                      : (tradeData?.sellerDisplayName || `${counterpartyInfo?.firstName || ''} ${counterpartyInfo?.lastName || ''}`.trim() || counterpartyInfo?.username || 'Vendedor'),
                     verified: stats.isVerified || false,
                     completedTrades: stats.completedTrades || 0,
                     successRate: stats.successRate || 0,
