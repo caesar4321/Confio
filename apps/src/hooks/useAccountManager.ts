@@ -325,7 +325,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         
         // Switch account in auth service with the generated account ID
         const generatedAccountId = `${newActiveAccount.type}_${newActiveAccount.index}`;
-        await authService.switchAccount(generatedAccountId);
+        await authService.switchAccount(generatedAccountId, apolloClient);
         
         // Get the new active account context
         const newActiveContext = await authService.getActiveAccountContext();
@@ -334,25 +334,21 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         // Update the active account context state
         setActiveAccountContext(newActiveContext);
         
-        // Clear Apollo cache without cancelling in-flight queries
-        // This ensures that subsequent requests use the updated account context
+        // Small delay to ensure the new JWT token is propagated
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Clear Apollo cache to ensure fresh data with new account context
         try {
-          // Stop all active queries first to prevent "store reset while query was in flight" error
-          apolloClient.stop();
-          
-          // Clear the cache
-          await apolloClient.clearStore();
-          
-          console.log('useAccountManager - Apollo cache cleared after account switch');
-          
-          // Note: Components will refetch their data automatically when they detect
-          // the account change through React context
+          // Use resetStore instead of clearStore - it clears cache AND refetches active queries
+          await apolloClient.resetStore();
+          console.log('useAccountManager - Apollo store reset after account switch');
         } catch (error) {
-          console.log('useAccountManager - Error clearing Apollo cache:', error);
-          // If clearStore fails, try to at least evict the cache
+          console.log('useAccountManager - Error resetting Apollo store:', error);
+          // If resetStore fails, try cache eviction as fallback
           try {
             apolloClient.cache.evict({});
             apolloClient.cache.gc();
+            console.log('useAccountManager - Cache evicted as fallback');
           } catch (evictError) {
             console.log('useAccountManager - Error evicting cache:', evictError);
           }

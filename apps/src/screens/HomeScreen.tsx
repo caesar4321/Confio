@@ -112,16 +112,24 @@ export const HomeScreen = () => {
     refreshAccounts,
   } = useAccount();
   
-  // Fetch real balances
+  // Fetch real balances - use no-cache to ensure we always get the correct account balance
   const { data: cUSDBalanceData, loading: cUSDLoading, error: cUSDError, refetch: refetchCUSD } = useQuery(GET_ACCOUNT_BALANCE, {
     variables: { tokenType: 'cUSD' },
-    fetchPolicy: 'network-only', // Force network request to bypass any cache issues
+    fetchPolicy: 'no-cache', // Completely bypass cache to ensure correct account context
   });
   
   const { data: confioBalanceData, loading: confioLoading, error: confioError, refetch: refetchConfio } = useQuery(GET_ACCOUNT_BALANCE, {
     variables: { tokenType: 'CONFIO' },
-    fetchPolicy: 'network-only', // Force network request to bypass any cache issues
+    fetchPolicy: 'no-cache', // Completely bypass cache to ensure correct account context
   });
+  
+  // Refetch balances when active account changes
+  useEffect(() => {
+    if (activeAccount) {
+      refetchCUSD();
+      refetchConfio();
+    }
+  }, [activeAccount?.id, activeAccount?.type, activeAccount?.index, refetchCUSD, refetchConfio]);
   
   // Log any errors and data for debugging
   useEffect(() => {

@@ -16,6 +16,9 @@ interface CustomJwtPayload {
   origIat: number;
   auth_token_version: number;
   type: 'access' | 'refresh';
+  account_type?: string;
+  account_index?: number;
+  business_id?: string;
 }
 
 const REFRESH_TOKEN = gql`
@@ -305,7 +308,7 @@ const authLink = setContext(async (operation, { headers }) => {
                 headers: {
                   ...headers,
                   Authorization: `JWT ${data.refreshToken.token}`
-                  // Account context is now embedded in the JWT token
+                  // Account context is embedded in the JWT token
                 }
               };
             } else {
@@ -337,7 +340,7 @@ const authLink = setContext(async (operation, { headers }) => {
                   headers: {
                     ...headers,
                     Authorization: `JWT ${token}`
-                    // Account context is now embedded in the JWT token
+                    // Account context is embedded in the JWT token
                   }
                 });
               } else {
@@ -364,11 +367,18 @@ const authLink = setContext(async (operation, { headers }) => {
       // Always include the token in the header for authenticated requests
       console.log('Including JWT token in request header');
       
+      // Log the token payload to verify account context
+      console.log('Token contains account context:', {
+        account_type: decoded.account_type || 'not present',
+        account_index: decoded.account_index || 'not present',
+        business_id: decoded.business_id || 'not present'
+      });
+      
       return {
         headers: {
           ...headers,
           Authorization: `JWT ${token}`
-          // Account context is now embedded in the JWT token
+          // Account context is embedded in the JWT token
         }
       };
     } catch (error) {

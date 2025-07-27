@@ -341,7 +341,7 @@ class Query(graphene.ObjectType):
 		return sorted(accounts, key=lambda acc: acc.get_ordering_key())
 
 	def resolve_account_balance(self, info, token_type):
-		"""Resolve account balance for a specific token type"""
+		"""Resolve account balance for a specific token type and active account"""
 		user = getattr(info.context, 'user', None)
 		
 		# Log authentication status for debugging
@@ -351,21 +351,49 @@ class Query(graphene.ObjectType):
 			print(f"AccountBalance resolver - Returning 0 for unauthenticated user")
 			return "0"
 		
+		# Get active account context
+		account_type = getattr(info.context, 'active_account_type', 'personal')
+		account_index = getattr(info.context, 'active_account_index', 0)
+		
+		print(f"AccountBalance resolver - Active Account: {account_type}_{account_index}")
+		
+		# Get the specific account
+		try:
+			from .models import Account
+			account = Account.objects.get(
+				user=user,
+				account_type=account_type,
+				account_index=account_index
+			)
+			print(f"AccountBalance resolver - Found account with Sui address: {account.sui_address}")
+		except Account.DoesNotExist:
+			print(f"AccountBalance resolver - Account not found: {account_type}_{account_index}")
+			return "0"
+		
 		# Normalize token type
 		normalized_token_type = token_type.upper()
 		if normalized_token_type == 'CUSD':
 			normalized_token_type = 'cUSD'
 		
-		# For now, return mock balances based on token type
-		# In a real implementation, this would query the blockchain or a balance service
-		mock_balances = {
-			'cUSD': '2850.35',
-			'CONFIO': '234.18',
-			'USDC': '458.22'
-		}
+		# For now, return mock balances based on account type and token type
+		# In production, this would query the blockchain using account.sui_address
+		if account_type == 'personal':
+			mock_balances = {
+				'cUSD': '150.00',
+				'CONFIO': '50.00',
+				'USDC': '200.00'
+			}
+		else:
+			# Significantly different balances for business accounts
+			# Business accounts typically have more funds
+			mock_balances = {
+				'cUSD': '25000.00',
+				'CONFIO': '5000.00',
+				'USDC': '10000.00'
+			}
 		
 		balance = mock_balances.get(normalized_token_type, '0')
-		print(f"AccountBalance resolver - Returning {balance} for {normalized_token_type}")
+		print(f"AccountBalance resolver - Returning {balance} for {normalized_token_type} on {account_type} account")
 		return balance
 
 	def resolve_countries(self, info, is_active=None):
@@ -916,8 +944,18 @@ class SwitchAccountToken(graphene.Mutation):
 			context = MockContext(account_type, account_index)
 			
 			# Generate new token with account context
+			from users.jwt import jwt_payload_handler
+			from graphql_jwt.settings import jwt_settings
+			import jwt
+			
 			new_payload = jwt_payload_handler(user, context)
-			new_token = jwt_encode(new_payload)
+			
+			# Encode the token manually to ensure our payload is used
+			new_token = jwt.encode(
+				new_payload,
+				jwt_settings.JWT_SECRET_KEY,
+				jwt_settings.JWT_ALGORITHM
+			)
 			
 			return SwitchAccountToken(
 				token=new_token,

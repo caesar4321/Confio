@@ -49,16 +49,24 @@ export const HomeScreenEnhanced = () => {
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
   const fadeAnim = useCallback(() => new Animated.Value(0), []);
   
-  // Fetch real balances
+  // Fetch real balances - use no-cache to ensure we always get the correct account balance
   const { data: cUSDBalance, refetch: refetchCUSD } = useQuery(GET_ACCOUNT_BALANCE, {
     variables: { tokenType: 'cUSD' },
-    fetchPolicy: 'cache-and-network',
+    fetchPolicy: 'no-cache', // Completely bypass cache to ensure correct account context
   });
   
   const { data: confioBalance, refetch: refetchConfio } = useQuery(GET_ACCOUNT_BALANCE, {
     variables: { tokenType: 'CONFIO' },
-    fetchPolicy: 'cache-and-network',
+    fetchPolicy: 'no-cache', // Completely bypass cache to ensure correct account context
   });
+
+  // Refetch balances when active account changes
+  useEffect(() => {
+    if (activeAccount) {
+      refetchCUSD();
+      refetchConfio();
+    }
+  }, [activeAccount?.id, activeAccount?.type, activeAccount?.index, refetchCUSD, refetchConfio]);
 
   // Calculate total portfolio value
   const calculateTotalValue = () => {

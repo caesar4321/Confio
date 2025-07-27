@@ -332,7 +332,7 @@ class Query(graphene.ObjectType):
     all_send_transactions = graphene.List(SendTransactionType, limit=graphene.Int())
 
     def resolve_send_transactions(self, info):
-        """Resolve all send transactions for the authenticated user"""
+        """Resolve all send transactions for the authenticated user and active account"""
         user = getattr(info.context, 'user', None)
         
         # TEMPORARY: For demo purposes, show some transactions
@@ -340,6 +340,29 @@ class Query(graphene.ObjectType):
             # Return some demo transactions for testing UI
             return SendTransaction.objects.all().order_by('-created_at')[:5]
         
+        # Get active account context
+        account_type = getattr(info.context, 'active_account_type', 'personal')
+        account_index = getattr(info.context, 'active_account_index', 0)
+        
+        # Get the account
+        try:
+            from users.models import Account
+            account = Account.objects.get(
+                user=user,
+                account_type=account_type,
+                account_index=account_index
+            )
+            
+            # Filter by account's Sui address
+            if account.sui_address:
+                return SendTransaction.objects.filter(
+                    models.Q(sender_address=account.sui_address) | 
+                    models.Q(recipient_address=account.sui_address)
+                ).order_by('-created_at')
+        except Account.DoesNotExist:
+            pass
+        
+        # Fallback to user-based filtering if account not found
         return SendTransaction.objects.filter(
             models.Q(sender_user=user) | models.Q(recipient_user=user)
         ).order_by('-created_at')
@@ -389,24 +412,49 @@ class Query(graphene.ObjectType):
         return queryset
 
     def resolve_send_transactions_with_friend(self, info, friend_user_id=None, friend_phone=None, limit=None):
-        """Resolve send transactions between current user and a specific friend"""
+        """Resolve send transactions between current user's active account and a specific friend"""
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
             return []
         
+        # Get active account context
+        account_type = getattr(info.context, 'active_account_type', 'personal')
+        account_index = getattr(info.context, 'active_account_index', 0)
+        
+        # Get the user's active account
+        try:
+            from users.models import Account
+            user_account = Account.objects.get(
+                user=user,
+                account_type=account_type,
+                account_index=account_index
+            )
+            
+            if not user_account.sui_address:
+                return []
+                
+        except Account.DoesNotExist:
+            return []
+        
         # Build the query based on whether we have a user ID or phone number
         if friend_user_id and not friend_user_id.startswith('contact_'):
-            # Regular Confío user - search by user ID
-            queryset = SendTransaction.objects.filter(
-                (models.Q(sender_user=user) & models.Q(recipient_user=friend_user_id)) |
-                (models.Q(sender_user=friend_user_id) & models.Q(recipient_user=user))
-            ).order_by('-created_at')
+            # Regular Confío user - search by user ID and account addresses
+            # Get all accounts for the friend user
+            friend_accounts = Account.objects.filter(user_id=friend_user_id).values_list('sui_address', flat=True)
+            friend_addresses = list(friend_accounts)
+            
+            if friend_addresses:
+                queryset = SendTransaction.objects.filter(
+                    (models.Q(sender_address=user_account.sui_address) & models.Q(recipient_address__in=friend_addresses)) |
+                    (models.Q(sender_address__in=friend_addresses) & models.Q(recipient_address=user_account.sui_address))
+                ).order_by('-created_at')
+            else:
+                # Friend has no accounts with addresses yet
+                queryset = SendTransaction.objects.none()
         elif friend_phone:
-            # Non-Confío friend - search by phone number
-            # ONLY show transactions where current user sent to this phone number
-            # We don't show received transactions from phone numbers as they can change
+            # Non-Confío friend - search by phone number from user's account
             queryset = SendTransaction.objects.filter(
-                models.Q(sender_user=user) & models.Q(recipient_phone=friend_phone)
+                models.Q(sender_address=user_account.sui_address) & models.Q(recipient_phone=friend_phone)
             ).order_by('-created_at')
         else:
             # No valid identifier provided
