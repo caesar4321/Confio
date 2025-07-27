@@ -1067,8 +1067,7 @@ export const ContactsScreen = () => {
     <>
       <View style={styles.container}>
         {/* Move search bar outside of SectionList to prevent keyboard issues */}
-        {!isBusinessAccount && (
-          <View style={styles.searchSection}>
+        <View style={styles.searchSection}>
             <View style={styles.searchBarContainer}>
               <View style={styles.searchBar}>
                 <Icon name="search" size={20} color="#9ca3af" style={styles.searchIcon} />
@@ -1125,7 +1124,7 @@ export const ContactsScreen = () => {
               </TouchableOpacity>
             )}
           </View>
-        )}
+        </View>
         
         <SectionList
           sections={sections}
