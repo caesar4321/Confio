@@ -161,7 +161,7 @@ export type MainStackParamList = {
     isOnConfio: boolean;
   };
   TransactionDetail: {
-    transactionType: 'received' | 'sent' | 'exchange' | 'payment';
+    transactionType: 'received' | 'sent' | 'exchange' | 'payment' | 'deposit' | 'withdrawal' | 'conversion';
     transactionData?: any; // You can make this more specific based on your data structure
   };
   TransactionProcessing: {
