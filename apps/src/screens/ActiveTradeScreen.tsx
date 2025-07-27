@@ -99,9 +99,11 @@ export const ActiveTradeScreen: React.FC = () => {
   const fullTradeData = tradeDetailsData?.p2pTrade;
   const currentUserId = userProfile?.id;
   
-  // Determine if current user is buyer or seller
-  const iAmBuyer = fullTradeData ? fullTradeData.buyer?.id === currentUserId : false;
-  const iAmSeller = fullTradeData ? fullTradeData.seller?.id === currentUserId : false;
+  // Determine if current user is buyer or seller using new fields
+  const iAmBuyer = fullTradeData ? 
+    (fullTradeData.buyerUser?.id === currentUserId || fullTradeData.buyer?.id === currentUserId) : false;
+  const iAmSeller = fullTradeData ? 
+    (fullTradeData.sellerUser?.id === currentUserId || fullTradeData.seller?.id === currentUserId) : false;
   
   const trade = fullTradeData ? {
     id: fullTradeData.id,
@@ -111,19 +113,27 @@ export const ActiveTradeScreen: React.FC = () => {
     tradeType: iAmBuyer ? 'buy' : 'sell', // Current user's perspective
     trader: iAmBuyer ? {
       // If I'm buyer, show seller info
-      name: `${fullTradeData.seller?.firstName || ''} ${fullTradeData.seller?.lastName || ''}`.trim() || fullTradeData.seller?.username || 'Vendedor',
+      name: fullTradeData.sellerDisplayName || 
+        `${fullTradeData.sellerUser?.firstName || ''} ${fullTradeData.sellerUser?.lastName || ''}`.trim() || 
+        fullTradeData.sellerUser?.username || 
+        `${fullTradeData.seller?.firstName || ''} ${fullTradeData.seller?.lastName || ''}`.trim() || 
+        fullTradeData.seller?.username || 'Vendedor',
       isOnline: fullTradeData.sellerStats?.isOnline || false,
       verified: fullTradeData.sellerStats?.isVerified || false,
-      lastSeen: fullTradeData.seller?.lastLogin || null,
+      lastSeen: fullTradeData.sellerUser?.lastLogin || fullTradeData.seller?.lastLogin || null,
       responseTime: fullTradeData.sellerStats?.avgResponseTime || 'N/A',
       completedTrades: fullTradeData.sellerStats?.completedTrades || 0,
       successRate: fullTradeData.sellerStats?.successRate || 0,
     } : {
       // If I'm seller, show buyer info
-      name: `${fullTradeData.buyer?.firstName || ''} ${fullTradeData.buyer?.lastName || ''}`.trim() || fullTradeData.buyer?.username || 'Comprador',
+      name: fullTradeData.buyerDisplayName || 
+        `${fullTradeData.buyerUser?.firstName || ''} ${fullTradeData.buyerUser?.lastName || ''}`.trim() || 
+        fullTradeData.buyerUser?.username || 
+        `${fullTradeData.buyer?.firstName || ''} ${fullTradeData.buyer?.lastName || ''}`.trim() || 
+        fullTradeData.buyer?.username || 'Comprador',
       isOnline: fullTradeData.buyerStats?.isOnline || false,
       verified: fullTradeData.buyerStats?.isVerified || false,
-      lastSeen: fullTradeData.buyer?.lastLogin || null,
+      lastSeen: fullTradeData.buyerUser?.lastLogin || fullTradeData.buyer?.lastLogin || null,
       responseTime: fullTradeData.buyerStats?.avgResponseTime || 'N/A',
       completedTrades: fullTradeData.buyerStats?.completedTrades || 0,
       successRate: fullTradeData.buyerStats?.successRate || 0,
@@ -134,7 +144,7 @@ export const ActiveTradeScreen: React.FC = () => {
     countryCode: fullTradeData.countryCode,
     currencyCode: fullTradeData.currencyCode,
     paymentMethod: fullTradeData.paymentMethod?.displayName || 'N/A',
-    rate: fullTradeData.exchangeRate || fullTradeData.rate,
+    rate: fullTradeData.rateUsed || fullTradeData.exchangeRate || fullTradeData.rate || '0',
     timeRemaining: 900, // Default 15 minutes
     createdAt: fullTradeData.createdAt,
     completedAt: fullTradeData.completedAt,

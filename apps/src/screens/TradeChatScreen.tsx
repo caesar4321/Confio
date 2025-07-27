@@ -1781,7 +1781,7 @@ export const TradeChatScreen: React.FC = () => {
             ) : (
               <View style={styles.inputRow}>
           {/* Share Payment Details Button - Only show for seller in step 1 */}
-          {tradeType === 'sell' && currentTradeStep === 1 && (
+          {computedTradeType === 'sell' && currentTradeStep === 1 && (
             <TouchableOpacity 
               onPress={handleSharePaymentDetails}
               onLongPress={() => Alert.alert('Compartir Datos de Pago', 'Comparte los datos de tu método de pago seleccionado con el comprador')}
@@ -1793,7 +1793,7 @@ export const TradeChatScreen: React.FC = () => {
           
           
           {/* Request Payment Details Button - Only show for buyer in step 1 */}
-          {tradeType === 'buy' && currentTradeStep === 1 && (
+          {computedTradeType === 'buy' && currentTradeStep === 1 && (
             <TouchableOpacity 
               onPress={() => {
                 Alert.alert(
