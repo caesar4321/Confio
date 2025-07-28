@@ -24,8 +24,6 @@ class Command(BaseCommand):
             'traveler',
             'merchant_10',
             # Community
-            'ambassador_5',
-            'community_helper',
             'hodler_30',
             'veteran_6months',
             # TikTok Viral

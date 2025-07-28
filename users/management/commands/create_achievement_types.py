@@ -123,31 +123,13 @@ class Command(BaseCommand):
             
             # 🤝 COMUNIDAD (COMMUNITY) - Priority 4
             {
-                'slug': 'ambassador_5',
-                'name': 'Embajador',
-                'description': 'Refiere a 5 nuevos usuarios que completen su registro',
-                'category': 'social',
-                'icon_emoji': '🤝',
-                'confio_reward': 10,  # $2.50 - Organic growth valuable
-                'display_order': 30
-            },
-            {
-                'slug': 'community_helper',
-                'name': 'Ayudante Comunitario',
-                'description': 'Ayuda a 3 usuarios nuevos con sus primeras transacciones',
-                'category': 'social',
-                'icon_emoji': '💫',
-                'confio_reward': 8,  # $2 - Support reduces costs
-                'display_order': 31
-            },
-            {
                 'slug': 'hodler_30',
                 'name': 'Hodler',
                 'description': 'Mantén cUSD en tu cuenta por 30 días',
                 'category': 'social',
                 'icon_emoji': '💎',
                 'confio_reward': 12,  # $3 - Liquidity valuable
-                'display_order': 32
+                'display_order': 30
             },
             {
                 'slug': 'veteran_6months',
@@ -156,7 +138,7 @@ class Command(BaseCommand):
                 'category': 'social',
                 'icon_emoji': '🎖️',
                 'confio_reward': 40,  # $10 - Long-term retention
-                'display_order': 33
+                'display_order': 31
             },
             
             # 🎯 TIKTOK VIRAL - Priority 5 - SCALED DOWN
@@ -167,7 +149,7 @@ class Command(BaseCommand):
                 'category': 'social',
                 'icon_emoji': '🎯',
                 'confio_reward': 4,  # $1 - Part of CPI strategy
-                'display_order': 40
+                'display_order': 32
             },
             {
                 'slug': 'primera_viral',
@@ -176,7 +158,7 @@ class Command(BaseCommand):
                 'category': 'social',
                 'icon_emoji': '🎬',
                 'confio_reward': 4,  # $1 - Scaled down from $5
-                'display_order': 41
+                'display_order': 33
             },
             {
                 'slug': 'explosion_viral',
@@ -185,7 +167,7 @@ class Command(BaseCommand):
                 'category': 'social',
                 'icon_emoji': '💥',
                 'confio_reward': 20,  # $5 - Scaled down from $25
-                'display_order': 42
+                'display_order': 34
             },
             {
                 'slug': 'mega_viral',
@@ -194,7 +176,7 @@ class Command(BaseCommand):
                 'category': 'social',
                 'icon_emoji': '🚀',
                 'confio_reward': 80,  # $20 - Major reach
-                'display_order': 43
+                'display_order': 35
             },
             {
                 'slug': 'tendencia_nacional',
@@ -203,7 +185,7 @@ class Command(BaseCommand):
                 'category': 'social',
                 'icon_emoji': '🏆',
                 'confio_reward': 250,  # $62.50 - Massive viral impact
-                'display_order': 44
+                'display_order': 36
             },
             
             # 👑 INFLUENCER TIERS - Priority 6 (Least common)
@@ -214,7 +196,7 @@ class Command(BaseCommand):
                 'category': 'ambassador',
                 'icon_emoji': '🌱',
                 'confio_reward': 4,  # $1 - Per influencer referral already
-                'display_order': 50
+                'display_order': 40
             },
             {
                 'slug': 'micro_influencer',
@@ -223,7 +205,7 @@ class Command(BaseCommand):
                 'category': 'ambassador',
                 'icon_emoji': '⭐',
                 'confio_reward': 8,  # $2 - Bonus for scale
-                'display_order': 51
+                'display_order': 41
             },
             {
                 'slug': 'macro_influencer',
@@ -232,7 +214,7 @@ class Command(BaseCommand):
                 'category': 'ambassador',
                 'icon_emoji': '💫',
                 'confio_reward': 20,  # $5 - Major growth driver
-                'display_order': 52
+                'display_order': 42
             },
             {
                 'slug': 'confio_ambassador',
@@ -241,7 +223,7 @@ class Command(BaseCommand):
                 'category': 'ambassador',
                 'icon_emoji': '👑',
                 'confio_reward': 0,  # Custom deal at this level
-                'display_order': 53
+                'display_order': 43
             }
         ]
 
