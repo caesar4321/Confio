@@ -1762,35 +1762,156 @@ location ^~ /.well-known/ {
 
 ## 🏆 Achievements (Logros) System
 
-The Confío app includes a gamified achievement system to encourage user engagement and promote viral growth through social sharing.
+The Confío app includes a comprehensive gamified achievement system designed to drive user engagement, encourage core app usage, and promote viral growth through TikTok integration.
 
-### Achievement Types
+### Achievement Categories
 
-1. **Primeros Pasos** (First Steps) - Complete registration
-2. **Primera Compra** (First Purchase) - Complete first P2P trade
-3. **Primer Envío** (First Send) - Send cUSD for the first time
-4. **Primera Recepción** (First Receive) - Receive cUSD for the first time
-5. **Primer Pago** (First Payment) - Make first merchant payment
-6. **Verificado** (Verified) - Complete identity verification
-7. **10 Intercambios** (10 Trades) - Complete 10 P2P trades
-8. **Embajador** (Ambassador) - Refer 5 new users
-9. **Hodler** (Hodler) - Hold cUSD for 30 days
-10. **Comerciante** (Merchant) - Accept 10 payments
-11. **Viajero** (Traveler) - Send to 3 different countries
-12. **Veterano** (Veteran) - Active for 6 months
+#### 🏠 **Bienvenida** (Welcome)
+| Achievement | Description | Reward | Icon |
+|-------------|-------------|---------|------|
+| **Pionero Beta** | Únete a Confío durante la fase beta - Exclusivo para los primeros usuarios | 1 CONFIO ($0.25) | 🚀 |
 
-### Implementation Details
+#### 🛡️ **Verificación** (Verification)
+| Achievement | Description | Reward | Icon |
+|-------------|-------------|---------|------|
+| **Verificado** | Completa la verificación de identidad | 2 CONFIO ($0.50) | 🛡️ |
 
-- **Location**: Profile screen (`ProfileScreen.tsx`)
-- **Visual Design**: Circular badges with completion status
-- **Progress Tracking**: "5/12" style counter
-- **Share Indicator**: Blue badge for achievements shared on social media
+#### 💱 **Intercambios** (Trading) - Highest Value Actions
+| Achievement | Description | Reward | Icon |
+|-------------|-------------|---------|------|
+| **Primera Compra** | Completa tu primer intercambio P2P exitoso | 8 CONFIO ($2.00) | 🔄 |
+| **10 Intercambios** | Completa 10 intercambios P2P exitosos | 20 CONFIO ($5.00) | 📊 |
+| **Trader Frecuente** | Completa 50 intercambios P2P exitosos | 40 CONFIO ($10.00) | 📈 |
+| **Trader $1,000** | Alcanza $1,000 USD en volumen total de intercambios | 50 CONFIO ($12.50) | 💰 |
+| **Trader $10,000** | Alcanza $10,000 USD en volumen total de intercambios | 200 CONFIO ($50.00) | 💎 |
 
-### Social Sharing Integration
+#### 💸 **Pagos y Transacciones** (Payments)
+| Achievement | Description | Reward | Icon |
+|-------------|-------------|---------|------|
+| **Primera Recepción** | Recibe cUSD por primera vez | 1 CONFIO ($0.25) | 📥 |
+| **Primer Envío** | Envía cUSD por primera vez | 1 CONFIO ($0.25) | 📤 |
+| **Primer Pago** | Realiza tu primer pago a un comercio | 2 CONFIO ($0.50) | 🛍️ |
+| **Viajero** | Envía dinero a 3 países diferentes | 10 CONFIO ($2.50) | 🌍 |
+| **Comerciante** | Acepta 10 pagos como negocio | 20 CONFIO ($5.00) | 🏪 |
 
-Each achievement can be shared to social media with pre-configured hashtags:
-- Latin America: `#RetoConfio #MiPrimerConfioDollar`
-- Other regions: `#ConfioChallenge #MyFirstSecureDollar`
+#### 🤝 **Comunidad** (Community)
+| Achievement | Description | Reward | Icon |
+|-------------|-------------|---------|------|
+| **Llegaste por Influencer** | Te registraste siguiendo a un influencer de TikTok | 4 CONFIO ($1.00) | 🎯 |
+| **Primera Viral** | Tu TikTok sobre Confío alcanzó 1,000 visualizaciones | 4 CONFIO ($1.00) | 🎬 |
+| **Hodler** | Mantén cUSD en tu cuenta por 30 días | 12 CONFIO ($3.00) | 💎 |
+| **Explosión Viral** | Tu TikTok sobre Confío alcanzó 10,000 visualizaciones | 20 CONFIO ($5.00) | 💥 |
+| **Veterano** | Mantén tu cuenta activa por 6 meses | 40 CONFIO ($10.00) | 🎖️ |
+| **Mega Viral** | Tu TikTok sobre Confío alcanzó 100,000 visualizaciones | 80 CONFIO ($20.00) | 🚀 |
+| **Tendencia Nacional** | Tu TikTok sobre Confío alcanzó 1,000,000 visualizaciones | 250 CONFIO ($62.50) | 🏆 |
+
+#### 👑 **Embajador** (Ambassador) - Influencer Tiers
+| Achievement | Description | Reward | Icon |
+|-------------|-------------|---------|------|
+| **Nano-Influencer** | Trae entre 1-10 referidos que completen su registro | 4 CONFIO ($1.00) | 🌱 |
+| **Micro-Influencer** | Trae entre 11-100 referidos activos - Badge especial desbloqueado | 8 CONFIO ($2.00) | ⭐ |
+| **Macro-Influencer** | Trae entre 101-1000 referidos - Perks exclusivos | 20 CONFIO ($5.00) | 💫 |
+| **Embajador Confío** | Trae 1000+ referidos - Programa de partnership personalizado | Custom Deal | 👑 |
+
+### CONFIO Token Economics
+
+- **Exchange Rate**: 4 CONFIO = $1 USD (never expose this pricing publicly in the app)
+- **Total Rewards Pool**: Designed to optimize for $2-2.50 CPI (Cost Per Install)
+- **Distribution Strategy**: 
+  - Easy actions: $0.25-$0.50 (onboarding, basic transactions)
+  - Core actions: $2-$12.50 (P2P trading - highest priority)
+  - Viral actions: $1-$62.50 (scaled based on reach)
+  - Long-term retention: $3-$10 (holding, veteran status)
+
+### TikTok Viral Integration
+
+#### Influencer Referral System
+- Users paste TikTok username of influencer who referred them
+- Both influencer and new user receive 4 CONFIO ($1) when user completes first transaction
+- Dual username verification (influencer's + user's own) prevents abuse
+- No URL parameters needed - pure username-based tracking
+
+#### Viral Content Rewards
+Progressive rewards based on TikTok video views:
+- 1K views: 4 CONFIO ($1)
+- 10K views: 20 CONFIO ($5)
+- 100K views: 80 CONFIO ($20)
+- 1M views: 250 CONFIO ($62.50)
+
+### Implementation Architecture
+
+#### Backend Components
+- **Models** (`users/models.py`):
+  - `AchievementType`: Defines available achievements
+  - `UserAchievement`: Tracks user progress and claims
+  - `InfluencerReferral`: Manages TikTok referral tracking
+  - `TikTokViralShare`: Tracks viral content performance
+
+#### GraphQL API
+```graphql
+# Queries
+achievementTypes
+userAchievements
+myInfluencerStats
+
+# Mutations
+claimAchievementReward(achievementId: ID!)
+createInfluencerReferral(tiktokUsername: String!, attributionData: String)
+submitTikTokShare(tiktokUrl: String!, shareType: String!, achievementId: ID)
+```
+
+#### Frontend Components
+- **AchievementsScreen** (`apps/src/screens/AchievementsScreen.tsx`):
+  - Displays achievement progress with categories
+  - Influencer referral input with real-time username cleaning
+  - Claim rewards functionality
+  - Share achievements to social media
+
+- **MiProgresoViralScreen** (`apps/src/screens/MiProgresoViralScreen.tsx`):
+  - Dashboard for influencer statistics
+  - Referral tracking and tier progression
+  - Viral content performance metrics
+
+### Anti-Abuse Measures
+
+1. **Phone Verification Required**: Must complete phone verification to claim rewards
+2. **Dual Username System**: Both influencer and user TikTok usernames required
+3. **Transaction Requirements**: Referral rewards only paid after real transactions
+4. **Rate Limiting**: Prevents spam submissions
+5. **Manual Review**: High-value achievements flagged for review
+
+### Management Commands
+
+```bash
+# Create/update achievement types
+python manage.py create_achievement_types
+
+# Clean up duplicate achievements
+python manage.py cleanup_achievements
+
+# Reorder achievements by reward value
+python manage.py reorder_achievements
+```
+
+### Visual Design
+
+- **Achievement Cards**: Clean design with emoji icons, progress bars, and reward amounts
+- **Category Colors**:
+  - Bienvenida: Green (#34d399)
+  - Verificación: Orange (#FFB800)
+  - Intercambios: Purple (#8b5cf6)
+  - Pagos: Red (#FF6B6B)
+  - Comunidad: Blue (#3b82f6)
+  - Embajador: Gold (#FFD700)
+- **Mi Progreso Viral**: Mint color (#3ADBBB) for active engagement feel
+
+### Future Enhancements
+
+1. **Achievement Badges**: Visual badges for profile display
+2. **Leaderboards**: Regional and global achievement rankings
+3. **Seasonal Achievements**: Limited-time challenges
+4. **Achievement Combos**: Bonus rewards for completing sets
+5. **Social Proof**: Show which friends completed achievements
 
 ## 📱 Social Financial Marketing Strategy: "Sigue al fundador"
 
