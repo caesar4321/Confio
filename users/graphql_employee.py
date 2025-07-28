@@ -534,6 +534,8 @@ class EmployeeQueries(graphene.ObjectType):
     current_business_employees = graphene.List(
         BusinessEmployeeType,
         include_inactive=graphene.Boolean(default_value=False),
+        first=graphene.Int(description="Number of employees to fetch"),
+        after=graphene.String(description="Cursor for pagination"),
         description="Get employees of current business (uses JWT context)"
     )
     
@@ -689,8 +691,8 @@ class EmployeeQueries(graphene.ObjectType):
         return queryset.select_related('employee')[:limit]
     
     # New JWT-context-aware resolvers
-    def resolve_current_business_employees(self, info, include_inactive=False):
-        """Get employees of current business using JWT context"""
+    def resolve_current_business_employees(self, info, include_inactive=False, first=None, after=None):
+        """Get employees of current business using JWT context with pagination"""
         try:
             # Require business context from JWT
             jwt_context = require_business_context(info)
@@ -711,10 +713,22 @@ class EmployeeQueries(graphene.ObjectType):
                 deleted_at__isnull=True
             ).exclude(
                 user=user  # Exclude the business owner from the employees list
-            ).select_related('user')
+            ).select_related('user').order_by('id')  # Consistent ordering for pagination
             
             if not include_inactive:
                 queryset = queryset.filter(is_active=True)
+            
+            # Handle pagination
+            if after:
+                # Decode cursor - for simplicity, using ID as cursor
+                try:
+                    cursor_id = int(after)
+                    queryset = queryset.filter(id__gt=cursor_id)
+                except (ValueError, TypeError):
+                    pass  # Invalid cursor, ignore
+            
+            if first:
+                queryset = queryset[:first]
                 
             return queryset
             

@@ -285,14 +285,40 @@ export const ContactsScreen = () => {
     }
   }, [isBusinessAccount, activeAccount, employeesLoading, employeesError, employeesData, invitationsLoading, invitationsError, invitationsData]);
   
+  // State for employee pagination
+  const [employeesState, setEmployeesState] = useState({
+    employees: [],
+    hasNextPage: true,
+    cursor: null,
+    loading: false,
+    refreshing: false
+  });
+
   // Fetch employees and invitations for business accounts using JWT context
-  const { data: employeesData, loading: employeesLoading, error: employeesError, refetch: refetchEmployees } = useQuery(GET_CURRENT_BUSINESS_EMPLOYEES, {
-    variables: { includeInactive: false },
+  const { data: employeesData, loading: employeesLoading, error: employeesError, refetch: refetchEmployees, fetchMore } = useQuery(GET_CURRENT_BUSINESS_EMPLOYEES, {
+    variables: { 
+      includeInactive: false,
+      first: 20 // Initial page size
+    },
     skip: !isBusinessAccount,
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all',
+    onCompleted: (data) => {
+      if (data?.currentBusinessEmployees) {
+        const employees = data.currentBusinessEmployees;
+        setEmployeesState(prev => ({
+          ...prev,
+          employees: employees,
+          hasNextPage: employees.length === 20, // If we got a full page, assume there might be more
+          cursor: employees.length > 0 ? employees[employees.length - 1].id : null,
+          loading: false,
+          refreshing: false
+        }));
+      }
+    },
     onError: (error) => {
       console.error('Error fetching current business employees:', error);
+      setEmployeesState(prev => ({ ...prev, loading: false, refreshing: false }));
     }
   });
   
@@ -598,17 +624,8 @@ export const ContactsScreen = () => {
     setRefreshing(true);
     
     if (isBusinessAccount) {
-      // Refresh employees and invitations for business accounts
-      try {
-        await Promise.all([
-          refetchEmployees(),
-          refetchInvitations()
-        ]);
-      } catch (error) {
-        console.error('Error refreshing business data:', error);
-      } finally {
-        setRefreshing(false);
-      }
+      // Use the dedicated employee refresh function for business accounts
+      await refreshEmployees();
       return;
     }
     
@@ -825,6 +842,69 @@ export const ContactsScreen = () => {
     }
   }, [cancelInvitation, refetchInvitations]);
 
+  // Employee infinite scroll functions
+  const loadMoreEmployees = useCallback(async () => {
+    if (!employeesState.hasNextPage || employeesState.loading || !isBusinessAccount || !employeesState.cursor) {
+      return;
+    }
+
+    setEmployeesState(prev => ({ ...prev, loading: true }));
+
+    try {
+      const result = await fetchMore({
+        variables: {
+          includeInactive: false,
+          first: 20,
+          after: employeesState.cursor.toString()
+        }
+      });
+
+      if (result.data?.currentBusinessEmployees) {
+        const newEmployees = result.data.currentBusinessEmployees;
+        setEmployeesState(prev => ({
+          ...prev,
+          employees: [...prev.employees, ...newEmployees],
+          hasNextPage: newEmployees.length === 20,
+          cursor: newEmployees.length > 0 ? newEmployees[newEmployees.length - 1].id : prev.cursor,
+          loading: false
+        }));
+      }
+    } catch (error) {
+      console.error('Error loading more employees:', error);
+      setEmployeesState(prev => ({ ...prev, loading: false }));
+    }
+  }, [employeesState.hasNextPage, employeesState.loading, employeesState.cursor, isBusinessAccount, fetchMore]);
+
+  const refreshEmployees = useCallback(async () => {
+    if (!isBusinessAccount) return;
+
+    setEmployeesState(prev => ({ ...prev, refreshing: true }));
+    
+    try {
+      const result = await refetchEmployees({
+        includeInactive: false,
+        first: 20
+      });
+      
+      if (result.data?.currentBusinessEmployees) {
+        const employees = result.data.currentBusinessEmployees;
+        setEmployeesState({
+          employees: employees,
+          hasNextPage: employees.length === 20,
+          cursor: employees.length > 0 ? employees[employees.length - 1].id : null,
+          loading: false,
+          refreshing: false
+        });
+      }
+      
+      // Also refresh invitations
+      refetchInvitations();
+    } catch (error) {
+      console.error('Error refreshing employees:', error);
+      setEmployeesState(prev => ({ ...prev, refreshing: false }));
+    }
+  }, [isBusinessAccount, refetchEmployees, refetchInvitations]);
+
   const TokenSelectionModal = () => (
     <Modal
       visible={showTokenSelection}
@@ -1020,7 +1100,7 @@ export const ContactsScreen = () => {
           isLoading: true
         }];
       }
-      const employees = employeesData?.currentBusinessEmployees || [];
+      const employees = employeesState.employees || [];
       const invitations = invitationsData?.currentBusinessInvitations || [];
       
       // Format employees for display - exclude the business owner
@@ -1570,6 +1650,13 @@ export const ContactsScreen = () => {
               tintColor={colors.primary}
             />
           }
+          onEndReached={isBusinessAccount ? loadMoreEmployees : undefined}
+          onEndReachedThreshold={0.1}
+          ListFooterComponent={isBusinessAccount && employeesState.loading ? (
+            <View style={{ paddingVertical: 16, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={colors.primary} />
+            </View>
+          ) : null}
           initialNumToRender={20}
           maxToRenderPerBatch={10}
           windowSize={21}
