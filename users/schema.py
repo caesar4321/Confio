@@ -1,12 +1,17 @@
 import graphene
 from graphene_django import DjangoObjectType
 from django.contrib.auth import get_user_model
-from .models import User, Account, IdentityVerification, Business, Country, Bank, BankInfo
+from .models import (
+    User, Account, IdentityVerification, Business, Country, Bank, BankInfo,
+    AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare
+)
 from .country_codes import COUNTRY_CODES
 from graphql_jwt.utils import jwt_encode, jwt_decode
 from graphql_jwt.shortcuts import create_refresh_token
 from datetime import datetime, timedelta
+from django.utils import timezone
 import logging
+import json
 from django.utils.translation import gettext as _
 from .legal.documents import TERMS, PRIVACY, DELETION
 from graphql import GraphQLError
@@ -267,6 +272,78 @@ class BankInfoType(DjangoObjectType):
 	def resolve_payment_method(self, info):
 		return self.payment_method
 
+
+# Achievement System GraphQL Types
+class AchievementTypeType(DjangoObjectType):
+	# Define computed fields explicitly
+	reward_display = graphene.String()
+	
+	class Meta:
+		model = AchievementType
+		fields = ('id', 'slug', 'name', 'description', 'category', 'icon_emoji', 'color',
+				 'confio_reward', 'is_repeatable', 'requires_manual_review', 'is_active', 
+				 'display_order', 'created_at', 'updated_at')
+	
+	def resolve_reward_display(self, info):
+		return self.reward_display
+
+
+class UserAchievementType(DjangoObjectType):
+	# Define computed fields explicitly
+	can_claim_reward = graphene.Boolean()
+	reward_amount = graphene.Decimal()
+	
+	class Meta:
+		model = UserAchievement
+		fields = ('id', 'user', 'account', 'achievement_type', 'status', 'earned_at', 
+				 'claimed_at', 'progress_data', 'earned_value', 'verified_by', 
+				 'verification_notes', 'created_at', 'updated_at')
+	
+	def resolve_can_claim_reward(self, info):
+		return self.can_claim_reward
+	
+	def resolve_reward_amount(self, info):
+		return self.reward_amount
+
+
+class InfluencerReferralType(DjangoObjectType):
+	class Meta:
+		model = InfluencerReferral
+		fields = ('id', 'referred_user', 'tiktok_username', 'influencer_user', 'status',
+				 'first_transaction_at', 'total_transaction_volume', 'referrer_confio_awarded',
+				 'referee_confio_awarded', 'reward_claimed_at', 'attribution_data',
+				 'created_at', 'updated_at')
+
+
+class TikTokViralShareType(DjangoObjectType):
+	# Define computed fields explicitly
+	has_required_hashtags = graphene.Boolean()
+	performance_tier = graphene.String()
+	
+	class Meta:
+		model = TikTokViralShare
+		fields = ('id', 'user', 'achievement', 'tiktok_url', 'tiktok_username', 'hashtags_used',
+				 'share_type', 'status', 'view_count', 'like_count', 'share_count',
+				 'base_confio_reward', 'view_bonus_confio', 'total_confio_awarded',
+				 'verified_by', 'verified_at', 'verification_notes', 'created_at', 'updated_at')
+	
+	def resolve_has_required_hashtags(self, info):
+		return self.has_required_hashtags
+	
+	def resolve_performance_tier(self, info):
+		return self.performance_tier
+
+
+class InfluencerStatsType(graphene.ObjectType):
+	"""Stats for a specific TikTok influencer"""
+	total_referrals = graphene.Int()
+	active_referrals = graphene.Int()
+	converted_referrals = graphene.Int()
+	total_volume = graphene.Float()
+	total_confio_earned = graphene.Float()
+	is_ambassador_eligible = graphene.Boolean()
+
+
 class CountryCodeType(graphene.ObjectType):
 	code = graphene.String()
 	name = graphene.String()
@@ -344,6 +421,15 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	
 	# Contact sync queries
 	check_users_by_phones = graphene.List(UserByPhoneType, phone_numbers=graphene.List(graphene.String, required=True))
+	
+	# Achievement system queries
+	achievement_types = graphene.List(AchievementTypeType, category=graphene.String())
+	user_achievements = graphene.List(UserAchievementType, status=graphene.String())
+	achievement_leaderboard = graphene.List(UserAchievementType, achievement_slug=graphene.String())
+	influencer_stats = graphene.Field(InfluencerStatsType, tiktok_username=graphene.String(required=True))
+	my_influencer_stats = graphene.Field(InfluencerStatsType)
+	user_influencer_referrals = graphene.List(InfluencerReferralType)
+	user_tiktok_shares = graphene.List(TikTokViralShareType, status=graphene.String())
 
 	def resolve_legalDocument(self, info, docType, language=None):
 		logger.info(f"Received legal document request for type: {docType}, language: {language}")
@@ -888,6 +974,135 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				))
 		
 		return results
+	
+	# Achievement system resolvers
+	def resolve_achievement_types(self, info, category=None):
+		"""Get all active achievement types, optionally filtered by category"""
+		queryset = AchievementType.objects.filter(is_active=True)
+		if category:
+			queryset = queryset.filter(category=category)
+		return queryset.order_by('category', 'display_order', 'name')
+	
+	def resolve_user_achievements(self, info, status=None):
+		"""Get achievements for the current user"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return []
+		
+		queryset = UserAchievement.objects.filter(user=user).select_related('achievement_type')
+		if status:
+			queryset = queryset.filter(status=status)
+		return queryset.order_by('-earned_at', '-created_at')
+	
+	def resolve_achievement_leaderboard(self, info, achievement_slug=None):
+		"""Get leaderboard for a specific achievement or all achievements"""
+		if achievement_slug:
+			try:
+				achievement_type = AchievementType.objects.get(slug=achievement_slug, is_active=True)
+				queryset = UserAchievement.objects.filter(
+					achievement_type=achievement_type,
+					status='earned'
+				).select_related('user', 'achievement_type')
+			except AchievementType.DoesNotExist:
+				return []
+		else:
+			# Return all earned achievements
+			queryset = UserAchievement.objects.filter(
+				status='earned'
+			).select_related('user', 'achievement_type')
+		
+		return queryset.order_by('-earned_at')[:50]  # Top 50
+	
+	def resolve_influencer_stats(self, info, tiktok_username):
+		"""Get stats for a specific TikTok influencer"""
+		stats = InfluencerReferral.get_influencer_stats(tiktok_username)
+		is_eligible = InfluencerReferral.check_ambassador_eligibility(tiktok_username)
+		
+		return InfluencerStatsType(
+			total_referrals=stats['total_referrals'],
+			active_referrals=stats['active_referrals'],
+			converted_referrals=stats['converted_referrals'],
+			total_volume=float(stats['total_volume']),
+			total_confio_earned=float(stats['total_confio_earned']),
+			is_ambassador_eligible=is_eligible
+		)
+	
+	def resolve_my_influencer_stats(self, info):
+		"""Get influencer stats for the current user"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return InfluencerStatsType(
+				total_referrals=0,
+				active_referrals=0,
+				converted_referrals=0,
+				total_volume=0.0,
+				total_confio_earned=0.0,
+				is_ambassador_eligible=False
+			)
+		
+		# Get the user's TikTok username from their referral data
+		# First, check if they have created any referrals (as influencer)
+		user_referral = InfluencerReferral.objects.filter(referred_user=user).first()
+		if user_referral and user_referral.attribution_data:
+			try:
+				attribution = json.loads(user_referral.attribution_data)
+				my_tiktok_username = attribution.get('my_tiktok_username')
+				if my_tiktok_username:
+					stats = InfluencerReferral.get_influencer_stats(my_tiktok_username)
+					is_eligible = InfluencerReferral.check_ambassador_eligibility(my_tiktok_username)
+					return InfluencerStatsType(
+						total_referrals=stats['total_referrals'],
+						active_referrals=stats['active_referrals'],
+						converted_referrals=stats['converted_referrals'],
+						total_volume=float(stats['total_volume']),
+						total_confio_earned=float(stats['total_confio_earned']),
+						is_ambassador_eligible=is_eligible
+					)
+			except:
+				pass
+		
+		# Also check TikTok shares for username
+		tiktok_share = TikTokViralShare.objects.filter(user=user).first()
+		if tiktok_share and tiktok_share.tiktok_username:
+			stats = InfluencerReferral.get_influencer_stats(tiktok_share.tiktok_username)
+			is_eligible = InfluencerReferral.check_ambassador_eligibility(tiktok_share.tiktok_username)
+			return InfluencerStatsType(
+				total_referrals=stats['total_referrals'],
+				active_referrals=stats['active_referrals'],
+				converted_referrals=stats['converted_referrals'],
+				total_volume=float(stats['total_volume']),
+				total_confio_earned=float(stats['total_confio_earned']),
+				is_ambassador_eligible=is_eligible
+			)
+		
+		# No stats found for this user
+		return InfluencerStatsType(
+			total_referrals=0,
+			active_referrals=0,
+			converted_referrals=0,
+			total_volume=0.0,
+			total_confio_earned=0.0,
+			is_ambassador_eligible=False
+		)
+	
+	def resolve_user_influencer_referrals(self, info):
+		"""Get influencer referrals where current user is the referred user"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return []
+		
+		return InfluencerReferral.objects.filter(referred_user=user).order_by('-created_at')
+	
+	def resolve_user_tiktok_shares(self, info, status=None):
+		"""Get TikTok shares for the current user"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return []
+		
+		queryset = TikTokViralShare.objects.filter(user=user).select_related('achievement')
+		if status:
+			queryset = queryset.filter(status=status)
+		return queryset.order_by('-created_at')
 
 class UpdatePhoneNumber(graphene.Mutation):
 	class Arguments:
@@ -1968,6 +2183,316 @@ class DeleteTestUsers(graphene.Mutation):
 		)
 
 
+# Achievement System Mutations
+class ClaimAchievementReward(graphene.Mutation):
+	class Arguments:
+		achievement_id = graphene.ID(required=True)
+	
+	success = graphene.Boolean()
+	error = graphene.String()
+	achievement = graphene.Field(UserAchievementType)
+	confio_awarded = graphene.Decimal()
+	
+	@classmethod
+	def mutate(cls, root, info, achievement_id):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return ClaimAchievementReward(success=False, error="Authentication required")
+		
+		try:
+			# Get the user's achievement
+			achievement = UserAchievement.objects.select_related('achievement_type').get(
+				id=achievement_id,
+				user=user
+			)
+			
+			# Check if reward can be claimed
+			if not achievement.can_claim_reward:
+				return ClaimAchievementReward(
+					success=False,
+					error="Esta achievement no puede ser reclamada o ya fue reclamada"
+				)
+			
+			# Claim the reward
+			success = achievement.claim_reward()
+			if success:
+				return ClaimAchievementReward(
+					success=True,
+					error=None,
+					achievement=achievement,
+					confio_awarded=achievement.reward_amount
+				)
+			else:
+				return ClaimAchievementReward(
+					success=False,
+					error="No se pudo reclamar la recompensa"
+				)
+		
+		except UserAchievement.DoesNotExist:
+			return ClaimAchievementReward(success=False, error="Achievement no encontrada")
+		except Exception as e:
+			logger.error(f"Error claiming achievement reward: {str(e)}")
+			return ClaimAchievementReward(success=False, error="Error interno del servidor")
+
+
+class CreateInfluencerReferral(graphene.Mutation):
+	class Arguments:
+		tiktok_username = graphene.String(required=True)
+		attribution_data = graphene.JSONString()
+	
+	success = graphene.Boolean()
+	error = graphene.String()
+	referral = graphene.Field(InfluencerReferralType)
+	
+	@classmethod
+	def mutate(cls, root, info, tiktok_username, attribution_data=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return CreateInfluencerReferral(success=False, error="Authentication required")
+		
+		try:
+			# Clean the TikTok username (remove @ if present)
+			clean_username = tiktok_username.lstrip('@').strip()
+			
+			if not clean_username:
+				return CreateInfluencerReferral(
+					success=False,
+					error="Nombre de usuario de TikTok es requerido"
+				)
+			
+			# Check if user already has a referral record
+			existing_referral = InfluencerReferral.objects.filter(referred_user=user).first()
+			if existing_referral:
+				return CreateInfluencerReferral(
+					success=False,
+					error="Ya tienes un registro de referido. Solo puedes ser referido una vez."
+				)
+			
+			# Create the referral record
+			referral = InfluencerReferral.objects.create(
+				referred_user=user,
+				tiktok_username=clean_username,
+				status='pending',
+				attribution_data=attribution_data or {}
+			)
+			
+			# Award initial signup reward to referred user (1$ worth of CONFIO)
+			referral.referee_confio_awarded = 100  # 100 CONFIO = $1 at presale price
+			referral.save()
+			
+			# Create "Seguidor Apasionado" achievement for the user
+			try:
+				follower_achievement = AchievementType.objects.get(slug='passionate_follower')
+				UserAchievement.objects.create(
+					user=user,
+					achievement_type=follower_achievement,
+					status='earned',
+					earned_at=timezone.now()
+				)
+			except AchievementType.DoesNotExist:
+				logger.warning("Passionate follower achievement type not found")
+			
+			return CreateInfluencerReferral(
+				success=True,
+				error=None,
+				referral=referral
+			)
+		
+		except Exception as e:
+			logger.error(f"Error creating influencer referral: {str(e)}")
+			return CreateInfluencerReferral(success=False, error="Error interno del servidor")
+
+
+class SubmitTikTokShare(graphene.Mutation):
+	class Arguments:
+		tiktok_url = graphene.String(required=True)
+		tiktok_username = graphene.String(required=True)
+		hashtags_used = graphene.List(graphene.String, required=True)
+		share_type = graphene.String(required=True)
+		achievement_id = graphene.ID()
+	
+	success = graphene.Boolean()
+	error = graphene.String()
+	share = graphene.Field(TikTokViralShareType)
+	
+	@classmethod
+	def mutate(cls, root, info, tiktok_url, tiktok_username, hashtags_used, share_type, achievement_id=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return SubmitTikTokShare(success=False, error="Authentication required")
+		
+		try:
+			# Validate share type
+			valid_share_types = [choice[0] for choice in TikTokViralShare.SHARE_TYPE_CHOICES]
+			if share_type not in valid_share_types:
+				return SubmitTikTokShare(
+					success=False,
+					error="Tipo de contenido compartido inválido"
+				)
+			
+			# Clean TikTok username
+			clean_username = tiktok_username.lstrip('@').strip()
+			
+			# Validate TikTok URL
+			if not ('tiktok.com' in tiktok_url or 'vm.tiktok.com' in tiktok_url):
+				return SubmitTikTokShare(
+					success=False,
+					error="URL de TikTok inválida"
+				)
+			
+			# Check for duplicate submission
+			existing_share = TikTokViralShare.objects.filter(
+				user=user,
+				tiktok_url=tiktok_url
+			).first()
+			
+			if existing_share:
+				return SubmitTikTokShare(
+					success=False,
+					error="Ya has enviado este video de TikTok"
+				)
+			
+			# Get achievement if provided
+			achievement = None
+			if achievement_id:
+				try:
+					achievement = UserAchievement.objects.get(
+						id=achievement_id,
+						user=user,
+						status='earned'
+					)
+				except UserAchievement.DoesNotExist:
+					return SubmitTikTokShare(
+						success=False,
+						error="Achievement no encontrada o no disponible para compartir"
+					)
+			
+			# Create the TikTok share record
+			share = TikTokViralShare.objects.create(
+				user=user,
+				achievement=achievement,
+				tiktok_url=tiktok_url,
+				tiktok_username=clean_username,
+				hashtags_used=hashtags_used,
+				share_type=share_type,
+				status='submitted'
+			)
+			
+			return SubmitTikTokShare(
+				success=True,
+				error=None,
+				share=share
+			)
+		
+		except Exception as e:
+			logger.error(f"Error submitting TikTok share: {str(e)}")
+			return SubmitTikTokShare(success=False, error="Error interno del servidor")
+
+
+class VerifyTikTokShare(graphene.Mutation):
+	"""Admin mutation to verify TikTok shares and award bonuses"""
+	class Arguments:
+		share_id = graphene.ID(required=True)
+		view_count = graphene.Int()
+		like_count = graphene.Int()
+		share_count = graphene.Int()
+		verification_notes = graphene.String()
+	
+	success = graphene.Boolean()
+	error = graphene.String()
+	share = graphene.Field(TikTokViralShareType)
+	confio_awarded = graphene.Decimal()
+	
+	@classmethod
+	def mutate(cls, root, info, share_id, view_count=None, like_count=None, share_count=None, verification_notes=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return VerifyTikTokShare(success=False, error="Authentication required")
+		
+		# Check if user is admin
+		if not user.is_staff:
+			return VerifyTikTokShare(
+				success=False,
+				error="Solo los administradores pueden verificar contenido viral"
+			)
+		
+		try:
+			share = TikTokViralShare.objects.get(id=share_id)
+			
+			# Verify and award rewards
+			total_awarded = share.verify_and_reward(
+				verified_by=user,
+				view_count=view_count,
+				like_count=like_count,
+				share_count=share_count
+			)
+			
+			if verification_notes:
+				share.verification_notes = verification_notes
+				share.save()
+			
+			return VerifyTikTokShare(
+				success=True,
+				error=None,
+				share=share,
+				confio_awarded=total_awarded
+			)
+		
+		except TikTokViralShare.DoesNotExist:
+			return VerifyTikTokShare(success=False, error="Contenido compartido no encontrado")
+		except Exception as e:
+			logger.error(f"Error verifying TikTok share: {str(e)}")
+			return VerifyTikTokShare(success=False, error="Error interno del servidor")
+
+
+class UpdateInfluencerStatus(graphene.Mutation):
+	"""Admin mutation to update influencer status and award ambassador status"""
+	class Arguments:
+		tiktok_username = graphene.String(required=True)
+		new_status = graphene.String(required=True)
+	
+	success = graphene.Boolean()
+	error = graphene.String()
+	updated_count = graphene.Int()
+	
+	@classmethod
+	def mutate(cls, root, info, tiktok_username, new_status):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return UpdateInfluencerStatus(success=False, error="Authentication required")
+		
+		# Check if user is admin
+		if not user.is_staff:
+			return UpdateInfluencerStatus(
+				success=False,
+				error="Solo los administradores pueden actualizar el estado de influencers"
+			)
+		
+		try:
+			# Validate new status
+			valid_statuses = [choice[0] for choice in InfluencerReferral.STATUS_CHOICES]
+			if new_status not in valid_statuses:
+				return UpdateInfluencerStatus(
+					success=False,
+					error="Estado de influencer inválido"
+				)
+			
+			# Update all referrals for this influencer
+			updated_count = InfluencerReferral.objects.filter(
+				tiktok_username__iexact=tiktok_username
+			).update(status=new_status)
+			
+			return UpdateInfluencerStatus(
+				success=True,
+				error=None,
+				updated_count=updated_count
+			)
+		
+		except Exception as e:
+			logger.error(f"Error updating influencer status: {str(e)}")
+			return UpdateInfluencerStatus(success=False, error="Error interno del servidor")
+
+
 class SetDefaultBankInfo(graphene.Mutation):
 	class Arguments:
 		bank_info_id = graphene.ID(required=True)
@@ -2052,3 +2577,10 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
 	# Test mutations (only in DEBUG mode)
 	create_test_users = CreateTestUsers.Field()
 	delete_test_users = DeleteTestUsers.Field()
+	
+	# Achievement system mutations
+	claim_achievement_reward = ClaimAchievementReward.Field()
+	create_influencer_referral = CreateInfluencerReferral.Field()
+	submit_tiktok_share = SubmitTikTokShare.Field()
+	verify_tiktok_share = VerifyTikTokShare.Field()
+	update_influencer_status = UpdateInfluencerStatus.Field()

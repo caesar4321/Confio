@@ -37,6 +37,7 @@ import { CreateOfferScreen } from '../screens/CreateOfferScreen';
 import { BankInfoScreen } from '../screens/BankInfoScreen';
 import { AchievementsScreen } from '../screens/AchievementsScreen';
 import { ConfioTokenInfoScreen } from '../screens/ConfioTokenInfoScreen';
+import { MiProgresoViralScreen } from '../screens/MiProgresoViralScreen';
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
 console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
@@ -288,6 +289,11 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="ConfioTokenInfo"
         component={ConfioTokenInfoScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="MiProgresoViral"
+        component={MiProgresoViralScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>
