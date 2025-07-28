@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from .models import (
     User, Account, IdentityVerification, Business, Country, Bank, BankInfo,
     AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare,
-    ConfioRewardBalance, ConfioRewardTransaction
+    ConfioRewardBalance, ConfioRewardTransaction, InfluencerAmbassador, AmbassadorActivity
 )
 from .country_codes import COUNTRY_CODES
 from graphql_jwt.utils import jwt_encode, jwt_decode
@@ -16,6 +16,13 @@ import json
 from django.utils.translation import gettext as _
 from .legal.documents import TERMS, PRIVACY, DELETION
 from graphql import GraphQLError
+from .decorators import (
+    rate_limit, 
+    check_suspicious_activity, 
+    require_trust_score,
+    check_activity_requirements,
+    log_achievement_activity
+)
 from .graphql_employee import (
     EmployeeQueries, EmployeeMutations,
     BusinessEmployeeType, EmployerBusinessType
@@ -345,6 +352,67 @@ class InfluencerStatsType(graphene.ObjectType):
 	is_ambassador_eligible = graphene.Boolean()
 
 
+class AmbassadorBenefitsType(graphene.ObjectType):
+	"""Ambassador tier benefits"""
+	referral_bonus = graphene.Float()
+	viral_rate = graphene.Float()
+	custom_code = graphene.Boolean()
+	dedicated_support = graphene.Boolean()
+	monthly_bonus = graphene.Float()
+	exclusive_events = graphene.Boolean()
+	early_features = graphene.Boolean()
+
+
+class InfluencerAmbassadorType(DjangoObjectType):
+	"""Ambassador profile with tier and performance metrics"""
+	benefits = graphene.Field(AmbassadorBenefitsType)
+	tier_progress = graphene.Int()
+	tier_display = graphene.String()
+	status_display = graphene.String()
+	
+	class Meta:
+		model = InfluencerAmbassador
+		fields = ('id', 'user', 'tier', 'status', 'total_referrals', 'active_referrals',
+				 'total_viral_views', 'monthly_viral_views', 'referral_transaction_volume',
+				 'confio_earned', 'tier_achieved_at', 'next_tier_progress', 'custom_referral_code',
+				 'performance_score', 'dedicated_support', 'last_activity_at', 'created_at')
+	
+	def resolve_benefits(self, info):
+		if not self.benefits:
+			return None
+		return AmbassadorBenefitsType(
+			referral_bonus=self.benefits.get('referral_bonus', 0),
+			viral_rate=self.benefits.get('viral_rate', 0),
+			custom_code=self.benefits.get('custom_code', False),
+			dedicated_support=self.benefits.get('dedicated_support', False),
+			monthly_bonus=self.benefits.get('monthly_bonus', 0),
+			exclusive_events=self.benefits.get('exclusive_events', False),
+			early_features=self.benefits.get('early_features', False)
+		)
+	
+	def resolve_tier_progress(self, info):
+		return self.calculate_tier_progress()
+	
+	def resolve_tier_display(self, info):
+		return self.get_tier_display()
+	
+	def resolve_status_display(self, info):
+		return self.get_status_display()
+
+
+class AmbassadorActivityType(DjangoObjectType):
+	"""Ambassador activity log"""
+	activity_type_display = graphene.String()
+	
+	class Meta:
+		model = AmbassadorActivity
+		fields = ('id', 'ambassador', 'activity_type', 'description', 'confio_rewarded',
+				 'metadata', 'created_at')
+	
+	def resolve_activity_type_display(self, info):
+		return self.get_activity_type_display()
+
+
 class ConfioBalanceType(DjangoObjectType):
 	"""User's CONFIO token balance (pre-blockchain accounting)"""
 	# Override decimal fields to return Float
@@ -469,6 +537,11 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	influencer_stats = graphene.Field(InfluencerStatsType, tiktok_username=graphene.String(required=True))
 	my_influencer_stats = graphene.Field(InfluencerStatsType)
 	user_influencer_referrals = graphene.List(InfluencerReferralType)
+	
+	# Ambassador system queries
+	my_ambassador_profile = graphene.Field(InfluencerAmbassadorType)
+	ambassador_leaderboard = graphene.List(InfluencerAmbassadorType, tier=graphene.String())
+	my_ambassador_activities = graphene.List(AmbassadorActivityType, limit=graphene.Int())
 	
 	# CONFIO balance queries
 	my_confio_balance = graphene.Field(ConfioBalanceType)
@@ -1136,6 +1209,52 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			return []
 		
 		return InfluencerReferral.objects.filter(referred_user=user).order_by('-created_at')
+	
+	def resolve_my_ambassador_profile(self, info):
+		"""Get current user's ambassador profile"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return None
+		
+		try:
+			ambassador = InfluencerAmbassador.objects.get(user=user)
+			# Update benefits if needed
+			if not ambassador.benefits:
+				ambassador.update_benefits()
+			# Update progress
+			ambassador.next_tier_progress = ambassador.calculate_tier_progress()
+			ambassador.save()
+			return ambassador
+		except InfluencerAmbassador.DoesNotExist:
+			return None
+	
+	def resolve_ambassador_leaderboard(self, info, tier=None):
+		"""Get ambassador leaderboard, optionally filtered by tier"""
+		queryset = InfluencerAmbassador.objects.filter(
+			status='active'
+		).order_by('-total_viral_views')[:100]
+		
+		if tier:
+			queryset = queryset.filter(tier=tier)
+		
+		return queryset
+	
+	def resolve_my_ambassador_activities(self, info, limit=None):
+		"""Get current user's ambassador activities"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return []
+		
+		try:
+			ambassador = InfluencerAmbassador.objects.get(user=user)
+			activities = ambassador.activities.all().order_by('-created_at')
+			
+			if limit:
+				activities = activities[:limit]
+			
+			return activities
+		except InfluencerAmbassador.DoesNotExist:
+			return []
 	
 	def resolve_my_confio_balance(self, info):
 		"""Get current user's CONFIO balance"""
@@ -2267,6 +2386,10 @@ class ClaimAchievementReward(graphene.Mutation):
 	confio_awarded = graphene.Decimal()
 	
 	@classmethod
+	@rate_limit('achievement_claim')
+	@check_suspicious_activity('achievement_claim')
+	@require_trust_score(20)
+	@log_achievement_activity('reward_claim')
 	def mutate(cls, root, info, achievement_id):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
@@ -2343,6 +2466,10 @@ class CreateInfluencerReferral(graphene.Mutation):
 	referral = graphene.Field(InfluencerReferralType)
 	
 	@classmethod
+	@rate_limit('referral_submit')
+	@check_suspicious_activity('referral_submit')
+	@check_activity_requirements('email_verified')
+	@log_achievement_activity('influencer_referral')
 	def mutate(cls, root, info, tiktok_username, attribution_data=None):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
@@ -2602,6 +2729,9 @@ class TrackTikTokShare(graphene.Mutation):
 	error = graphene.String()
 	
 	@classmethod
+	@rate_limit('tiktok_share')
+	@check_suspicious_activity('tiktok_share')
+	@log_achievement_activity('tiktok_share')
 	def mutate(cls, root, info, achievement_id, tiktok_url):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):

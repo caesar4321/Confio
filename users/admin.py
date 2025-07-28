@@ -2,7 +2,8 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
-from .models import User, Account, Business, IdentityVerification, Country, Bank, BankInfo, ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare
+from django.utils import timezone
+from .models import User, Account, Business, IdentityVerification, Country, Bank, BankInfo, ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare, InfluencerAmbassador, AmbassadorActivity, SuspiciousActivity
 from .models_unified import UnifiedTransactionTable
 from .models_employee import BusinessEmployee, EmployeeInvitation
 
@@ -1031,3 +1032,299 @@ class TikTokViralShareAdmin(admin.ModelAdmin):
         # In production, this would trigger async task to fetch view counts
         self.message_user(request, "View count update task queued.")
     update_view_counts.short_description = "Update view counts"
+
+
+@admin.register(InfluencerAmbassador)
+class InfluencerAmbassadorAdmin(admin.ModelAdmin):
+    """Admin for influencer ambassadors"""
+    list_display = ('user', 'tier_display', 'status_display', 'total_referrals', 'total_viral_views_display', 
+                    'confio_earned_display', 'performance_score_display', 'last_activity_at')
+    list_filter = ('tier', 'status', 'dedicated_support', 'tier_achieved_at')
+    search_fields = ('user__username', 'user__email', 'custom_referral_code')
+    readonly_fields = ('created_at', 'updated_at', 'tier_achieved_at', 'last_activity_at', 
+                       'next_tier_progress_display', 'benefits_display')
+    raw_id_fields = ('user',)
+    
+    fieldsets = (
+        ('Ambassador Information', {
+            'fields': ('user', 'tier', 'status', 'custom_referral_code')
+        }),
+        ('Performance Metrics', {
+            'fields': ('total_referrals', 'active_referrals', 'total_viral_views', 
+                       'monthly_viral_views', 'referral_transaction_volume', 'confio_earned')
+        }),
+        ('Tier Progression', {
+            'fields': ('tier_achieved_at', 'next_tier_progress_display', 'performance_score')
+        }),
+        ('Benefits & Support', {
+            'fields': ('benefits_display', 'dedicated_support', 'ambassador_notes')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at', 'last_activity_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def tier_display(self, obj):
+        tier_colors = {
+            'bronze': '#CD7F32',
+            'silver': '#C0C0C0',
+            'gold': '#FFD700',
+            'diamond': '#B9F2FF'
+        }
+        tier_icons = {
+            'bronze': '🥉',
+            'silver': '🥈',
+            'gold': '🥇',
+            'diamond': '💎'
+        }
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{} {}</span>',
+            tier_colors.get(obj.tier, '#000'),
+            tier_icons.get(obj.tier, ''),
+            obj.get_tier_display()
+        )
+    tier_display.short_description = "Tier"
+    
+    def status_display(self, obj):
+        status_colors = {
+            'active': '#10B981',
+            'paused': '#F59E0B',
+            'revoked': '#EF4444'
+        }
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            status_colors.get(obj.status, '#000'),
+            obj.get_status_display()
+        )
+    status_display.short_description = "Status"
+    
+    def total_viral_views_display(self, obj):
+        if obj.total_viral_views >= 1000000:
+            return format_html('<strong>{:.1f}M</strong>', obj.total_viral_views / 1000000)
+        elif obj.total_viral_views >= 1000:
+            return format_html('<strong>{:.1f}K</strong>', obj.total_viral_views / 1000)
+        return format_html('<strong>{}</strong>', obj.total_viral_views)
+    total_viral_views_display.short_description = "Total Views"
+    
+    def confio_earned_display(self, obj):
+        return format_html('<strong>{:,.0f} $CONFIO</strong>', obj.confio_earned)
+    confio_earned_display.short_description = "CONFIO Earned"
+    
+    def performance_score_display(self, obj):
+        color = '#10B981' if obj.performance_score >= 80 else '#F59E0B' if obj.performance_score >= 50 else '#EF4444'
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}%</span>',
+            color,
+            obj.performance_score
+        )
+    performance_score_display.short_description = "Performance"
+    
+    def next_tier_progress_display(self, obj):
+        progress = obj.calculate_tier_progress()
+        return format_html(
+            '<div style="width: 200px; background-color: #E5E7EB; border-radius: 4px; height: 20px;">'
+            '<div style="width: {}%; background-color: #8B5CF6; height: 100%; border-radius: 4px; text-align: center; color: white; line-height: 20px;">'
+            '{}%</div></div>',
+            progress, progress
+        )
+    next_tier_progress_display.short_description = "Progress to Next Tier"
+    
+    def benefits_display(self, obj):
+        if not obj.benefits:
+            return "-"
+        benefits_html = "<ul style='margin: 0; padding-left: 20px;'>"
+        for key, value in obj.benefits.items():
+            benefits_html += f"<li><strong>{key.replace('_', ' ').title()}:</strong> {value}</li>"
+        benefits_html += "</ul>"
+        return format_html(benefits_html)
+    benefits_display.short_description = "Current Benefits"
+    
+    actions = ['update_tier', 'calculate_monthly_bonus', 'pause_ambassadors', 'activate_ambassadors']
+    
+    def update_tier(self, request, queryset):
+        for ambassador in queryset:
+            ambassador.next_tier_progress = ambassador.calculate_tier_progress()
+            ambassador.save()
+        self.message_user(request, f"Updated tier progress for {queryset.count()} ambassadors.")
+    update_tier.short_description = "Update tier progress"
+    
+    def calculate_monthly_bonus(self, request, queryset):
+        total_bonus = 0
+        for ambassador in queryset.filter(status='active'):
+            bonus = ambassador.benefits.get('monthly_bonus', 0)
+            if bonus > 0:
+                total_bonus += bonus
+                # In production, this would create ConfioRewardTransaction
+        self.message_user(request, f"Monthly bonus calculated: {total_bonus} $CONFIO for {queryset.count()} ambassadors.")
+    calculate_monthly_bonus.short_description = "Calculate monthly bonus"
+    
+    def pause_ambassadors(self, request, queryset):
+        updated = queryset.update(status='paused')
+        self.message_user(request, f"{updated} ambassadors paused.")
+    pause_ambassadors.short_description = "Pause selected ambassadors"
+    
+    def activate_ambassadors(self, request, queryset):
+        updated = queryset.update(status='active')
+        self.message_user(request, f"{updated} ambassadors activated.")
+    activate_ambassadors.short_description = "Activate selected ambassadors"
+
+
+@admin.register(AmbassadorActivity)
+class AmbassadorActivityAdmin(admin.ModelAdmin):
+    """Admin for ambassador activities"""
+    list_display = ('ambassador', 'activity_type_display', 'description', 'confio_rewarded_display', 'created_at')
+    list_filter = ('activity_type', 'created_at')
+    search_fields = ('ambassador__user__username', 'description')
+    readonly_fields = ('created_at', 'updated_at')
+    raw_id_fields = ('ambassador',)
+    date_hierarchy = 'created_at'
+    
+    def activity_type_display(self, obj):
+        type_colors = {
+            'referral': '#3B82F6',
+            'viral_milestone': '#8B5CF6',
+            'tier_upgrade': '#10B981',
+            'monthly_bonus': '#F59E0B',
+            'special_achievement': '#EC4899'
+        }
+        type_icons = {
+            'referral': '👥',
+            'viral_milestone': '🚀',
+            'tier_upgrade': '⬆️',
+            'monthly_bonus': '💰',
+            'special_achievement': '🏆'
+        }
+        return format_html(
+            '<span style="color: {};">{} {}</span>',
+            type_colors.get(obj.activity_type, '#000'),
+            type_icons.get(obj.activity_type, ''),
+            obj.get_activity_type_display()
+        )
+    activity_type_display.short_description = "Activity Type"
+    
+    def confio_rewarded_display(self, obj):
+        if obj.confio_rewarded > 0:
+            return format_html('<strong style="color: #10B981;">+{:,.0f} $CONFIO</strong>', obj.confio_rewarded)
+        return "-"
+    confio_rewarded_display.short_description = "Reward"
+
+
+@admin.register(SuspiciousActivity)
+class SuspiciousActivityAdmin(admin.ModelAdmin):
+    """Admin for suspicious activity logs"""
+    list_display = ('user', 'action', 'flags_display', 'ip_address', 'reviewed_display', 
+                    'action_taken_display', 'created_at')
+    list_filter = ('reviewed', 'action_taken', 'action', 'created_at')
+    search_fields = ('user__username', 'user__email', 'ip_address', 'device_fingerprint')
+    readonly_fields = ('created_at', 'updated_at', 'user', 'action', 'flags', 'metadata', 
+                       'ip_address', 'device_fingerprint')
+    raw_id_fields = ('user', 'reviewed_by')
+    date_hierarchy = 'created_at'
+    
+    fieldsets = (
+        ('Activity Details', {
+            'fields': ('user', 'action', 'flags', 'metadata', 'ip_address', 'device_fingerprint')
+        }),
+        ('Review Status', {
+            'fields': ('reviewed', 'reviewed_by', 'reviewed_at', 'action_taken', 'notes')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def flags_display(self, obj):
+        if not obj.flags:
+            return "-"
+        flags_html = []
+        flag_colors = {
+            'multiple_accounts_per_device': '#EF4444',
+            'rapid_referral_submission': '#F59E0B',
+            'similar_usernames_detected': '#8B5CF6',
+            'high_transaction_velocity': '#EF4444',
+        }
+        for flag in obj.flags:
+            color = flag_colors.get(flag, '#6B7280')
+            flags_html.append(f'<span style="color: {color}; font-weight: bold;">{flag}</span>')
+        return format_html('<br>'.join(flags_html))
+    flags_display.short_description = "Flags"
+    
+    def reviewed_display(self, obj):
+        if obj.reviewed:
+            return format_html(
+                '<span style="color: #10B981;">✓ Reviewed by {}</span>',
+                obj.reviewed_by.username if obj.reviewed_by else 'Unknown'
+            )
+        return format_html('<span style="color: #F59E0B;">⏳ Pending</span>')
+    reviewed_display.short_description = "Review Status"
+    
+    def action_taken_display(self, obj):
+        action_colors = {
+            'none': '#6B7280',
+            'warning': '#F59E0B',
+            'suspended': '#EF4444',
+            'banned': '#991B1B',
+        }
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            action_colors.get(obj.action_taken, '#000'),
+            obj.get_action_taken_display()
+        )
+    action_taken_display.short_description = "Action Taken"
+    
+    actions = ['mark_as_reviewed', 'issue_warning', 'suspend_accounts', 'ban_accounts']
+    
+    def mark_as_reviewed(self, request, queryset):
+        updated = queryset.filter(reviewed=False).update(
+            reviewed=True,
+            reviewed_by=request.user,
+            reviewed_at=timezone.now(),
+            action_taken='none'
+        )
+        self.message_user(request, f"{updated} activities marked as reviewed.")
+    mark_as_reviewed.short_description = "Mark as reviewed (no action)"
+    
+    def issue_warning(self, request, queryset):
+        for activity in queryset.filter(reviewed=False):
+            activity.reviewed = True
+            activity.reviewed_by = request.user
+            activity.reviewed_at = timezone.now()
+            activity.action_taken = 'warning'
+            activity.save()
+            # In production, send warning email to user
+        self.message_user(request, f"Warnings issued for {queryset.count()} activities.")
+    issue_warning.short_description = "Issue warning to users"
+    
+    def suspend_accounts(self, request, queryset):
+        users_to_suspend = set()
+        for activity in queryset:
+            users_to_suspend.add(activity.user)
+            activity.reviewed = True
+            activity.reviewed_by = request.user
+            activity.reviewed_at = timezone.now()
+            activity.action_taken = 'suspended'
+            activity.save()
+        
+        # In production, implement actual suspension logic
+        self.message_user(request, f"{len(users_to_suspend)} accounts marked for suspension.")
+    suspend_accounts.short_description = "Suspend user accounts"
+    
+    def ban_accounts(self, request, queryset):
+        users_to_ban = set()
+        for activity in queryset:
+            users_to_ban.add(activity.user)
+            activity.reviewed = True
+            activity.reviewed_by = request.user
+            activity.reviewed_at = timezone.now()
+            activity.action_taken = 'banned'
+            activity.save()
+        
+        # In production, implement actual ban logic
+        self.message_user(request, f"{len(users_to_ban)} accounts marked for ban.")
+    ban_accounts.short_description = "Ban user accounts"
+    
+    def get_queryset(self, request):
+        """Optimize queries"""
+        return super().get_queryset(request).select_related('user', 'reviewed_by')

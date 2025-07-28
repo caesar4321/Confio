@@ -1876,3 +1876,319 @@ class ConfioRewardTransaction(SoftDeleteModel):
     
     def __str__(self):
         return f"{self.user.username} - {self.transaction_type} - {self.amount} CONFIO"
+
+
+class InfluencerAmbassador(SoftDeleteModel):
+    """Tracks influencer progression to ambassador status with performance metrics"""
+    
+    TIER_CHOICES = [
+        ('bronze', 'Bronce'),
+        ('silver', 'Plata'),
+        ('gold', 'Oro'),
+        ('diamond', 'Diamante'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('active', 'Activo'),
+        ('paused', 'Pausado'),
+        ('revoked', 'Revocado'),
+    ]
+    
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='ambassador_profile',
+        help_text="User who achieved ambassador status"
+    )
+    
+    # Ambassador tier and status
+    tier = models.CharField(
+        max_length=20,
+        choices=TIER_CHOICES,
+        default='bronze',
+        help_text="Current ambassador tier"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='active',
+        help_text="Current ambassador status"
+    )
+    
+    # Performance metrics
+    total_referrals = models.IntegerField(
+        default=0,
+        help_text="Total number of successful referrals"
+    )
+    active_referrals = models.IntegerField(
+        default=0,
+        help_text="Number of referrals active in last 30 days"
+    )
+    total_viral_views = models.BigIntegerField(
+        default=0,
+        help_text="Total views across all viral content"
+    )
+    monthly_viral_views = models.BigIntegerField(
+        default=0,
+        help_text="Views in current month"
+    )
+    
+    # Financial metrics
+    referral_transaction_volume = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text="Total transaction volume from referrals"
+    )
+    confio_earned = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Total CONFIO earned as ambassador"
+    )
+    
+    # Tier progression
+    tier_achieved_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When current tier was achieved"
+    )
+    next_tier_progress = models.IntegerField(
+        default=0,
+        help_text="Progress percentage to next tier (0-100)"
+    )
+    
+    # Benefits and perks
+    benefits = models.JSONField(
+        default=dict,
+        help_text="Current benefits based on tier"
+    )
+    custom_referral_code = models.CharField(
+        max_length=20,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Custom referral code for ambassador"
+    )
+    
+    # Performance tracking
+    last_activity_at = models.DateTimeField(
+        auto_now=True,
+        help_text="Last activity timestamp"
+    )
+    performance_score = models.IntegerField(
+        default=100,
+        help_text="Performance score (0-100) for tier evaluation"
+    )
+    
+    # Contact and support
+    dedicated_support = models.BooleanField(
+        default=False,
+        help_text="Has access to dedicated support"
+    )
+    ambassador_notes = models.TextField(
+        blank=True,
+        help_text="Internal notes about this ambassador"
+    )
+    
+    class Meta:
+        ordering = ['-tier', '-total_viral_views']
+        verbose_name = "Influencer Ambassador"
+        verbose_name_plural = "Influencer Ambassadors"
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.get_tier_display()} Ambassador"
+    
+    def calculate_tier_progress(self):
+        """Calculate progress to next tier based on performance metrics"""
+        tier_requirements = {
+            'bronze': {'referrals': 0, 'views': 0, 'volume': 0},
+            'silver': {'referrals': 10, 'views': 100000, 'volume': 1000},
+            'gold': {'referrals': 50, 'views': 1000000, 'volume': 10000},
+            'diamond': {'referrals': 200, 'views': 10000000, 'volume': 100000},
+        }
+        
+        current_tier_index = ['bronze', 'silver', 'gold', 'diamond'].index(self.tier)
+        if current_tier_index >= 3:  # Already at max tier
+            return 100
+            
+        next_tier = ['bronze', 'silver', 'gold', 'diamond'][current_tier_index + 1]
+        requirements = tier_requirements[next_tier]
+        
+        # Calculate weighted progress
+        referral_progress = min(100, (self.total_referrals / requirements['referrals']) * 100)
+        views_progress = min(100, (self.total_viral_views / requirements['views']) * 100)
+        volume_progress = min(100, (float(self.referral_transaction_volume) / requirements['volume']) * 100)
+        
+        # Weighted average: 40% referrals, 40% views, 20% volume
+        return int((referral_progress * 0.4) + (views_progress * 0.4) + (volume_progress * 0.2))
+    
+    def update_benefits(self):
+        """Update benefits based on current tier"""
+        tier_benefits = {
+            'bronze': {
+                'referral_bonus': 10,  # $CONFIO per referral
+                'viral_rate': 0.1,     # $CONFIO per 1000 views
+                'custom_code': False,
+                'dedicated_support': False,
+                'monthly_bonus': 0,
+            },
+            'silver': {
+                'referral_bonus': 25,
+                'viral_rate': 0.2,
+                'custom_code': True,
+                'dedicated_support': False,
+                'monthly_bonus': 100,
+            },
+            'gold': {
+                'referral_bonus': 50,
+                'viral_rate': 0.5,
+                'custom_code': True,
+                'dedicated_support': True,
+                'monthly_bonus': 500,
+            },
+            'diamond': {
+                'referral_bonus': 100,
+                'viral_rate': 1.0,
+                'custom_code': True,
+                'dedicated_support': True,
+                'monthly_bonus': 2000,
+                'exclusive_events': True,
+                'early_features': True,
+            },
+        }
+        
+        self.benefits = tier_benefits.get(self.tier, tier_benefits['bronze'])
+        self.dedicated_support = self.benefits.get('dedicated_support', False)
+        self.save()
+
+
+class AmbassadorActivity(SoftDeleteModel):
+    """Track ambassador activities and achievements"""
+    
+    ACTIVITY_TYPES = [
+        ('referral', 'New Referral'),
+        ('viral_milestone', 'Viral Milestone'),
+        ('tier_upgrade', 'Tier Upgrade'),
+        ('monthly_bonus', 'Monthly Bonus'),
+        ('special_achievement', 'Special Achievement'),
+    ]
+    
+    ambassador = models.ForeignKey(
+        InfluencerAmbassador,
+        on_delete=models.CASCADE,
+        related_name='activities',
+        help_text="Ambassador this activity belongs to"
+    )
+    
+    activity_type = models.CharField(
+        max_length=30,
+        choices=ACTIVITY_TYPES,
+        help_text="Type of activity"
+    )
+    
+    description = models.TextField(
+        help_text="Detailed description of the activity"
+    )
+    
+    # Rewards
+    confio_rewarded = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="CONFIO awarded for this activity"
+    )
+    
+    # Related data
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Additional activity data"
+    )
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Ambassador Activity"
+        verbose_name_plural = "Ambassador Activities"
+    
+    def __str__(self):
+        return f"{self.ambassador.user.username} - {self.get_activity_type_display()}"
+
+
+class SuspiciousActivity(SoftDeleteModel):
+    """Log of suspicious activities for review"""
+    ACTION_CHOICES = [
+        ('none', 'No Action'),
+        ('warning', 'Warning Issued'),
+        ('suspended', 'Account Suspended'),
+        ('banned', 'Account Banned'),
+    ]
+    
+    user = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='suspicious_activities',
+        help_text="User who performed the suspicious activity"
+    )
+    action = models.CharField(
+        max_length=50,
+        help_text="Type of action that was flagged"
+    )
+    flags = models.JSONField(
+        default=list,
+        help_text="List of flags triggered"
+    )
+    metadata = models.JSONField(
+        default=dict,
+        help_text="Additional context about the activity"
+    )
+    ip_address = models.GenericIPAddressField(
+        null=True, 
+        blank=True,
+        help_text="IP address from which activity originated"
+    )
+    device_fingerprint = models.CharField(
+        max_length=64, 
+        null=True, 
+        blank=True,
+        help_text="Hashed device fingerprint"
+    )
+    reviewed = models.BooleanField(
+        default=False,
+        help_text="Whether this activity has been reviewed"
+    )
+    reviewed_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='reviewed_suspicious_activities',
+        help_text="Admin who reviewed this activity"
+    )
+    reviewed_at = models.DateTimeField(
+        null=True, 
+        blank=True,
+        help_text="When the activity was reviewed"
+    )
+    action_taken = models.CharField(
+        max_length=20, 
+        choices=ACTION_CHOICES,
+        default='none',
+        help_text="Action taken after review"
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Admin notes about the review"
+    )
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['reviewed', '-created_at']),
+            models.Index(fields=['device_fingerprint']),
+        ]
+        verbose_name = "Suspicious Activity"
+        verbose_name_plural = "Suspicious Activities"
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.action} - {self.created_at.strftime('%Y-%m-%d')}"

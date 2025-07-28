@@ -392,6 +392,13 @@ confio_admin_site.register(UserAchievement, UserAchievementAdmin)
 confio_admin_site.register(InfluencerReferral, InfluencerReferralAdmin)
 confio_admin_site.register(TikTokViralShare, TikTokViralShareAdmin)
 
+# Ambassador models
+from users.models import InfluencerAmbassador, AmbassadorActivity, SuspiciousActivity
+from users.admin import InfluencerAmbassadorAdmin, AmbassadorActivityAdmin, SuspiciousActivityAdmin
+confio_admin_site.register(InfluencerAmbassador, InfluencerAmbassadorAdmin)
+confio_admin_site.register(AmbassadorActivity, AmbassadorActivityAdmin)
+confio_admin_site.register(SuspiciousActivity, SuspiciousActivityAdmin)
+
 # Unified Transaction Tables
 from users.models_unified import UnifiedTransactionTable
 from usdc_transactions.models_unified import UnifiedUSDCTransactionTable
