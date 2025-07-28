@@ -329,31 +329,3 @@ class AbusePreventionService:
         return min(100, score)
 
 
-class SuspiciousActivity(models.Model):
-    """Log of suspicious activities for review"""
-    user = models.ForeignKey('User', on_delete=models.CASCADE, related_name='suspicious_activities')
-    action = models.CharField(max_length=50)
-    flags = models.JSONField(default=list)
-    metadata = models.JSONField(default=dict)
-    ip_address = models.GenericIPAddressField(null=True, blank=True)
-    device_fingerprint = models.CharField(max_length=64, null=True, blank=True)
-    reviewed = models.BooleanField(default=False)
-    reviewed_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True,
-                                   related_name='reviewed_suspicious_activities')
-    reviewed_at = models.DateTimeField(null=True, blank=True)
-    action_taken = models.CharField(max_length=20, choices=[
-        ('none', 'No Action'),
-        ('warning', 'Warning Issued'),
-        ('suspended', 'Account Suspended'),
-        ('banned', 'Account Banned'),
-    ], default='none')
-    notes = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    
-    class Meta:
-        ordering = ['-created_at']
-        indexes = [
-            models.Index(fields=['user', '-created_at']),
-            models.Index(fields=['reviewed', '-created_at']),
-            models.Index(fields=['device_fingerprint']),
-        ]
