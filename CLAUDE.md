@@ -45,6 +45,8 @@
 10. **JWT Context for All Operations**: Never pass account IDs as parameters - all account context must come from JWT tokens. Use `get_jwt_business_context_with_validation()` for business operations.
 11. **Permission Validation**: All mutations must validate required permissions. Owners bypass checks, other roles use negative-check system.
 12. **GraphQL Field Types**: Use proper GraphQL object types for complex fields, not JSONString.
+13. **Custom Admin Site**: This project uses a custom admin site `confio_admin_site` defined in `/config/admin_dashboard.py`. All models must be registered with this custom admin site, NOT the default Django admin. When adding new models, import their admin classes and register them in `admin_dashboard.py`.
+14. **Standardized Hashtags**: Always use exactly these 5 hashtags for all social media sharing throughout the app: #Confio #RetoConfio #LogroConfio #AppDeDolares #DolarDigital. Never suggest additional hashtags to avoid user confusion.
 
 ### Development Environment
 - **Python Virtual Environment**: Always use `myvenv/bin/python` for Python commands

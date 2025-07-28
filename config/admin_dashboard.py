@@ -354,7 +354,7 @@ confio_admin_site = ConfioAdminSite(name='confio_admin')
 
 # Re-register all models with the custom admin site
 from django.contrib.auth.models import Group
-from users.admin import UserAdmin, AccountAdmin, BusinessAdmin, IdentityVerificationAdmin, CountryAdmin, BankAdmin, BankInfoAdmin, UnifiedTransactionAdmin, BusinessEmployeeAdmin, EmployeeInvitationAdmin
+from users.admin import UserAdmin, AccountAdmin, BusinessAdmin, IdentityVerificationAdmin, CountryAdmin, BankAdmin, BankInfoAdmin, UnifiedTransactionAdmin, BusinessEmployeeAdmin, EmployeeInvitationAdmin, ConfioRewardBalanceAdmin, ConfioRewardTransactionAdmin
 from p2p_exchange.admin import (
     P2PPaymentMethodAdmin, P2POfferAdmin, P2PTradeAdmin, 
     P2PMessageAdmin, P2PUserStatsAdmin, P2PEscrowAdmin,
@@ -379,6 +379,18 @@ confio_admin_site.register(BankInfo, BankInfoAdmin)
 from users.models_employee import BusinessEmployee, EmployeeInvitation
 confio_admin_site.register(BusinessEmployee, BusinessEmployeeAdmin)
 confio_admin_site.register(EmployeeInvitation, EmployeeInvitationAdmin)
+
+# CONFIO Reward models
+from users.models import ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare
+confio_admin_site.register(ConfioRewardBalance, ConfioRewardBalanceAdmin)
+confio_admin_site.register(ConfioRewardTransaction, ConfioRewardTransactionAdmin)
+
+# Achievement models
+from users.admin import AchievementTypeAdmin, UserAchievementAdmin, InfluencerReferralAdmin, TikTokViralShareAdmin
+confio_admin_site.register(AchievementType, AchievementTypeAdmin)
+confio_admin_site.register(UserAchievement, UserAchievementAdmin)
+confio_admin_site.register(InfluencerReferral, InfluencerReferralAdmin)
+confio_admin_site.register(TikTokViralShare, TikTokViralShareAdmin)
 
 # Unified Transaction Tables
 from users.models_unified import UnifiedTransactionTable

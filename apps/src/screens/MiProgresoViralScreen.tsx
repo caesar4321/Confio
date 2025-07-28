@@ -63,8 +63,7 @@ export const MiProgresoViralScreen = () => {
   const nextTarget = nextTierTargets[currentTier];
   
   const suggestedHashtags = [
-    '#RetoConfio', '#ConfioVenezuela', '#CriptoLatam', '#P2PVenezuela',
-    '#StablecoinVzla', '#DineroDigital', '#Web3Venezuela', '#ConfioChallenge'
+    '#Confio', '#RetoConfio', '#LogroConfio', '#AppDeDolares', '#DolarDigital'
   ];
   
   const handleSubmitTikTok = async () => {

@@ -2349,7 +2349,7 @@ export const GET_USER_ACHIEVEMENTS = gql`
         color
         confioReward
         rewardDisplay
-      }
+        }
       status
       earnedAt
       claimedAt
@@ -2415,6 +2415,40 @@ export const GET_MY_INFLUENCER_STATS = gql`
       totalVolume
       totalConfioEarned
       isAmbassadorEligible
+    }
+  }
+`;
+
+export const GET_MY_CONFIO_BALANCE = gql`
+  query GetMyConfioBalance {
+    myConfioBalance {
+      id
+      totalEarned
+      totalLocked
+      totalUnlocked
+      achievementRewards
+      referralRewards
+      viralRewards
+      presalePurchase
+      otherRewards
+      lockUntil
+      lastRewardAt
+      dailyRewardCount
+      dailyRewardAmount
+    }
+  }
+`;
+
+export const GET_MY_CONFIO_TRANSACTIONS = gql`
+  query GetMyConfioTransactions($limit: Int, $offset: Int) {
+    myConfioTransactions(limit: $limit, offset: $offset) {
+      id
+      transactionType
+      amount
+      balanceAfter
+      source
+      description
+      createdAt
     }
   }
 `;
