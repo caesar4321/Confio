@@ -269,8 +269,10 @@ Confío supports multiple accounts per user, allowing separate wallets for perso
 
 #### Account ID Format
 - **Personal**: `personal_{index}` (e.g., `personal_0`, `personal_1`)
-- **Business (Owner)**: `business_{index}` (e.g., `business_0`, `business_1`)
-- **Business (Employee)**: `business_{businessId}_{index}` (e.g., `business_123_0`)
+- **Business (All)**: `business_{businessId}_{index}` (e.g., `business_123_0`, `business_456_1`)
+  - Both owners and employees use the same format
+  - Differentiation between owner/employee is done via BusinessEmployee relation model on server
+  - businessId is the actual Business model ID from the database
 
 #### Salt Formula
 The multi-account system uses deterministic salt generation:
@@ -450,14 +452,15 @@ await authService.switchAccount(businessAccount.id);
 **Switching Between Accounts**
 ```typescript
 await authService.switchAccount('personal_0'); // Personal account
-await authService.switchAccount('business_0'); // Business account
+await authService.switchAccount('business_123_0'); // Business account (ID 123)
 ```
 
 **Employee Access**
 ```typescript
 // Employee switches to employer's business account
-await authService.switchAccount('business_123_0'); // Business ID 123
+await authService.switchAccount('business_456_0'); // Business ID 456
 // JWT automatically includes business_id for permission validation
+// Server differentiates owner vs employee via BusinessEmployee relation
 ```
 
 **GraphQL Query with Permission Check**
@@ -802,7 +805,7 @@ mutation CreateOffer {
     availableAmount: 500.00
     paymentMethodIds: ["1", "2"]
     countryCode: "VE"
-    accountId: "business_0"
+    accountId: "business_123_0"
   }) {
     success
     offer { id rate availableAmount }
