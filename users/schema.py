@@ -595,8 +595,9 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		else:
 			# Create deterministic balances per business ID for debugging
 			# This helps identify which business context is being used
-			business_id = account.business.id if account.business else 0
-			base_multiplier = int(business_id) * 1000  # Each business gets unique base amount
+			# Use business_id from JWT context to ensure proper differentiation
+			business_id = int(business_id_from_context) if business_id_from_context else 0
+			base_multiplier = business_id * 1000  # Each business gets unique base amount
 			
 			mock_balances = {
 				'cUSD': f'{10000 + base_multiplier}.00',     # Business 1: 11000, Business 2: 12000, etc.

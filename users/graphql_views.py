@@ -333,11 +333,13 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         print(f"Found account: {account.id}, business: {account.business.id if account.business else None}")
         
         # Base query - all transactions involving this account
-        if account.account_type == 'business' and account.business:
-            # For business accounts, filter by business relationships
+        if account_type == 'business' and business_id:
+            # For business accounts, filter by business relationships using JWT business_id
+            from users.models import Business
+            business = Business.objects.get(id=business_id)
             queryset = UnifiedTransactionTable.objects.filter(
-                Q(sender_business=account.business) | 
-                Q(counterparty_business=account.business)
+                Q(sender_business=business) | 
+                Q(counterparty_business=business)
             )
         else:
             # For personal accounts, filter by user relationships BUT exclude business transactions
