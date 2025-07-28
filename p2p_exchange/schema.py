@@ -753,13 +753,11 @@ class CreateP2POfferInput(graphene.InputObjectType):
     country_code = graphene.String(required=True)  # Required country code for the offer
     terms = graphene.String()
     response_time_minutes = graphene.Int()
-    account_id = graphene.String(required=False)  # Optional: specify which account to use
 
 class CreateP2PTradeInput(graphene.InputObjectType):
     offerId = graphene.ID(required=True)
     cryptoAmount = graphene.Decimal(required=True)
     paymentMethodId = graphene.ID(required=True)
-    accountId = graphene.String(required=False)  # Optional: specify which account to use
 
 class UpdateP2PTradeStatusInput(graphene.InputObjectType):
     trade_id = graphene.ID(required=True)
@@ -933,63 +931,40 @@ class CreateP2POffer(graphene.Mutation):
                 'user': user,
             }
 
-            if input.account_id:
-                from users.models import Account
+            # Use JWT context to determine account type instead of input.account_id
+            from users.jwt_context import get_jwt_business_context_with_validation
+            from users.models import Business
+            
+            # Get JWT context with validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            if not jwt_context:
+                return CreateP2POffer(
+                    offer=None,
+                    success=False,
+                    errors=["Invalid account context"]
+                )
                 
-                # Handle special frontend account ID format (e.g., 'personal_0', 'business_0')
-                if isinstance(input.account_id, str) and '_' in input.account_id:
-                    account_type, account_index = input.account_id.split('_', 1)
-                    account_index = int(account_index)
-                    
-                    if account_type == 'personal':
-                        # Personal offer
-                        offer_kwargs['offer_user'] = user
-                    elif account_type == 'business':
-                        # Find the business account by index
-                        try:
-                            account = Account.objects.get(
-                                user=user, 
-                                account_type='business', 
-                                account_index=account_index
-                            )
-                            offer_kwargs['account'] = account
-                            
-                            if account.business:
-                                # Business offer
-                                offer_kwargs['offer_business'] = account.business
-                            else:
-                                return CreateP2POffer(
-                                    offer=None,
-                                    success=False,
-                                    errors=["Business account has no associated business"]
-                                )
-                        except Account.DoesNotExist:
-                            return CreateP2POffer(
-                                offer=None,
-                                success=False,
-                                errors=["Business account not found or access denied"]
-                            )
-                else:
-                    # Fallback: try to use account_id as a direct database ID
-                    try:
-                        account = Account.objects.get(id=input.account_id, user=user)
-                        offer_kwargs['account'] = account
-                        
-                        if account.account_type == 'business' and account.business:
-                            # Business offer
-                            offer_kwargs['offer_business'] = account.business
-                        else:
-                            # Personal offer
-                            offer_kwargs['offer_user'] = user
-                    except (Account.DoesNotExist, ValueError):
-                        return CreateP2POffer(
-                            offer=None,
-                            success=False,
-                            errors=["Account not found or access denied"]
-                        )
+            account_type = jwt_context['account_type']
+            business_id = jwt_context.get('business_id')
+            
+            print(f"CreateP2POffer - JWT context: account_type={account_type}, business_id={business_id}")
+            
+            if account_type == 'business' and business_id:
+                # Business offer using JWT business_id
+                try:
+                    business = Business.objects.get(id=business_id)
+                    offer_kwargs['offer_business'] = business
+                    print(f"CreateP2POffer - Creating business offer for business {business.name}")
+                except Business.DoesNotExist:
+                    return CreateP2POffer(
+                        offer=None,
+                        success=False,
+                        errors=["Business not found"]
+                    )
             else:
-                # Default to personal offer
+                # Personal offer
                 offer_kwargs['offer_user'] = user
+                print(f"CreateP2POffer - Creating personal offer for user {user.username}")
 
             # Create offer with new direct relationships
             offer = P2POffer.objects.create(**offer_kwargs)
@@ -1221,57 +1196,43 @@ class CreateP2PTrade(graphene.Mutation):
             user_entity_type = 'user'
             offer_entity = offer.user  # Default to user for personal trades
             offer_entity_type = 'user'
-            user_account = None  # Initialize user_account
             
-            if input.accountId:
-                from users.models import Account
+            # Use JWT context to determine account type instead of input.accountId
+            from users.jwt_context import get_jwt_business_context_with_validation
+            from users.models import Business
+            
+            # Get JWT context with validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            if not jwt_context:
+                return CreateP2PTrade(
+                    trade=None,
+                    success=False,
+                    errors=["Invalid account context"]
+                )
                 
-                # Handle special frontend account ID format (e.g., 'personal_0', 'business_0')
-                if isinstance(input.accountId, str) and '_' in input.accountId:
-                    account_type, account_index = input.accountId.split('_', 1)
-                    account_index = int(account_index)
-                    
-                    if account_type == 'personal':
-                        # Keep default personal settings
-                        user_entity = user
-                        user_entity_type = 'user'
-                        user_account = None
-                    elif account_type == 'business':
-                        # Find the business account by index
-                        try:
-                            user_account = Account.objects.get(
-                                user=user, 
-                                account_type='business', 
-                                account_index=account_index
-                            )
-                            if user_account.business:
-                                user_entity = user_account.business
-                                user_entity_type = 'business'
-                            else:
-                                return CreateP2PTrade(
-                                    trade=None,
-                                    success=False,
-                                    errors=["Business account has no associated business"]
-                                )
-                        except Account.DoesNotExist:
-                            return CreateP2PTrade(
-                                trade=None,
-                                success=False,
-                                errors=["Business account not found or access denied"]
-                            )
-                else:
-                    # Fallback: try to use accountId as a direct database ID
-                    try:
-                        user_account = Account.objects.get(id=input.accountId, user=user)
-                        if user_account.account_type == 'business' and user_account.business:
-                            user_entity = user_account.business
-                            user_entity_type = 'business'
-                    except (Account.DoesNotExist, ValueError):
-                        return CreateP2PTrade(
-                            trade=None,
-                            success=False,
-                            errors=["Account not found or access denied"]
-                        )
+            account_type = jwt_context['account_type']
+            business_id = jwt_context.get('business_id')
+            
+            print(f"CreateP2PTrade - JWT context: account_type={account_type}, business_id={business_id}")
+            
+            if account_type == 'business' and business_id:
+                # Business trade using JWT business_id
+                try:
+                    business = Business.objects.get(id=business_id)
+                    user_entity = business
+                    user_entity_type = 'business'
+                    print(f"CreateP2PTrade - Creating business trade for business {business.name}")
+                except Business.DoesNotExist:
+                    return CreateP2PTrade(
+                        trade=None,
+                        success=False,
+                        errors=["Business not found"]
+                    )
+            else:
+                # Personal trade
+                user_entity = user
+                user_entity_type = 'user'
+                print(f"CreateP2PTrade - Creating personal trade for user {user.username}")
             
             # Check offer's account type
             if offer.account and offer.account.account_type == 'business' and offer.account.business:
@@ -1308,8 +1269,8 @@ class CreateP2PTrade(graphene.Mutation):
                 # Keep old fields for backward compatibility
                 'buyer': user if offer.exchange_type == 'SELL' else offer.user,
                 'seller': offer.user if offer.exchange_type == 'SELL' else user,
-                'buyer_account': user_account if input.accountId and offer.exchange_type == 'SELL' else offer.account,
-                'seller_account': offer.account if offer.exchange_type == 'SELL' else (user_account if input.accountId else None),
+                'buyer_account': None,  # Legacy field - not needed with JWT context
+                'seller_account': None,  # Legacy field - not needed with JWT context
             }
             
             if offer.exchange_type == 'SELL':
@@ -2299,10 +2260,9 @@ class Query(graphene.ObjectType):
         favorites_only=graphene.Boolean()
     )
     p2p_offer = graphene.Field(P2POfferType, id=graphene.ID(required=True))
-    my_p2p_offers = graphene.List(P2POfferType, account_id=graphene.String())
+    my_p2p_offers = graphene.List(P2POfferType)
     my_p2p_trades = graphene.Field(
         P2PTradePaginatedType, 
-        account_id=graphene.String(),
         offset=graphene.Int(default_value=0),
         limit=graphene.Int(default_value=10)
     )
@@ -2397,7 +2357,7 @@ class Query(graphene.ObjectType):
         except P2POffer.DoesNotExist:
             return None
 
-    def resolve_my_p2p_offers(self, info, account_id=None):
+    def resolve_my_p2p_offers(self, info):
         """Resolve P2P offers using JWT account context"""
         from users.jwt_context import get_jwt_business_context_with_validation
         from django.db.models import Q
@@ -2440,7 +2400,7 @@ class Query(graphene.ObjectType):
                 offer_business__isnull=False  # Exclude business offers
             ).order_by('-created_at')
 
-    def resolve_my_p2p_trades(self, info, account_id=None, offset=0, limit=10):
+    def resolve_my_p2p_trades(self, info, offset=0, limit=10):
         """Resolve P2P trades using JWT account context"""
         try:
             from users.jwt_context import get_jwt_business_context_with_validation

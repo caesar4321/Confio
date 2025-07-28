@@ -422,13 +422,11 @@ export const ExchangeScreen = () => {
 
   // Fetch user's active trades filtered by current account context
   const tradesQueryVariables = {
-    accountId: activeAccount?.id, // Filter trades by current account context
     offset: tradesOffset,
     limit: TRADES_LIMIT
   };
   
   console.log('[ExchangeScreen] Trades query variables:', {
-    accountId: tradesQueryVariables.accountId,
     activeAccountType: activeAccount?.type,
     activeAccountIndex: activeAccount?.index,
     offset: tradesQueryVariables.offset,
@@ -477,9 +475,6 @@ export const ExchangeScreen = () => {
 
   // Fetch my P2P offers for the active account
   const { data: myOffersData, loading: myOffersLoading, error: myOffersError, refetch: refetchMyOffers } = useQuery(GET_MY_P2P_OFFERS, {
-    variables: {
-      accountId: activeAccount?.id
-    },
     fetchPolicy: 'cache-and-network',
     notifyOnNetworkStatusChange: false,
     skip: !activeAccount || !activeAccount.id, // Skip if no account or no ID

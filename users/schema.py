@@ -339,7 +339,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	# Bank info queries
 	countries = graphene.List(CountryType, is_active=graphene.Boolean())
 	banks = graphene.List(BankType, country_code=graphene.String())
-	user_bank_accounts = graphene.List(BankInfoType, account_id=graphene.ID())
+	user_bank_accounts = graphene.List(BankInfoType)
 	bank_info = graphene.Field(BankInfoType, id=graphene.ID(required=True))
 	
 	# Contact sync queries
@@ -723,7 +723,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			queryset = queryset.filter(country__code=country_code)
 		return queryset.order_by('country__display_order', 'display_order', 'name')
 
-	def resolve_user_bank_accounts(self, info, account_id=None):
+	def resolve_user_bank_accounts(self, info):
 		"""Resolve bank accounts for the current user based on active account context"""
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
@@ -798,7 +798,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			
 			# Check permissions for business accounts
 			if bank_info.account.account_type == 'business':
-				business = bank_info.account.get_business()
+				business = bank_info.account.business
 				if business:
 					# Get JWT context to check if user is accessing as employee
 					from .jwt_context import get_jwt_business_context_with_validation
@@ -1274,7 +1274,6 @@ class UpdateBusiness(graphene.Mutation):
 
 class UpdateAccountSuiAddress(graphene.Mutation):
 	class Arguments:
-		account_id = graphene.ID(required=True)
 		sui_address = graphene.String(required=True)
 
 	success = graphene.Boolean()
@@ -1282,14 +1281,52 @@ class UpdateAccountSuiAddress(graphene.Mutation):
 	account = graphene.Field(AccountType)
 
 	@classmethod
-	def mutate(cls, root, info, account_id, sui_address):
+	def mutate(cls, root, info, sui_address):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return UpdateAccountSuiAddress(success=False, error="Authentication required")
 
 		try:
-			# Get the account and verify it belongs to the user
-			account = Account.objects.get(id=account_id, user=user)
+			# Get JWT context with validation and permission check
+			from .jwt_context import get_jwt_business_context_with_validation
+			jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+			if not jwt_context:
+				return UpdateAccountSuiAddress(success=False, error="Invalid account context")
+			
+			account_type = jwt_context['account_type']
+			account_index = jwt_context['account_index']
+			business_id = jwt_context.get('business_id')
+			
+			# Get the account using JWT context
+			if account_type == 'business' and business_id:
+				# For business accounts, find the account by business_id
+				account = Account.objects.get(
+					business_id=business_id,
+					account_type='business',
+					account_index=account_index
+				)
+				
+				# Verify user has access to this business account
+				# Check if user owns this business
+				if not Account.objects.filter(user=user, business_id=business_id, account_type='business').exists():
+					# Check if user is an employee with permission
+					from .models_employee import BusinessEmployee
+					employee_record = BusinessEmployee.objects.filter(
+						user=user,
+						business_id=business_id,
+						is_active=True,
+						deleted_at__isnull=True
+					).first()
+					
+					if not employee_record:
+						return UpdateAccountSuiAddress(success=False, error="No tienes acceso a esta cuenta de negocio")
+			else:
+				# For personal accounts
+				account = Account.objects.get(
+					user=user,
+					account_type=account_type,
+					account_index=account_index
+				)
 			
 			# Update the Sui address
 			account.sui_address = sui_address
@@ -1475,7 +1512,6 @@ class RefreshToken(graphene.Mutation):
 
 class CreateBankInfo(graphene.Mutation):
 	class Arguments:
-		account_id = graphene.ID(required=True)
 		payment_method_id = graphene.ID(required=True)
 		account_holder_name = graphene.String(required=True)
 		account_number = graphene.String()
@@ -1491,7 +1527,7 @@ class CreateBankInfo(graphene.Mutation):
 	bank_info = graphene.Field(BankInfoType)
 
 	@classmethod
-	def mutate(cls, root, info, account_id, payment_method_id, account_holder_name, 
+	def mutate(cls, root, info, payment_method_id, account_holder_name, 
 	          account_number=None, phone_number=None, email=None, username=None,
 	          account_type=None, identification_number=None, is_default=False):
 		user = getattr(info.context, 'user', None)
@@ -1499,37 +1535,34 @@ class CreateBankInfo(graphene.Mutation):
 			return CreateBankInfo(success=False, error="Authentication required")
 
 		try:
-			# Verify account belongs to user
-			account = Account.objects.get(id=account_id, user=user)
+			# Get JWT context with validation and permission check
+			from .jwt_context import get_jwt_business_context_with_validation
+			jwt_context = get_jwt_business_context_with_validation(info, required_permission='manage_bank_accounts')
+			if not jwt_context:
+				return CreateBankInfo(success=False, error="Invalid account context or insufficient permissions")
 			
-			# Check employee permissions for business accounts
-			if account.account_type == 'business':
-				business = account.get_business()
-				if business:
-					# Get JWT context to check if user is accessing as employee
-					from .jwt_context import get_jwt_business_context_with_validation
-					jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-					if jwt_context:
-						jwt_business_id = jwt_context.get('business_id')
-						if jwt_business_id and str(business.id) == str(jwt_business_id):
-							# Check if user is an employee (not owner)
-							from .models_employee import BusinessEmployee
-							employee_record = BusinessEmployee.objects.filter(
-								user=user,
-								business_id=jwt_business_id,
-								is_active=True,
-								deleted_at__isnull=True
-							).first()
-							
-							if employee_record and employee_record.role != 'owner':
-								# Employee accessing business account - check permission
-								try:
-									check_employee_permission(user, business, 'manage_bank_accounts')
-								except PermissionDenied:
-									return CreateBankInfo(
-										success=False,
-										error="You don't have permission to manage bank accounts for this business"
-									)
+			account_type_context = jwt_context['account_type']
+			account_index = jwt_context['account_index']
+			business_id = jwt_context.get('business_id')
+			
+			# Get the account using JWT context
+			if account_type_context == 'business' and business_id:
+				# For business accounts, find the account by business_id
+				account = Account.objects.get(
+					business_id=business_id,
+					account_type='business',
+					account_index=account_index
+				)
+				
+				# Verify user has access to this business account
+				# Permission is already checked via get_jwt_business_context_with_validation
+			else:
+				# For personal accounts
+				account = Account.objects.get(
+					user=user,
+					account_type=account_type_context,
+					account_index=account_index
+				)
 			
 			# Import P2PPaymentMethod
 			from p2p_exchange.models import P2PPaymentMethod
@@ -1645,7 +1678,7 @@ class UpdateBankInfo(graphene.Mutation):
 			
 			# Check employee permissions for business accounts
 			if bank_info.account.account_type == 'business':
-				business = bank_info.account.get_business()
+				business = bank_info.account.business
 				if business:
 					# Get JWT context to check if user is accessing as employee
 					from .jwt_context import get_jwt_business_context_with_validation
@@ -1718,7 +1751,7 @@ class DeleteBankInfo(graphene.Mutation):
 			
 			# Check employee permissions for business accounts
 			if bank_info.account.account_type == 'business':
-				business = bank_info.account.get_business()
+				business = bank_info.account.business
 				if business:
 					# Get JWT context to check if user is accessing as employee
 					from .jwt_context import get_jwt_business_context_with_validation
@@ -1958,7 +1991,7 @@ class SetDefaultBankInfo(graphene.Mutation):
 			
 			# Check employee permissions for business accounts
 			if bank_info.account.account_type == 'business':
-				business = bank_info.account.get_business()
+				business = bank_info.account.business
 				if business:
 					# Get JWT context to check if user is accessing as employee
 					from .jwt_context import get_jwt_business_context_with_validation
