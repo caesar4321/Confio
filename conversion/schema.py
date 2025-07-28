@@ -82,9 +82,16 @@ class ConvertUSDCToCUSD(graphene.Mutation):
             validate_transaction_amount(amount)
             amount_decimal = Decimal(amount)
             
-            # Get JWT context for account determination
-            from users.jwt_context import get_jwt_business_context
-            jwt_context = get_jwt_business_context(info)
+            # Get JWT context with validation and permission check
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+            if not jwt_context:
+                return ConvertUSDCToCUSD(
+                    conversion=None,
+                    success=False,
+                    errors=["No access or permission to perform conversions"]
+                )
+                
             account_type = jwt_context['account_type']
             account_index = jwt_context['account_index']
             business_id = jwt_context.get('business_id')
@@ -94,7 +101,9 @@ class ConvertUSDCToCUSD(graphene.Mutation):
             # Get the user's active account using JWT context
             if account_type == 'business' and business_id:
                 # For business accounts, find by business_id from JWT
-                active_account = user.accounts.filter(
+                # This will find the business account regardless of who owns it
+                from users.models import Account
+                active_account = Account.objects.filter(
                     account_type='business',
                     account_index=account_index,
                     business_id=business_id
@@ -235,9 +244,16 @@ class ConvertCUSDToUSDC(graphene.Mutation):
             validate_transaction_amount(amount)
             amount_decimal = Decimal(amount)
             
-            # Get JWT context for account determination
-            from users.jwt_context import get_jwt_business_context
-            jwt_context = get_jwt_business_context(info)
+            # Get JWT context with validation and permission check
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+            if not jwt_context:
+                return ConvertCUSDToUSDC(
+                    conversion=None,
+                    success=False,
+                    errors=["No access or permission to perform conversions"]
+                )
+                
             account_type = jwt_context['account_type']
             account_index = jwt_context['account_index']
             business_id = jwt_context.get('business_id')
@@ -247,7 +263,9 @@ class ConvertCUSDToUSDC(graphene.Mutation):
             # Get the user's active account using JWT context
             if account_type == 'business' and business_id:
                 # For business accounts, find by business_id from JWT
-                active_account = user.accounts.filter(
+                # This will find the business account regardless of who owns it
+                from users.models import Account
+                active_account = Account.objects.filter(
                     account_type='business',
                     account_index=account_index,
                     business_id=business_id
@@ -363,11 +381,31 @@ class Query(graphene.ObjectType):
         if not (user and getattr(user, 'is_authenticated', False)):
             return []
         
-        # Get active account
-        active_account = user.accounts.filter(
-            account_type=info.context.active_account_type,
-            account_index=info.context.active_account_index
-        ).first()
+        # Get JWT context with validation and permission check
+        from users.jwt_context import get_jwt_business_context_with_validation
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_transactions')
+        if not jwt_context:
+            return []
+            
+        account_type = jwt_context['account_type']
+        account_index = jwt_context['account_index']
+        business_id = jwt_context.get('business_id')
+        
+        # Get active account using JWT context
+        if account_type == 'business' and business_id:
+            # For business accounts, find by business_id from JWT
+            from users.models import Account
+            active_account = Account.objects.filter(
+                account_type='business',
+                account_index=account_index,
+                business_id=business_id
+            ).first()
+        else:
+            # For personal accounts
+            active_account = user.accounts.filter(
+                account_type=account_type,
+                account_index=account_index
+            ).first()
         
         if not active_account:
             return []

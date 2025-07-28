@@ -3311,6 +3311,21 @@ export const ExchangeScreen = () => {
     );
   }
 
+  // Check if employee has permission to manage P2P
+  if (activeAccount?.isEmployee && !activeAccount?.employeePermissions?.manageP2p) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+        <Icon name="lock" size={64} color={colors.primaryText} style={{ marginBottom: 24 }} />
+        <Text style={{ fontSize: 24, fontWeight: '600', color: colors.dark, marginBottom: 12, textAlign: 'center' }}>
+          Función No Disponible
+        </Text>
+        <Text style={{ fontSize: 16, color: colors.gray600, textAlign: 'center', lineHeight: 24 }}>
+          No tienes permisos para gestionar intercambios P2P desde esta cuenta empresarial.
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Header />

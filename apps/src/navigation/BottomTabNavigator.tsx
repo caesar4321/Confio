@@ -29,13 +29,17 @@ export const BottomTabNavigator = () => {
   // 🔥 Fix: Normalize the account type to lowercase for comparison
   const accountType = (activeAccount?.type || 'personal').toLowerCase();
   const isBusiness = accountType === 'business';
+  const isEmployee = activeAccount?.isEmployee || false;
+  const permissions = activeAccount?.employeePermissions || {};
 
   // console.log('🔍 BottomTabNavigator - Active account:', {
   //   accountId: activeAccount?.id,
   //   originalType: activeAccount?.type,
   //   normalizedType: accountType,
   //   accountName: activeAccount?.name,
-  //   isBusiness
+  //   isBusiness,
+  //   isEmployee,
+  //   permissions
   // });
 
   const handleNotificationPress = useCallback(() => {
@@ -142,8 +146,8 @@ export const BottomTabNavigator = () => {
         <Icon name="maximize" size={32} color="#fff" />
       </View>
     ),
-    tabBarButton: isBusinessAccount ? () => null : undefined, // Hide for business accounts
-  }), [ScanHeader, isBusinessAccount]);
+    tabBarButton: (isEmployee && !permissions.sendFunds) ? () => null : undefined, // Hide for employees without sendFunds permission
+  }), [ScanHeader, isBusinessAccount, isEmployee, permissions.sendFunds]);
 
   // Charge tab options - only show for business accounts
   const chargeTabOptions = useMemo(() => ({

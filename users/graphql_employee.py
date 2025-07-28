@@ -6,7 +6,7 @@ from django.utils import timezone
 from datetime import timedelta
 from .models_employee import BusinessEmployee, EmployeeInvitation, EmployeeActivityLog
 from .models import Business, User, Account
-from .jwt_context import require_business_context, get_jwt_business_context
+from .jwt_context import require_business_context, get_jwt_business_context_with_validation
 
 
 def get_account_from_context(context, user=None):
@@ -21,7 +21,7 @@ def get_account_from_context(context, user=None):
         def __init__(self, context):
             self.context = context
     
-    jwt_context = get_jwt_business_context(FakeInfo(context))
+    jwt_context = get_jwt_business_context_with_validation(FakeInfo(context), required_permission=None)
     if not jwt_context:
         # Fall back to personal account if no JWT context
         account_type = 'personal'

@@ -79,6 +79,23 @@ export const GET_USER_ACCOUNTS = gql`
       lastLoginAt
       displayName
       avatarLetter
+      isEmployee
+      employeeRole
+      employeePermissions {
+        viewBalance
+        sendFunds
+        acceptPayments
+        viewTransactions
+        manageEmployees
+        viewBusinessAddress
+        viewAnalytics
+        editBusinessInfo
+        manageBankAccounts
+        manageP2p
+        createInvoices
+        manageInvoices
+        exportData
+      }
       business {
         id
         name
@@ -2104,8 +2121,8 @@ export const GET_USER_BY_ID = gql`
 `;
 
 export const SWITCH_ACCOUNT_TOKEN = gql`
-  mutation SwitchAccountToken($accountType: String!, $accountIndex: Int!) {
-    switchAccountToken(accountType: $accountType, accountIndex: $accountIndex) {
+  mutation SwitchAccountToken($accountType: String!, $accountIndex: Int!, $businessId: ID) {
+    switchAccountToken(accountType: $accountType, accountIndex: $accountIndex, businessId: $businessId) {
       token
       payload
     }

@@ -133,9 +133,16 @@ class CreateUSDCDeposit(graphene.Mutation):
             )
 
         try:
-            # Get JWT context for account determination
-            from users.jwt_context import get_jwt_business_context
-            jwt_context = get_jwt_business_context(info)
+            # Get JWT context with validation and permission check
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission='accept_payments')
+            if not jwt_context:
+                return CreateUSDCDeposit(
+                    deposit=None,
+                    success=False,
+                    errors=["No access or permission to create deposits"]
+                )
+                
             account_type = jwt_context['account_type']
             account_index = jwt_context['account_index']
             business_id = jwt_context.get('business_id')
@@ -143,7 +150,9 @@ class CreateUSDCDeposit(graphene.Mutation):
             # Get the user's active account using JWT context
             if account_type == 'business' and business_id:
                 # For business accounts, find by business_id from JWT
-                active_account = user.accounts.filter(
+                # This will find the business account regardless of who owns it
+                from users.models import Account
+                active_account = Account.objects.filter(
                     account_type='business',
                     account_index=account_index,
                     business_id=business_id
@@ -234,19 +243,38 @@ class CreateUSDCWithdrawal(graphene.Mutation):
             )
 
         try:
-            # Log context info
-            account_type = getattr(info.context, 'active_account_type', 'personal')
-            account_index = getattr(info.context, 'active_account_index', 0)
-            logger.info(f"Looking for account - Type: {account_type}, Index: {account_index}")
+            # Get JWT context with validation and permission check
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+            if not jwt_context:
+                return CreateUSDCWithdrawal(
+                    withdrawal=None,
+                    success=False,
+                    errors=["No access or permission to create withdrawals"]
+                )
+                
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
             
-            # Get the user's active account
-            accounts = user.accounts.all()
-            logger.info(f"User has {accounts.count()} accounts")
+            logger.info(f"Looking for account - Type: {account_type}, Index: {account_index}, Business ID: {business_id}")
             
-            active_account = user.accounts.filter(
-                account_type=account_type,
-                account_index=account_index
-            ).first()
+            # Get the user's active account using JWT context
+            if account_type == 'business' and business_id:
+                # For business accounts, find by business_id from JWT
+                # This will find the business account regardless of who owns it
+                from users.models import Account
+                active_account = Account.objects.filter(
+                    account_type='business',
+                    account_index=account_index,
+                    business_id=business_id
+                ).first()
+            else:
+                # For personal accounts
+                active_account = user.accounts.filter(
+                    account_type=account_type,
+                    account_index=account_index
+                ).first()
             
             if not active_account:
                 logger.error(f"Active account not found for user {user.id} with type={account_type}, index={account_index}")
@@ -340,9 +368,14 @@ class Query(graphene.ObjectType):
         if not (user and getattr(user, 'is_authenticated', False)):
             return []
         
-        # Get active account context
-        account_type = getattr(info.context, 'active_account_type', 'personal')
-        account_index = getattr(info.context, 'active_account_index', 0)
+        # Get JWT context for account determination
+        from users.jwt_context import get_jwt_business_context_with_validation
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+        if not jwt_context:
+            return []
+        account_type = jwt_context['account_type']
+        account_index = jwt_context['account_index']
+        business_id = jwt_context.get('business_id')
         
         # Filter by user and account context
         queryset = USDCDeposit.objects.filter(
@@ -351,16 +384,11 @@ class Query(graphene.ObjectType):
         )
         
         # Filter by business if active account is business
-        if account_type == 'business':
+        if account_type == 'business' and business_id:
             try:
-                account = user.accounts.get(
-                    account_type=account_type,
-                    account_index=account_index
-                )
-                if account.business:
-                    queryset = queryset.filter(actor_business=account.business)
-                else:
-                    return []
+                from users.models import Business
+                business = Business.objects.get(id=business_id)
+                queryset = queryset.filter(actor_business=business)
             except:
                 return []
         else:
@@ -380,9 +408,14 @@ class Query(graphene.ObjectType):
         if not (user and getattr(user, 'is_authenticated', False)):
             return []
         
-        # Get active account context
-        account_type = getattr(info.context, 'active_account_type', 'personal')
-        account_index = getattr(info.context, 'active_account_index', 0)
+        # Get JWT context for account determination
+        from users.jwt_context import get_jwt_business_context_with_validation
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+        if not jwt_context:
+            return []
+        account_type = jwt_context['account_type']
+        account_index = jwt_context['account_index']
+        business_id = jwt_context.get('business_id')
         
         # Filter by user and account context
         queryset = USDCWithdrawal.objects.filter(
@@ -391,16 +424,11 @@ class Query(graphene.ObjectType):
         )
         
         # Filter by business if active account is business
-        if account_type == 'business':
+        if account_type == 'business' and business_id:
             try:
-                account = user.accounts.get(
-                    account_type=account_type,
-                    account_index=account_index
-                )
-                if account.business:
-                    queryset = queryset.filter(actor_business=account.business)
-                else:
-                    return []
+                from users.models import Business
+                business = Business.objects.get(id=business_id)
+                queryset = queryset.filter(actor_business=business)
             except:
                 return []
         else:
@@ -420,24 +448,24 @@ class Query(graphene.ObjectType):
         if not (user and getattr(user, 'is_authenticated', False)):
             return []
         
-        # Get active account context
-        account_type = getattr(info.context, 'active_account_type', 'personal')
-        account_index = getattr(info.context, 'active_account_index', 0)
+        # Get JWT context for account determination
+        from users.jwt_context import get_jwt_business_context_with_validation
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+        if not jwt_context:
+            return []
+        account_type = jwt_context['account_type']
+        account_index = jwt_context['account_index']
+        business_id = jwt_context.get('business_id')
         
         # Filter by user and account context
         queryset = UnifiedUSDCTransactionTable.objects.filter(actor_user=user)
         
         # Filter by business if active account is business
-        if account_type == 'business':
+        if account_type == 'business' and business_id:
             try:
-                account = user.accounts.get(
-                    account_type=account_type,
-                    account_index=account_index
-                )
-                if account.business:
-                    queryset = queryset.filter(actor_business=account.business)
-                else:
-                    return []
+                from users.models import Business
+                business = Business.objects.get(id=business_id)
+                queryset = queryset.filter(actor_business=business)
             except:
                 return []
         else:
