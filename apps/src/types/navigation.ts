@@ -160,6 +160,14 @@ export type MainStackParamList = {
     friendPhone?: string;
     isOnConfio: boolean;
   };
+  EmployeeDetail: {
+    employeeId: string;
+    employeeName: string;
+    employeePhone: string;
+    employeeRole: string;
+    isActive: boolean;
+    employeeData: any; // Full employee object from GraphQL
+  };
   TransactionDetail: {
     transactionType: 'received' | 'sent' | 'exchange' | 'payment' | 'deposit' | 'withdrawal' | 'conversion';
     transactionData?: any; // You can make this more specific based on your data structure

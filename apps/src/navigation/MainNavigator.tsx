@@ -19,6 +19,7 @@ import { USDCConversionScreen } from '../screens/USDCConversionScreen';
 import { SendWithAddressScreen } from '../screens/SendWithAddressScreen';
 import { SendToFriendScreen } from '../screens/SendToFriendScreen';
 import { FriendDetailScreen } from '../screens/FriendDetailScreen';
+import { EmployeeDetailScreen } from '../screens/EmployeeDetailScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
 import { TransactionProcessingScreen } from '../screens/TransactionProcessingScreen';
 import { TransactionSuccessScreen } from '../screens/TransactionSuccessScreen';
@@ -185,6 +186,11 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="FriendDetail"
         component={FriendDetailScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="EmployeeDetail"
+        component={EmployeeDetailScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen

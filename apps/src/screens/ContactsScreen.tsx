@@ -120,27 +120,29 @@ const EmployeeCard = memo(({ contact, onPress, onRemove, onCancelInvitation }: E
         <Text style={styles.employeeRole}>{role}</Text>
       </View>
       
-      {isInvitation ? (
-        <TouchableOpacity
-          style={styles.cancelButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            onCancelInvitation(contact);
-          }}
-        >
-          <Icon name="x" size={20} color="#ef4444" />
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity
-          style={styles.moreButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            onRemove(contact);
-          }}
-        >
-          <Icon name="more-vertical" size={20} color="#6b7280" />
-        </TouchableOpacity>
-      )}
+      <View style={styles.employeeActionContainer}>
+        {isInvitation ? (
+          <TouchableOpacity
+            style={styles.cancelButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              onCancelInvitation(contact);
+            }}
+          >
+            <Icon name="x" size={20} color="#ef4444" />
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.moreButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              onRemove(contact);
+            }}
+          >
+            <Icon name="more-vertical" size={20} color="#6b7280" />
+          </TouchableOpacity>
+        )}
+      </View>
     </TouchableOpacity>
   );
 });
@@ -251,7 +253,7 @@ export const ContactsScreen = () => {
   const [createTestUsers] = useMutation(CREATE_TEST_USERS);
   
   // Import useAccount to check account type
-  const { activeAccount } = useAccount();
+  const { activeAccount, user } = useAccount();
   
   // Check if this is a business account or confirmed personal account
   const isBusinessAccount = activeAccount?.type === 'business';
@@ -741,6 +743,88 @@ export const ContactsScreen = () => {
     handleInviteFriend(contact);
   }, []);
 
+  // Employee management handlers
+  const handleEmployeePress = useCallback((contact: any) => {
+    if (contact.isInvitation) {
+      // Show invitation details
+      Alert.alert(
+        'Invitación Pendiente',
+        `Invitación enviada a ${contact.name} (${contact.phone})\nRol: ${getRoleLabel(contact.role)}`,
+        [
+          { text: 'Cancelar Invitación', onPress: () => handleCancelInvitation(contact), style: 'destructive' },
+          { text: 'Cerrar', style: 'cancel' }
+        ]
+      );
+    } else {
+      // Navigate directly to employee detail screen
+      navigation.navigate('EmployeeDetail', {
+        employeeId: contact.id,
+        employeeName: contact.name,
+        employeePhone: contact.phone,
+        employeeRole: contact.role,
+        isActive: contact.isActive,
+        employeeData: contact.employeeData || contact.employee
+      });
+    }
+  }, [navigation]);
+
+  // Handle employee actions menu (three dots button)
+  const handleEmployeeActions = useCallback((contact: any) => {
+    Alert.alert(
+      'Acciones del Empleado',
+      `${contact.name}\nRol: ${getRoleLabel(contact.role)}\nEstado: ${contact.isActive ? 'Activo' : 'Inactivo'}`,
+      [
+        { text: contact.isActive ? 'Desactivar' : 'Activar', onPress: () => handleToggleEmployee(contact) },
+        { text: 'Remover', onPress: () => handleRemoveEmployee(contact), style: 'destructive' },
+        { text: 'Cancelar', style: 'cancel' }
+      ]
+    );
+  }, []);
+
+  const handleToggleEmployee = useCallback(async (contact: any) => {
+    // TODO: Implement employee activation/deactivation
+    console.log('Toggle employee:', contact);
+    Alert.alert('Funcionalidad Pendiente', 'La activación/desactivación de empleados estará disponible pronto.');
+  }, []);
+
+  const handleRemoveEmployee = useCallback(async (contact: any) => {
+    Alert.alert(
+      'Confirmar Eliminación',
+      `¿Estás seguro de que quieres remover a ${contact.name} como empleado?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { 
+          text: 'Remover', 
+          style: 'destructive',
+          onPress: async () => {
+            // TODO: Implement employee removal
+            console.log('Remove employee:', contact);
+            Alert.alert('Funcionalidad Pendiente', 'La eliminación de empleados estará disponible pronto.');
+          }
+        }
+      ]
+    );
+  }, []);
+
+  const handleCancelInvitation = useCallback(async (contact: any) => {
+    try {
+      const result = await cancelInvitation({
+        variables: { invitationId: contact.invitationData.id }
+      });
+
+      if (result.data?.cancelInvitation?.success) {
+        Alert.alert('Éxito', 'Invitación cancelada correctamente.');
+        // Refresh invitations
+        refetchInvitations();
+      } else {
+        Alert.alert('Error', result.data?.cancelInvitation?.errors?.[0] || 'Error al cancelar la invitación');
+      }
+    } catch (error) {
+      console.error('Error canceling invitation:', error);
+      Alert.alert('Error', 'No se pudo cancelar la invitación. Intenta de nuevo.');
+    }
+  }, [cancelInvitation, refetchInvitations]);
+
   const TokenSelectionModal = () => (
     <Modal
       visible={showTokenSelection}
@@ -939,18 +1023,24 @@ export const ContactsScreen = () => {
       const employees = employeesData?.currentBusinessEmployees || [];
       const invitations = invitationsData?.currentBusinessInvitations || [];
       
-      // Format employees for display
-      const employeeContacts = employees.map(employee => ({
-        id: `employee-${employee.id}`,
-        name: `${employee.user.firstName || ''} ${employee.user.lastName || ''}`.trim() || employee.user.username,
-        phone: formatPhoneNumber(employee.user.phoneNumber, employee.user.phoneCountry),
-        avatar: (employee.user.firstName?.[0] || employee.user.username?.[0] || 'E').toUpperCase(),
-        role: employee.role,
-        isActive: employee.isActive,
-        permissions: employee.effectivePermissions,
-        isEmployee: true,
-        employeeData: employee
-      }));
+      // Format employees for display - exclude the business owner
+      const employeeContacts = employees
+        .filter(employee => {
+          // Filter out the business owner (current user)
+          const currentUserId = user?.id;
+          return employee.user.id !== currentUserId;
+        })
+        .map(employee => ({
+          id: `employee-${employee.id}`,
+          name: `${employee.user.firstName || ''} ${employee.user.lastName || ''}`.trim() || employee.user.username,
+          phone: formatPhoneNumber(employee.user.phoneNumber, employee.user.phoneCountry),
+          avatar: (employee.user.firstName?.[0] || employee.user.username?.[0] || 'E').toUpperCase(),
+          role: employee.role,
+          isActive: employee.isActive,
+          permissions: employee.effectivePermissions,
+          isEmployee: true,
+          employeeData: employee
+        }));
       
       // Format pending invitations
       const invitationContacts = invitations.map(invitation => ({
@@ -1020,13 +1110,23 @@ export const ContactsScreen = () => {
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
         <Text style={[styles.sectionTitle, section.isEmployees && styles.employeeSectionTitle]}>{section.title}</Text>
-        {section.isLoading ? (
-          <ActivityIndicator size="small" color={colors.primary} />
-        ) : (
-          <View style={styles.sectionCount}>
-            <Text style={styles.sectionCountText}>{section.count}</Text>
-          </View>
-        )}
+        <View style={styles.sectionHeaderRight}>
+          {section.isLoading ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <View style={styles.sectionCount}>
+              <Text style={styles.sectionCountText}>{section.count}</Text>
+            </View>
+          )}
+          {section.isEmployees && !section.isLoading && (
+            <TouchableOpacity 
+              style={styles.addEmployeeHeaderButton}
+              onPress={() => setShowInviteModal(true)}
+            >
+              <Icon name="user-plus" size={16} color={colors.primary} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
       
       {section.showInfo && (
@@ -1074,15 +1174,30 @@ export const ContactsScreen = () => {
     </View>
   ), []);
 
-  const renderItem = useCallback(({ item, section }) => (
-    <ContactCard 
-      contact={item} 
-      isOnConfio={item.isOnConfio || false}
-      onPress={handleFriendPressCallback}
-      onSendPress={handleSendToFriendCallback}
-      onInvitePress={handleInviteFriendCallback}
-    />
-  ), [handleFriendPressCallback, handleSendToFriendCallback, handleInviteFriendCallback]);
+  const renderItem = useCallback(({ item, section }) => {
+    // For business accounts showing employees
+    if (section.isEmployees) {
+      return (
+        <EmployeeCard 
+          contact={item} 
+          onPress={handleEmployeePress}
+          onRemove={handleEmployeeActions}
+          onCancelInvitation={handleCancelInvitation}
+        />
+      );
+    }
+    
+    // For regular contacts
+    return (
+      <ContactCard 
+        contact={item} 
+        isOnConfio={item.isOnConfio || false}
+        onPress={handleFriendPressCallback}
+        onSendPress={handleSendToFriendCallback}
+        onInvitePress={handleInviteFriendCallback}
+      />
+    );
+  }, [handleFriendPressCallback, handleSendToFriendCallback, handleInviteFriendCallback, handleEmployeePress, handleEmployeeActions, handleCancelInvitation]);
 
   // Create a stable header component that won't cause re-renders
   const ListHeaderComponent = useMemo(() => {
@@ -1481,8 +1596,10 @@ export const ContactsScreen = () => {
           onClose={() => setShowInviteModal(false)}
           onSuccess={() => {
             setShowInviteModal(false);
+            // Refresh both employees and invitations data
             refetchEmployees();
             refetchInvitations();
+            console.log('Employee invitation successful, data refreshed');
           }}
         />
       )}
@@ -1633,6 +1750,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 12,
   },
+  sectionHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  addEmployeeHeaderButton: {
+    padding: 4,
+    borderRadius: 8,
+    backgroundColor: colors.primaryLight,
+  },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '600',
@@ -1710,11 +1837,28 @@ const styles = StyleSheet.create({
     color: '#059669',
     marginTop: 2,
   },
+  employeeActionContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+  },
   cancelButton: {
     padding: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fef2f2',
+    minWidth: 36,
+    minHeight: 36,
   },
   moreButton: {
     padding: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f9fafb',
+    minWidth: 36,
+    minHeight: 36,
   },
   infoCard: {
     backgroundColor: colors.violetLight,

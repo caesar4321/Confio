@@ -340,13 +340,12 @@ export const AddBankInfoModal = ({
   };
 
   const handleSubmit = async () => {
-    if (!validateForm() || !accountId) return;
+    if (!validateForm()) return;
 
     setIsSubmitting(true);
     try {
 
       const variables = {
-        accountId,
         paymentMethodId: selectedPaymentMethod!.id,
         accountHolderName: formData.accountHolderName.trim(),
         accountNumber: formData.accountNumber.trim() || null,

@@ -41,7 +41,7 @@ export const TradeConfirmScreen: React.FC = () => {
     refetchQueries: [
       {
         query: GET_MY_P2P_TRADES,
-        variables: { accountId: activeAccount?.id }
+        variables: {}
       }
     ],
     // Don't wait for refetch to complete before navigating
@@ -54,7 +54,7 @@ export const TradeConfirmScreen: React.FC = () => {
       }
     }
   });
-  // Only query with numeric account IDs to avoid GraphQL errors
+  // Query user bank accounts for payment method validation
   const { 
     data: userBankAccountsData,
     refetch: refetchBankAccounts 
@@ -70,11 +70,11 @@ export const TradeConfirmScreen: React.FC = () => {
   // Refetch bank accounts when screen comes into focus
   useFocusEffect(
     React.useCallback(() => {
-      if (refetchBankAccounts && activeAccount?.id && isNumericAccountId) {
+      if (refetchBankAccounts && activeAccount?.id) {
         console.log('[TradeConfirmScreen] Screen focused, refetching bank accounts');
         refetchBankAccounts();
       }
-    }, [refetchBankAccounts, activeAccount?.id, isNumericAccountId])
+    }, [refetchBankAccounts, activeAccount?.id])
   );
   
   // Auto-select first configured payment method when data loads
@@ -153,7 +153,6 @@ export const TradeConfirmScreen: React.FC = () => {
             offerId: offer.id,
             cryptoAmount: cryptoAmount,
             paymentMethodId: selectedPaymentMethod.id,
-            accountId: activeAccount?.id, // Pass the current account ID
           },
         },
       });

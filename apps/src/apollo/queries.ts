@@ -253,8 +253,8 @@ export const CREATE_BUSINESS = gql`
 `;
 
 export const UPDATE_ACCOUNT_SUI_ADDRESS = gql`
-  mutation UpdateAccountSuiAddress($accountId: ID!, $suiAddress: String!) {
-    updateAccountSuiAddress(accountId: $accountId, suiAddress: $suiAddress) {
+  mutation UpdateAccountSuiAddress($suiAddress: String!) {
+    updateAccountSuiAddress(suiAddress: $suiAddress) {
       account {
         id
         accountId
@@ -716,8 +716,8 @@ export const GET_P2P_OFFERS = gql`
 `;
 
 export const GET_MY_P2P_OFFERS = gql`
-  query GetMyP2POffers($accountId: String) {
-    myP2pOffers(accountId: $accountId) {
+  query GetMyP2POffers {
+    myP2pOffers {
       id
       exchangeType
       tokenType
@@ -764,8 +764,8 @@ export const GET_MY_P2P_OFFERS = gql`
 `;
 
 export const GET_MY_P2P_TRADES = gql`
-  query GetMyP2PTrades($accountId: String, $offset: Int, $limit: Int) {
-    myP2pTrades(accountId: $accountId, offset: $offset, limit: $limit) {
+  query GetMyP2PTrades($offset: Int, $limit: Int) {
+    myP2pTrades(offset: $offset, limit: $limit) {
       trades {
       id
       offer {
@@ -1603,8 +1603,8 @@ export const GET_BANKS = gql`
 `;
 
 export const GET_USER_BANK_ACCOUNTS = gql`
-  query GetUserBankAccounts($accountId: ID) {
-    userBankAccounts(accountId: $accountId) {
+  query GetUserBankAccounts {
+    userBankAccounts {
       id
       account {
         id
@@ -1728,7 +1728,6 @@ export const GET_BANK_INFO = gql`
 // Bank Info Mutations
 export const CREATE_BANK_INFO = gql`
   mutation CreateBankInfo(
-    $accountId: ID!
     $paymentMethodId: ID!
     $accountHolderName: String!
     $accountNumber: String
@@ -1740,7 +1739,6 @@ export const CREATE_BANK_INFO = gql`
     $isDefault: Boolean
   ) {
     createBankInfo(
-      accountId: $accountId
       paymentMethodId: $paymentMethodId
       accountHolderName: $accountHolderName
       accountNumber: $accountNumber
@@ -2281,8 +2279,8 @@ export const GET_CURRENT_BUSINESS_INVITATIONS = gql`
 `;
 
 export const INVITE_EMPLOYEE = gql`
-  mutation InviteEmployee($phoneNumber: String!, $role: String!, $message: String) {
-    inviteEmployee(phoneNumber: $phoneNumber, role: $role, message: $message) {
+  mutation InviteEmployee($input: InviteEmployeeInput!) {
+    inviteEmployee(input: $input) {
       success
       errors
       invitation {

@@ -184,7 +184,6 @@ export const CreateBusinessScreen = () => {
           // Update the account with the Sui address on the server
           const updateResult = await updateAccountSuiAddress({
             variables: {
-              accountId: createdAccount.id,
               suiAddress: suiAddress
             }
           });

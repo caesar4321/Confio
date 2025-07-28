@@ -85,7 +85,6 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
   onSuccess,
 }) => {
   const { activeAccount } = useAccount();
-  const businessId = activeAccount?.business?.id;
   const [phoneNumber, setPhoneNumber] = useState('');
   const [employeeName, setEmployeeName] = useState('');
   const [role, setRole] = useState('cashier');
@@ -140,7 +139,6 @@ export const InviteEmployeeModal: React.FC<InviteEmployeeModalProps> = ({
       const { data } = await inviteEmployee({
         variables: {
           input: {
-            businessId,
             employeePhone: phoneNumber,
             employeePhoneCountry: selectedCountry?.[2] || 'VE',
             employeeName,

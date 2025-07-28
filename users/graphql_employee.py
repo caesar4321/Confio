@@ -129,7 +129,6 @@ class EmployeeActivityLogType(DjangoObjectType):
     
 
 class AddBusinessEmployeeInput(graphene.InputObjectType):
-    business_id = graphene.ID(required=True)
     user_phone = graphene.String(required=True, description="Phone number of employee to add")
     role = graphene.String(default_value='cashier')
     custom_permissions = graphene.JSONString(description="Custom permissions overriding role defaults")
@@ -168,23 +167,18 @@ class AddBusinessEmployee(graphene.Mutation):
         if not user.is_authenticated:
             return cls(success=False, errors=["Authentication required"])
         
-        # Get account context to ensure user is operating as business owner
-        account = get_account_from_context(info.context)
-        if not account or account.account_type != 'business':
-            return cls(success=False, errors=["Must be operating as business account"])
-        
         try:
-            # Get the business
+            # Use JWT context to get the current business
+            jwt_context = require_business_context(info)
+            business_id = jwt_context['business_id']
+            
+            # Get the business and verify access
             business = Business.objects.get(
-                id=input.business_id,
+                id=business_id,
                 accounts__user=user,
                 accounts__account_type='business',
                 deleted_at__isnull=True
             )
-            
-            # Check if user is owner (has account associated with this business)
-            if not business.accounts.filter(user=user).exists():
-                return cls(success=False, errors=["You don't have permission to manage this business"])
             
             # Find employee user by phone
             employee_user = User.objects.filter(
@@ -267,6 +261,10 @@ class UpdateBusinessEmployee(graphene.Mutation):
             if not employee.business.accounts.filter(user=user).exists():
                 return cls(success=False, errors=["You don't have permission to manage this employee"])
             
+            # Prevent business owner from deactivating themselves
+            if employee.user == user and input.is_active is False:
+                return cls(success=False, errors=["Business owners cannot deactivate themselves. Transfer ownership first if needed."])
+            
             # Update fields
             with transaction.atomic():
                 if input.role is not None:
@@ -326,6 +324,10 @@ class RemoveBusinessEmployee(graphene.Mutation):
             if not employee.business.accounts.filter(user=user).exists():
                 return cls(success=False, errors=["You don't have permission to remove this employee"])
             
+            # Prevent business owner from removing themselves
+            if employee.user == user:
+                return cls(success=False, errors=["Business owners cannot remove themselves. Transfer ownership first if needed."])
+            
             # Soft delete
             with transaction.atomic():
                 employee.soft_delete()
@@ -341,7 +343,6 @@ class RemoveBusinessEmployee(graphene.Mutation):
 
 
 class InviteEmployeeInput(graphene.InputObjectType):
-    business_id = graphene.ID(required=True)
     employee_phone = graphene.String(required=True)
     employee_phone_country = graphene.String(required=True)
     employee_name = graphene.String()
@@ -366,21 +367,17 @@ class InviteEmployee(graphene.Mutation):
             return cls(success=False, errors=["Authentication required"])
         
         try:
-            # Get the business and verify ownership
-            business = Business.objects.get(id=input.business_id)
+            # Use JWT context to get the current business
+            jwt_context = require_business_context(info)
+            business_id = jwt_context['business_id']
             
-            account = get_account_from_context(info.context, user)
-            
-            # Debug logging
-            print(f"InviteEmployee - User: {user.id}, BusinessID: {input.business_id}")
-            print(f"InviteEmployee - Account: {account}")
-            print(f"InviteEmployee - Account business: {account.business if account else 'No account'}")
-            print(f"InviteEmployee - Target business: {business}")
-            print(f"InviteEmployee - Account type: {account.account_type if account else 'No account'}")
-            print(f"InviteEmployee - Business match: {account.business == business if account else False}")
-            
-            if not account or account.business != business:
-                return cls(success=False, errors=["You don't have permission to invite employees to this business"])
+            # Get the business and verify access
+            business = Business.objects.get(
+                id=business_id,
+                accounts__user=user,
+                accounts__account_type='business',
+                deleted_at__isnull=True
+            )
             
             # Check if trying to invite themselves
             if (user.phone_number == input.employee_phone and 
@@ -436,7 +433,7 @@ class InviteEmployee(graphene.Mutation):
             return cls(invitation=invitation, success=True)
             
         except Business.DoesNotExist:
-            return cls(success=False, errors=["Business not found"])
+            return cls(success=False, errors=["Business not found or access denied"])
         except Exception as e:
             return cls(success=False, errors=[str(e)])
 
@@ -601,10 +598,12 @@ class EmployeeQueries(graphene.ObjectType):
         except Business.DoesNotExist:
             return []
         
-        # Get employees
+        # Get employees - exclude the business owner
         queryset = BusinessEmployee.objects.filter(
             business=business,
             deleted_at__isnull=True
+        ).exclude(
+            user=user  # Exclude the business owner from the employees list
         ).select_related('user', 'hired_by', 'deactivated_by')
         
         if not include_inactive:
@@ -706,10 +705,12 @@ class EmployeeQueries(graphene.ObjectType):
                 deleted_at__isnull=True
             )
             
-            # Get employees
+            # Get employees - exclude the business owner
             queryset = BusinessEmployee.objects.filter(
                 business=business,
                 deleted_at__isnull=True
+            ).exclude(
+                user=user  # Exclude the business owner from the employees list
             ).select_related('user')
             
             if not include_inactive:
