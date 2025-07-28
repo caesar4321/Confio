@@ -6,6 +6,16 @@ export interface AccountContext {
   type: AccountType;
   index: number;
   businessId?: string;
+  employeeRole?: 'owner' | 'cashier' | 'manager' | 'admin';
+  permissions?: {
+    acceptPayments: boolean;
+    viewTransactions: boolean;
+    viewBalance: boolean;
+    sendFunds: boolean;
+    manageEmployees: boolean;
+    viewBusinessAddress: boolean;
+    viewAnalytics: boolean;
+  };
 }
 
 export interface StoredAccount {

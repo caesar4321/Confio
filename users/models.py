@@ -1035,3 +1035,5 @@ def ensure_single_default_bank_account(sender, instance, **kwargs):
 from .models_views import UnifiedTransaction
 # Import new table models
 from .models_unified import UnifiedTransactionTable
+# Import employee model
+from .models_employee import BusinessEmployee

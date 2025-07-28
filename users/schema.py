@@ -10,6 +10,10 @@ import logging
 from django.utils.translation import gettext as _
 from .legal.documents import TERMS, PRIVACY, DELETION
 from graphql import GraphQLError
+from .graphql_employee import (
+    EmployeeQueries, EmployeeMutations,
+    BusinessEmployeeType, EmployerBusinessType
+)
 # Removed circular import - P2PPaymentMethodType will be referenced by string
 
 User = get_user_model()
@@ -199,7 +203,7 @@ class UserByPhoneType(graphene.ObjectType):
 	active_account_id = graphene.ID()
 	active_account_sui_address = graphene.String()
 
-class Query(graphene.ObjectType):
+class Query(EmployeeQueries, graphene.ObjectType):
 	me = graphene.Field(UserType)
 	user = graphene.Field(UserType, id=graphene.ID(required=True))
 	business = graphene.Field(BusinessType, id=graphene.ID(required=True))
@@ -1442,7 +1446,7 @@ class SetDefaultBankInfo(graphene.Mutation):
 			logger.error(f"Error setting default bank info: {str(e)}")
 			return SetDefaultBankInfo(success=False, error="Error interno del servidor")
 
-class Mutation(graphene.ObjectType):
+class Mutation(EmployeeMutations, graphene.ObjectType):
 	update_phone_number = UpdatePhoneNumber.Field()
 	update_username = UpdateUsername.Field()
 	update_user_profile = UpdateUserProfile.Field()
