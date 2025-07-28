@@ -28,6 +28,8 @@ interface Account {
   phone?: string;
   category?: string;
   avatar: string;
+  isEmployee?: boolean;
+  employeeRole?: 'cashier' | 'manager' | 'admin';
 }
 
 interface ProfileMenuProps {
@@ -133,7 +135,11 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
                   <View style={styles.accountItemInfo}>
                     <Text style={styles.accountItemName}>{account.name}</Text>
                     <Text style={styles.accountItemType}>
-                      {account.type.toLowerCase() === "personal" ? "Personal" : "Negocio"}
+                      {account.type.toLowerCase() === "personal" 
+                        ? "Personal" 
+                        : account.isEmployee 
+                          ? `Empleado - ${account.employeeRole === 'cashier' ? 'Cajero' : account.employeeRole === 'manager' ? 'Gerente' : 'Admin'}`
+                          : "Negocio"}
                     </Text>
                   </View>
                   {selectedAccount === account.id && (

@@ -8,9 +8,28 @@ import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import ContactService, { contactService } from '../services/contactService';
 import { ContactPermissionModal } from '../components/ContactPermissionModal';
+import { InviteEmployeeModal } from '../components/InviteEmployeeModal';
 import { useContactNames } from '../hooks/useContactName';
-import { useApolloClient, useMutation, gql } from '@apollo/client';
+import { useApolloClient, useMutation, gql, useQuery } from '@apollo/client';
 import { useAccount } from '../contexts/AccountContext';
+import { INVITE_EMPLOYEE, GET_CURRENT_BUSINESS_EMPLOYEES, GET_CURRENT_BUSINESS_INVITATIONS, CANCEL_INVITATION } from '../apollo/queries';
+import { getCountryByIso } from '../utils/countries';
+
+// Utility function to format phone number with country code
+const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
+  if (!phoneNumber) return '';
+  
+  // If we have a country code, format it
+  if (phoneCountry) {
+    const country = getCountryByIso(phoneCountry);
+    if (country) {
+      const countryCode = country[1]; // country[1] is the phone code (e.g., '+54')
+      return `${countryCode} ${phoneNumber}`;
+    }
+  }
+  
+  return phoneNumber;
+};
 
 type ContactsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -60,6 +79,71 @@ interface ContactCardProps {
   onSendPress: (contact: any) => void;
   onInvitePress: (contact: any) => void;
 }
+
+interface EmployeeCardProps {
+  contact: any;
+  onPress: (contact: any) => void;
+  onRemove: (contact: any) => void;
+  onCancelInvitation: (contact: any) => void;
+}
+
+const getRoleLabel = (role: string) => {
+  switch (role) {
+    case 'cashier': return 'Cajero';
+    case 'manager': return 'Gerente';
+    case 'admin': return 'Administrador';
+    default: return role;
+  }
+};
+
+const EmployeeCard = memo(({ contact, onPress, onRemove, onCancelInvitation }: EmployeeCardProps) => {
+  const isInvitation = contact.isInvitation;
+  const role = getRoleLabel(contact.role);
+  
+  return (
+    <TouchableOpacity style={styles.contactCard} onPress={() => onPress(contact)}>
+      <View style={[
+        styles.avatarContainer,
+        { backgroundColor: isInvitation ? '#fef3c7' : colors.primaryLight }
+      ]}>
+        <Text style={[
+          styles.avatarText,
+          { color: isInvitation ? '#f59e0b' : colors.primaryDark }
+        ]}>
+          {contact.avatar}
+        </Text>
+      </View>
+      
+      <View style={styles.contactInfo}>
+        <Text style={styles.contactName}>{contact.name}</Text>
+        <Text style={styles.contactPhone}>{contact.phone}</Text>
+        <Text style={styles.employeeRole}>{role}</Text>
+      </View>
+      
+      {isInvitation ? (
+        <TouchableOpacity
+          style={styles.cancelButton}
+          onPress={(e) => {
+            e.stopPropagation();
+            onCancelInvitation(contact);
+          }}
+        >
+          <Icon name="x" size={20} color="#ef4444" />
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity
+          style={styles.moreButton}
+          onPress={(e) => {
+            e.stopPropagation();
+            onRemove(contact);
+          }}
+        >
+          <Icon name="more-vertical" size={20} color="#6b7280" />
+        </TouchableOpacity>
+      )}
+    </TouchableOpacity>
+  );
+});
 
 const ContactCard = memo(({ contact, isOnConfio = false, onPress, onSendPress, onInvitePress }: ContactCardProps) => (
   <TouchableOpacity style={styles.contactCard} onPress={() => onPress(contact)}>
@@ -173,6 +257,56 @@ export const ContactsScreen = () => {
   const isBusinessAccount = activeAccount?.type === 'business';
   const isPersonalAccount = activeAccount?.type === 'personal';
   
+  // Debug logging for business account
+  React.useEffect(() => {
+    if (isBusinessAccount) {
+      console.log('ContactsScreen - Business account debug:', {
+        isBusinessAccount,
+        activeAccountId: activeAccount?.id,
+        activeAccountType: activeAccount?.type,
+        businessName: activeAccount?.business?.name,
+        businessId: activeAccount?.business?.id,
+        isEmployee: activeAccount?.isEmployee,
+        employeeRole: activeAccount?.employeeRole
+      });
+      
+      // Log query status
+      console.log('ContactsScreen - Query status:', {
+        employeesLoading,
+        employeesError: employeesError?.message,
+        employeesData: employeesData?.currentBusinessEmployees?.length || 0,
+        invitationsLoading,
+        invitationsError: invitationsError?.message,
+        invitationsData: invitationsData?.currentBusinessInvitations?.length || 0,
+        skip: !isBusinessAccount,
+      });
+    }
+  }, [isBusinessAccount, activeAccount, employeesLoading, employeesError, employeesData, invitationsLoading, invitationsError, invitationsData]);
+  
+  // Fetch employees and invitations for business accounts using JWT context
+  const { data: employeesData, loading: employeesLoading, error: employeesError, refetch: refetchEmployees } = useQuery(GET_CURRENT_BUSINESS_EMPLOYEES, {
+    variables: { includeInactive: false },
+    skip: !isBusinessAccount,
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+    onError: (error) => {
+      console.error('Error fetching current business employees:', error);
+    }
+  });
+  
+  const { data: invitationsData, loading: invitationsLoading, error: invitationsError, refetch: refetchInvitations } = useQuery(GET_CURRENT_BUSINESS_INVITATIONS, {
+    variables: { status: 'pending' },
+    skip: !isBusinessAccount,
+    fetchPolicy: 'cache-and-network',
+    errorPolicy: 'all',
+    onError: (error) => {
+      console.error('Error fetching current business invitations:', error);
+    }
+  });
+  
+  const [inviteEmployee] = useMutation(INVITE_EMPLOYEE);
+  const [cancelInvitation] = useMutation(CANCEL_INVITATION);
+  
   // Stable callback for search updates
   const handleSearchChange = useCallback((text: string) => {
     setSearchTerm(text);
@@ -182,6 +316,7 @@ export const ContactsScreen = () => {
   const [showFriendTokenSelection, setShowFriendTokenSelection] = useState(false);
   const [selectedFriend, setSelectedFriend] = useState<any>(null);
   const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [contactsFromDevice, setContactsFromDevice] = useState<any[]>([]);
@@ -458,13 +593,28 @@ export const ContactsScreen = () => {
 
   // Handle pull to refresh
   const handleRefresh = async () => {
-    // Only refresh for personal accounts
+    setRefreshing(true);
+    
+    if (isBusinessAccount) {
+      // Refresh employees and invitations for business accounts
+      try {
+        await Promise.all([
+          refetchEmployees(),
+          refetchInvitations()
+        ]);
+      } catch (error) {
+        console.error('Error refreshing business data:', error);
+      } finally {
+        setRefreshing(false);
+      }
+      return;
+    }
+    
     if (!isPersonalAccount) {
       setRefreshing(false);
       return;
     }
     
-    setRefreshing(true);
     setIsLoadingContacts(true);
     
     // Clear existing contacts to show loading state
@@ -774,14 +924,72 @@ export const ContactsScreen = () => {
 
   // Prepare sections for SectionList
   const sections = useMemo(() => {
-    // For business accounts, show employees section
-    if (isBusinessAccount) {
-      return [{
-        title: 'EMPLEADOS',
-        count: 0,
-        data: [],
-        isEmployees: true
-      }];
+    // For business accounts, show employees section (but not for employees themselves)
+    if (isBusinessAccount && !activeAccount?.isEmployee) {
+      // Show loading state
+      if (employeesLoading || invitationsLoading) {
+        return [{
+          title: 'EMPLEADOS',
+          count: 0,
+          data: [],
+          isEmployees: true,
+          isLoading: true
+        }];
+      }
+      const employees = employeesData?.currentBusinessEmployees || [];
+      const invitations = invitationsData?.currentBusinessInvitations || [];
+      
+      // Format employees for display
+      const employeeContacts = employees.map(employee => ({
+        id: `employee-${employee.id}`,
+        name: `${employee.user.firstName || ''} ${employee.user.lastName || ''}`.trim() || employee.user.username,
+        phone: formatPhoneNumber(employee.user.phoneNumber, employee.user.phoneCountry),
+        avatar: (employee.user.firstName?.[0] || employee.user.username?.[0] || 'E').toUpperCase(),
+        role: employee.role,
+        isActive: employee.isActive,
+        permissions: employee.effectivePermissions,
+        isEmployee: true,
+        employeeData: employee
+      }));
+      
+      // Format pending invitations
+      const invitationContacts = invitations.map(invitation => ({
+        id: `invitation-${invitation.id}`,
+        name: invitation.employeeName || 'Invitación pendiente',
+        phone: formatPhoneNumber(invitation.employeePhone, invitation.employeePhoneCountry),
+        avatar: '?',
+        role: invitation.role,
+        isInvitation: true,
+        invitationData: invitation
+      }));
+      
+      // Filter by search term
+      const filteredEmployees = searchTerm
+        ? employeeContacts.filter(contact =>
+            contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            contact.phone.includes(searchTerm)
+          )
+        : employeeContacts;
+      
+      const filteredInvitations = searchTerm
+        ? invitationContacts.filter(contact =>
+            contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            contact.phone.includes(searchTerm)
+          )
+        : invitationContacts;
+      
+      const sections = [];
+      
+      if (filteredEmployees.length > 0 || filteredInvitations.length > 0) {
+        sections.push({
+          title: 'EMPLEADOS',
+          count: filteredEmployees.length + filteredInvitations.length,
+          data: [...filteredEmployees, ...filteredInvitations],
+          isEmployees: true
+        });
+      }
+      
+      return sections;
     }
     
     const sectionData = [];
@@ -806,15 +1014,19 @@ export const ContactsScreen = () => {
     }
     
     return sectionData;
-  }, [filteredConfioFriends, filteredNonConfioFriends, isBusinessAccount]);
+  }, [filteredConfioFriends, filteredNonConfioFriends, isBusinessAccount, activeAccount, employeesLoading, invitationsLoading, employeesData, invitationsData, searchTerm]);
 
   const renderSectionHeader = useCallback(({ section }) => (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
         <Text style={[styles.sectionTitle, section.isEmployees && styles.employeeSectionTitle]}>{section.title}</Text>
-        <View style={styles.sectionCount}>
-          <Text style={styles.sectionCountText}>{section.count}</Text>
-        </View>
+        {section.isLoading ? (
+          <ActivityIndicator size="small" color={colors.primary} />
+        ) : (
+          <View style={styles.sectionCount}>
+            <Text style={styles.sectionCountText}>{section.count}</Text>
+          </View>
+        )}
       </View>
       
       {section.showInfo && (
@@ -834,7 +1046,7 @@ export const ContactsScreen = () => {
         </View>
       )}
       
-      {section.isEmployees && section.count === 0 && (
+      {section.isEmployees && section.count === 0 && !activeAccount?.isEmployee && (
         <View style={styles.employeeInfoCard}>
           <View style={styles.infoCardContent}>
             <View style={[styles.infoIconContainer, { backgroundColor: colors.primary }]}>
@@ -851,8 +1063,7 @@ export const ContactsScreen = () => {
           <TouchableOpacity 
             style={styles.addEmployeeFromInfoButton}
             onPress={() => {
-              // TODO: Navigate to add employee screen
-              Alert.alert('Próximamente', 'La función de añadir empleados estará disponible pronto');
+              setShowInviteModal(true);
             }}
           >
             <Icon name="user-plus" size={16} color="#fff" style={{ marginRight: 8 }} />
@@ -885,8 +1096,7 @@ export const ContactsScreen = () => {
           <TouchableOpacity 
             style={styles.addEmployeeActionButton}
             onPress={() => {
-              // TODO: Navigate to add employee screen
-              Alert.alert('Próximamente', 'La función de añadir empleados estará disponible pronto');
+              setShowInviteModal(true);
             }}
           >
             <View style={styles.actionButtonContent}>
@@ -935,39 +1145,58 @@ export const ContactsScreen = () => {
           </TouchableOpacity>
         )}
         
-        <View style={styles.actionButtons}>
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={handleSendWithAddress}
-          >
-            <View style={styles.actionButtonContent}>
-              <View style={styles.actionIconContainer}>
-                <Icon name="send" size={20} color="#fff" />
-              </View>
-              <View style={styles.actionTextContainer}>
-                <Text style={styles.actionButtonTitle}>Enviar con dirección</Text>
-                <Text style={styles.actionButtonSubtitle}>Envía a cualquier wallet</Text>
-              </View>
+        {activeAccount?.isEmployee ? (
+          // Employee welcome message
+          <View style={styles.employeeWelcomeContainer}>
+            <View style={styles.employeeWelcomeIcon}>
+              <Icon name="users" size={40} color="#7c3aed" />
             </View>
-            <Icon name="chevron-right" size={20} color="#9ca3af" />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.actionButton}
-            onPress={handleReceiveWithAddress}
-          >
-            <View style={styles.actionButtonContent}>
-              <View style={styles.actionIconContainer}>
-                <Icon name="download" size={20} color="#fff" />
+            <Text style={styles.employeeWelcomeTitle}>
+              Equipo {activeAccount?.business?.name}
+            </Text>
+            <Text style={styles.employeeWelcomeText}>
+              ¡Bienvenido! Como {activeAccount?.employeeRole === 'cashier' ? 'cajero' : activeAccount?.employeeRole === 'manager' ? 'gerente' : activeAccount?.employeeRole === 'admin' ? 'administrador' : 'parte del equipo'}, eres fundamental para el éxito del negocio.
+              {'\n\n'}
+              {activeAccount?.employeePermissions?.acceptPayments ? 
+                '💡 Consejo: Usa el botón "Cobrar" para recibir pagos de los clientes de forma rápida y segura.' : 
+                'Tu rol está enfocado en otras áreas importantes del negocio.'}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.actionButtons}>
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={handleSendWithAddress}
+            >
+              <View style={styles.actionButtonContent}>
+                <View style={styles.actionIconContainer}>
+                  <Icon name="send" size={20} color="#fff" />
+                </View>
+                <View style={styles.actionTextContainer}>
+                  <Text style={styles.actionButtonTitle}>Enviar con dirección</Text>
+                  <Text style={styles.actionButtonSubtitle}>Envía a cualquier wallet</Text>
+                </View>
               </View>
-              <View style={styles.actionTextContainer}>
-                <Text style={styles.actionButtonTitle}>Recibir con dirección</Text>
-                <Text style={styles.actionButtonSubtitle}>Comparte tu dirección</Text>
+              <Icon name="chevron-right" size={20} color="#9ca3af" />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={handleReceiveWithAddress}
+            >
+              <View style={styles.actionButtonContent}>
+                <View style={styles.actionIconContainer}>
+                  <Icon name="download" size={20} color="#fff" />
+                </View>
+                <View style={styles.actionTextContainer}>
+                  <Text style={styles.actionButtonTitle}>Recibir con dirección</Text>
+                  <Text style={styles.actionButtonSubtitle}>Comparte tu dirección</Text>
+                </View>
               </View>
-            </View>
-            <Icon name="chevron-right" size={20} color="#9ca3af" />
-          </TouchableOpacity>
-        </View>
+              <Icon name="chevron-right" size={20} color="#9ca3af" />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     </>
     );
@@ -976,8 +1205,47 @@ export const ContactsScreen = () => {
   }, [searchTerm, hasContactPermission, isLoadingContacts, refreshing, contactsData.friends.length, contactsData.nonConfioFriends.length, handleSendWithAddress, handleRefresh, isBusinessAccount, isPersonalAccount]);
 
   const ListEmptyComponent = useCallback(() => {
-    // For business accounts, show Add Employee button
+    // For business accounts
     if (isBusinessAccount) {
+      // Check if there was an error loading employees  
+      if ((employeesError || invitationsError) && !activeAccount?.isEmployee) {
+        console.error('ContactsScreen - Error details:', {
+          employeesError: employeesError?.message,
+          invitationsError: invitationsError?.message,
+          networkError: employeesError?.networkError,
+          graphQLErrors: employeesError?.graphQLErrors
+        });
+        
+        return (
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIconContainer}>
+              <Icon name="alert-circle" size={32} color="#ef4444" />
+            </View>
+            <Text style={styles.emptyTitle}>Error al cargar empleados</Text>
+            <Text style={styles.emptyDescription}>
+              No se pudieron cargar los empleados. Por favor, intenta de nuevo.
+              {employeesError?.message && `\n\nError: ${employeesError.message}`}
+            </Text>
+            <TouchableOpacity 
+              style={styles.retryButton}
+              onPress={() => {
+                refetchEmployees();
+                refetchInvitations();
+              }}
+            >
+              <Icon name="refresh-cw" size={20} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.retryButtonText}>Reintentar</Text>
+            </TouchableOpacity>
+          </View>
+        );
+      }
+      
+      // Check if user is an employee - just return null to hide the section
+      if (activeAccount?.isEmployee) {
+        return null;
+      }
+      
+      // Business owner view
       return (
         <View style={styles.emptyState}>
           <View style={styles.emptyIconContainer}>
@@ -991,8 +1259,7 @@ export const ContactsScreen = () => {
           <TouchableOpacity 
             style={styles.addEmployeeButton}
             onPress={() => {
-              // TODO: Navigate to add employee screen
-              Alert.alert('Próximamente', 'La función de añadir empleados estará disponible pronto');
+              setShowInviteModal(true);
             }}
           >
             <Icon name="user-plus" size={20} color="#fff" style={{ marginRight: 8 }} />
@@ -1091,7 +1358,7 @@ export const ContactsScreen = () => {
     }
     
     return null;
-  }, [searchTerm, isInitialLoad, isLoadingContacts, hasContactPermission, handleRefresh, isBusinessAccount, isPersonalAccount]);
+  }, [searchTerm, isInitialLoad, isLoadingContacts, hasContactPermission, handleRefresh, isBusinessAccount, isPersonalAccount, activeAccount, employeesError, invitationsError, refetchEmployees, refetchInvitations]);
 
   return (
     <>
@@ -1111,9 +1378,13 @@ export const ContactsScreen = () => {
               <TouchableOpacity 
                 style={styles.syncButton}
                 onPress={async () => {
+                  if (isBusinessAccount) {
+                    // For business accounts, refresh employees
+                    handleRefresh();
+                    return;
+                  }
+                  
                   if (!isPersonalAccount) {
-                    // For business accounts, do nothing for now
-                    // TODO: Implement employee refresh from server
                     return;
                   }
                   
@@ -1138,7 +1409,7 @@ export const ContactsScreen = () => {
                     }
                   }
                 }}
-                disabled={isLoadingContacts || refreshing || !isPersonalAccount}
+                disabled={isLoadingContacts || refreshing}
               >
                 <Icon 
                   name={isBusinessAccount || hasContactPermission ? "refresh-cw" : "shield"} 
@@ -1178,13 +1449,11 @@ export const ContactsScreen = () => {
           stickySectionHeadersEnabled={false}
           contentContainerStyle={{ paddingBottom: 24 }}
           refreshControl={
-            isPersonalAccount ? (
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={handleRefresh}
-                tintColor={colors.primary}
-              />
-            ) : undefined
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.primary}
+            />
           }
           initialNumToRender={20}
           maxToRenderPerBatch={10}
@@ -1204,6 +1473,19 @@ export const ContactsScreen = () => {
         onDeny={handlePermissionDeny}
         onClose={() => setShowPermissionModal(false)}
       />
+      
+      {/* Employee Invitation Modal */}
+      {isBusinessAccount && (
+        <InviteEmployeeModal
+          visible={showInviteModal}
+          onClose={() => setShowInviteModal(false)}
+          onSuccess={() => {
+            setShowInviteModal(false);
+            refetchEmployees();
+            refetchInvitations();
+          }}
+        />
+      )}
       
       {/* Loading overlay - only show for manual refresh and for personal accounts */}
       {isPersonalAccount && (isLoadingContacts || (isInitialLoad && hasContactPermission && !contactsData.isLoaded)) && (
@@ -1280,6 +1562,34 @@ const styles = StyleSheet.create({
   },
   actionButtons: {
     gap: 8,
+  },
+  employeeWelcomeContainer: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+  },
+  employeeWelcomeIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#ede9fe',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  employeeWelcomeTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#1f2937',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  employeeWelcomeText: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   actionButton: {
     width: '100%',
@@ -1394,6 +1704,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '500',
     fontSize: 14,
+  },
+  employeeRole: {
+    fontSize: 12,
+    color: '#059669',
+    marginTop: 2,
+  },
+  cancelButton: {
+    padding: 8,
+  },
+  moreButton: {
+    padding: 8,
   },
   infoCard: {
     backgroundColor: colors.violetLight,
@@ -1644,6 +1965,20 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
   addEmployeeButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 999,
+    marginTop: 24,
+  },
+  retryButtonText: {
     color: '#fff',
     fontWeight: '600',
     fontSize: 16,

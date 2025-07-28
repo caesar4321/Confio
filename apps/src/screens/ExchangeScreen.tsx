@@ -471,10 +471,6 @@ export const ExchangeScreen = () => {
 
   // Fetch user's bank accounts to check payment method availability
   const { data: bankAccountsData, loading: bankAccountsLoading } = useQuery(GET_USER_BANK_ACCOUNTS, {
-    variables: { 
-      accountId: activeAccount?.id 
-    },
-    skip: !activeAccount?.id,
     fetchPolicy: 'cache-and-network',
     errorPolicy: 'all' // Continue to show data even if there's an error
   });
@@ -3286,6 +3282,35 @@ export const ExchangeScreen = () => {
     return null;
   };
 
+  // Check if user is an employee and block access
+  if (activeAccount?.isEmployee) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+        <View style={styles.employeeBlockContainer}>
+          <View style={styles.employeeBlockIcon}>
+            <Icon name="lock" size={48} color="#7c3aed" />
+          </View>
+          <Text style={styles.employeeBlockTitle}>
+            Intercambio P2P
+          </Text>
+          <Text style={styles.employeeBlockText}>
+            El intercambio de divisas es una función personal que no está disponible en tu cuenta de trabajo en {activeAccount?.business?.name}.
+            {'\n\n'}
+            Para usar esta función, puedes cambiar a tu cuenta personal desde el menú de perfil.
+          </Text>
+          <TouchableOpacity 
+            style={styles.employeeBlockButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Icon name="arrow-left" size={20} color="#fff" />
+            <Text style={styles.employeeBlockButtonText}>Volver</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Header />
@@ -3411,6 +3436,49 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  employeeBlockContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  employeeBlockIcon: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  employeeBlockTitle: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 12,
+  },
+  employeeBlockText: {
+    fontSize: 16,
+    color: '#6b7280',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 32,
+    maxWidth: 320,
+  },
+  employeeBlockButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#7c3aed',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  employeeBlockButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
   content: {
     flex: 1,

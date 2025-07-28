@@ -32,7 +32,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_UNIFIED_TRANSACTIONS } from '../apollo/queries';
+import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS } from '../apollo/queries';
 // import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations'; // Removed - handled in USDCConversion screen
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import moment from 'moment';
@@ -110,7 +110,10 @@ export const AccountDetailScreen = () => {
   const route = useRoute<AccountDetailScreenRouteProp>();
   const { formatNumber, formatCurrency } = useNumberFormat();
   const { activeAccount } = useAccount();
-  const [showBalance, setShowBalance] = useState(true);
+  
+  // Check if employee has permission to view balance
+  const canViewBalance = !activeAccount?.isEmployee || activeAccount?.employeePermissions?.viewBalance;
+  const [showBalance, setShowBalance] = useState(canViewBalance);
   const [refreshing, setRefreshing] = useState(false);
   const [transactionLimit, setTransactionLimit] = useState(20);
   const [transactionOffset, setTransactionOffset] = useState(0);
@@ -138,7 +141,7 @@ export const AccountDetailScreen = () => {
     currencies: {
       cUSD: true,
       CONFIO: true,
-      USDC: true,
+      ...(activeAccount?.isEmployee ? {} : { USDC: true }),
     },
     status: {
       completed: true,
@@ -223,8 +226,8 @@ export const AccountDetailScreen = () => {
     }
   });
 
-  // USDC balance data (shown only for cUSD account)
-  const usdcAccount = route.params.accountType === 'cusd' ? {
+  // USDC balance data - HIDDEN for employees
+  const usdcAccount = (route.params.accountType === 'cusd' && !activeAccount?.isEmployee) ? {
     name: "USD Coin",
     symbol: "USDC",
     balance: "458.22",
@@ -232,24 +235,24 @@ export const AccountDetailScreen = () => {
     description: "Para usuarios avanzados - depósito directo vía Sui Blockchain"
   } : null;
   
-  // Unified transactions query
+  // JWT-context-aware transactions query
   const queryVariables = {
-    accountType: activeAccount?.type || 'personal',
-    accountIndex: activeAccount?.index || 0,
     limit: transactionLimit,
     offset: 0, // Always start with offset 0 for initial query
-    tokenTypes: route.params.accountType === 'cusd' ? ['cUSD', 'CUSD', 'USDC'] : ['CONFIO']
+    tokenTypes: route.params.accountType === 'cusd' ? 
+      (activeAccount?.isEmployee ? ['cUSD', 'CUSD'] : ['cUSD', 'CUSD', 'USDC']) : 
+      ['CONFIO']
   };
   
-  console.log('AccountDetailScreen - GraphQL query variables:', queryVariables);
+  console.log('AccountDetailScreen - JWT GraphQL query variables:', queryVariables);
   
-  const { data: unifiedTransactionsData, loading: unifiedLoading, error: unifiedError, refetch: refetchUnified, fetchMore } = useQuery(GET_UNIFIED_TRANSACTIONS, {
+  const { data: unifiedTransactionsData, loading: unifiedLoading, error: unifiedError, refetch: refetchUnified, fetchMore } = useQuery(GET_CURRENT_ACCOUNT_TRANSACTIONS, {
     variables: queryVariables,
     skip: false, // Enable unified transactions
     onCompleted: (data) => {
-      console.log('AccountDetailScreen - Unified query completed:', {
+      console.log('AccountDetailScreen - JWT context query completed:', {
         hasData: !!data,
-        transactionCount: data?.unifiedTransactions?.length || 0
+        transactionCount: data?.currentAccountTransactions?.length || 0
       });
     },
     onError: (error) => {
@@ -318,9 +321,11 @@ export const AccountDetailScreen = () => {
         accountIndex: activeAccount?.index || 0,
         limit: 20,
         offset: 0,
-        tokenTypes: route.params.accountType === 'cusd' ? ['cUSD', 'CUSD', 'USDC'] : ['CONFIO']
+        tokenTypes: route.params.accountType === 'cusd' ? 
+      (activeAccount?.isEmployee ? ['cUSD', 'CUSD'] : ['cUSD', 'CUSD', 'USDC']) : 
+      ['CONFIO']
       });
-      setAllTransactions(data?.unifiedTransactions || []);
+      setAllTransactions(data?.currentAccountTransactions || []);
       setTransactionLimit(20);
       setTransactionOffset(0);
       setHasReachedEnd(false);
@@ -628,13 +633,13 @@ export const AccountDetailScreen = () => {
   // Debug which data source is being used
   console.log('AccountDetailScreen - Transaction source:', {
     usingUnified: !!unifiedTransactionsData,
-    unifiedCount: unifiedTransactionsData?.unifiedTransactions?.length || 0,
+    unifiedCount: unifiedTransactionsData?.currentAccountTransactions?.length || 0,
     allTransactionsCount: allTransactions.length,
     formattedCount: transactions.length,
     hasReachedEnd,
     loadingMore,
     firstTransaction: transactions[0],
-    rawData: unifiedTransactionsData?.unifiedTransactions?.slice(0, 2)
+    rawData: unifiedTransactionsData?.currentAccountTransactions?.slice(0, 2)
   });
   
   // Debug the actual transaction object
@@ -785,15 +790,15 @@ export const AccountDetailScreen = () => {
   
   // Set initial transactions when data loads
   React.useEffect(() => {
-    const unifiedTransactions = unifiedTransactionsData?.unifiedTransactions || [];
+    const currentTransactions = unifiedTransactionsData?.currentAccountTransactions || [];
     
     // Only set initial transactions if we're not loading more (i.e., this is the initial load or refresh)
-    if (!loadingMore && unifiedTransactions.length > 0) {
-      console.log('Setting initial transactions:', unifiedTransactions.length);
-      setAllTransactions(unifiedTransactions);
+    if (!loadingMore && currentTransactions.length > 0) {
+      console.log('Setting initial transactions:', currentTransactions.length);
+      setAllTransactions(currentTransactions);
       
       // If we have fewer transactions than the limit, we've reached the end
-      if (unifiedTransactions.length < transactionLimit) {
+      if (currentTransactions.length < transactionLimit) {
         setHasReachedEnd(true);
       } else {
         setHasReachedEnd(false);
@@ -1203,24 +1208,26 @@ export const AccountDetailScreen = () => {
           accountIndex: activeAccount?.index || 0,
           limit: transactionLimit,
           offset: newOffset,
-          tokenTypes: route.params.accountType === 'cusd' ? ['cUSD', 'CUSD', 'USDC'] : ['CONFIO']
+          tokenTypes: route.params.accountType === 'cusd' ? 
+      (activeAccount?.isEmployee ? ['cUSD', 'CUSD'] : ['cUSD', 'CUSD', 'USDC']) : 
+      ['CONFIO']
         },
         updateQuery: (prev, { fetchMoreResult }) => {
           console.log('loadMoreTransactions - fetchMoreResult:', {
             hasResult: !!fetchMoreResult,
-            newTransactionsCount: fetchMoreResult?.unifiedTransactions?.length || 0,
-            prevCount: prev?.unifiedTransactions?.length || 0
+            newTransactionsCount: fetchMoreResult?.currentAccountTransactions?.length || 0,
+            prevCount: prev?.currentAccountTransactions?.length || 0
           });
           
           if (!fetchMoreResult) return prev;
           
-          if (fetchMoreResult.unifiedTransactions.length === 0) {
+          if (fetchMoreResult.currentAccountTransactions.length === 0) {
             setHasReachedEnd(true);
             return prev;
           }
           
           // Append new transactions to allTransactions state
-          const newTransactions = fetchMoreResult.unifiedTransactions;
+          const newTransactions = fetchMoreResult.currentAccountTransactions;
           
           // Check if we've reached the end
           if (newTransactions.length < transactionLimit) {
@@ -1236,7 +1243,7 @@ export const AccountDetailScreen = () => {
           // Return updated query result for Apollo cache
           return {
             ...prev,
-            unifiedTransactions: [...(prev.unifiedTransactions || []), ...newTransactions]
+            currentAccountTransactions: [...(prev.currentAccountTransactions || []), ...newTransactions]
           };
         }
       });
@@ -1268,121 +1275,159 @@ export const AccountDetailScreen = () => {
 
         <View style={styles.balanceRow}>
           <Text style={styles.balanceText}>
-            {showBalance ? `$${account.balance}` : account.balanceHidden}
+            {!canViewBalance ? account.balanceHidden : (showBalance ? `$${account.balance}` : account.balanceHidden)}
           </Text>
-          <TouchableOpacity onPress={toggleBalanceVisibility}>
-            <Icon
-              name={showBalance ? 'eye' : 'eye-off'}
-              size={20}
-              color="#ffffff"
-              style={styles.eyeIcon}
-            />
-          </TouchableOpacity>
+          {canViewBalance && (
+            <TouchableOpacity onPress={toggleBalanceVisibility}>
+              <Icon
+                name={showBalance ? 'eye' : 'eye-off'}
+                size={20}
+                color="#ffffff"
+                style={styles.eyeIcon}
+              />
+            </TouchableOpacity>
+          )}
         </View>
 
         <Text style={styles.balanceDescription}>{account.description}</Text>
-        <View style={styles.addressContainer}>
-          <Text style={styles.addressText}>{account.addressShort}</Text>
-          <TouchableOpacity onPress={() => {
-            if (account.address) {
-              Clipboard.setString(account.address);
-              Alert.alert('Copiado', 'Dirección copiada al portapapeles');
-            }
-          }}>
-            <Icon name="copy" size={16} color="#ffffff" style={styles.copyIcon} />
-          </TouchableOpacity>
-        </View>
+        {/* Hide address for employees without viewBusinessAddress permission */}
+        {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.viewBusinessAddress) && account.address && (
+          <View style={styles.addressContainer}>
+            <Text style={styles.addressText}>{account.addressShort}</Text>
+            <TouchableOpacity onPress={() => {
+              if (account.address) {
+                Clipboard.setString(account.address);
+                Alert.alert('Copiado', 'Dirección copiada al portapapeles');
+              }
+            }}>
+              <Icon name="copy" size={16} color="#ffffff" style={styles.copyIcon} />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       {/* Action Buttons */}
       <View style={styles.actionButtonsContainer}>
-        <View style={styles.actionButtons}>
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={handleSend}
-            >
-              <View style={{
-                width: 52,
-                height: 52,
-                borderRadius: 26,
-                backgroundColor: colors.primary,
-                justifyContent: 'center',
-                alignItems: 'center',
-                marginBottom: 8,
-              }}>
-                <Icon name="send" size={22} color="#ffffff" />
-              </View>
-              <Text style={styles.actionButtonText}>Enviar</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={() => {
-                // Navigate to USDCDeposit screen with proper token type
-                navigation.navigate('USDCDeposit', { 
-                  tokenType: route.params.accountType === 'cusd' ? 'cusd' : 'confio' 
-                });
-              }}
-            >
-              <View style={{
-                width: 52,
-                height: 52,
-                borderRadius: 26,
-                backgroundColor: colors.primary,
-                justifyContent: 'center',
-                alignItems: 'center',
-                marginBottom: 8,
-              }}>
-                <Icon name="download" size={22} color="#ffffff" />
-              </View>
-              <Text style={styles.actionButtonText}>Recibir</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={() => {
-                // @ts-ignore - Navigation type mismatch, but should work at runtime
-                const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
-                navigation.navigate('BottomTabs', { 
-                  screen: isBusinessAccount ? 'Charge' : 'Scan' 
-                });
-              }}
-            >
-              <View style={{
-                width: 52,
-                height: 52,
-                borderRadius: 26,
-                backgroundColor: colors.secondary,
-                justifyContent: 'center',
-                alignItems: 'center',
-                marginBottom: 8,
-              }}>
-                <Icon name="shopping-bag" size={22} color="#ffffff" />
-              </View>
-              <Text style={styles.actionButtonText}>Pagar</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => {
-                // @ts-ignore - Navigation type mismatch, but should work at runtime
-                navigation.navigate('BottomTabs', { screen: 'Exchange' });
-              }}
-            >
-              <View style={{
-                width: 52,
-                height: 52,
-                borderRadius: 26,
-                backgroundColor: colors.accent,
-                justifyContent: 'center',
-                alignItems: 'center',
-                marginBottom: 8,
-              }}>
-                <Icon name="refresh-cw" size={22} color="#ffffff" />
-              </View>
-              <Text style={styles.actionButtonText}>Intercambio</Text>
-            </TouchableOpacity>
+        {activeAccount?.isEmployee && !activeAccount?.employeePermissions?.sendFunds ? (
+          // Employee welcome message
+          <View style={styles.employeeMessageContainer}>
+            <View style={styles.employeeMessageIcon}>
+              <Icon name="briefcase" size={32} color="#7c3aed" />
+            </View>
+            <Text style={styles.employeeMessageTitle}>
+              Eres parte de {activeAccount?.business?.name}
+            </Text>
+            <Text style={styles.employeeMessageText}>
+              Como {activeAccount?.employeeRole === 'cashier' ? 'cajero' : 
+                    activeAccount?.employeeRole === 'manager' ? 'gerente' : 
+                    activeAccount?.employeeRole === 'admin' ? 'administrador' : 'miembro del equipo'}, {(() => {
+                const perms = [];
+                if (activeAccount?.employeePermissions?.acceptPayments) perms.push('recibir pagos');
+                if (activeAccount?.employeePermissions?.viewTransactions) perms.push('ver el historial de transacciones');
+                
+                if (perms.length === 0) return 'estás aquí para ayudar al éxito del negocio';
+                if (perms.length === 1) return `puedes ${perms[0]} para ayudar a nuestros clientes`;
+                return `puedes ${perms.join(' y ')} para contribuir al crecimiento del negocio`;
+              })()}.
+            </Text>
           </View>
+        ) : (
+          <View style={styles.actionButtons}>
+            {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.sendFunds) && (
+              <TouchableOpacity 
+                style={styles.actionButton}
+                onPress={handleSend}
+              >
+                <View style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: 26,
+                  backgroundColor: colors.primary,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: 8,
+                }}>
+                  <Icon name="send" size={22} color="#ffffff" />
+                </View>
+                <Text style={styles.actionButtonText}>Enviar</Text>
+              </TouchableOpacity>
+            )}
+
+            {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.acceptPayments) && (
+              <TouchableOpacity 
+                style={styles.actionButton}
+                onPress={() => {
+                  // Navigate to USDCDeposit screen with proper token type
+                  navigation.navigate('USDCDeposit', { 
+                    tokenType: route.params.accountType === 'cusd' ? 'cusd' : 'confio' 
+                  });
+                }}
+              >
+                <View style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: 26,
+                  backgroundColor: colors.primary,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: 8,
+                }}>
+                  <Icon name="download" size={22} color="#ffffff" />
+                </View>
+                <Text style={styles.actionButtonText}>Recibir</Text>
+              </TouchableOpacity>
+            )}
+
+            {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.acceptPayments) && (
+              <TouchableOpacity 
+                style={styles.actionButton}
+                onPress={() => {
+                  // @ts-ignore - Navigation type mismatch, but should work at runtime
+                  const isBusinessAccount = activeAccount?.type?.toLowerCase() === 'business';
+                  navigation.navigate('BottomTabs', { 
+                    screen: isBusinessAccount ? 'Charge' : 'Scan' 
+                  });
+                }}
+              >
+                <View style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: 26,
+                  backgroundColor: colors.secondary,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: 8,
+                }}>
+                  <Icon name="shopping-bag" size={22} color="#ffffff" />
+                </View>
+                <Text style={styles.actionButtonText}>Pagar</Text>
+              </TouchableOpacity>
+            )}
+
+            {!activeAccount?.isEmployee && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => {
+                  // @ts-ignore - Navigation type mismatch, but should work at runtime
+                  navigation.navigate('BottomTabs', { screen: 'Exchange' });
+                }}
+              >
+                <View style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: 26,
+                  backgroundColor: colors.accent,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginBottom: 8,
+                }}>
+                  <Icon name="refresh-cw" size={22} color="#ffffff" />
+                </View>
+                <Text style={styles.actionButtonText}>Intercambio</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </View>
       <SectionList
         style={styles.scrollView}
@@ -1499,7 +1544,7 @@ export const AccountDetailScreen = () => {
                 </View>
                 <View style={styles.usdcBalance}>
                   <Text style={styles.usdcBalanceText}>
-                    {showBalance ? usdcAccount.balance : usdcAccount.balanceHidden}
+                    {!canViewBalance ? usdcAccount.balanceHidden : (showBalance ? usdcAccount.balance : usdcAccount.balanceHidden)}
                   </Text>
                   <Text style={styles.usdcSymbol}>{usdcAccount.symbol}</Text>
                 </View>
@@ -1878,6 +1923,45 @@ const styles = StyleSheet.create({
     marginTop: -16,
     paddingHorizontal: 16,
     marginBottom: 16,
+  },
+  employeeMessageContainer: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  employeeMessageIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  employeeMessageTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1f2937',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  employeeMessageText: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   actionButtons: {
     backgroundColor: '#ffffff',

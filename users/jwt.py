@@ -45,8 +45,12 @@ def jwt_payload_handler(*args, **kwargs):
         account_type = context.active_account_type
         account_index = context.active_account_index
         
-        # If it's a business account, get the business_id
-        if account_type == 'business':
+        # Check if business_id is directly provided in context (for employee access)
+        if hasattr(context, 'active_business_id') and context.active_business_id:
+            business_id = str(context.active_business_id)
+            logger.info(f"Using business_id from context: {business_id}")
+        # If it's a business account and no business_id provided, get it from the account
+        elif account_type == 'business':
             try:
                 from users.models import Account
                 account = Account.objects.get(

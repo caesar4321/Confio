@@ -55,13 +55,10 @@ export const TradeConfirmScreen: React.FC = () => {
     }
   });
   // Only query with numeric account IDs to avoid GraphQL errors
-  const isNumericAccountId = activeAccount?.id && /^\d+$/.test(activeAccount.id);
   const { 
     data: userBankAccountsData,
     refetch: refetchBankAccounts 
   } = useQuery(GET_USER_BANK_ACCOUNTS, {
-    variables: { accountId: activeAccount?.id },
-    skip: !activeAccount?.id || !isNumericAccountId,
     fetchPolicy: 'cache-and-network',
     notifyOnNetworkStatusChange: true
   });

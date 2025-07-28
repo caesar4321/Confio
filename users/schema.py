@@ -79,18 +79,84 @@ class AccountType(DjangoObjectType):
 	display_name = graphene.String()
 	avatar_letter = graphene.String()
 	
+	# Employee-related fields
+	is_employee = graphene.Boolean()
+	employee_role = graphene.String()
+	employee_permissions = graphene.JSONString()
+	employee_record_id = graphene.ID()
+	
 	class Meta:
 		model = Account
 		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'sui_address', 'created_at', 'last_login_at')
 	
+	@classmethod
+	def get_queryset(cls, queryset, info):
+		# This ensures we can handle both Account querysets and mixed lists
+		return queryset
+	
 	def resolve_account_id(self, info):
-		return self.account_id
+		if hasattr(self, 'account_id'):
+			return self.account_id
+		# Generate account_id
+		# For employee accounts, use a special format to distinguish them
+		if getattr(self, 'is_employee', False):
+			return f"employee_{self.account_type}_{self.id}"
+		return f"{self.account_type}_{self.account_index}"
 	
 	def resolve_display_name(self, info):
-		return self.display_name
+		if hasattr(self, 'display_name'):
+			return self.display_name
+		# Generate display name for regular accounts
+		if self.account_type == 'personal':
+			user = self.user
+			if user.first_name or user.last_name:
+				return f"Personal - {user.first_name} {user.last_name}".strip()
+			return f"Personal - {user.username}"
+		elif self.business:
+			# Check if this is an employee account
+			if getattr(self, 'is_employee', False):
+				return f"{self.business.name} (Empleado)"
+			return f"Negocio - {self.business.name}"
+		return "Account"
+	
+	def resolve_is_employee(self, info):
+		return getattr(self, 'is_employee', False)
+	
+	def resolve_employee_role(self, info):
+		return getattr(self, 'employee_role', None)
+	
+	def resolve_sui_address(self, info):
+		"""Custom resolver for sui_address to check permissions"""
+		# If this is an employee accessing business account
+		if self.account_type == 'business' and hasattr(info.context, 'active_business_id'):
+			business_id = getattr(info.context, 'active_business_id', None)
+			user = getattr(info.context, 'user', None)
+			
+			if business_id and user and str(self.business_id) == str(business_id):
+				# Employee accessing business account
+				try:
+					from .permissions import check_employee_permission
+					from django.core.exceptions import PermissionDenied
+					check_employee_permission(user, self.business, 'view_business_address')
+				except PermissionDenied:
+					# Employee doesn't have permission to view business address
+					return None
+		
+		# Return the actual address for owners or employees with permission
+		return self.sui_address
+	
+	def resolve_employee_permissions(self, info):
+		return getattr(self, 'employee_permissions', None)
+	
+	def resolve_employee_record_id(self, info):
+		return getattr(self, 'employee_record_id', None)
 	
 	def resolve_avatar_letter(self, info):
-		return self.avatar_letter
+		if hasattr(self, 'avatar_letter'):
+			return self.avatar_letter
+		# Generate avatar letter for regular accounts
+		display_name = self.resolve_display_name(info)
+		return display_name[0].upper() if display_name else 'A'
 
 
 class CountryType(DjangoObjectType):
@@ -212,6 +278,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	user_verifications = graphene.List(IdentityVerificationType, user_id=graphene.ID())
 	user_accounts = graphene.List(AccountType)
 	account_balance = graphene.String(token_type=graphene.String(required=True))
+	current_account_permissions = graphene.Field(graphene.JSONString)
 	legalDocument = graphene.Field(
 		LegalDocumentType,
 		docType=graphene.String(required=True),
@@ -307,7 +374,66 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			return None
 
 	def resolve_country_codes(self, info):
-		return [CountryCodeType(code=code[1], name=code[0], flag=code[3]) for code in COUNTRY_CODES]
+		# Map ISO codes to flag emojis
+		flag_map = {
+			'AF': '🇦🇫', 'AL': '🇦🇱', 'DZ': '🇩🇿', 'AS': '🇦🇸', 'AD': '🇦🇩',
+			'AO': '🇦🇴', 'AI': '🇦🇮', 'AG': '🇦🇬', 'AR': '🇦🇷', 'AM': '🇦🇲',
+			'AW': '🇦🇼', 'AU': '🇦🇺', 'AT': '🇦🇹', 'AZ': '🇦🇿', 'BS': '🇧🇸',
+			'BH': '🇧🇭', 'BD': '🇧🇩', 'BB': '🇧🇧', 'BY': '🇧🇾', 'BE': '🇧🇪',
+			'BZ': '🇧🇿', 'BJ': '🇧🇯', 'BM': '🇧🇲', 'BT': '🇧🇹', 'BO': '🇧🇴',
+			'BA': '🇧🇦', 'BW': '🇧🇼', 'BR': '🇧🇷', 'IO': '🇮🇴', 'VG': '🇻🇬',
+			'BN': '🇧🇳', 'BG': '🇧🇬', 'BF': '🇧🇫', 'BI': '🇧🇮', 'KH': '🇰🇭',
+			'CM': '🇨🇲', 'CA': '🇨🇦', 'CV': '🇨🇻', 'BQ': '🇧🇶', 'KY': '🇰🇾',
+			'CF': '🇨🇫', 'TD': '🇹🇩', 'CL': '🇨🇱', 'CN': '🇨🇳', 'CX': '🇨🇽',
+			'CC': '🇨🇨', 'CO': '🇨🇴', 'KM': '🇰🇲', 'CD': '🇨🇩', 'CG': '🇨🇬',
+			'CK': '🇨🇰', 'CR': '🇨🇷', 'CI': '🇨🇮', 'HR': '🇭🇷', 'CU': '🇨🇺',
+			'CW': '🇨🇼', 'CY': '🇨🇾', 'CZ': '🇨🇿', 'DK': '🇩🇰', 'DJ': '🇩🇯',
+			'DM': '🇩🇲', 'DO': '🇩🇴', 'EC': '🇪🇨', 'EG': '🇪🇬', 'SV': '🇸🇻',
+			'GQ': '🇬🇶', 'ER': '🇪🇷', 'EE': '🇪🇪', 'ET': '🇪🇹', 'FK': '🇫🇰',
+			'FO': '🇫🇴', 'FJ': '🇫🇯', 'FI': '🇫🇮', 'FR': '🇫🇷', 'GF': '🇬🇫',
+			'PF': '🇵🇫', 'GA': '🇬🇦', 'GM': '🇬🇲', 'GE': '🇬🇪', 'DE': '🇩🇪',
+			'GH': '🇬🇭', 'GI': '🇬🇮', 'GR': '🇬🇷', 'GL': '🇬🇱', 'GD': '🇬🇩',
+			'GP': '🇬🇵', 'GU': '🇬🇺', 'GT': '🇬🇹', 'GG': '🇬🇬', 'GN': '🇬🇳',
+			'GW': '🇬🇼', 'GY': '🇬🇾', 'HT': '🇭🇹', 'HN': '🇭🇳', 'HK': '🇭🇰',
+			'HU': '🇭🇺', 'IS': '🇮🇸', 'IN': '🇮🇳', 'ID': '🇮🇩', 'IR': '🇮🇷',
+			'IQ': '🇮🇶', 'IE': '🇮🇪', 'IM': '🇮🇲', 'IL': '🇮🇱', 'IT': '🇮🇹',
+			'JM': '🇯🇲', 'JP': '🇯🇵', 'JE': '🇯🇪', 'JO': '🇯🇴', 'KZ': '🇰🇿',
+			'KE': '🇰🇪', 'KI': '🇰🇮', 'XK': '🇽🇰', 'KW': '🇰🇼', 'KG': '🇰🇬',
+			'LA': '🇱🇦', 'LV': '🇱🇻', 'LB': '🇱🇧', 'LS': '🇱🇸', 'LR': '🇱🇷',
+			'LY': '🇱🇾', 'LI': '🇱🇮', 'LT': '🇱🇹', 'LU': '🇱🇺', 'MO': '🇲🇴',
+			'MK': '🇲🇰', 'MG': '🇲🇬', 'MW': '🇲🇼', 'MY': '🇲🇾', 'MV': '🇲🇻',
+			'ML': '🇲🇱', 'MT': '🇲🇹', 'MH': '🇲🇭', 'MQ': '🇲🇶', 'MR': '🇲🇷',
+			'MU': '🇲🇺', 'YT': '🇾🇹', 'MX': '🇲🇽', 'FM': '🇫🇲', 'MD': '🇲🇩',
+			'MC': '🇲🇨', 'MN': '🇲🇳', 'ME': '🇲🇪', 'MS': '🇲🇸', 'MA': '🇲🇦',
+			'MZ': '🇲🇿', 'MM': '🇲🇲', 'NA': '🇳🇦', 'NR': '🇳🇷', 'NP': '🇳🇵',
+			'NL': '🇳🇱', 'NC': '🇳🇨', 'NZ': '🇳🇿', 'NI': '🇳🇮', 'NE': '🇳🇪',
+			'NG': '🇳🇬', 'NU': '🇳🇺', 'NF': '🇳🇫', 'KP': '🇰🇵', 'MP': '🇲🇵',
+			'NO': '🇳🇴', 'OM': '🇴🇲', 'PK': '🇵🇰', 'PW': '🇵🇼', 'PS': '🇵🇸',
+			'PA': '🇵🇦', 'PG': '🇵🇬', 'PY': '🇵🇾', 'PE': '🇵🇪', 'PH': '🇵🇭',
+			'PL': '🇵🇱', 'PT': '🇵🇹', 'PR': '🇵🇷', 'QA': '🇶🇦', 'RE': '🇷🇪',
+			'RO': '🇷🇴', 'RU': '🇷🇺', 'RW': '🇷🇼', 'BL': '🇧🇱', 'SH': '🇸🇭',
+			'KN': '🇰🇳', 'LC': '🇱🇨', 'MF': '🇲🇫', 'PM': '🇵🇲', 'VC': '🇻🇨',
+			'WS': '🇼🇸', 'SM': '🇸🇲', 'ST': '🇸🇹', 'SA': '🇸🇦', 'SN': '🇸🇳',
+			'RS': '🇷🇸', 'SC': '🇸🇨', 'SL': '🇸🇱', 'SG': '🇸🇬', 'SX': '🇸🇽',
+			'SK': '🇸🇰', 'SI': '🇸🇮', 'SB': '🇸🇧', 'SO': '🇸🇴', 'ZA': '🇿🇦',
+			'KR': '🇰🇷', 'SS': '🇸🇸', 'ES': '🇪🇸', 'LK': '🇱🇰', 'SD': '🇸🇩',
+			'SR': '🇸🇷', 'SJ': '🇸🇯', 'SZ': '🇸🇿', 'SE': '🇸🇪', 'CH': '🇨🇭',
+			'SY': '🇸🇾', 'TW': '🇹🇼', 'TJ': '🇹🇯', 'TZ': '🇹🇿', 'TH': '🇹🇭',
+			'TL': '🇹🇱', 'TG': '🇹🇬', 'TK': '🇹🇰', 'TO': '🇹🇴', 'TT': '🇹🇹',
+			'TN': '🇹🇳', 'TR': '🇹🇷', 'TM': '🇹🇲', 'TC': '🇹🇨', 'TV': '🇹🇻',
+			'VI': '🇻🇮', 'UG': '🇺🇬', 'UA': '🇺🇦', 'AE': '🇦🇪', 'GB': '🇬🇧',
+			'US': '🇺🇸', 'UY': '🇺🇾', 'UZ': '🇺🇿', 'VU': '🇻🇺', 'VA': '🇻🇦',
+			'VE': '🇻🇪', 'VN': '🇻🇳', 'WF': '🇼🇫', 'EH': '🇪🇭', 'YE': '🇾🇪',
+			'ZM': '🇿🇲', 'ZW': '🇿🇼'
+		}
+		return [
+			CountryCodeType(
+				code=code[2],  # ISO code (e.g., 'VE')
+				name=f"{code[0]} ({code[1]})",  # e.g., "Venezuela (+58)"
+				flag=flag_map.get(code[2], '🏳️')  # Flag emoji or default flag
+			) 
+			for code in COUNTRY_CODES
+		]
 
 	def resolve_business_categories(self, info):
 		from .models import Business
@@ -336,13 +462,63 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			print("resolve_user_accounts - returning empty list (not authenticated)")
 			return []
 		
-		accounts = Account.objects.filter(user=user).select_related('business')
-		print(f"resolve_user_accounts - found {accounts.count()} accounts for user {user.id}")
-		for account in accounts:
-			print(f"  Account: {account.id} ({account.account_type}_{account.account_index}) - business: {account.business}")
+		# Get owned accounts (excluding soft-deleted ones)
+		owned_accounts = Account.objects.filter(
+			user=user,
+			deleted_at__isnull=True
+		).select_related('business')
+		print(f"resolve_user_accounts - found {owned_accounts.count()} owned accounts for user {user.id}")
 		
-		# Return accounts sorted by custom ordering: personal first, then business by index
-		return sorted(accounts, key=lambda acc: acc.get_ordering_key())
+		# Start with owned accounts
+		all_accounts = list(owned_accounts)
+		
+		# Get businesses where user is an employee
+		from .models_employee import BusinessEmployee
+		employee_records = BusinessEmployee.objects.filter(
+			user=user,
+			is_active=True,
+			deleted_at__isnull=True
+		).select_related('business')
+		
+		print(f"resolve_user_accounts - found {employee_records.count()} employee relationships for user {user.id}")
+		
+		# For each employee relationship, get the business owner's account
+		for emp_record in employee_records:
+			# Skip if user is the owner (they already have the account in owned_accounts)
+			# Owner role means they own the business, so skip to avoid duplicates
+			if emp_record.role == 'owner':
+				continue
+				
+			# Find the business account (owned by someone else)
+			business_account = Account.objects.filter(
+				business=emp_record.business,
+				account_type='business',
+				deleted_at__isnull=True
+			).first()
+			
+			if business_account:
+				# Clone the account object and add employee metadata
+				# We can't modify the original as it might affect other queries
+				from copy import copy
+				employee_account = copy(business_account)
+				employee_account.is_employee = True
+				employee_account.employee_role = emp_record.role
+				employee_account.employee_permissions = emp_record.get_effective_permissions()
+				employee_account.employee_record_id = emp_record.id
+				# Ensure this account is marked as not owned by this user
+				employee_account._is_employee_view = True
+				all_accounts.append(employee_account)
+		
+		# Sort accounts: personal first, owned business, then employee business
+		def get_sort_key(acc):
+			if acc.account_type == 'personal':
+				return (0, acc.account_index, '')
+			elif getattr(acc, 'is_employee', False):
+				return (2, acc.account_index, acc.business.name if acc.business else '')
+			else:
+				return (1, acc.account_index, acc.business.name if acc.business else '')
+		
+		return sorted(all_accounts, key=get_sort_key)
 
 	def resolve_account_balance(self, info, token_type):
 		"""Resolve account balance for a specific token type and active account"""
@@ -355,24 +531,53 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			print(f"AccountBalance resolver - Returning 0 for unauthenticated user")
 			return "0"
 		
-		# Get active account context
-		account_type = getattr(info.context, 'active_account_type', 'personal')
-		account_index = getattr(info.context, 'active_account_index', 0)
+		# Get JWT context with validation and permission check
+		from .jwt_context import get_jwt_business_context_with_validation
+		jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_balance')
+		if not jwt_context:
+			print(f"AccountBalance resolver - No JWT context found, access denied, or lacking permission")
+			return "0"
+			
+		account_type = jwt_context['account_type']
+		account_index = jwt_context['account_index']
+		business_id_from_context = jwt_context.get('business_id')
+		employee_record = jwt_context.get('employee_record')
 		
-		print(f"AccountBalance resolver - Active Account: {account_type}_{account_index}")
+		print(f"AccountBalance resolver - JWT Account: {account_type}_{account_index}")
+		print(f"AccountBalance resolver - JWT Business ID: {business_id_from_context}")
 		
 		# Get the specific account
 		try:
 			from .models import Account
-			account = Account.objects.get(
-				user=user,
-				account_type=account_type,
-				account_index=account_index
-			)
+			from .permissions import check_employee_permission
+			from django.core.exceptions import PermissionDenied
+			
+			# For business accounts, permission is already checked via role-based matrix
+			if account_type == 'business' and business_id_from_context and employee_record:
+				# Permission already validated in get_jwt_business_context_with_validation
+				# and check_role_permission ensures only authorized roles can view balance
+				
+				# Get the business account
+				account = Account.objects.get(
+					business_id=business_id_from_context,
+					account_type='business',
+					account_index=account_index
+				)
+			else:
+				# Personal account - user must own it
+				account = Account.objects.get(
+					user=user,
+					account_type=account_type,
+					account_index=account_index
+				)
+				
 			print(f"AccountBalance resolver - Found account with Sui address: {account.sui_address}")
-		except Account.DoesNotExist:
+		except (Account.DoesNotExist, Business.DoesNotExist) as e:
 			print(f"AccountBalance resolver - Account not found: {account_type}_{account_index}")
 			return "0"
+		except PermissionDenied:
+			# Already handled above
+			pass
 		
 		# Normalize token type
 		normalized_token_type = token_type.upper()
@@ -388,17 +593,66 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				'USDC': '200.00'
 			}
 		else:
-			# Significantly different balances for business accounts
-			# Business accounts typically have more funds
+			# Create deterministic balances per business ID for debugging
+			# This helps identify which business context is being used
+			business_id = account.business.id if account.business else 0
+			base_multiplier = int(business_id) * 1000  # Each business gets unique base amount
+			
 			mock_balances = {
-				'cUSD': '25000.00',
-				'CONFIO': '5000.00',
-				'USDC': '10000.00'
+				'cUSD': f'{10000 + base_multiplier}.00',     # Business 1: 11000, Business 2: 12000, etc.
+				'CONFIO': f'{5000 + base_multiplier}.00',    # Business 1: 6000, Business 2: 7000, etc. 
+				'USDC': f'{20000 + base_multiplier}.00'      # Business 1: 21000, Business 2: 22000, etc.
 			}
+			
+			print(f"AccountBalance resolver - Business ID {business_id} deterministic balances: {mock_balances}")
 		
 		balance = mock_balances.get(normalized_token_type, '0')
 		print(f"AccountBalance resolver - Returning {balance} for {normalized_token_type} on {account_type} account")
 		return balance
+	
+	def resolve_current_account_permissions(self, info):
+		"""Get permissions for the current active account"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return {}
+		
+		# Get JWT context for account determination
+		from .jwt_context import get_jwt_business_context
+		jwt_context = get_jwt_business_context(info)
+		if not jwt_context:
+			return {}
+			
+		account_type = jwt_context['account_type']
+		business_id = jwt_context.get('business_id')
+		
+		# Personal accounts have no permission restrictions
+		if account_type == 'personal':
+			return {
+				'accept_payments': True,
+				'view_transactions': True,
+				'view_balance': True,
+				'send_funds': True,
+				'manage_employees': False,
+				'view_business_address': False,
+				'view_analytics': False,
+				'delete_business': False,
+				'edit_business_info': False,
+				'manage_bank_accounts': True,
+			}
+		
+		# Business accounts - check employee permissions
+		from .permissions import get_user_permissions_for_business
+		
+		if business_id:
+			try:
+				business = Business.objects.get(id=business_id)
+				return get_user_permissions_for_business(user, business)
+			except Business.DoesNotExist:
+				return {}
+		else:
+			# Owner accessing their own business - full permissions
+			from .models_employee import BusinessEmployee
+			return BusinessEmployee.DEFAULT_PERMISSIONS['owner']
 
 	def resolve_countries(self, info, is_active=None):
 		"""Resolve available countries for bank accounts"""
@@ -415,19 +669,58 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		return queryset.order_by('country__display_order', 'display_order', 'name')
 
 	def resolve_user_bank_accounts(self, info, account_id=None):
-		"""Resolve bank accounts for the current user"""
+		"""Resolve bank accounts for the current user based on active account context"""
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return []
 		
+		# Get account context from middleware
+		account_type = getattr(info.context, 'active_account_type', 'personal')
+		account_index = getattr(info.context, 'active_account_index', 0)
+		business_id = getattr(info.context, 'active_business_id', None)
+		
 		queryset = BankInfo.objects.select_related('country', 'bank', 'account')
 		
-		if account_id:
-			# Filter by specific account if provided
-			queryset = queryset.filter(account_id=account_id, account__user=user)
+		if account_type == 'business' and business_id:
+			# Business account context - filter by business
+			try:
+				business = Business.objects.get(id=business_id)
+				
+				# Check if user has access to this business (owner or employee)
+				has_access = False
+				
+				# Check if user owns this business
+				if Account.objects.filter(user=user, business=business, account_type='business').exists():
+					has_access = True
+				else:
+					# Check if user is an employee with permission
+					from .models_employee import BusinessEmployee
+					employee_record = BusinessEmployee.objects.filter(
+						user=user, 
+						business=business, 
+						is_active=True,
+						deleted_at__isnull=True
+					).first()
+					
+					if employee_record:
+						try:
+							from .permissions import check_employee_permission
+							check_employee_permission(user, business, 'manage_bank_accounts')
+							has_access = True
+						except PermissionDenied:
+							has_access = False
+				
+				if has_access:
+					# Filter by business accounts
+					queryset = queryset.filter(account__business=business, account__account_type='business')
+				else:
+					return []
+					
+			except Business.DoesNotExist:
+				return []
 		else:
-			# Return all bank accounts for user's accounts
-			queryset = queryset.filter(account__user=user)
+			# Personal account context - filter by user's personal accounts
+			queryset = queryset.filter(account__user=user, account__account_type='personal')
 		
 		return queryset.order_by('-is_default', '-created_at')
 
@@ -438,10 +731,26 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			return None
 		
 		try:
-			return BankInfo.objects.select_related('country', 'bank', 'account').get(
+			bank_info = BankInfo.objects.select_related('country', 'bank', 'account').get(
 				id=id, 
 				account__user=user
 			)
+			
+			# Check permissions for business accounts
+			if bank_info.account.account_type == 'business':
+				business = bank_info.account.get_business()
+				if business:
+					# Check if user is an employee accessing business account
+					business_id = getattr(info.context, 'active_business_id', None)
+					if business_id and str(business.id) == str(business_id):
+						# Employee accessing business account
+						try:
+							check_employee_permission(user, business, 'manage_bank_accounts')
+						except PermissionDenied:
+							# Employee without permission - return None
+							return None
+			
+			return bank_info
 		except BankInfo.DoesNotExist:
 			return None
 
@@ -802,6 +1111,16 @@ class CreateBusiness(graphene.Mutation):
 				business=business
 			)
 
+			# Automatically create BusinessEmployee record with owner role
+			from .models_employee import BusinessEmployee
+			BusinessEmployee.objects.create(
+				business=business,
+				user=user,
+				role='owner',
+				hired_by=user,  # Owner hires themselves
+				is_active=True
+			)
+
 			return CreateBusiness(
 				success=True,
 				error=None,
@@ -920,39 +1239,81 @@ class SwitchAccountToken(graphene.Mutation):
 	class Arguments:
 		account_type = graphene.String(required=True)
 		account_index = graphene.Int(required=True)
+		business_id = graphene.ID(required=False)  # Optional, for employee switching to business
 	
 	token = graphene.String()
 	payload = graphene.JSONString()
 	
 	@classmethod
-	def mutate(cls, root, info, account_type, account_index):
+	def mutate(cls, root, info, account_type, account_index, business_id=None):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			raise Exception("Authentication required")
 		
+		logger.info(f"SwitchAccountToken - Received parameters: account_type={account_type}, account_index={account_index}, business_id={business_id}")
+		logger.info(f"SwitchAccountToken - User: {user.username} (id={user.id})")
+		
 		try:
-			# Validate account exists
 			from .models import Account
-			account = Account.objects.get(
-				user=user,
-				account_type=account_type,
-				account_index=account_index
-			)
+			from .models_employee import BusinessEmployee
 			
-			# Create context with account info
-			class MockContext:
-				def __init__(self, account_type, account_index):
-					self.active_account_type = account_type
-					self.active_account_index = account_index
-			
-			context = MockContext(account_type, account_index)
+			# For business accounts with business_id, check if user is employee
+			if account_type == 'business' and business_id:
+				# Check if user has employee relation to this business
+				employee_record = BusinessEmployee.objects.filter(
+					user=user,
+					business_id=business_id,
+					is_active=True,
+					deleted_at__isnull=True
+				).first()
+				
+				if not employee_record:
+					# Also check if user owns this business
+					owned_account = Account.objects.filter(
+						user=user,
+						business_id=business_id,
+						account_type='business',
+						deleted_at__isnull=True
+					).first()
+					
+					if not owned_account:
+						raise Exception("You don't have access to this business account")
+			else:
+				# For personal accounts or business without business_id, find owned account
+				account = Account.objects.get(
+					user=user,
+					account_type=account_type,
+					account_index=account_index,
+					deleted_at__isnull=True
+				)
+				
+				# If it's a business account and no business_id was provided, get it from the account
+				if account_type == 'business' and not business_id and hasattr(account, 'business') and account.business:
+					business_id = str(account.business.id)
+					logger.info(f"SwitchAccountToken - Retrieved business_id from owned account: {business_id}")
 			
 			# Generate new token with account context
-			from users.jwt import jwt_payload_handler
+			from users.jwt import refresh_token_payload_handler
 			from graphql_jwt.settings import jwt_settings
 			import jwt
 			
-			new_payload = jwt_payload_handler(user, context)
+			# Use the refresh_token_payload_handler which accepts account context directly
+			# but modify the expiry and type for access token
+			now = datetime.utcnow()
+			new_payload = {
+				'user_id': user.id,
+				'username': user.get_username(),
+				'origIat': int(now.timestamp()),
+				'auth_token_version': user.auth_token_version,
+				'exp': int((now + timedelta(hours=1)).timestamp()),  # 1 hour for access token
+				'type': 'access',
+				# Account context fields
+				'account_type': account_type,
+				'account_index': account_index,
+				'business_id': business_id  # Will be set for BOTH owned and employee business accounts
+			}
+			
+			logger.info(f"SwitchAccountToken - Generated payload with: account_type={account_type}, account_index={account_index}, business_id={business_id}")
 			
 			# Encode the token manually to ensure our payload is used
 			new_token = jwt.encode(
@@ -1068,6 +1429,22 @@ class CreateBankInfo(graphene.Mutation):
 			# Verify account belongs to user
 			account = Account.objects.get(id=account_id, user=user)
 			
+			# Check employee permissions for business accounts
+			if account.account_type == 'business':
+				business = account.get_business()
+				if business:
+					# Check if user is an employee accessing business account
+					business_id = getattr(info.context, 'active_business_id', None)
+					if business_id and str(business.id) == str(business_id):
+						# Employee accessing business account
+						try:
+							check_employee_permission(user, business, 'manage_bank_accounts')
+						except PermissionDenied:
+							return CreateBankInfo(
+								success=False,
+								error="You don't have permission to manage bank accounts for this business"
+							)
+			
 			# Import P2PPaymentMethod
 			from p2p_exchange.models import P2PPaymentMethod
 			
@@ -1180,6 +1557,22 @@ class UpdateBankInfo(graphene.Mutation):
 				account__user=user
 			)
 			
+			# Check employee permissions for business accounts
+			if bank_info.account.account_type == 'business':
+				business = bank_info.account.get_business()
+				if business:
+					# Check if user is an employee accessing business account
+					business_id = getattr(info.context, 'active_business_id', None)
+					if business_id and str(business.id) == str(business_id):
+						# Employee accessing business account
+						try:
+							check_employee_permission(user, business, 'manage_bank_accounts')
+						except PermissionDenied:
+							return UpdateBankInfo(
+								success=False,
+								error="You don't have permission to manage bank accounts for this business"
+							)
+			
 			# Validate identification requirement
 			if bank_info.country.requires_identification and not identification_number:
 				return UpdateBankInfo(
@@ -1223,6 +1616,22 @@ class DeleteBankInfo(graphene.Mutation):
 				id=bank_info_id,
 				account__user=user
 			)
+			
+			# Check employee permissions for business accounts
+			if bank_info.account.account_type == 'business':
+				business = bank_info.account.get_business()
+				if business:
+					# Check if user is an employee accessing business account
+					business_id = getattr(info.context, 'active_business_id', None)
+					if business_id and str(business.id) == str(business_id):
+						# Employee accessing business account
+						try:
+							check_employee_permission(user, business, 'manage_bank_accounts')
+						except PermissionDenied:
+							return DeleteBankInfo(
+								success=False,
+								error="You don't have permission to manage bank accounts for this business"
+							)
 
 			# Soft delete the bank info
 			bank_info.soft_delete()
@@ -1434,6 +1843,22 @@ class SetDefaultBankInfo(graphene.Mutation):
 				id=bank_info_id,
 				account__user=user
 			)
+			
+			# Check employee permissions for business accounts
+			if bank_info.account.account_type == 'business':
+				business = bank_info.account.get_business()
+				if business:
+					# Check if user is an employee accessing business account
+					business_id = getattr(info.context, 'active_business_id', None)
+					if business_id and str(business.id) == str(business_id):
+						# Employee accessing business account
+						try:
+							check_employee_permission(user, business, 'manage_bank_accounts')
+						except PermissionDenied:
+							return SetDefaultBankInfo(
+								success=False,
+								error="You don't have permission to manage bank accounts for this business"
+							)
 
 			# Set as default (this will unset others automatically)
 			bank_info.set_as_default()

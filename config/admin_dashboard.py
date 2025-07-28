@@ -354,7 +354,7 @@ confio_admin_site = ConfioAdminSite(name='confio_admin')
 
 # Re-register all models with the custom admin site
 from django.contrib.auth.models import Group
-from users.admin import UserAdmin, AccountAdmin, BusinessAdmin, IdentityVerificationAdmin, CountryAdmin, BankAdmin, BankInfoAdmin, UnifiedTransactionAdmin
+from users.admin import UserAdmin, AccountAdmin, BusinessAdmin, IdentityVerificationAdmin, CountryAdmin, BankAdmin, BankInfoAdmin, UnifiedTransactionAdmin, BusinessEmployeeAdmin, EmployeeInvitationAdmin
 from p2p_exchange.admin import (
     P2PPaymentMethodAdmin, P2POfferAdmin, P2PTradeAdmin, 
     P2PMessageAdmin, P2PUserStatsAdmin, P2PEscrowAdmin,
@@ -374,6 +374,11 @@ confio_admin_site.register(IdentityVerification, IdentityVerificationAdmin)
 confio_admin_site.register(Country, CountryAdmin)
 confio_admin_site.register(Bank, BankAdmin)
 confio_admin_site.register(BankInfo, BankInfoAdmin)
+
+# Employee models
+from users.models_employee import BusinessEmployee, EmployeeInvitation
+confio_admin_site.register(BusinessEmployee, BusinessEmployeeAdmin)
+confio_admin_site.register(EmployeeInvitation, EmployeeInvitationAdmin)
 
 # Unified Transaction Tables
 from users.models_unified import UnifiedTransactionTable

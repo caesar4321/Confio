@@ -14,6 +14,8 @@ export const AccountProvider = ({ children }: { children: React.ReactNode }) => 
 export const useAccount = () => {
   const ctx = useContext(AccountContext);
   if (!ctx) {
+    console.error("useAccount called outside <AccountProvider>. Stack trace:");
+    console.error(new Error().stack);
     throw new Error("useAccount must be used inside <AccountProvider>");
   }
   return ctx;

@@ -197,14 +197,11 @@ export const TradeChatScreen: React.FC = () => {
     }
   });
   
-  // Fetch user's bank accounts - filter by active account ID
-  const isNumericAccountId = activeAccount?.id && /^\d+$/.test(activeAccount.id);
+  // Fetch user's bank accounts - server determines context from JWT
   const { data: bankAccountsData, loading: bankAccountsLoading, error: bankAccountsError } = useQuery(GET_USER_BANK_ACCOUNTS, {
-    variables: { accountId: activeAccount?.id }, // Filter by active account
     fetchPolicy: 'network-only', // Force fresh data
-    skip: !activeAccount?.id || !isNumericAccountId, // Skip if no valid account ID
     onCompleted: (data) => {
-      console.log('✅ Bank accounts query completed for account:', activeAccount?.id);
+      console.log('✅ Bank accounts query completed');
       console.log('Number of bank accounts:', data?.userBankAccounts?.length || 0);
       if (data?.userBankAccounts) {
         data.userBankAccounts.forEach((account: any, index: number) => {
@@ -493,12 +490,10 @@ export const TradeChatScreen: React.FC = () => {
         const apiUrl = require('../config/env').getApiUrl();
         const wsBaseUrl = apiUrl.replace('http://', 'ws://').replace('https://', 'wss://').replace('/graphql/', '/');
         
-        // Include account context in WebSocket URL
-        const accountType = activeAccount?.type || 'personal';
-        const accountIndex = activeAccount?.index || 0;
-        const wsUrl = `${wsBaseUrl}ws/trade/${tradeId}/?token=${encodeURIComponent(token)}&account_type=${accountType}&account_index=${accountIndex}`;
+        // JWT token now contains account context securely
+        const wsUrl = `${wsBaseUrl}ws/trade/${tradeId}/?token=${encodeURIComponent(token)}`;
         
-        console.log('🔌 WebSocket URL with account context:', wsUrl.replace(token, 'TOKEN_HIDDEN'));
+        console.log('🔌 WebSocket URL with JWT auth:', wsUrl.replace(token, 'TOKEN_HIDDEN'));
         
         websocket.current = new WebSocket(wsUrl);
         

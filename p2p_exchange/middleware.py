@@ -10,23 +10,34 @@ from django.conf import settings
 User = get_user_model()
 
 @database_sync_to_async
-def get_user_from_token(token):
-    """Get user from JWT token"""
+def get_user_and_context_from_token(token):
+    """Get user and account context from JWT token"""
     try:
         # Remove 'JWT ' prefix if present
         if token.startswith('JWT '):
             token = token[4:]
         
-        # Decode the token
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        # Decode the token using proper JWT verification
+        from users.jwt import verify_auth_token_version
+        payload = verify_auth_token_version(token)
+        
         user_id = payload.get('user_id')
         
         if user_id:
             user = User.objects.get(id=user_id)
-            return user
-        return AnonymousUser()
-    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, User.DoesNotExist):
-        return AnonymousUser()
+            
+            # Extract account context from JWT
+            account_context = {
+                'account_type': payload.get('account_type', 'personal'),
+                'account_index': payload.get('account_index', 0),
+                'business_id': payload.get('business_id')
+            }
+            
+            return user, account_context
+        return AnonymousUser(), None
+    except Exception as e:
+        print(f"WebSocket JWT verification failed: {e}")
+        return AnonymousUser(), None
 
 class JWTAuthMiddleware(BaseMiddleware):
     """
@@ -43,8 +54,11 @@ class JWTAuthMiddleware(BaseMiddleware):
         token = query_params.get('token', [None])[0]
         
         if token:
-            scope['user'] = await get_user_from_token(token)
+            user, account_context = await get_user_and_context_from_token(token)
+            scope['user'] = user
+            scope['account_context'] = account_context
         else:
             scope['user'] = AnonymousUser()
+            scope['account_context'] = None
         
         return await super().__call__(scope, receive, send)

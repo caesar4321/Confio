@@ -366,7 +366,7 @@ export const AddBankInfoModal = ({
             ...variables
           },
           refetchQueries: [
-            { query: GET_USER_BANK_ACCOUNTS, variables: { accountId } },
+            { query: GET_USER_BANK_ACCOUNTS, variables: {} },
             { query: GET_USER_BANK_ACCOUNTS, variables: {} } // Also refetch without filter
           ],
           awaitRefetchQueries: true
@@ -375,7 +375,7 @@ export const AddBankInfoModal = ({
         result = await createBankInfo({ 
           variables,
           refetchQueries: [
-            { query: GET_USER_BANK_ACCOUNTS, variables: { accountId } },
+            { query: GET_USER_BANK_ACCOUNTS, variables: {} },
             { query: GET_USER_BANK_ACCOUNTS, variables: {} } // Also refetch without filter
           ],
           awaitRefetchQueries: true

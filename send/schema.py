@@ -109,11 +109,56 @@ class CreateSendTransaction(graphene.Mutation):
                 # Validate the transaction amount
                 validate_transaction_amount(input.amount)
 
-                # Get the sender's active account with row-level locking
-                active_account = user.accounts.select_for_update().filter(
-                    account_type=info.context.active_account_type,
-                    account_index=info.context.active_account_index
-                ).first()
+                # Get JWT context for account determination
+                from users.jwt_context import get_jwt_business_context
+                jwt_context = get_jwt_business_context(info)
+                account_type = jwt_context['account_type']
+                account_index = jwt_context['account_index']
+                business_id = jwt_context.get('business_id')
+                
+                # Check permissions for business accounts
+                if account_type == 'business':
+                    from users.models import Business
+                    from users.permissions import check_employee_permission
+                    from django.core.exceptions import PermissionDenied
+                    
+                    if business_id:
+                        # Employee accessing business account
+                        try:
+                            business = Business.objects.get(id=business_id)
+                            check_employee_permission(user, business, 'send_funds')
+                            
+                            # Get the business account
+                            active_account = Account.objects.select_for_update().get(
+                                business=business,
+                                account_type='business'
+                            )
+                        except (Business.DoesNotExist, Account.DoesNotExist):
+                            return CreateSendTransaction(
+                                send_transaction=None,
+                                success=False,
+                                errors=["Business account not found"]
+                            )
+                        except PermissionDenied:
+                            return CreateSendTransaction(
+                                send_transaction=None,
+                                success=False,
+                                errors=["You don't have permission to send funds from this business account"]
+                            )
+                    else:
+                        # Owner accessing their own business account - this shouldn't happen with JWT
+                        # because JWT should include business_id for all business account access
+                        return CreateSendTransaction(
+                            send_transaction=None,
+                            success=False,
+                            errors=["Business account access requires proper JWT context"]
+                        )
+                else:
+                    # Personal account
+                    active_account = user.accounts.select_for_update().filter(
+                        account_type=account_type,
+                        account_index=account_index
+                    ).first()
                 
                 if not active_account or not active_account.sui_address:
                     return CreateSendTransaction(

@@ -1,3 +1,13 @@
+"""
+User authentication and authorization middleware.
+
+SECURITY UPDATE: ActiveAccountMiddleware has been removed.
+- Previously: Account context came from X-Active-Account-Type/Index headers (insecure)
+- Now: All account context comes from JWT tokens via jwt_context functions
+- This prevents client-side manipulation of business context
+- All mutations/queries now use require_authenticated_context() for secure context
+"""
+
 from django.utils.functional import SimpleLazyObject
 from graphql_jwt.utils import get_http_authorization
 from .jwt import verify_auth_token_version
@@ -6,54 +16,6 @@ import logging
 from django.contrib.auth.models import AnonymousUser
 
 logger = logging.getLogger(__name__)
-
-class ActiveAccountMiddleware:
-    """Middleware to set active account information on the request context"""
-    
-    def __init__(self, get_response):
-        self.get_response = get_response
-
-    def __call__(self, request):
-        # Set default values
-        request.active_account_type = 'personal'
-        request.active_account_index = 0
-        request.active_business_id = None
-        
-        # Try to extract account context from JWT token
-        auth_header = request.headers.get('Authorization', '')
-        if auth_header and auth_header.startswith('JWT'):
-            try:
-                from graphql_jwt.utils import jwt_decode
-                token = auth_header[4:] if auth_header.startswith('JWT ') else auth_header[3:]
-                payload = jwt_decode(token)
-                
-                # Extract account context from JWT payload
-                request.active_account_type = payload.get('account_type', 'personal')
-                request.active_account_index = payload.get('account_index', 0)
-                request.active_business_id = payload.get('business_id')
-                
-                logger.info(f"Account context from JWT - type: {request.active_account_type}, index: {request.active_account_index}, business_id: {request.active_business_id}")
-            except Exception as e:
-                logger.debug(f"Could not extract account context from JWT: {e}")
-        
-        # Fallback to headers for backward compatibility (will be removed later)
-        if request.path == '/graphql/' and request.method == 'POST':
-            # Read active account headers (deprecated)
-            header_account_type = request.headers.get('X-Active-Account-Type')
-            header_account_index = request.headers.get('X-Active-Account-Index')
-            
-            if header_account_type or header_account_index:
-                logger.warning("DEPRECATED: Using X-Active-Account headers. Please update client to use JWT-based account context.")
-                if header_account_type:
-                    request.active_account_type = header_account_type
-                if header_account_index:
-                    try:
-                        request.active_account_index = int(header_account_index)
-                    except ValueError:
-                        logger.warning(f"Invalid active account index: {header_account_index}")
-        
-        logger.info(f"Final account context - type: {request.active_account_type}, index: {request.active_account_index}, business_id: {request.active_business_id}")
-        return self.get_response(request)
 
 class AuthTokenVersionMiddleware:
     def __init__(self, get_response):

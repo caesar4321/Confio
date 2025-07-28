@@ -224,18 +224,17 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
             user = self.scope['user']
             trade = P2PTrade.objects.get(id=self.trade_id)
             
-            # Get active account context from query params if available
-            # The WebSocket URL should include these as query parameters
-            query_string = self.scope.get('query_string', b'').decode('utf-8')
-            params = {}
-            if query_string:
-                for param in query_string.split('&'):
-                    if '=' in param:
-                        key, value = param.split('=', 1)
-                        params[key] = value
-            
-            active_account_type = params.get('account_type', 'personal')
-            active_account_index = int(params.get('account_index', '0'))
+            # Get account context from JWT middleware (secure)
+            account_context = self.scope.get('account_context')
+            if account_context:
+                active_account_type = account_context['account_type']
+                active_account_index = account_context['account_index']
+                business_id = account_context['business_id']
+            else:
+                # Fallback to personal account if no context
+                active_account_type = 'personal'
+                active_account_index = 0
+                business_id = None
             
             
             # Determine sender entity based on active account context

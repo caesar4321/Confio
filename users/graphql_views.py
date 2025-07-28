@@ -220,6 +220,14 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         description="Get unified transactions for a specific account"
     )
     
+    current_account_transactions = graphene.List(
+        UnifiedTransactionType,
+        limit=graphene.Int(default_value=50),
+        offset=graphene.Int(default_value=0),
+        token_types=graphene.List(graphene.String),
+        description="Get unified transactions for current JWT account context"
+    )
+    
     unified_transactions_with_friend = graphene.List(
         UnifiedTransactionType,
         friend_user_id=graphene.ID(),
@@ -274,6 +282,85 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         
         # Apply pagination and add user address to each transaction for direction calculation
         transactions = list(queryset[offset:offset + limit])
+        
+        # Set the user's address on each transaction for the resolvers
+        for transaction in transactions:
+            transaction._user_address = account.sui_address
+            
+        return transactions
+    
+    def resolve_current_account_transactions(self, info, limit=50, offset=0, token_types=None):
+        """Resolve unified transactions using JWT account context"""
+        from .jwt_context import get_jwt_business_context_with_validation
+        
+        # Get JWT context with validation and permission check
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_transactions')
+        if not jwt_context:
+            return []
+            
+        # Get the user from the request
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return []
+            
+        account_type = jwt_context['account_type']
+        account_index = jwt_context['account_index']
+        business_id = jwt_context.get('business_id')
+        
+        print(f"Transaction resolver - JWT context: user_id={user.id}, account_type={account_type}, account_index={account_index}, business_id={business_id}")
+        
+        # Get the account
+        from users.models import Account
+        try:
+            if account_type == 'business' and business_id:
+                # For business accounts, find the account by business_id
+                account = Account.objects.get(
+                    business_id=business_id,
+                    account_type='business',
+                    account_index=account_index
+                )
+            else:
+                # For personal accounts
+                account = Account.objects.get(
+                    user=user,
+                    account_type=account_type,
+                    account_index=account_index
+                )
+        except Account.DoesNotExist:
+            print(f"Account not found for type {account_type}, index {account_index}, business_id {business_id}")
+            return []
+        
+        print(f"Found account: {account.id}, business: {account.business.id if account.business else None}")
+        
+        # Base query - all transactions involving this account
+        if account.account_type == 'business' and account.business:
+            # For business accounts, filter by business relationships
+            queryset = UnifiedTransactionTable.objects.filter(
+                Q(sender_business=account.business) | 
+                Q(counterparty_business=account.business)
+            )
+        else:
+            # For personal accounts, filter by user relationships BUT exclude business transactions
+            queryset = UnifiedTransactionTable.objects.filter(
+                Q(
+                    Q(sender_user=user) & Q(sender_business__isnull=True)
+                ) | 
+                Q(
+                    Q(counterparty_user=user) & Q(counterparty_business__isnull=True)
+                )
+            )
+        
+        # Filter by token types if provided
+        if token_types:
+            queryset = queryset.filter(token_type__in=token_types)
+        
+        # Order by created_at descending to show newest first
+        queryset = queryset.order_by('-created_at')
+        
+        # Apply pagination and add user address to each transaction for direction calculation
+        transactions = list(queryset[offset:offset + limit])
+        
+        print(f"Found {len(transactions)} transactions for account {account.id}")
         
         # Set the user's address on each transaction for the resolvers
         for transaction in transactions:

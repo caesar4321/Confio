@@ -219,10 +219,18 @@ class P2POfferType(DjangoObjectType):
         if not user.is_authenticated:
             return False
         
-        # Get the active account context from the request
-        request = info.context
-        active_account_type = getattr(request, 'active_account_type', 'personal')
-        active_account_index = getattr(request, 'active_account_index', 0)
+        # Get JWT context for account determination
+        from users.jwt_context import get_jwt_business_context
+        try:
+            jwt_context = get_jwt_business_context(info)
+            active_account_type = jwt_context['account_type']
+            active_account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
+        except:
+            # Fallback for unauthenticated users or errors
+            active_account_type = 'personal'
+            active_account_index = 0
+            business_id = None
         
         # Determine favoriter_business if acting as business account
         favoriter_business = None
@@ -457,10 +465,18 @@ class P2PTradeType(DjangoObjectType):
             if not user.is_authenticated:
                 return False
             
-            # Get the active account context from request (set by middleware)
-            request = info.context
-            active_account_type = getattr(request, 'active_account_type', 'personal')
-            active_account_index = getattr(request, 'active_account_index', 0)
+            # Get JWT context for account determination
+            from users.jwt_context import get_jwt_business_context
+            try:
+                jwt_context = get_jwt_business_context(info)
+                active_account_type = jwt_context['account_type']
+                active_account_index = jwt_context['account_index']
+                business_id = jwt_context.get('business_id')
+            except:
+                # Fallback for unauthenticated users or errors
+                active_account_type = 'personal'
+                active_account_index = 0
+                business_id = None
             
             print(f"\n[DEBUG] resolve_has_rating for trade {self.id}")
             print(f"  - User: {user.id} ({user.username})")
@@ -1414,10 +1430,12 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                     errors=["Invalid status"]
                 )
 
-            # Get active account context to determine confirmer
-            request = info.context
-            active_account_type = getattr(request, 'active_account_type', 'personal')
-            active_account_index = getattr(request, 'active_account_index', 0)
+            # Get JWT context for account determination
+            from users.jwt_context import get_jwt_business_context
+            jwt_context = get_jwt_business_context(info)
+            active_account_type = jwt_context['account_type']
+            active_account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
             
             # Determine if user is buyer or seller
             is_buyer = False
@@ -1567,12 +1585,14 @@ class SendP2PMessage(graphene.Mutation):
                     errors=["Trade not found or access denied"]
                 )
 
-            # Get the active account context from the request
-            request = info.context
-            active_account_type = getattr(request, 'active_account_type', 'personal')
-            active_account_index = getattr(request, 'active_account_index', 0)
+            # Get JWT context for account determination
+            from users.jwt_context import get_jwt_business_context
+            jwt_context = get_jwt_business_context(info)
+            active_account_type = jwt_context['account_type']
+            active_account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
             
-            print(f"SendP2PMessage - Active account context: type={active_account_type}, index={active_account_index}")
+            print(f"SendP2PMessage - JWT account context: type={active_account_type}, index={active_account_index}, business_id={business_id}")
             print(f"SendP2PMessage - Trade participants: buyer_user={trade.buyer_user_id}, seller_user={trade.seller_user_id}, buyer_business={trade.buyer_business_id}, seller_business={trade.seller_business_id}")
 
             # Determine sender entity based on the active account context
@@ -1732,10 +1752,12 @@ class RateP2PTrade(graphene.Mutation):
                     errors=["Trade must be completed before rating"]
                 )
             
-            # Get the active account context
-            request = info.context
-            active_account_type = getattr(request, 'active_account_type', 'personal')
-            active_account_index = getattr(request, 'active_account_index', 0)
+            # Get JWT context for account determination
+            from users.jwt_context import get_jwt_business_context
+            jwt_context = get_jwt_business_context(info)
+            active_account_type = jwt_context['account_type']
+            active_account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
             
             # Check if already rated by current user IN THEIR CURRENT CONTEXT
             if active_account_type == 'business':
@@ -1965,10 +1987,12 @@ class DisputeP2PTrade(graphene.Mutation):
             # Create detailed dispute record
             from .models import P2PDispute
             
-            # Determine if initiator is user or business based on active account
-            request = info.context
-            active_account_type = getattr(request, 'active_account_type', 'personal')
-            active_account_index = getattr(request, 'active_account_index', 0)
+            # Get JWT context for account determination
+            from users.jwt_context import get_jwt_business_context
+            jwt_context = get_jwt_business_context(info)
+            active_account_type = jwt_context['account_type']
+            active_account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
             
             dispute_kwargs = {
                 'trade': trade,
@@ -2053,10 +2077,12 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                     errors=["Trade not found or access denied"]
                 )
             
-            # Get active account context
-            request = info.context
-            active_account_type = getattr(request, 'active_account_type', 'personal')
-            active_account_index = getattr(request, 'active_account_index', 0)
+            # Get JWT context for account determination
+            from users.jwt_context import get_jwt_business_context
+            jwt_context = get_jwt_business_context(info)
+            active_account_type = jwt_context['account_type']
+            active_account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
             
             # Determine if user is buyer or seller
             is_buyer = False
@@ -2273,10 +2299,18 @@ class Query(graphene.ObjectType):
                 from django.db.models import Q
                 from .models import P2PFavoriteTrader
                 
-                # Get the active account context from the request
-                request = info.context
-                active_account_type = getattr(request, 'active_account_type', 'personal')
-                active_account_index = getattr(request, 'active_account_index', 0)
+                # Get JWT context for account determination
+                from users.jwt_context import get_jwt_business_context
+                try:
+                    jwt_context = get_jwt_business_context(info)
+                    active_account_type = jwt_context['account_type']
+                    active_account_index = jwt_context['account_index']
+                    business_id = jwt_context.get('business_id')
+                except:
+                    # Fallback for unauthenticated users
+                    active_account_type = 'personal'
+                    active_account_index = 0
+                    business_id = None
                 
                 # Determine favoriter_business if acting as business account
                 favoriter_business = None
@@ -2749,30 +2783,28 @@ class ToggleFavoriteTrader(graphene.Mutation):
                 message="Cannot provide both trader_user_id and trader_business_id"
             )
         
-        # Get the active account context from the request
-        request = info.context
-        active_account_type = getattr(request, 'active_account_type', 'personal')
-        active_account_index = getattr(request, 'active_account_index', 0)
+        # Get JWT context with validation and permission check
+        from users.jwt_context import get_jwt_business_context_with_validation
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission='manage_p2p')
+        if not jwt_context:
+            return ToggleFavoriteTrader(
+                success=False,
+                is_favorite=False,
+                message="Invalid JWT context, access denied, or lacking permission"
+            )
+            
+        active_account_type = jwt_context['account_type']
+        active_account_index = jwt_context['account_index']
+        business_id = jwt_context.get('business_id')
+        employee_record = jwt_context.get('employee_record')
         
         try:
             # Determine favoriter_business if acting as business account
             favoriter_business = None
-            if active_account_type == 'business':
-                from users.models import Account
-                active_account = Account.objects.filter(
-                    user=user,
-                    account_type='business',
-                    account_index=active_account_index
-                ).first()
-                
-                if active_account and active_account.business:
-                    favoriter_business = active_account.business
-                else:
-                    return ToggleFavoriteTrader(
-                        success=False,
-                        is_favorite=False,
-                        message="Business account not found"
-                    )
+            if active_account_type == 'business' and business_id:
+                # Permission already checked in get_jwt_business_context_with_validation
+                from users.models import Business
+                favoriter_business = Business.objects.get(id=business_id)
             
             # Check if already favorited
             if trader_user_id:
