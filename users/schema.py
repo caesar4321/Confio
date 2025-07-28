@@ -73,6 +73,23 @@ class BusinessType(DjangoObjectType):
 		model = Business
 		fields = ('id', 'name', 'description', 'category', 'business_registration_number', 'address', 'created_at', 'updated_at')
 
+class EmployeePermissionsType(graphene.ObjectType):
+	"""Employee permissions object type"""
+	viewBalance = graphene.Boolean()
+	sendFunds = graphene.Boolean()
+	acceptPayments = graphene.Boolean()
+	viewTransactions = graphene.Boolean()
+	manageEmployees = graphene.Boolean()
+	viewBusinessAddress = graphene.Boolean()
+	viewAnalytics = graphene.Boolean()
+	editBusinessInfo = graphene.Boolean()
+	manageBankAccounts = graphene.Boolean()
+	manageP2p = graphene.Boolean()
+	createInvoices = graphene.Boolean()
+	manageInvoices = graphene.Boolean()
+	exportData = graphene.Boolean()
+
+
 class AccountType(DjangoObjectType):
 	# Define computed fields explicitly
 	account_id = graphene.String()
@@ -82,7 +99,7 @@ class AccountType(DjangoObjectType):
 	# Employee-related fields
 	is_employee = graphene.Boolean()
 	employee_role = graphene.String()
-	employee_permissions = graphene.JSONString()
+	employee_permissions = graphene.Field(EmployeePermissionsType)
 	employee_record_id = graphene.ID()
 	
 	class Meta:
@@ -98,9 +115,9 @@ class AccountType(DjangoObjectType):
 		if hasattr(self, 'account_id'):
 			return self.account_id
 		# Generate account_id
-		# For employee accounts, use a special format to distinguish them
-		if getattr(self, 'is_employee', False):
-			return f"employee_{self.account_type}_{self.id}"
+		# For business accounts (both owned and employee), include business_id
+		if self.account_type == 'business' and self.business:
+			return f"business_{self.business.id}_{self.account_index}"
 		return f"{self.account_type}_{self.account_index}"
 	
 	def resolve_display_name(self, info):
@@ -128,25 +145,59 @@ class AccountType(DjangoObjectType):
 	def resolve_sui_address(self, info):
 		"""Custom resolver for sui_address to check permissions"""
 		# If this is an employee accessing business account
-		if self.account_type == 'business' and hasattr(info.context, 'active_business_id'):
-			business_id = getattr(info.context, 'active_business_id', None)
-			user = getattr(info.context, 'user', None)
-			
-			if business_id and user and str(self.business_id) == str(business_id):
-				# Employee accessing business account
-				try:
-					from .permissions import check_employee_permission
-					from django.core.exceptions import PermissionDenied
-					check_employee_permission(user, self.business, 'view_business_address')
-				except PermissionDenied:
-					# Employee doesn't have permission to view business address
-					return None
+		if self.account_type == 'business':
+			# Get JWT context to check if user is accessing as employee
+			from .jwt_context import get_jwt_business_context_with_validation
+			jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+			if jwt_context:
+				jwt_business_id = jwt_context.get('business_id')
+				user = getattr(info.context, 'user', None)
+				
+				# Check if this is an employee accessing this specific business account
+				if jwt_business_id and user and self.business and str(self.business.id) == str(jwt_business_id):
+					# Check if user is an employee (not owner)
+					from .models_employee import BusinessEmployee
+					employee_record = BusinessEmployee.objects.filter(
+						user=user,
+						business_id=jwt_business_id,
+						is_active=True,
+						deleted_at__isnull=True
+					).first()
+					
+					if employee_record and employee_record.role != 'owner':
+						# Employee accessing business account - check permission
+						try:
+							from .permissions import check_employee_permission
+							from django.core.exceptions import PermissionDenied
+							check_employee_permission(user, self.business, 'view_business_address')
+						except PermissionDenied:
+							# Employee doesn't have permission to view business address
+							return None
 		
 		# Return the actual address for owners or employees with permission
 		return self.sui_address
 	
 	def resolve_employee_permissions(self, info):
-		return getattr(self, 'employee_permissions', None)
+		permissions = getattr(self, 'employee_permissions', None)
+		if not permissions:
+			return None
+		
+		# Create EmployeePermissionsType object with camelCase field names
+		return EmployeePermissionsType(
+			viewBalance=permissions.get('view_balance', False),
+			sendFunds=permissions.get('send_funds', False),
+			acceptPayments=permissions.get('accept_payments', False),
+			viewTransactions=permissions.get('view_transactions', False),
+			manageEmployees=permissions.get('manage_employees', False),
+			viewBusinessAddress=permissions.get('view_business_address', False),
+			viewAnalytics=permissions.get('view_analytics', False),
+			editBusinessInfo=permissions.get('edit_business_info', False),
+			manageBankAccounts=permissions.get('manage_bank_accounts', False),
+			manageP2p=permissions.get('manage_p2p', False),
+			createInvoices=permissions.get('create_invoices', False),
+			manageInvoices=permissions.get('manage_invoices', False),
+			exportData=permissions.get('export_data', False)
+		)
 	
 	def resolve_employee_record_id(self, info):
 		return getattr(self, 'employee_record_id', None)
@@ -621,8 +672,8 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			return {}
 		
 		# Get JWT context for account determination
-		from .jwt_context import get_jwt_business_context
-		jwt_context = get_jwt_business_context(info)
+		from .jwt_context import get_jwt_business_context_with_validation
+		jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
 		if not jwt_context:
 			return {}
 			
@@ -678,10 +729,15 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return []
 		
-		# Get account context from middleware
-		account_type = getattr(info.context, 'active_account_type', 'personal')
-		account_index = getattr(info.context, 'active_account_index', 0)
-		business_id = getattr(info.context, 'active_business_id', None)
+		# Get JWT context with validation and permission check
+		from .jwt_context import get_jwt_business_context_with_validation
+		jwt_context = get_jwt_business_context_with_validation(info, required_permission='manage_bank_accounts')
+		if not jwt_context:
+			return []
+		
+		account_type = jwt_context['account_type']
+		account_index = jwt_context['account_index']
+		business_id = jwt_context.get('business_id')
 		
 		queryset = BankInfo.objects.select_related('country', 'bank', 'account')
 		
@@ -744,15 +800,28 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			if bank_info.account.account_type == 'business':
 				business = bank_info.account.get_business()
 				if business:
-					# Check if user is an employee accessing business account
-					business_id = getattr(info.context, 'active_business_id', None)
-					if business_id and str(business.id) == str(business_id):
-						# Employee accessing business account
-						try:
-							check_employee_permission(user, business, 'manage_bank_accounts')
-						except PermissionDenied:
-							# Employee without permission - return None
-							return None
+					# Get JWT context to check if user is accessing as employee
+					from .jwt_context import get_jwt_business_context_with_validation
+					jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+					if jwt_context:
+						jwt_business_id = jwt_context.get('business_id')
+						if jwt_business_id and str(business.id) == str(jwt_business_id):
+							# Check if user is an employee (not owner)
+							from .models_employee import BusinessEmployee
+							employee_record = BusinessEmployee.objects.filter(
+								user=user,
+								business_id=jwt_business_id,
+								is_active=True,
+								deleted_at__isnull=True
+							).first()
+							
+							if employee_record and employee_record.role != 'owner':
+								# Employee accessing business account - check permission
+								try:
+									check_employee_permission(user, business, 'manage_bank_accounts')
+								except PermissionDenied:
+									# Employee without permission - return None
+									return None
 			
 			return bank_info
 		except BankInfo.DoesNotExist:
@@ -1437,17 +1506,30 @@ class CreateBankInfo(graphene.Mutation):
 			if account.account_type == 'business':
 				business = account.get_business()
 				if business:
-					# Check if user is an employee accessing business account
-					business_id = getattr(info.context, 'active_business_id', None)
-					if business_id and str(business.id) == str(business_id):
-						# Employee accessing business account
-						try:
-							check_employee_permission(user, business, 'manage_bank_accounts')
-						except PermissionDenied:
-							return CreateBankInfo(
-								success=False,
-								error="You don't have permission to manage bank accounts for this business"
-							)
+					# Get JWT context to check if user is accessing as employee
+					from .jwt_context import get_jwt_business_context_with_validation
+					jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+					if jwt_context:
+						jwt_business_id = jwt_context.get('business_id')
+						if jwt_business_id and str(business.id) == str(jwt_business_id):
+							# Check if user is an employee (not owner)
+							from .models_employee import BusinessEmployee
+							employee_record = BusinessEmployee.objects.filter(
+								user=user,
+								business_id=jwt_business_id,
+								is_active=True,
+								deleted_at__isnull=True
+							).first()
+							
+							if employee_record and employee_record.role != 'owner':
+								# Employee accessing business account - check permission
+								try:
+									check_employee_permission(user, business, 'manage_bank_accounts')
+								except PermissionDenied:
+									return CreateBankInfo(
+										success=False,
+										error="You don't have permission to manage bank accounts for this business"
+									)
 			
 			# Import P2PPaymentMethod
 			from p2p_exchange.models import P2PPaymentMethod
@@ -1565,17 +1647,30 @@ class UpdateBankInfo(graphene.Mutation):
 			if bank_info.account.account_type == 'business':
 				business = bank_info.account.get_business()
 				if business:
-					# Check if user is an employee accessing business account
-					business_id = getattr(info.context, 'active_business_id', None)
-					if business_id and str(business.id) == str(business_id):
-						# Employee accessing business account
-						try:
-							check_employee_permission(user, business, 'manage_bank_accounts')
-						except PermissionDenied:
-							return UpdateBankInfo(
-								success=False,
-								error="You don't have permission to manage bank accounts for this business"
-							)
+					# Get JWT context to check if user is accessing as employee
+					from .jwt_context import get_jwt_business_context_with_validation
+					jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+					if jwt_context:
+						jwt_business_id = jwt_context.get('business_id')
+						if jwt_business_id and str(business.id) == str(jwt_business_id):
+							# Check if user is an employee (not owner)
+							from .models_employee import BusinessEmployee
+							employee_record = BusinessEmployee.objects.filter(
+								user=user,
+								business_id=jwt_business_id,
+								is_active=True,
+								deleted_at__isnull=True
+							).first()
+							
+							if employee_record and employee_record.role != 'owner':
+								# Employee accessing business account - check permission
+								try:
+									check_employee_permission(user, business, 'manage_bank_accounts')
+								except PermissionDenied:
+									return UpdateBankInfo(
+										success=False,
+										error="You don't have permission to manage bank accounts for this business"
+									)
 			
 			# Validate identification requirement
 			if bank_info.country.requires_identification and not identification_number:
@@ -1625,17 +1720,30 @@ class DeleteBankInfo(graphene.Mutation):
 			if bank_info.account.account_type == 'business':
 				business = bank_info.account.get_business()
 				if business:
-					# Check if user is an employee accessing business account
-					business_id = getattr(info.context, 'active_business_id', None)
-					if business_id and str(business.id) == str(business_id):
-						# Employee accessing business account
-						try:
-							check_employee_permission(user, business, 'manage_bank_accounts')
-						except PermissionDenied:
-							return DeleteBankInfo(
-								success=False,
-								error="You don't have permission to manage bank accounts for this business"
-							)
+					# Get JWT context to check if user is accessing as employee
+					from .jwt_context import get_jwt_business_context_with_validation
+					jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+					if jwt_context:
+						jwt_business_id = jwt_context.get('business_id')
+						if jwt_business_id and str(business.id) == str(jwt_business_id):
+							# Check if user is an employee (not owner)
+							from .models_employee import BusinessEmployee
+							employee_record = BusinessEmployee.objects.filter(
+								user=user,
+								business_id=jwt_business_id,
+								is_active=True,
+								deleted_at__isnull=True
+							).first()
+							
+							if employee_record and employee_record.role != 'owner':
+								# Employee accessing business account - check permission
+								try:
+									check_employee_permission(user, business, 'manage_bank_accounts')
+								except PermissionDenied:
+									return DeleteBankInfo(
+										success=False,
+										error="You don't have permission to manage bank accounts for this business"
+									)
 
 			# Soft delete the bank info
 			bank_info.soft_delete()
@@ -1852,17 +1960,30 @@ class SetDefaultBankInfo(graphene.Mutation):
 			if bank_info.account.account_type == 'business':
 				business = bank_info.account.get_business()
 				if business:
-					# Check if user is an employee accessing business account
-					business_id = getattr(info.context, 'active_business_id', None)
-					if business_id and str(business.id) == str(business_id):
-						# Employee accessing business account
-						try:
-							check_employee_permission(user, business, 'manage_bank_accounts')
-						except PermissionDenied:
-							return SetDefaultBankInfo(
-								success=False,
-								error="You don't have permission to manage bank accounts for this business"
-							)
+					# Get JWT context to check if user is accessing as employee
+					from .jwt_context import get_jwt_business_context_with_validation
+					jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+					if jwt_context:
+						jwt_business_id = jwt_context.get('business_id')
+						if jwt_business_id and str(business.id) == str(jwt_business_id):
+							# Check if user is an employee (not owner)
+							from .models_employee import BusinessEmployee
+							employee_record = BusinessEmployee.objects.filter(
+								user=user,
+								business_id=jwt_business_id,
+								is_active=True,
+								deleted_at__isnull=True
+							).first()
+							
+							if employee_record and employee_record.role != 'owner':
+								# Employee accessing business account - check permission
+								try:
+									check_employee_permission(user, business, 'manage_bank_accounts')
+								except PermissionDenied:
+									return SetDefaultBankInfo(
+										success=False,
+										error="You don't have permission to manage bank accounts for this business"
+									)
 
 			# Set as default (this will unset others automatically)
 			bank_info.set_as_default()

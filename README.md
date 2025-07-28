@@ -367,8 +367,9 @@ ROLE_PERMISSIONS = {
 - Manages JWT tokens with embedded account context
 
 **JWT Context** (`users/jwt_context.py`)
-- `get_jwt_business_context()`: Extracts account context from JWT
-- `get_jwt_business_context_with_validation()`: Validates BusinessEmployee access
+- `get_jwt_business_context_with_validation()`: Extracts account context from JWT and validates BusinessEmployee access
+  - Pass `required_permission=None` for read-only operations
+  - Pass specific permission (e.g., 'send_funds', 'manage_employees') for mutations
 - `check_role_permission()`: Implements negative-check permission system
 
 **React Hook** (`apps/src/hooks/useAccountManager.ts`)

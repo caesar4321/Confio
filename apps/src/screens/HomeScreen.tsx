@@ -367,11 +367,11 @@ export const HomeScreen = () => {
             // Employees can receive if they can accept payments
             return permissions.acceptPayments === true;
           case 'pay':
-            // Employees can access pay/charge if they can accept payments
-            return permissions.acceptPayments === true;
+            // Employees need sendFunds permission to pay
+            return permissions.sendFunds === true;
           case 'exchange':
-            // Employees can't exchange
-            return false;
+            // Employees need manageP2p permission
+            return permissions.manageP2p === true;
           default:
             return true;
         }
@@ -630,9 +630,15 @@ export const HomeScreen = () => {
             </Text>
             <Text style={styles.balanceAmount}>
               {/* Hide balance for employees without viewBalance permission */}
-              {(activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
-                ? '••••••'
-                : showBalance 
+              {(() => {
+                console.log('HomeScreen Balance Check:', {
+                  isEmployee: activeAccount?.isEmployee,
+                  permissions: activeAccount?.employeePermissions,
+                  viewBalance: activeAccount?.employeePermissions?.viewBalance
+                });
+                return (activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
+                  ? '••••••'
+                  : showBalance 
                   ? (showLocalCurrency 
                       ? formatAmount.plain(totalLocalValue)
                       : totalUSDValue.toLocaleString('en-US', { 
@@ -640,8 +646,8 @@ export const HomeScreen = () => {
                           maximumFractionDigits: 2 
                         })
                     )
-                  : '••••••'
-              }
+                  : '••••••';
+              })()}
             </Text>
           </Animated.View>
         </Animated.View>
@@ -663,8 +669,8 @@ export const HomeScreen = () => {
             }
           ]}
         >
-          {/* Show employee welcome message if no quick actions available */}
-          {quickActions.length === 0 && activeAccount?.isEmployee ? (
+          {/* Show employee welcome message if limited actions available */}
+          {activeAccount?.isEmployee && quickActions.length <= 1 ? (
             <View style={styles.employeeWelcomeContainer}>
               <View style={styles.employeeWelcomeIcon}>
                 <Icon name="briefcase" size={32} color="#7c3aed" />

@@ -140,7 +140,10 @@ export const useAccountManager = (): UseAccountManagerReturn => {
             id: convertedAccount.id,
             type: convertedAccount.type,
             name: convertedAccount.name,
-            businessId: convertedAccount.business?.id
+            businessId: convertedAccount.business?.id,
+            isEmployee: convertedAccount.isEmployee,
+            employeeRole: convertedAccount.employeeRole,
+            employeePermissions: convertedAccount.employeePermissions
           }
         });
         

@@ -220,9 +220,9 @@ class P2POfferType(DjangoObjectType):
             return False
         
         # Get JWT context for account determination
-        from users.jwt_context import get_jwt_business_context
+        from users.jwt_context import get_jwt_business_context_with_validation
         try:
-            jwt_context = get_jwt_business_context(info)
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
             active_account_type = jwt_context['account_type']
             active_account_index = jwt_context['account_index']
             business_id = jwt_context.get('business_id')
@@ -466,9 +466,9 @@ class P2PTradeType(DjangoObjectType):
                 return False
             
             # Get JWT context for account determination
-            from users.jwt_context import get_jwt_business_context
+            from users.jwt_context import get_jwt_business_context_with_validation
             try:
-                jwt_context = get_jwt_business_context(info)
+                jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
                 active_account_type = jwt_context['account_type']
                 active_account_index = jwt_context['account_index']
                 business_id = jwt_context.get('business_id')
@@ -1430,9 +1430,15 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                     errors=["Invalid status"]
                 )
 
-            # Get JWT context for account determination
-            from users.jwt_context import get_jwt_business_context
-            jwt_context = get_jwt_business_context(info)
+            # Get JWT context with validation and permission check
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission='manage_p2p')
+            if not jwt_context:
+                return UpdateP2PTradeStatus(
+                    trade=None,
+                    success=False,
+                    errors=["No access or permission to manage P2P trades"]
+                )
             active_account_type = jwt_context['account_type']
             active_account_index = jwt_context['account_index']
             business_id = jwt_context.get('business_id')
@@ -1585,9 +1591,15 @@ class SendP2PMessage(graphene.Mutation):
                     errors=["Trade not found or access denied"]
                 )
 
-            # Get JWT context for account determination
-            from users.jwt_context import get_jwt_business_context
-            jwt_context = get_jwt_business_context(info)
+            # Get JWT context with validation and permission check
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission='manage_p2p')
+            if not jwt_context:
+                return SendP2PMessage(
+                    message=None,
+                    success=False,
+                    errors=["No access or permission to manage P2P trades"]
+                )
             active_account_type = jwt_context['account_type']
             active_account_index = jwt_context['account_index']
             business_id = jwt_context.get('business_id')
@@ -1752,9 +1764,16 @@ class RateP2PTrade(graphene.Mutation):
                     errors=["Trade must be completed before rating"]
                 )
             
-            # Get JWT context for account determination
-            from users.jwt_context import get_jwt_business_context
-            jwt_context = get_jwt_business_context(info)
+            # Get JWT context with validation and permission check
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission='manage_p2p')
+            if not jwt_context:
+                return RateP2PTrade(
+                    rating=None,
+                    trade=None,
+                    success=False,
+                    errors=["No access or permission to manage P2P trades"]
+                )
             active_account_type = jwt_context['account_type']
             active_account_index = jwt_context['account_index']
             business_id = jwt_context.get('business_id')
@@ -1987,9 +2006,15 @@ class DisputeP2PTrade(graphene.Mutation):
             # Create detailed dispute record
             from .models import P2PDispute
             
-            # Get JWT context for account determination
-            from users.jwt_context import get_jwt_business_context
-            jwt_context = get_jwt_business_context(info)
+            # Get JWT context with validation and permission check
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission='manage_p2p')
+            if not jwt_context:
+                return DisputeP2PTrade(
+                    trade=None,
+                    success=False,
+                    errors=["No access or permission to manage P2P trades"]
+                )
             active_account_type = jwt_context['account_type']
             active_account_index = jwt_context['account_index']
             business_id = jwt_context.get('business_id')
@@ -2077,9 +2102,16 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                     errors=["Trade not found or access denied"]
                 )
             
-            # Get JWT context for account determination
-            from users.jwt_context import get_jwt_business_context
-            jwt_context = get_jwt_business_context(info)
+            # Get JWT context with validation and permission check
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission='manage_p2p')
+            if not jwt_context:
+                return ConfirmP2PTradeStep(
+                    confirmation=None,
+                    trade=None,
+                    success=False,
+                    errors=["No access or permission to manage P2P trades"]
+                )
             active_account_type = jwt_context['account_type']
             active_account_index = jwt_context['account_index']
             business_id = jwt_context.get('business_id')
@@ -2300,9 +2332,9 @@ class Query(graphene.ObjectType):
                 from .models import P2PFavoriteTrader
                 
                 # Get JWT context for account determination
-                from users.jwt_context import get_jwt_business_context
+                from users.jwt_context import get_jwt_business_context_with_validation
                 try:
-                    jwt_context = get_jwt_business_context(info)
+                    jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
                     active_account_type = jwt_context['account_type']
                     active_account_index = jwt_context['account_index']
                     business_id = jwt_context.get('business_id')

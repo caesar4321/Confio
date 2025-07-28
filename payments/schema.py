@@ -128,7 +128,9 @@ class CreateInvoice(graphene.Mutation):
             # Get the user's active account using JWT context
             if account_type == 'business' and business_id:
                 # For business accounts, find by business_id from JWT
-                active_account = user.accounts.filter(
+                # This will find the business account regardless of who owns it
+                from users.models import Account
+                active_account = Account.objects.filter(
                     account_type='business',
                     account_index=account_index,
                     business_id=business_id
@@ -342,9 +344,17 @@ class PayInvoice(graphene.Mutation):
                         errors=["Cannot pay your own invoice"]
                     )
 
-                # Get JWT context for account determination
-                from users.jwt_context import get_jwt_business_context
-                jwt_context = get_jwt_business_context(info)
+                # Get JWT context with validation and permission check
+                from users.jwt_context import get_jwt_business_context_with_validation
+                jwt_context = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+                if not jwt_context:
+                    return PayInvoice(
+                        invoice=None,
+                        payment_transaction=None,
+                        success=False,
+                        errors=["No access or permission to pay invoices"]
+                    )
+                    
                 account_type = jwt_context['account_type']
                 account_index = jwt_context['account_index']
                 business_id = jwt_context.get('business_id')
@@ -357,7 +367,9 @@ class PayInvoice(graphene.Mutation):
                 # Get the payer's active account using JWT context
                 if account_type == 'business' and business_id:
                     # For business accounts, find by business_id from JWT
-                    payer_account = user.accounts.filter(
+                    # This will find the business account regardless of who owns it
+                    from users.models import Account
+                    payer_account = Account.objects.filter(
                         account_type='business',
                         account_index=account_index,
                         business_id=business_id
@@ -528,9 +540,14 @@ class Query(graphene.ObjectType):
         if not (user and getattr(user, 'is_authenticated', False)):
             return []
         
-        # Get active account context
-        account_type = getattr(info.context, 'active_account_type', 'personal')
-        account_index = getattr(info.context, 'active_account_index', 0)
+        # Get JWT context for account determination
+        from users.jwt_context import get_jwt_business_context_with_validation
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+        if not jwt_context:
+            return []
+        account_type = jwt_context['account_type']
+        account_index = jwt_context['account_index']
+        business_id = jwt_context.get('business_id')
         
         # Filter by user and active account
         return Invoice.objects.filter(
@@ -559,18 +576,33 @@ class Query(graphene.ObjectType):
         
         from django.db import models
         
-        # Get active account context
-        account_type = getattr(info.context, 'active_account_type', 'personal')
-        account_index = getattr(info.context, 'active_account_index', 0)
+        # Get JWT context for account determination
+        from users.jwt_context import get_jwt_business_context_with_validation
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+        if not jwt_context:
+            return []
+        account_type = jwt_context['account_type']
+        account_index = jwt_context['account_index']
+        business_id = jwt_context.get('business_id')
         
         # Get the user's active account
         try:
             from users.models import Account
-            user_account = Account.objects.get(
-                user=user,
-                account_type=account_type,
-                account_index=account_index
-            )
+            if account_type == 'business' and business_id:
+                # For business accounts, find by business_id from JWT
+                # This will find the business account regardless of who owns it
+                user_account = Account.objects.get(
+                    account_type='business',
+                    account_index=account_index,
+                    business_id=business_id
+                )
+            else:
+                # For personal accounts
+                user_account = Account.objects.get(
+                    user=user,
+                    account_type=account_type,
+                    account_index=account_index
+                )
             
             if not user_account.sui_address:
                 return []

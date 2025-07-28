@@ -540,20 +540,30 @@ const ChargeScreen = () => {
           </View>
         ) : (
           <View style={styles.pagarContent}>
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Escanear Código QR para Pagar</Text>
-              <Text style={styles.cardSubtitle}>
-                Escanea el código QR de un negocio para realizar un pago de forma rápida y segura
-              </Text>
-              
-              <TouchableOpacity
-                style={[styles.scanButton, { backgroundColor: colors.primary, marginTop: 24 }]}
-                onPress={() => navigation.navigate('Scan', { mode: 'pagar' })}
-              >
-                <Icon name="camera" size={20} color="white" style={{ marginRight: 8 }} />
-                <Text style={styles.scanButtonText}>Abrir Escáner QR</Text>
-              </TouchableOpacity>
-            </View>
+            {activeAccount?.isEmployee && !activeAccount?.employeePermissions?.sendFunds ? (
+              <View style={styles.card}>
+                <Icon name="lock" size={48} color={colors.primaryText} style={{ alignSelf: 'center', marginBottom: 16 }} />
+                <Text style={[styles.cardTitle, { textAlign: 'center' }]}>Función No Disponible</Text>
+                <Text style={[styles.cardSubtitle, { textAlign: 'center' }]}>
+                  No tienes permisos para realizar pagos desde esta cuenta empresarial.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Escanear Código QR para Pagar</Text>
+                <Text style={styles.cardSubtitle}>
+                  Escanea el código QR de un negocio para realizar un pago de forma rápida y segura
+                </Text>
+                
+                <TouchableOpacity
+                  style={[styles.scanButton, { backgroundColor: colors.primary, marginTop: 24 }]}
+                  onPress={() => navigation.navigate('Scan', { mode: 'pagar' })}
+                >
+                  <Icon name="camera" size={20} color="white" style={{ marginRight: 8 }} />
+                  <Text style={styles.scanButtonText}>Abrir Escáner QR</Text>
+                </TouchableOpacity>
+              </View>
+            )}
             
             <View style={styles.card}>
               <Text style={styles.cardTitle}>¿Cómo funciona?</Text>

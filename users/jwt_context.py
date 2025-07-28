@@ -54,14 +54,21 @@ def check_role_permission(role, permission):
     allowed_permissions = ROLE_PERMISSIONS.get(role, set())
     return permission in allowed_permissions
 
-def get_jwt_business_context(info):
+def get_jwt_business_context_with_validation(info, required_permission=None):
     """
-    Extract business context from JWT token in the GraphQL request.
+    Extract business context from JWT token and validate access through BusinessEmployee.
+    This ensures that for business accounts, the user has proper access rights.
+    
+    Args:
+        info: GraphQL info object
+        required_permission: Optional permission to check (e.g., 'view_balance', 'accept_payments')
+                           Pass None for read-only operations that don't require permission checks
     
     Returns:
-        dict: Contains 'business_id', 'account_type', 'account_index', 'user_id'
-        None: If no valid JWT or business context found
+        dict: Contains 'business_id', 'account_type', 'account_index', 'user_id', 'employee_record'
+        None: If no valid JWT context found, access denied, or permission check fails
     """
+    # Extract JWT context
     try:
         # Get the request from GraphQL info
         request = info.context
@@ -82,36 +89,20 @@ def get_jwt_business_context(info):
         payload = jwt_decode(token)
         
         # Extract context information
-        business_context = {
+        jwt_context = {
             'user_id': payload.get('user_id'),
             'account_type': payload.get('account_type', 'personal'),
             'account_index': payload.get('account_index', 0),
             'business_id': payload.get('business_id'),  # Will be None for personal accounts
         }
         
-        logger.info(f"Extracted JWT context: {business_context}")
+        logger.info(f"Extracted JWT context: {jwt_context}")
         logger.info(f"JWT business_id type: {type(payload.get('business_id'))}, value: {payload.get('business_id')}")
-        return business_context
         
     except Exception as e:
         logger.error(f"Error extracting JWT business context: {str(e)}")
         return None
-
-def get_jwt_business_context_with_validation(info, required_permission=None):
-    """
-    Extract business context from JWT token and validate access through BusinessEmployee.
-    This ensures that for business accounts, the user has proper access rights.
     
-    Args:
-        info: GraphQL info object
-        required_permission: Optional permission to check (e.g., 'view_balance', 'accept_payments')
-    
-    Returns:
-        dict: Contains 'business_id', 'account_type', 'account_index', 'user_id', 'employee_record'
-        None: If no valid JWT context found, access denied, or permission check fails
-    """
-    # First get the basic JWT context
-    jwt_context = get_jwt_business_context(info)
     if not jwt_context:
         return None
     
@@ -179,7 +170,7 @@ def get_user_business_id(info):
         str: business_id if in business context
         None: if in personal context or no valid JWT
     """
-    context = get_jwt_business_context(info)
+    context = get_jwt_business_context_with_validation(info, required_permission=None)
     return context.get('business_id') if context else None
 
 def validate_business_access(info, business_id):

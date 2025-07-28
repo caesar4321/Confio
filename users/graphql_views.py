@@ -70,13 +70,26 @@ class UnifiedTransactionType(DjangoObjectType):
             user = info.context.user if info.context else None
             if user and user.is_authenticated:
                 # Check if user is sender (seller in the trade)
-                if (self.sender_user and self.sender_user.id == user.id) or \
-                   (self.sender_business and user.accounts.filter(business_id=self.sender_business.id).exists()):
+                if self.sender_user and self.sender_user.id == user.id:
                     return 'sent'
+                elif self.sender_business:
+                    # Check if user has access to sender business (owner or employee)
+                    from users.models_employee import BusinessEmployee
+                    has_access = user.accounts.filter(business_id=self.sender_business.id).exists() or \
+                                BusinessEmployee.objects.filter(user=user, business=self.sender_business, is_active=True, deleted_at__isnull=True).exists()
+                    if has_access:
+                        return 'sent'
+                
                 # Check if user is counterparty (buyer in the trade)
-                elif (self.counterparty_user and self.counterparty_user.id == user.id) or \
-                     (self.counterparty_business and user.accounts.filter(business_id=self.counterparty_business.id).exists()):
+                if self.counterparty_user and self.counterparty_user.id == user.id:
                     return 'received'
+                elif self.counterparty_business:
+                    # Check if user has access to counterparty business (owner or employee)
+                    from users.models_employee import BusinessEmployee
+                    has_access = user.accounts.filter(business_id=self.counterparty_business.id).exists() or \
+                                BusinessEmployee.objects.filter(user=user, business=self.counterparty_business, is_active=True, deleted_at__isnull=True).exists()
+                    if has_access:
+                        return 'received'
             return 'unknown'
             
         # Get the user's address from the transaction context
@@ -102,13 +115,26 @@ class UnifiedTransactionType(DjangoObjectType):
                 user = info.context.user if info.context else None
                 if user and user.is_authenticated:
                     # Check if user is sender (seller in the trade)
-                    if (self.sender_user and self.sender_user.id == user.id) or \
-                       (self.sender_business and user.accounts.filter(business_id=self.sender_business.id).exists()):
+                    if self.sender_user and self.sender_user.id == user.id:
                         return f'-{self.amount}'
+                    elif self.sender_business:
+                        # Check if user has access to sender business (owner or employee)
+                        from users.models_employee import BusinessEmployee
+                        has_access = user.accounts.filter(business_id=self.sender_business.id).exists() or \
+                                    BusinessEmployee.objects.filter(user=user, business=self.sender_business, is_active=True, deleted_at__isnull=True).exists()
+                        if has_access:
+                            return f'-{self.amount}'
+                    
                     # Check if user is counterparty (buyer in the trade)
-                    elif (self.counterparty_user and self.counterparty_user.id == user.id) or \
-                         (self.counterparty_business and user.accounts.filter(business_id=self.counterparty_business.id).exists()):
+                    if self.counterparty_user and self.counterparty_user.id == user.id:
                         return f'+{self.amount}'
+                    elif self.counterparty_business:
+                        # Check if user has access to counterparty business (owner or employee)
+                        from users.models_employee import BusinessEmployee
+                        has_access = user.accounts.filter(business_id=self.counterparty_business.id).exists() or \
+                                    BusinessEmployee.objects.filter(user=user, business=self.counterparty_business, is_active=True, deleted_at__isnull=True).exists()
+                        if has_access:
+                            return f'+{self.amount}'
                 return str(self.amount)
                 
             # Get direction directly
@@ -135,13 +161,26 @@ class UnifiedTransactionType(DjangoObjectType):
                 user = info.context.user if info.context else None
                 if user and user.is_authenticated:
                     # Check if user is sender (seller in the trade)
-                    if (self.sender_user and self.sender_user.id == user.id) or \
-                       (self.sender_business and user.accounts.filter(business_id=self.sender_business.id).exists()):
+                    if self.sender_user and self.sender_user.id == user.id:
                         return self.counterparty_display_name or 'Unknown'
+                    elif self.sender_business:
+                        # Check if user has access to sender business (owner or employee)
+                        from users.models_employee import BusinessEmployee
+                        has_access = user.accounts.filter(business_id=self.sender_business.id).exists() or \
+                                    BusinessEmployee.objects.filter(user=user, business=self.sender_business, is_active=True, deleted_at__isnull=True).exists()
+                        if has_access:
+                            return self.counterparty_display_name or 'Unknown'
+                    
                     # Check if user is counterparty (buyer in the trade)
-                    elif (self.counterparty_user and self.counterparty_user.id == user.id) or \
-                         (self.counterparty_business and user.accounts.filter(business_id=self.counterparty_business.id).exists()):
+                    if self.counterparty_user and self.counterparty_user.id == user.id:
                         return self.sender_display_name or 'Unknown'
+                    elif self.counterparty_business:
+                        # Check if user has access to counterparty business (owner or employee)
+                        from users.models_employee import BusinessEmployee
+                        has_access = user.accounts.filter(business_id=self.counterparty_business.id).exists() or \
+                                    BusinessEmployee.objects.filter(user=user, business=self.counterparty_business, is_active=True, deleted_at__isnull=True).exists()
+                        if has_access:
+                            return self.sender_display_name or 'Unknown'
                 return 'Unknown'
                 
             # Get direction directly
