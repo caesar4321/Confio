@@ -331,12 +331,14 @@ class UnifiedTransactionQuery(graphene.ObjectType):
             return []
         
         print(f"Found account: {account.id}, business: {account.business.id if account.business else None}")
+        print(f"Transaction resolver - DEBUG: Using JWT business_id={business_id} for query")
         
         # Base query - all transactions involving this account
         if account_type == 'business' and business_id:
             # For business accounts, filter by business relationships using JWT business_id
             from users.models import Business
             business = Business.objects.get(id=business_id)
+            print(f"Transaction resolver - Filtering transactions for business id={business.id}, name={business.name}")
             queryset = UnifiedTransactionTable.objects.filter(
                 Q(sender_business=business) | 
                 Q(counterparty_business=business)

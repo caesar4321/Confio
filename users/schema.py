@@ -599,6 +599,9 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			business_id = int(business_id_from_context) if business_id_from_context else 0
 			base_multiplier = business_id * 1000  # Each business gets unique base amount
 			
+			print(f"AccountBalance resolver - DEBUG: JWT business_id={business_id_from_context}, account.business.id={account.business.id if account.business else None}")
+			print(f"AccountBalance resolver - Using business_id={business_id} for balance calculation")
+			
 			mock_balances = {
 				'cUSD': f'{10000 + base_multiplier}.00',     # Business 1: 11000, Business 2: 12000, etc.
 				'CONFIO': f'{5000 + base_multiplier}.00',    # Business 1: 6000, Business 2: 7000, etc. 
