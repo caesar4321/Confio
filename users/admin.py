@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
-from .models import User, Account, Business, IdentityVerification, Country, Bank, BankInfo
+from .models import User, Account, Business, IdentityVerification, Country, Bank, BankInfo, ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare
 from .models_unified import UnifiedTransactionTable
 from .models_employee import BusinessEmployee, EmployeeInvitation
 
@@ -755,3 +755,279 @@ class EmployeeInvitationAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('business', 'invited_by', 'accepted_by')
+
+
+@admin.register(ConfioRewardBalance)
+class ConfioRewardBalanceAdmin(admin.ModelAdmin):
+    """Admin for CONFIO reward balances"""
+    list_display = ('user', 'total_locked_display', 'total_earned_display', 'sources_breakdown', 'lock_status', 'last_reward_at')
+    list_filter = ('migration_status', 'lock_until', 'created_at')
+    search_fields = ('user__username', 'user__email', 'user__phone_number')
+    readonly_fields = (
+        'user', 'total_earned', 'total_locked', 'total_unlocked',
+        'achievement_rewards', 'referral_rewards', 'viral_rewards',
+        'presale_purchase', 'other_rewards', 'last_reward_at',
+        'daily_reward_count', 'daily_reward_amount', 'created_at', 'updated_at'
+    )
+    
+    def total_locked_display(self, obj):
+        return format_html(
+            '<strong style="color: #8b5cf6;">{} CONFIO</strong>',
+            obj.total_locked
+        )
+    total_locked_display.short_description = "Locked Balance"
+    
+    def total_earned_display(self, obj):
+        return format_html(
+            '{} CONFIO<br><small style="color: #6B7280;">${}</small>',
+            obj.total_earned,
+            obj.total_earned / 4  # 4 CONFIO = $1
+        )
+    total_earned_display.short_description = "Total Earned"
+    
+    def sources_breakdown(self, obj):
+        sources = []
+        if obj.achievement_rewards > 0:
+            sources.append(f"🏆 {obj.achievement_rewards}")
+        if obj.referral_rewards > 0:
+            sources.append(f"🤝 {obj.referral_rewards}")
+        if obj.viral_rewards > 0:
+            sources.append(f"🚀 {obj.viral_rewards}")
+        if obj.presale_purchase > 0:
+            sources.append(f"💰 {obj.presale_purchase}")
+        if obj.other_rewards > 0:
+            sources.append(f"🎁 {obj.other_rewards}")
+        
+        return format_html('<br>'.join(sources)) if sources else "No rewards yet"
+    sources_breakdown.short_description = "Sources"
+    
+    def lock_status(self, obj):
+        if not obj.lock_until:
+            return format_html('<span style="color: green;">✅ Unlocked</span>')
+        
+        from django.utils import timezone
+        if obj.lock_until > timezone.now():
+            days_left = (obj.lock_until - timezone.now()).days
+            return format_html(
+                '<span style="color: orange;">🔒 {} days</span>',
+                days_left
+            )
+        else:
+            return format_html('<span style="color: green;">🔓 Ready to unlock</span>')
+    lock_status.short_description = "Lock Status"
+
+
+@admin.register(ConfioRewardTransaction)
+class ConfioRewardTransactionAdmin(admin.ModelAdmin):
+    """Admin for CONFIO reward transactions (pre-blockchain accounting)"""
+    list_display = ('user', 'transaction_type_display', 'amount_display', 'source', 'description', 'created_at')
+    list_filter = ('transaction_type', 'created_at')
+    search_fields = ('user__username', 'user__email', 'source', 'description')
+    readonly_fields = ('user', 'transaction_type', 'amount', 'balance_after', 'source', 'description', 'achievement', 'referral', 'metadata', 'created_at')
+    date_hierarchy = 'created_at'
+    
+    def transaction_type_display(self, obj):
+        type_icons = {
+            'reward': '🎁',
+            'presale': '💰',
+            'unlock': '🔓',
+            'migration': '🚀',
+            'adjustment': '⚡'
+        }
+        
+        type_colors = {
+            'reward': '#10b981',
+            'presale': '#8b5cf6',
+            'unlock': '#3b82f6',
+            'migration': '#f59e0b',
+            'adjustment': '#6b7280'
+        }
+        
+        return format_html(
+            '<span style="color: {};">{} {}</span>',
+            type_colors.get(obj.transaction_type, '#6b7280'),
+            type_icons.get(obj.transaction_type, '❓'),
+            obj.get_transaction_type_display()
+        )
+    transaction_type_display.short_description = "Type"
+    
+    def amount_display(self, obj):
+        return format_html(
+            '<strong>{} CONFIO</strong><br><small style="color: #6B7280;">${}</small>',
+            obj.amount,
+            obj.amount / 4  # 4 CONFIO = $1
+        )
+    amount_display.short_description = "Amount"
+    
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('user', 'achievement', 'referral')
+
+
+@admin.register(AchievementType)
+class AchievementTypeAdmin(admin.ModelAdmin):
+    """Admin for achievement types"""
+    list_display = ('name', 'slug', 'category_display', 'confio_reward_display', 'is_active', 'created_at')
+    list_filter = ('category', 'is_active', 'created_at')
+    search_fields = ('name', 'slug', 'description')
+    readonly_fields = ('created_at', 'updated_at')
+    ordering = ('category', 'display_order', 'name')
+    
+    def get_queryset(self, request):
+        # Ensure we're not filtering out soft-deleted items
+        return super().get_queryset(request).filter(deleted_at__isnull=True)
+    
+    fieldsets = (
+        ('Basic Information', {
+            'fields': ('name', 'slug', 'description', 'icon_emoji', 'color')
+        }),
+        ('Classification', {
+            'fields': ('category', 'display_order')
+        }),
+        ('Rewards', {
+            'fields': ('confio_reward', 'is_repeatable', 'requires_manual_review')
+        }),
+        ('Status', {
+            'fields': ('is_active', 'created_at', 'updated_at')
+        }),
+    )
+    
+    def category_display(self, obj):
+        categories = {
+            'onboarding': '👋 Bienvenida',
+            'trading': '💱 Intercambios',
+            'payments': '💸 Pagos',
+            'social': '👥 Comunidad',
+            'verification': '✅ Verificación',
+            'ambassador': '👑 Embajador',
+            # Also support old category names
+            'bienvenida': '👋 Bienvenida',
+            'verificacion': '✅ Verificación',
+            'viral': '🚀 Viral',
+            'embajador': '👑 Embajador'
+        }
+        return categories.get(obj.category, obj.category)
+    category_display.short_description = "Category"
+    
+    def confio_reward_display(self, obj):
+        return format_html(
+            '<strong>{} CONFIO</strong><br><small style="color: #6B7280;">${}</small>',
+            obj.confio_reward,
+            obj.confio_reward / 4  # 4 CONFIO = $1
+        )
+    confio_reward_display.short_description = "Reward"
+
+
+@admin.register(UserAchievement)
+class UserAchievementAdmin(admin.ModelAdmin):
+    """Admin for user achievements"""
+    list_display = ('user', 'achievement_type', 'status_display', 'earned_at', 'claimed_at', 'can_claim')
+    list_filter = ('status', 'earned_at', 'claimed_at', 'achievement_type__category')
+    search_fields = ('user__username', 'user__email', 'achievement_type__name')
+    readonly_fields = ('earned_at', 'claimed_at', 'created_at', 'updated_at')
+    raw_id_fields = ('user', 'achievement_type')
+    
+    def status_display(self, obj):
+        status_colors = {
+            'pending': '#9CA3AF',
+            'earned': '#F59E0B',
+            'claimed': '#10B981',
+            'expired': '#EF4444'
+        }
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            status_colors.get(obj.status, '#000'),
+            obj.get_status_display()
+        )
+    status_display.short_description = "Status"
+    
+    def can_claim(self, obj):
+        if obj.can_claim_reward:
+            return format_html('<span style="color: #10B981;">✅ Yes</span>')
+        return format_html('<span style="color: #9CA3AF;">❌ No</span>')
+    can_claim.short_description = "Can Claim?"
+    
+    actions = ['mark_as_earned', 'mark_as_claimed']
+    
+    def mark_as_earned(self, request, queryset):
+        from django.utils import timezone
+        updated = queryset.filter(status='pending').update(
+            status='earned',
+            earned_at=timezone.now()
+        )
+        self.message_user(request, f"{updated} achievements marked as earned.")
+    mark_as_earned.short_description = "Mark selected as earned"
+    
+    def mark_as_claimed(self, request, queryset):
+        from django.utils import timezone
+        count = 0
+        for achievement in queryset.filter(status='earned'):
+            if achievement.claim_reward():
+                count += 1
+        self.message_user(request, f"{count} achievements claimed with rewards distributed.")
+    mark_as_claimed.short_description = "Claim rewards for selected"
+
+
+@admin.register(InfluencerReferral)
+class InfluencerReferralAdmin(admin.ModelAdmin):
+    """Admin for influencer referrals"""
+    list_display = ('tiktok_username', 'referred_user', 'status', 'created_at')
+    list_filter = ('status', 'created_at')
+    search_fields = ('referred_user__username', 'referred_user__email', 'tiktok_username')
+    readonly_fields = ('created_at', 'updated_at')
+    raw_id_fields = ('referred_user', 'influencer_user')
+    
+    def status_display(self, obj):
+        status_colors = {
+            'pending': '#9CA3AF',
+            'active': '#10B981',
+            'converted': '#8B5CF6',
+            'ambassador': '#F59E0B'
+        }
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            status_colors.get(obj.status, '#000'),
+            obj.get_status_display()
+        )
+    status_display.short_description = "Status"
+
+
+@admin.register(TikTokViralShare)
+class TikTokViralShareAdmin(admin.ModelAdmin):
+    """Admin for TikTok viral shares"""
+    list_display = ('user', 'tiktok_username', 'share_type', 'status_display', 'created_at')
+    list_filter = ('status', 'share_type', 'created_at')
+    search_fields = ('user__username', 'tiktok_username', 'tiktok_url')
+    readonly_fields = ('created_at', 'updated_at')
+    raw_id_fields = ('user', 'achievement')
+    
+    def status_display(self, obj):
+        status_colors = {
+            'pending': '#9CA3AF',
+            'submitted': '#3B82F6',
+            'verified': '#10B981',
+            'rewarded': '#8B5CF6',
+            'rejected': '#EF4444'
+        }
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            status_colors.get(obj.status, '#000'),
+            obj.get_status_display()
+        )
+    status_display.short_description = "Status"
+    
+    def view_count_display(self, obj):
+        # View count would be tracked in metadata or separate model
+        return format_html('<span style="color: #6B7280;">-</span>')
+    view_count_display.short_description = "Views"
+    
+    actions = ['verify_shares', 'update_view_counts']
+    
+    def verify_shares(self, request, queryset):
+        updated = queryset.filter(status='submitted').update(status='verified')
+        self.message_user(request, f"{updated} shares verified.")
+    verify_shares.short_description = "Verify selected shares"
+    
+    def update_view_counts(self, request, queryset):
+        # In production, this would trigger async task to fetch view counts
+        self.message_user(request, "View count update task queued.")
+    update_view_counts.short_description = "Update view counts"

@@ -3,7 +3,8 @@ from graphene_django import DjangoObjectType
 from django.contrib.auth import get_user_model
 from .models import (
     User, Account, IdentityVerification, Business, Country, Bank, BankInfo,
-    AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare
+    AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare,
+    ConfioRewardBalance, ConfioRewardTransaction
 )
 from .country_codes import COUNTRY_CODES
 from graphql_jwt.utils import jwt_encode, jwt_decode
@@ -344,6 +345,45 @@ class InfluencerStatsType(graphene.ObjectType):
 	is_ambassador_eligible = graphene.Boolean()
 
 
+class ConfioBalanceType(DjangoObjectType):
+	"""User's CONFIO token balance (pre-blockchain accounting)"""
+	# Override decimal fields to return Float
+	total_earned = graphene.Float()
+	total_locked = graphene.Float()
+	total_unlocked = graphene.Float()
+	achievement_rewards = graphene.Float()
+	referral_rewards = graphene.Float()
+	viral_rewards = graphene.Float()
+	presale_purchase = graphene.Float()
+	other_rewards = graphene.Float()
+	daily_reward_amount = graphene.Float()
+	
+	class Meta:
+		model = ConfioRewardBalance
+		fields = [
+			'id', 'total_earned', 'total_locked', 'total_unlocked',
+			'achievement_rewards', 'referral_rewards', 'viral_rewards',
+			'presale_purchase', 'other_rewards', 'lock_until',
+			'last_reward_at', 'daily_reward_count', 'daily_reward_amount',
+			'migration_status', 'created_at'
+		]
+
+
+class ConfioRewardTransactionType(DjangoObjectType):
+	"""CONFIO reward transaction history"""
+	# Override decimal fields to return Float
+	amount = graphene.Float()
+	balance_after = graphene.Float()
+	
+	class Meta:
+		model = ConfioRewardTransaction
+		fields = [
+			'id', 'transaction_type', 'amount', 'balance_after',
+			'source', 'description', 'achievement', 'referral',
+			'metadata', 'created_at'
+		]
+
+
 class CountryCodeType(graphene.ObjectType):
 	code = graphene.String()
 	name = graphene.String()
@@ -429,6 +469,10 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	influencer_stats = graphene.Field(InfluencerStatsType, tiktok_username=graphene.String(required=True))
 	my_influencer_stats = graphene.Field(InfluencerStatsType)
 	user_influencer_referrals = graphene.List(InfluencerReferralType)
+	
+	# CONFIO balance queries
+	my_confio_balance = graphene.Field(ConfioBalanceType)
+	my_confio_transactions = graphene.List(ConfioRewardTransactionType, limit=graphene.Int(), offset=graphene.Int())
 	user_tiktok_shares = graphene.List(TikTokViralShareType, status=graphene.String())
 
 	def resolve_legalDocument(self, info, docType, language=None):
@@ -1092,6 +1136,35 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			return []
 		
 		return InfluencerReferral.objects.filter(referred_user=user).order_by('-created_at')
+	
+	def resolve_my_confio_balance(self, info):
+		"""Get current user's CONFIO balance"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return None
+		
+		# Get or create balance
+		balance, created = ConfioRewardBalance.objects.get_or_create(
+			user=user,
+			defaults={'lock_until': timezone.now() + timedelta(days=365)}
+		)
+		return balance
+	
+	def resolve_my_confio_transactions(self, info, limit=50, offset=0):
+		"""Get current user's CONFIO transaction history"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return []
+		
+		queryset = ConfioRewardTransaction.objects.filter(user=user).order_by('-created_at')
+		
+		# Apply pagination
+		if offset:
+			queryset = queryset[offset:]
+		if limit:
+			queryset = queryset[:limit]
+			
+		return queryset
 	
 	def resolve_user_tiktok_shares(self, info, status=None):
 		"""Get TikTok shares for the current user"""
@@ -2213,6 +2286,31 @@ class ClaimAchievementReward(graphene.Mutation):
 					error="Esta achievement no puede ser reclamada o ya fue reclamada"
 				)
 			
+			# Anti-abuse check: Check daily limits
+			balance = ConfioRewardBalance.objects.filter(user=user).first()
+			if balance:
+				# Reset daily counters if it's a new day
+				from django.utils import timezone
+				from datetime import timedelta
+				now = timezone.now()
+				if balance.last_reward_at and balance.last_reward_at.date() < now.date():
+					balance.daily_reward_count = 0
+					balance.daily_reward_amount = 0
+					balance.save()
+				
+				# Check daily limits (max 10 claims or 100 CONFIO per day)
+				if balance.daily_reward_count >= 10:
+					return ClaimAchievementReward(
+						success=False,
+						error="Has alcanzado el límite diario de reclamaciones (10 por día)"
+					)
+				
+				if balance.daily_reward_amount + achievement.achievement_type.confio_reward > 100:
+					return ClaimAchievementReward(
+						success=False,
+						error="Has alcanzado el límite diario de CONFIO (100 por día)"
+					)
+			
 			# Claim the reward
 			success = achievement.claim_reward()
 			if success:
@@ -2493,6 +2591,78 @@ class UpdateInfluencerStatus(graphene.Mutation):
 			return UpdateInfluencerStatus(success=False, error="Error interno del servidor")
 
 
+class TrackTikTokShare(graphene.Mutation):
+	"""Track a TikTok share for an achievement"""
+	class Arguments:
+		achievement_id = graphene.ID(required=True)
+		tiktok_url = graphene.String(required=True)
+	
+	success = graphene.Boolean()
+	share_id = graphene.ID()
+	error = graphene.String()
+	
+	@classmethod
+	def mutate(cls, root, info, achievement_id, tiktok_url):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return TrackTikTokShare(success=False, error="Authentication required")
+		
+		try:
+			# Validate the achievement belongs to the user
+			user_achievement = UserAchievement.objects.get(
+				id=achievement_id,
+				user=user
+			)
+			
+			# Validate TikTok URL
+			import re
+			tiktok_pattern = re.compile(r'^https?://(www\.)?(tiktok\.com|vm\.tiktok\.com)')
+			if not tiktok_pattern.match(tiktok_url):
+				return TrackTikTokShare(
+					success=False,
+					error="URL de TikTok inválida"
+				)
+			
+			# Check if URL was already submitted
+			existing_share = TikTokViralShare.objects.filter(
+				user=user,
+				tiktok_url=tiktok_url
+			).first()
+			
+			if existing_share:
+				return TrackTikTokShare(
+					success=False,
+					error="Este video ya fue registrado anteriormente"
+				)
+			
+			# Create the share record
+			share = TikTokViralShare.objects.create(
+				user=user,
+				tiktok_username=user.username,  # Use their app username
+				tiktok_url=tiktok_url,
+				achievement=user_achievement,
+				status='pending_verification'
+			)
+			
+			# TODO: In production, trigger async task to verify URL and fetch initial views
+			
+			return TrackTikTokShare(
+				success=True,
+				share_id=share.id
+			)
+			
+		except UserAchievement.DoesNotExist:
+			return TrackTikTokShare(
+				success=False,
+				error="Logro no encontrado"
+			)
+		except Exception as e:
+			return TrackTikTokShare(
+				success=False,
+				error=str(e)
+			)
+
+
 class SetDefaultBankInfo(graphene.Mutation):
 	class Arguments:
 		bank_info_id = graphene.ID(required=True)
@@ -2580,6 +2750,7 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
 	
 	# Achievement system mutations
 	claim_achievement_reward = ClaimAchievementReward.Field()
+	track_tiktok_share = TrackTikTokShare.Field()
 	create_influencer_referral = CreateInfluencerReferral.Field()
 	submit_tiktok_share = SubmitTikTokShare.Field()
 	verify_tiktok_share = VerifyTikTokShare.Field()

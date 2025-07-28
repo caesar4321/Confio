@@ -67,5 +67,14 @@ urlpatterns = [
     path('terms/', terms_view, name='terms'),
     path('privacy/', privacy_view, name='privacy'),
     path('deletion/', deletion_view, name='deletion'),
+]
+
+# Add media files before catch-all pattern in DEBUG mode
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+
+# Catch-all pattern should be last
+urlpatterns += [
     re_path(r'^.*$', TemplateView.as_view(template_name='index.html')),
-] + static(settings.STATIC_URL, document_root=settings.STATIC_ROOT) + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+]

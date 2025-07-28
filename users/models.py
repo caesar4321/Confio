@@ -6,6 +6,7 @@ from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.utils import timezone
 from django.core.exceptions import ValidationError
+from datetime import timedelta
 import logging
 import uuid
 
@@ -1048,7 +1049,8 @@ class AchievementType(SoftDeleteModel):
     slug = models.CharField(
         max_length=50,
         unique=True,
-        help_text="Unique identifier for this achievement type"
+        blank=True,  # Allow blank for auto-generation
+        help_text="Unique identifier for this achievement type (auto-generated from name if blank)"
     )
     name = models.CharField(
         max_length=100,
@@ -1117,6 +1119,23 @@ class AchievementType(SoftDeleteModel):
         if self.confio_reward > 0:
             return f"+{self.confio_reward} CONFIO"
         return "Sin recompensa"
+    
+    def save(self, *args, **kwargs):
+        """Auto-generate slug from name if not provided"""
+        if not self.slug:
+            from django.utils.text import slugify
+            base_slug = slugify(self.name)
+            slug = base_slug
+            counter = 1
+            
+            # Ensure unique slug
+            while AchievementType.objects.filter(slug=slug).exclude(pk=self.pk).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            
+            self.slug = slug
+        
+        super().save(*args, **kwargs)
 
 
 class UserAchievement(SoftDeleteModel):
@@ -1220,11 +1239,25 @@ class UserAchievement(SoftDeleteModel):
         self.save(update_fields=['status', 'earned_at'])
     
     def claim_reward(self):
-        """Mark reward as claimed"""
-        if self.status == 'earned':
+        """Claim achievement reward and add to user's CONFIO balance"""
+        if self.status == 'earned' and self.achievement_type.confio_reward > 0:
+            # Get or create user's CONFIO balance
+            balance, created = ConfioRewardBalance.objects.get_or_create(
+                user=self.user,
+                defaults={'lock_until': timezone.now() + timedelta(days=365)}  # Lock for 1 year by default
+            )
+            
+            # Add reward to balance
+            balance.add_reward(
+                amount=self.achievement_type.confio_reward,
+                source=f'achievement_{self.achievement_type.slug}'
+            )
+            
+            # Update achievement status
             self.status = 'claimed'
             self.claimed_at = timezone.now()
             self.save(update_fields=['status', 'claimed_at'])
+            
             return True
         return False
     
@@ -1590,3 +1623,256 @@ from .models_views import UnifiedTransaction
 from .models_unified import UnifiedTransactionTable
 # Import employee model
 from .models_employee import BusinessEmployee
+
+
+class ConfioRewardBalance(SoftDeleteModel):
+    """Tracks user's CONFIO token balance (pre-blockchain accounting only)"""
+    
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='confio_balance',
+        help_text="User who owns this balance"
+    )
+    
+    # Balance tracking (just numbers, not actual tokens)
+    total_earned = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        default=0,
+        help_text="Total CONFIO earned from all sources"
+    )
+    
+    total_locked = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        default=0,
+        help_text="Total CONFIO currently locked"
+    )
+    
+    total_unlocked = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        default=0,
+        help_text="Total CONFIO available (when tokens launch)"
+    )
+    
+    # Breakdown by source
+    achievement_rewards = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        default=0,
+        help_text="CONFIO earned from achievements"
+    )
+    
+    referral_rewards = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        default=0,
+        help_text="CONFIO earned from referrals"
+    )
+    
+    viral_rewards = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        default=0,
+        help_text="CONFIO earned from viral content"
+    )
+    
+    presale_purchase = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        default=0,
+        help_text="CONFIO purchased in presale"
+    )
+    
+    other_rewards = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        default=0,
+        help_text="CONFIO from other sources"
+    )
+    
+    # Lock status
+    lock_until = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Date when tokens will be unlocked"
+    )
+    
+    # Anti-abuse tracking
+    last_reward_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time user received a reward"
+    )
+    
+    daily_reward_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of rewards claimed today"
+    )
+    
+    daily_reward_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Total CONFIO claimed today"
+    )
+    
+    # Notes for future blockchain migration
+    migration_address = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Sui wallet address for future token distribution"
+    )
+    
+    migration_status = models.CharField(
+        max_length=20,
+        default='pending',
+        choices=[
+            ('pending', 'Pending'),
+            ('ready', 'Ready for Migration'),
+            ('migrated', 'Migrated to Blockchain'),
+            ('failed', 'Migration Failed'),
+        ],
+        help_text="Status of blockchain migration"
+    )
+    
+    class Meta:
+        verbose_name = "CONFIO Balance"
+        verbose_name_plural = "CONFIO Balances"
+    
+    def __str__(self):
+        return f"{self.user.username}: {self.total_locked} CONFIO locked"
+    
+    def add_reward(self, amount, source='achievement'):
+        """Add reward to user's balance"""
+        from django.utils import timezone
+        from decimal import Decimal
+        
+        amount = Decimal(str(amount))
+        
+        # Update totals
+        self.total_earned += amount
+        self.total_locked += amount
+        
+        # Update source breakdown
+        if source.startswith('achievement'):
+            self.achievement_rewards += amount
+        elif source == 'referral':
+            self.referral_rewards += amount
+        elif source == 'viral':
+            self.viral_rewards += amount
+        elif source == 'presale':
+            self.presale_purchase += amount
+        else:
+            self.other_rewards += amount
+        
+        # Update anti-abuse tracking
+        now = timezone.now()
+        if self.last_reward_at and self.last_reward_at.date() == now.date():
+            self.daily_reward_count += 1
+            self.daily_reward_amount += amount
+        else:
+            self.daily_reward_count = 1
+            self.daily_reward_amount = amount
+        
+        self.last_reward_at = now
+        self.save()
+        
+        # Create transaction record
+        ConfioRewardTransaction.objects.create(
+            user=self.user,
+            transaction_type='reward',
+            amount=amount,
+            balance_after=self.total_locked,
+            source=source,
+            description=f"{source.title()} reward"
+        )
+        
+        return True
+
+
+class ConfioRewardTransaction(SoftDeleteModel):
+    """Transaction history for CONFIO rewards (audit trail) - Pre-blockchain accounting"""
+    
+    TRANSACTION_TYPES = [
+        ('reward', 'Reward Earned'),
+        ('presale', 'Presale Purchase'),
+        ('unlock', 'Tokens Unlocked'),
+        ('migration', 'Blockchain Migration'),
+        ('adjustment', 'Manual Adjustment'),
+    ]
+    
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='confio_reward_transactions',
+        help_text="User this transaction belongs to"
+    )
+    
+    transaction_type = models.CharField(
+        max_length=20,
+        choices=TRANSACTION_TYPES,
+        help_text="Type of transaction"
+    )
+    
+    amount = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        help_text="Amount of CONFIO in this transaction"
+    )
+    
+    balance_after = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        help_text="User's balance after this transaction"
+    )
+    
+    source = models.CharField(
+        max_length=50,
+        help_text="Source of the transaction (achievement slug, referral, etc)"
+    )
+    
+    description = models.TextField(
+        help_text="Human-readable description of the transaction"
+    )
+    
+    # Related records
+    achievement = models.ForeignKey(
+        UserAchievement,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='confio_reward_transactions',
+        help_text="Related achievement if applicable"
+    )
+    
+    referral = models.ForeignKey(
+        InfluencerReferral,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='confio_reward_transactions',
+        help_text="Related referral if applicable"
+    )
+    
+    # Metadata
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Additional transaction metadata"
+    )
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['transaction_type', '-created_at']),
+        ]
+        verbose_name = "CONFIO Reward Transaction"
+        verbose_name_plural = "CONFIO Reward Transactions"
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.transaction_type} - {self.amount} CONFIO"

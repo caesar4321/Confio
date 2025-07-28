@@ -10,8 +10,10 @@ import {
   GET_USER_ACHIEVEMENTS,
   CLAIM_ACHIEVEMENT_REWARD,
   CREATE_INFLUENCER_REFERRAL,
-  SUBMIT_TIKTOK_SHARE
+  SUBMIT_TIKTOK_SHARE,
+  GET_MY_CONFIO_BALANCE
 } from '../apollo/queries';
+import { ShareAchievementModal } from '../components/ShareAchievementModal';
 
 const colors = {
   primary: '#34d399',
@@ -70,10 +72,19 @@ export const AchievementsScreen = () => {
   const [influencerUsername, setInfluencerUsername] = useState('');
   const [myTikTokUsername, setMyTikTokUsername] = useState('');
   const [showInfluencerInput, setShowInfluencerInput] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [selectedAchievement, setSelectedAchievement] = useState<{
+    id: string;
+    name: string;
+    description: string;
+    confioReward: number;
+    category: string;
+  } | null>(null);
   
   // GraphQL queries
-  const { data: achievementTypesData, loading: achievementTypesLoading } = useQuery(GET_ACHIEVEMENT_TYPES);
-  const { data: userAchievementsData, loading: userAchievementsLoading, refetch: refetchAchievements } = useQuery(GET_USER_ACHIEVEMENTS);
+  const { data: achievementTypesData, loading: achievementTypesLoading, error: achievementTypesError } = useQuery(GET_ACHIEVEMENT_TYPES);
+  const { data: userAchievementsData, loading: userAchievementsLoading, error: userAchievementsError, refetch: refetchAchievements } = useQuery(GET_USER_ACHIEVEMENTS);
+  const { data: confioBalanceData, refetch: refetchBalance } = useQuery(GET_MY_CONFIO_BALANCE);
   
   // GraphQL mutations
   const [claimAchievementReward] = useMutation(CLAIM_ACHIEVEMENT_REWARD);
@@ -89,11 +100,14 @@ export const AchievementsScreen = () => {
     console.log('AchievementsScreen Debug:');
     console.log('- Achievement Types Loading:', achievementTypesLoading);
     console.log('- User Achievements Loading:', userAchievementsLoading);
+    console.log('- Achievement Types Error:', achievementTypesError);
+    console.log('- User Achievements Error:', userAchievementsError);
     console.log('- Achievement Types Count:', achievementTypes?.length || 0);
     console.log('- User Achievements Count:', userAchievements?.length || 0);
-    console.log('- Achievement Types Data:', achievementTypes?.slice(0, 2) || []);
+    console.log('- Achievement Types Data:', achievementTypesData);
+    console.log('- User Achievements Data:', userAchievementsData);
     console.log('- Achievements Array:', achievements?.length || 0);
-  }, [achievementTypes, userAchievements, achievementTypesLoading, userAchievementsLoading, achievements]);
+  }, [achievementTypes, userAchievements, achievementTypesLoading, userAchievementsLoading, achievementTypesError, userAchievementsError, achievementTypesData, userAchievementsData, achievements]);
   
   // Create a map of user achievements by achievement type slug
   const userAchievementMap = React.useMemo(() => {
@@ -113,12 +127,14 @@ export const AchievementsScreen = () => {
     if (achievementTypes && achievementTypes.length > 0) {
       return achievementTypes.map(type => {
         const userAchievement = userAchievementMap.get(type.slug);
+        // Normalize status to lowercase
+        const normalizedStatus = userAchievement?.status?.toLowerCase() || 'pending';
         return {
           id: userAchievement?.id || type.id,
           name: type.name,
           description: type.description,
           iconEmoji: type.iconEmoji,
-          status: userAchievement?.status || 'pending',
+          status: normalizedStatus,
           earnedAt: userAchievement?.earnedAt,
           claimedAt: userAchievement?.claimedAt,
           progressData: userAchievement?.progressData,
@@ -246,6 +262,7 @@ export const AchievementsScreen = () => {
           [{ text: 'OK' }]
         );
         refetchAchievements();
+        refetchBalance();
       } else {
         Alert.alert('Error', result.data?.claimAchievementReward?.error || 'No se pudo reclamar la recompensa');
       }
@@ -325,31 +342,14 @@ export const AchievementsScreen = () => {
   const handleShare = async (achievement: Achievement) => {
     if (achievement.status !== 'earned' && achievement.status !== 'claimed') return;
     
-    try {
-      const shareText = `¡Desbloqueé "${achievement.name}" en Confío! ${achievement.achievementType.iconEmoji || '🎉'} #RetoConfio #ConfioLogros`;
-      
-      const shareResult = await Share.share({
-        message: shareText,
-        title: 'Logro en Confío',
-      });
-      
-      // If user shared to TikTok or similar, prompt for TikTok URL
-      if (shareResult.action === Share.sharedAction) {
-        Alert.alert(
-          '¿Compartiste en TikTok?',
-          'Si compartiste este logro en TikTok, pega el enlace aquí para ganar CONFIO extra por las visualizaciones',
-          [
-            { text: 'Cancelar', style: 'cancel' },
-            { 
-              text: 'Agregar TikTok', 
-              onPress: () => promptForTikTokUrl(achievement)
-            }
-          ]
-        );
-      }
-    } catch (error) {
-      console.error('Error sharing achievement:', error);
-    }
+    setSelectedAchievement({
+      id: achievement.id,
+      name: achievement.name,
+      description: achievement.description,
+      confioReward: achievement.achievementType.confioReward || 0,
+      category: achievement.achievementType.category,
+    });
+    setShowShareModal(true);
   };
   
   const promptForTikTokUrl = (achievement: Achievement) => {
@@ -367,7 +367,7 @@ export const AchievementsScreen = () => {
                   tiktokUrl: tiktokUrl.trim(),
                   shareType: 'achievement',
                   achievementId: achievement.id,
-                  hashtagsUsed: JSON.stringify(['#RetoConfio', '#ConfioLogros'])
+                  hashtagsUsed: JSON.stringify(['#Confio', '#RetoConfio', '#LogroConfio', '#AppDeDolares', '#DolarDigital'])
                 }
               }).then(result => {
                 if (result.data?.submitTikTokShare?.success) {
@@ -427,15 +427,15 @@ export const AchievementsScreen = () => {
   };
 
   const completedCount = (achievements || []).filter(a => a.status === 'earned' || a.status === 'claimed').length;
-  const totalConfioEarned = (achievements || [])
-    .filter(a => a.status === 'earned' || a.status === 'claimed')
-    .reduce((sum, a) => sum + (a.achievementType?.confioReward || 0), 0);
   
-  const claimedConfio = (achievements || [])
-    .filter(a => a.status === 'claimed')
-    .reduce((sum, a) => sum + (a.achievementType?.confioReward || 0), 0);
+  // Use actual CONFIO balance from database
+  const confioBalance = confioBalanceData?.myConfioBalance;
+  const totalConfioEarned = confioBalance?.totalLocked || 0;
   
-  const pendingConfio = totalConfioEarned - claimedConfio;
+  // Calculate pending rewards (earned but not claimed)
+  const pendingConfio = (achievements || [])
+    .filter(a => a.status === 'earned')
+    .reduce((sum, a) => sum + (a.achievementType?.confioReward || 0), 0);
 
   const categories = [
     { key: 'onboarding', name: 'Bienvenida', icon: 'home' },
@@ -776,6 +776,17 @@ export const AchievementsScreen = () => {
 
         <View style={styles.bottomPadding} />
       </ScrollView>
+      
+      {selectedAchievement && (
+        <ShareAchievementModal
+          visible={showShareModal}
+          onClose={() => {
+            setShowShareModal(false);
+            setSelectedAchievement(null);
+          }}
+          achievement={selectedAchievement}
+        />
+      )}
     </SafeAreaView>
   );
 };
