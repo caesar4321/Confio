@@ -4,6 +4,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
+import { PendingInvitationBanner } from '../components/PendingInvitationBanner';
 
 type NotificationScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -110,6 +111,9 @@ export const NotificationScreen = () => {
 
       {/* Notifications List */}
       <ScrollView style={styles.notificationsList} showsVerticalScrollIndicator={false}>
+        {/* Pending Employee Invitations */}
+        <PendingInvitationBanner />
+        
         {notifications.length === 0 ? (
           <View style={styles.emptyState}>
             <Icon name="bell" size={64} color="#D1D5DB" />

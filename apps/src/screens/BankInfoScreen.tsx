@@ -157,19 +157,20 @@ export const BankInfoScreen = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingBankInfo, setEditingBankInfo] = useState<BankAccount | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Check if user is an employee without manage_bank_accounts permission
+  const isEmployee = activeAccount?.isEmployee || false;
+  const canManageBankAccounts = !isEmployee || activeAccount?.employeePermissions?.manageBankAccounts;
 
 
   // GraphQL queries
-  // Only query with numeric account IDs to avoid GraphQL errors
-  const isNumericAccountId = activeAccount?.id && /^\d+$/.test(activeAccount.id);
+  // Server determines context from JWT token
   const { 
     data: bankAccountsData, 
     loading: bankAccountsLoading, 
     error: bankAccountsError,
     refetch: refetchBankAccounts 
   } = useQuery(GET_USER_BANK_ACCOUNTS, {
-    variables: { accountId: activeAccount?.id },
-    skip: !activeAccount?.id || !isNumericAccountId,
     fetchPolicy: 'cache-and-network'
   });
 
@@ -363,6 +364,35 @@ export const BankInfoScreen = () => {
       </TouchableOpacity>
     </View>
   );
+
+  // Show permission denied screen for employees without permission
+  if (!canManageBankAccounts) {
+    return (
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+          <View style={styles.headerContent}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <Icon name="arrow-left" size={24} color="white" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Métodos de Pago</Text>
+            <View style={{ width: 40 }} />
+          </View>
+        </View>
+        
+        <View style={styles.permissionDeniedContainer}>
+          <Icon name="lock" size={64} color={colors.text.light} />
+          <Text style={styles.permissionDeniedTitle}>Información del Negocio</Text>
+          <Text style={styles.permissionDeniedText}>
+            Los métodos de pago de {activeAccount?.business?.name || 'la empresa'} son gestionados por el equipo administrativo.
+          </Text>
+          <Text style={styles.permissionDeniedSubtext}>
+            Si necesitas información sobre pagos, consulta con tu supervisor.
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -696,5 +726,31 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '600',
     marginLeft: 8,
+  },
+  permissionDeniedContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  permissionDeniedTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: colors.text.primary,
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  permissionDeniedText: {
+    fontSize: 16,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: 8,
+    lineHeight: 24,
+  },
+  permissionDeniedSubtext: {
+    fontSize: 14,
+    color: colors.text.light,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });

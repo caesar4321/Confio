@@ -29,6 +29,18 @@ export interface StoredAccount {
   suiAddress?: string;
   createdAt: string;
   isActive: boolean;
+  isEmployee?: boolean;
+  employeeRole?: 'cashier' | 'manager' | 'admin';
+  employeePermissions?: {
+    acceptPayments: boolean;
+    viewTransactions: boolean;
+    viewBalance: boolean;
+    sendFunds: boolean;
+    manageEmployees: boolean;
+    viewBusinessAddress: boolean;
+    viewAnalytics: boolean;
+  };
+  employeeRecordId?: string;
   business?: {
     id: string;
     name: string;
@@ -77,6 +89,7 @@ export class AccountManager {
 
   /**
    * Parse account ID to get type and index
+   * Supports: personal_{index} and business_{businessId}_{index}
    */
   public parseAccountId(accountId: string): AccountContext {
     // Handle empty or invalid account ID
@@ -84,20 +97,39 @@ export class AccountManager {
       throw new Error(`Invalid account ID format: empty or null value`);
     }
 
-    const [type, indexStr] = accountId.split('_');
-    const index = parseInt(indexStr, 10);
+    const parts = accountId.split('_');
     
-    // Convert type to lowercase for comparison
-    const normalizedType = type.toLowerCase();
-    
-    if (!type || isNaN(index) || (normalizedType !== 'personal' && normalizedType !== 'business')) {
-      throw new Error(`Invalid account ID format: "${accountId}" (expected format: "personal_0" or "business_0")`);
+    if (parts.length === 2 && parts[0].toLowerCase() === 'personal') {
+      // Personal format: personal_index
+      const [type, indexStr] = parts;
+      const index = parseInt(indexStr, 10);
+      
+      if (isNaN(index)) {
+        throw new Error(`Invalid account ID format: "${accountId}" (expected format: "personal_0")`);
+      }
+      
+      return {
+        type: 'personal' as AccountType,
+        index
+      };
+    } else if (parts.length === 3 && parts[0].toLowerCase() === 'business') {
+      // Business format: business_businessId_index
+      const [type, businessIdStr, indexStr] = parts;
+      const businessId = businessIdStr;
+      const index = parseInt(indexStr, 10);
+      
+      if (!businessId || isNaN(index)) {
+        throw new Error(`Invalid account ID format: "${accountId}" (expected format: "business_19_0")`);
+      }
+      
+      return {
+        type: 'business' as AccountType,
+        index,
+        businessId
+      };
+    } else {
+      throw new Error(`Invalid account ID format: "${accountId}" (expected format: "personal_0" or "business_19_0")`);
     }
-    
-    return {
-      type: normalizedType as AccountType,
-      index
-    };
   }
 
   /**
@@ -132,17 +164,9 @@ export class AccountManager {
       console.log('AccountManager - Parsed active account context:', {
         accountId: activeAccountId,
         contextType: context.type,
-        contextIndex: context.index
+        contextIndex: context.index,
+        contextBusinessId: context.businessId
       });
-      
-      // If it's a business account, get the businessId
-      if (context.type === 'business') {
-        const account = await this.getAccount(activeAccountId);
-        if (account?.business?.id) {
-          context.businessId = account.business.id;
-          console.log('AccountManager - Added businessId to context:', context.businessId);
-        }
-      }
       
       return context;
     } catch (error) {
@@ -157,11 +181,18 @@ export class AccountManager {
    */
   public async setActiveAccountContext(context: AccountContext): Promise<void> {
     try {
-      const accountId = this.generateAccountId(context.type, context.index);
+      // Generate the full account ID including business_id for business accounts
+      let accountId: string;
+      if (context.type === 'business' && context.businessId) {
+        accountId = `business_${context.businessId}_${context.index}`;
+      } else {
+        accountId = this.generateAccountId(context.type, context.index);
+      }
       
       console.log('AccountManager - setActiveAccountContext:', {
         contextType: context.type,
         contextIndex: context.index,
+        contextBusinessId: context.businessId,
         generatedAccountId: accountId
       });
       

@@ -266,14 +266,17 @@ export const ProfileScreen = () => {
             <Icon name="chevron-right" size={16} color="#9CA3AF" />
           </TouchableOpacity>
           
-          <TouchableOpacity 
-            style={styles.cardOption}
-            onPress={() => navigation.navigate('BankInfo')}
-          >
-            <Icon name="credit-card" size={18} color="#6B7280" />
-            <Text style={styles.cardOptionText}>Métodos de Pago</Text>
-            <Icon name="chevron-right" size={16} color="#9CA3AF" />
-          </TouchableOpacity>
+          {/* Hide payment methods for employees without permission */}
+          {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.manageBankAccounts) && (
+            <TouchableOpacity 
+              style={styles.cardOption}
+              onPress={() => navigation.navigate('BankInfo')}
+            >
+              <Icon name="credit-card" size={18} color="#6B7280" />
+              <Text style={styles.cardOptionText}>Métodos de Pago</Text>
+              <Icon name="chevron-right" size={16} color="#9CA3AF" />
+            </TouchableOpacity>
+          )}
           
           {activeAccount?.type.toLowerCase() === 'personal' && (
             <TouchableOpacity 

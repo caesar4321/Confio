@@ -1930,6 +1930,82 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
   }
 `;
 
+// NEW: JWT-context-aware transactions query
+export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
+  query GetCurrentAccountTransactions($limit: Int, $offset: Int, $tokenTypes: [String]) {
+    currentAccountTransactions(limit: $limit, offset: $offset, tokenTypes: $tokenTypes) {
+      id
+      transactionType
+      createdAt
+      updatedAt
+      amount
+      tokenType
+      status
+      transactionHash
+      errorMessage
+      
+      # Computed fields from user perspective
+      direction
+      displayAmount
+      displayCounterparty
+      displayDescription
+      
+      # Original transaction data
+      senderUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      senderBusiness {
+        id
+        name
+        category
+      }
+      senderType
+      senderDisplayName
+      senderPhone
+      senderAddress
+      
+      counterpartyUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      counterpartyBusiness {
+        id
+        name
+        category
+      }
+      counterpartyType
+      counterpartyDisplayName
+      counterpartyPhone
+      counterpartyAddress
+      
+      description
+      invoiceId
+      paymentTransactionId
+      
+      # Invitation fields
+      isInvitation
+      invitationClaimed
+      invitationReverted
+      invitationExpiresAt
+      
+      # Conversion-specific fields
+      conversionType
+      fromAmount
+      toAmount
+      fromToken
+      toToken
+      
+      # P2P Trade ID for navigation
+      p2pTradeId
+    }
+  }
+`;
+
 // Unified transactions with a specific friend
 export const GET_UNIFIED_TRANSACTIONS_WITH_FRIEND = gql`
   query GetUnifiedTransactionsWithFriend($friendUserId: ID, $friendPhone: String, $limit: Int, $offset: Int) {
@@ -2128,6 +2204,82 @@ export const UPDATE_BUSINESS_EMPLOYEE = gql`
 export const REMOVE_BUSINESS_EMPLOYEE = gql`
   mutation RemoveBusinessEmployee($input: RemoveBusinessEmployeeInput!) {
     removeBusinessEmployee(input: $input) {
+      success
+      errors
+    }
+  }
+`;
+
+// JWT-context-aware queries for current business (no businessId parameter needed)
+export const GET_CURRENT_BUSINESS_EMPLOYEES = gql`
+  query GetCurrentBusinessEmployees($includeInactive: Boolean) {
+    currentBusinessEmployees(includeInactive: $includeInactive) {
+      id
+      user {
+        id
+        username
+        firstName
+        lastName
+        phoneNumber
+        phoneCountry
+      }
+      role
+      isActive
+      permissions
+      effectivePermissions
+      isWithinShift
+      hiredAt
+      shiftStartTime
+      shiftEndTime
+      dailyTransactionLimit
+      notes
+    }
+  }
+`;
+
+export const GET_CURRENT_BUSINESS_INVITATIONS = gql`
+  query GetCurrentBusinessInvitations($status: String) {
+    currentBusinessInvitations(status: $status) {
+      id
+      business {
+        id
+        name
+      }
+      invitedBy {
+        id
+        firstName
+        lastName
+        username
+      }
+      role
+      status
+      employeeName
+      employeePhone
+      employeePhoneCountry
+      createdAt
+      expiresAt
+      invitationCode
+    }
+  }
+`;
+
+export const INVITE_EMPLOYEE = gql`
+  mutation InviteEmployee($phoneNumber: String!, $role: String!, $message: String) {
+    inviteEmployee(phoneNumber: $phoneNumber, role: $role, message: $message) {
+      success
+      errors
+      invitation {
+        id
+        invitationCode
+        expiresAt
+      }
+    }
+  }
+`;
+
+export const CANCEL_INVITATION = gql`
+  mutation CancelInvitation($invitationId: ID!) {
+    cancelInvitation(invitationId: $invitationId) {
       success
       errors
     }

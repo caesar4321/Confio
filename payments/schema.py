@@ -111,11 +111,34 @@ class CreateInvoice(graphene.Mutation):
             # Validate the amount
             validate_transaction_amount(input.amount)
 
-            # Get the user's active account
-            active_account = user.accounts.filter(
-                account_type=info.context.active_account_type,
-                account_index=info.context.active_account_index
-            ).first()
+            # Get JWT context with validation and permission check
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission='accept_payments')
+            if not jwt_context:
+                return CreateInvoice(
+                    invoice=None,
+                    success=False,
+                    errors=["No access or permission to create invoices"]
+                )
+            
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
+            
+            # Get the user's active account using JWT context
+            if account_type == 'business' and business_id:
+                # For business accounts, find by business_id from JWT
+                active_account = user.accounts.filter(
+                    account_type='business',
+                    account_index=account_index,
+                    business_id=business_id
+                ).first()
+            else:
+                # For personal accounts
+                active_account = user.accounts.filter(
+                    account_type=account_type,
+                    account_index=account_index
+                ).first()
             
             if not active_account:
                 return CreateInvoice(
@@ -153,6 +176,28 @@ class CreateInvoice(graphene.Mutation):
                 expires_at=expires_at,
                 status='PENDING'
             )
+            
+            # Log activity if user is an employee
+            from users.models_employee import BusinessEmployee, EmployeeActivityLog
+            employee_record = BusinessEmployee.objects.filter(
+                business=merchant_business,
+                user=user,
+                is_active=True
+            ).first()
+            
+            if employee_record:
+                EmployeeActivityLog.log_activity(
+                    business=merchant_business,
+                    employee=user,
+                    action='invoice_created',
+                    request=info.context,
+                    invoice_id=invoice.invoice_id,
+                    amount=input.amount,
+                    details={
+                        'token_type': input.token_type,
+                        'description': input.description or ''
+                    }
+                )
 
             return CreateInvoice(
                 invoice=invoice,
@@ -297,16 +342,32 @@ class PayInvoice(graphene.Mutation):
                         errors=["Cannot pay your own invoice"]
                     )
 
-                # Debug: Log the active account context being used
-                print(f"PayInvoice - Active account context: {info.context.active_account_type}_{info.context.active_account_index}")
+                # Get JWT context for account determination
+                from users.jwt_context import get_jwt_business_context
+                jwt_context = get_jwt_business_context(info)
+                account_type = jwt_context['account_type']
+                account_index = jwt_context['account_index']
+                business_id = jwt_context.get('business_id')
+                
+                # Debug: Log the JWT account context being used
+                print(f"PayInvoice - JWT account context: {account_type}_{account_index}, business_id={business_id}")
                 print(f"PayInvoice - User ID: {user.id}")
                 print(f"PayInvoice - Available accounts for user: {list(user.accounts.values_list('account_type', 'account_index', 'sui_address'))}")
                 
-                # Get the payer's active account
-                payer_account = user.accounts.filter(
-                    account_type=info.context.active_account_type,
-                    account_index=info.context.active_account_index
-                ).first()
+                # Get the payer's active account using JWT context
+                if account_type == 'business' and business_id:
+                    # For business accounts, find by business_id from JWT
+                    payer_account = user.accounts.filter(
+                        account_type='business',
+                        account_index=account_index,
+                        business_id=business_id
+                    ).first()
+                else:
+                    # For personal accounts
+                    payer_account = user.accounts.filter(
+                        account_type=account_type,
+                        account_index=account_index
+                    ).first()
                 
                 print(f"PayInvoice - Found payer account: {payer_account}")
                 
@@ -392,6 +453,34 @@ class PayInvoice(graphene.Mutation):
                 unique_id = str(uuid.uuid4())[:8]  # First 8 characters of UUID
                 payment_transaction.transaction_hash = f"test_pay_tx_{payment_transaction.id}_{microsecond_timestamp}_{unique_id}"
                 payment_transaction.save()
+                
+                # Log activity if merchant is an employee accepting payment
+                from users.models_employee import BusinessEmployee, EmployeeActivityLog
+                
+                # Check if the merchant account user is an employee
+                if invoice.merchant_account.user == invoice.created_by_user:
+                    # Owner accepting their own payment, check if they're acting as an employee
+                    employee_record = BusinessEmployee.objects.filter(
+                        business=merchant_business,
+                        user=invoice.created_by_user,
+                        is_active=True
+                    ).first()
+                    
+                    if employee_record:
+                        EmployeeActivityLog.log_activity(
+                            business=merchant_business,
+                            employee=invoice.created_by_user,
+                            action='payment_accepted',
+                            request=info.context,
+                            invoice_id=invoice.invoice_id,
+                            transaction_id=payment_transaction.transaction_hash,
+                            amount=invoice.amount,
+                            details={
+                                'token_type': invoice.token_type,
+                                'payer': payer_display_name,
+                                'payment_type': 'digital'
+                            }
+                        )
 
                 return PayInvoice(
                     invoice=invoice,

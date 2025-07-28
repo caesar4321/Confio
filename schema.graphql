@@ -1,0 +1,3169 @@
+type UserType {
+  id: ID!
+
+  """Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only."""
+  username: String!
+  firstName: String!
+  lastName: String!
+  email: String!
+
+  """User's country ISO code for phone number"""
+  phoneCountry: UsersUserPhoneCountryChoices
+
+  """User's phone number without country code"""
+  phoneNumber: String
+  isIdentityVerified: Boolean
+  lastVerifiedDate: DateTime
+  verificationStatus: String
+  accounts: [AccountType]
+}
+
+"""An enumeration."""
+enum UsersUserPhoneCountryChoices {
+  """Afghanistan (+93)"""
+  AF
+
+  """Albania (+355)"""
+  AL
+
+  """Algeria (+213)"""
+  DZ
+
+  """American Samoa (+1)"""
+  AS
+
+  """Andorra (+376)"""
+  AD
+
+  """Angola (+244)"""
+  AO
+
+  """Anguilla (+1)"""
+  AI
+
+  """Antigua and Barbuda (+1)"""
+  AG
+
+  """Argentina (+54)"""
+  AR
+
+  """Armenia (+374)"""
+  AM
+
+  """Aruba (+297)"""
+  AW
+
+  """Australia (+61)"""
+  AU
+
+  """Austria (+43)"""
+  AT
+
+  """Azerbaijan (+994)"""
+  AZ
+
+  """Bahamas (+1)"""
+  BS
+
+  """Bahrain (+973)"""
+  BH
+
+  """Bangladesh (+880)"""
+  BD
+
+  """Barbados (+1)"""
+  BB
+
+  """Belarus (+375)"""
+  BY
+
+  """Belgium (+32)"""
+  BE
+
+  """Belize (+501)"""
+  BZ
+
+  """Benin (+229)"""
+  BJ
+
+  """Bermuda (+1)"""
+  BM
+
+  """Bhutan (+975)"""
+  BT
+
+  """Bolivia (+591)"""
+  BO
+
+  """Bosnia and Herzegovina (+387)"""
+  BA
+
+  """Botswana (+267)"""
+  BW
+
+  """Brazil (+55)"""
+  BR
+
+  """British Indian Ocean Territory (+246)"""
+  IO
+
+  """British Virgin Islands (+1)"""
+  VG
+
+  """Brunei (+673)"""
+  BN
+
+  """Bulgaria (+359)"""
+  BG
+
+  """Burkina Faso (+226)"""
+  BF
+
+  """Burundi (+257)"""
+  BI
+
+  """Cambodia (+855)"""
+  KH
+
+  """Cameroon (+237)"""
+  CM
+
+  """Canada (+1)"""
+  CA
+
+  """Cape Verde (+238)"""
+  CV
+
+  """Caribbean Netherlands (+599)"""
+  BQ
+
+  """Cayman Islands (+1)"""
+  KY
+
+  """Central African Republic (+236)"""
+  CF
+
+  """Chad (+235)"""
+  TD
+
+  """Chile (+56)"""
+  CL
+
+  """China (+86)"""
+  CN
+
+  """Christmas Island (+61)"""
+  CX
+
+  """Cocos Islands (+61)"""
+  CC
+
+  """Colombia (+57)"""
+  CO
+
+  """Comoros (+269)"""
+  KM
+
+  """Congo (DRC) (+243)"""
+  CD
+
+  """Congo (Republic) (+242)"""
+  CG
+
+  """Cook Islands (+682)"""
+  CK
+
+  """Costa Rica (+506)"""
+  CR
+
+  """Cote d'Ivoire (+225)"""
+  CI
+
+  """Croatia (+385)"""
+  HR
+
+  """Cuba (+53)"""
+  CU
+
+  """Curacao (+599)"""
+  CW
+
+  """Cyprus (+357)"""
+  CY
+
+  """Czech Republic (+420)"""
+  CZ
+
+  """Denmark (+45)"""
+  DK
+
+  """Djibouti (+253)"""
+  DJ
+
+  """Dominica (+1)"""
+  DM
+
+  """Dominican Republic (+1)"""
+  DO
+
+  """Ecuador (+593)"""
+  EC
+
+  """Egypt (+20)"""
+  EG
+
+  """El Salvador (+503)"""
+  SV
+
+  """Equatorial Guinea (+240)"""
+  GQ
+
+  """Eritrea (+291)"""
+  ER
+
+  """Estonia (+372)"""
+  EE
+
+  """Ethiopia (+251)"""
+  ET
+
+  """Falkland Islands (+500)"""
+  FK
+
+  """Faroe Islands (+298)"""
+  FO
+
+  """Fiji (+679)"""
+  FJ
+
+  """Finland (+358)"""
+  FI
+
+  """France (+33)"""
+  FR
+
+  """French Guiana (+594)"""
+  GF
+
+  """French Polynesia (+689)"""
+  PF
+
+  """Gabon (+241)"""
+  GA
+
+  """Gambia (+220)"""
+  GM
+
+  """Georgia (+995)"""
+  GE
+
+  """Germany (+49)"""
+  DE
+
+  """Ghana (+233)"""
+  GH
+
+  """Gibraltar (+350)"""
+  GI
+
+  """Greece (+30)"""
+  GR
+
+  """Greenland (+299)"""
+  GL
+
+  """Grenada (+1)"""
+  GD
+
+  """Guadeloupe (+590)"""
+  GP
+
+  """Guam (+1)"""
+  GU
+
+  """Guatemala (+502)"""
+  GT
+
+  """Guernsey (+44)"""
+  GG
+
+  """Guinea (+224)"""
+  GN
+
+  """Guinea-Bissau (+245)"""
+  GW
+
+  """Guyana (+592)"""
+  GY
+
+  """Haiti (+509)"""
+  HT
+
+  """Honduras (+504)"""
+  HN
+
+  """Hong Kong (+852)"""
+  HK
+
+  """Hungary (+36)"""
+  HU
+
+  """Iceland (+354)"""
+  IS
+
+  """India (+91)"""
+  IN
+
+  """Indonesia (+62)"""
+  ID
+
+  """Iran (+98)"""
+  IR
+
+  """Iraq (+964)"""
+  IQ
+
+  """Ireland (+353)"""
+  IE
+
+  """Isle of Man (+44)"""
+  IM
+
+  """Israel (+972)"""
+  IL
+
+  """Italy (+39)"""
+  IT
+
+  """Jamaica (+1)"""
+  JM
+
+  """Japan (+81)"""
+  JP
+
+  """Jersey (+44)"""
+  JE
+
+  """Jordan (+962)"""
+  JO
+
+  """Kazakhstan (+7)"""
+  KZ
+
+  """Kenya (+254)"""
+  KE
+
+  """Kiribati (+686)"""
+  KI
+
+  """Kosovo (+383)"""
+  XK
+
+  """Kuwait (+965)"""
+  KW
+
+  """Kyrgyzstan (+996)"""
+  KG
+
+  """Laos (+856)"""
+  LA
+
+  """Latvia (+371)"""
+  LV
+
+  """Lebanon (+961)"""
+  LB
+
+  """Lesotho (+266)"""
+  LS
+
+  """Liberia (+231)"""
+  LR
+
+  """Libya (+218)"""
+  LY
+
+  """Liechtenstein (+423)"""
+  LI
+
+  """Lithuania (+370)"""
+  LT
+
+  """Luxembourg (+352)"""
+  LU
+
+  """Macau (+853)"""
+  MO
+
+  """Macedonia (+389)"""
+  MK
+
+  """Madagascar (+261)"""
+  MG
+
+  """Malawi (+265)"""
+  MW
+
+  """Malaysia (+60)"""
+  MY
+
+  """Maldives (+960)"""
+  MV
+
+  """Mali (+223)"""
+  ML
+
+  """Malta (+356)"""
+  MT
+
+  """Marshall Islands (+692)"""
+  MH
+
+  """Martinique (+596)"""
+  MQ
+
+  """Mauritania (+222)"""
+  MR
+
+  """Mauritius (+230)"""
+  MU
+
+  """Mayotte (+262)"""
+  YT
+
+  """Mexico (+52)"""
+  MX
+
+  """Micronesia (+691)"""
+  FM
+
+  """Moldova (+373)"""
+  MD
+
+  """Monaco (+377)"""
+  MC
+
+  """Mongolia (+976)"""
+  MN
+
+  """Montenegro (+382)"""
+  ME
+
+  """Montserrat (+1)"""
+  MS
+
+  """Morocco (+212)"""
+  MA
+
+  """Mozambique (+258)"""
+  MZ
+
+  """Myanmar (+95)"""
+  MM
+
+  """Namibia (+264)"""
+  NA
+
+  """Nauru (+674)"""
+  NR
+
+  """Nepal (+977)"""
+  NP
+
+  """Netherlands (+31)"""
+  NL
+
+  """New Caledonia (+687)"""
+  NC
+
+  """New Zealand (+64)"""
+  NZ
+
+  """Nicaragua (+505)"""
+  NI
+
+  """Niger (+227)"""
+  NE
+
+  """Nigeria (+234)"""
+  NG
+
+  """Niue (+683)"""
+  NU
+
+  """Norfolk Island (+672)"""
+  NF
+
+  """North Korea (+850)"""
+  KP
+
+  """Northern Mariana Islands (+1)"""
+  MP
+
+  """Norway (+47)"""
+  NO
+
+  """Oman (+968)"""
+  OM
+
+  """Pakistan (+92)"""
+  PK
+
+  """Palau (+680)"""
+  PW
+
+  """Palestine (+970)"""
+  PS
+
+  """Panama (+507)"""
+  PA
+
+  """Papua New Guinea (+675)"""
+  PG
+
+  """Paraguay (+595)"""
+  PY
+
+  """Peru (+51)"""
+  PE
+
+  """Philippines (+63)"""
+  PH
+
+  """Poland (+48)"""
+  PL
+
+  """Portugal (+351)"""
+  PT
+
+  """Puerto Rico (+1)"""
+  PR
+
+  """Qatar (+974)"""
+  QA
+
+  """Reunion (+262)"""
+  RE
+
+  """Romania (+40)"""
+  RO
+
+  """Russia (+7)"""
+  RU
+
+  """Rwanda (+250)"""
+  RW
+
+  """Saint Barthelemy (+590)"""
+  BL
+
+  """Saint Helena (+290)"""
+  SH
+
+  """Saint Kitts and Nevis (+1)"""
+  KN
+
+  """Saint Lucia (+1)"""
+  LC
+
+  """Saint Martin (+590)"""
+  MF
+
+  """Saint Pierre and Miquelon (+508)"""
+  PM
+
+  """Saint Vincent and the Grenadines (+1)"""
+  VC
+
+  """Samoa (+685)"""
+  WS
+
+  """San Marino (+378)"""
+  SM
+
+  """Sao Tome and Principe (+239)"""
+  ST
+
+  """Saudi Arabia (+966)"""
+  SA
+
+  """Senegal (+221)"""
+  SN
+
+  """Serbia (+381)"""
+  RS
+
+  """Seychelles (+248)"""
+  SC
+
+  """Sierra Leone (+232)"""
+  SL
+
+  """Singapore (+65)"""
+  SG
+
+  """Sint Maarten (+1)"""
+  SX
+
+  """Slovakia (+421)"""
+  SK
+
+  """Slovenia (+386)"""
+  SI
+
+  """Solomon Islands (+677)"""
+  SB
+
+  """Somalia (+252)"""
+  SO
+
+  """South Africa (+27)"""
+  ZA
+
+  """South Korea (+82)"""
+  KR
+
+  """South Sudan (+211)"""
+  SS
+
+  """Spain (+34)"""
+  ES
+
+  """Sri Lanka (+94)"""
+  LK
+
+  """Sudan (+249)"""
+  SD
+
+  """Suriname (+597)"""
+  SR
+
+  """Svalbard and Jan Mayen (+47)"""
+  SJ
+
+  """Swaziland (+268)"""
+  SZ
+
+  """Sweden (+46)"""
+  SE
+
+  """Switzerland (+41)"""
+  CH
+
+  """Syria (+963)"""
+  SY
+
+  """Taiwan (+886)"""
+  TW
+
+  """Tajikistan (+992)"""
+  TJ
+
+  """Tanzania (+255)"""
+  TZ
+
+  """Thailand (+66)"""
+  TH
+
+  """Timor-Leste (+670)"""
+  TL
+
+  """Togo (+228)"""
+  TG
+
+  """Tokelau (+690)"""
+  TK
+
+  """Tonga (+676)"""
+  TO
+
+  """Trinidad and Tobago (+1)"""
+  TT
+
+  """Tunisia (+216)"""
+  TN
+
+  """Turkey (+90)"""
+  TR
+
+  """Turkmenistan (+993)"""
+  TM
+
+  """Turks and Caicos Islands (+1)"""
+  TC
+
+  """Tuvalu (+688)"""
+  TV
+
+  """U.S. Virgin Islands (+1)"""
+  VI
+
+  """Uganda (+256)"""
+  UG
+
+  """Ukraine (+380)"""
+  UA
+
+  """United Arab Emirates (+971)"""
+  AE
+
+  """United Kingdom (+44)"""
+  GB
+
+  """United States (+1)"""
+  US
+
+  """Uruguay (+598)"""
+  UY
+
+  """Uzbekistan (+998)"""
+  UZ
+
+  """Vanuatu (+678)"""
+  VU
+
+  """Vatican City (+379)"""
+  VA
+
+  """Venezuela (+58)"""
+  VE
+
+  """Vietnam (+84)"""
+  VN
+
+  """Wallis and Futuna (+681)"""
+  WF
+
+  """Western Sahara (+212)"""
+  EH
+
+  """Yemen (+967)"""
+  YE
+
+  """Zambia (+260)"""
+  ZM
+
+  """Zimbabwe (+263)"""
+  ZW
+}
+
+"""
+The `DateTime` scalar type represents a DateTime
+value as specified by
+[iso8601](https://en.wikipedia.org/wiki/ISO_8601).
+"""
+scalar DateTime
+
+type AccountType {
+  id: ID!
+  createdAt: DateTime!
+  user: UserType!
+
+  """Type of account (personal or business)"""
+  accountType: UsersAccountAccountTypeChoices!
+
+  """Index of the account within its type (0, 1, 2, etc.)"""
+  accountIndex: Int!
+
+  """Associated business for business accounts"""
+  business: BusinessType
+
+  """Last‑computed Sui address for this account"""
+  suiAddress: String
+  lastLoginAt: DateTime
+  accountId: String
+  displayName: String
+  avatarLetter: String
+  isEmployee: Boolean
+  employeeRole: String
+  employeePermissions: JSONString
+  employeeRecordId: ID
+}
+
+"""An enumeration."""
+enum UsersAccountAccountTypeChoices {
+  """Personal"""
+  PERSONAL
+
+  """Business"""
+  BUSINESS
+}
+
+type BusinessType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  """Business name"""
+  name: String!
+
+  """Business description"""
+  description: String
+
+  """Business category"""
+  category: UsersBusinessCategoryChoices!
+
+  """Business registration number or tax ID"""
+  businessRegistrationNumber: String
+
+  """Business address"""
+  address: String
+}
+
+"""An enumeration."""
+enum UsersBusinessCategoryChoices {
+  """Comida y Bebidas"""
+  FOOD
+
+  """Comercio y Ventas"""
+  RETAIL
+
+  """Servicios Profesionales"""
+  SERVICES
+
+  """Belleza y Salud"""
+  HEALTH
+
+  """Transporte y Delivery"""
+  TRANSPORT
+
+  """Otros Negocios"""
+  OTHER
+}
+
+"""
+Allows use of a JSON String for input / output from the GraphQL schema.
+
+Use of this type is *not recommended* as you lose the benefits of having a defined, static
+schema (one of the key benefits of GraphQL).
+"""
+scalar JSONString
+
+type CountryCodeType {
+  code: String
+  name: String
+  flag: String
+}
+
+type BusinessCategoryType {
+  id: String
+  name: String
+}
+
+type LegalDocumentType {
+  title: String
+  content: [JSONString]
+  version: String
+  lastUpdated: String
+  language: String
+  isLegallyBinding: Boolean
+}
+
+"""GraphQL type for unified transaction view"""
+type UnifiedTransactionType {
+  id: ID!
+  transactionType: UsersUnifiedTransactionTableTransactionTypeChoices!
+  amount: String!
+  tokenType: UsersUnifiedTransactionTableTokenTypeChoices!
+  status: UsersUnifiedTransactionTableStatusChoices!
+
+  """Transaction hash on blockchain"""
+  transactionHash: String
+  senderUser: UserType
+  senderBusiness: BusinessType
+  senderType: UsersUnifiedTransactionTableSenderTypeChoices!
+  senderDisplayName: String!
+  senderAddress: String!
+  counterpartyUser: UserType
+  counterpartyBusiness: BusinessType
+  counterpartyType: UsersUnifiedTransactionTableCounterpartyTypeChoices!
+  counterpartyDisplayName: String!
+  counterpartyAddress: String!
+  isInvitation: Boolean!
+  invitationClaimed: Boolean!
+  invitationReverted: Boolean!
+  invitationExpiresAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  """Transaction direction from current user perspective"""
+  direction: String
+
+  """Formatted amount with +/- based on direction"""
+  displayAmount: String
+
+  """Name of the counterparty from user perspective"""
+  displayCounterparty: String
+
+  """Transaction description"""
+  displayDescription: String
+
+  """Error message if transaction failed"""
+  errorMessage: String
+
+  """Sender phone number"""
+  senderPhone: String
+
+  """Counterparty phone number"""
+  counterpartyPhone: String
+
+  """Transaction description"""
+  description: String
+
+  """Invoice ID for payments"""
+  invoiceId: String
+
+  """Payment transaction ID"""
+  paymentTransactionId: String
+
+  """Conversion type (usdc_to_cusd or cusd_to_usdc)"""
+  conversionType: String
+
+  """Amount being converted from"""
+  fromAmount: String
+
+  """Amount being converted to"""
+  toAmount: String
+
+  """Token being converted from"""
+  fromToken: String
+
+  """Token being converted to"""
+  toToken: String
+
+  """P2P Trade ID if this is an exchange transaction"""
+  p2pTradeId: String
+}
+
+"""An enumeration."""
+enum UsersUnifiedTransactionTableTransactionTypeChoices {
+  """Send/Receive"""
+  SEND
+
+  """Payment"""
+  PAYMENT
+
+  """Conversion"""
+  CONVERSION
+
+  """P2P Exchange"""
+  EXCHANGE
+}
+
+"""An enumeration."""
+enum UsersUnifiedTransactionTableTokenTypeChoices {
+  """Confío Dollar"""
+  CUSD
+
+  """Confío Token"""
+  CONFIO
+
+  """USD Coin"""
+  USDC
+}
+
+"""An enumeration."""
+enum UsersUnifiedTransactionTableStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Sponsoring"""
+  SPONSORING
+
+  """Signed"""
+  SIGNED
+
+  """Submitted"""
+  SUBMITTED
+
+  """Confirmed"""
+  CONFIRMED
+
+  """Failed"""
+  FAILED
+}
+
+"""An enumeration."""
+enum UsersUnifiedTransactionTableSenderTypeChoices {
+  """Personal"""
+  USER
+
+  """Business"""
+  BUSINESS
+
+  """External"""
+  EXTERNAL
+}
+
+"""An enumeration."""
+enum UsersUnifiedTransactionTableCounterpartyTypeChoices {
+  """Personal"""
+  USER
+
+  """Business"""
+  BUSINESS
+
+  """External"""
+  EXTERNAL
+}
+
+"""GraphQL type for SendTransaction model"""
+type SendTransactionType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  """User who sent the transaction (null for external deposits)"""
+  senderUser: UserType
+  recipientUser: UserType
+
+  """Business that sent the transaction (if sent by business)"""
+  senderBusiness: BusinessType
+
+  """Business that received the transaction (if received by business)"""
+  recipientBusiness: BusinessType
+
+  """Type of sender (user or business)"""
+  senderType: SendSendTransactionSenderTypeChoices!
+
+  """Type of recipient (user or business)"""
+  recipientType: SendSendTransactionRecipientTypeChoices!
+
+  """Display name for the sender"""
+  senderDisplayName: String!
+
+  """Display name for the recipient"""
+  recipientDisplayName: String!
+
+  """Sender phone number at transaction time"""
+  senderPhone: String!
+
+  """Recipient phone number at transaction time"""
+  recipientPhone: String!
+  senderAddress: String!
+  recipientAddress: String!
+  amount: String!
+  tokenType: SendSendTransactionTokenTypeChoices!
+  memo: String!
+  status: SendSendTransactionStatusChoices!
+
+  """Sui transaction digest (0x + 32 bytes, 66 hex characters total)"""
+  transactionHash: String!
+
+  """True if this transaction includes an invitation to join Confío"""
+  isInvitation: Boolean!
+
+  """True if the invitation was claimed by the recipient"""
+  invitationClaimed: Boolean!
+
+  """True if the invitation expired and funds were returned to sender"""
+  invitationReverted: Boolean!
+
+  """When the invitation expires (7 days after creation)"""
+  invitationExpiresAt: DateTime
+}
+
+"""An enumeration."""
+enum SendSendTransactionSenderTypeChoices {
+  """Personal"""
+  USER
+
+  """Business"""
+  BUSINESS
+
+  """External"""
+  EXTERNAL
+}
+
+"""An enumeration."""
+enum SendSendTransactionRecipientTypeChoices {
+  """Personal"""
+  USER
+
+  """Business"""
+  BUSINESS
+
+  """External"""
+  EXTERNAL
+}
+
+"""An enumeration."""
+enum SendSendTransactionTokenTypeChoices {
+  """Confío Dollar"""
+  CUSD
+
+  """Confío Token"""
+  CONFIO
+
+  """USD Coin"""
+  USDC
+}
+
+"""An enumeration."""
+enum SendSendTransactionStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Sponsoring"""
+  SPONSORING
+
+  """Signed"""
+  SIGNED
+
+  """Submitted"""
+  SUBMITTED
+
+  """Confirmed"""
+  CONFIRMED
+
+  """Failed"""
+  FAILED
+}
+
+"""GraphQL type for Invoice model"""
+type InvoiceType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  invoiceId: String!
+
+  """User who created this invoice (business owner or cashier)"""
+  createdByUser: UserType!
+
+  """Business entity that is the actual merchant"""
+  merchantBusiness: BusinessType!
+
+  """Type of merchant (always business for invoices)"""
+  merchantType: PaymentsInvoiceMerchantTypeChoices!
+
+  """Display name for the merchant"""
+  merchantDisplayName: String!
+  merchantAccount: AccountType!
+  amount: String!
+  tokenType: PaymentsInvoiceTokenTypeChoices!
+  description: String!
+  status: PaymentsInvoiceStatusChoices!
+  paidByUser: UserType
+
+  """Business that paid the invoice (if payer is business)"""
+  paidByBusiness: BusinessType
+  paidAt: DateTime
+  expiresAt: DateTime!
+  isExpired: Boolean
+  qrCodeData: String
+  paymentTransactions: [PaymentTransactionType]
+}
+
+"""An enumeration."""
+enum PaymentsInvoiceMerchantTypeChoices {
+  """Personal"""
+  USER
+
+  """Business"""
+  BUSINESS
+}
+
+"""An enumeration."""
+enum PaymentsInvoiceTokenTypeChoices {
+  """Confío Dollar"""
+  CUSD
+
+  """Confío Token"""
+  CONFIO
+
+  """USD Coin"""
+  USDC
+}
+
+"""An enumeration."""
+enum PaymentsInvoiceStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Paid"""
+  PAID
+
+  """Expired"""
+  EXPIRED
+
+  """Cancelled"""
+  CANCELLED
+}
+
+"""GraphQL type for PaymentTransaction model"""
+type PaymentTransactionType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  paymentTransactionId: String!
+
+  """User who initiated the payment"""
+  payerUser: UserType!
+
+  """User associated with the merchant business (owner or cashier)"""
+  merchantAccountUser: UserType
+
+  """Business that made the payment (if payer is business account)"""
+  payerBusiness: BusinessType
+
+  """Business entity that received the payment"""
+  merchantBusiness: BusinessType!
+
+  """Type of payer (user or business)"""
+  payerType: PaymentsPaymentTransactionPayerTypeChoices!
+
+  """Type of merchant (always business for payments)"""
+  merchantType: PaymentsPaymentTransactionMerchantTypeChoices!
+
+  """Display name for the payer"""
+  payerDisplayName: String!
+
+  """Display name for the merchant"""
+  merchantDisplayName: String!
+
+  """Payer phone number at transaction time"""
+  payerPhone: String!
+  payerAccount: AccountType!
+  merchantAccount: AccountType!
+  payerAddress: String!
+  merchantAddress: String!
+  amount: String!
+  tokenType: PaymentsPaymentTransactionTokenTypeChoices!
+  description: String!
+  status: PaymentsPaymentTransactionStatusChoices!
+
+  """Sui transaction digest (0x + 32 bytes, 66 hex characters total)"""
+  transactionHash: String!
+  errorMessage: String!
+  invoice: InvoiceType!
+}
+
+"""An enumeration."""
+enum PaymentsPaymentTransactionPayerTypeChoices {
+  """Personal"""
+  USER
+
+  """Business"""
+  BUSINESS
+}
+
+"""An enumeration."""
+enum PaymentsPaymentTransactionMerchantTypeChoices {
+  """Personal"""
+  USER
+
+  """Business"""
+  BUSINESS
+}
+
+"""An enumeration."""
+enum PaymentsPaymentTransactionTokenTypeChoices {
+  """Confío Dollar"""
+  CUSD
+
+  """Confío Token"""
+  CONFIO
+
+  """USD Coin"""
+  USDC
+}
+
+"""An enumeration."""
+enum PaymentsPaymentTransactionStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Sponsoring"""
+  SPONSORING
+
+  """Signed"""
+  SIGNED
+
+  """Submitted"""
+  SUBMITTED
+
+  """Confirmed"""
+  CONFIRMED
+
+  """Failed"""
+  FAILED
+}
+
+type P2POfferType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  """DEPRECATED: Use offer_user or offer_business instead"""
+  user: UserType
+
+  """DEPRECATED: Use offer_user or offer_business instead"""
+  account: AccountType
+
+  """User creating this offer (for personal offers)"""
+  offerUser: UserType
+
+  """Business creating this offer (for business offers)"""
+  offerBusiness: BusinessType
+  exchangeType: P2PExchangeP2POfferExchangeTypeChoices!
+  tokenType: P2PExchangeP2POfferTokenTypeChoices!
+  rate: Decimal!
+  minAmount: Decimal!
+  maxAmount: Decimal!
+  availableAmount: Decimal!
+  paymentMethods: [P2PPaymentMethodType]
+
+  """ISO country code (e.g., 'VE', 'US', 'AS')"""
+  countryCode: String!
+
+  """Currency code (e.g., 'VES', 'COP', 'ARS')"""
+  currencyCode: String!
+  terms: String!
+  responseTimeMinutes: Int!
+  status: P2PExchangeP2POfferStatusChoices!
+  autoCompleteEnabled: Boolean!
+  autoCompleteTimeMinutes: Int!
+  userStats: P2PUserStatsType
+  offerType: String
+  offerDisplayName: String
+  isFavorite: Boolean
+}
+
+"""An enumeration."""
+enum P2PExchangeP2POfferExchangeTypeChoices {
+  """Buy"""
+  BUY
+
+  """Sell"""
+  SELL
+}
+
+"""An enumeration."""
+enum P2PExchangeP2POfferTokenTypeChoices {
+  """Confío Dollar"""
+  CUSD
+
+  """Confío Token"""
+  CONFIO
+}
+
+"""The `Decimal` scalar type represents a python Decimal."""
+scalar Decimal
+
+"""An enumeration."""
+enum P2PExchangeP2POfferStatusChoices {
+  """Active"""
+  ACTIVE
+
+  """Paused"""
+  PAUSED
+
+  """Completed"""
+  COMPLETED
+
+  """Cancelled"""
+  CANCELLED
+}
+
+type P2PTradeType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  offer: P2POfferType
+
+  """DEPRECATED: Use buyer_user or buyer_business instead"""
+  buyer: UserType
+
+  """DEPRECATED: Use seller_user or seller_business instead"""
+  seller: UserType
+
+  """DEPRECATED: Use buyer_user or buyer_business instead"""
+  buyerAccount: AccountType
+
+  """DEPRECATED: Use seller_user or seller_business instead"""
+  sellerAccount: AccountType
+
+  """User who is buying (for personal trades)"""
+  buyerUser: UserType
+
+  """Business that is buying (for business trades)"""
+  buyerBusiness: BusinessType
+
+  """User who is selling (for personal trades)"""
+  sellerUser: UserType
+
+  """Business that is selling (for business trades)"""
+  sellerBusiness: BusinessType
+  cryptoAmount: Decimal!
+  fiatAmount: Decimal!
+  rateUsed: Decimal!
+
+  """ISO country code from the offer"""
+  countryCode: String!
+
+  """Currency code (e.g., 'VES', 'COP', 'ARS')"""
+  currencyCode: String!
+  paymentMethod: P2PPaymentMethodType
+  status: P2PExchangeP2PTradeStatusChoices!
+  expiresAt: DateTime!
+  paymentReference: String!
+  paymentNotes: String!
+  cryptoTransactionHash: String!
+  completedAt: DateTime
+  escrow: P2PEscrowType
+  buyerType: String
+  sellerType: String
+  buyerDisplayName: String
+  sellerDisplayName: String
+  rating: P2PTradeRatingType
+  hasRating: Boolean
+  confirmations: [P2PTradeConfirmationType]
+  buyerStats: P2PUserStatsType
+  sellerStats: P2PUserStatsType
+}
+
+"""An enumeration."""
+enum P2PExchangeP2PTradeStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Payment Pending"""
+  PAYMENT_PENDING
+
+  """Payment Sent"""
+  PAYMENT_SENT
+
+  """Payment Confirmed"""
+  PAYMENT_CONFIRMED
+
+  """Crypto Released"""
+  CRYPTO_RELEASED
+
+  """Completed"""
+  COMPLETED
+
+  """Disputed"""
+  DISPUTED
+
+  """Cancelled"""
+  CANCELLED
+
+  """Expired"""
+  EXPIRED
+}
+
+"""GraphQL type for P2P escrow records"""
+type P2PEscrowType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  trade: P2PTradeType!
+  escrowAmount: Decimal!
+  tokenType: String!
+  escrowTransactionHash: String!
+  releaseTransactionHash: String!
+
+  """Funds are currently held in escrow"""
+  isEscrowed: Boolean!
+
+  """Funds have been released from escrow"""
+  isReleased: Boolean!
+
+  """How the funds were released from escrow"""
+  releaseType: P2PExchangeP2PEscrowReleaseTypeChoices
+
+  """Amount released (may be less than escrow_amount for partial refunds)"""
+  releaseAmount: Decimal
+  escrowedAt: DateTime
+  releasedAt: DateTime
+
+  """True if this escrow was resolved through dispute resolution"""
+  resolvedByDispute: Boolean!
+
+  """Link to dispute that resolved this escrow"""
+  disputeResolution: P2PDisputeType
+  statusDisplay: String
+}
+
+"""An enumeration."""
+enum P2PExchangeP2PEscrowReleaseTypeChoices {
+  """Normal Release to Seller"""
+  NORMAL
+
+  """Refund to Buyer"""
+  REFUND
+
+  """Partial Refund"""
+  PARTIAL_REFUND
+
+  """Dispute Release to Seller"""
+  DISPUTE_RELEASE
+}
+
+"""GraphQL type for P2P disputes"""
+type P2PDisputeType {
+  id: ID!
+  trade: P2PTradeType!
+  initiatorUser: UserType
+  initiatorBusiness: BusinessType
+
+  """Initial reason for dispute"""
+  reason: String!
+  status: P2PExchangeP2PDisputeStatusChoices!
+
+  """1=Low, 2=Medium, 3=High"""
+  priority: Int!
+
+  """List of evidence URLs"""
+  evidenceUrls: JSONString!
+
+  """Internal notes from admin/support"""
+  adminNotes: String!
+  resolutionType: P2PExchangeP2PDisputeResolutionTypeChoices
+  resolutionAmount: Decimal
+  resolutionNotes: String!
+  resolvedBy: UserType
+  openedAt: DateTime!
+  resolvedAt: DateTime
+  lastUpdated: DateTime!
+}
+
+"""An enumeration."""
+enum P2PExchangeP2PDisputeStatusChoices {
+  """Open"""
+  OPEN
+
+  """Under Review"""
+  UNDER_REVIEW
+
+  """Resolved"""
+  RESOLVED
+
+  """Escalated"""
+  ESCALATED
+}
+
+"""An enumeration."""
+enum P2PExchangeP2PDisputeResolutionTypeChoices {
+  """Refund to Buyer"""
+  REFUND_BUYER
+
+  """Release to Seller"""
+  RELEASE_TO_SELLER
+
+  """Partial Refund"""
+  PARTIAL_REFUND
+
+  """Trade Cancelled"""
+  CANCELLED
+
+  """No Action Taken"""
+  NO_ACTION
+}
+
+"""GraphQL type for P2P trade ratings"""
+type P2PTradeRatingType {
+  id: ID!
+  trade: P2PTradeType!
+  raterUser: UserType
+  raterBusiness: BusinessType
+  rateeUser: UserType
+  rateeBusiness: BusinessType
+  overallRating: Int!
+  communicationRating: Int
+  speedRating: Int
+  reliabilityRating: Int
+  comment: String!
+  tags: JSONString!
+  ratedAt: DateTime!
+  raterType: String
+  rateeType: String
+  raterDisplayName: String
+  rateeDisplayName: String
+}
+
+"""GraphQL type for P2P trade confirmations"""
+type P2PTradeConfirmationType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  trade: P2PTradeType!
+  confirmationType: P2PExchangeP2PTradeConfirmationConfirmationTypeChoices!
+  confirmerUser: UserType
+  confirmerBusiness: BusinessType
+  reference: String!
+  notes: String!
+  proofImageUrl: String!
+  confirmerType: String
+  confirmerDisplayName: String
+}
+
+"""An enumeration."""
+enum P2PExchangeP2PTradeConfirmationConfirmationTypeChoices {
+  """Payment Sent"""
+  PAYMENT_SENT
+
+  """Payment Received"""
+  PAYMENT_RECEIVED
+
+  """Crypto Released"""
+  CRYPTO_RELEASED
+
+  """Crypto Received"""
+  CRYPTO_RECEIVED
+}
+
+"""Paginated response for P2P trades"""
+type P2PTradePaginatedType {
+  trades: [P2PTradeType]
+  totalCount: Int
+  hasMore: Boolean
+  offset: Int
+  limit: Int
+  activeCount: Int
+}
+
+type P2PMessageType {
+  id: ID!
+  createdAt: DateTime!
+  trade: P2PTradeType!
+
+  """DEPRECATED: Use sender_user or sender_business instead"""
+  sender: UserType
+
+  """User sending this message (for personal messages)"""
+  senderUser: UserType
+
+  """Business sending this message (for business messages)"""
+  senderBusiness: BusinessType
+  messageType: P2PExchangeP2PMessageMessageTypeChoices!
+  content: String!
+  attachmentUrl: String!
+  attachmentType: String!
+  isRead: Boolean!
+  readAt: DateTime
+  senderType: String
+  senderDisplayName: String
+}
+
+"""An enumeration."""
+enum P2PExchangeP2PMessageMessageTypeChoices {
+  """Text"""
+  TEXT
+
+  """System"""
+  SYSTEM
+
+  """Payment Proof"""
+  PAYMENT_PROOF
+}
+
+type P2PPaymentMethodType {
+  id: ID
+  name: String
+  displayName: String
+  icon: String
+  isActive: Boolean
+  providerType: String
+  requiresPhone: Boolean
+  requiresEmail: Boolean
+  requiresAccountNumber: Boolean
+  countryCode: String
+  bank: BankType
+  country: CountryType
+}
+
+type BankType {
+  id: ID!
+
+  """Country where this bank operates"""
+  country: CountryType!
+
+  """Bank code/identifier"""
+  code: String!
+
+  """Bank name"""
+  name: String!
+
+  """Short/common name for the bank"""
+  shortName: String
+
+  """Whether bank supports checking accounts"""
+  supportsChecking: Boolean!
+
+  """Whether bank supports savings accounts"""
+  supportsSavings: Boolean!
+
+  """Whether bank supports payroll accounts"""
+  supportsPayroll: Boolean!
+
+  """Whether this bank is currently supported"""
+  isActive: Boolean!
+
+  """Display order in lists (lower numbers first)"""
+  displayOrder: Int!
+  accountTypeChoices: [String]
+}
+
+type CountryType {
+  id: ID!
+
+  """ISO 3166-1 alpha-2 country code (e.g., VE, CO, AR)"""
+  code: String!
+
+  """Country name"""
+  name: String!
+
+  """Country flag emoji (e.g., 🇻🇪)"""
+  flagEmoji: String
+
+  """Currency code (e.g., VES, COP, ARS)"""
+  currencyCode: String!
+
+  """Currency symbol (e.g., Bs., $)"""
+  currencySymbol: String!
+
+  """Whether bank transfers require recipient ID number"""
+  requiresIdentification: Boolean!
+
+  """Local name for ID document (e.g., Cédula, DNI, RUT)"""
+  identificationName: String!
+
+  """Expected format for ID (e.g., 'V-12345678', '12345678-9')"""
+  identificationFormat: String
+
+  """Typical account number length"""
+  accountNumberLength: Int!
+
+  """Whether country supports phone-based payments"""
+  supportsPhonePayments: Boolean!
+
+  """Whether Confío operates in this country"""
+  isActive: Boolean!
+
+  """Display order in lists (lower numbers first)"""
+  displayOrder: Int!
+}
+
+type P2PUserStatsType {
+  id: ID!
+
+  """DEPRECATED: Use stats_user or stats_business instead"""
+  user: UserType
+
+  """User these stats belong to (for personal account stats)"""
+  statsUser: UserType
+
+  """Business these stats belong to (for business account stats)"""
+  statsBusiness: BusinessType
+  totalTrades: Int!
+  completedTrades: Int!
+  cancelledTrades: Int!
+  disputedTrades: Int!
+  successRate: Float
+  avgResponseTime: Int!
+  lastSeenOnline: String
+  totalVolumeCusd: Decimal!
+  totalVolumeConfio: Decimal!
+  isVerified: Boolean!
+  verificationLevel: Int!
+  statsType: String
+  statsDisplayName: String
+  avgRating: Float
+}
+
+type ExchangeRateType {
+  id: ID!
+
+  """Source currency (e.g., VES)"""
+  sourceCurrency: String!
+
+  """Target currency (e.g., USD)"""
+  targetCurrency: String!
+
+  """How many source_currency per 1 target_currency"""
+  rate: Decimal!
+  rateType: ExchangeRatesExchangeRateRateTypeChoices!
+  source: ExchangeRatesExchangeRateSourceChoices!
+  fetchedAt: DateTime!
+  createdAt: DateTime!
+
+  """Whether this rate is currently valid"""
+  isActive: Boolean!
+}
+
+"""An enumeration."""
+enum ExchangeRatesExchangeRateRateTypeChoices {
+  """Official Rate"""
+  OFFICIAL
+
+  """Parallel Market Rate"""
+  PARALLEL
+
+  """Black Market Rate"""
+  BLACK_MARKET
+
+  """Average Rate"""
+  AVERAGE
+}
+
+"""An enumeration."""
+enum ExchangeRatesExchangeRateSourceChoices {
+  """Yadio.io"""
+  YADIO
+
+  """ExchangeRate-API"""
+  EXCHANGERATE_API
+
+  """CurrencyLayer"""
+  CURRENCYLAYER
+
+  """Bluelytics (Argentina)"""
+  BLUELYTICS
+
+  """DolarAPI (Argentina)"""
+  DOLARAPI
+
+  """Banco Central de Venezuela"""
+  BCV
+
+  """Manual Entry"""
+  MANUAL
+}
+
+"""GraphQL type for Conversion model"""
+type ConversionType {
+  id: ID!
+  conversionId: UUID!
+
+  """User who initiated the conversion (if personal account)"""
+  actorUser: UserType
+
+  """Business that initiated the conversion (if business account)"""
+  actorBusiness: BusinessType
+
+  """Type of actor (user or business)"""
+  actorType: ConversionConversionActorTypeChoices!
+
+  """Display name of the actor at conversion time"""
+  actorDisplayName: String!
+
+  """Blockchain address of the actor"""
+  actorAddress: String!
+  conversionType: ConversionConversionConversionTypeChoices!
+  fromAmount: Decimal!
+  toAmount: Decimal!
+  exchangeRate: Decimal!
+  feeAmount: Decimal!
+  fromTransactionHash: String
+  toTransactionHash: String
+  status: ConversionConversionStatusChoices!
+  errorMessage: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  completedAt: DateTime
+  fromToken: String
+  toToken: String
+}
+
+"""
+Leverages the internal Python implementation of UUID (uuid.UUID) to provide native UUID objects
+in fields, resolvers and input.
+"""
+scalar UUID
+
+"""An enumeration."""
+enum ConversionConversionActorTypeChoices {
+  """Personal"""
+  USER
+
+  """Business"""
+  BUSINESS
+}
+
+"""An enumeration."""
+enum ConversionConversionConversionTypeChoices {
+  """USDC to cUSD"""
+  USDC_TO_CUSD
+
+  """cUSD to USDC"""
+  CUSD_TO_USDC
+}
+
+"""An enumeration."""
+enum ConversionConversionStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Processing"""
+  PROCESSING
+
+  """Completed"""
+  COMPLETED
+
+  """Failed"""
+  FAILED
+}
+
+"""GraphQL type for USDCDeposit model"""
+type USDCDepositType {
+  id: ID!
+  depositId: UUID!
+
+  """User who made the deposit (if personal account)"""
+  actorUser: UserType
+
+  """Business that made the deposit (if business account)"""
+  actorBusiness: BusinessType
+
+  """Type of actor (user or business)"""
+  actorType: UsdcTransactionsUSDCDepositActorTypeChoices!
+
+  """Display name of the actor at deposit time"""
+  actorDisplayName: String!
+
+  """Confío wallet address receiving the deposit"""
+  actorAddress: String!
+
+  """Amount of USDC deposited"""
+  amount: Decimal!
+
+  """External wallet address that sent the USDC"""
+  sourceAddress: String!
+
+  """Blockchain network used"""
+  network: String!
+  status: UsdcTransactionsUSDCDepositStatusChoices!
+  errorMessage: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  completedAt: DateTime
+}
+
+"""An enumeration."""
+enum UsdcTransactionsUSDCDepositActorTypeChoices {
+  """Personal"""
+  USER
+
+  """Business"""
+  BUSINESS
+}
+
+"""An enumeration."""
+enum UsdcTransactionsUSDCDepositStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Processing"""
+  PROCESSING
+
+  """Completed"""
+  COMPLETED
+
+  """Failed"""
+  FAILED
+}
+
+"""GraphQL type for USDCWithdrawal model"""
+type USDCWithdrawalType {
+  id: ID!
+  withdrawalId: UUID!
+
+  """User who made the withdrawal (if personal account)"""
+  actorUser: UserType
+
+  """Business that made the withdrawal (if business account)"""
+  actorBusiness: BusinessType
+
+  """Type of actor (user or business)"""
+  actorType: UsdcTransactionsUSDCWithdrawalActorTypeChoices!
+
+  """Display name of the actor at withdrawal time"""
+  actorDisplayName: String!
+
+  """Confío wallet address making the withdrawal"""
+  actorAddress: String!
+
+  """Amount of USDC withdrawn"""
+  amount: Decimal!
+
+  """External wallet address receiving the USDC"""
+  destinationAddress: String!
+
+  """Blockchain network used"""
+  network: String!
+
+  """Confío service fee"""
+  serviceFee: Decimal!
+  status: UsdcTransactionsUSDCWithdrawalStatusChoices!
+  errorMessage: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  completedAt: DateTime
+}
+
+"""An enumeration."""
+enum UsdcTransactionsUSDCWithdrawalActorTypeChoices {
+  """Personal"""
+  USER
+
+  """Business"""
+  BUSINESS
+}
+
+"""An enumeration."""
+enum UsdcTransactionsUSDCWithdrawalStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Processing"""
+  PROCESSING
+
+  """Completed"""
+  COMPLETED
+
+  """Failed"""
+  FAILED
+}
+
+"""GraphQL type for UnifiedUSDCTransactionTable"""
+type UnifiedUSDCTransactionType {
+  """UUID of the source transaction"""
+  transactionId: UUID!
+  transactionType: UsdcTransactionsUnifiedUSDCTransactionTableTransactionTypeChoices!
+
+  """User associated with the transaction"""
+  actorUser: UserType
+
+  """Business associated with the transaction"""
+  actorBusiness: BusinessType
+  actorType: UsdcTransactionsUnifiedUSDCTransactionTableActorTypeChoices!
+  actorDisplayName: String!
+  actorAddress: String!
+
+  """
+  Primary amount (USDC for deposits/withdrawals, source amount for conversions)
+  """
+  amount: Decimal!
+
+  """Primary currency"""
+  currency: String!
+
+  """Converted amount for conversions"""
+  secondaryAmount: Decimal
+
+  """Converted currency for conversions"""
+  secondaryCurrency: String!
+  exchangeRate: Decimal
+  networkFee: Decimal!
+  serviceFee: Decimal!
+
+  """Source address (for deposits and conversions)"""
+  sourceAddress: String!
+
+  """Destination address (for withdrawals and conversions)"""
+  destinationAddress: String!
+  network: String!
+  status: UsdcTransactionsUnifiedUSDCTransactionTableStatusChoices!
+  errorMessage: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  completedAt: DateTime
+  formattedTitle: String
+  iconName: String
+  iconColor: String
+}
+
+"""An enumeration."""
+enum UsdcTransactionsUnifiedUSDCTransactionTableTransactionTypeChoices {
+  """Deposit"""
+  DEPOSIT
+
+  """Withdrawal"""
+  WITHDRAWAL
+
+  """Conversion"""
+  CONVERSION
+}
+
+"""An enumeration."""
+enum UsdcTransactionsUnifiedUSDCTransactionTableActorTypeChoices {
+  """Personal"""
+  USER
+
+  """Business"""
+  BUSINESS
+}
+
+"""An enumeration."""
+enum UsdcTransactionsUnifiedUSDCTransactionTableStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Processing"""
+  PROCESSING
+
+  """Completed"""
+  COMPLETED
+
+  """Failed"""
+  FAILED
+}
+
+type Query {
+  usdcDeposits(limit: Int): [USDCDepositType]
+  usdcWithdrawals(limit: Int): [USDCWithdrawalType]
+  unifiedUsdcTransactions(limit: Int, offset: Int, transactionType: String): [UnifiedUSDCTransactionType]
+  conversions(limit: Int, status: String, conversionType: String): [ConversionType]
+  conversion(conversionId: String): ConversionType
+  currentExchangeRate(sourceCurrency: String = "VES", targetCurrency: String = "USD", rateType: String = "parallel"): Decimal
+  exchangeRateWithFallback(sourceCurrency: String = "VES", targetCurrency: String = "USD"): Decimal
+  exchangeRates(sourceCurrency: String = "VES", targetCurrency: String = "USD", rateType: String, limit: Int = 10): [ExchangeRateType]
+  p2pOffers(exchangeType: String, tokenType: String, paymentMethod: String, countryCode: String, favoritesOnly: Boolean): [P2POfferType]
+  p2pOffer(id: ID!): P2POfferType
+  myP2pOffers(accountId: String): [P2POfferType]
+  myP2pTrades(accountId: String, offset: Int = 0, limit: Int = 10): P2PTradePaginatedType
+  p2pTrade(id: ID!): P2PTradeType
+  p2pTradeMessages(tradeId: ID!): [P2PMessageType]
+  p2pPaymentMethods(countryCode: String): [P2PPaymentMethodType]
+  invoice(invoiceId: String): InvoiceType
+  invoices: [InvoiceType]
+  paymentTransactions: [PaymentTransactionType]
+  paymentTransactionsWithFriend(friendUserId: ID!, limit: Int): [PaymentTransactionType]
+  sendTransactions: [SendTransactionType]
+  sendTransaction(id: ID!): SendTransactionType
+  sendTransactionsWithFriend(friendUserId: ID, friendPhone: String, limit: Int): [SendTransactionType]
+  allSendTransactions(limit: Int): [SendTransactionType]
+
+  """Get unified transactions for a specific account"""
+  unifiedTransactions(accountType: String!, accountIndex: Int!, limit: Int = 50, offset: Int = 0, tokenTypes: [String]): [UnifiedTransactionType]
+
+  """Get unified transactions for current JWT account context"""
+  currentAccountTransactions(limit: Int = 50, offset: Int = 0, tokenTypes: [String]): [UnifiedTransactionType]
+
+  """Get unified transactions between current user and a specific friend"""
+  unifiedTransactionsWithFriend(friendUserId: ID, friendPhone: String, limit: Int = 50, offset: Int = 0): [UnifiedTransactionType]
+
+  """Get businesses where current user is an employee"""
+  myEmployerBusinesses: [EmployerBusinessType]
+
+  """Get employees of a business (owner only)"""
+  businessEmployees(businessId: ID!, includeInactive: Boolean = false): [BusinessEmployeeType]
+
+  """Get employee invitations for a business"""
+  businessInvitations(businessId: ID!, status: String): [EmployeeInvitationType]
+
+  """Get employees of current business (uses JWT context)"""
+  currentBusinessEmployees(includeInactive: Boolean = false): [BusinessEmployeeType]
+
+  """Get invitations for current business (uses JWT context)"""
+  currentBusinessInvitations(status: String): [EmployeeInvitationType]
+
+  """Get pending invitations for current user"""
+  myInvitations: [EmployeeInvitationType]
+
+  """Get employee activity logs for a business"""
+  employeeActivityLogs(businessId: ID!, employeeId: ID, action: String, limit: Int = 100): [EmployeeActivityLogType]
+  me: UserType
+  user(id: ID!): UserType
+  business(id: ID!): BusinessType
+  countryCodes: [CountryCodeType]
+  businessCategories: [BusinessCategoryType]
+  userVerifications(userId: ID): [IdentityVerificationType]
+  userAccounts: [AccountType]
+  accountBalance(tokenType: String!): String
+  currentAccountPermissions: JSONString
+  legalDocument(docType: String!, language: String): LegalDocumentType
+  countries(isActive: Boolean): [CountryType]
+  banks(countryCode: String): [BankType]
+  userBankAccounts(accountId: ID): [BankInfoType]
+  bankInfo(id: ID!): BankInfoType
+  checkUsersByPhones(phoneNumbers: [String]!): [UserByPhoneType]
+}
+
+"""Represents a business where user is employed"""
+type EmployerBusinessType {
+  business: BusinessType
+  employeeRecord: BusinessEmployeeType
+  role: String
+  permissions: JSONString
+}
+
+"""GraphQL type for business employees"""
+type BusinessEmployeeType {
+  id: ID!
+
+  """The business this employee works for"""
+  business: BusinessType!
+
+  """The user who is an employee"""
+  user: UserType!
+
+  """Employee role determining base permissions"""
+  role: UsersBusinessEmployeeRoleChoices!
+
+  """Whether this employee is currently active"""
+  isActive: Boolean!
+
+  """When the employee was added"""
+  hiredAt: DateTime!
+
+  """User who added this employee"""
+  hiredBy: UserType
+
+  """When the employee was deactivated"""
+  deactivatedAt: DateTime
+
+  """User who deactivated this employee"""
+  deactivatedBy: UserType
+
+  """Daily shift start time"""
+  shiftStartTime: Time
+
+  """Daily shift end time"""
+  shiftEndTime: Time
+
+  """Maximum daily transaction amount"""
+  dailyTransactionLimit: Decimal
+
+  """Internal notes about this employee"""
+  notes: String!
+  permissions: JSONString
+  effectivePermissions: JSONString
+  isWithinShift: Boolean
+}
+
+"""An enumeration."""
+enum UsersBusinessEmployeeRoleChoices {
+  """Owner"""
+  OWNER
+
+  """Administrator"""
+  ADMIN
+
+  """Manager"""
+  MANAGER
+
+  """Cashier"""
+  CASHIER
+}
+
+"""
+The `Time` scalar type represents a Time value as
+specified by
+[iso8601](https://en.wikipedia.org/wiki/ISO_8601).
+"""
+scalar Time
+
+"""GraphQL type for employee invitations"""
+type EmployeeInvitationType {
+  id: ID!
+  createdAt: DateTime!
+  business: BusinessType!
+  invitationCode: String!
+
+  """Phone number of the invited employee"""
+  employeePhone: String!
+
+  """ISO country code for the phone number"""
+  employeePhoneCountry: String!
+
+  """Name of the invited employee (optional)"""
+  employeeName: String!
+  role: UsersEmployeeInvitationRoleChoices!
+  invitedBy: UserType
+  status: UsersEmployeeInvitationStatusChoices!
+
+  """When the invitation expires"""
+  expiresAt: DateTime!
+  acceptedBy: UserType
+  acceptedAt: DateTime
+
+  """Optional message to include with the invitation"""
+  message: String!
+  isExpired: Boolean
+  permissions: JSONString
+}
+
+"""An enumeration."""
+enum UsersEmployeeInvitationRoleChoices {
+  """Owner"""
+  OWNER
+
+  """Administrator"""
+  ADMIN
+
+  """Manager"""
+  MANAGER
+
+  """Cashier"""
+  CASHIER
+}
+
+"""An enumeration."""
+enum UsersEmployeeInvitationStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Accepted"""
+  ACCEPTED
+
+  """Expired"""
+  EXPIRED
+
+  """Cancelled"""
+  CANCELLED
+}
+
+"""GraphQL type for employee activity logs"""
+type EmployeeActivityLogType {
+  id: ID!
+  business: BusinessType!
+  employee: UserType!
+  action: UsersEmployeeActivityLogActionChoices!
+  timestamp: DateTime!
+
+  """Related invoice ID if applicable"""
+  invoiceId: String
+
+  """Related transaction hash if applicable"""
+  transactionId: String
+
+  """Transaction amount if applicable"""
+  amount: String
+  ipAddress: String
+  details: JSONString
+}
+
+"""An enumeration."""
+enum UsersEmployeeActivityLogActionChoices {
+  """Payment Accepted"""
+  PAYMENT_ACCEPTED
+
+  """Invoice Created"""
+  INVOICE_CREATED
+
+  """Invoice Cancelled"""
+  INVOICE_CANCELLED
+
+  """Account Accessed"""
+  ACCOUNT_ACCESSED
+
+  """Balance Viewed"""
+  BALANCE_VIEWED
+
+  """Transaction Viewed"""
+  TRANSACTION_VIEWED
+
+  """Settings Changed"""
+  SETTINGS_CHANGED
+}
+
+type IdentityVerificationType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  """User being verified"""
+  user: UserType!
+
+  """First name as verified from documents"""
+  verifiedFirstName: String!
+
+  """Last name as verified from documents"""
+  verifiedLastName: String!
+
+  """Date of birth as verified from documents"""
+  verifiedDateOfBirth: Date!
+
+  """Nationality ISO code (e.g., VEN, ARG, COL)"""
+  verifiedNationality: String!
+
+  """Full address as verified from documents"""
+  verifiedAddress: String!
+
+  """City as verified from documents"""
+  verifiedCity: String!
+
+  """State/Province as verified from documents"""
+  verifiedState: String!
+
+  """Country ISO code as verified from documents"""
+  verifiedCountry: String!
+
+  """Postal code as verified from documents"""
+  verifiedPostalCode: String
+
+  """Type of identification document"""
+  documentType: UsersIdentityVerificationDocumentTypeChoices!
+
+  """Document number/ID"""
+  documentNumber: String!
+
+  """Country that issued the document"""
+  documentIssuingCountry: String!
+
+  """Document expiry date if applicable"""
+  documentExpiryDate: Date
+
+  """Current verification status"""
+  status: UsersIdentityVerificationStatusChoices!
+
+  """Admin user who approved the verification"""
+  verifiedBy: UserType
+
+  """Date and time when verification was approved"""
+  verifiedAt: DateTime
+
+  """Reason for rejection if verification was rejected"""
+  rejectedReason: String
+}
+
+"""
+The `Date` scalar type represents a Date
+value as specified by
+[iso8601](https://en.wikipedia.org/wiki/ISO_8601).
+"""
+scalar Date
+
+"""An enumeration."""
+enum UsersIdentityVerificationDocumentTypeChoices {
+  """Cédula de Identidad"""
+  NATIONAL_ID
+
+  """Pasaporte"""
+  PASSPORT
+
+  """Licencia de Conducir"""
+  DRIVERS_LICENSE
+
+  """Documento de Identidad Extranjero"""
+  FOREIGN_ID
+}
+
+"""An enumeration."""
+enum UsersIdentityVerificationStatusChoices {
+  """Pendiente"""
+  PENDING
+
+  """Verificado"""
+  VERIFIED
+
+  """Rechazado"""
+  REJECTED
+
+  """Expirado"""
+  EXPIRED
+}
+
+type BankInfoType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  """Account that owns this payment method"""
+  account: AccountType!
+
+  """DEPRECATED: Use payment_method.country_code instead"""
+  country: CountryType
+
+  """DEPRECATED: Use payment_method.bank instead"""
+  bank: BankType
+
+  """Full name of the account/payment method holder"""
+  accountHolderName: String!
+
+  """Account number (for banks) or identifier (for some fintech)"""
+  accountNumber: String
+
+  """Phone number (for mobile wallets like Nequi, Yape, Pago Móvil)"""
+  phoneNumber: String
+
+  """Email address (for PayPal, Wise, etc.)"""
+  email: String
+
+  """Username/handle (for some fintech platforms)"""
+  username: String
+
+  """Type of bank account (only for banks)"""
+  accountType: UsersBankInfoAccountTypeChoices
+
+  """Identification number (required for some countries/banks)"""
+  identificationNumber: String
+
+  """Whether this is the default bank account for this account"""
+  isDefault: Boolean!
+
+  """Whether this bank info can be shared with other users"""
+  isPublic: Boolean!
+
+  """Whether this bank account has been verified"""
+  isVerified: Boolean!
+
+  """When the bank account was verified"""
+  verifiedAt: DateTime
+  maskedAccountNumber: String
+  fullBankName: String
+  summaryText: String
+  requiresIdentification: Boolean
+  identificationLabel: String
+  paymentDetails: JSONString
+  paymentMethod: P2PPaymentMethodType
+}
+
+"""An enumeration."""
+enum UsersBankInfoAccountTypeChoices {
+  """Cuenta de Ahorros"""
+  AHORRO
+
+  """Cuenta Corriente"""
+  CORRIENTE
+
+  """Cuenta Nómina"""
+  NOMINA
+}
+
+type UserByPhoneType {
+  phoneNumber: String
+  userId: ID
+  username: String
+  firstName: String
+  lastName: String
+  isOnConfio: Boolean
+  activeAccountId: ID
+  activeAccountSuiAddress: String
+}
+
+type Mutation {
+  """Mutation for creating a new USDC deposit"""
+  createUsdcDeposit(input: USDCDepositInput!): CreateUSDCDeposit
+
+  """Mutation for creating a new USDC withdrawal"""
+  createUsdcWithdrawal(input: USDCWithdrawalInput!): CreateUSDCWithdrawal
+
+  """Mutation to convert USDC to cUSD"""
+  convertUsdcToCusd(
+    """Amount of USDC to convert"""
+    amount: String!
+  ): ConvertUSDCToCUSD
+
+  """Mutation to convert cUSD to USDC"""
+  convertCusdToUsdc(
+    """Amount of cUSD to convert"""
+    amount: String!
+  ): ConvertCUSDToUSDC
+
+  """Simple test mutation"""
+  testConversion: TestConversion
+
+  """Mutation to manually trigger exchange rate refresh"""
+  refreshExchangeRates: RefreshExchangeRates
+  createP2pOffer(input: CreateP2POfferInput!): CreateP2POffer
+  updateP2pOffer(availableAmount: Float, maxAmount: Float, minAmount: Float, offerId: ID!, paymentMethodIds: [ID], rate: Float, status: String, terms: String): UpdateP2POffer
+  createP2pTrade(input: CreateP2PTradeInput!): CreateP2PTrade
+  updateP2pTradeStatus(input: UpdateP2PTradeStatusInput!): UpdateP2PTradeStatus
+  sendP2pMessage(input: SendP2PMessageInput!): SendP2PMessage
+  rateP2pTrade(input: RateP2PTradeInput!): RateP2PTrade
+  disputeP2pTrade(reason: String!, tradeId: ID!): DisputeP2PTrade
+  confirmP2pTradeStep(input: ConfirmP2PTradeStepInput!): ConfirmP2PTradeStep
+  toggleFavoriteTrader(note: String, traderBusinessId: ID, traderUserId: ID): ToggleFavoriteTrader
+
+  """Mutation for admins to resolve disputes"""
+  resolveDispute(disputeId: ID!, resolutionAmount: Decimal, resolutionNotes: String, resolutionType: String!): ResolveDispute
+
+  """Mutation for escalating disputes to higher priority"""
+  escalateDispute(disputeId: ID!, escalationNotes: String): EscalateDispute
+
+  """Mutation for admins to add evidence or notes to disputes"""
+  addDisputeEvidence(content: String!, disputeId: ID!, evidenceType: String!, evidenceUrls: [String]): AddDisputeEvidence
+
+  """Mutation for creating a new invoice"""
+  createInvoice(input: InvoiceInput!): CreateInvoice
+
+  """Mutation for getting an invoice by ID"""
+  getInvoice(invoiceId: String!): GetInvoice
+
+  """Mutation for paying an invoice"""
+  payInvoice(
+    """Optional idempotency key to prevent duplicate payments"""
+    idempotencyKey: String
+    invoiceId: String!
+  ): PayInvoice
+
+  """Mutation for creating a new send transaction"""
+  createSendTransaction(input: SendTransactionInput!): CreateSendTransaction
+
+  """Initiate Telegram verification process"""
+  initiateTelegramVerification(countryCode: String!, phoneNumber: String!): InitiateTelegramVerification
+  verifyTelegramCode(code: String!, countryCode: String!, phoneNumber: String!): VerifyTelegramCode
+
+  """Initialize zkLogin process"""
+  initializeZkLogin(firebaseToken: String!, provider: String!, providerToken: String!): InitializeZkLogin
+  finalizeZkLogin(input: FinalizeZkLoginInput!): FinalizeZkLoginPayload
+  addBusinessEmployee(input: AddBusinessEmployeeInput!): AddBusinessEmployee
+  updateBusinessEmployee(input: UpdateBusinessEmployeeInput!): UpdateBusinessEmployee
+  removeBusinessEmployee(input: RemoveBusinessEmployeeInput!): RemoveBusinessEmployee
+  inviteEmployee(input: InviteEmployeeInput!): InviteEmployee
+  acceptInvitation(invitationCode: String!): AcceptInvitation
+  cancelInvitation(invitationId: ID!): CancelInvitation
+  updatePhoneNumber(countryCode: String!, phoneNumber: String!): UpdatePhoneNumber
+  updateUsername(username: String!): UpdateUsername
+  updateUserProfile(firstName: String!, lastName: String!): UpdateUserProfile
+  invalidateAuthTokens: InvalidateAuthTokens
+  refreshToken(refreshToken: String!): RefreshToken
+
+  """Generate a new JWT token with updated account context"""
+  switchAccountToken(accountIndex: Int!, accountType: String!, businessId: ID): SwitchAccountToken
+  submitIdentityVerification(documentBackImage: String, documentExpiryDate: Date, documentFrontImage: String!, documentIssuingCountry: String!, documentNumber: String!, documentType: String!, selfieWithDocument: String!, verifiedAddress: String!, verifiedCity: String!, verifiedCountry: String!, verifiedDateOfBirth: Date!, verifiedFirstName: String!, verifiedLastName: String!, verifiedNationality: String!, verifiedPostalCode: String, verifiedState: String!): SubmitIdentityVerification
+  approveIdentityVerification(verificationId: ID!): ApproveIdentityVerification
+  rejectIdentityVerification(reason: String!, verificationId: ID!): RejectIdentityVerification
+  createBusiness(address: String, businessRegistrationNumber: String, category: String!, description: String, name: String!): CreateBusiness
+  updateBusiness(address: String, businessId: ID!, businessRegistrationNumber: String, category: String!, description: String, name: String!): UpdateBusiness
+  updateAccountSuiAddress(accountId: ID!, suiAddress: String!): UpdateAccountSuiAddress
+  createBankInfo(accountHolderName: String!, accountId: ID!, accountNumber: String, accountType: String, email: String, identificationNumber: String, isDefault: Boolean, paymentMethodId: ID!, phoneNumber: String, username: String): CreateBankInfo
+  updateBankInfo(accountHolderName: String!, accountNumber: String!, accountType: String!, bankInfoId: ID!, identificationNumber: String, isDefault: Boolean): UpdateBankInfo
+  deleteBankInfo(bankInfoId: ID!): DeleteBankInfo
+  setDefaultBankInfo(bankInfoId: ID!): SetDefaultBankInfo
+
+  """
+  Test mutation to create users based on phone numbers - FOR TESTING ONLY
+  """
+  createTestUsers(phoneNumbers: [String]!): CreateTestUsers
+
+  """Delete test users - FOR TESTING ONLY"""
+  deleteTestUsers: DeleteTestUsers
+}
+
+"""Mutation for creating a new USDC deposit"""
+type CreateUSDCDeposit {
+  deposit: USDCDepositType
+  success: Boolean
+  errors: [String]
+}
+
+"""Input type for creating a USDC deposit"""
+input USDCDepositInput {
+  """Amount of USDC deposited (e.g., '100.50')"""
+  amount: String!
+
+  """External wallet address that sent the USDC"""
+  sourceAddress: String!
+}
+
+"""Mutation for creating a new USDC withdrawal"""
+type CreateUSDCWithdrawal {
+  withdrawal: USDCWithdrawalType
+  success: Boolean
+  errors: [String]
+}
+
+"""Input type for creating a USDC withdrawal"""
+input USDCWithdrawalInput {
+  """Amount of USDC to withdraw (e.g., '100.50')"""
+  amount: String!
+
+  """External wallet address to receive the USDC"""
+  destinationAddress: String!
+
+  """Confío service fee"""
+  serviceFee: String
+}
+
+"""Mutation to convert USDC to cUSD"""
+type ConvertUSDCToCUSD {
+  conversion: ConversionType
+  success: Boolean
+  errors: [String]
+}
+
+"""Mutation to convert cUSD to USDC"""
+type ConvertCUSDToUSDC {
+  conversion: ConversionType
+  success: Boolean
+  errors: [String]
+}
+
+"""Simple test mutation"""
+type TestConversion {
+  success: Boolean
+  message: String
+}
+
+"""Mutation to manually trigger exchange rate refresh"""
+type RefreshExchangeRates {
+  success: Boolean
+  message: String
+  sources: JSONString
+}
+
+type CreateP2POffer {
+  offer: P2POfferType
+  success: Boolean
+  errors: [String]
+}
+
+input CreateP2POfferInput {
+  exchangeType: String!
+  tokenType: String!
+  rate: Decimal!
+  minAmount: Decimal!
+  maxAmount: Decimal!
+  availableAmount: Decimal!
+  paymentMethodIds: [ID]!
+  countryCode: String!
+  terms: String
+  responseTimeMinutes: Int
+  accountId: String
+}
+
+type UpdateP2POffer {
+  offer: P2POfferType
+  success: Boolean
+  errors: [String]
+}
+
+type CreateP2PTrade {
+  trade: P2PTradeType
+  success: Boolean
+  errors: [String]
+}
+
+input CreateP2PTradeInput {
+  offerId: ID!
+  cryptoAmount: Decimal!
+  paymentMethodId: ID!
+  accountId: String
+}
+
+type UpdateP2PTradeStatus {
+  trade: P2PTradeType
+  success: Boolean
+  errors: [String]
+}
+
+input UpdateP2PTradeStatusInput {
+  tradeId: ID!
+  status: String!
+  paymentReference: String
+  paymentNotes: String
+}
+
+type SendP2PMessage {
+  message: P2PMessageType
+  success: Boolean
+  errors: [String]
+}
+
+input SendP2PMessageInput {
+  tradeId: ID!
+  content: String!
+  messageType: String
+  attachmentUrl: String
+  attachmentType: String
+}
+
+type RateP2PTrade {
+  rating: P2PTradeRatingType
+  trade: P2PTradeType
+  success: Boolean
+  errors: [String]
+}
+
+input RateP2PTradeInput {
+  tradeId: ID!
+  overallRating: Int!
+  communicationRating: Int
+  speedRating: Int
+  reliabilityRating: Int
+  comment: String
+  tags: [String]
+}
+
+type DisputeP2PTrade {
+  trade: P2PTradeType
+  success: Boolean
+  errors: [String]
+}
+
+type ConfirmP2PTradeStep {
+  confirmation: P2PTradeConfirmationType
+  trade: P2PTradeType
+  success: Boolean
+  errors: [String]
+}
+
+input ConfirmP2PTradeStepInput {
+  tradeId: ID!
+  confirmationType: String!
+  reference: String
+  notes: String
+  proofImageUrl: String
+}
+
+type ToggleFavoriteTrader {
+  success: Boolean
+  isFavorite: Boolean
+  message: String
+}
+
+"""Mutation for admins to resolve disputes"""
+type ResolveDispute {
+  dispute: P2PDisputeType
+  trade: P2PTradeType
+  success: Boolean
+  errors: [String]
+}
+
+"""Mutation for escalating disputes to higher priority"""
+type EscalateDispute {
+  dispute: P2PDisputeType
+  success: Boolean
+  errors: [String]
+}
+
+"""Mutation for admins to add evidence or notes to disputes"""
+type AddDisputeEvidence {
+  dispute: P2PDisputeType
+  success: Boolean
+  errors: [String]
+}
+
+"""Mutation for creating a new invoice"""
+type CreateInvoice {
+  invoice: InvoiceType
+  success: Boolean
+  errors: [String]
+}
+
+"""Input type for creating a new invoice"""
+input InvoiceInput {
+  """Amount to request (e.g., '10.50')"""
+  amount: String!
+
+  """Type of token to request (e.g., 'cUSD', 'CONFIO')"""
+  tokenType: String!
+
+  """Optional description for the invoice"""
+  description: String
+
+  """Hours until expiration (default: 24)"""
+  expiresInHours: Int
+}
+
+"""Mutation for getting an invoice by ID"""
+type GetInvoice {
+  invoice: InvoiceType
+  success: Boolean
+  errors: [String]
+}
+
+"""Mutation for paying an invoice"""
+type PayInvoice {
+  invoice: InvoiceType
+  paymentTransaction: PaymentTransactionType
+  success: Boolean
+  errors: [String]
+}
+
+"""Mutation for creating a new send transaction"""
+type CreateSendTransaction {
+  sendTransaction: SendTransactionType
+  success: Boolean
+  errors: [String]
+}
+
+"""Input type for creating a send transaction"""
+input SendTransactionInput {
+  """User ID of the recipient (for Confío users)"""
+  recipientUserId: ID
+
+  """Phone number of the recipient (for any user)"""
+  recipientPhone: String
+
+  """Sui address of the recipient (DEPRECATED - use phone or user ID)"""
+  recipientAddress: String
+
+  """Amount to send (e.g., '10.50')"""
+  amount: String!
+
+  """Type of token to send (e.g., 'cUSD', 'CONFIO')"""
+  tokenType: String!
+
+  """Optional memo for the transaction"""
+  memo: String
+
+  """Optional idempotency key to prevent duplicate sends"""
+  idempotencyKey: String
+
+  """Display name for the recipient (for UI)"""
+  recipientDisplayName: String
+}
+
+"""Initiate Telegram verification process"""
+type InitiateTelegramVerification {
+  success: Boolean
+  error: String
+}
+
+type VerifyTelegramCode {
+  success: Boolean
+  error: String
+}
+
+"""Initialize zkLogin process"""
+type InitializeZkLogin {
+  success: Boolean
+  error: String
+  maxEpoch: String
+  randomness: String
+  authAccessToken: String
+  authRefreshToken: String
+}
+
+type FinalizeZkLoginPayload {
+  success: Boolean
+  zkProof: ProofPointsType
+  suiAddress: String
+  error: String
+  isPhoneVerified: Boolean
+}
+
+type ProofPointsType {
+  a: [String]
+  b: [[String]]
+  c: [String]
+}
+
+input FinalizeZkLoginInput {
+  maxEpoch: String!
+  randomness: String!
+  extendedEphemeralPublicKey: String!
+  userSignature: String!
+  jwt: String!
+  keyClaimName: String!
+  audience: String!
+  firebaseToken: String!
+  salt: String!
+  accountType: String!
+  accountIndex: Int!
+}
+
+type AddBusinessEmployee {
+  employee: BusinessEmployeeType
+  success: Boolean
+  errors: [String]
+}
+
+input AddBusinessEmployeeInput {
+  businessId: ID!
+
+  """Phone number of employee to add"""
+  userPhone: String!
+  role: String = "cashier"
+
+  """Custom permissions overriding role defaults"""
+  customPermissions: JSONString
+
+  """Daily shift start time (HH:MM)"""
+  shiftStartTime: String
+
+  """Daily shift end time (HH:MM)"""
+  shiftEndTime: String
+
+  """Maximum daily transaction amount"""
+  dailyTransactionLimit: Decimal
+  notes: String
+}
+
+type UpdateBusinessEmployee {
+  employee: BusinessEmployeeType
+  success: Boolean
+  errors: [String]
+}
+
+input UpdateBusinessEmployeeInput {
+  employeeId: ID!
+  role: String
+  customPermissions: JSONString
+  shiftStartTime: String
+  shiftEndTime: String
+  dailyTransactionLimit: Decimal
+  notes: String
+  isActive: Boolean
+}
+
+type RemoveBusinessEmployee {
+  success: Boolean
+  errors: [String]
+}
+
+input RemoveBusinessEmployeeInput {
+  employeeId: ID!
+}
+
+type InviteEmployee {
+  invitation: EmployeeInvitationType
+  success: Boolean
+  errors: [String]
+}
+
+input InviteEmployeeInput {
+  businessId: ID!
+  employeePhone: String!
+  employeePhoneCountry: String!
+  employeeName: String
+  role: String = "cashier"
+  customPermissions: JSONString
+  message: String
+  expiresInDays: Int = 7
+}
+
+type AcceptInvitation {
+  employee: BusinessEmployeeType
+  success: Boolean
+  errors: [String]
+}
+
+type CancelInvitation {
+  success: Boolean
+  errors: [String]
+}
+
+type UpdatePhoneNumber {
+  success: Boolean
+  error: String
+}
+
+type UpdateUsername {
+  success: Boolean
+  error: String
+  user: UserType
+}
+
+type UpdateUserProfile {
+  success: Boolean
+  error: String
+  user: UserType
+}
+
+type InvalidateAuthTokens {
+  success: Boolean
+  error: String
+}
+
+type RefreshToken {
+  token: String
+  payload: JSONString
+  refreshExpiresIn: Int
+}
+
+"""Generate a new JWT token with updated account context"""
+type SwitchAccountToken {
+  token: String
+  payload: JSONString
+}
+
+type SubmitIdentityVerification {
+  success: Boolean
+  error: String
+  verification: IdentityVerificationType
+}
+
+type ApproveIdentityVerification {
+  success: Boolean
+  error: String
+  verification: IdentityVerificationType
+}
+
+type RejectIdentityVerification {
+  success: Boolean
+  error: String
+  verification: IdentityVerificationType
+}
+
+type CreateBusiness {
+  success: Boolean
+  error: String
+  business: BusinessType
+  account: AccountType
+}
+
+type UpdateBusiness {
+  success: Boolean
+  error: String
+  business: BusinessType
+}
+
+type UpdateAccountSuiAddress {
+  success: Boolean
+  error: String
+  account: AccountType
+}
+
+type CreateBankInfo {
+  success: Boolean
+  error: String
+  bankInfo: BankInfoType
+}
+
+type UpdateBankInfo {
+  success: Boolean
+  error: String
+  bankInfo: BankInfoType
+}
+
+type DeleteBankInfo {
+  success: Boolean
+  error: String
+}
+
+type SetDefaultBankInfo {
+  success: Boolean
+  error: String
+  bankInfo: BankInfoType
+}
+
+"""
+Test mutation to create users based on phone numbers - FOR TESTING ONLY
+"""
+type CreateTestUsers {
+  success: Boolean
+  error: String
+  createdCount: Int
+  usersCreated: [UserByPhoneType]
+}
+
+"""Delete test users - FOR TESTING ONLY"""
+type DeleteTestUsers {
+  success: Boolean
+  error: String
+  deletedCount: Int
+}
+
+type Subscription {
+  tradeChatMessage(tradeId: ID!): TradeChatMessageSubscription
+  tradeStatusUpdate(tradeId: ID!): TradeStatusSubscription
+  typingIndicator(tradeId: ID!): TypingIndicatorSubscription
+}
+
+"""Subscription for new chat messages in a trade"""
+type TradeChatMessageSubscription {
+  tradeId: ID!
+  message: P2PMessageType
+}
+
+"""Subscription for trade status updates"""
+type TradeStatusSubscription {
+  tradeId: ID!
+  trade: P2PTradeType
+  status: String
+  updatedBy: ID
+}
+
+"""Subscription for typing indicators"""
+type TypingIndicatorSubscription {
+  tradeId: ID!
+  userId: ID
+  username: String
+  isTyping: Boolean
+}

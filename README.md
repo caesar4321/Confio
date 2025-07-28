@@ -261,16 +261,16 @@ This is a **monolithic repository** containing the full Confío stack:
 
 ### Multi-Account System
 
-Confío supports multiple accounts per user, allowing separate wallets for personal and business use cases.
+Confío supports multiple accounts per user, allowing separate wallets for personal and business use cases with advanced JWT-based context management and role-based access control.
 
 #### Account Types
 - **Personal Accounts**: Individual wallets for personal transactions
-- **Business Accounts**: Dedicated wallets for business operations
+- **Business Accounts**: Dedicated wallets for business operations with employee management
 
 #### Salt Formula
 The multi-account system uses deterministic salt generation:
 ```
-salt = SHA256(issuer | subject | audience | account_type | account_index)
+salt = SHA256(issuer | subject | audience | account_type | business_id (if applied) | account_index)
 ```
 
 Where:
@@ -278,32 +278,103 @@ Where:
 - `subject`: JWT subject (user's unique ID)
 - `audience`: OAuth client ID
 - `account_type`: Either "personal" or "business"
+- `business_id`: Business ID (only included for business accounts)
 - `account_index`: Numeric index (0, 1, 2, etc.)
+
+#### JWT Integration
+
+The system includes comprehensive JWT context management for secure account operations:
+
+**JWT Payload Structure**
+```json
+{
+  "user_id": "123",
+  "username": "user@example.com",
+  "account_type": "business",
+  "account_index": 0,
+  "business_id": "456",  // Only for business accounts
+  "auth_token_version": 1,
+  "exp": 1234567890,
+  "type": "access"
+}
+```
+
+**Account Context in API Requests**
+- All GraphQL queries/mutations automatically receive account context from JWT
+- Business operations validate access through BusinessEmployee relationships
+- No client-controlled parameters for sensitive operations
+
+#### Business Employee System
+
+Business accounts support multiple employees with role-based permissions:
+
+**Roles**
+- **Owner**: Full access to all business operations
+- **Admin**: Most operations except deleting the business
+- **Manager**: Operational permissions without employee management
+- **Cashier**: Limited to accepting payments and viewing transactions
+
+**Permission System (Negative-Check)**
+```python
+ROLE_PERMISSIONS = {
+    'admin': {
+        'accept_payments', 'view_transactions', 'view_balance', 'send_funds',
+        'manage_employees', 'view_business_address', 'view_analytics',
+        'edit_business_info', 'manage_bank_accounts', 'manage_p2p',
+        'create_invoices', 'manage_invoices', 'export_data'
+    },
+    'manager': {
+        'accept_payments', 'view_transactions', 'view_balance', 'send_funds',
+        'view_business_address', 'view_analytics', 'manage_bank_accounts',
+        'manage_p2p', 'create_invoices', 'manage_invoices', 'export_data'
+    },
+    'cashier': {
+        'accept_payments', 'view_transactions', 'view_balance', 
+        'create_invoices', 'view_business_address'
+    }
+}
+```
+
+**Security Pattern**
+- All business operations verify access through `user_id → BusinessEmployee.filter(business_id=x)`
+- Never directly access through business_id to prevent security vulnerabilities
+- JWT context validation happens centrally in `get_jwt_business_context_with_validation()`
 
 #### Default Behavior
 - **New users**: Automatically get `personal_0` as their default account
 - **Existing users**: Continue using their current salt (equivalent to `personal_0`)
 - **Account switching**: Each account type/index combination generates a unique Sui address
+- **Employee accounts**: Access business through JWT with embedded business_id
 
 #### Security Model
 1. **Deterministic**: Same OAuth identity + account context = same Sui address
 2. **Isolated**: Each account has its own private key and Sui address
 3. **Non-custodial**: Private keys are never stored on servers
 4. **Stateless**: Server doesn't track active accounts, client manages state
+5. **Role-based**: Negative-check permission system ensures only explicitly allowed actions
+6. **Relationship-based**: All business access verified through BusinessEmployee table
 
 #### Implementation Components
 
 **Account Manager** (`apps/src/utils/accountManager.ts`)
 - Manages account storage and retrieval using React Native Keychain
 - Handles account creation, switching, and context management
+- Stores account metadata including business relationships
 
 **Auth Service Integration** (`apps/src/services/authService.ts`)
 - Automatically uses active account context for salt generation
 - Provides account switching and creation methods
+- Manages JWT tokens with embedded account context
+
+**JWT Context** (`users/jwt_context.py`)
+- `get_jwt_business_context()`: Extracts account context from JWT
+- `get_jwt_business_context_with_validation()`: Validates BusinessEmployee access
+- `check_role_permission()`: Implements negative-check permission system
 
 **React Hook** (`apps/src/hooks/useAccountManager.ts`)
 - Provides easy access to account management in React components
 - Handles account state and operations
+- Syncs with server-provided account data
 
 #### Usage Examples
 
@@ -325,15 +396,42 @@ await authService.switchAccount('personal_0'); // Personal account
 await authService.switchAccount('business_0'); // Business account
 ```
 
-**Multiple Personal Accounts**
+**Employee Access**
 ```typescript
-const personal2 = await authService.createAccount(
-  'personal',
-  'Personal Savings',
-  'S',
-  '+1234567890'
-);
-await authService.switchAccount('personal_1'); // Savings account
+// Employee switches to employer's business account
+await authService.switchAccount('business_123_0'); // Business ID 123
+// JWT automatically includes business_id for permission validation
+```
+
+**GraphQL Query with Permission Check**
+```python
+# Backend automatically validates access
+jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_balance')
+if not jwt_context:
+    return "0"  # Access denied
+```
+
+#### Permission Examples
+
+**Cashier Creating Invoice** ✅
+```python
+# Cashier has 'accept_payments' permission
+jwt_context = get_jwt_business_context_with_validation(info, required_permission='accept_payments')
+# Access granted - can create invoice
+```
+
+**Cashier Managing Employees** ❌
+```python
+# Cashier lacks 'manage_employees' permission
+jwt_context = get_jwt_business_context_with_validation(info, required_permission='manage_employees')
+# Returns None - access denied
+```
+
+**Owner Any Operation** ✅
+```python
+# Owners bypass all permission checks
+if employee_record.role == 'owner':
+    # Full access granted
 ```
 
 ### Token Management

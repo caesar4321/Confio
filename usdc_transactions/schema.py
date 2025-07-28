@@ -133,11 +133,27 @@ class CreateUSDCDeposit(graphene.Mutation):
             )
 
         try:
-            # Get the user's active account
-            active_account = user.accounts.filter(
-                account_type=info.context.active_account_type,
-                account_index=info.context.active_account_index
-            ).first()
+            # Get JWT context for account determination
+            from users.jwt_context import get_jwt_business_context
+            jwt_context = get_jwt_business_context(info)
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
+            
+            # Get the user's active account using JWT context
+            if account_type == 'business' and business_id:
+                # For business accounts, find by business_id from JWT
+                active_account = user.accounts.filter(
+                    account_type='business',
+                    account_index=account_index,
+                    business_id=business_id
+                ).first()
+            else:
+                # For personal accounts
+                active_account = user.accounts.filter(
+                    account_type=account_type,
+                    account_index=account_index
+                ).first()
             
             if not active_account:
                 return CreateUSDCDeposit(

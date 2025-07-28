@@ -82,18 +82,29 @@ class ConvertUSDCToCUSD(graphene.Mutation):
             validate_transaction_amount(amount)
             amount_decimal = Decimal(amount)
             
-            # Get the user's active account
-            print(f"[CONVERSION] Looking for account: type={getattr(info.context, 'active_account_type', 'NOT SET')}, index={getattr(info.context, 'active_account_index', 'NOT SET')}")
+            # Get JWT context for account determination
+            from users.jwt_context import get_jwt_business_context
+            jwt_context = get_jwt_business_context(info)
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
             
-            # Get account index with fallback to 0
-            account_index = getattr(info.context, 'active_account_index', 0)
-            if account_index is None:
-                account_index = 0
-                
-            active_account = user.accounts.filter(
-                account_type=info.context.active_account_type,
-                account_index=account_index
-            ).first()
+            print(f"[CONVERSION] JWT context: type={account_type}, index={account_index}, business_id={business_id}")
+            
+            # Get the user's active account using JWT context
+            if account_type == 'business' and business_id:
+                # For business accounts, find by business_id from JWT
+                active_account = user.accounts.filter(
+                    account_type='business',
+                    account_index=account_index,
+                    business_id=business_id
+                ).first()
+            else:
+                # For personal accounts
+                active_account = user.accounts.filter(
+                    account_type=account_type,
+                    account_index=account_index
+                ).first()
             
             print(f"[CONVERSION] Active account found: {active_account}")
             
@@ -224,18 +235,29 @@ class ConvertCUSDToUSDC(graphene.Mutation):
             validate_transaction_amount(amount)
             amount_decimal = Decimal(amount)
             
-            # Get the user's active account
-            print(f"[CONVERSION] Looking for account: type={getattr(info.context, 'active_account_type', 'NOT SET')}, index={getattr(info.context, 'active_account_index', 'NOT SET')}")
+            # Get JWT context for account determination
+            from users.jwt_context import get_jwt_business_context
+            jwt_context = get_jwt_business_context(info)
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
             
-            # Get account index with fallback to 0
-            account_index = getattr(info.context, 'active_account_index', 0)
-            if account_index is None:
-                account_index = 0
-                
-            active_account = user.accounts.filter(
-                account_type=info.context.active_account_type,
-                account_index=account_index
-            ).first()
+            print(f"[CONVERSION] JWT context: type={account_type}, index={account_index}, business_id={business_id}")
+            
+            # Get the user's active account using JWT context
+            if account_type == 'business' and business_id:
+                # For business accounts, find by business_id from JWT
+                active_account = user.accounts.filter(
+                    account_type='business',
+                    account_index=account_index,
+                    business_id=business_id
+                ).first()
+            else:
+                # For personal accounts
+                active_account = user.accounts.filter(
+                    account_type=account_type,
+                    account_index=account_index
+                ).first()
             
             print(f"[CONVERSION] Active account found: {active_account}")
             

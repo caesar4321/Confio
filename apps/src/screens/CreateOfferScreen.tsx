@@ -79,10 +79,7 @@ export const CreateOfferScreen = () => {
   });
   
   // Fetch user's registered payment methods
-  const isNumericAccountId = activeAccount?.id && /^\d+$/.test(activeAccount.id);
   const { data: userBankAccountsData, loading: userBankAccountsLoading } = useQuery(GET_USER_BANK_ACCOUNTS, {
-    variables: { accountId: activeAccount?.id },
-    skip: !activeAccount?.id || !isNumericAccountId,
     fetchPolicy: 'cache-and-network'
   });
   

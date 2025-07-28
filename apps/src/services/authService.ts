@@ -1442,21 +1442,62 @@ export class AuthService {
     
     console.log('AuthService - switchAccount called with accountId:', accountId);
     
-    const accountContext = accountManager.parseAccountId(accountId);
+    // Parse the account ID to extract type, businessId (if present), and index
+    let accountContext: AccountContext;
     
-    // If it's a business account, get the businessId
-    if (accountContext.type === 'business') {
-      const account = await accountManager.getAccount(accountId);
-      if (account?.business?.id) {
-        accountContext.businessId = account.business.id;
+    if (accountId === 'personal_0') {
+      // Personal account
+      accountContext = {
+        type: 'personal',
+        index: 0
+      };
+    } else if (accountId.startsWith('business_')) {
+      // Business account format: business_{businessId}_0
+      const parts = accountId.split('_');
+      if (parts.length >= 3) {
+        const businessId = parts[1];
+        const index = parseInt(parts[2]) || 0;
+        
+        accountContext = {
+          type: 'business',
+          index: index,
+          businessId: businessId // Required for salt generation
+        };
+        
+        console.log('AuthService - Parsed business account with businessId:', {
+          accountId,
+          businessId,
+          index,
+          contextBusinessId: accountContext.businessId
+        });
+      } else {
+        // Fallback for simple business_0 format
+        accountContext = {
+          type: 'business',
+          index: 0
+        };
+        
+        console.log('AuthService - Fallback business account (no businessId):', {
+          accountId,
+          type: 'business',
+          index: 0
+        });
       }
+    } else {
+      // Fallback - extract type and index
+      const [accountType, indexStr] = accountId.split('_');
+      const accountIndex = parseInt(indexStr) || 0;
+      
+      accountContext = {
+        type: accountType as 'personal' | 'business',
+        index: accountIndex
+      };
     }
     
     console.log('AuthService - Parsed account context:', {
       accountId: accountId,
       accountType: accountContext.type,
       accountIndex: accountContext.index,
-      businessId: accountContext.businessId,
       note: accountContext.type === 'personal' ? 'Personal account (index 0)' : `Business account (index ${accountContext.index})`
     });
     
@@ -1470,12 +1511,32 @@ export class AuthService {
       try {
         const { SWITCH_ACCOUNT_TOKEN } = await import('../apollo/queries');
         
+        const variables: any = {
+          accountType: accountContext.type,
+          accountIndex: accountContext.index
+        };
+        
+        // Add businessId for employee accounts switching to business accounts
+        if (accountContext.businessId) {
+          variables.businessId = accountContext.businessId;
+          console.log('AuthService - Added businessId to variables:', {
+            businessId: accountContext.businessId,
+            businessIdType: typeof accountContext.businessId
+          });
+        } else {
+          console.log('AuthService - No businessId in accountContext:', {
+            accountContextType: accountContext.type,
+            accountContextIndex: accountContext.index,
+            accountContextBusinessId: accountContext.businessId,
+            hasBusinessId: !!accountContext.businessId
+          });
+        }
+        
+        console.log('AuthService - Calling SWITCH_ACCOUNT_TOKEN with variables:', variables);
+        
         const { data } = await apolloClient.mutate({
           mutation: SWITCH_ACCOUNT_TOKEN,
-          variables: {
-            accountType: accountContext.type,
-            accountIndex: accountContext.index
-          }
+          variables
         });
         
         if (data?.switchAccountToken?.token) {

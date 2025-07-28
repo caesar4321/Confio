@@ -4,10 +4,11 @@ from django.urls import reverse
 from django.utils.safestring import mark_safe
 from .models import User, Account, Business, IdentityVerification, Country, Bank, BankInfo
 from .models_unified import UnifiedTransactionTable
+from .models_employee import BusinessEmployee, EmployeeInvitation
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'verification_status_display', 'accounts_count', 'is_staff', 'created_at')
+    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'verification_status_display', 'accounts_count', 'employment_status', 'is_staff', 'created_at')
     list_filter = ('is_staff', 'is_superuser', 'phone_country', 'created_at')
     search_fields = ('username', 'email', 'firebase_uid', 'first_name', 'last_name')
     readonly_fields = ('firebase_uid', 'auth_token_version', 'created_at', 'updated_at')
@@ -59,6 +60,22 @@ class UserAdmin(admin.ModelAdmin):
         url = reverse('admin:users_account_changelist') + f'?user__id__exact={obj.id}'
         return format_html('<a href="{}">{} accounts</a>', url, count)
     accounts_count.short_description = "Accounts"
+    
+    def employment_status(self, obj):
+        active_employments = obj.employment_records.filter(is_active=True, deleted_at__isnull=True).select_related('business')
+        if active_employments.exists():
+            businesses = []
+            for emp in active_employments[:3]:  # Show max 3
+                role_icon = {'owner': '🏢', 'admin': '👑', 'manager': '👔', 'cashier': '💰'}.get(emp.role, '👤')
+                businesses.append(f"{role_icon} {emp.business.name}")
+            
+            if active_employments.count() > 3:
+                businesses.append(f"...+{active_employments.count() - 3} more")
+            
+            url = reverse('admin:users_businessemployee_changelist') + f'?user__id__exact={obj.id}'
+            return format_html('<a href="{}">{}</a>', url, '<br>'.join(businesses))
+        return "-"
+    employment_status.short_description = "Employed At"
 
 @admin.register(Account)
 class AccountAdmin(admin.ModelAdmin):
@@ -96,10 +113,26 @@ class AccountAdmin(admin.ModelAdmin):
 
 @admin.register(Business)
 class BusinessAdmin(admin.ModelAdmin):
-    list_display = ('name', 'category_display_name', 'accounts_count', 'business_registration_number', 'created_at')
+    list_display = ('name', 'category_display_name', 'owner_display', 'accounts_count', 'employees_count', 'business_registration_number', 'created_at')
     list_filter = ('category', 'created_at')
     search_fields = ('name', 'category', 'description', 'business_registration_number')
-    readonly_fields = ('created_at', 'updated_at')
+    readonly_fields = ('created_at', 'updated_at', 'owner_display')
+    
+    def owner_display(self, obj):
+        from .models_employee import BusinessEmployee
+        owner = BusinessEmployee.objects.filter(
+            business=obj,
+            role='owner',
+            deleted_at__isnull=True
+        ).select_related('user').first()
+        
+        if owner:
+            user = owner.user
+            name = user.get_full_name() or user.username
+            url = reverse('admin:users_user_change', args=[user.id])
+            return format_html('<a href="{}">🏢 {}</a>', url, name)
+        return format_html('<span style="color: orange;">No owner</span>')
+    owner_display.short_description = "Owner"
     
     def accounts_count(self, obj):
         count = obj.accounts.count()
@@ -108,6 +141,18 @@ class BusinessAdmin(admin.ModelAdmin):
             return format_html('<a href="{}">{} accounts</a>', url, count)
         return "0 accounts"
     accounts_count.short_description = "Accounts"
+    
+    def employees_count(self, obj):
+        active_count = obj.employees.filter(is_active=True, deleted_at__isnull=True).count()
+        total_count = obj.employees.filter(deleted_at__isnull=True).count()
+        if total_count > 0:
+            url = reverse('admin:users_businessemployee_changelist') + f'?business__id__exact={obj.id}'
+            if active_count < total_count:
+                return format_html('<a href="{}">{}/{} employees</a>', url, active_count, total_count)
+            else:
+                return format_html('<a href="{}">{} employees</a>', url, active_count)
+        return "0 employees"
+    employees_count.short_description = "Employees"
 
 @admin.register(IdentityVerification)
 class IdentityVerificationAdmin(admin.ModelAdmin):
@@ -491,3 +536,222 @@ class UnifiedTransactionAdmin(admin.ModelAdmin):
             'send_transaction', 'payment_transaction', 
             'conversion', 'p2p_trade'
         )
+
+@admin.register(BusinessEmployee)
+class BusinessEmployeeAdmin(admin.ModelAdmin):
+    list_display = ('employee_name', 'business', 'role_display', 'status_display', 'hired_at', 'hired_by_name', 'shift_info')
+    list_filter = ('role', 'is_active', 'business', 'hired_at')
+    search_fields = ('user__username', 'user__email', 'user__first_name', 'user__last_name', 'business__name')
+    readonly_fields = ('hired_at', 'deactivated_at', 'created_at', 'updated_at', 'deleted_at', 'permissions_display')
+    
+    fieldsets = (
+        ('Employee Information', {
+            'fields': ('business', 'user', 'role', 'is_active')
+        }),
+        ('Permissions', {
+            'fields': ('permissions', 'permissions_display'),
+            'description': 'Custom permissions override role defaults. Leave empty to use default role permissions. Owners have all permissions by default.'
+        }),
+        ('Shift Settings', {
+            'fields': ('shift_start_time', 'shift_end_time', 'daily_transaction_limit'),
+            'classes': ('collapse',)
+        }),
+        ('Employment History', {
+            'fields': ('hired_by', 'hired_at', 'deactivated_by', 'deactivated_at', 'notes')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at', 'deleted_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def employee_name(self, obj):
+        if obj.user.first_name or obj.user.last_name:
+            full_name = f"{obj.user.first_name} {obj.user.last_name}".strip()
+            return format_html('<strong>{}</strong><br><small>{}</small>', full_name, obj.user.username)
+        return obj.user.username
+    employee_name.short_description = "Employee"
+    
+    def role_display(self, obj):
+        role_colors = {
+            'owner': '#F59E0B',
+            'admin': '#8B5CF6',
+            'manager': '#3B82F6',
+            'cashier': '#10B981'
+        }
+        role_icons = {
+            'owner': '🏢',
+            'admin': '👑',
+            'manager': '👔',
+            'cashier': '💰'
+        }
+        return format_html(
+            '<span style="color: {};">{} {}</span>',
+            role_colors.get(obj.role, '#6B7280'),
+            role_icons.get(obj.role, '👤'),
+            obj.get_role_display()
+        )
+    role_display.short_description = "Role"
+    
+    def status_display(self, obj):
+        if obj.is_active:
+            if obj.is_within_shift():
+                return format_html('<span style="color: green;">✅ Active (In Shift)</span>')
+            return format_html('<span style="color: green;">✅ Active</span>')
+        return format_html('<span style="color: red;">❌ Inactive</span>')
+    status_display.short_description = "Status"
+    
+    def hired_by_name(self, obj):
+        if obj.hired_by:
+            return obj.hired_by.get_full_name() or obj.hired_by.username
+        return "-"
+    hired_by_name.short_description = "Hired By"
+    
+    def shift_info(self, obj):
+        if obj.shift_start_time and obj.shift_end_time:
+            return f"{obj.shift_start_time} - {obj.shift_end_time}"
+        return "No shift set"
+    shift_info.short_description = "Shift"
+    
+    def permissions_display(self, obj):
+        permissions = obj.get_effective_permissions()
+        if not permissions:
+            return "Using role defaults"
+        
+        html = '<table style="width: 100%; font-size: 12px;">'
+        for key, value in permissions.items():
+            icon = '✅' if value else '❌'
+            html += f'<tr><td>{key.replace("_", " ").title()}:</td><td>{icon}</td></tr>'
+        html += '</table>'
+        return format_html(html)
+    permissions_display.short_description = "Effective Permissions"
+    
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('business', 'user', 'hired_by', 'deactivated_by')
+
+@admin.register(EmployeeInvitation)
+class EmployeeInvitationAdmin(admin.ModelAdmin):
+    list_display = ('invitation_code', 'business', 'employee_info', 'role_display', 'status_display', 'created_at', 'expires_at_display', 'invited_by_name')
+    list_filter = ('status', 'role', 'business', 'created_at', 'expires_at')
+    search_fields = ('invitation_code', 'employee_phone', 'employee_name', 'business__name', 'invited_by__username')
+    readonly_fields = ('invitation_code', 'created_at', 'updated_at', 'accepted_at', 'deleted_at')
+    
+    fieldsets = (
+        ('Invitation Details', {
+            'fields': ('business', 'invitation_code', 'status')
+        }),
+        ('Employee Information', {
+            'fields': ('employee_phone', 'employee_phone_country', 'employee_name', 'role', 'permissions')
+        }),
+        ('Message', {
+            'fields': ('message',),
+            'classes': ('wide',)
+        }),
+        ('Invitation History', {
+            'fields': ('invited_by', 'created_at', 'expires_at', 'accepted_by', 'accepted_at')
+        }),
+        ('Timestamps', {
+            'fields': ('updated_at', 'deleted_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def employee_info(self, obj):
+        country_flags = {
+            'VE': '🇻🇪', 'CO': '🇨🇴', 'AR': '🇦🇷', 'PE': '🇵🇪', 'CL': '🇨🇱',
+            'BR': '🇧🇷', 'MX': '🇲🇽', 'US': '🇺🇸', 'DO': '🇩🇴', 'PA': '🇵🇦'
+        }
+        flag = country_flags.get(obj.employee_phone_country, '🌐')
+        name = obj.employee_name or "No name"
+        return format_html(
+            '<strong>{}</strong><br>{} {}',
+            name,
+            flag,
+            obj.employee_phone
+        )
+    employee_info.short_description = "Employee"
+    
+    def role_display(self, obj):
+        role_colors = {
+            'owner': '#F59E0B',
+            'admin': '#8B5CF6',
+            'manager': '#3B82F6',
+            'cashier': '#10B981'
+        }
+        role_icons = {
+            'owner': '🏢',
+            'admin': '👑',
+            'manager': '👔',
+            'cashier': '💰'
+        }
+        return format_html(
+            '<span style="color: {};">{} {}</span>',
+            role_colors.get(obj.role, '#6B7280'),
+            role_icons.get(obj.role, '👤'),
+            obj.get_role_display()
+        )
+    role_display.short_description = "Role"
+    
+    def status_display(self, obj):
+        status_colors = {
+            'pending': '#F59E0B',
+            'accepted': '#10B981',
+            'expired': '#6B7280',
+            'cancelled': '#EF4444'
+        }
+        status_icons = {
+            'pending': '⏳',
+            'accepted': '✅',
+            'expired': '⏰',
+            'cancelled': '❌'
+        }
+        
+        # Check if expired
+        if obj.status == 'pending' and obj.is_expired:
+            status = 'expired'
+            display_status = 'Expired'
+        else:
+            status = obj.status
+            display_status = obj.get_status_display()
+        
+        return format_html(
+            '<span style="color: {};">{} {}</span>',
+            status_colors.get(status, '#6B7280'),
+            status_icons.get(status, '❓'),
+            display_status
+        )
+    status_display.short_description = "Status"
+    
+    def expires_at_display(self, obj):
+        if obj.is_expired:
+            return format_html('<span style="color: red;">Expired</span>')
+        elif obj.status == 'accepted':
+            return format_html('<span style="color: green;">Accepted</span>')
+        elif obj.status == 'cancelled':
+            return format_html('<span style="color: gray;">Cancelled</span>')
+        else:
+            from django.utils import timezone
+            time_left = obj.expires_at - timezone.now()
+            days = time_left.days
+            if days > 1:
+                return f"In {days} days"
+            elif days == 1:
+                return "Tomorrow"
+            elif days == 0:
+                hours = time_left.seconds // 3600
+                if hours > 0:
+                    return f"In {hours} hours"
+                else:
+                    return format_html('<span style="color: orange;">Soon</span>')
+            else:
+                return format_html('<span style="color: red;">Expired</span>')
+    expires_at_display.short_description = "Expires"
+    
+    def invited_by_name(self, obj):
+        if obj.invited_by:
+            return obj.invited_by.get_full_name() or obj.invited_by.username
+        return "-"
+    invited_by_name.short_description = "Invited By"
+    
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('business', 'invited_by', 'accepted_by')

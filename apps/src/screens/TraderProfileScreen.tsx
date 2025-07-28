@@ -179,8 +179,6 @@ export const TraderProfileScreen: React.FC = () => {
 
   // Fetch user's bank accounts for payment method availability check
   const { data: bankAccountsData } = useQuery(GET_USER_BANK_ACCOUNTS, {
-    variables: { accountId: activeAccount?.id },
-    skip: !activeAccount?.id,
     fetchPolicy: 'cache-and-network',
   });
 

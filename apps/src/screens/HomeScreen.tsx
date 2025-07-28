@@ -73,6 +73,17 @@ interface Account {
   phone?: string;
   category?: string;
   avatar: string;
+  isEmployee?: boolean;
+  employeeRole?: 'cashier' | 'manager' | 'admin';
+  employeePermissions?: {
+    acceptPayments: boolean;
+    viewTransactions: boolean;
+    viewBalance: boolean;
+    sendFunds: boolean;
+    manageEmployees: boolean;
+    viewBusinessAddress: boolean;
+    viewAnalytics: boolean;
+  };
 }
 
 type HomeScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -303,8 +314,8 @@ export const HomeScreen = () => {
     }
   }, [refreshAccounts, refetchCUSD, refetchConfio]);
   
-  // Quick actions configuration
-  const quickActions: QuickAction[] = [
+  // Quick actions configuration - filter based on permissions
+  const quickActionsData: QuickAction[] = [
     {
       id: 'send',
       label: 'Enviar',
@@ -340,6 +351,36 @@ export const HomeScreen = () => {
       route: () => navigation.navigate('BottomTabs', { screen: 'Exchange' }),
     },
   ];
+  
+  // Filter quick actions based on employee permissions
+  const quickActions = React.useMemo(() => {
+    // If user is an employee, filter actions based on permissions
+    if (activeAccount?.isEmployee) {
+      const permissions = activeAccount.employeePermissions || {};
+      
+      return quickActionsData.filter(action => {
+        switch (action.id) {
+          case 'send':
+            // Employees can't send funds
+            return permissions.sendFunds === true;
+          case 'receive':
+            // Employees can receive if they can accept payments
+            return permissions.acceptPayments === true;
+          case 'pay':
+            // Employees can access pay/charge if they can accept payments
+            return permissions.acceptPayments === true;
+          case 'exchange':
+            // Employees can't exchange
+            return false;
+          default:
+            return true;
+        }
+      });
+    }
+    
+    // Non-employees get all actions
+    return quickActionsData;
+  }, [activeAccount, quickActionsData]);
 
   // Entrance animation - only run after initialization
   React.useEffect(() => {
@@ -548,13 +589,16 @@ export const HomeScreen = () => {
               </Text>
             </View>
             <View style={styles.portfolioActions}>
-              <TouchableOpacity 
-                style={styles.eyeToggle}
-                onPress={toggleBalanceVisibility}
-                activeOpacity={0.7}
-              >
-                <Icon name={showBalance ? 'eye' : 'eye-off'} size={18} color="#fff" />
-              </TouchableOpacity>
+              {/* Only show eye toggle if employee has viewBalance permission or not an employee */}
+              {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.viewBalance) && (
+                <TouchableOpacity 
+                  style={styles.eyeToggle}
+                  onPress={toggleBalanceVisibility}
+                  activeOpacity={0.7}
+                >
+                  <Icon name={showBalance ? 'eye' : 'eye-off'} size={18} color="#fff" />
+                </TouchableOpacity>
+              )}
               {canShowLocalCurrency && (
                 <TouchableOpacity 
                   style={styles.currencyToggle}
@@ -585,15 +629,18 @@ export const HomeScreen = () => {
               {showLocalCurrency ? currency.symbol : '$'}
             </Text>
             <Text style={styles.balanceAmount}>
-              {showBalance 
-                ? (showLocalCurrency 
-                    ? formatAmount.plain(totalLocalValue)
-                    : totalUSDValue.toLocaleString('en-US', { 
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2 
-                      })
-                  )
-                : '••••••'
+              {/* Hide balance for employees without viewBalance permission */}
+              {(activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
+                ? '••••••'
+                : showBalance 
+                  ? (showLocalCurrency 
+                      ? formatAmount.plain(totalLocalValue)
+                      : totalUSDValue.toLocaleString('en-US', { 
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2 
+                        })
+                    )
+                  : '••••••'
               }
             </Text>
           </Animated.View>
@@ -616,34 +663,54 @@ export const HomeScreen = () => {
             }
           ]}
         >
-          {quickActions.map((action, index) => (
-            <TouchableOpacity
-              key={action.id}
-              style={styles.actionButton}
-              onPress={action.route}
-              activeOpacity={0.7}
-            >
-              <Animated.View 
-                style={[
-                  styles.actionIcon,
-                  { backgroundColor: action.color },
-                  {
-                    transform: [
-                      {
-                        scale: scaleAnim.interpolate({
-                          inputRange: [0.95, 1],
-                          outputRange: [0.8, 1],
-                        })
-                      }
-                    ]
-                  }
-                ]}
+          {/* Show employee welcome message if no quick actions available */}
+          {quickActions.length === 0 && activeAccount?.isEmployee ? (
+            <View style={styles.employeeWelcomeContainer}>
+              <View style={styles.employeeWelcomeIcon}>
+                <Icon name="briefcase" size={32} color="#7c3aed" />
+              </View>
+              <Text style={styles.employeeWelcomeTitle}>
+                ¡Hola, equipo {activeAccount?.business?.name}!
+              </Text>
+              <Text style={styles.employeeWelcomeText}>
+                Como {activeAccount?.employeeRole === 'cashier' ? 'cajero' : 
+                       activeAccount?.employeeRole === 'manager' ? 'gerente' : 
+                       activeAccount?.employeeRole === 'admin' ? 'administrador' : 'parte del equipo'},{' '}
+                {activeAccount?.employeePermissions?.acceptPayments 
+                  ? 'estás listo para recibir pagos y atender a nuestros clientes.'
+                  : 'eres una parte importante de nuestro equipo.'}
+              </Text>
+            </View>
+          ) : (
+            quickActions.map((action, index) => (
+              <TouchableOpacity
+                key={action.id}
+                style={styles.actionButton}
+                onPress={action.route}
+                activeOpacity={0.7}
               >
-                <Icon name={action.icon} size={22} color="#fff" />
-              </Animated.View>
-              <Text style={styles.actionLabel}>{action.label}</Text>
-            </TouchableOpacity>
-          ))}
+                <Animated.View 
+                  style={[
+                    styles.actionIcon,
+                    { backgroundColor: action.color },
+                    {
+                      transform: [
+                        {
+                          scale: scaleAnim.interpolate({
+                            inputRange: [0.95, 1],
+                            outputRange: [0.8, 1],
+                          })
+                        }
+                      ]
+                    }
+                  ]}
+                >
+                  <Icon name={action.icon} size={22} color="#fff" />
+                </Animated.View>
+                <Text style={styles.actionLabel}>{action.label}</Text>
+              </TouchableOpacity>
+            ))
+          )}
         </Animated.View>
 
         {/* Wallets Section */}
@@ -687,7 +754,10 @@ export const HomeScreen = () => {
                   </View>
                   <View style={styles.walletBalanceContainer}>
                     <Text style={styles.walletBalanceText}>
-                      {showBalance ? `$${cUSDBalance.toFixed(2)}` : '••••'}
+                      {/* Hide balance for employees without viewBalance permission */}
+                      {(activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
+                        ? '••••'
+                        : showBalance ? `$${cUSDBalance.toFixed(2)}` : '••••'}
                     </Text>
                     <Icon name="chevron-right" size={20} color="#9ca3af" />
                   </View>
@@ -712,7 +782,10 @@ export const HomeScreen = () => {
                   </View>
                   <View style={styles.walletBalanceContainer}>
                     <Text style={styles.walletBalanceText}>
-                      {showBalance ? confioBalance.toFixed(2) : '••••'}
+                      {/* Hide balance for employees without viewBalance permission */}
+                      {(activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
+                        ? '••••'
+                        : showBalance ? confioBalance.toFixed(2) : '••••'}
                     </Text>
                     <Icon name="chevron-right" size={20} color="#9ca3af" />
                   </View>
@@ -923,6 +996,35 @@ const styles = StyleSheet.create({
     fontSize: 18,
     textAlign: 'center',
     marginTop: 40,
+  },
+  // Employee welcome styles
+  employeeWelcomeContainer: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  employeeWelcomeIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#f3e8ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  employeeWelcomeTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#111827',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  employeeWelcomeText: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
+    paddingHorizontal: 20,
+    lineHeight: 20,
   },
   // Legacy styles kept for compatibility
   content: {
