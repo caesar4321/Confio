@@ -90,6 +90,7 @@ def get_jwt_business_context(info):
         }
         
         logger.info(f"Extracted JWT context: {business_context}")
+        logger.info(f"JWT business_id type: {type(payload.get('business_id'))}, value: {payload.get('business_id')}")
         return business_context
         
     except Exception as e:
@@ -123,6 +124,8 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
     if jwt_context['account_type'] == 'business' and jwt_context['business_id']:
         from .models_employee import BusinessEmployee
         
+        logger.info(f"Validating business access: user_id={user.id}, business_id={jwt_context['business_id']}")
+        
         # Check user's relationship to this business
         employee_record = BusinessEmployee.objects.filter(
             user=user,
@@ -133,6 +136,8 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
         if not employee_record:
             logger.warning(f"User {user.id} has no relation to business {jwt_context['business_id']} - access denied")
             return None
+        
+        logger.info(f"Found employee record: role={employee_record.role}, business_name={employee_record.business.name}")
         
         # Add employee record to context for permission checking
         jwt_context['employee_record'] = employee_record
