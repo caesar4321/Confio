@@ -326,3 +326,29 @@ def handle_conversion_soft_delete(sender, instance, **kwargs):
         UnifiedTransactionTable.objects.filter(conversion=instance).update(
             deleted_at=timezone.now()
         )
+
+
+# Achievement system signals
+from django.contrib.auth import get_user_model
+from .models import AchievementType, UserAchievement
+
+User = get_user_model()
+
+
+@receiver(post_save, sender=User)
+def create_welcome_achievement(sender, instance, created, **kwargs):
+    """
+    Automatically award the welcome achievement to new users
+    """
+    if created:
+        try:
+            welcome_achievement = AchievementType.objects.get(slug='welcome_signup')
+            UserAchievement.objects.create(
+                user=instance,
+                achievement_type=welcome_achievement,
+                status='earned',
+                earned_at=instance.date_joined
+            )
+        except AchievementType.DoesNotExist:
+            # Achievement type doesn't exist yet, skip
+            pass

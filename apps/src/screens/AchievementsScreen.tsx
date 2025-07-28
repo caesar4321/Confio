@@ -1,9 +1,17 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Share, Platform, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Share, Platform, SafeAreaView, TextInput, Alert, Linking } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
+import { useQuery, useMutation } from '@apollo/client';
+import {
+  GET_ACHIEVEMENT_TYPES,
+  GET_USER_ACHIEVEMENTS,
+  CLAIM_ACHIEVEMENT_REWARD,
+  CREATE_INFLUENCER_REFERRAL,
+  SUBMIT_TIKTOK_SHARE
+} from '../apollo/queries';
 
 const colors = {
   primary: '#34d399',
@@ -19,215 +27,444 @@ const colors = {
   violetLight: '#ddd6fe',
   silver: '#C0C0C0',
   bronze: '#CD7F32',
+  mint: '#3ADBBB',
+  mintLight: '#B8F0E4',
 };
 
 type Achievement = {
-  id: number;
+  id: string;
   name: string;
   description: string;
-  icon: string;
-  completed: boolean;
-  shared: boolean;
-  date?: string;
-  progress?: number;
-  maxProgress?: number;
-  reward?: string;
-  shareText?: string;
-  category: 'onboarding' | 'transactions' | 'social' | 'trading';
+  iconEmoji?: string;
+  status: 'pending' | 'earned' | 'claimed' | 'expired';
+  earnedAt?: string;
+  claimedAt?: string;
+  progressData?: any;
+  earnedValue?: number;
+  achievementType: {
+    slug: string;
+    name: string;
+    description: string;
+    category: string;
+    iconEmoji?: string;
+    confioReward: number;
+    displayOrder: number;
+  };
+};
+
+type AchievementType = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  category: string;
+  iconEmoji?: string;
+  confioReward: number;
+  displayOrder: number;
 };
 
 export const AchievementsScreen = () => {
   const navigation = useNavigation();
   const { userProfile } = useAuth();
   const { activeAccount } = useAccount();
+  const [influencerUsername, setInfluencerUsername] = useState('');
+  const [myTikTokUsername, setMyTikTokUsername] = useState('');
+  const [showInfluencerInput, setShowInfluencerInput] = useState(false);
   
-  const [achievements] = useState<Achievement[]>([
-    // Onboarding Achievements
+  // GraphQL queries
+  const { data: achievementTypesData, loading: achievementTypesLoading } = useQuery(GET_ACHIEVEMENT_TYPES);
+  const { data: userAchievementsData, loading: userAchievementsLoading, refetch: refetchAchievements } = useQuery(GET_USER_ACHIEVEMENTS);
+  
+  // GraphQL mutations
+  const [claimAchievementReward] = useMutation(CLAIM_ACHIEVEMENT_REWARD);
+  const [createInfluencerReferral] = useMutation(CREATE_INFLUENCER_REFERRAL);
+  const [submitTikTokShare] = useMutation(SUBMIT_TIKTOK_SHARE);
+  
+  // Process the achievement data
+  const achievementTypes: AchievementType[] = achievementTypesData?.achievementTypes || [];
+  const userAchievements: Achievement[] = userAchievementsData?.userAchievements || [];
+  
+  // Debug logging
+  React.useEffect(() => {
+    console.log('AchievementsScreen Debug:');
+    console.log('- Achievement Types Loading:', achievementTypesLoading);
+    console.log('- User Achievements Loading:', userAchievementsLoading);
+    console.log('- Achievement Types Count:', achievementTypes?.length || 0);
+    console.log('- User Achievements Count:', userAchievements?.length || 0);
+    console.log('- Achievement Types Data:', achievementTypes?.slice(0, 2) || []);
+    console.log('- Achievements Array:', achievements?.length || 0);
+  }, [achievementTypes, userAchievements, achievementTypesLoading, userAchievementsLoading, achievements]);
+  
+  // Create a map of user achievements by achievement type slug
+  const userAchievementMap = React.useMemo(() => {
+    const map = new Map();
+    if (userAchievements && Array.isArray(userAchievements)) {
+      userAchievements.forEach(achievement => {
+        if (achievement?.achievementType?.slug) {
+          map.set(achievement.achievementType.slug, achievement);
+        }
+      });
+    }
+    return map;
+  }, [userAchievements]);
+  
+  // Combine achievement types with user progress, fallback to mock data if empty
+  const achievements: Achievement[] = React.useMemo(() => {
+    if (achievementTypes && achievementTypes.length > 0) {
+      return achievementTypes.map(type => {
+        const userAchievement = userAchievementMap.get(type.slug);
+        return {
+          id: userAchievement?.id || type.id,
+          name: type.name,
+          description: type.description,
+          iconEmoji: type.iconEmoji,
+          status: userAchievement?.status || 'pending',
+          earnedAt: userAchievement?.earnedAt,
+          claimedAt: userAchievement?.claimedAt,
+          progressData: userAchievement?.progressData,
+          earnedValue: userAchievement?.earnedValue,
+          achievementType: type
+        };
+      }).sort((a, b) => a.achievementType.displayOrder - b.achievementType.displayOrder);
+    } else {
+      // Use mock data when GraphQL data is not available
+      return mockAchievements || [];
+    }
+  }, [achievementTypes, userAchievementMap, mockAchievements]);
+
+  const mockAchievements = React.useMemo<Achievement[]>(() => [
+    // Fallback mock data when GraphQL is loading or unavailable
     {
-      id: 1,
-      name: 'Primeros Pasos',
-      description: 'Crea tu cuenta y verifica tu número',
-      icon: 'user-check',
-      completed: true,
-      shared: true,
-      date: '15 Nov',
-      category: 'onboarding',
-      shareText: '¡Acabo de unirme a Confío! La nueva forma de manejar dinero en Latinoamérica 🚀 #RetoConfio',
+      id: 'mock-welcome',
+      name: 'Pionero Beta',
+      description: 'Únete a Confío durante la fase beta - Exclusivo para los primeros usuarios',
+      iconEmoji: '🚀',
+      status: 'earned',
+      earnedAt: new Date().toISOString(),
+      progressData: null,
+      earnedValue: null,
+      achievementType: {
+        slug: 'welcome_signup',
+        name: 'Pionero Beta',
+        description: 'Únete a Confío durante la fase beta - Exclusivo para los primeros usuarios',
+        category: 'onboarding',
+        iconEmoji: '🚀',
+        confioReward: 4,
+        displayOrder: 1
+      }
     },
     {
-      id: 2,
+      id: 'mock-verification',
       name: 'Cuenta Verificada',
       description: 'Completa la verificación de identidad',
-      icon: 'shield',
-      completed: false,
-      shared: false,
-      category: 'onboarding',
-      progress: 0,
-      maxProgress: 1,
-      reward: '10 $CONFIO',
-      shareText: '¡Mi cuenta está verificada en Confío! Ahora puedo hacer transacciones más seguras 🛡️ #RetoConfio',
-    },
-    
-    // Transaction Achievements
-    {
-      id: 3,
-      name: 'Primera Compra',
-      description: 'Realiza tu primera compra de cUSD',
-      icon: 'shopping-cart',
-      completed: true,
-      shared: false,
-      date: '18 Nov',
-      category: 'transactions',
-      reward: '5 $CONFIO',
-      shareText: '¡Hice mi primera compra de stablecoins en Confío! 💰 #RetoConfio',
+      iconEmoji: '🛡️',
+      status: 'pending',
+      earnedAt: null,
+      progressData: { current: 0, target: 1 },
+      earnedValue: null,
+      achievementType: {
+        slug: 'identity_verified',
+        name: 'Cuenta Verificada',
+        description: 'Completa la verificación de identidad',
+        category: 'verification',
+        iconEmoji: '🛡️',
+        confioReward: 20,
+        displayOrder: 2
+      }
     },
     {
-      id: 4,
-      name: 'Primer Envío',
-      description: 'Envía dinero a un amigo',
-      icon: 'send',
-      completed: true,
-      shared: true,
-      date: '20 Nov',
-      category: 'transactions',
-      shareText: '¡Envié dinero instantáneamente con Confío! Sin comisiones bancarias 📲 #RetoConfio',
-    },
-    {
-      id: 5,
-      name: 'Primera Recepción',
-      description: 'Recibe dinero de otro usuario',
-      icon: 'download',
-      completed: true,
-      shared: false,
-      date: '22 Nov',
-      category: 'transactions',
-      shareText: '¡Recibí mi primer pago en Confío! Directo a mi wallet 🎯 #RetoConfio',
-    },
-    {
-      id: 6,
-      name: 'Primer Pago',
-      description: 'Paga en un comercio con QR',
-      icon: 'credit-card',
-      completed: true,
-      shared: false,
-      date: '25 Nov',
-      category: 'transactions',
-      shareText: '¡Pagué con QR en Confío! El futuro de los pagos en Latinoamérica 🛒 #RetoConfio',
-    },
-    
-    // Trading Achievements
-    {
-      id: 7,
+      id: 'mock-first-trade',
       name: 'Trader Novato',
-      description: 'Completa tu primer intercambio P2P',
-      icon: 'refresh-cw',
-      completed: false,
-      shared: false,
-      category: 'trading',
-      progress: 0,
-      maxProgress: 1,
-      shareText: '¡Completé mi primer intercambio P2P en Confío! 🔄 #RetoConfio',
+      description: 'Completa tu primer intercambio P2P exitoso',
+      iconEmoji: '🔄',
+      status: 'pending',
+      earnedAt: null,
+      progressData: { current: 0, target: 1 },
+      earnedValue: null,
+      achievementType: {
+        slug: 'first_p2p_trade',
+        name: 'Trader Novato',
+        description: 'Completa tu primer intercambio P2P exitoso',
+        category: 'trading',
+        iconEmoji: '🔄',
+        confioReward: 20,
+        displayOrder: 20
+      }
     },
     {
-      id: 8,
-      name: 'Trader Frecuente',
-      description: 'Completa 10 intercambios exitosos',
-      icon: 'trending-up',
-      completed: false,
-      shared: false,
-      category: 'trading',
-      progress: 3,
-      maxProgress: 10,
-      shareText: '¡Ya hice 10 intercambios en Confío! Soy un trader frecuente 📈 #RetoConfio',
+      id: 'mock-nano-influencer',
+      name: 'Nano-Influencer',
+      description: 'Trae entre 1-10 referidos que completen su registro',
+      iconEmoji: '🌱',
+      status: 'pending',
+      earnedAt: null,
+      progressData: { current: 0, target: 1 },
+      earnedValue: null,
+      achievementType: {
+        slug: 'nano_influencer',
+        name: 'Nano-Influencer',
+        description: 'Trae entre 1-10 referidos que completen su registro',
+        category: 'ambassador',
+        iconEmoji: '🌱',
+        confioReward: 4,
+        displayOrder: 10
+      }
     },
     {
-      id: 9,
-      name: 'Trader Experto',
-      description: 'Completa 50 intercambios exitosos',
-      icon: 'award',
-      completed: false,
-      shared: false,
-      category: 'trading',
-      progress: 3,
-      maxProgress: 50,
-      reward: '100 $CONFIO',
-      shareText: '¡Soy un Trader Experto en Confío! 50 intercambios completados 🏆 #RetoConfio',
-    },
+      id: 'mock-primera-viral',
+      name: 'Primera Viral',
+      description: 'Tu TikTok sobre Confío alcanzó 1,000 visualizaciones',
+      iconEmoji: '🎬',
+      status: 'pending',
+      earnedAt: null,
+      progressData: { current: 0, target: 1000 },
+      earnedValue: null,
+      achievementType: {
+        slug: 'primera_viral',
+        name: 'Primera Viral',
+        description: 'Tu TikTok sobre Confío alcanzó 1,000 visualizaciones',
+        category: 'social',
+        iconEmoji: '🎬',
+        confioReward: 50,
+        displayOrder: 30
+      }
+    }
+  ], []);
+
+  const handleClaimReward = async (achievement: Achievement) => {
+    if (achievement.status !== 'earned') return;
     
-    // Social Achievements
-    {
-      id: 10,
-      name: 'Embajador Confío',
-      description: 'Invita a 5 amigos que se registren',
-      icon: 'users',
-      completed: false,
-      shared: false,
-      category: 'social',
-      progress: 2,
-      maxProgress: 5,
-      reward: '50 $CONFIO',
-      shareText: '¡Soy Embajador Confío! Únete con mi código y recibe beneficios 🎁 #RetoConfio',
-    },
-    {
-      id: 11,
-      name: 'Influencer Cripto',
-      description: 'Comparte 10 logros en redes sociales',
-      icon: 'share-2',
-      completed: false,
-      shared: false,
-      category: 'social',
-      progress: 2,
-      maxProgress: 10,
-      shareText: '¡Soy un Influencer Cripto en Confío! Sígueme para más tips 🌟 #RetoConfio',
-    },
-  ]);
+    try {
+      const result = await claimAchievementReward({
+        variables: { achievementId: achievement.id }
+      });
+      
+      if (result.data?.claimAchievementReward?.success) {
+        Alert.alert(
+          '¡Recompensa Reclamada!',
+          `Has reclamado ${achievement.achievementType.confioReward} $CONFIO`,
+          [{ text: 'OK' }]
+        );
+        refetchAchievements();
+      } else {
+        Alert.alert('Error', result.data?.claimAchievementReward?.error || 'No se pudo reclamar la recompensa');
+      }
+    } catch (error) {
+      console.error('Error claiming reward:', error);
+      Alert.alert('Error', 'Ocurrió un error al reclamar la recompensa');
+    }
+  };
+
+  const cleanTikTokUsername = (username: string): string => {
+    // Remove @ if present and clean invalid characters
+    // TikTok usernames: letters, numbers, underscores, periods (1-24 chars)
+    return username
+      .replace(/^@+/, '') // Remove leading @
+      .replace(/[^a-zA-Z0-9_.]/g, '') // Keep only valid chars
+      .toLowerCase()
+      .slice(0, 24); // Max length limit
+  };
+
+  const handleInfluencerReferral = async () => {
+    const cleanedInfluencer = cleanTikTokUsername(influencerUsername);
+    const cleanedMyUsername = cleanTikTokUsername(myTikTokUsername);
+    
+    if (!cleanedInfluencer) {
+      Alert.alert('Error', 'Por favor ingresa el usuario del influencer');
+      return;
+    }
+    
+    if (!cleanedMyUsername) {
+      Alert.alert('Error', 'Por favor ingresa tu usuario de TikTok');
+      return;
+    }
+    
+    if (cleanedInfluencer.length < 2 || cleanedMyUsername.length < 2) {
+      Alert.alert('Error', 'Los nombres de usuario deben tener al menos 2 caracteres');
+      return;
+    }
+    
+    if (cleanedInfluencer === cleanedMyUsername) {
+      Alert.alert('Error', 'No puedes ser tu propio influencer');
+      return;
+    }
+    
+    try {
+      const result = await createInfluencerReferral({
+        variables: {
+          tiktokUsername: cleanedInfluencer,
+          attributionData: JSON.stringify({
+            source: 'achievements_screen',
+            platform: Platform.OS,
+            my_tiktok_username: cleanedMyUsername,
+            original_input: influencerUsername
+          })
+        }
+      });
+      
+      if (result.data?.createInfluencerReferral?.success) {
+        Alert.alert(
+          '¡Referencia Registrada!',
+          '¡Genial! Has registrado tu referencia del influencer. Ambos recibirán $1 en CONFIO cuando completes tu primera transacción.',
+          [{ text: 'OK' }]
+        );
+        setInfluencerUsername('');
+        setMyTikTokUsername('');
+        setShowInfluencerInput(false);
+        refetchAchievements();
+      } else {
+        Alert.alert('Error', result.data?.createInfluencerReferral?.error || 'No se pudo registrar la referencia');
+      }
+    } catch (error) {
+      console.error('Error creating influencer referral:', error);
+      Alert.alert('Error', 'Ocurrió un error al registrar la referencia');
+    }
+  };
+
 
   const handleShare = async (achievement: Achievement) => {
+    if (achievement.status !== 'earned' && achievement.status !== 'claimed') return;
+    
     try {
-      const shareText = achievement.shareText || `¡Desbloqueé "${achievement.name}" en Confío! 🎉 #RetoConfio`;
+      const shareText = `¡Desbloqueé "${achievement.name}" en Confío! ${achievement.achievementType.iconEmoji || '🎉'} #RetoConfio #ConfioLogros`;
       
-      await Share.share({
+      const shareResult = await Share.share({
         message: shareText,
         title: 'Logro en Confío',
       });
       
-      // Here you would update the achievement as shared
-      console.log('Achievement shared:', achievement.id);
+      // If user shared to TikTok or similar, prompt for TikTok URL
+      if (shareResult.action === Share.sharedAction) {
+        Alert.alert(
+          '¿Compartiste en TikTok?',
+          'Si compartiste este logro en TikTok, pega el enlace aquí para ganar CONFIO extra por las visualizaciones',
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            { 
+              text: 'Agregar TikTok', 
+              onPress: () => promptForTikTokUrl(achievement)
+            }
+          ]
+        );
+      }
     } catch (error) {
       console.error('Error sharing achievement:', error);
     }
   };
+  
+  const promptForTikTokUrl = (achievement: Achievement) => {
+    Alert.prompt(
+      'Enlace de TikTok',
+      'Pega el enlace de tu video de TikTok aquí:',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Enviar',
+          onPress: (tiktokUrl) => {
+            if (tiktokUrl && tiktokUrl.includes('tiktok.com')) {
+              submitTikTokShare({
+                variables: {
+                  tiktokUrl: tiktokUrl.trim(),
+                  shareType: 'achievement',
+                  achievementId: achievement.id,
+                  hashtagsUsed: JSON.stringify(['#RetoConfio', '#ConfioLogros'])
+                }
+              }).then(result => {
+                if (result.data?.submitTikTokShare?.success) {
+                  Alert.alert(
+                    '¡TikTok Enviado!',
+                    'Hemos recibido tu enlace de TikTok. Te notificaremos cuando sea verificado y recibas CONFIO extra por las visualizaciones.',
+                    [{ text: 'OK' }]
+                  );
+                } else {
+                  Alert.alert('Error', 'No se pudo procesar el enlace de TikTok');
+                }
+              }).catch(error => {
+                console.error('Error submitting TikTok share:', error);
+                Alert.alert('Error', 'Ocurrió un error al procesar el enlace');
+              });
+            } else {
+              Alert.alert('Error', 'Por favor ingresa un enlace válido de TikTok');
+            }
+          }
+        }
+      ],
+      'plain-text'
+    );
+  };
 
-  const getCategoryColor = (category: Achievement['category']) => {
-    switch (category) {
+  const getCategoryColor = (category: string) => {
+    const normalizedCategory = category.toLowerCase();
+    switch (normalizedCategory) {
       case 'onboarding': return colors.primary;
-      case 'transactions': return colors.accent;
       case 'trading': return colors.secondary;
-      case 'social': return '#FF6B6B';
+      case 'payments': return '#FF6B6B';
+      case 'social': return colors.accent;
+      case 'verification': return '#FFB800';
+      case 'ambassador': return '#FFD700';
       default: return colors.primary;
     }
   };
-
-  const getProgressPercentage = (progress?: number, maxProgress?: number) => {
-    if (!progress || !maxProgress) return 0;
-    return (progress / maxProgress) * 100;
+  
+  const getCategoryIcon = (category: string) => {
+    const normalizedCategory = category.toLowerCase();
+    switch (normalizedCategory) {
+      case 'onboarding': return 'home';
+      case 'trading': return 'refresh-cw';
+      case 'payments': return 'credit-card';
+      case 'social': return 'users';
+      case 'verification': return 'shield';
+      case 'ambassador': return 'award';
+      default: return 'star';
+    }
   };
 
-  const completedCount = achievements.filter(a => a.completed).length;
-  const totalConfioMonedas = achievements.filter(a => a.completed).reduce((sum, a) => {
-    if (a.reward) {
-      const monedas = parseFloat(a.reward.split(' ')[0]);
-      return sum + monedas;
-    }
-    return sum;
-  }, 0);
+  const getProgressPercentage = (achievement: Achievement) => {
+    if (!achievement.progressData) return 0;
+    const { current, target } = achievement.progressData;
+    if (!current || !target) return 0;
+    return Math.min((current / target) * 100, 100);
+  };
+
+  const completedCount = (achievements || []).filter(a => a.status === 'earned' || a.status === 'claimed').length;
+  const totalConfioEarned = (achievements || [])
+    .filter(a => a.status === 'earned' || a.status === 'claimed')
+    .reduce((sum, a) => sum + (a.achievementType?.confioReward || 0), 0);
+  
+  const claimedConfio = (achievements || [])
+    .filter(a => a.status === 'claimed')
+    .reduce((sum, a) => sum + (a.achievementType?.confioReward || 0), 0);
+  
+  const pendingConfio = totalConfioEarned - claimedConfio;
 
   const categories = [
-    { key: 'onboarding', name: 'Inicio', icon: 'home' },
-    { key: 'transactions', name: 'Transacciones', icon: 'credit-card' },
+    { key: 'onboarding', name: 'Bienvenida', icon: 'home' },
+    { key: 'verification', name: 'Verificación', icon: 'shield' },
     { key: 'trading', name: 'Intercambios', icon: 'refresh-cw' },
-    { key: 'social', name: 'Social', icon: 'users' },
+    { key: 'payments', name: 'Pagos y Transacciones', icon: 'credit-card' },
+    { key: 'social', name: 'Comunidad', icon: 'users' },
+    { key: 'ambassador', name: 'Embajador', icon: 'award' },
   ];
+  
+  // Show loading state only for a brief moment, then show mock data
+  const isInitialLoading = (achievementTypesLoading || userAchievementsLoading) && (!achievements || achievements.length === 0);
+  
+  if (isInitialLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Icon name="arrow-left" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Logros</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Cargando logros...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -247,12 +484,12 @@ export const AchievementsScreen = () => {
             <Text style={styles.statLabel}>Completados</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{achievements.length}</Text>
+            <Text style={styles.statNumber}>{achievements?.length || 0}</Text>
             <Text style={styles.statLabel}>Total</Text>
           </View>
           <View style={styles.statCard}>
             <Icon name="lock" size={16} color={colors.violet} style={styles.lockIcon} />
-            <Text style={styles.statNumber}>{totalConfioMonedas}</Text>
+            <Text style={styles.statNumber}>{totalConfioEarned}</Text>
             <Text style={styles.statLabel}>$CONFIO</Text>
             <TouchableOpacity 
               style={styles.infoButton}
@@ -263,7 +500,7 @@ export const AchievementsScreen = () => {
           </View>
         </View>
 
-        {/* Inspirational Message */}
+        {/* 1. Tu Futuro con $CONFIO - PRIMARY (Purple) */}
         <TouchableOpacity 
           style={styles.inspirationalCard}
           onPress={() => navigation.navigate('ConfioTokenInfo' as any)}
@@ -284,34 +521,146 @@ export const AchievementsScreen = () => {
           </View>
         </TouchableOpacity>
 
+        {/* 2. ¿Te trajo un influencer? - SECONDARY (Orange) */}
+        {!showInfluencerInput ? (
+          <TouchableOpacity 
+            style={styles.orangeCard}
+            onPress={() => setShowInfluencerInput(true)}
+          >
+            <View style={styles.cardHeader}>
+              <Icon name="users" size={20} color="#F59E0B" />
+              <Text style={styles.orangeTitle}>¿Te trajo un influencer?</Text>
+            </View>
+            <Text style={styles.orangeText}>
+              Si llegaste por un TikTok de un influencer, ingresa su usuario aquí para que ambos reciban 4 CONFIO 💰
+            </Text>
+            <View style={styles.learnMoreRow}>
+              <Text style={styles.orangeLearnMore}>Agregar referencia</Text>
+              <Icon name="chevron-right" size={16} color="#F59E0B" />
+            </View>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.orangeInputCard}>
+            <View style={styles.orangeInputHeader}>
+              <Icon name="users" size={20} color="#F59E0B" />
+              <Text style={styles.orangeInputTitle}>Referencia de Influencer</Text>
+            </View>
+            <Text style={styles.influencerInputLabel}>Usuario de TikTok del influencer:</Text>
+            <View style={styles.inputWithAt}>
+              <Text style={styles.atSymbol}>@</Text>
+              <TextInput
+                style={styles.influencerInputWithAt}
+                value={influencerUsername}
+                onChangeText={(text) => {
+                  const cleaned = cleanTikTokUsername(text);
+                  setInfluencerUsername(cleaned);
+                }}
+                placeholder="confio_venezuela"
+                placeholderTextColor="#9CA3AF"
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={24}
+              />
+            </View>
+            
+            <Text style={styles.influencerInputLabel}>Usuario de Mi TikTok:</Text>
+            <View style={styles.inputWithAt}>
+              <Text style={styles.atSymbol}>@</Text>
+              <TextInput
+                style={styles.influencerInputWithAt}
+                value={myTikTokUsername}
+                onChangeText={(text) => {
+                  const cleaned = cleanTikTokUsername(text);
+                  setMyTikTokUsername(cleaned);
+                }}
+                placeholder="mi_usuario"
+                placeholderTextColor="#9CA3AF"
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={24}
+              />
+            </View>
+            <Text style={styles.inputHint}>
+              Necesitamos ambos usuarios para prevenir abuso y fraude
+            </Text>
+            <View style={styles.influencerButtonRow}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  setShowInfluencerInput(false);
+                  setInfluencerUsername('');
+                  setMyTikTokUsername('');
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.submitButton}
+                onPress={handleInfluencerReferral}
+              >
+                <Text style={styles.submitButtonText}>Registrar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+        
+        {/* 3. Mi Progreso Viral - TERTIARY (Mint) */}
+        <TouchableOpacity 
+          style={styles.mintCard}
+          onPress={() => navigation.navigate('MiProgresoViral' as any)}
+        >
+          <View style={styles.cardHeader}>
+            <Icon name="trending-up" size={20} color={colors.mint} />
+            <Text style={styles.mintTitle}>Mi Progreso Viral</Text>
+          </View>
+          <Text style={styles.mintText}>
+            Ve tus estadísticas de influencer, sube TikToks y gana CONFIO por visualizaciones 🚀
+          </Text>
+          <View style={styles.learnMoreRow}>
+            <Text style={styles.mintLearnMore}>Ver dashboard</Text>
+            <Icon name="chevron-right" size={16} color={colors.mint} />
+          </View>
+        </TouchableOpacity>
+
+
         {/* Progress Bar */}
         <View style={styles.progressContainer}>
           <View style={styles.progressHeader}>
             <Text style={styles.progressTitle}>Progreso General</Text>
             <Text style={styles.progressText}>
-              {Math.round((completedCount / achievements.length) * 100)}%
+              {(achievements && achievements.length > 0) ? Math.round((completedCount / achievements.length) * 100) : 0}%
             </Text>
           </View>
           <View style={styles.progressBarBg}>
             <View 
               style={[
                 styles.progressBarFill, 
-                { width: `${(completedCount / achievements.length) * 100}%` }
+                { width: (achievements && achievements.length > 0) ? `${(completedCount / achievements.length) * 100}%` : '0%' }
               ]} 
             />
           </View>
+          {(!achievements || achievements.length === 0) && (
+            <Text style={styles.noDataText}>
+              Cargando logros desde el servidor...
+            </Text>
+          )}
         </View>
 
         {/* Categories */}
         {categories.map(category => {
-          const categoryAchievements = achievements.filter(a => a.category === category.key);
-          const categoryCompleted = categoryAchievements.filter(a => a.completed).length;
+          const categoryAchievements = (achievements || []).filter(a => a.achievementType?.category?.toLowerCase() === category.key);
+          const categoryCompleted = categoryAchievements.filter(a => a.status === 'earned' || a.status === 'claimed').length;
+          
+          // Skip empty categories
+          if (categoryAchievements.length === 0) {
+            return null;
+          }
           
           return (
             <View key={category.key} style={styles.categorySection}>
               <View style={styles.categoryHeader}>
                 <View style={styles.categoryTitleRow}>
-                  <Icon name={category.icon} size={20} color={getCategoryColor(category.key as Achievement['category'])} />
+                  <Icon name={category.icon} size={20} color={getCategoryColor(category.key)} />
                   <Text style={styles.categoryTitle}>{category.name}</Text>
                 </View>
                 <Text style={styles.categoryProgress}>
@@ -324,72 +673,98 @@ export const AchievementsScreen = () => {
                   key={achievement.id}
                   style={[
                     styles.achievementCard,
-                    achievement.completed && styles.achievementCardCompleted
+                    (achievement.status === 'earned' || achievement.status === 'claimed') && styles.achievementCardCompleted
                   ]}
-                  onPress={() => achievement.completed && handleShare(achievement)}
-                  disabled={!achievement.completed}
+                  onPress={() => {
+                    if (achievement?.status === 'earned') {
+                      handleClaimReward(achievement);
+                    } else if (achievement?.status === 'claimed') {
+                      handleShare(achievement);
+                    }
+                  }}
+                  disabled={!achievement || achievement.status === 'pending'}
                 >
                   <View style={[
                     styles.achievementIcon,
-                    achievement.completed && styles.achievementIconCompleted
+                    (achievement?.status === 'earned' || achievement?.status === 'claimed') && styles.achievementIconCompleted
                   ]}>
-                    <Icon 
-                      name={achievement.icon} 
-                      size={24} 
-                      color={achievement.completed ? '#fff' : '#9CA3AF'} 
-                    />
+                    {achievement?.achievementType?.iconEmoji ? (
+                      <Text style={styles.achievementEmoji}>{achievement.achievementType.iconEmoji}</Text>
+                    ) : (
+                      <Icon 
+                        name={getCategoryIcon(achievement?.achievementType?.category || 'onboarding')} 
+                        size={24} 
+                        color={(achievement?.status === 'earned' || achievement?.status === 'claimed') ? '#fff' : '#9CA3AF'} 
+                      />
+                    )}
                   </View>
 
                   <View style={styles.achievementContent}>
-                    <Text style={[
-                      styles.achievementName,
-                      !achievement.completed && styles.achievementNameLocked
-                    ]}>
-                      {achievement.name}
-                    </Text>
+                    <View style={styles.achievementTitleRow}>
+                      <Text style={[
+                        styles.achievementName,
+                        achievement?.status === 'pending' && styles.achievementNameLocked
+                      ]}>
+                        {achievement?.name || 'Unknown Achievement'}
+                      </Text>
+                      {achievement?.status === 'earned' && (
+                        <View style={styles.claimableBadge}>
+                          <Text style={styles.claimableText}>¡Reclamar!</Text>
+                        </View>
+                      )}
+                      {achievement?.status === 'claimed' && (
+                        <Icon name="check-circle" size={16} color={colors.primary} />
+                      )}
+                    </View>
                     <Text style={styles.achievementDescription}>
-                      {achievement.description}
+                      {achievement?.description || 'No description available'}
                     </Text>
                     
-                    {achievement.progress !== undefined && achievement.maxProgress && !achievement.completed && (
+                    {achievement?.progressData && achievement?.status === 'pending' && (
                       <View style={styles.achievementProgressContainer}>
                         <View style={styles.achievementProgressBg}>
                           <View 
                             style={[
                               styles.achievementProgressFill,
-                              { width: `${getProgressPercentage(achievement.progress, achievement.maxProgress)}%` }
+                              { width: `${getProgressPercentage(achievement)}%` }
                             ]} 
                           />
                         </View>
                         <Text style={styles.achievementProgressText}>
-                          {achievement.progress}/{achievement.maxProgress}
+                          {achievement.progressData?.current || 0}/{achievement.progressData?.target || 1}
                         </Text>
                       </View>
                     )}
 
-                    {achievement.reward && (
+                    {(achievement?.achievementType?.confioReward || 0) > 0 && (
                       <View style={styles.rewardContainer}>
                         <Icon name="gift" size={14} color={colors.violet} />
-                        <Text style={styles.rewardText}>{achievement.reward}</Text>
+                        <Text style={styles.rewardText}>{achievement?.achievementType?.confioReward || 0} $CONFIO</Text>
                       </View>
                     )}
 
-                    {achievement.completed && achievement.date && (
+                    {achievement?.earnedAt && (
                       <Text style={styles.achievementDate}>
-                        Completado: {achievement.date}
+                        {achievement?.status === 'claimed' ? 'Reclamado' : 'Completado'}: {new Date(achievement.earnedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
                       </Text>
                     )}
                   </View>
 
-                  {achievement.completed && (
+                  {(achievement?.status === 'earned' || achievement?.status === 'claimed') && (
                     <TouchableOpacity 
-                      style={styles.shareButton}
-                      onPress={() => handleShare(achievement)}
+                      style={styles.actionButton}
+                      onPress={() => {
+                        if (achievement?.status === 'earned') {
+                          handleClaimReward(achievement);
+                        } else if (achievement?.status === 'claimed') {
+                          handleShare(achievement);
+                        }
+                      }}
                     >
                       <Icon 
-                        name={achievement.shared ? "check-circle" : "share-2"} 
+                        name={achievement?.status === 'earned' ? "gift" : "share-2"} 
                         size={20} 
-                        color={achievement.shared ? colors.primary : colors.accent} 
+                        color={achievement?.status === 'earned' ? colors.violet : colors.accent} 
                       />
                     </TouchableOpacity>
                   )}
@@ -446,6 +821,45 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
     position: 'relative',
+  },
+  actionCardsWrapper: {
+    paddingHorizontal: 16,
+    marginBottom: 20,
+  },
+  actionCard: {
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1.5,
+  },
+  primaryActionCard: {
+    backgroundColor: colors.violetLight,
+    borderColor: colors.violet,
+  },
+  secondaryActionCard: {
+    backgroundColor: colors.primaryLight,
+    borderColor: colors.primary,
+  },
+  tertiaryActionCard: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#FB923C',
+  },
+  actionCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  actionCardContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  actionCardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  actionCardDescription: {
+    fontSize: 13,
+    color: '#6B7280',
   },
   lockIcon: {
     position: 'absolute',
@@ -653,5 +1067,319 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 40,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#6B7280',
+  },
+  actionCardsContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    gap: 12,
+  },
+  actionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  primaryActionCard: {
+    backgroundColor: colors.violetLight,
+    borderColor: colors.violet,
+    borderWidth: 2,
+  },
+  secondaryActionCard: {
+    backgroundColor: colors.primaryLight,
+    borderColor: colors.primary,
+  },
+  tertiaryActionCard: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#FB923C',
+  },
+  actionCardContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  actionCardTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.dark,
+    flex: 1,
+  },
+  actionCardDescription: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  influencerCard: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+    backgroundColor: colors.primaryLight,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  orangeCard: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+    backgroundColor: '#FFF7ED',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#FB923C',
+  },
+  greenCard: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+    backgroundColor: colors.primaryLight,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  mintCard: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+    backgroundColor: colors.mintLight,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.mint,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  orangeTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F59E0B',
+  },
+  orangeText: {
+    fontSize: 15,
+    color: '#92400E',
+    marginBottom: 12,
+    fontWeight: '500',
+  },
+  orangeLearnMore: {
+    fontSize: 14,
+    color: '#F59E0B',
+    fontWeight: '600',
+  },
+  orangeInputCard: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+    backgroundColor: '#FFF7ED',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#FB923C',
+  },
+  orangeInputHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  orangeInputTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#F59E0B',
+  },
+  greenTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  greenText: {
+    fontSize: 15,
+    color: '#047857',
+    marginBottom: 12,
+    fontWeight: '500',
+  },
+  greenLearnMore: {
+    fontSize: 14,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  mintTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.mint,
+  },
+  mintText: {
+    fontSize: 15,
+    color: '#0F766E',
+    marginBottom: 12,
+    fontWeight: '500',
+  },
+  mintLearnMore: {
+    fontSize: 14,
+    color: colors.mint,
+    fontWeight: '600',
+  },
+  shareButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
+  },
+  socialShareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: colors.mint,
+  },
+  socialShareText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.mint,
+  },
+  influencerInputCard: {
+    marginHorizontal: 16,
+    marginBottom: 20,
+    backgroundColor: colors.neutralDark,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.violet,
+  },
+  influencerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  influencerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.dark,
+  },
+  influencerText: {
+    fontSize: 15,
+    color: colors.dark,
+    marginBottom: 12,
+    fontWeight: '500',
+  },
+  influencerInputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.dark,
+    marginBottom: 8,
+  },
+  influencerInput: {
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginBottom: 16,
+  },
+  inputWithAt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginBottom: 12,
+  },
+  atSymbol: {
+    paddingLeft: 12,
+    paddingRight: 4,
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.violet,
+  },
+  influencerInputWithAt: {
+    flex: 1,
+    padding: 12,
+    fontSize: 16,
+    paddingLeft: 0,
+  },
+  inputHint: {
+    fontSize: 12,
+    color: '#6B7280',
+    fontStyle: 'italic',
+    marginBottom: 16,
+  },
+  influencerButtonRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  submitButton: {
+    flex: 1,
+    backgroundColor: colors.violet,
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  submitButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  achievementEmoji: {
+    fontSize: 24,
+  },
+  achievementTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  claimableBadge: {
+    backgroundColor: colors.violet,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  claimableText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  actionButton: {
+    padding: 8,
+  },
+  categoryTitlePriority: {
+    fontWeight: '700',
+    color: colors.violet,
+  },
+  noDataText: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textAlign: 'center',
+    marginTop: 8,
   },
 });

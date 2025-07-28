@@ -340,6 +340,7 @@ export type MainStackParamList = {
   } | undefined;
   Achievements: undefined;
   ConfioTokenInfo: undefined;
+  MiProgresoViral: undefined;
 };
 
 // Root Stack - Top level navigation

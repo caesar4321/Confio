@@ -2300,3 +2300,297 @@ export const CANCEL_INVITATION = gql`
     }
   }
 `;
+
+// Achievement System Queries
+export const GET_ACHIEVEMENT_TYPES = gql`
+  query GetAchievementTypes($category: String) {
+    achievementTypes(category: $category) {
+      id
+      slug
+      name
+      description
+      category
+      iconEmoji
+      color
+      confioReward
+      isRepeatable
+      requiresManualReview
+      isActive
+      displayOrder
+      rewardDisplay
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_USER_ACHIEVEMENTS = gql`
+  query GetUserAchievements($status: String) {
+    userAchievements(status: $status) {
+      id
+      user {
+        id
+        username
+        firstName
+        lastName
+      }
+      account {
+        id
+        accountId
+        displayName
+      }
+      achievementType {
+        id
+        slug
+        name
+        description
+        category
+        iconEmoji
+        color
+        confioReward
+        rewardDisplay
+      }
+      status
+      earnedAt
+      claimedAt
+      progressData
+      earnedValue
+      verifiedBy {
+        id
+        username
+      }
+      verificationNotes
+      canClaimReward
+      rewardAmount
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_ACHIEVEMENT_LEADERBOARD = gql`
+  query GetAchievementLeaderboard($achievementSlug: String) {
+    achievementLeaderboard(achievementSlug: $achievementSlug) {
+      id
+      user {
+        id
+        username
+        firstName
+        lastName
+      }
+      achievementType {
+        id
+        slug
+        name
+        description
+        iconEmoji
+        color
+      }
+      status
+      earnedAt
+      earnedValue
+    }
+  }
+`;
+
+export const GET_INFLUENCER_STATS = gql`
+  query GetInfluencerStats($tiktokUsername: String!) {
+    influencerStats(tiktokUsername: $tiktokUsername) {
+      totalReferrals
+      activeReferrals
+      convertedReferrals
+      totalVolume
+      totalConfioEarned
+      isAmbassadorEligible
+    }
+  }
+`;
+
+export const GET_MY_INFLUENCER_STATS = gql`
+  query GetMyInfluencerStats {
+    myInfluencerStats {
+      totalReferrals
+      activeReferrals
+      convertedReferrals
+      totalVolume
+      totalConfioEarned
+      isAmbassadorEligible
+    }
+  }
+`;
+
+export const GET_USER_INFLUENCER_REFERRALS = gql`
+  query GetUserInfluencerReferrals {
+    userInfluencerReferrals {
+      id
+      referredUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      tiktokUsername
+      influencerUser {
+        id
+        username
+        firstName
+        lastName
+      }
+      status
+      firstTransactionAt
+      totalTransactionVolume
+      referrerConfioAwarded
+      refereeConfioAwarded
+      rewardClaimedAt
+      attributionData
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_USER_TIKTOK_SHARES = gql`
+  query GetUserTikTokShares($status: String) {
+    userTiktokShares(status: $status) {
+      id
+      user {
+        id
+        username
+        firstName
+        lastName
+      }
+      achievement {
+        id
+        achievementType {
+          id
+          name
+          iconEmoji
+        }
+        status
+      }
+      tiktokUrl
+      tiktokUsername
+      hashtagsUsed
+      shareType
+      status
+      viewCount
+      likeCount
+      shareCount
+      baseConfioReward
+      viewBonusConfio
+      totalConfioAwarded
+      verifiedBy {
+        id
+        username
+      }
+      verifiedAt
+      verificationNotes
+      hasRequiredHashtags
+      performanceTier
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+// Achievement System Mutations
+export const CLAIM_ACHIEVEMENT_REWARD = gql`
+  mutation ClaimAchievementReward($achievementId: ID!) {
+    claimAchievementReward(achievementId: $achievementId) {
+      success
+      error
+      achievement {
+        id
+        status
+        claimedAt
+      }
+      confioAwarded
+    }
+  }
+`;
+
+export const CREATE_INFLUENCER_REFERRAL = gql`
+  mutation CreateInfluencerReferral($tiktokUsername: String!, $attributionData: JSONString) {
+    createInfluencerReferral(tiktokUsername: $tiktokUsername, attributionData: $attributionData) {
+      success
+      error
+      referral {
+        id
+        tiktokUsername
+        status
+        refereeConfioAwarded
+        createdAt
+      }
+    }
+  }
+`;
+
+export const SUBMIT_TIKTOK_SHARE = gql`
+  mutation SubmitTikTokShare(
+    $tiktokUrl: String!
+    $tiktokUsername: String!
+    $hashtagsUsed: [String!]!
+    $shareType: String!
+    $achievementId: ID
+  ) {
+    submitTiktokShare(
+      tiktokUrl: $tiktokUrl
+      tiktokUsername: $tiktokUsername
+      hashtagsUsed: $hashtagsUsed
+      shareType: $shareType
+      achievementId: $achievementId
+    ) {
+      success
+      error
+      share {
+        id
+        tiktokUrl
+        status
+        shareType
+        baseConfioReward
+        created_at
+      }
+    }
+  }
+`;
+
+export const VERIFY_TIKTOK_SHARE = gql`
+  mutation VerifyTikTokShare(
+    $shareId: ID!
+    $viewCount: Int
+    $likeCount: Int
+    $shareCount: Int
+    $verificationNotes: String
+  ) {
+    verifyTiktokShare(
+      shareId: $shareId
+      viewCount: $viewCount
+      likeCount: $likeCount
+      shareCount: $shareCount
+      verificationNotes: $verificationNotes
+    ) {
+      success
+      error
+      share {
+        id
+        status
+        viewCount
+        likeCount
+        shareCount
+        totalConfioAwarded
+        verifiedAt
+      }
+      confioAwarded
+    }
+  }
+`;
+
+export const UPDATE_INFLUENCER_STATUS = gql`
+  mutation UpdateInfluencerStatus($tiktokUsername: String!, $newStatus: String!) {
+    updateInfluencerStatus(tiktokUsername: $tiktokUsername, newStatus: $newStatus) {
+      success
+      error
+      updatedCount
+    }
+  }
+`;

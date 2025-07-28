@@ -1031,6 +1031,559 @@ def ensure_single_default_bank_account(sender, instance, **kwargs):
             is_default=True
         ).exclude(id=instance.id).update(is_default=False)
 
+# Achievement System Models
+class AchievementType(SoftDeleteModel):
+    """Defines types of achievements that users can earn"""
+    
+    CATEGORY_CHOICES = [
+        ('onboarding', 'Bienvenida'),
+        ('trading', 'Intercambios'),
+        ('payments', 'Pagos y Transacciones'),
+        ('social', 'Comunidad'),
+        ('verification', 'Verificación'),
+        ('ambassador', 'Embajador'),
+    ]
+    
+    # Basic achievement info
+    slug = models.CharField(
+        max_length=50,
+        unique=True,
+        help_text="Unique identifier for this achievement type"
+    )
+    name = models.CharField(
+        max_length=100,
+        help_text="Display name for this achievement"
+    )
+    description = models.TextField(
+        help_text="Description of what this achievement represents"
+    )
+    category = models.CharField(
+        max_length=20,
+        choices=CATEGORY_CHOICES,
+        help_text="Category this achievement belongs to"
+    )
+    
+    # Visual elements
+    icon_emoji = models.CharField(
+        max_length=10,
+        blank=True,
+        null=True,
+        help_text="Emoji icon for this achievement (e.g., 🏆, 🎉, 🔥)"
+    )
+    color = models.CharField(
+        max_length=7,
+        default='#FFD700',
+        help_text="Hex color code for achievement badge"
+    )
+    
+    # Requirements and rewards
+    confio_reward = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="CONFIO tokens awarded for this achievement"
+    )
+    is_repeatable = models.BooleanField(
+        default=False,
+        help_text="Whether users can earn this achievement multiple times"
+    )
+    requires_manual_review = models.BooleanField(
+        default=False,
+        help_text="Whether this achievement requires manual admin approval"
+    )
+    
+    # Activation and ordering
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this achievement is currently available to earn"
+    )
+    display_order = models.PositiveIntegerField(
+        default=1000,
+        help_text="Display order in achievement lists (lower numbers first)"
+    )
+    
+    class Meta:
+        ordering = ['category', 'display_order', 'name']
+        verbose_name = "Achievement Type"
+        verbose_name_plural = "Achievement Types"
+    
+    def __str__(self):
+        emoji = f"{self.icon_emoji} " if self.icon_emoji else ""
+        return f"{emoji}{self.name}"
+    
+    @property
+    def reward_display(self):
+        """Get formatted reward display"""
+        if self.confio_reward > 0:
+            return f"+{self.confio_reward} CONFIO"
+        return "Sin recompensa"
+
+
+class UserAchievement(SoftDeleteModel):
+    """Tracks achievements earned by users"""
+    
+    STATUS_CHOICES = [
+        ('pending', 'Pendiente'),
+        ('earned', 'Ganado'),
+        ('claimed', 'Reclamado'),
+        ('expired', 'Expirado'),
+    ]
+    
+    # Links
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='achievements',
+        help_text="User who earned this achievement"
+    )
+    account = models.ForeignKey(
+        Account,
+        on_delete=models.CASCADE,
+        related_name='achievements',
+        null=True,
+        blank=True,
+        help_text="Account associated with this achievement (if applicable)"
+    )
+    achievement_type = models.ForeignKey(
+        AchievementType,
+        on_delete=models.CASCADE,
+        related_name='user_achievements',
+        help_text="Type of achievement earned"
+    )
+    
+    # Achievement status
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending',
+        help_text="Current status of this achievement"
+    )
+    earned_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the achievement was earned"
+    )
+    claimed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the CONFIO reward was claimed"
+    )
+    
+    # Progress and metadata
+    progress_data = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="JSON data tracking progress toward this achievement"
+    )
+    earned_value = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Specific value earned (e.g., trade volume, referral count)"
+    )
+    
+    # Admin and verification
+    verified_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='verified_achievements',
+        help_text="Admin who verified this achievement (if manual review required)"
+    )
+    verification_notes = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Admin notes about verification"
+    )
+    
+    class Meta:
+        ordering = ['-earned_at', '-created_at']
+        unique_together = [['user', 'achievement_type', 'earned_at']]  # Allow repeatable achievements
+        verbose_name = "User Achievement"
+        verbose_name_plural = "User Achievements"
+    
+    def __str__(self):
+        status_emoji = {
+            'pending': '⏳',
+            'earned': '🏆',
+            'claimed': '✅',
+            'expired': '❌',
+        }.get(self.status, '')
+        return f"{status_emoji} {self.user.username} - {self.achievement_type.name}"
+    
+    def mark_as_earned(self):
+        """Mark achievement as earned and set timestamp"""
+        self.status = 'earned'
+        self.earned_at = timezone.now()
+        self.save(update_fields=['status', 'earned_at'])
+    
+    def claim_reward(self):
+        """Mark reward as claimed"""
+        if self.status == 'earned':
+            self.status = 'claimed'
+            self.claimed_at = timezone.now()
+            self.save(update_fields=['status', 'claimed_at'])
+            return True
+        return False
+    
+    @property
+    def can_claim_reward(self):
+        """Check if reward can be claimed"""
+        return self.status == 'earned' and self.achievement_type.confio_reward > 0
+    
+    @property
+    def reward_amount(self):
+        """Get the CONFIO reward amount"""
+        return self.achievement_type.confio_reward
+
+
+class InfluencerReferral(SoftDeleteModel):
+    """Tracks referrals from TikTok influencers"""
+    
+    STATUS_CHOICES = [
+        ('pending', 'Pendiente'),
+        ('active', 'Activo'),
+        ('converted', 'Convertido'),
+        ('ambassador', 'Embajador'),
+    ]
+    
+    # Referral participants
+    referred_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='influencer_referrals',
+        help_text="User who was referred"
+    )
+    
+    # Influencer information
+    tiktok_username = models.CharField(
+        max_length=100,
+        db_index=True,
+        help_text="TikTok username of the influencer (without @)"
+    )
+    influencer_user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='influencer_campaigns',
+        help_text="Registered user account for the influencer (if they sign up)"
+    )
+    
+    # Referral status and tracking
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending',
+        help_text="Current status of this referral"
+    )
+    first_transaction_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the referred user made their first transaction"
+    )
+    total_transaction_volume = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text="Total volume of transactions by referred user"
+    )
+    
+    # Rewards tracking
+    referrer_confio_awarded = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="CONFIO awarded to the influencer for this referral"
+    )
+    referee_confio_awarded = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="CONFIO awarded to the referred user"
+    )
+    reward_claimed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When rewards were claimed"
+    )
+    
+    # Attribution tracking
+    attribution_data = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Additional attribution data (IP, device info, etc.)"
+    )
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['tiktok_username']),
+            models.Index(fields=['status']),
+            models.Index(fields=['created_at']),
+        ]
+        verbose_name = "Influencer Referral"
+        verbose_name_plural = "Influencer Referrals"
+    
+    def __str__(self):
+        return f"@{self.tiktok_username} → {self.referred_user.username} ({self.get_status_display()})"
+    
+    def mark_as_converted(self):
+        """Mark referral as converted (user made first transaction)"""
+        if self.status == 'pending':
+            self.status = 'converted' 
+            self.first_transaction_at = timezone.now()
+            self.save(update_fields=['status', 'first_transaction_at'])
+    
+    def update_transaction_volume(self, amount):
+        """Update the total transaction volume for this referral"""
+        self.total_transaction_volume += amount
+        self.save(update_fields=['total_transaction_volume'])
+    
+    @classmethod
+    def get_influencer_stats(cls, tiktok_username):
+        """Get stats for a specific influencer"""
+        referrals = cls.objects.filter(tiktok_username__iexact=tiktok_username)
+        return {
+            'total_referrals': referrals.count(),
+            'active_referrals': referrals.filter(status='active').count(),
+            'converted_referrals': referrals.filter(status='converted').count(),
+            'total_volume': referrals.aggregate(volume=models.Sum('total_transaction_volume'))['volume'] or 0,
+            'total_confio_earned': referrals.aggregate(earned=models.Sum('referrer_confio_awarded'))['earned'] or 0,
+        }
+    
+    @classmethod
+    def check_ambassador_eligibility(cls, tiktok_username, min_referrals=20, min_volume=1000):
+        """Check if an influencer is eligible for ambassador status"""
+        stats = cls.get_influencer_stats(tiktok_username)
+        return (
+            stats['converted_referrals'] >= min_referrals and 
+            stats['total_volume'] >= min_volume
+        )
+
+
+class TikTokViralShare(SoftDeleteModel):
+    """Tracks TikTok shares and viral campaign participation"""
+    
+    STATUS_CHOICES = [
+        ('pending', 'Pendiente'),
+        ('submitted', 'Enviado'),
+        ('verified', 'Verificado'),
+        ('rewarded', 'Recompensado'),
+        ('rejected', 'Rechazado'),
+    ]
+    
+    SHARE_TYPE_CHOICES = [
+        ('achievement', 'Logro Compartido'),
+        ('user_video', 'Video Original'),
+        ('template_video', 'Video con Plantilla'),
+        ('challenge', 'Desafío Viral'),
+    ]
+    
+    # User and content
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='tiktok_shares',
+        help_text="User who shared the content"
+    )
+    achievement = models.ForeignKey(
+        UserAchievement,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='tiktok_shares',
+        help_text="Achievement being shared (if applicable)"
+    )
+    
+    # TikTok details
+    tiktok_url = models.URLField(
+        help_text="URL of the TikTok video"
+    )
+    tiktok_username = models.CharField(
+        max_length=100,
+        help_text="User's TikTok username"
+    )
+    hashtags_used = models.JSONField(
+        default=list,
+        help_text="List of hashtags used in the video"
+    )
+    
+    # Content type and verification
+    share_type = models.CharField(
+        max_length=20,
+        choices=SHARE_TYPE_CHOICES,
+        help_text="Type of content shared"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending',
+        help_text="Current verification status"
+    )
+    
+    # Performance metrics
+    view_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of views on the TikTok video"
+    )
+    like_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of likes on the TikTok video"
+    )
+    share_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of shares of the TikTok video"
+    )
+    
+    # Rewards and verification
+    base_confio_reward = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=100,
+        help_text="Base CONFIO reward for sharing"
+    )
+    view_bonus_confio = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Bonus CONFIO based on view count"
+    )
+    total_confio_awarded = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Total CONFIO awarded for this share"
+    )
+    
+    verified_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='verified_tiktok_shares',
+        help_text="Admin who verified this share"
+    )
+    verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the share was verified"
+    )
+    verification_notes = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Admin notes about verification"
+    )
+    
+    class Meta:
+        ordering = ['-created_at']
+        unique_together = [['user', 'tiktok_url']]  # Prevent duplicate submissions
+        verbose_name = "TikTok Viral Share"
+        verbose_name_plural = "TikTok Viral Shares"
+    
+    def __str__(self):
+        return f"@{self.tiktok_username} - {self.get_share_type_display()} ({self.get_status_display()})"
+    
+    def calculate_view_bonus(self):
+        """Calculate bonus CONFIO based on view count"""
+        if not self.view_count:
+            return 0
+        
+        # Tiered bonus system
+        if self.view_count >= 100000:  # 100K+ views
+            return 1000
+        elif self.view_count >= 50000:  # 50K+ views
+            return 500
+        elif self.view_count >= 10000:  # 10K+ views
+            return 200
+        elif self.view_count >= 1000:   # 1K+ views
+            return 50
+        
+        return 0
+    
+    def verify_and_reward(self, verified_by, view_count=None, like_count=None, share_count=None):
+        """Verify the share and calculate rewards"""
+        self.status = 'verified'
+        self.verified_by = verified_by
+        self.verified_at = timezone.now()
+        
+        # Update metrics if provided
+        if view_count is not None:
+            self.view_count = view_count
+        if like_count is not None:
+            self.like_count = like_count
+        if share_count is not None:
+            self.share_count = share_count
+        
+        # Calculate rewards
+        self.view_bonus_confio = self.calculate_view_bonus()
+        self.total_confio_awarded = self.base_confio_reward + self.view_bonus_confio
+        
+        self.save()
+        return self.total_confio_awarded
+    
+    @property
+    def has_required_hashtags(self):
+        """Check if video contains required Confío hashtags"""
+        required_hashtags = ['#confio', '#confioapp', '#confiologs']
+        user_hashtags = [tag.lower() for tag in self.hashtags_used]
+        return any(tag in user_hashtags for tag in required_hashtags)
+    
+    @property
+    def performance_tier(self):
+        """Get performance tier based on view count"""
+        if not self.view_count:
+            return 'sin_datos'
+        elif self.view_count >= 100000:
+            return 'viral'
+        elif self.view_count >= 10000:
+            return 'popular'
+        elif self.view_count >= 1000:
+            return 'good'
+        else:
+            return 'basic'
+
+
+# Achievement system signals
+@receiver(post_save, sender=User)
+def create_welcome_achievement(sender, instance, created, **kwargs):
+    """Create welcome achievement for new users"""
+    if created:
+        try:
+            welcome_achievement = AchievementType.objects.get(slug='welcome')
+            UserAchievement.objects.create(
+                user=instance,
+                achievement_type=welcome_achievement,
+                status='earned',
+                earned_at=timezone.now()
+            )
+        except AchievementType.DoesNotExist:
+            logger.warning("Welcome achievement type not found")
+
+
+@receiver(post_save, sender=InfluencerReferral)
+def check_first_transaction_achievement(sender, instance, **kwargs):
+    """Award achievement when referred user makes first transaction"""
+    if instance.status == 'converted' and instance.first_transaction_at:
+        try:
+            first_trade_achievement = AchievementType.objects.get(slug='first_trade')
+            UserAchievement.objects.get_or_create(
+                user=instance.referred_user,
+                achievement_type=first_trade_achievement,
+                defaults={
+                    'status': 'earned',
+                    'earned_at': timezone.now()
+                }
+            )
+        except AchievementType.DoesNotExist:
+            logger.warning("First trade achievement type not found")
+
+
 # Import view models - temporarily keep the old import for compatibility
 from .models_views import UnifiedTransaction
 # Import new table models

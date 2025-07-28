@@ -47,6 +47,12 @@ types = [
 	users_schema.CountryCodeType,
 	users_schema.BusinessCategoryType,
 	users_schema.LegalDocumentType,
+	# Achievement system types
+	users_schema.AchievementTypeType,
+	users_schema.UserAchievementType,
+	users_schema.InfluencerReferralType,
+	users_schema.TikTokViralShareType,
+	users_schema.InfluencerStatsType,
 	UnifiedTransactionType,
 	send_schema.SendTransactionType,
 	payments_schema.InvoiceType,
