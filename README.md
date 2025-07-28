@@ -267,6 +267,11 @@ Confío supports multiple accounts per user, allowing separate wallets for perso
 - **Personal Accounts**: Individual wallets for personal transactions
 - **Business Accounts**: Dedicated wallets for business operations with employee management
 
+#### Account ID Format
+- **Personal**: `personal_{index}` (e.g., `personal_0`, `personal_1`)
+- **Business (Owner)**: `business_{index}` (e.g., `business_0`, `business_1`)
+- **Business (Employee)**: `business_{businessId}_{index}` (e.g., `business_123_0`)
+
 #### Salt Formula
 The multi-account system uses deterministic salt generation:
 ```
@@ -292,7 +297,7 @@ The system includes comprehensive JWT context management for secure account oper
   "username": "user@example.com",
   "account_type": "business",
   "account_index": 0,
-  "business_id": "456",  // Only for business accounts
+  "business_id": "456",  // Present for ALL business accounts (owner and employee)
   "auth_token_version": 1,
   "exp": 1234567890,
   "type": "access"
@@ -303,34 +308,51 @@ The system includes comprehensive JWT context management for secure account oper
 - All GraphQL queries/mutations automatically receive account context from JWT
 - Business operations validate access through BusinessEmployee relationships
 - No client-controlled parameters for sensitive operations
+- Account context determines which wallet address and data to access
 
 #### Business Employee System
 
 Business accounts support multiple employees with role-based permissions:
 
 **Roles**
-- **Owner**: Full access to all business operations
-- **Admin**: Most operations except deleting the business
-- **Manager**: Operational permissions without employee management
-- **Cashier**: Limited to accepting payments and viewing transactions
+- **Owner**: Full access to all business operations (bypasses permission checks)
+- **Admin**: All operations except deleting the business
+- **Manager**: Full operational permissions without employee management
+- **Cashier**: Limited to accepting payments and creating invoices
 
 **Permission System (Negative-Check)**
 ```python
+# Permissions are explicitly defined - if not listed, access is denied
 ROLE_PERMISSIONS = {
-    'admin': {
+    'owner': {
+        # All permissions granted (special case - bypasses checks)
         'accept_payments', 'view_transactions', 'view_balance', 'send_funds',
         'manage_employees', 'view_business_address', 'view_analytics',
-        'edit_business_info', 'manage_bank_accounts', 'manage_p2p',
-        'create_invoices', 'manage_invoices', 'export_data'
-    },
-    'manager': {
-        'accept_payments', 'view_transactions', 'view_balance', 'send_funds',
-        'view_business_address', 'view_analytics', 'manage_bank_accounts',
+        'delete_business', 'edit_business_info', 'manage_bank_accounts',
         'manage_p2p', 'create_invoices', 'manage_invoices', 'export_data'
     },
+    'admin': {
+        'accept_payments': True, 'view_transactions': True, 'view_balance': True,
+        'send_funds': True, 'manage_employees': True, 'view_business_address': True,
+        'view_analytics': True, 'edit_business_info': True, 'manage_bank_accounts': True,
+        'manage_p2p': True, 'create_invoices': True, 'manage_invoices': True,
+        'export_data': True
+        # Note: delete_business is False (not granted)
+    },
+    'manager': {
+        'accept_payments': True, 'view_transactions': True, 'view_balance': True,
+        'send_funds': True, 'view_business_address': True, 'view_analytics': True,
+        'manage_bank_accounts': True, 'manage_p2p': True, 'create_invoices': True,
+        'manage_invoices': True, 'export_data': True
+        # Note: manage_employees and edit_business_info are False
+    },
     'cashier': {
-        'accept_payments', 'view_transactions', 'view_balance', 
-        'create_invoices', 'view_business_address'
+        'accept_payments': True, 'view_transactions': True, 'create_invoices': True
+        # Note: All other permissions are False, including:
+        # - view_balance (cannot see business balance)
+        # - view_business_address (cannot see business address)
+        # - send_funds (cannot make payments)
+        # - manage_p2p (cannot access P2P trading)
     }
 }
 ```
@@ -339,12 +361,44 @@ ROLE_PERMISSIONS = {
 - All business operations verify access through `user_id → BusinessEmployee.filter(business_id=x)`
 - Never directly access through business_id to prevent security vulnerabilities
 - JWT context validation happens centrally in `get_jwt_business_context_with_validation()`
+- Both UI and API enforce permissions - UI hides features, API blocks operations
+- Owners identified by role='owner' in BusinessEmployee, not by account ownership
+
+**UI Permission Enforcement**
+The frontend automatically adapts based on employee permissions:
+
+```typescript
+// Balance visibility
+{activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance
+  ? '••••••'  // Hidden for employees without permission
+  : '$1,234.56'
+}
+
+// Action buttons
+{activeAccount?.isEmployee && quickActions.length <= 1 ? (
+  // Show welcome message instead of limited actions
+  <EmployeeWelcomeMessage />
+) : (
+  // Show available action buttons
+  <ActionButtons />
+)}
+
+// Tab visibility
+- Scan tab: Hidden for employees without sendFunds
+- Exchange tab: Shows lock message without manageP2p
+- Charge>Pagar: Shows lock message without sendFunds
+
+// Address visibility
+- Business address hidden for cashiers (no viewBusinessAddress permission)
+- Personal addresses always visible to account owner
+```
 
 #### Default Behavior
 - **New users**: Automatically get `personal_0` as their default account
 - **Existing users**: Continue using their current salt (equivalent to `personal_0`)
 - **Account switching**: Each account type/index combination generates a unique Sui address
 - **Employee accounts**: Access business through JWT with embedded business_id
+- **Business owners**: Also receive business_id in JWT for consistent security model
 
 #### Security Model
 1. **Deterministic**: Same OAuth identity + account context = same Sui address
@@ -353,6 +407,8 @@ ROLE_PERMISSIONS = {
 4. **Stateless**: Server doesn't track active accounts, client manages state
 5. **Role-based**: Negative-check permission system ensures only explicitly allowed actions
 6. **Relationship-based**: All business access verified through BusinessEmployee table
+7. **JWT-first**: All account context comes from JWT, never from client parameters
+8. **Permission validation**: Every mutation validates required permissions
 
 #### Implementation Components
 
@@ -438,6 +494,7 @@ if employee_record.role == 'owner':
 ### Token Management
 1. **Access Token**
    - Short-lived (1 hour) for security
+   - Contains account context (type, index, business_id)
    - Automatically refreshed using refresh token
    - Stored securely in device Keychain
 
@@ -452,6 +509,7 @@ if employee_record.role == 'owner':
    - Request queue management during refresh
    - Automatic retry of failed requests after refresh
    - Secure token storage and cleanup
+   - Account context preserved across token refreshes
 
 ### Security Features
 - 🔒 Secure credential storage using Keychain
@@ -482,6 +540,29 @@ All queries for account creation/index assignment include soft-deleted rows to p
 
 #### Example: Why Soft Delete?
 If a business account `business_2` is deleted, the next business account will be `business_3`, not `business_2` again. This ensures that the Sui address for `business_2` is never reused, maintaining cryptographic and financial safety.
+
+## 🔒 Recent Security Enhancements
+
+### JWT-Based Account Context (July 2025)
+Major security overhaul replacing client-controlled account parameters with JWT-embedded context:
+
+- **Before**: Account ID passed as GraphQL parameters (security risk)
+- **After**: Account context embedded in JWT token (secure)
+- **Impact**: Prevents account spoofing and unauthorized access
+- **Implementation**: All GraphQL resolvers updated to use `get_jwt_business_context_with_validation()`
+
+### Permission System Improvements
+- Centralized permission validation in JWT context extraction
+- Negative-check system: only explicitly allowed actions permitted
+- UI and API dual enforcement: features hidden + operations blocked
+- Employee access always validated through BusinessEmployee relation
+
+### Key Security Fixes
+- Fixed business accounts showing same data regardless of accessor
+- Fixed payment attribution errors in multi-account scenarios
+- Removed deprecated header-based context middleware
+- Added permission checks to all financial mutations
+- Implemented role-based UI feature blocking
 
 ## 💸 Transaction Types
 
@@ -580,6 +661,7 @@ This eliminates confusing Account indirection and provides:
 - ✅ **Better performance**: Fewer database joins required
 - ✅ **Account context filtering**: Trades filter correctly by user vs business context
 - ✅ **Visual admin interface**: 👤 for users, 🏢 for businesses
+- ✅ **JWT-based context**: Account context determined by JWT, not client parameters
 
 #### WebSocket Integration
 Real-time features powered by Django Channels:
@@ -696,15 +778,15 @@ The P2P platform exposes a comprehensive GraphQL API:
 
 #### Queries
 - `p2pOffers`: List available offers with filtering
-- `myP2pTrades(accountId)`: User's trades filtered by account context
+- `myP2pTrades`: User's trades filtered by JWT account context (no accountId parameter)
 - `p2pTradeMessages(tradeId)`: Real-time trade chat messages
 - `p2pPaymentMethods(countryCode)`: Country-specific payment methods
 
 #### Mutations
-- `createP2POffer`: Create new trading offers
-- `createP2PTrade`: Initiate trades with offers
-- `updateP2PTradeStatus`: Update trade status (payment sent, confirmed, etc.)
-- `sendP2PMessage`: Send messages in trade chat
+- `createP2POffer`: Create new trading offers (uses JWT context)
+- `createP2PTrade`: Initiate trades with offers (uses JWT context)
+- `updateP2PTradeStatus`: Update trade status (validates permissions)
+- `sendP2PMessage`: Send messages in trade chat (uses JWT context)
 
 ### Usage Examples
 
@@ -1086,9 +1168,41 @@ This internationalization system ensures that Confío feels native to users acro
 
 ## 🚀 Development Setup
 
+### Quick Start Commands
+
+The project includes convenient Makefile commands for common operations:
+
+```bash
+# Start development server with WebSocket support
+make runserver
+
+# Run database migrations
+make migrate
+
+# Setup database and user (PostgreSQL)
+make db-setup
+
+# Run Django shell
+make shell
+
+# Run tests
+make test
+```
+
 ### Prerequisites
 
-1. **Redis Server** (required for Django Channels)
+1. **Python Virtual Environment**
+   ```bash
+   # Create virtual environment
+   python -m venv myvenv
+   
+   # Activate virtual environment
+   source myvenv/bin/activate  # On macOS/Linux
+   # or
+   myvenv\Scripts\activate     # On Windows
+   ```
+
+2. **Redis Server** (required for Django Channels)
    ```bash
    # macOS
    brew install redis
@@ -1102,7 +1216,7 @@ This internationalization system ensures that Confío feels native to users acro
    docker run -d -p 6379:6379 redis:alpine
    ```
 
-2. **PostgreSQL Database**
+3. **PostgreSQL Database**
    ```bash
    # Create database and user
    make db-setup
@@ -1113,7 +1227,7 @@ This internationalization system ensures that Confío feels native to users acro
 1. **Install Dependencies**
    ```bash
    # Install Python dependencies (includes Django Channels, Redis, Daphne)
-   pip install -r requirements.txt
+   myvenv/bin/pip install -r requirements.txt
 
    # Install Node.js dependencies
    cd web
@@ -1132,20 +1246,20 @@ This internationalization system ensures that Confío feels native to users acro
 
 3. **Run Database Migrations**
    ```bash
-   make migrate
+   myvenv/bin/python manage.py migrate
    ```
 
 4. **Setup Unified Payment Method System**
    ```bash
    # Create and apply migrations for user and P2P models
-   python manage.py makemigrations users p2p_exchange
-   python manage.py migrate
+   myvenv/bin/python manage.py makemigrations users p2p_exchange
+   myvenv/bin/python manage.py migrate
    
    # Populate initial country and bank data
-   python manage.py populate_bank_data
+   myvenv/bin/python manage.py populate_bank_data
    
    # Populate P2P payment methods (banks + fintech solutions)
-   python manage.py populate_payment_methods
+   myvenv/bin/python manage.py populate_payment_methods
    ```
    This will:
    - Create database tables for Country, Bank, and BankInfo models (now called PaymentMethod)
@@ -1526,6 +1640,85 @@ If you see field errors like `Cannot query field 'providerType'`:
    - Monitor which payment methods are most popular
    - Track conversion rates by payment method type
    - Alert on payment method failures
+
+## 🔧 Common Development Issues & Solutions
+
+### Virtual Environment Issues
+
+**Problem**: `python: command not found` or using wrong Python version
+```bash
+# Solution: Always use virtual environment
+source myvenv/bin/activate  # Activate first
+# OR use full path
+myvenv/bin/python manage.py runserver
+```
+
+**Problem**: `ModuleNotFoundError` when running Django commands
+```bash
+# Solution: Install dependencies in virtual environment
+myvenv/bin/pip install -r requirements.txt
+```
+
+### JWT Context Errors
+
+**Problem**: "Active account not found" error
+```python
+# Wrong: Looking up by user's direct accounts
+account = user.accounts.filter(account_type='business').first()
+
+# Correct: Look up through JWT context
+jwt_context = get_jwt_business_context_with_validation(info)
+account = Account.objects.filter(
+    business_id=jwt_context['business_id'],
+    account_index=jwt_context['account_index']
+).first()
+```
+
+**Problem**: Business accounts showing same data
+```python
+# Wrong: Using account.business.id
+business_id = account.business.id
+
+# Correct: Using JWT business_id
+jwt_context = get_jwt_business_context_with_validation(info)
+business_id = jwt_context['business_id']
+```
+
+### GraphQL Field Type Errors
+
+**Problem**: "Field must not have a selection since type 'JSONString' has no subfields"
+```python
+# Wrong: Using JSONString for complex fields
+employee_permissions = graphene.JSONString()
+
+# Correct: Create proper GraphQL object type
+class EmployeePermissionsType(graphene.ObjectType):
+    viewBalance = graphene.Boolean()
+    sendFunds = graphene.Boolean()
+    # ... other fields
+
+employee_permissions = graphene.Field(EmployeePermissionsType)
+```
+
+### Permission Validation
+
+**Problem**: Mutations not checking permissions
+```python
+# Wrong: Direct business access
+def mutate(self, info, business_id):
+    business = Business.objects.get(id=business_id)
+    # ... perform operation
+
+# Correct: Validate through JWT context
+def mutate(self, info):
+    jwt_context = get_jwt_business_context_with_validation(
+        info, 
+        required_permission='manage_employees'
+    )
+    if not jwt_context:
+        raise GraphQLError("Permission denied")
+    business = Business.objects.get(id=jwt_context['business_id'])
+```
 
 ## 📱 App Verification: `.well-known` Directory & nginx Configuration
 
