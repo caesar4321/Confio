@@ -2035,3 +2035,101 @@ export const SWITCH_ACCOUNT_TOKEN = gql`
     }
   }
 `;
+
+// Employee queries
+export const GET_MY_EMPLOYER_BUSINESSES = gql`
+  query GetMyEmployerBusinesses {
+    myEmployerBusinesses {
+      business {
+        id
+        name
+        category
+        description
+      }
+      employeeRecord {
+        id
+        role
+        isActive
+        hiredAt
+        shiftStartTime
+        shiftEndTime
+        dailyTransactionLimit
+      }
+      role
+      permissions
+    }
+  }
+`;
+
+export const GET_BUSINESS_EMPLOYEES = gql`
+  query GetBusinessEmployees($businessId: ID!, $includeInactive: Boolean) {
+    businessEmployees(businessId: $businessId, includeInactive: $includeInactive) {
+      id
+      user {
+        id
+        username
+        firstName
+        lastName
+        phoneNumber
+      }
+      role
+      isActive
+      permissions
+      effectivePermissions
+      isWithinShift
+      hiredAt
+      shiftStartTime
+      shiftEndTime
+      dailyTransactionLimit
+      notes
+    }
+  }
+`;
+
+export const ADD_BUSINESS_EMPLOYEE = gql`
+  mutation AddBusinessEmployee($input: AddBusinessEmployeeInput!) {
+    addBusinessEmployee(input: $input) {
+      employee {
+        id
+        user {
+          id
+          username
+          firstName
+          lastName
+        }
+        role
+        isActive
+        permissions
+      }
+      success
+      errors
+    }
+  }
+`;
+
+export const UPDATE_BUSINESS_EMPLOYEE = gql`
+  mutation UpdateBusinessEmployee($input: UpdateBusinessEmployeeInput!) {
+    updateBusinessEmployee(input: $input) {
+      employee {
+        id
+        role
+        isActive
+        permissions
+        shiftStartTime
+        shiftEndTime
+        dailyTransactionLimit
+      }
+      success
+      errors
+    }
+  }
+`;
+
+export const REMOVE_BUSINESS_EMPLOYEE = gql`
+  mutation RemoveBusinessEmployee($input: RemoveBusinessEmployeeInput!) {
+    removeBusinessEmployee(input: $input) {
+      success
+      errors
+    }
+  }
+`;
