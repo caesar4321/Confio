@@ -2398,75 +2398,57 @@ class Query(graphene.ObjectType):
             return None
 
     def resolve_my_p2p_offers(self, info, account_id=None):
-        user = getattr(info.context, 'user', None)
-        if not (user and getattr(user, 'is_authenticated', False)):
-            return []
-        
+        """Resolve P2P offers using JWT account context"""
+        from users.jwt_context import get_jwt_business_context_with_validation
         from django.db.models import Q
         from users.models import Account, Business
         
-        if account_id:
-            # Handle special frontend account ID format (e.g., 'personal_0', 'business_0')
-            if isinstance(account_id, str) and '_' in account_id:
-                account_type, account_index = account_id.split('_', 1)
-                account_index = int(account_index)
-                
-                if account_type == 'personal':
-                    # Return only personal offers for this user
-                    return P2POffer.objects.filter(
-                        Q(offer_user=user) | Q(user=user)  # Include legacy offers
-                    ).exclude(
-                        offer_business__isnull=False  # Exclude business offers
-                    ).order_by('-created_at')
-                elif account_type == 'business':
-                    # Find the business account by index
-                    try:
-                        account = Account.objects.get(
-                            user=user, 
-                            account_type='business', 
-                            account_index=account_index
-                        )
-                        if account.business:
-                            # Return only business offers for this specific business
-                            return P2POffer.objects.filter(
-                                offer_business=account.business
-                            ).order_by('-created_at')
-                    except Account.DoesNotExist:
-                        return []
-            else:
-                # Fallback: try to use account_id as a direct database ID
-                try:
-                    account = Account.objects.get(id=account_id, user=user)
-                    
-                    if account.account_type == 'business' and account.business:
-                        # Return only business offers for this specific business
-                        return P2POffer.objects.filter(
-                            offer_business=account.business
-                        ).order_by('-created_at')
-                    else:
-                        # Return only personal offers for this user
-                        return P2POffer.objects.filter(
-                            Q(offer_user=user) | Q(user=user)  # Include legacy offers
-                        ).exclude(
-                            offer_business__isnull=False  # Exclude business offers
-                        ).order_by('-created_at')
-                        
-                except (Account.DoesNotExist, ValueError):
-                    return []
-            
+        # Get JWT context with validation
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+        if not jwt_context:
             return []
+            
+        # Get the user from the request
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return []
+            
+        account_type = jwt_context['account_type']
+        account_index = jwt_context['account_index']
+        business_id = jwt_context.get('business_id')
+        
+        print(f"P2P offers resolver - JWT context: user_id={user.id}, account_type={account_type}, account_index={account_index}, business_id={business_id}")
+        
+        if account_type == 'business' and business_id:
+            # For business accounts, filter by business using JWT business_id
+            from users.models import Business
+            try:
+                business = Business.objects.get(id=business_id)
+                print(f"P2P offers resolver - Filtering offers for business id={business.id}, name={business.name}")
+                return P2POffer.objects.filter(
+                    offer_business=business
+                ).order_by('-created_at')
+            except Business.DoesNotExist:
+                print(f"P2P offers resolver - Business not found: {business_id}")
+                return []
         else:
-            # Fallback: return all user's offers if no account specified
-            user_businesses = Business.objects.filter(user=user)
-            query = Q(offer_user=user) | Q(user=user)
-            if user_businesses.exists():
-                query |= Q(offer_business__in=user_businesses)
-            return P2POffer.objects.filter(query).order_by('-created_at')
+            # For personal accounts, filter by user and exclude business offers
+            print(f"P2P offers resolver - Filtering personal offers for user {user.id}")
+            return P2POffer.objects.filter(
+                Q(offer_user=user) | Q(user=user)  # Include legacy offers
+            ).exclude(
+                offer_business__isnull=False  # Exclude business offers
+            ).order_by('-created_at')
 
     def resolve_my_p2p_trades(self, info, account_id=None, offset=0, limit=10):
+        """Resolve P2P trades using JWT account context"""
         try:
-            user = getattr(info.context, 'user', None)
-            if not (user and getattr(user, 'is_authenticated', False)):
+            from users.jwt_context import get_jwt_business_context_with_validation
+            from users.models import Business
+            
+            # Get JWT context with validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            if not jwt_context:
                 return P2PTradePaginatedType(
                     trades=[],
                     total_count=0,
@@ -2475,168 +2457,70 @@ class Query(graphene.ObjectType):
                     limit=limit,
                     active_count=0
                 )
-            
-            print(f"[P2P] resolve_my_p2p_trades - account_id: {account_id}, user: {user.username if user else 'None'}")
-            
-            if account_id:
-                # Handle special frontend account ID format (e.g., 'personal_0', 'business_0')
-                print(f"[P2P] Processing account_id: '{account_id}' for user: {user.username}")
                 
-                if isinstance(account_id, str) and '_' in account_id:
-                    account_type, account_index = account_id.split('_', 1)
-                    account_index = int(account_index)
-                    print(f"[P2P] Parsed frontend account ID: type='{account_type}', index={account_index}")
+            # Get the user from the request
+            user = info.context.user
+            if not user or not user.is_authenticated:
+                return P2PTradePaginatedType(
+                    trades=[],
+                    total_count=0,
+                    has_more=False,
+                    offset=offset,
+                    limit=limit,
+                    active_count=0
+                )
+                
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
+            
+            print(f"P2P trades resolver - JWT context: user_id={user.id}, account_type={account_type}, account_index={account_index}, business_id={business_id}")
+            
+            if account_type == 'business' and business_id:
+                # For business accounts, filter by business using JWT business_id
+                try:
+                    business = Business.objects.get(id=business_id)
+                    print(f"P2P trades resolver - Filtering trades for business id={business.id}, name={business.name}")
                     
-                    if account_type == 'personal':
-                        # Show only personal trades for this user, excluding cancelled
-                        base_trades = P2PTrade.objects.filter(
-                            models.Q(buyer_user=user) | models.Q(seller_user=user)
-                        ).exclude(status='CANCELLED').prefetch_related('ratings')
-                        
-                        # Apply sorting
-                        trades = Query._get_sorted_trades_queryset(base_trades)
-                        
-                        total_count = trades.count()
-                        active_count = trades.exclude(status='COMPLETED').count()
-                        
-                        print(f"[P2P] Filtering personal trades for user_id: {user.id}, found: {total_count} trades ({active_count} active), returning offset={offset}, limit={limit}")
-                        paginated_trades = trades[offset:offset+limit]
-                        
-                        return P2PTradePaginatedType(
-                            trades=paginated_trades,
-                            total_count=total_count,
-                            has_more=(offset + limit) < total_count,
-                            offset=offset,
-                            limit=limit,
-                            active_count=active_count
-                        )
-                    elif account_type == 'business':
-                        # Find the business account by index
-                        from users.models import Account
-                        try:
-                            account = Account.objects.get(
-                                user=user, 
-                                account_type='business', 
-                                account_index=account_index
-                            )
-                            print(f"[P2P] Found business account: {account.id}, business: {account.business.id if account.business else 'None'}")
-                            
-                            if account.business:
-                                # Show only business trades for this specific business, excluding cancelled
-                                base_trades = P2PTrade.objects.filter(
-                                    models.Q(buyer_business=account.business) | models.Q(seller_business=account.business)
-                                ).exclude(status='CANCELLED').prefetch_related('ratings')
-                                
-                                # Apply sorting
-                                trades = Query._get_sorted_trades_queryset(base_trades)
-                                
-                                total_count = trades.count()
-                                active_count = trades.exclude(status='COMPLETED').count()
-                                
-                                print(f"[P2P] Filtering business trades for business_id: {account.business.id}, found: {total_count} trades ({active_count} active), returning offset={offset}, limit={limit}")
-                                paginated_trades = trades[offset:offset+limit]
-                                
-                                return P2PTradePaginatedType(
-                                    trades=paginated_trades,
-                                    total_count=total_count,
-                                    has_more=(offset + limit) < total_count,
-                                    offset=offset,
-                                    limit=limit,
-                                    active_count=active_count
-                                )
-                        except Account.DoesNotExist:
-                            print(f"[P2P] Business account not found: user_id={user.id}, account_index={account_index}")
-                            return P2PTradePaginatedType(
-                                trades=[],
-                                total_count=0,
-                                has_more=False,
-                                offset=offset,
-                                limit=limit,
-                                active_count=0
-                            )
-                else:
-                    # Fallback: try to use account_id as a direct database ID
-                    from users.models import Account
-                    try:
-                        account = Account.objects.get(id=account_id, user=user)
-                        print(f"[P2P] Found database account: {account.id}, type: {account.account_type}, business: {account.business.id if account.business else 'None'}")
-                        
-                        if account.account_type == 'business' and account.business:
-                            # Show only business trades for this specific business, excluding cancelled
-                            base_trades = P2PTrade.objects.filter(
-                                models.Q(buyer_business=account.business) | models.Q(seller_business=account.business)
-                            ).exclude(status='CANCELLED').prefetch_related('ratings')
-                            
-                            # Apply sorting
-                            trades = Query._get_sorted_trades_queryset(base_trades)
-                            
-                            total_count = trades.count()
-                            active_count = trades.exclude(status='COMPLETED').count()
-                            
-                            print(f"[P2P] Filtering business trades for business_id: {account.business.id}, found: {total_count} trades ({active_count} active), returning offset={offset}, limit={limit}")
-                            paginated_trades = trades[offset:offset+limit]
-                            
-                            return P2PTradePaginatedType(
-                                trades=paginated_trades,
-                                total_count=total_count,
-                                has_more=(offset + limit) < total_count,
-                                offset=offset,
-                                limit=limit,
-                                active_count=active_count
-                            )
-                        else:
-                            # Show only personal trades for this user, excluding cancelled
-                            base_trades = P2PTrade.objects.filter(
-                                models.Q(buyer_user=user) | models.Q(seller_user=user)
-                            ).exclude(status='CANCELLED').prefetch_related('ratings')
-                            
-                            # Apply sorting
-                            trades = Query._get_sorted_trades_queryset(base_trades)
-                            
-                            total_count = trades.count()
-                            active_count = trades.exclude(status='COMPLETED').count()
-                            
-                            print(f"[P2P] Filtering personal trades for user_id: {user.id}, found: {total_count} trades ({active_count} active), returning offset={offset}, limit={limit}")
-                            paginated_trades = trades[offset:offset+limit]
-                            
-                            return P2PTradePaginatedType(
-                                trades=paginated_trades,
-                                total_count=total_count,
-                                has_more=(offset + limit) < total_count,
-                                offset=offset,
-                                limit=limit,
-                                active_count=active_count
-                            )
-                    except (Account.DoesNotExist, ValueError):
-                        print(f"[P2P] Database account not found: account_id={account_id}, user_id={user.id}")
-                        return P2PTradePaginatedType(
-                            trades=[],
-                            total_count=0,
-                            has_more=False,
-                            offset=offset,
-                            limit=limit,
-                            active_count=0
-                        )
-                
-                return P2PTradePaginatedType(
-                    trades=[],
-                    total_count=0,
-                    has_more=False,
-                    offset=offset,
-                    limit=limit,
-                    active_count=0
-                )
+                    # Show only business trades for this specific business, excluding cancelled
+                    base_trades = P2PTrade.objects.filter(
+                        models.Q(buyer_business=business) | models.Q(seller_business=business)
+                    ).exclude(status='CANCELLED').prefetch_related('ratings')
+                    
+                    # Apply sorting
+                    trades = Query._get_sorted_trades_queryset(base_trades)
+                    
+                    total_count = trades.count()
+                    active_count = trades.exclude(status='COMPLETED').count()
+                    
+                    print(f"P2P trades resolver - Found {total_count} business trades ({active_count} active), returning offset={offset}, limit={limit}")
+                    paginated_trades = trades[offset:offset+limit]
+                    
+                    return P2PTradePaginatedType(
+                        trades=paginated_trades,
+                        total_count=total_count,
+                        has_more=(offset + limit) < total_count,
+                        offset=offset,
+                        limit=limit,
+                        active_count=active_count
+                    )
+                except Business.DoesNotExist:
+                    print(f"P2P trades resolver - Business not found: {business_id}")
+                    return P2PTradePaginatedType(
+                        trades=[],
+                        total_count=0,
+                        has_more=False,
+                        offset=offset,
+                        limit=limit,
+                        active_count=0
+                    )
             else:
-                # No account filter - show all trades for this user (all accounts)
-                print(f"[P2P] No account_id provided - returning ALL trades for user")
-                from users.models import Business
-                user_businesses = Business.objects.filter(accounts__user=user)
+                # For personal accounts, filter by user and exclude business trades
+                print(f"P2P trades resolver - Filtering personal trades for user {user.id}")
                 
-                # Find trades where user is involved as a person OR through their businesses, excluding cancelled
-                # NEW: Use direct relationships for cleaner semantics
+                # Show only personal trades for this user, excluding cancelled
                 base_trades = P2PTrade.objects.filter(
-                    models.Q(buyer_user=user) | models.Q(seller_user=user) |
-                    models.Q(buyer_business__in=user_businesses) | models.Q(seller_business__in=user_businesses)
+                    models.Q(buyer_user=user) | models.Q(seller_user=user)
                 ).exclude(status='CANCELLED').prefetch_related('ratings')
                 
                 # Apply sorting
@@ -2645,7 +2529,7 @@ class Query(graphene.ObjectType):
                 total_count = trades.count()
                 active_count = trades.exclude(status='COMPLETED').count()
                 
-                print(f"[P2P] Found {total_count} total trades across all accounts ({active_count} active), returning offset={offset}, limit={limit}")
+                print(f"P2P trades resolver - Found {total_count} personal trades ({active_count} active), returning offset={offset}, limit={limit}")
                 paginated_trades = trades[offset:offset+limit]
                 
                 return P2PTradePaginatedType(
@@ -2656,8 +2540,9 @@ class Query(graphene.ObjectType):
                     limit=limit,
                     active_count=active_count
                 )
+                
         except Exception as e:
-            print(f"[P2P] Error in resolve_my_p2p_trades: {str(e)}")
+            print(f"P2P trades resolver - Error: {str(e)}")
             import traceback
             traceback.print_exc()
             # Return empty result on error
