@@ -225,6 +225,13 @@ export const MiProgresoViralScreen = () => {
           >
             <Text style={styles.submitButtonText}>Enviar TikTok</Text>
           </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={styles.templatesButton}
+            onPress={() => navigation.navigate('ViralTemplates')}
+          >
+            <Text style={styles.templatesButtonText}>🎬 Ver Ideas para Videos</Text>
+          </TouchableOpacity>
         </View>
         
         {/* Recent TikTok Shares */}
@@ -437,6 +444,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  templatesButton: {
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  templatesButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.violet,
   },
   shareCard: {
     backgroundColor: colors.neutralDark,
