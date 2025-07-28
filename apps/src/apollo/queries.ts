@@ -2227,8 +2227,8 @@ export const REMOVE_BUSINESS_EMPLOYEE = gql`
 
 // JWT-context-aware queries for current business (no businessId parameter needed)
 export const GET_CURRENT_BUSINESS_EMPLOYEES = gql`
-  query GetCurrentBusinessEmployees($includeInactive: Boolean) {
-    currentBusinessEmployees(includeInactive: $includeInactive) {
+  query GetCurrentBusinessEmployees($includeInactive: Boolean, $first: Int, $after: String) {
+    currentBusinessEmployees(includeInactive: $includeInactive, first: $first, after: $after) {
       id
       user {
         id
