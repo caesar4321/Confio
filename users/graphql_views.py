@@ -414,34 +414,71 @@ class UnifiedTransactionQuery(graphene.ObjectType):
     def resolve_unified_transactions_with_friend(self, info, friend_user_id=None, friend_phone=None, 
                                                limit=50, offset=0):
         """Resolve unified transactions between current user and a specific friend"""
+        from .jwt_context import get_jwt_business_context_with_validation
+        
+        # Get JWT context with validation and permission check
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_transactions')
+        if not jwt_context:
+            return []
+            
+        # Get the user from the request
         user = info.context.user
-        if not user.is_authenticated:
+        if not user or not user.is_authenticated:
             return []
         
         # Must have either friend_user_id or friend_phone
         if not friend_user_id and not friend_phone:
             return []
         
-        # Get the current user's personal account (assuming friends are always personal)
+        account_type = jwt_context['account_type']
+        account_index = jwt_context['account_index']
+        business_id = jwt_context.get('business_id')
+        
+        print(f"Friend transactions resolver - JWT context: user_id={user.id}, account_type={account_type}, account_index={account_index}, business_id={business_id}")
+        
+        # Get the account using JWT context
         from users.models import Account
         try:
-            account = Account.objects.get(
-                user=user,
-                account_type='personal',
-                account_index=0
-            )
+            if account_type == 'business' and business_id:
+                # For business accounts, find the account by business_id
+                account = Account.objects.get(
+                    business_id=business_id,
+                    account_type='business',
+                    account_index=account_index
+                )
+            else:
+                # For personal accounts
+                account = Account.objects.get(
+                    user=user,
+                    account_type=account_type,
+                    account_index=account_index
+                )
         except Account.DoesNotExist:
+            print(f"Friend transactions - Account not found for type {account_type}, index {account_index}, business_id {business_id}")
             return []
         
-        # Base query - transactions involving the current user
-        queryset = UnifiedTransactionTable.objects.filter(
-            Q(
-                Q(sender_user=user) & Q(sender_business__isnull=True)
-            ) | 
-            Q(
-                Q(counterparty_user=user) & Q(counterparty_business__isnull=True)
+        print(f"Found account: {account.id}, business: {account.business.id if account.business else None}")
+        
+        # Base query - transactions involving the current account (similar to current_account_transactions)
+        if account_type == 'business' and business_id:
+            # For business accounts, filter by business relationships using JWT business_id
+            from users.models import Business
+            business = Business.objects.get(id=business_id)
+            print(f"Friend transactions resolver - Filtering transactions for business id={business.id}, name={business.name}")
+            queryset = UnifiedTransactionTable.objects.filter(
+                Q(sender_business=business) | 
+                Q(counterparty_business=business)
             )
-        )
+        else:
+            # For personal accounts, filter by user relationships BUT exclude business transactions
+            queryset = UnifiedTransactionTable.objects.filter(
+                Q(
+                    Q(sender_user=user) & Q(sender_business__isnull=True)
+                ) | 
+                Q(
+                    Q(counterparty_user=user) & Q(counterparty_business__isnull=True)
+                )
+            )
         
         # Filter by friend criteria
         friend_conditions = Q()
@@ -466,6 +503,8 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         
         # Apply pagination and add user address to each transaction for direction calculation
         transactions = list(queryset[offset:offset + limit])
+        
+        print(f"Friend transactions resolver - Found {len(transactions)} transactions for account {account.id} with friend criteria")
         
         # Set the user's address on each transaction for the resolvers
         for transaction in transactions:
