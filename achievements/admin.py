@@ -12,7 +12,7 @@ from .models import (
     AchievementType, UserAchievement, InfluencerReferral, 
     TikTokViralShare, ConfioRewardBalance, ConfioRewardTransaction,
     InfluencerAmbassador, AmbassadorActivity,
-    PioneroBetaTracker
+    PioneroBetaTracker, ConfioGrowthMetric
 )
 
 logger = logging.getLogger(__name__)
@@ -229,33 +229,40 @@ class UserAchievementAdmin(admin.ModelAdmin):
         from collections import defaultdict
         import json
         
-        # Get all achievements with device fingerprints
-        achievements = UserAchievement.objects.filter(
-            device_fingerprint_hash__isnull=False
-        ).select_related('user', 'achievement_type')
-        
-        # 1. Device Analysis
-        device_stats = defaultdict(lambda: {'users': set(), 'achievements': [], 'total_confio': 0})
-        
-        for achievement in achievements:
-            device_hash = achievement.device_fingerprint_hash
-            device_stats[device_hash]['users'].add(achievement.user_id)
-            device_stats[device_hash]['achievements'].append(achievement)
-            if achievement.status == 'claimed':
-                device_stats[device_hash]['total_confio'] += float(achievement.achievement_type.confio_reward)
+        # Get device data from DeviceFingerprint model
+        from security.models import DeviceFingerprint as SecurityDeviceFingerprint
         
         # Find suspicious devices (multiple users)
         suspicious_devices = []
-        for device_hash, stats in device_stats.items():
-            if len(stats['users']) > 1:
-                suspicious_devices.append({
-                    'device_hash': device_hash,
-                    'device_hash_short': device_hash[:8] + '...',
-                    'user_count': len(stats['users']),
-                    'achievement_count': len(stats['achievements']),
-                    'total_confio': stats['total_confio'],
-                    'users': list(stats['users'])[:10],  # Limit to first 10 for display
-                })
+        
+        # Get devices with multiple users
+        multi_user_devices = SecurityDeviceFingerprint.objects.annotate(
+            user_count=Count('users', distinct=True)
+        ).filter(user_count__gt=1)
+        
+        for device in multi_user_devices:
+            # Get user achievements for this device's users
+            device_users = device.users.all()
+            achievements_count = UserAchievement.objects.filter(
+                user__in=device_users,
+                status__in=['earned', 'claimed']
+            ).count()
+            
+            total_confio = UserAchievement.objects.filter(
+                user__in=device_users,
+                status='claimed'
+            ).aggregate(
+                total=Sum('achievement_type__confio_reward')
+            )['total'] or 0
+            
+            suspicious_devices.append({
+                'device_hash': device.fingerprint,
+                'device_hash_short': device.fingerprint[:8] + '...' if len(device.fingerprint) > 8 else device.fingerprint,
+                'user_count': device.user_count,
+                'achievement_count': achievements_count,
+                'total_confio': float(total_confio),
+                'users': list(device_users.values_list('id', flat=True))[:10],  # Limit to first 10 for display
+            })
         
         suspicious_devices.sort(key=lambda x: x['user_count'], reverse=True)
         
@@ -295,11 +302,20 @@ class UserAchievementAdmin(admin.ModelAdmin):
             suspicious_count=Count('user_achievements', filter=Q(user_achievements__security_metadata__suspicious_ip=True))
         ).order_by('-fraud_count')
         
+        # Add fraud percentage to each achievement
+        for achievement in achievement_fraud_stats:
+            if achievement.total_earned > 0:
+                achievement.fraud_percentage = (achievement.fraud_count / achievement.total_earned) * 100
+            else:
+                achievement.fraud_percentage = 0
+        
         # 5. Overall Statistics
         total_achievements = UserAchievement.objects.count()
         total_fraud = UserAchievement.objects.filter(security_metadata__fraud_detected__isnull=False).count()
         total_suspicious = UserAchievement.objects.filter(security_metadata__suspicious_ip=True).count()
-        total_devices_tracked = UserAchievement.objects.filter(device_fingerprint_hash__isnull=False).values('device_fingerprint_hash').distinct().count()
+        # Get total devices from DeviceFingerprint model
+        from security.models import DeviceFingerprint
+        total_devices_tracked = DeviceFingerprint.objects.count()
         
         # Calculate potential fraud loss
         potential_loss = UserAchievement.objects.filter(
@@ -647,11 +663,11 @@ class ConfioRewardTransactionAdmin(admin.ModelAdmin):
 @admin.register(InfluencerAmbassador)
 class InfluencerAmbassadorAdmin(admin.ModelAdmin):
     """Admin for influencer ambassadors"""
-    list_display = ('user', 'referrer_identifier', 'tier', 'status', 'total_referrals', 'performance_score')
+    list_display = ('user', 'tier', 'status', 'total_referrals', 'performance_score')
     list_filter = ('tier', 'status', 'created_at')
-    search_fields = ('user__username', 'user__email', 'referrer_identifier')
+    search_fields = ('user__username', 'user__email')
     readonly_fields = ('created_at', 'updated_at', 'tier_achieved_at', 'last_activity_at')
-    raw_id_fields = ('user', 'assigned_manager')
+    raw_id_fields = ('user',)
 
 
 @admin.register(AmbassadorActivity)
@@ -816,3 +832,37 @@ class PioneroBetaTrackerAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         # Don't allow deleting the tracker
         return False
+
+
+@admin.register(ConfioGrowthMetric)
+class ConfioGrowthMetricAdmin(admin.ModelAdmin):
+    """Admin for CONFIO growth metrics"""
+    list_display = ('display_name', 'current_value', 'growth_percentage', 'display_order', 'is_active', 'last_updated')
+    list_filter = ('is_active', 'metric_type', 'last_updated')
+    search_fields = ('display_name', 'metric_type')
+    readonly_fields = ('last_updated',)
+    list_editable = ('current_value', 'growth_percentage', 'display_order', 'is_active')
+    ordering = ('display_order', 'metric_type')
+    
+    fieldsets = (
+        ('Metric Information', {
+            'fields': ('metric_type', 'display_name'),
+            'description': 'Basic information about this growth metric'
+        }),
+        ('Current Values', {
+            'fields': ('current_value', 'growth_percentage'),
+            'description': 'Current metric value and growth percentage'
+        }),
+        ('Display Settings', {
+            'fields': ('display_order', 'is_active'),
+            'description': 'How this metric appears in the app'
+        }),
+        ('Timestamps', {
+            'fields': ('last_updated',),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def get_queryset(self, request):
+        """Order by display order by default"""
+        return super().get_queryset(request).order_by('display_order', 'metric_type')

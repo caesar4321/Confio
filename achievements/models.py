@@ -1,68 +1,68 @@
+"""
+Consolidated models for the achievements app
+"""
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.db.models import F, Q, Sum
 from decimal import Decimal
-import json
-import logging
-
 from users.models import SoftDeleteModel
-
-logger = logging.getLogger(__name__)
 
 
 class AchievementType(SoftDeleteModel):
-    """Defines types of achievements that users can earn"""
+    """Types of achievements that users can earn"""
     
     CATEGORY_CHOICES = [
-        ('onboarding', 'Bienvenida'),
-        ('trading', 'Intercambios'),
-        ('payments', 'Pagos y Transacciones'),
-        ('social', 'Comunidad'),
-        ('verification', 'Verificación'),
-        ('ambassador', 'Embajador'),
+        ('onboarding', 'Onboarding'),
+        ('trading', 'Trading'),
+        ('payments', 'Payments'),
+        ('social', 'Social'),
+        ('verification', 'Verification'),
+        ('ambassador', 'Ambassador'),
     ]
     
-    # Basic achievement info
     slug = models.CharField(
         max_length=50,
         unique=True,
-        blank=True,  # Allow blank for auto-generation
-        help_text="Unique identifier for this achievement type (auto-generated from name if blank)"
+        help_text="Unique identifier for this achievement type"
     )
     name = models.CharField(
         max_length=100,
         help_text="Display name for this achievement"
     )
     description = models.TextField(
-        help_text="Description of what this achievement represents"
+        help_text="Description of what the user needs to do"
     )
     category = models.CharField(
         max_length=20,
         choices=CATEGORY_CHOICES,
         help_text="Category this achievement belongs to"
     )
-    
-    # Visual elements
     icon_emoji = models.CharField(
         max_length=10,
         blank=True,
         null=True,
-        help_text="Emoji icon for this achievement (e.g., 🏆, 🎉, 🔥)"
+        help_text="Emoji icon for this achievement"
     )
     color = models.CharField(
-        max_length=7,
+        max_length=20,
         default='#FFD700',
-        help_text="Hex color code for achievement badge"
+        help_text="Color for this achievement (hex code)"
     )
-    
-    # Requirements and rewards
     confio_reward = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         default=0,
-        help_text="CONFIO tokens awarded for this achievement"
+        help_text="Amount of CONFIO tokens to reward"
+    )
+    display_order = models.PositiveIntegerField(
+        default=0,
+        help_text="Order to display this achievement"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this achievement is currently active"
     )
     is_repeatable = models.BooleanField(
         default=False,
@@ -70,17 +70,7 @@ class AchievementType(SoftDeleteModel):
     )
     requires_manual_review = models.BooleanField(
         default=False,
-        help_text="Whether this achievement requires manual admin approval"
-    )
-    
-    # Activation and ordering
-    is_active = models.BooleanField(
-        default=True,
-        help_text="Whether this achievement is currently available to earn"
-    )
-    display_order = models.PositiveIntegerField(
-        default=1000,
-        help_text="Display order in achievement lists (lower numbers first)"
+        help_text="Whether this achievement requires manual admin review"
     )
     
     class Meta:
@@ -111,8 +101,8 @@ class AchievementType(SoftDeleteModel):
             while AchievementType.objects.filter(slug=slug).exclude(pk=self.pk).exists():
                 slug = f"{base_slug}-{counter}"
                 counter += 1
-            
-            self.slug = slug
+        
+        self.slug = slug
         
         super().save(*args, **kwargs)
 
@@ -202,6 +192,20 @@ class UserAchievement(SoftDeleteModel):
         status = dict(self.STATUS_CHOICES).get(self.status, self.status)
         return f"{self.user.username} - {self.achievement_type.name} ({status})"
     
+    @property
+    def can_claim_reward(self):
+        """Check if the reward for this achievement can be claimed"""
+        return (
+            self.status == 'earned' and 
+            self.claimed_at is None and
+            self.achievement_type.confio_reward > 0
+        )
+    
+    @property
+    def reward_amount(self):
+        """Get the reward amount for this achievement"""
+        return self.earned_value or self.achievement_type.confio_reward
+    
     def claim_reward(self):
         """Claim the reward for this achievement"""
         if self.status != 'earned':
@@ -223,9 +227,15 @@ class UserAchievement(SoftDeleteModel):
                 defaults={'total_earned': 0, 'total_locked': 0}
             )
             
-            # Update balance
+            # Calculate new balance for transaction record
+            new_total_locked = balance.total_locked + reward_amount
+            
+            # Update balance and tracking
             balance.total_earned = F('total_earned') + reward_amount
             balance.total_locked = F('total_locked') + reward_amount
+            balance.last_reward_at = timezone.now()
+            balance.daily_reward_count = F('daily_reward_count') + 1
+            balance.daily_reward_amount = F('daily_reward_amount') + reward_amount
             balance.save()
             
             # Create transaction record
@@ -233,7 +243,7 @@ class UserAchievement(SoftDeleteModel):
                 user=self.user,
                 transaction_type='earned',
                 amount=reward_amount,
-                balance_after=balance.total_locked + reward_amount,
+                balance_after=new_total_locked,
                 reference_type='achievement',
                 reference_id=str(self.id),
                 description=f"Recompensa por {self.achievement_type.name}"
@@ -244,87 +254,75 @@ class UserAchievement(SoftDeleteModel):
 
 
 class InfluencerReferral(SoftDeleteModel):
-    """Tracks TikTok influencer referrals"""
+    """Tracks referrals made by influencers"""
     
     STATUS_CHOICES = [
-        ('pending', 'Pendiente'),
         ('active', 'Activo'),
         ('converted', 'Convertido'),
-        ('failed', 'Fallido'),
+        ('inactive', 'Inactivo'),
     ]
     
     referred_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='influencer_referral'
+        related_name='referrals_as_referred'
     )
     referrer_identifier = models.CharField(
-        max_length=100,
-        db_index=True,
-        help_text="TikTok username, phone, or code of referrer"
+        max_length=50,
+        help_text="Identifier of the referrer (@username, code, etc.)"
     )
     influencer_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='referred_users',
-        help_text="User account of the influencer (if they have one)"
+        related_name='referrals_as_influencer',
+        help_text="Actual user who made the referral (if registered)"
     )
-    
     status = models.CharField(
         max_length=20,
         choices=STATUS_CHOICES,
-        default='pending'
+        default='active'
     )
-    
-    # Transaction tracking
     first_transaction_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text="When referred user completed first transaction"
+        help_text="When the referred user made their first transaction"
     )
     total_transaction_volume = models.DecimalField(
         max_digits=20,
         decimal_places=2,
         default=0,
-        help_text="Total volume of transactions by referred user"
+        help_text="Total volume of transactions by this user"
     )
-    
-    # Reward tracking
     referrer_confio_awarded = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         default=0,
-        help_text="CONFIO awarded to referrer"
+        help_text="CONFIO awarded to the referrer"
     )
     referee_confio_awarded = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         default=0,
-        help_text="CONFIO awarded to referred user"
+        help_text="CONFIO awarded to the referred user"
     )
     reward_claimed_at = models.DateTimeField(
         null=True,
         blank=True,
-        help_text="When rewards were claimed"
+        help_text="When the referral reward was claimed"
     )
-    
-    # Additional data
     attribution_data = models.JSONField(
         default=dict,
         blank=True,
-        help_text="Additional attribution data (source, campaign, etc.)"
+        help_text="Additional attribution data"
     )
     
     class Meta:
+        unique_together = [('referred_user', 'deleted_at')]
         ordering = ['-created_at']
         verbose_name = "Influencer Referral"
         verbose_name_plural = "Influencer Referrals"
-        indexes = [
-            models.Index(fields=['referrer_identifier', 'status']),
-            models.Index(fields=['referred_user', 'status']),
-        ]
     
     def __str__(self):
         return f"{self.referred_user.username} referred by {self.referrer_identifier}"
@@ -347,6 +345,7 @@ class InfluencerReferral(SoftDeleteModel):
             'total_confio_earned': referrals.aggregate(
                 total=Sum('referrer_confio_awarded')
             )['total'] or Decimal('0'),
+            'is_ambassador_eligible': cls.check_ambassador_eligibility(referrer_identifier)
         }
     
     @classmethod
@@ -397,32 +396,65 @@ class TikTokViralShare(SoftDeleteModel):
         help_text="URL of the TikTok video"
     )
     tiktok_username = models.CharField(
-        max_length=100,
-        help_text="TikTok username of the sharer"
+        max_length=50,
+        help_text="TikTok username of the creator"
     )
     hashtags_used = models.JSONField(
         default=list,
-        help_text="Hashtags used in the video"
+        help_text="List of hashtags used in the video"
     )
     share_type = models.CharField(
         max_length=20,
         choices=SHARE_TYPE_CHOICES,
         default='achievement'
     )
-    
-    # Verification status
     status = models.CharField(
         max_length=30,
         choices=STATUS_CHOICES,
         default='pending_verification'
     )
+    
+    # Performance metrics
+    view_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of views on the TikTok video"
+    )
+    like_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of likes on the TikTok video"
+    )
+    share_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of shares of the TikTok video"
+    )
+    
+    # Rewards
+    base_confio_reward = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=10,
+        help_text="Base CONFIO reward for sharing"
+    )
+    view_bonus_confio = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Bonus CONFIO based on view performance"
+    )
+    total_confio_awarded = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Total CONFIO awarded for this share"
+    )
+    
+    # Admin fields
     verified_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='verified_shares',
-        help_text="Admin who verified this share"
+        related_name='verified_tiktok_shares'
     )
     verified_at = models.DateTimeField(
         null=True,
@@ -430,41 +462,7 @@ class TikTokViralShare(SoftDeleteModel):
     )
     verification_notes = models.TextField(
         blank=True,
-        help_text="Notes from verification process"
-    )
-    
-    # Performance metrics
-    view_count = models.PositiveIntegerField(
-        default=0,
-        help_text="Number of views on TikTok"
-    )
-    like_count = models.PositiveIntegerField(
-        default=0,
-        help_text="Number of likes on TikTok"
-    )
-    share_count = models.PositiveIntegerField(
-        default=0,
-        help_text="Number of shares on TikTok"
-    )
-    
-    # Reward calculation
-    base_confio_reward = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=0,
-        help_text="Base CONFIO reward for this share"
-    )
-    view_bonus_confio = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=0,
-        help_text="Additional CONFIO based on view count"
-    )
-    total_confio_awarded = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=0,
-        help_text="Total CONFIO awarded for this share"
+        help_text="Admin notes about verification"
     )
     
     class Meta:
@@ -494,25 +492,23 @@ class TikTokViralShare(SoftDeleteModel):
             return 'growing'
         return 'new'
     
-    def calculate_rewards(self):
-        """Calculate rewards based on performance"""
-        # Base reward
-        base = Decimal('4.0')  # 4 CONFIO base
+    def calculate_bonus_confio(self):
+        """Calculate bonus CONFIO based on performance"""
+        base = self.base_confio_reward
         
-        # View-based multipliers
+        # View-based multiplier
         if self.view_count >= 1000000:
-            multiplier = Decimal('62.5')  # 250 CONFIO total
+            multiplier = 10.0  # 10x for viral (1M+ views)
         elif self.view_count >= 100000:
-            multiplier = Decimal('20.0')  # 80 CONFIO total
+            multiplier = 5.0   # 5x for hot (100K+ views)
         elif self.view_count >= 10000:
-            multiplier = Decimal('5.0')   # 20 CONFIO total
+            multiplier = 2.0   # 2x for trending (10K+ views)
         elif self.view_count >= 1000:
-            multiplier = Decimal('1.0')   # 4 CONFIO total
+            multiplier = 1.5   # 1.5x for growing (1K+ views)
         else:
-            multiplier = Decimal('0.25')  # 1 CONFIO for trying
+            multiplier = 1.0   # Base reward
         
-        self.base_confio_reward = base
-        self.view_bonus_confio = base * (multiplier - 1) if multiplier > 1 else 0
+        self.view_bonus_confio = base * (multiplier - 1)
         self.total_confio_awarded = base * multiplier
         
         return self.total_confio_awarded
@@ -566,6 +562,23 @@ class ConfioRewardBalance(SoftDeleteModel):
         help_text="Amount to unlock on next date"
     )
     
+    # Rate limiting and tracking
+    last_reward_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time user received a reward"
+    )
+    daily_reward_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of rewards claimed today"
+    )
+    daily_reward_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Total CONFIO claimed today"
+    )
+    
     class Meta:
         verbose_name = "CONFIO Balance"
         verbose_name_plural = "CONFIO Balances"
@@ -608,24 +621,20 @@ class ConfioRewardTransaction(SoftDeleteModel):
     balance_after = models.DecimalField(
         max_digits=20,
         decimal_places=2,
-        help_text="Balance after this transaction"
+        help_text="User's total balance after this transaction"
     )
     
-    # Reference to source
+    # Reference to what caused this transaction
     reference_type = models.CharField(
         max_length=50,
-        blank=True,
-        help_text="Type of reference (achievement, referral, viral, etc.)"
+        help_text="Type of action that caused this transaction"
     )
     reference_id = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text="ID of the referenced object"
+        max_length=50,
+        help_text="ID of the record that caused this transaction"
     )
-    
     description = models.TextField(
-        blank=True,
-        help_text="Description of this transaction"
+        help_text="Human-readable description of this transaction"
     )
     
     class Meta:
@@ -658,13 +667,6 @@ class InfluencerAmbassador(SoftDeleteModel):
         on_delete=models.CASCADE,
         related_name='ambassador_profile'
     )
-    referrer_identifier = models.CharField(
-        max_length=100,
-        unique=True,
-        help_text="Primary identifier used for referrals"
-    )
-    
-    # Ambassador status
     tier = models.CharField(
         max_length=20,
         choices=TIER_CHOICES,
@@ -679,19 +681,19 @@ class InfluencerAmbassador(SoftDeleteModel):
     # Performance metrics
     total_referrals = models.PositiveIntegerField(
         default=0,
-        help_text="Total number of referrals"
+        help_text="Total number of referrals made"
     )
     active_referrals = models.PositiveIntegerField(
         default=0,
-        help_text="Number of active referred users"
+        help_text="Number of currently active referrals"
     )
     total_viral_views = models.PositiveBigIntegerField(
         default=0,
         help_text="Total views across all viral content"
     )
-    monthly_viral_views = models.PositiveBigIntegerField(
+    monthly_viral_views = models.PositiveIntegerField(
         default=0,
-        help_text="Views in current month"
+        help_text="Viral views in the current month"
     )
     referral_transaction_volume = models.DecimalField(
         max_digits=20,
@@ -700,36 +702,18 @@ class InfluencerAmbassador(SoftDeleteModel):
         help_text="Total transaction volume from referrals"
     )
     confio_earned = models.DecimalField(
-        max_digits=15,
+        max_digits=20,
         decimal_places=2,
         default=0,
         help_text="Total CONFIO earned as ambassador"
     )
     
-    # Tier progression
-    tier_achieved_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="When current tier was achieved"
-    )
-    tier_progress = models.JSONField(
-        default=dict,
-        help_text="Progress towards next tier"
-    )
-    
-    # Special perks
-    custom_referral_code = models.CharField(
-        max_length=20,
-        unique=True,
-        null=True,
-        blank=True,
-        help_text="Custom referral code (gold+ tier)"
-    )
+    # Benefits and bonuses
     referral_bonus_multiplier = models.DecimalField(
         max_digits=3,
         decimal_places=2,
         default=1.0,
-        help_text="Multiplier for referral rewards"
+        help_text="Multiplier for referral rewards (e.g., 1.5 = 50% bonus)"
     )
     viral_bonus_multiplier = models.DecimalField(
         max_digits=3,
@@ -737,51 +721,52 @@ class InfluencerAmbassador(SoftDeleteModel):
         default=1.0,
         help_text="Multiplier for viral content rewards"
     )
+    custom_referral_code = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        unique=True,
+        help_text="Custom referral code for this ambassador"
+    )
     
-    # Management
-    assigned_manager = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
+    # Tier progression
+    tier_achieved_at = models.DateTimeField(
+        auto_now_add=True,
         null=True,
         blank=True,
-        related_name='managed_ambassadors',
-        help_text="Confío team member managing this ambassador"
+        help_text="When the current tier was achieved"
     )
-    performance_score = models.DecimalField(
-        max_digits=5,
-        decimal_places=2,
+    performance_score = models.PositiveIntegerField(
         default=0,
         help_text="Overall performance score (0-100)"
     )
-    last_activity_at = models.DateTimeField(
-        default=timezone.now,
-        help_text="Last referral or viral activity"
-    )
-    notes = models.TextField(
-        blank=True,
-        help_text="Internal notes about this ambassador"
-    )
     
-    # Perk flags
+    # Benefits flags
     has_early_access = models.BooleanField(
         default=False,
-        help_text="Access to beta features"
+        help_text="Has early access to new features"
     )
     has_exclusive_events = models.BooleanField(
         default=False,
-        help_text="Invited to exclusive events"
+        help_text="Has access to exclusive events"
     )
     has_monthly_bonus = models.BooleanField(
         default=False,
-        help_text="Eligible for monthly performance bonus"
+        help_text="Receives monthly performance bonus"
     )
     dedicatedSupport = models.BooleanField(
         default=False,
-        help_text="Has dedicated support contact"
+        help_text="Has access to dedicated support"
+    )
+    
+    # Activity tracking
+    last_activity_at = models.DateTimeField(
+        auto_now=True,
+        help_text="Last time ambassador was active"
     )
     
     class Meta:
-        ordering = ['-performance_score', '-total_referrals']
+        ordering = ['-confio_earned', '-total_referrals']
         verbose_name = "Influencer Ambassador"
         verbose_name_plural = "Influencer Ambassadors"
     
@@ -810,50 +795,65 @@ class InfluencerAmbassador(SoftDeleteModel):
         return f"{status_colors.get(self.status, '')} {self.get_status_display()}"
     
     def calculate_performance_score(self):
-        """Calculate performance score based on various metrics"""
-        # Base scores
-        referral_score = min(self.active_referrals / 100 * 30, 30)  # Max 30 points
-        volume_score = min(float(self.referral_transaction_volume) / 10000 * 20, 20)  # Max 20 points
-        viral_score = min(self.monthly_viral_views / 100000 * 20, 20)  # Max 20 points
-        consistency_score = 30  # Based on regular activity
+        """Calculate overall performance score (0-100)"""
+        score = 0
         
-        # Check last activity
-        days_inactive = (timezone.now() - self.last_activity_at).days
-        if days_inactive > 30:
-            consistency_score = max(0, consistency_score - days_inactive + 30)
+        # Referral component (40%)
+        if self.total_referrals >= 1000:
+            score += 40
+        elif self.total_referrals >= 500:
+            score += 30
+        elif self.total_referrals >= 100:
+            score += 20
+        elif self.total_referrals >= 50:
+            score += 10
         
-        self.performance_score = referral_score + volume_score + viral_score + consistency_score
+        # Viral component (40%)
+        if self.total_viral_views >= 10000000:  # 10M+
+            score += 40
+        elif self.total_viral_views >= 5000000:  # 5M+
+            score += 30
+        elif self.total_viral_views >= 1000000:  # 1M+
+            score += 20
+        elif self.total_viral_views >= 100000:  # 100K+
+            score += 10
+        
+        # Volume component (20%)
+        volume_usd = float(self.referral_transaction_volume)
+        if volume_usd >= 1000000:  # $1M+
+            score += 20
+        elif volume_usd >= 500000:  # $500K+
+            score += 15
+        elif volume_usd >= 100000:  # $100K+
+            score += 10
+        elif volume_usd >= 50000:   # $50K+
+            score += 5
+        
+        self.performance_score = min(score, 100)
         return self.performance_score
     
-    def check_tier_upgrade(self):
-        """Check if eligible for tier upgrade"""
-        tier_requirements = {
-            'bronze': {'referrals': 0, 'active': 0, 'volume': 0},
-            'silver': {'referrals': 50, 'active': 20, 'volume': 1000},
-            'gold': {'referrals': 200, 'active': 100, 'volume': 10000},
-            'diamond': {'referrals': 1000, 'active': 500, 'volume': 100000},
-        }
+    def calculate_tier_progress(self):
+        """Calculate progress towards next tier (0-100)"""
+        current_tier_index = [choice[0] for choice in self.TIER_CHOICES].index(self.tier)
         
-        current_tier_index = [t[0] for t in self.TIER_CHOICES].index(self.tier)
+        if current_tier_index == len(self.TIER_CHOICES) - 1:
+            return 100  # Already at highest tier
         
-        for i in range(current_tier_index + 1, len(self.TIER_CHOICES)):
-            next_tier = self.TIER_CHOICES[i][0]
-            requirements = tier_requirements[next_tier]
-            
-            if (self.total_referrals >= requirements['referrals'] and
-                self.active_referrals >= requirements['active'] and
-                self.referral_transaction_volume >= requirements['volume']):
-                
-                self.tier = next_tier
-                self.tier_achieved_at = timezone.now()
-                self.update_tier_perks()
-                return True
-        
-        return False
+        # Simplified tier progression based on performance score
+        if self.performance_score >= 90:
+            return 100
+        elif self.performance_score >= 75:
+            return 80
+        elif self.performance_score >= 50:
+            return 60
+        elif self.performance_score >= 25:
+            return 40
+        else:
+            return 20
     
-    def update_tier_perks(self):
-        """Update perks based on current tier"""
-        tier_perks = {
+    def update_tier_benefits(self):
+        """Update benefits based on current tier"""
+        tier_benefits = {
             'bronze': {
                 'referral_bonus': 1.0,
                 'viral_bonus': 1.0,
@@ -885,10 +885,10 @@ class InfluencerAmbassador(SoftDeleteModel):
                 'exclusive_events': True,
                 'monthly_bonus': True,
                 'dedicated_support': True,
-            },
+            }
         }
         
-        perks = tier_perks.get(self.tier, tier_perks['bronze'])
+        perks = tier_benefits.get(self.tier, tier_benefits['bronze'])
         
         self.referral_bonus_multiplier = perks['referral_bonus']
         self.viral_bonus_multiplier = perks['viral_bonus']
@@ -912,14 +912,14 @@ class InfluencerAmbassador(SoftDeleteModel):
 
 
 class AmbassadorActivity(SoftDeleteModel):
-    """Log of ambassador activities and milestones"""
+    """Track ambassador activity and performance"""
     
     ACTIVITY_TYPE_CHOICES = [
-        ('referral', 'Nueva Referencia'),
+        ('referral', 'Referido'),
         ('viral_content', 'Contenido Viral'),
-        ('tier_upgrade', 'Mejora de Nivel'),
-        ('milestone', 'Hito Alcanzado'),
-        ('bonus_earned', 'Bono Ganado'),
+        ('community_engagement', 'Participación Comunitaria'),
+        ('event_participation', 'Participación en Eventos'),
+        ('milestone_achieved', 'Hito Alcanzado'),
     ]
     
     ambassador = models.ForeignKey(
@@ -928,20 +928,24 @@ class AmbassadorActivity(SoftDeleteModel):
         related_name='activities'
     )
     activity_type = models.CharField(
-        max_length=20,
+        max_length=30,
         choices=ACTIVITY_TYPE_CHOICES
     )
     description = models.TextField()
-    metadata = models.JSONField(
-        default=dict,
-        blank=True,
-        help_text="Additional activity data"
+    points_earned = models.PositiveIntegerField(
+        default=0,
+        help_text="Points earned for this activity"
     )
     confio_earned = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         default=0,
-        help_text="CONFIO earned from this activity"
+        help_text="CONFIO earned for this activity"
+    )
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Additional activity metadata"
     )
     
     class Meta:
@@ -952,6 +956,56 @@ class AmbassadorActivity(SoftDeleteModel):
     def __str__(self):
         return f"{self.ambassador.user.username} - {self.get_activity_type_display()}"
 
+
+class ConfioGrowthMetric(models.Model):
+    """Stores growth metrics for the CONFIO token info screen"""
+    
+    METRIC_TYPE_CHOICES = [
+        ('active_users', 'Usuarios Activos'),
+        ('protected_savings', 'Ahorros Protegidos'),
+        ('daily_transactions', 'Transacciones Diarias'),
+        ('monthly_volume', 'Volumen Mensual'),
+        ('venezuelan_states', 'Estados de Venezuela'),
+    ]
+    
+    metric_type = models.CharField(
+        max_length=30,
+        choices=METRIC_TYPE_CHOICES,
+        unique=True,
+        help_text="Type of metric being tracked"
+    )
+    display_name = models.CharField(
+        max_length=100,
+        help_text="Display name for this metric"
+    )
+    current_value = models.CharField(
+        max_length=50,
+        help_text="Current value (e.g., '8K+', '$1.2M cUSD')"
+    )
+    growth_percentage = models.CharField(
+        max_length=20,
+        help_text="Growth percentage (e.g., '+25%')"
+    )
+    display_order = models.PositiveIntegerField(
+        default=0,
+        help_text="Order to display this metric"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether to show this metric in the app"
+    )
+    last_updated = models.DateTimeField(
+        auto_now=True,
+        help_text="When this metric was last updated"
+    )
+    
+    class Meta:
+        ordering = ['display_order', 'metric_type']
+        verbose_name = "CONFIO Growth Metric"
+        verbose_name_plural = "CONFIO Growth Metrics"
+    
+    def __str__(self):
+        return f"{self.display_name}: {self.current_value} ({self.growth_percentage})"
 
 
 class PioneroBetaTracker(models.Model):
@@ -973,30 +1027,14 @@ class PioneroBetaTracker(models.Model):
         super().save(*args, **kwargs)
     
     @classmethod
-    def increment_and_check(cls):
-        """
-        Atomically increment counter and check if under 10,000
-        Returns (success, current_count)
-        """
-        from django.db import transaction
-        
-        with transaction.atomic():
-            tracker, created = cls.objects.select_for_update().get_or_create(pk=1)
-            if tracker.count >= 10000:
-                return False, tracker.count
-            
-            tracker.count += 1
-            tracker.save()
-            return True, tracker.count
+    def get_instance(cls):
+        """Get the singleton instance"""
+        instance, created = cls.objects.get_or_create(pk=1)
+        return instance
     
-    @classmethod
-    def get_count(cls):
-        """Get current count"""
-        tracker, created = cls.objects.get_or_create(pk=1)
-        return tracker.count
-    
-    def get_remaining_slots(self):
-        """Get remaining slots available"""
+    @property
+    def remaining_spots(self):
+        """Get remaining spots for Pionero Beta"""
         return max(0, 10000 - self.count)
     
     def __str__(self):

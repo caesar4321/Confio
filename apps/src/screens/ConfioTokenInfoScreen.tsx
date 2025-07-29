@@ -61,9 +61,9 @@ export const ConfioTokenInfoScreen = () => {
   ];
 
   const stats = [
-    { label: 'Usuarios Activos', value: '50K+', growth: '+120%' },
-    { label: 'Transacciones/Mes', value: '500K+', growth: '+85%' },
-    { label: 'Países', value: '15', growth: '+3' },
+    { label: 'Usuarios Activos mensual', value: '8K+', growth: '+12% semanal' },
+    { label: 'Ahorros Protegidos', value: '$1.2M cUSD', growth: '+25% semanal' },
+    { label: 'Transacciones Diarias', value: '2.5K+', growth: '+18% semanal' },
   ];
 
   return (

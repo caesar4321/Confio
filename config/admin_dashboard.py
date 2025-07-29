@@ -17,6 +17,7 @@ from decimal import Decimal
 from users.models import User, Account, Business, Country, Bank, BankInfo
 from security.models import IdentityVerification
 from achievements.admin_views import achievement_dashboard
+from achievements.models import UserAchievement
 from p2p_exchange.models import P2POffer, P2PTrade, P2PUserStats, P2PDispute
 from send.models import SendTransaction
 from payments.models import PaymentTransaction
@@ -96,6 +97,46 @@ class ConfioAdminSite(admin.AdminSite):
             status__in=['OPEN', 'UNDER_REVIEW']
         ).count()
         context['escalated_disputes'] = P2PDispute.objects.filter(status='ESCALATED').count()
+        
+        # Fraud Detection Statistics
+        total_achievements = UserAchievement.objects.count()
+        fraud_detected = UserAchievement.objects.filter(
+            security_metadata__fraud_detected__isnull=False
+        ).count()
+        suspicious_activity = UserAchievement.objects.filter(
+            security_metadata__suspicious_ip=True
+        ).count()
+        
+        # Count unique devices with multiple users from DeviceFingerprint model
+        from security.models import DeviceFingerprint
+        from django.db.models import Count
+        
+        # Count devices that have more than one user
+        multi_user_devices = DeviceFingerprint.objects.annotate(
+            user_count=Count('users', distinct=True)
+        ).filter(user_count__gt=1).count()
+        
+        # Also get total unique devices tracked
+        total_devices_tracked = DeviceFingerprint.objects.count()
+        
+        # Calculate potential fraud loss
+        potential_loss = UserAchievement.objects.filter(
+            security_metadata__fraud_detected__isnull=False,
+            status='claimed'
+        ).aggregate(
+            total=Sum('achievement_type__confio_reward')
+        )['total'] or 0
+        
+        context['fraud_stats'] = {
+            'total_achievements': total_achievements,
+            'fraud_detected': fraud_detected,
+            'fraud_percentage': (fraud_detected / total_achievements * 100) if total_achievements > 0 else 0,
+            'suspicious_activity': suspicious_activity,
+            'multi_user_devices': multi_user_devices,
+            'total_devices_tracked': total_devices_tracked,
+            'potential_loss': potential_loss,
+            'potential_loss_usd': float(potential_loss) / 4,  # 4 CONFIO = $1
+        }
         
         # Transaction metrics
         context['send_transactions_today'] = SendTransaction.objects.filter(
@@ -401,17 +442,18 @@ confio_admin_site.register(BusinessEmployee, BusinessEmployeeAdmin)
 confio_admin_site.register(EmployeeInvitation, EmployeeInvitationAdmin)
 
 # CONFIO Reward models
-from achievements.models import ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare
+from achievements.models import ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare, ConfioGrowthMetric
 # Achievement models are now registered below
 
 # Achievement models
-from achievements.admin import AchievementTypeAdmin, UserAchievementAdmin, InfluencerReferralAdmin, TikTokViralShareAdmin, ConfioRewardBalanceAdmin, ConfioRewardTransactionAdmin
+from achievements.admin import AchievementTypeAdmin, UserAchievementAdmin, InfluencerReferralAdmin, TikTokViralShareAdmin, ConfioRewardBalanceAdmin, ConfioRewardTransactionAdmin, ConfioGrowthMetricAdmin
 confio_admin_site.register(ConfioRewardBalance, ConfioRewardBalanceAdmin)
 confio_admin_site.register(ConfioRewardTransaction, ConfioRewardTransactionAdmin)
 confio_admin_site.register(AchievementType, AchievementTypeAdmin)
 confio_admin_site.register(UserAchievement, UserAchievementAdmin)
 confio_admin_site.register(InfluencerReferral, InfluencerReferralAdmin)
 confio_admin_site.register(TikTokViralShare, TikTokViralShareAdmin)
+confio_admin_site.register(ConfioGrowthMetric, ConfioGrowthMetricAdmin)
 
 # Ambassador models
 from achievements.models import InfluencerAmbassador, AmbassadorActivity, PioneroBetaTracker
