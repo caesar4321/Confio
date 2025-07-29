@@ -2,7 +2,7 @@
 Update Pionero Beta achievement description to include mystery benefits
 """
 from django.core.management.base import BaseCommand
-from users.models import AchievementType
+from achievements.models import AchievementType
 
 
 class Command(BaseCommand):

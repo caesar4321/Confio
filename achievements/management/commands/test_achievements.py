@@ -2,7 +2,8 @@
 Test command to verify achievement system is working
 """
 from django.core.management.base import BaseCommand
-from users.models import AchievementType, UserAchievement, User
+from users.models import User
+from achievements.models import AchievementType, UserAchievement
 
 
 class Command(BaseCommand):
@@ -37,7 +38,7 @@ class Command(BaseCommand):
             self.stdout.write(f"Error checking user achievements: {e}")
         
         # Show Pionero Beta status
-        from users.models import PioneroBetaTracker
+        from achievements.models import PioneroBetaTracker
         tracker = PioneroBetaTracker.objects.first()
         if tracker:
             self.stdout.write(f"\n=== Pionero Beta Status ===")

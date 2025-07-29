@@ -3,7 +3,7 @@ Setup referral system integrated with Logros
 Based on AI consensus: Single entry point, dual reward
 """
 from django.core.management.base import BaseCommand
-from users.models import AchievementType
+from achievements.models import AchievementType
 from decimal import Decimal
 
 
