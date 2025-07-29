@@ -3,6 +3,7 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Count, Sum, Q
+import logging
 
 from .models import (
     AchievementType, UserAchievement, InfluencerReferral, 
@@ -10,6 +11,59 @@ from .models import (
     InfluencerAmbassador, AmbassadorActivity,
     PioneroBetaTracker
 )
+
+logger = logging.getLogger(__name__)
+
+
+class FraudStatusFilter(admin.SimpleListFilter):
+    """Custom filter for fraud detection status"""
+    title = 'Fraud Status'
+    parameter_name = 'fraud_status'
+    
+    def lookups(self, request, model_admin):
+        return (
+            ('clean', 'Clean'),
+            ('suspicious', 'Suspicious'),
+            ('fraud', 'Confirmed Fraud'),
+            ('multi_device', 'Multiple on Same Device'),
+        )
+    
+    def queryset(self, request, queryset):
+        if self.value() == 'clean':
+            # No fraud indicators
+            return queryset.filter(
+                Q(security_metadata={}) | Q(security_metadata__isnull=True)
+            )
+        elif self.value() == 'suspicious':
+            # Has suspicious indicators but not confirmed fraud
+            return queryset.filter(
+                security_metadata__suspicious_ip=True
+            ).exclude(
+                security_metadata__fraud_detected__isnull=False
+            )
+        elif self.value() == 'fraud':
+            # Confirmed fraud
+            return queryset.filter(
+                security_metadata__fraud_detected__isnull=False
+            )
+        elif self.value() == 'multi_device':
+            # Find achievements where device has multiple users
+            from django.db.models import Subquery, OuterRef
+            
+            # Get device hashes that appear for multiple users
+            multi_device = UserAchievement.objects.filter(
+                device_fingerprint_hash=OuterRef('device_fingerprint_hash')
+            ).exclude(
+                user=OuterRef('user')
+            ).values('device_fingerprint_hash')[:1]
+            
+            return queryset.filter(
+                device_fingerprint_hash__isnull=False
+            ).filter(
+                device_fingerprint_hash__in=Subquery(multi_device)
+            )
+        
+        return queryset
 
 
 @admin.register(AchievementType)
@@ -112,12 +166,50 @@ class AchievementTypeAdmin(admin.ModelAdmin):
 @admin.register(UserAchievement)
 class UserAchievementAdmin(admin.ModelAdmin):
     """Admin for user achievements"""
-    list_display = ('user_display', 'achievement_display', 'status_display', 'reward_display', 'earned_at', 'claimed_at')
-    list_filter = ('status', 'earned_at', 'claimed_at', 'achievement_type__category', 'achievement_type__is_active')
-    search_fields = ('user__username', 'user__email', 'achievement_type__name', 'achievement_type__slug')
-    readonly_fields = ('earned_at', 'claimed_at', 'created_at', 'updated_at', 'reward_amount_display')
+    list_display = ('user_display', 'achievement_display', 'status_display', 'reward_display', 'fraud_indicator', 'earned_at', 'claimed_at')
+    list_filter = ('status', FraudStatusFilter, 'earned_at', 'claimed_at', 'achievement_type__category', 'achievement_type__is_active')
+    search_fields = ('user__username', 'user__email', 'achievement_type__name', 'achievement_type__slug', 'device_fingerprint_hash', 'claim_ip_address')
+    readonly_fields = ('earned_at', 'claimed_at', 'created_at', 'updated_at', 'reward_amount_display', 'device_fingerprint_display', 'security_metadata_display')
     raw_id_fields = ('user', 'achievement_type')
     date_hierarchy = 'earned_at'
+    
+    def changelist_view(self, request, extra_context=None):
+        """Add fraud statistics to the changelist view"""
+        response = super().changelist_view(request, extra_context)
+        
+        try:
+            # Get the filtered queryset
+            qs = response.context_data['cl'].queryset
+            
+            # Calculate fraud statistics
+            total_achievements = qs.count()
+            fraud_detected = qs.filter(security_metadata__fraud_detected__isnull=False).count()
+            suspicious_ips = qs.filter(security_metadata__suspicious_ip=True).count()
+            
+            # Count unique devices with multiple users
+            device_counts = {}
+            for achievement in qs.filter(device_fingerprint_hash__isnull=False):
+                device_hash = achievement.device_fingerprint_hash
+                if device_hash not in device_counts:
+                    device_counts[device_hash] = set()
+                device_counts[device_hash].add(achievement.user_id)
+            
+            multi_user_devices = sum(1 for users in device_counts.values() if len(users) > 1)
+            
+            # Add to context
+            response.context_data.update({
+                'fraud_stats': {
+                    'total': total_achievements,
+                    'fraud_detected': fraud_detected,
+                    'fraud_percentage': (fraud_detected / total_achievements * 100) if total_achievements > 0 else 0,
+                    'suspicious_ips': suspicious_ips,
+                    'multi_user_devices': multi_user_devices,
+                }
+            })
+        except (AttributeError, KeyError):
+            pass
+        
+        return response
     
     fieldsets = (
         ('User & Achievement', {
@@ -125,6 +217,11 @@ class UserAchievementAdmin(admin.ModelAdmin):
         }),
         ('Reward Information', {
             'fields': ('reward_amount_display',),
+        }),
+        ('Security & Fraud Detection', {
+            'fields': ('device_fingerprint_display', 'claim_ip_address', 'security_metadata_display'),
+            'classes': ('collapse',),
+            'description': 'Device fingerprint and security information for fraud prevention'
         }),
         ('Timestamps', {
             'fields': ('earned_at', 'claimed_at', 'created_at', 'updated_at'),
@@ -185,13 +282,90 @@ class UserAchievementAdmin(admin.ModelAdmin):
         )
     status_display.short_description = "Status"
     
+    def fraud_indicator(self, obj):
+        """Display fraud indicators based on security metadata"""
+        if not obj.security_metadata:
+            return format_html('<span style="color: #10B981;">✓</span>')
+        
+        if obj.security_metadata.get('fraud_detected'):
+            reason = obj.security_metadata.get('blocked_reason', 'Fraud detected')
+            return format_html(
+                '<span style="color: #DC2626; font-weight: bold;" title="{}">⚠️ FRAUD</span>',
+                reason
+            )
+        elif obj.security_metadata.get('suspicious_ip'):
+            return format_html(
+                '<span style="color: #F59E0B;" title="Suspicious IP activity">⚠️ Suspicious</span>'
+            )
+        else:
+            return format_html('<span style="color: #10B981;">✓</span>')
+    fraud_indicator.short_description = "Security"
+    
+    def device_fingerprint_display(self, obj):
+        """Display device fingerprint information"""
+        if not obj.device_fingerprint_hash:
+            return format_html('<span style="color: #9CA3AF;">No device data</span>')
+        
+        # Show first 8 chars of hash for identification
+        hash_preview = obj.device_fingerprint_hash[:8]
+        
+        # Check how many achievements from this device
+        same_device_count = UserAchievement.objects.filter(
+            device_fingerprint_hash=obj.device_fingerprint_hash
+        ).exclude(id=obj.id).count()
+        
+        if same_device_count > 0:
+            color = '#F59E0B' if same_device_count < 3 else '#DC2626'
+            return format_html(
+                '<span style="color: {};" title="Full hash: {}">{}... ({} other achievements)</span>',
+                color,
+                obj.device_fingerprint_hash,
+                hash_preview,
+                same_device_count
+            )
+        else:
+            return format_html(
+                '<span title="Full hash: {}">{}...</span>',
+                obj.device_fingerprint_hash,
+                hash_preview
+            )
+    device_fingerprint_display.short_description = "Device ID"
+    
+    def security_metadata_display(self, obj):
+        """Display security metadata in readable format"""
+        if not obj.security_metadata:
+            return "No metadata"
+        
+        try:
+            # Format metadata as a simple list
+            items = []
+            for key, value in obj.security_metadata.items():
+                if key == 'fraud_detected':
+                    items.append(f"Fraud Type: {value}")
+                elif key == 'blocked_reason':
+                    items.append(f"Reason: {value}")
+                elif key == 'suspicious_ip':
+                    items.append(f"Suspicious IP: Yes")
+                elif key == 'recent_registrations':
+                    items.append(f"Recent Registrations: {value}")
+                else:
+                    items.append(f"{key}: {value}")
+            
+            return format_html(
+                '<pre style="margin: 0; font-size: 11px;">{}</pre>',
+                '\n'.join(items)
+            )
+        except Exception as e:
+            return f"Error displaying metadata: {e}"
+    security_metadata_display.short_description = "Security Metadata"
+    
     def can_claim(self, obj):
         if obj.can_claim_reward:
             return format_html('<span style="color: #10B981;">✅ Yes</span>')
         return format_html('<span style="color: #9CA3AF;">❌ No</span>')
     can_claim.short_description = "Can Claim?"
     
-    actions = ['mark_as_earned', 'mark_as_claimed']
+    actions = ['mark_as_earned', 'mark_as_claimed', 'mark_as_fraudulent', 'block_device']
     
     def mark_as_earned(self, request, queryset):
         updated = queryset.filter(status='pending').update(
@@ -208,6 +382,78 @@ class UserAchievementAdmin(admin.ModelAdmin):
                 count += 1
         self.message_user(request, f"{count} achievements claimed with rewards distributed.")
     mark_as_claimed.short_description = "Claim rewards for selected"
+    
+    def mark_as_fraudulent(self, request, queryset):
+        """Mark selected achievements as fraudulent"""
+        from django.contrib import messages
+        
+        fraud_count = 0
+        for achievement in queryset:
+            if achievement.status in ['earned', 'claimed']:
+                # Update security metadata
+                achievement.security_metadata['fraud_detected'] = 'manual_review'
+                achievement.security_metadata['blocked_reason'] = 'Manually marked as fraudulent by admin'
+                achievement.security_metadata['blocked_by'] = request.user.username
+                achievement.security_metadata['blocked_at'] = timezone.now().isoformat()
+                
+                # Change status to expired to prevent claiming
+                if achievement.status == 'earned':
+                    achievement.status = 'expired'
+                
+                achievement.save()
+                fraud_count += 1
+                
+                logger.warning(
+                    f"Achievement {achievement.id} marked as fraudulent by {request.user.username}. "
+                    f"User: {achievement.user.id}, Type: {achievement.achievement_type.slug}"
+                )
+        
+        messages.warning(request, f"{fraud_count} achievements marked as fraudulent.")
+    mark_as_fraudulent.short_description = "Mark selected as fraudulent"
+    
+    def block_device(self, request, queryset):
+        """Block all achievements from the same device"""
+        from django.contrib import messages
+        
+        device_hashes = set()
+        for achievement in queryset:
+            if achievement.device_fingerprint_hash:
+                device_hashes.add(achievement.device_fingerprint_hash)
+        
+        if not device_hashes:
+            messages.warning(request, "No device fingerprints found in selected achievements.")
+            return
+        
+        blocked_count = 0
+        for device_hash in device_hashes:
+            # Find all achievements from this device
+            device_achievements = UserAchievement.objects.filter(
+                device_fingerprint_hash=device_hash,
+                status__in=['earned', 'pending']
+            )
+            
+            for achievement in device_achievements:
+                achievement.security_metadata['fraud_detected'] = 'device_blocked'
+                achievement.security_metadata['blocked_reason'] = 'Device blocked by admin'
+                achievement.security_metadata['blocked_by'] = request.user.username
+                achievement.security_metadata['blocked_at'] = timezone.now().isoformat()
+                
+                if achievement.status == 'earned':
+                    achievement.status = 'expired'
+                
+                achievement.save()
+                blocked_count += 1
+            
+            logger.warning(
+                f"Device {device_hash[:8]}... blocked by {request.user.username}. "
+                f"{blocked_count} achievements affected."
+            )
+        
+        messages.warning(
+            request, 
+            f"Blocked {blocked_count} achievements from {len(device_hashes)} device(s)."
+        )
+    block_device.short_description = "Block all achievements from same device"
 
 
 @admin.register(InfluencerReferral)

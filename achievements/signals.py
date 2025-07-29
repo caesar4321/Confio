@@ -6,6 +6,7 @@ from django.db.models import Count, Q
 
 from .models import AchievementType, UserAchievement, InfluencerReferral, PioneroBetaTracker
 from p2p_exchange.models import P2PTrade
+from security.models import DeviceFingerprint, IPAddress, UserDevice
 
 import logging
 
@@ -18,9 +19,53 @@ def create_welcome_achievement(sender, instance, created, **kwargs):
     """
     Automatically award the Pionero Beta achievement to new users
     Only for the first 10,000 users
+    Now with device fingerprint fraud prevention
     """
     if created:
         try:
+            # Get device fingerprint and IP from the current request context
+            device_fingerprint_hash = None
+            ip_address = None
+            security_metadata = {}
+            
+            # Try to get the device fingerprint from the user's session
+            # This would be set during the authentication process
+            if hasattr(instance, '_device_fingerprint_hash'):
+                device_fingerprint_hash = instance._device_fingerprint_hash
+                
+                # Check if this device has already claimed Pionero Beta
+                existing_achievement = UserAchievement.objects.filter(
+                    achievement_type__slug='pionero_beta',
+                    device_fingerprint_hash=device_fingerprint_hash,
+                    status__in=['earned', 'claimed']
+                ).exists()
+                
+                if existing_achievement:
+                    logger.warning(
+                        f"Device fingerprint {device_fingerprint_hash} already claimed Pionero Beta. "
+                        f"Blocking achievement for user {instance.id}"
+                    )
+                    security_metadata['fraud_detected'] = 'duplicate_device'
+                    security_metadata['blocked_reason'] = 'Device already claimed Pionero Beta'
+                    return
+            
+            # Get IP address if available
+            if hasattr(instance, '_registration_ip'):
+                ip_address = instance._registration_ip
+                
+                # Check for suspicious IP patterns
+                recent_registrations = User.objects.filter(
+                    date_joined__gte=timezone.now() - timezone.timedelta(hours=1)
+                ).count()
+                
+                if recent_registrations > 10:
+                    logger.warning(
+                        f"Suspicious registration rate from IP {ip_address}. "
+                        f"{recent_registrations} registrations in last hour."
+                    )
+                    security_metadata['suspicious_ip'] = True
+                    security_metadata['recent_registrations'] = recent_registrations
+            
             # Use atomic counter to check if we can award Pionero Beta
             can_award, current_count = PioneroBetaTracker.increment_and_check()
             
@@ -30,13 +75,22 @@ def create_welcome_achievement(sender, instance, created, **kwargs):
                     user=instance,
                     achievement_type=pionero_achievement,
                     status='earned',
-                    earned_at=instance.date_joined
+                    earned_at=instance.date_joined,
+                    device_fingerprint_hash=device_fingerprint_hash,
+                    claim_ip_address=ip_address,
+                    security_metadata=security_metadata
                 )
                 
                 # Update tracker with user ID
                 tracker = PioneroBetaTracker.objects.get(pk=1)
                 tracker.last_user_id = instance.id
                 tracker.save(update_fields=['last_user_id'])
+                
+                logger.info(
+                    f"Pionero Beta awarded to user {instance.id} "
+                    f"(#{current_count}/10,000) "
+                    f"Device: {device_fingerprint_hash[:8] if device_fingerprint_hash else 'Unknown'}"
+                )
             else:
                 # Log that we've reached the limit
                 logger.info(f"Pionero Beta limit reached: {current_count}/10,000")

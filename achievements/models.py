@@ -174,6 +174,24 @@ class UserAchievement(SoftDeleteModel):
         help_text="Actual value earned (for variable rewards)"
     )
     
+    # Fraud prevention fields
+    device_fingerprint_hash = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        help_text="Hash of device fingerprint when achievement was earned"
+    )
+    claim_ip_address = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        help_text="IP address when achievement was earned"
+    )
+    security_metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Additional security metadata for fraud detection"
+    )
+    
     class Meta:
         unique_together = [('user', 'achievement_type', 'deleted_at')]
         ordering = ['-earned_at', '-created_at']
