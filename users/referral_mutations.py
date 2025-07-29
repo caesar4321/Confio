@@ -45,12 +45,11 @@ class SetReferrer(graphene.Mutation):
             from django.utils import timezone
             from datetime import timedelta
             
-            # TEMPORARILY DISABLED FOR TESTING
-            # if user.created_at < timezone.now() - timedelta(hours=48):
-            #     return SetReferrer(
-            #         success=False,
-            #         error="El período para registrar un referidor ha expirado (48 horas)."
-            #     )
+            if user.created_at < timezone.now() - timedelta(hours=48):
+                return SetReferrer(
+                    success=False,
+                    error="El período para registrar un referidor ha expirado (48 horas)."
+                )
             
             # Clean the identifier
             identifier = referrer_identifier.strip().lower()
@@ -74,6 +73,11 @@ class SetReferrer(graphene.Mutation):
             # Find the referrer
             referrer = None
             referrer_username = identifier
+            
+            # Debug logging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"SetReferrer: identifier='{identifier}', referral_type='{referral_type}'")
             
             if referral_type == 'friend':
                 # Detect if it's a phone number
@@ -130,7 +134,9 @@ class SetReferrer(graphene.Mutation):
                         )
                     
                     referrer = User.objects.filter(username__iexact=identifier).first()
+                    logger.info(f"Username lookup for '{identifier}': found={referrer is not None}")
                     if not referrer:
+                        logger.warning(f"User not found with username: {identifier}")
                         return SetReferrer(
                             success=False,
                             error=f"No se encontró ningún usuario con el username @{identifier}"
@@ -161,7 +167,8 @@ class SetReferrer(graphene.Mutation):
             with db_transaction.atomic():
                 referral = InfluencerReferral.objects.create(
                     referred_user=user,
-                    tiktok_username=referrer_username,
+                    referrer_identifier=referrer_username,
+                    referral_type=referral_type,
                     influencer_user=referrer if referral_type == 'friend' else None,
                     status='pending',
                     attribution_data={
@@ -219,22 +226,21 @@ class CheckReferralStatus(graphene.Mutation):
         if existing:
             return CheckReferralStatus(
                 can_set_referrer=False,
-                existing_referrer=existing.tiktok_username
+                existing_referrer=existing.referrer_identifier
             )
         
         # Check time limit
         from django.utils import timezone
         from datetime import timedelta
         
-        # TEMPORARILY DISABLED FOR TESTING - Always allow setting referrer
-        # signup_deadline = user.created_at + timedelta(hours=48)
-        # if timezone.now() > signup_deadline:
-        #     return CheckReferralStatus(can_set_referrer=False, time_remaining_hours=0)
+        signup_deadline = user.created_at + timedelta(hours=48)
+        if timezone.now() > signup_deadline:
+            return CheckReferralStatus(can_set_referrer=False, time_remaining_hours=0)
         
-        # time_remaining = signup_deadline - timezone.now()
-        # hours_remaining = int(time_remaining.total_seconds() / 3600)
+        time_remaining = signup_deadline - timezone.now()
+        hours_remaining = int(time_remaining.total_seconds() / 3600)
         
         return CheckReferralStatus(
             can_set_referrer=True,
-            time_remaining_hours=48  # Show 48 hours for testing
+            time_remaining_hours=hours_remaining
         )

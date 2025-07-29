@@ -27,8 +27,8 @@ const CHECK_REFERRAL_STATUS = gql`
 `;
 
 const SET_REFERRER = gql`
-  mutation SetReferrer($referrerIdentifier: String!) {
-    setReferrer(referrerIdentifier: $referrerIdentifier) {
+  mutation SetReferrer($referrerIdentifier: String!, $referralType: String) {
+    setReferrer(referrerIdentifier: $referrerIdentifier, referralType: $referralType) {
       success
       error
       referralType
@@ -96,11 +96,21 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
     }
 
     try {
-      const { data } = await setReferrer({
+      console.log('Submitting referrer:', finalIdentifier, 'Type:', inputType);
+      const { data, errors } = await setReferrer({
         variables: {
           referrerIdentifier: finalIdentifier,
+          referralType: inputType === 'phone' ? 'friend' : inputType,
         },
       });
+
+      console.log('SetReferrer response:', { data, errors });
+
+      if (errors && errors.length > 0) {
+        console.error('GraphQL errors:', errors);
+        setError(errors[0].message || 'Error al registrar referidor');
+        return;
+      }
 
       if (data?.setReferrer?.success) {
         setShowSuccess(true);
@@ -109,9 +119,11 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
           onClose();
         }, 2000);
       } else {
+        console.log('Validation error:', data?.setReferrer?.error);
         setError(data?.setReferrer?.error || 'Error al registrar referidor');
       }
     } catch (err) {
+      console.error('Network error:', err);
       setError('Error de conexión. Intenta de nuevo.');
     }
   };

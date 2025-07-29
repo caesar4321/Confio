@@ -72,7 +72,7 @@ export const AchievementsScreen = () => {
   const { activeAccount } = useAccount();
   const [showReferralModal, setShowReferralModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [canShowReferralBox, setCanShowReferralBox] = useState(true); // Temporarily enabled for testing
+  const [canShowReferralBox, setCanShowReferralBox] = useState(false);
   const [selectedAchievement, setSelectedAchievement] = useState<{
     id: string;
     name: string;
