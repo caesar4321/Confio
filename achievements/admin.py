@@ -328,14 +328,15 @@ class PioneroBetaTrackerAdmin(admin.ModelAdmin):
     def progress_display(self, obj):
         percentage = (obj.count / 10000) * 100
         color = '#10B981' if percentage < 80 else '#F59E0B' if percentage < 95 else '#DC2626'
+        percentage_str = f"{percentage:.1f}"
         return format_html(
             '<div style="display: flex; align-items: center;">'
             '<div style="width: 200px; height: 20px; background: #e5e7eb; border-radius: 10px; overflow: hidden; margin-right: 10px;">'
             '<div style="width: {}%; height: 100%; background: {}; transition: width 0.3s;"></div>'
             '</div>'
-            '<span style="font-weight: bold; color: {};">{:.1f}%</span>'
+            '<span style="font-weight: bold; color: {};">{}%</span>'
             '</div>',
-            percentage, color, color, percentage
+            percentage, color, color, percentage_str
         )
     progress_display.short_description = "Progress"
     
