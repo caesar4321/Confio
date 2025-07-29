@@ -108,6 +108,24 @@ class CreateSendTransaction(graphene.Mutation):
 
                 # Validate the transaction amount
                 validate_transaction_amount(input.amount)
+                
+                # Import security checks
+                from security.utils import check_kyc_required, perform_aml_check
+                from decimal import Decimal
+                
+                # Check KYC requirement
+                kyc_required, kyc_reason = check_kyc_required(
+                    user, 
+                    'send_money', 
+                    Decimal(input.amount)
+                )
+                
+                if kyc_required:
+                    return CreateSendTransaction(
+                        send_transaction=None,
+                        success=False,
+                        errors=[kyc_reason]
+                    )
 
                 # Get JWT context with validation and permission check
                 from users.jwt_context import get_jwt_business_context_with_validation
@@ -322,6 +340,40 @@ class CreateSendTransaction(graphene.Mutation):
                     is_invitation=(recipient_user is None and bool(recipient_phone)),  # Only invitations for phone-based sends
                     invitation_expires_at=invitation_expires_at
                 )
+                
+                # Perform AML check for the transaction
+                aml_result = perform_aml_check(
+                    user=user,
+                    transaction_type='send',
+                    amount=Decimal(input.amount)
+                )
+                
+                # Check if transaction should be blocked based on AML risk
+                if aml_result['requires_review']:
+                    send_transaction.status = 'AML_REVIEW'
+                    send_transaction.save()
+                    
+                    # Create suspicious activity if high risk
+                    if aml_result['risk_score'] >= 70:
+                        from security.utils import create_suspicious_activity
+                        create_suspicious_activity(
+                            user=user,
+                            activity_type='high_risk_transaction',
+                            detection_data={
+                                'transaction_id': send_transaction.id,
+                                'transaction_type': 'send',
+                                'amount': str(input.amount),
+                                'risk_score': aml_result['risk_score'],
+                                'risk_factors': aml_result['risk_factors']
+                            },
+                            severity=min(aml_result['risk_score'] // 10, 10)
+                        )
+                    
+                    return CreateSendTransaction(
+                        send_transaction=send_transaction,
+                        success=True,
+                        errors=["Transaction is under review due to compliance requirements"]
+                    )
 
                 # TODO: Implement sponsored transaction logic here
                 # This will be handled by a background task

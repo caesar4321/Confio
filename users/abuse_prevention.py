@@ -267,8 +267,8 @@ class AbusePreventionService:
         ).exists()
         
         has_send = SendTransaction.objects.filter(
-            sender_account__user=user,
-            status='SUCCESS'
+            sender_user=user,
+            status='CONFIRMED'
         ).exists()
         
         requirements['has_transactions'] = has_p2p or has_send

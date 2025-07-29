@@ -35,6 +35,7 @@
     "react-native": "0.79.3",
     "react-native-buffer": "^6.0.3",
     "react-native-contacts": "^7.0.8",
+    "react-native-device-info": "^14.0.4",
     "react-native-fs": "^2.20.0",
     "react-native-get-random-values": "^1.9.0",
     "react-native-keychain": "^10.0.0",

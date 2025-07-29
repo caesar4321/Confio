@@ -16,6 +16,7 @@ import { base64ToBytes, bytesToBase64, stringToUtf8Bytes, bufferToHex } from '..
 import { ApolloClient } from '@apollo/client';
 import { AccountManager, AccountContext } from '../utils/accountManager';
 import { generateZkLoginSalt as generateZkLoginSaltUtil } from '../utils/zkLogin';
+import { DeviceFingerprint } from '../utils/deviceFingerprint';
 
 // Debug logging for environment variables
 console.log('Environment variables loaded:');
@@ -174,11 +175,27 @@ export class AuthService {
       const firebaseToken = await user.getIdToken();
       console.log('Firebase token received');
 
-      // 4) Initialize zkLogin
+      // 4) Collect device fingerprint before zkLogin initialization
+      console.log('Collecting device fingerprint...');
+      let deviceFingerprint = null;
+      try {
+        deviceFingerprint = await DeviceFingerprint.generateFingerprint();
+        console.log('Device fingerprint collected successfully');
+      } catch (error) {
+        console.error('Error collecting device fingerprint:', error);
+        // Continue without fingerprint rather than failing authentication
+      }
+
+      // 5) Initialize zkLogin with device fingerprint
       console.log('Initializing zkLogin...');
       const { data: { initializeZkLogin: init } } = await apolloClient.mutate({
         mutation: INITIALIZE_ZKLOGIN,
-        variables: { firebaseToken, providerToken: idToken, provider: 'google' }
+        variables: { 
+          firebaseToken, 
+          providerToken: idToken, 
+          provider: 'google',
+          deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null
+        }
       });
       console.log('zkLogin initialization response:', init ? 'Data received' : 'No data');
 
@@ -266,7 +283,7 @@ export class AuthService {
       // 6) Derive ephemeral keypair
       this.suiKeypair = this.deriveEphemeralKeypair(salt, decodedJwt.sub, GOOGLE_CLIENT_IDS.production.web);
 
-      // 7) Finalize zkLogin
+      // 7) Finalize zkLogin with device fingerprint
       const extendedPub = this.suiKeypair.getPublicKey().toBase64();
       const userSig = bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0)));
       const { data: { finalizeZkLogin: fin } } = await apolloClient.mutate({
@@ -283,7 +300,8 @@ export class AuthService {
             audience: GOOGLE_CLIENT_IDS.production.web,
             firebaseToken: firebaseToken,
             accountType: accountContext.type,
-            accountIndex: accountContext.index
+            accountIndex: accountContext.index,
+            deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null
           }
         }
       });
@@ -420,14 +438,26 @@ export class AuthService {
       const firebaseToken = await userCredential.user.getIdToken();
       console.log('Got Firebase ID token');
 
-      // Initialize zkLogin with the Firebase token
+      // Collect device fingerprint before zkLogin initialization
+      console.log('Collecting device fingerprint (Apple)...');
+      let deviceFingerprint = null;
+      try {
+        deviceFingerprint = await DeviceFingerprint.generateFingerprint();
+        console.log('Device fingerprint collected successfully (Apple)');
+      } catch (error) {
+        console.error('Error collecting device fingerprint (Apple):', error);
+        // Continue without fingerprint rather than failing authentication
+      }
+
+      // Initialize zkLogin with the Firebase token and device fingerprint
       console.log('Initializing zkLogin...');
       const { data: initData } = await apolloClient.mutate({
         mutation: INITIALIZE_ZKLOGIN,
         variables: {
           firebaseToken,
           providerToken: identityToken,
-          provider: 'apple'
+          provider: 'apple',
+          deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null
         }
       });
 
@@ -531,7 +561,7 @@ export class AuthService {
       // Get the extended ephemeral public key (now deterministic)
       const extendedEphemeralPublicKey = this.suiKeypair.getPublicKey().toBase64();
 
-      // Finalize zkLogin
+      // Finalize zkLogin with device fingerprint
       const { data: finalizeData } = await apolloClient.mutate({
         mutation: FINALIZE_ZKLOGIN,
         variables: {
@@ -546,7 +576,8 @@ export class AuthService {
             audience: 'apple',
             firebaseToken: firebaseToken,
             accountType: accountContext.type,
-            accountIndex: accountContext.index
+            accountIndex: accountContext.index,
+            deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null
           }
         }
       });
@@ -1122,6 +1153,14 @@ export class AuthService {
       const accountManager = AccountManager.getInstance();
       const accountContext = await accountManager.getActiveAccountContext();
       
+      // Collect fresh device fingerprint for proof refresh
+      let deviceFingerprint = null;
+      try {
+        deviceFingerprint = await DeviceFingerprint.generateFingerprint();
+      } catch (error) {
+        console.error('Error collecting device fingerprint for refresh:', error);
+      }
+
       // Get a fresh proof from the server
       const { data } = await apolloClient.mutate({
         mutation: FINALIZE_ZKLOGIN,
@@ -1137,7 +1176,8 @@ export class AuthService {
             audience: this.zkProof.clientId,
             firebaseToken: firebaseToken,
             accountType: accountContext.type,
-            accountIndex: accountContext.index
+            accountIndex: accountContext.index,
+            deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null
           }
         }
       });

@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, Easing } from 'react-native';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { appleAuth } from '@invertase/react-native-apple-authentication';
-import { AuthService } from '../services/authService';
+import { EnhancedAuthService } from '../services/enhancedAuthService';
 import GoogleLogo from '../assets/svg/GoogleLogo.svg';
 import AppleLogo from '../assets/svg/AppleLogo.svg';
 import { useNavigation } from '@react-navigation/native';
@@ -29,18 +29,34 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Auth'>;
 
 export const AuthScreen = () => {
   const navigation = useNavigation<NavigationProp>();
-  const authService = AuthService.getInstance();
+  const enhancedAuthService = EnhancedAuthService.getInstance();
   const { handleSuccessfulLogin } = useAuth();
 
   useEffect(() => {
-    authService.initialize().catch(error => {
-      console.error('Failed to initialize AuthService:', error);
+    enhancedAuthService.initialize().catch(error => {
+      console.error('Failed to initialize EnhancedAuthService:', error);
     });
   }, []);
 
   const handleGoogleSignIn = async () => {
     try {
-      const result = await authService.signInWithGoogle();
+      console.log('AuthScreen - Starting enhanced Google Sign-In...');
+      const result = await enhancedAuthService.signInWithGoogle();
+      
+      // Log security information
+      console.log('AuthScreen - Authentication completed with security data:', {
+        fingerprintHash: result.securityData.fingerprintHash,
+        isNewDevice: result.securityData.securityFlags.isNewDevice,
+        isTrustedDevice: result.securityData.securityFlags.isTrustedDevice,
+        requiresDeviceTrust: result.securityData.securityFlags.requiresDeviceTrust
+      });
+      
+      // Handle device trust if required
+      if (result.securityData.securityFlags.requiresDeviceTrust) {
+        console.log('AuthScreen - New device detected, may require additional verification');
+        // TODO: Show device trust verification UI
+      }
+      
       await handleSuccessfulLogin(result.zkLoginData.isPhoneVerified);
     } catch (error) {
       console.error('Google Sign-In failed:', error);
@@ -49,7 +65,23 @@ export const AuthScreen = () => {
 
   const handleAppleSignIn = async () => {
     try {
-      const result = await authService.signInWithApple();
+      console.log('AuthScreen - Starting enhanced Apple Sign-In...');
+      const result = await enhancedAuthService.signInWithApple();
+      
+      // Log security information
+      console.log('AuthScreen - Authentication completed with security data:', {
+        fingerprintHash: result.securityData.fingerprintHash,
+        isNewDevice: result.securityData.securityFlags.isNewDevice,
+        isTrustedDevice: result.securityData.securityFlags.isTrustedDevice,
+        requiresDeviceTrust: result.securityData.securityFlags.requiresDeviceTrust
+      });
+      
+      // Handle device trust if required
+      if (result.securityData.securityFlags.requiresDeviceTrust) {
+        console.log('AuthScreen - New device detected, may require additional verification');
+        // TODO: Show device trust verification UI
+      }
+      
       await handleSuccessfulLogin(result.zkLoginData.isPhoneVerified);
     } catch (error) {
       console.error('Apple Sign-In Error:', error);
