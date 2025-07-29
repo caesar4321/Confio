@@ -5,7 +5,8 @@ Should be run daily via cron job
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 from datetime import timedelta
-from users.models import User, AchievementType, UserAchievement
+from users.models import User
+from achievements.models import AchievementType, UserAchievement
 from django.db.models import Q, F
 
 

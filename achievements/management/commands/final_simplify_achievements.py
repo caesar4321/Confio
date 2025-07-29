@@ -3,7 +3,7 @@ Final simplification of achievements based on AI consensus
 MVP: Only 5 core achievements
 """
 from django.core.management.base import BaseCommand
-from users.models import AchievementType, UserAchievement
+from achievements.models import AchievementType, UserAchievement
 from decimal import Decimal
 
 

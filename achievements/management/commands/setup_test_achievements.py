@@ -1,6 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from users.models import User, UserAchievement, AchievementType
+from users.models import User
+from achievements.models import UserAchievement, AchievementType
 
 
 class Command(BaseCommand):
@@ -79,7 +80,7 @@ class Command(BaseCommand):
         
         # Show balance if any rewards were claimed
         if claimed_count > 0:
-            from users.models import ConfioRewardBalance
+            from achievements.models import ConfioRewardBalance
             balance = ConfioRewardBalance.objects.filter(user=user).first()
             if balance:
                 self.stdout.write(

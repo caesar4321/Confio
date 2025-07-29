@@ -2,7 +2,7 @@
 Simplify achievement types to focus on core behaviors
 """
 from django.core.management.base import BaseCommand
-from users.models import AchievementType, UserAchievement
+from achievements.models import AchievementType, UserAchievement
 
 
 class Command(BaseCommand):
