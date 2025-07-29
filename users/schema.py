@@ -2,7 +2,9 @@ import graphene
 from graphene_django import DjangoObjectType
 from django.contrib.auth import get_user_model
 from .models import (
-    User, Account, IdentityVerification, Business, Country, Bank, BankInfo,
+    User, Account, IdentityVerification, Business, Country, Bank, BankInfo
+)
+from achievements.models import (
     AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare,
     ConfioRewardBalance, ConfioRewardTransaction, InfluencerAmbassador, AmbassadorActivity
 )

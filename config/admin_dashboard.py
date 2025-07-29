@@ -362,7 +362,7 @@ confio_admin_site = ConfioAdminSite(name='confio_admin')
 
 # Re-register all models with the custom admin site
 from django.contrib.auth.models import Group
-from users.admin import UserAdmin, AccountAdmin, BusinessAdmin, IdentityVerificationAdmin, CountryAdmin, BankAdmin, BankInfoAdmin, UnifiedTransactionAdmin, BusinessEmployeeAdmin, EmployeeInvitationAdmin, ConfioRewardBalanceAdmin, ConfioRewardTransactionAdmin
+from users.admin import UserAdmin, AccountAdmin, BusinessAdmin, IdentityVerificationAdmin, CountryAdmin, BankAdmin, BankInfoAdmin, UnifiedTransactionAdmin, BusinessEmployeeAdmin, EmployeeInvitationAdmin
 from p2p_exchange.admin import (
     P2PPaymentMethodAdmin, P2POfferAdmin, P2PTradeAdmin, 
     P2PMessageAdmin, P2PUserStatsAdmin, P2PEscrowAdmin,
@@ -389,23 +389,25 @@ confio_admin_site.register(BusinessEmployee, BusinessEmployeeAdmin)
 confio_admin_site.register(EmployeeInvitation, EmployeeInvitationAdmin)
 
 # CONFIO Reward models
-from users.models import ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare
-confio_admin_site.register(ConfioRewardBalance, ConfioRewardBalanceAdmin)
-confio_admin_site.register(ConfioRewardTransaction, ConfioRewardTransactionAdmin)
+from achievements.models import ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare
+# Achievement models are now registered below
 
 # Achievement models
-from users.admin import AchievementTypeAdmin, UserAchievementAdmin, InfluencerReferralAdmin, TikTokViralShareAdmin
+from achievements.admin import AchievementTypeAdmin, UserAchievementAdmin, InfluencerReferralAdmin, TikTokViralShareAdmin, ConfioRewardBalanceAdmin, ConfioRewardTransactionAdmin
+confio_admin_site.register(ConfioRewardBalance, ConfioRewardBalanceAdmin)
+confio_admin_site.register(ConfioRewardTransaction, ConfioRewardTransactionAdmin)
 confio_admin_site.register(AchievementType, AchievementTypeAdmin)
 confio_admin_site.register(UserAchievement, UserAchievementAdmin)
 confio_admin_site.register(InfluencerReferral, InfluencerReferralAdmin)
 confio_admin_site.register(TikTokViralShare, TikTokViralShareAdmin)
 
 # Ambassador models
-from users.models import InfluencerAmbassador, AmbassadorActivity, SuspiciousActivity
-from users.admin import InfluencerAmbassadorAdmin, AmbassadorActivityAdmin, SuspiciousActivityAdmin
+from achievements.models import InfluencerAmbassador, AmbassadorActivity, SuspiciousActivity, PioneroBetaTracker
+from achievements.admin import InfluencerAmbassadorAdmin, AmbassadorActivityAdmin, SuspiciousActivityAdmin, PioneroBetaTrackerAdmin
 confio_admin_site.register(InfluencerAmbassador, InfluencerAmbassadorAdmin)
 confio_admin_site.register(AmbassadorActivity, AmbassadorActivityAdmin)
 confio_admin_site.register(SuspiciousActivity, SuspiciousActivityAdmin)
+confio_admin_site.register(PioneroBetaTracker, PioneroBetaTrackerAdmin)
 
 # Unified Transaction Tables
 from users.models_unified import UnifiedTransactionTable

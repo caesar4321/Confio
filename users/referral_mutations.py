@@ -5,7 +5,8 @@ Handles both influencer and friend referrals
 import graphene
 from graphql import GraphQLError
 from django.db import transaction as db_transaction
-from .models import User, InfluencerReferral, UserAchievement, AchievementType
+from .models import User
+from achievements.models import InfluencerReferral, UserAchievement, AchievementType
 from .decorators import rate_limit, check_suspicious_activity
 import re
 
