@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from users.models import User, Account, Business, IdentityVerification, Country, Bank, BankInfo
+from users.admin_views import achievement_dashboard
 from p2p_exchange.models import P2POffer, P2PTrade, P2PUserStats, P2PDispute
 from send.models import SendTransaction
 from payments.models import PaymentTransaction
@@ -33,6 +34,7 @@ class ConfioAdminSite(admin.AdminSite):
             path('p2p-analytics/', self.admin_view(self.p2p_analytics_view), name='p2p_analytics'),
             path('user-analytics/', self.admin_view(self.user_analytics_view), name='user_analytics'),
             path('transaction-analytics/', self.admin_view(self.transaction_analytics_view), name='transaction_analytics'),
+            path('achievements/', self.admin_view(self.achievement_dashboard_view), name='achievement_dashboard'),
         ]
         return custom_urls + urls
     
@@ -347,6 +349,11 @@ class ConfioAdminSite(admin.AdminSite):
         context['payment_success_rate'] = (payment_success / payment_total * 100) if payment_total > 0 else 0
         
         return render(request, 'admin/transaction_analytics.html', context)
+    
+    def achievement_dashboard_view(self, request):
+        """Achievement system dashboard - delegate to the dedicated view"""
+        from users.admin_views import achievement_dashboard as dashboard_func
+        return dashboard_func(request)
 
 
 # Create custom admin site instance
