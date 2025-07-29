@@ -1,0 +1,335 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .fraud-dashboard {
+        padding: 20px;
+    }
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+    .stat-card {
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .stat-value {
+        font-size: 32px;
+        font-weight: bold;
+        margin-bottom: 5px;
+    }
+    .stat-label {
+        color: #666;
+        font-size: 14px;
+    }
+    .stat-sublabel {
+        color: #999;
+        font-size: 12px;
+        margin-top: 5px;
+    }
+    .danger { color: #dc3545; }
+    .warning { color: #ffc107; }
+    .success { color: #28a745; }
+    .info { color: #17a2b8; }
+    
+    .section {
+        background: white;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 30px;
+    }
+    .section h2 {
+        margin-top: 0;
+        margin-bottom: 20px;
+        color: #333;
+        border-bottom: 2px solid #eee;
+        padding-bottom: 10px;
+    }
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+    }
+    .data-table th, .data-table td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid #eee;
+    }
+    .data-table th {
+        background: #f5f5f5;
+        font-weight: bold;
+        color: #666;
+    }
+    .data-table tr:hover {
+        background: #f9f9f9;
+    }
+    .device-hash {
+        font-family: monospace;
+        font-size: 13px;
+        color: #666;
+    }
+    .alert {
+        padding: 15px;
+        margin-bottom: 20px;
+        border: 1px solid transparent;
+        border-radius: 4px;
+    }
+    .alert-warning {
+        color: #856404;
+        background-color: #fff3cd;
+        border-color: #ffeeba;
+    }
+    .dashboard-actions {
+        margin-bottom: 20px;
+    }
+    .dashboard-actions a {
+        display: inline-block;
+        padding: 10px 20px;
+        background: #417690;
+        color: white;
+        text-decoration: none;
+        border-radius: 4px;
+        margin-right: 10px;
+    }
+    .dashboard-actions a:hover {
+        background: #205067;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="fraud-dashboard">
+    <h1>🔍 Achievement Fraud Detection Dashboard</h1>
+    
+    <div class="dashboard-actions">
+        <a href="{% url 'admin:achievements_userachievement_changelist' %}">← Back to Achievements</a>
+        <a href="{% url 'admin:achievements_userachievement_changelist' %}?fraud_status=fraud">View All Fraud</a>
+        <a href="{% url 'admin:achievements_userachievement_changelist' %}?fraud_status=multi_device">View Multi-Device</a>
+    </div>
+    
+    <!-- Overall Statistics -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ stats.total_achievements|floatformat:0 }}</div>
+            <div class="stat-label">Total Achievements</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value danger">{{ stats.total_fraud|floatformat:0 }}</div>
+            <div class="stat-label">Confirmed Fraud</div>
+            <div class="stat-sublabel">{{ stats.fraud_percentage|floatformat:1 }}% of total</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value warning">{{ stats.total_suspicious|floatformat:0 }}</div>
+            <div class="stat-label">Suspicious Activity</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value info">{{ stats.total_devices_tracked|floatformat:0 }}</div>
+            <div class="stat-label">Unique Devices</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value danger">${{ stats.potential_loss_usd|floatformat:2 }}</div>
+            <div class="stat-label">Potential Loss</div>
+            <div class="stat-sublabel">{{ stats.potential_loss|floatformat:0 }} CONFIO</div>
+        </div>
+    </div>
+    
+    {% if stats.total_fraud > 0 or stats.total_suspicious > 0 %}
+    <div class="alert alert-warning">
+        <strong>⚠️ Security Alert:</strong> 
+        {% if stats.total_fraud > 0 %}
+        {{ stats.total_fraud }} confirmed fraudulent achievement{{ stats.total_fraud|pluralize }}.
+        {% endif %}
+        {% if stats.total_suspicious > 0 %}
+        {{ stats.total_suspicious }} achievement{{ stats.total_suspicious|pluralize }} with suspicious activity.
+        {% endif %}
+        Review the details below and take appropriate action.
+    </div>
+    {% endif %}
+    
+    <!-- Suspicious Devices -->
+    {% if suspicious_devices %}
+    <div class="section">
+        <h2>🚨 Suspicious Devices (Multiple Users)</h2>
+        <p>These devices have been used by multiple user accounts, indicating potential fraud.</p>
+        
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Device ID</th>
+                    <th>Users</th>
+                    <th>Achievements</th>
+                    <th>CONFIO Claimed</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for device in suspicious_devices %}
+                <tr>
+                    <td class="device-hash" title="{{ device.device_hash }}">{{ device.device_hash_short }}</td>
+                    <td>
+                        <strong class="danger">{{ device.user_count }}</strong> users
+                    </td>
+                    <td>{{ device.achievement_count }}</td>
+                    <td>
+                        {% if device.total_confio > 0 %}
+                        <span class="danger">{{ device.total_confio|floatformat:0 }} CONFIO</span>
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{% url 'admin:achievements_userachievement_changelist' %}?device_fingerprint_hash={{ device.device_hash }}">
+                            View All
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    <!-- Suspicious IPs -->
+    {% if suspicious_ips %}
+    <div class="section">
+        <h2>🌐 Suspicious IP Addresses</h2>
+        <p>These IP addresses have been used by multiple user accounts.</p>
+        
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>IP Address</th>
+                    <th>Users</th>
+                    <th>Achievements</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ip in suspicious_ips %}
+                <tr>
+                    <td>{{ ip.ip }}</td>
+                    <td>
+                        <strong class="warning">{{ ip.user_count }}</strong> users
+                    </td>
+                    <td>{{ ip.achievement_count }}</td>
+                    <td>
+                        <a href="{% url 'admin:achievements_userachievement_changelist' %}?claim_ip_address={{ ip.ip }}">
+                            View All
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    
+    <!-- Achievement Type Analysis -->
+    <div class="section">
+        <h2>📊 Achievement Type Analysis</h2>
+        <p>Fraud statistics by achievement type.</p>
+        
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Achievement</th>
+                    <th>Total Earned</th>
+                    <th>Fraud Count</th>
+                    <th>Suspicious</th>
+                    <th>Fraud Rate</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for achievement in achievement_fraud_stats %}
+                {% if achievement.fraud_count > 0 or achievement.suspicious_count > 0 %}
+                <tr>
+                    <td>
+                        {{ achievement.icon_emoji|default:"🏆" }} {{ achievement.name }}
+                        {% if achievement.slug == 'pionero_beta' %}
+                        <span class="warning">⭐</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ achievement.total_earned }}</td>
+                    <td>
+                        {% if achievement.fraud_count > 0 %}
+                        <span class="danger">{{ achievement.fraud_count }}</span>
+                        {% else %}
+                        0
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if achievement.suspicious_count > 0 %}
+                        <span class="warning">{{ achievement.suspicious_count }}</span>
+                        {% else %}
+                        0
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if achievement.total_earned > 0 %}
+                        {{ achievement.fraud_count|floatformat:0|default:0|add:achievement.suspicious_count|floatformat:0|default:0|mul:100|div:achievement.total_earned|floatformat:1 }}%
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Recent Fraud Activity -->
+    {% if recent_fraud %}
+    <div class="section">
+        <h2>⏰ Recent Fraud Activity</h2>
+        <p>Latest achievements flagged as fraudulent.</p>
+        
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Achievement</th>
+                    <th>Reason</th>
+                    <th>Flagged</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for achievement in recent_fraud %}
+                <tr>
+                    <td>
+                        <a href="{% url 'admin:users_user_change' achievement.user.id %}">
+                            {{ achievement.user.username }}
+                        </a>
+                    </td>
+                    <td>{{ achievement.achievement_type.icon_emoji|default:"🏆" }} {{ achievement.achievement_type.name }}</td>
+                    <td>
+                        {{ achievement.security_metadata.blocked_reason|default:"Fraud detected" }}
+                    </td>
+                    <td>{{ achievement.updated_at|timesince }} ago</td>
+                    <td>
+                        <a href="{% url 'admin:achievements_userachievement_change' achievement.id %}">
+                            View
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

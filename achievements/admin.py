@@ -1,8 +1,11 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from django.urls import reverse
+from django.urls import reverse, path
 from django.utils import timezone
 from django.db.models import Count, Sum, Q
+from django.template.response import TemplateResponse
+from django.contrib.admin.views.decorators import staff_member_required
+from django.utils.decorators import method_decorator
 import logging
 
 from .models import (
@@ -210,6 +213,123 @@ class UserAchievementAdmin(admin.ModelAdmin):
             pass
         
         return response
+    
+    def get_urls(self):
+        """Add custom admin URLs"""
+        urls = super().get_urls()
+        custom_urls = [
+            path('fraud-dashboard/', self.admin_site.admin_view(self.fraud_dashboard_view), name='achievements_userachievement_fraud_dashboard'),
+        ]
+        return custom_urls + urls
+    
+    @method_decorator(staff_member_required)
+    def fraud_dashboard_view(self, request):
+        """Comprehensive fraud detection dashboard"""
+        from django.db.models import Count, Q, F
+        from collections import defaultdict
+        import json
+        
+        # Get all achievements with device fingerprints
+        achievements = UserAchievement.objects.filter(
+            device_fingerprint_hash__isnull=False
+        ).select_related('user', 'achievement_type')
+        
+        # 1. Device Analysis
+        device_stats = defaultdict(lambda: {'users': set(), 'achievements': [], 'total_confio': 0})
+        
+        for achievement in achievements:
+            device_hash = achievement.device_fingerprint_hash
+            device_stats[device_hash]['users'].add(achievement.user_id)
+            device_stats[device_hash]['achievements'].append(achievement)
+            if achievement.status == 'claimed':
+                device_stats[device_hash]['total_confio'] += float(achievement.achievement_type.confio_reward)
+        
+        # Find suspicious devices (multiple users)
+        suspicious_devices = []
+        for device_hash, stats in device_stats.items():
+            if len(stats['users']) > 1:
+                suspicious_devices.append({
+                    'device_hash': device_hash,
+                    'device_hash_short': device_hash[:8] + '...',
+                    'user_count': len(stats['users']),
+                    'achievement_count': len(stats['achievements']),
+                    'total_confio': stats['total_confio'],
+                    'users': list(stats['users'])[:10],  # Limit to first 10 for display
+                })
+        
+        suspicious_devices.sort(key=lambda x: x['user_count'], reverse=True)
+        
+        # 2. IP Analysis
+        ip_stats = defaultdict(lambda: {'users': set(), 'achievements': 0})
+        
+        achievements_with_ip = UserAchievement.objects.filter(
+            claim_ip_address__isnull=False
+        )
+        
+        for achievement in achievements_with_ip:
+            ip = achievement.claim_ip_address
+            ip_stats[ip]['users'].add(achievement.user_id)
+            ip_stats[ip]['achievements'] += 1
+        
+        # Find suspicious IPs
+        suspicious_ips = []
+        for ip, stats in ip_stats.items():
+            if len(stats['users']) > 3:  # More than 3 users from same IP
+                suspicious_ips.append({
+                    'ip': ip,
+                    'user_count': len(stats['users']),
+                    'achievement_count': stats['achievements'],
+                })
+        
+        suspicious_ips.sort(key=lambda x: x['user_count'], reverse=True)
+        
+        # 3. Recent Fraud Activity
+        recent_fraud = UserAchievement.objects.filter(
+            security_metadata__fraud_detected__isnull=False
+        ).order_by('-updated_at')[:20]
+        
+        # 4. Achievement Type Analysis
+        achievement_fraud_stats = AchievementType.objects.annotate(
+            total_earned=Count('user_achievements', filter=Q(user_achievements__status__in=['earned', 'claimed'])),
+            fraud_count=Count('user_achievements', filter=Q(user_achievements__security_metadata__fraud_detected__isnull=False)),
+            suspicious_count=Count('user_achievements', filter=Q(user_achievements__security_metadata__suspicious_ip=True))
+        ).order_by('-fraud_count')
+        
+        # 5. Overall Statistics
+        total_achievements = UserAchievement.objects.count()
+        total_fraud = UserAchievement.objects.filter(security_metadata__fraud_detected__isnull=False).count()
+        total_suspicious = UserAchievement.objects.filter(security_metadata__suspicious_ip=True).count()
+        total_devices_tracked = UserAchievement.objects.filter(device_fingerprint_hash__isnull=False).values('device_fingerprint_hash').distinct().count()
+        
+        # Calculate potential fraud loss
+        potential_loss = UserAchievement.objects.filter(
+            security_metadata__fraud_detected__isnull=False,
+            status='claimed'
+        ).aggregate(
+            total=Sum('achievement_type__confio_reward')
+        )['total'] or 0
+        
+        context = {
+            **self.admin_site.each_context(request),
+            'title': 'Achievement Fraud Detection Dashboard',
+            'suspicious_devices': suspicious_devices[:20],  # Top 20
+            'suspicious_ips': suspicious_ips[:20],  # Top 20
+            'recent_fraud': recent_fraud,
+            'achievement_fraud_stats': achievement_fraud_stats,
+            'stats': {
+                'total_achievements': total_achievements,
+                'total_fraud': total_fraud,
+                'total_suspicious': total_suspicious,
+                'total_devices_tracked': total_devices_tracked,
+                'fraud_percentage': (total_fraud / total_achievements * 100) if total_achievements > 0 else 0,
+                'potential_loss': potential_loss,
+                'potential_loss_usd': float(potential_loss) / 4,  # 4 CONFIO = $1
+            },
+            'opts': self.model._meta,
+            'has_filters': False,
+        }
+        
+        return TemplateResponse(request, 'admin/achievements/userachievement/fraud_dashboard.html', context)
     
     fieldsets = (
         ('User & Achievement', {

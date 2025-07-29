@@ -1,0 +1,66 @@
+{% extends "admin/change_list.html" %}
+{% load i18n admin_urls static admin_list %}
+
+{% block content_title %}
+    <h1>{{ cl.opts.verbose_name_plural|capfirst }}</h1>
+    <div style="float: right; margin-top: -40px;">
+        <a href="{% url 'admin:achievements_userachievement_fraud_dashboard' %}" class="button" style="background: #dc3545; color: white;">
+            🔍 Fraud Dashboard
+        </a>
+    </div>
+{% endblock %}
+
+{% block result_list %}
+{% if fraud_stats %}
+<div style="background: #f3f4f6; padding: 20px; margin-bottom: 20px; border-radius: 8px; border: 1px solid #e5e7eb;">
+    <h3 style="margin-top: 0; margin-bottom: 15px; color: #1f2937;">
+        🔍 Fraud Detection Statistics
+    </h3>
+    
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+        <div style="background: white; padding: 15px; border-radius: 6px; text-align: center; border: 1px solid #e5e7eb;">
+            <div style="font-size: 24px; font-weight: bold; color: #1f2937;">{{ fraud_stats.total|floatformat:0 }}</div>
+            <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">Total Achievements</div>
+        </div>
+        
+        <div style="background: white; padding: 15px; border-radius: 6px; text-align: center; border: 1px solid #e5e7eb;">
+            <div style="font-size: 24px; font-weight: bold; color: #dc2626;">{{ fraud_stats.fraud_detected|floatformat:0 }}</div>
+            <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">Confirmed Fraud</div>
+            {% if fraud_stats.total > 0 %}
+            <div style="font-size: 12px; color: #9ca3af; margin-top: 3px;">
+                ({{ fraud_stats.fraud_percentage|floatformat:1 }}%)
+            </div>
+            {% endif %}
+        </div>
+        
+        <div style="background: white; padding: 15px; border-radius: 6px; text-align: center; border: 1px solid #e5e7eb;">
+            <div style="font-size: 24px; font-weight: bold; color: #f59e0b;">{{ fraud_stats.suspicious_ips|floatformat:0 }}</div>
+            <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">Suspicious IPs</div>
+        </div>
+        
+        <div style="background: white; padding: 15px; border-radius: 6px; text-align: center; border: 1px solid #e5e7eb;">
+            <div style="font-size: 24px; font-weight: bold; color: #8b5cf6;">{{ fraud_stats.multi_user_devices|floatformat:0 }}</div>
+            <div style="font-size: 14px; color: #6b7280; margin-top: 5px;">Multi-User Devices</div>
+        </div>
+    </div>
+    
+    {% if fraud_stats.fraud_detected > 0 or fraud_stats.suspicious_ips > 0 %}
+    <div style="margin-top: 15px; padding: 10px; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 4px;">
+        <p style="margin: 0; color: #92400e; font-size: 14px;">
+            <strong>⚠️ Attention:</strong> 
+            {% if fraud_stats.fraud_detected > 0 %}
+            {{ fraud_stats.fraud_detected }} achievement{{ fraud_stats.fraud_detected|pluralize }} 
+            {{ fraud_stats.fraud_detected|pluralize:"has,have" }} been flagged as fraudulent.
+            {% endif %}
+            {% if fraud_stats.suspicious_ips > 0 %}
+            {{ fraud_stats.suspicious_ips }} achievement{{ fraud_stats.suspicious_ips|pluralize }} 
+            {{ fraud_stats.suspicious_ips|pluralize:"shows,show" }} suspicious IP activity.
+            {% endif %}
+        </p>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{{ block.super }}
+{% endblock %}
