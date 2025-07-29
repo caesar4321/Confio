@@ -330,7 +330,7 @@ def handle_conversion_soft_delete(sender, instance, **kwargs):
 
 # Achievement system signals
 from django.contrib.auth import get_user_model
-from .models import AchievementType, UserAchievement, InfluencerReferral
+from .models import AchievementType, UserAchievement, InfluencerReferral, PioneroBetaTracker
 from django.db.models import Count, Q
 
 User = get_user_model()
@@ -344,22 +344,35 @@ def create_welcome_achievement(sender, instance, created, **kwargs):
     """
     if created:
         try:
-            # Check if we've already given out 10,000 Pionero Beta achievements
-            pionero_achievement = AchievementType.objects.get(slug='pionero_beta')
+            # Use atomic counter to check if we can award Pionero Beta
+            can_award, current_count = PioneroBetaTracker.increment_and_check()
             
-            existing_count = UserAchievement.objects.filter(
-                achievement_type=pionero_achievement
-            ).count()
-            
-            if existing_count < 10000:
+            if can_award:
+                pionero_achievement = AchievementType.objects.get(slug='pionero_beta')
                 UserAchievement.objects.create(
                     user=instance,
                     achievement_type=pionero_achievement,
                     status='earned',
                     earned_at=instance.date_joined
                 )
+                
+                # Update tracker with user ID
+                tracker = PioneroBetaTracker.objects.get(pk=1)
+                tracker.last_user_id = instance.id
+                tracker.save(update_fields=['last_user_id'])
+            else:
+                # Log that we've reached the limit
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Pionero Beta limit reached: {current_count}/10,000")
+                
         except AchievementType.DoesNotExist:
             # Achievement type doesn't exist yet, skip
+            # Decrement the counter since we didn't actually award
+            tracker = PioneroBetaTracker.objects.get(pk=1)
+            if tracker.count > 0:
+                tracker.count -= 1
+                tracker.save(update_fields=['count'])
             pass
 
 

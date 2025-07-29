@@ -36,10 +36,19 @@ class Command(BaseCommand):
         except Exception as e:
             self.stdout.write(f"Error checking user achievements: {e}")
         
+        # Show Pionero Beta status
+        from users.models import PioneroBetaTracker
+        tracker = PioneroBetaTracker.objects.first()
+        if tracker:
+            self.stdout.write(f"\n=== Pionero Beta Status ===")
+            self.stdout.write(f"Awarded: {tracker.count:,}/10,000")
+            self.stdout.write(f"Remaining: {tracker.get_remaining_slots():,}")
+            self.stdout.write(f"Last updated: {tracker.updated_at}")
+        
         self.stdout.write("\n=== Achievement Triggers ===")
-        self.stdout.write("✓ Pionero Beta: Awarded on user signup")
+        self.stdout.write("✓ Pionero Beta: Awarded on user signup (first 10,000 only)")
         self.stdout.write("✓ Conexión Exitosa: Awarded when setting referrer")
-        self.stdout.write("✓ Primera Compra P2P: Awarded on first P2P trade")
-        self.stdout.write("✓ 10 Intercambios: Awarded after 10 P2P trades")
+        self.stdout.write("✓ Primera Compra P2P: Awarded on first P2P trade (COMPLETED status)")
+        self.stdout.write("✓ 10 Intercambios: Awarded after 10 P2P trades (COMPLETED status)")
         self.stdout.write("✓ Referido Exitoso: Awarded when referred user completes first trade")
         self.stdout.write("✓ Hodler 30 días: Run 'check_hodler_achievements' command daily")

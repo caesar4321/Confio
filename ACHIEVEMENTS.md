@@ -6,11 +6,12 @@ The Confío achievement system rewards users with CONFIO tokens for completing s
 
 ## Active Achievements (MVP)
 
-### 1. Pionero Beta (1 CONFIO)
-- **Description**: Únete durante la fase beta
+### 1. Pionero Beta 🚀 (1 CONFIO)
+- **Description**: Primeros 10,000 usuarios - Acceso exclusivo a beneficios futuros 🎁
 - **Trigger**: Automatically awarded on user signup
-- **Limit**: Only the first 10,000 users
+- **Limit**: Only the first 10,000 users (tracked atomically via PioneroBetaTracker)
 - **Implementation**: `users/signals.py` - `create_welcome_achievement`
+- **Mystery Benefits**: Future exclusive perks to be announced (presale priority, NFT badge, governance rights, etc.)
 
 ### 2. Conexión Exitosa (4 CONFIO) 
 - **Description**: Registra quién te invitó a Confío
@@ -87,9 +88,18 @@ myvenv/bin/python manage.py test_achievements
 myvenv/bin/python manage.py check_hodler_achievements
 ```
 
-### Simplify Achievements (Migration)
+### Update Pionero Beta Description
 ```bash
-myvenv/bin/python manage.py final_simplify_achievements
+myvenv/bin/python manage.py update_pionero_description
+```
+
+### Monitor Pionero Beta Status
+```python
+# Django shell
+from users.models import PioneroBetaTracker
+tracker = PioneroBetaTracker.objects.first()
+print(f"Awarded: {tracker.count}/10,000")
+print(f"Remaining: {tracker.get_remaining_slots()}")
 ```
 
 ## Future Considerations
