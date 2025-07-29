@@ -915,16 +915,16 @@ class AchievementTypeAdmin(admin.ModelAdmin):
                 remaining = tracker.get_remaining_slots()
                 if remaining > 0:
                     return format_html(
-                        '<span style="color: #059669; font-weight: bold;">{:,}/{:,}</span>',
-                        count, 10000
+                        '<span style="color: #059669; font-weight: bold;">{}/{}</span>',
+                        f"{count:,}", f"{10000:,}"
                     )
                 else:
                     return format_html(
-                        '<span style="color: #DC2626; font-weight: bold;">{:,}/{:,} (FULL)</span>',
-                        count, 10000
+                        '<span style="color: #DC2626; font-weight: bold;">{}/{} (FULL)</span>',
+                        f"{count:,}", f"{10000:,}"
                     )
         
-        return format_html('<span>{:,}</span>', count)
+        return format_html('<span>{}</span>', f"{count:,}")
     users_earned.short_description = 'Users Earned'
     
     def total_earned_display(self, obj):

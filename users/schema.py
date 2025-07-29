@@ -2459,7 +2459,7 @@ class ClaimAchievementReward(graphene.Mutation):
 
 class CreateInfluencerReferral(graphene.Mutation):
 	class Arguments:
-		tiktok_username = graphene.String(required=True)
+		referrer_identifier = graphene.String(required=True)
 		attribution_data = graphene.JSONString()
 	
 	success = graphene.Boolean()
@@ -2471,14 +2471,14 @@ class CreateInfluencerReferral(graphene.Mutation):
 	@check_suspicious_activity('referral_submit')
 	@check_activity_requirements('email_verified')
 	@log_achievement_activity('influencer_referral')
-	def mutate(cls, root, info, tiktok_username, attribution_data=None):
+	def mutate(cls, root, info, referrer_identifier, attribution_data=None):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return CreateInfluencerReferral(success=False, error="Authentication required")
 		
 		try:
-			# Clean the TikTok username (remove @ if present)
-			clean_username = tiktok_username.lstrip('@').strip()
+			# Clean the referrer identifier (remove @ if present for TikTok usernames)
+			clean_username = referrer_identifier.lstrip('@').strip()
 			
 			if not clean_username:
 				return CreateInfluencerReferral(

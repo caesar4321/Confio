@@ -14,7 +14,6 @@ from django.conf import settings
 from django.conf.urls.static import static
 import json
 import logging
-from users.admin_views import achievement_dashboard
 
 # Customize admin site
 admin.site.site_header = "Confío Admin"
@@ -63,7 +62,6 @@ from .admin_dashboard import confio_admin_site
 
 urlpatterns = [
     path('admin/', confio_admin_site.urls),
-    path('admin/achievements/dashboard/', staff_member_required(achievement_dashboard), name='achievement_dashboard'),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
     path('prover/', include('prover.urls')),
     path('terms/', terms_view, name='terms'),

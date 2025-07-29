@@ -2394,8 +2394,8 @@ export const GET_ACHIEVEMENT_LEADERBOARD = gql`
 `;
 
 export const GET_INFLUENCER_STATS = gql`
-  query GetInfluencerStats($tiktokUsername: String!) {
-    influencerStats(tiktokUsername: $tiktokUsername) {
+  query GetInfluencerStats($referrerIdentifier: String!) {
+    influencerStats(referrerIdentifier: $referrerIdentifier) {
       totalReferrals
       activeReferrals
       convertedReferrals
@@ -2463,7 +2463,7 @@ export const GET_USER_INFLUENCER_REFERRALS = gql`
         firstName
         lastName
       }
-      tiktokUsername
+      referrerIdentifier
       influencerUser {
         id
         username
@@ -2544,13 +2544,13 @@ export const CLAIM_ACHIEVEMENT_REWARD = gql`
 `;
 
 export const CREATE_INFLUENCER_REFERRAL = gql`
-  mutation CreateInfluencerReferral($tiktokUsername: String!, $attributionData: JSONString) {
-    createInfluencerReferral(tiktokUsername: $tiktokUsername, attributionData: $attributionData) {
+  mutation CreateInfluencerReferral($referrerIdentifier: String!, $attributionData: JSONString) {
+    createInfluencerReferral(referrerIdentifier: $referrerIdentifier, attributionData: $attributionData) {
       success
       error
       referral {
         id
-        tiktokUsername
+        referrerIdentifier
         status
         refereeConfioAwarded
         createdAt
@@ -2620,8 +2620,8 @@ export const VERIFY_TIKTOK_SHARE = gql`
 `;
 
 export const UPDATE_INFLUENCER_STATUS = gql`
-  mutation UpdateInfluencerStatus($tiktokUsername: String!, $newStatus: String!) {
-    updateInfluencerStatus(tiktokUsername: $tiktokUsername, newStatus: $newStatus) {
+  mutation UpdateInfluencerStatus($referrerIdentifier: String!, $newStatus: String!) {
+    updateInfluencerStatus(referrerIdentifier: $referrerIdentifier, newStatus: $newStatus) {
       success
       error
       updatedCount
