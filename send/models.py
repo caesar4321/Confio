@@ -12,7 +12,8 @@ class SendTransaction(SoftDeleteModel):
         ('SIGNED', 'Signed'),
         ('SUBMITTED', 'Submitted'),
         ('CONFIRMED', 'Confirmed'),
-        ('FAILED', 'Failed')
+        ('FAILED', 'Failed'),
+        ('AML_REVIEW', 'Under AML Review')
     ]
 
     TOKEN_TYPES = [

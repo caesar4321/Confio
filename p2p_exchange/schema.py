@@ -1190,6 +1190,24 @@ class CreateP2PTrade(graphene.Mutation):
 
             # Calculate fiat amount
             fiat_amount = input.cryptoAmount * offer.rate
+            
+            # Import security checks
+            from security.utils import check_kyc_required, perform_aml_check
+            from decimal import Decimal
+            
+            # Check KYC requirement for P2P trading
+            kyc_required, kyc_reason = check_kyc_required(
+                user, 
+                'p2p_trade', 
+                fiat_amount
+            )
+            
+            if kyc_required:
+                return CreateP2PTrade(
+                    trade=None,
+                    success=False,
+                    errors=[kyc_reason]
+                )
 
             # Get user's account if specified and determine entity type
             user_entity = user  # Default to user for personal trades
@@ -1298,6 +1316,41 @@ class CreateP2PTrade(graphene.Mutation):
 
             # Create trade with new direct relationships
             trade = P2PTrade.objects.create(**trade_kwargs)
+            
+            # Perform AML check for the trade
+            aml_result = perform_aml_check(
+                user=user,
+                transaction_type='p2p_trade',
+                amount=fiat_amount
+            )
+            
+            # Check if trade should be flagged for review
+            if aml_result['requires_review']:
+                trade.status = 'AML_REVIEW'
+                trade.save()
+                
+                # Create suspicious activity if high risk
+                if aml_result['risk_score'] >= 70:
+                    from security.utils import create_suspicious_activity
+                    create_suspicious_activity(
+                        user=user,
+                        activity_type='high_risk_p2p_trade',
+                        detection_data={
+                            'trade_id': trade.id,
+                            'offer_id': offer.id,
+                            'fiat_amount': str(fiat_amount),
+                            'crypto_amount': str(input.cryptoAmount),
+                            'risk_score': aml_result['risk_score'],
+                            'risk_factors': aml_result['risk_factors']
+                        },
+                        severity=min(aml_result['risk_score'] // 10, 10)
+                    )
+                
+                return CreateP2PTrade(
+                    trade=trade,
+                    success=True,
+                    errors=["Trade is under review due to compliance requirements"]
+                )
             
             # Create escrow record for this trade
             from .models import P2PEscrow

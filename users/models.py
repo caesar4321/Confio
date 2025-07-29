@@ -144,7 +144,7 @@ class User(AbstractUser, SoftDeleteModel):
     @property
     def is_identity_verified(self):
         """Check if user has any verified identity records"""
-        return self.verifications.filter(status='verified').exists()
+        return self.security_verifications.filter(status='verified').exists()
 
     @property
     def last_verified_date(self):
@@ -159,7 +159,7 @@ class User(AbstractUser, SoftDeleteModel):
     @property
     def latest_verification(self):
         """Get the latest verification record for this user"""
-        return self.verifications.order_by('-verified_at').first()
+        return self.security_verifications.order_by('-verified_at').first()
 
     @property
     def is_verified(self):

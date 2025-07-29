@@ -150,6 +150,13 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── schema.py      # Send GraphQL schema
 │   └── validators.py  # Transaction validation
 
+├── security/          # Security and fraud prevention system
+│   ├── models.py      # Security models (IPAddress, UserSession, DeviceFingerprint, etc.)
+│   ├── middleware.py  # Security middleware for tracking IPs and sessions
+│   ├── utils.py       # Security utilities (device fingerprinting, risk assessment)
+│   ├── admin.py       # Enhanced admin interface for security monitoring
+│   └── migrations/    # Database migrations for security models
+
 ├── prover/            # Server-side proof verification
 │   ├── models.py      # Database models for storing proof verification results
 │   ├── schema.py      # GraphQL schema and resolvers for proof verification endpoints
@@ -1037,6 +1044,196 @@ python manage.py shell -c "from exchange_rates.models import ExchangeRate; print
 ```
 
 This multi-currency system ensures that Confío users across Latin America have access to accurate, real-time exchange rates for fair P2P trading regardless of their local economic conditions.
+
+## 🔐 Security & Fraud Prevention
+
+Confío implements a comprehensive security system to protect users and prevent fraud while maintaining the permissionless nature of blockchain transactions.
+
+### Device Fingerprinting
+
+The security system collects device fingerprints to track and monitor user activity across sessions:
+
+#### Client-Side (React Native)
+- **Implementation**: `apps/src/utils/deviceFingerprint.js`
+- **Features**:
+  - Persistent device ID using React Native Keychain
+  - Hardware information collection
+  - Behavioral pattern tracking
+  - Screen and system information
+  - Timezone and locale detection
+
+#### Backend Integration
+- **Models**: IPAddress, UserSession, DeviceFingerprint, UserDevice
+- **Middleware**: SecurityMiddleware tracks IPs, sessions, and devices
+- **Storage**: Device fingerprints stored and analyzed for patterns
+
+### Security Features
+
+#### IP Tracking & Analysis
+- Automatic IP geolocation (manual trigger to save API calls)
+- VPN/Proxy detection
+- IP reputation checking
+- Country-based risk assessment
+
+#### Session Management
+- Device-based session tracking
+- Multi-device support with trust levels
+- Session activity monitoring
+- Automatic suspicious activity detection
+
+#### Risk Assessment
+- Transaction velocity monitoring
+- Unusual pattern detection
+- Cross-device activity analysis
+- Behavioral analytics
+
+### Security Models
+
+```python
+# IP Address Tracking
+class IPAddress(SoftDeleteModel):
+    ip_address = models.GenericIPAddressField(unique=True)
+    country_code = models.CharField(max_length=2)
+    is_vpn = models.BooleanField(default=False)
+    is_blocked = models.BooleanField(default=False)
+    risk_score = models.IntegerField(default=0)
+
+# Device Fingerprinting
+class DeviceFingerprint(SoftDeleteModel):
+    fingerprint_hash = models.CharField(max_length=64)
+    device_info = models.JSONField()
+    first_seen = models.DateTimeField(auto_now_add=True)
+    
+# User Device Tracking
+class UserDevice(SoftDeleteModel):
+    user = models.ForeignKey(User)
+    device_name = models.CharField(max_length=255)
+    is_trusted = models.BooleanField(default=False)
+    total_sessions = models.IntegerField(default=0)
+```
+
+### Admin Interface
+
+The security app includes an enhanced admin interface for monitoring:
+- Real-time IP tracking with geolocation
+- Device fingerprint analysis
+- User session monitoring
+- Suspicious activity alerts
+- Ban management system
+
+### KYC Requirements (Disabled for MVP)
+
+For the blockchain MVP, KYC requirements have been disabled to maintain the permissionless nature of crypto transactions. The check_kyc_required function always returns False, but the infrastructure remains in place for future compliance needs if required.
+
+### Privacy Considerations
+
+- Device fingerprints are hashed before storage
+- No personally identifiable information in fingerprints
+- Users can clear behavioral data (but not device ID)
+- All security data follows soft-delete patterns
+
+### Achievement & Rewards Fraud Prevention
+
+The security system includes comprehensive fraud prevention for the achievements and rewards system:
+
+#### Multi-Account Abuse Prevention
+- **Device Fingerprint Tracking**: Links achievements to specific devices
+- **Cross-Account Detection**: Identifies users creating multiple accounts from same device
+- **Behavioral Analysis**: Detects suspicious patterns in achievement claiming
+- **IP-Based Clustering**: Groups related accounts by IP patterns
+
+#### Achievement Security Features
+
+```python
+# Achievement claim validation
+class UserAchievement(SoftDeleteModel):
+    user = models.ForeignKey(User)
+    achievement_type = models.ForeignKey(AchievementType)
+    device_fingerprint = models.ForeignKey(DeviceFingerprint)
+    claim_ip = models.ForeignKey(IPAddress)
+    
+# Fraud detection signals
+- Same device claiming "new user" achievements multiple times
+- Rapid achievement claiming from single IP
+- Pattern matching for bot-like behavior
+- Referral chain analysis for circular referrals
+```
+
+#### Referral System Protection
+- **Referral Loops**: Detects and prevents circular referral chains
+- **Device Validation**: Ensures referrer and referee use different devices
+- **Time-Based Analysis**: Flags suspiciously fast referral completions
+- **Geographic Validation**: Checks for realistic geographic distribution
+
+#### Automated Fraud Detection
+
+The system automatically flags suspicious activity:
+
+1. **Device Reuse**
+   - Multiple "Pionero Beta" claims from same device
+   - New user achievements on previously seen devices
+   - Pattern: Device → Multiple Accounts → Multiple Rewards
+
+2. **Velocity Checks**
+   - Too many achievements in short timeframe
+   - Inhuman speeds for completing tasks
+   - Bulk account creation patterns
+
+3. **Network Analysis**
+   - Cluster detection for fraud rings
+   - Social graph analysis for fake referral networks
+   - IP subnet analysis for bot farms
+
+#### Admin Tools for Fraud Investigation
+
+```python
+# Admin interface provides:
+- Device fingerprint timeline view
+- Achievement claim heat maps
+- Suspicious pattern alerts
+- Bulk action tools for fraud response
+- Referral network visualization
+```
+
+#### Response to Detected Fraud
+
+When fraud is detected, the system can:
+- **Soft Block**: Prevent achievement claims without banning
+- **Achievement Reversal**: Remove fraudulently obtained rewards
+- **Network Ban**: Block entire clusters of related accounts
+- **Smart Contract Integration**: On-chain blocking for severe cases
+
+### Example Fraud Scenarios Prevented
+
+1. **The Multi-Account Farmer**
+   - User creates 50 accounts to claim "Pionero Beta" achievement
+   - System detects: Same device fingerprint across accounts
+   - Response: Only first account receives achievement
+
+2. **The Referral Circle**
+   - Users A→B→C→A create circular referral chain
+   - System detects: Referral loop in network graph
+   - Response: Referral rewards blocked for circular chains
+
+3. **The Bot Farm**
+   - Automated scripts create hundreds of accounts
+   - System detects: Identical behavioral patterns, same IP subnet
+   - Response: Entire IP range flagged, achievements blocked
+
+4. **The Device Spoofer**
+   - User attempts to fake device fingerprints
+   - System detects: Inconsistent hardware info, behavioral anomalies
+   - Response: Deep behavioral analysis triggers manual review
+
+### Balancing Security and User Experience
+
+The fraud prevention system is designed to be:
+- **Invisible to legitimate users**: Real users never see security checks
+- **Forgiving of edge cases**: Shared devices (families) handled gracefully
+- **Scalable**: Automated detection reduces manual review needs
+- **Privacy-preserving**: No personal data exposed in fraud detection
+
+This comprehensive approach ensures that the achievement system rewards genuine community members while preventing abuse at scale.
 
 ## 🌍 Internationalization & Number Formatting
 

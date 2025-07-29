@@ -7,6 +7,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useMutation } from '@apollo/client';
 import { PAY_INVOICE, CREATE_SEND_TRANSACTION } from '../apollo/queries';
 import { AccountManager } from '../utils/accountManager';
+import { EnhancedAuthService } from '../services/enhancedAuthService';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -65,6 +66,9 @@ export const TransactionProcessingScreen = () => {
     new Animated.Value(0),
     new Animated.Value(0)
   ]);
+
+  // Services
+  const enhancedAuthService = EnhancedAuthService.getInstance();
 
   // GraphQL mutations
   const [payInvoice] = useMutation(PAY_INVOICE);
@@ -219,18 +223,27 @@ export const TransactionProcessingScreen = () => {
         setCurrentStep(1);
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Step 3: Call the actual payment mutation
+        // Step 3: Call the actual payment mutation with security checks
         setCurrentStep(2);
-        console.log('TransactionProcessingScreen: Calling payInvoice mutation with idempotency key:', idempotencyKey);
+        console.log('TransactionProcessingScreen: Calling payInvoice mutation with security checks and idempotency key:', idempotencyKey);
         
-        const { data } = await payInvoice({
-          variables: {
-            invoiceId: transactionData.invoiceId,
-            idempotencyKey: idempotencyKey
-          }
-        });
+        // Perform secure payment operation
+        const secureResult = await enhancedAuthService.performSecureOperation(
+          async () => {
+            return await payInvoice({
+              variables: {
+                invoiceId: transactionData.invoiceId,
+                idempotencyKey: idempotencyKey
+              }
+            });
+          },
+          'payment',
+          parseFloat(transactionData.amount)
+        );
 
+        const { data } = secureResult.result;
         console.log('TransactionProcessingScreen: Payment mutation response:', data);
+        console.log('TransactionProcessingScreen: Security checks:', secureResult.securityChecks);
         
         if (data?.payInvoice?.success) {
           console.log('TransactionProcessingScreen: Payment successful');
@@ -293,12 +306,21 @@ export const TransactionProcessingScreen = () => {
         };
         console.log('TransactionProcessingScreen: Full mutation variables:', JSON.stringify(mutationVariables, null, 2));
         
-        const { data, errors } = await createSendTransaction({
-          variables: mutationVariables
-        });
+        // Perform secure send operation with device fingerprinting and security checks
+        const secureResult = await enhancedAuthService.performSecureOperation(
+          async () => {
+            return await createSendTransaction({
+              variables: mutationVariables
+            });
+          },
+          'send_money',
+          parseFloat(transactionData.amount)
+        );
 
+        const { data, errors } = secureResult.result;
         console.log('TransactionProcessingScreen: Send mutation raw response:', { data, errors });
         console.log('TransactionProcessingScreen: Response data structure:', JSON.stringify(data, null, 2));
+        console.log('TransactionProcessingScreen: Security checks:', secureResult.securityChecks);
         
         // Check for GraphQL errors first
         if (errors && errors.length > 0) {

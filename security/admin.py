@@ -384,8 +384,8 @@ class UserBanAdmin(admin.ModelAdmin):
 class IPAddressAdmin(admin.ModelAdmin):
     """Admin for IP addresses"""
     list_display = (
-        'ip_address', 'country_flag', 'location', 'risk_indicators',
-        'risk_score_badge', 'total_users', 'is_blocked_badge'
+        'ip_address_display', 'country_flag', 'location', 'risk_indicators',
+        'risk_score_badge', 'total_users', 'is_blocked_badge', 'last_seen'
     )
     list_filter = (
         'is_vpn', 'is_tor', 'is_datacenter', 'is_blocked',
@@ -422,7 +422,16 @@ class IPAddressAdmin(admin.ModelAdmin):
         })
     )
     
-    actions = ['block_ips', 'unblock_ips']
+    actions = ['block_ips', 'unblock_ips', 'fetch_geolocation']
+    
+    def ip_address_display(self, obj):
+        """Display IP address prominently"""
+        return format_html(
+            '<strong style="font-size: 1.1em; font-family: monospace;">{}</strong>',
+            obj.ip_address
+        )
+    ip_address_display.short_description = 'IP Address'
+    ip_address_display.admin_order_field = 'ip_address'
     
     def country_flag(self, obj):
         if obj.country_code:
@@ -506,6 +515,74 @@ class IPAddressAdmin(admin.ModelAdmin):
         )
         self.message_user(request, f"{count} IPs unblocked.")
     unblock_ips.short_description = "Unblock selected IPs"
+    
+    def fetch_geolocation(self, request, queryset):
+        """Fetch geolocation data for selected IPs on demand"""
+        import requests
+        success_count = 0
+        error_count = 0
+        
+        for ip_obj in queryset:
+            # Skip private/local IP addresses
+            ip_parts = ip_obj.ip_address.split('.')
+            if (ip_obj.ip_address.startswith(('10.', '192.168.', '127.')) or
+                (ip_obj.ip_address.startswith('172.') and 16 <= int(ip_parts[1]) <= 31)):
+                # This is a private IP - skip it
+                error_count += 1
+                continue
+                
+            try:
+                # Use ipapi.co free service (1000 requests/day)
+                response = requests.get(
+                    f'https://ipapi.co/{ip_obj.ip_address}/json/',
+                    timeout=5,
+                    headers={'User-Agent': 'Confio Security Admin/1.0'}
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    # Check for error in response (e.g., reserved/private IP)
+                    if data.get('error'):
+                        error_count += 1
+                        continue
+                    
+                    # Update IP object with geographic data
+                    ip_obj.country_code = data.get('country_code', '')[:2]
+                    ip_obj.country_name = data.get('country_name', '')[:100]
+                    ip_obj.city = data.get('city', '')[:100]
+                    ip_obj.region = data.get('region', '')[:100]
+                    
+                    # Handle latitude/longitude safely
+                    try:
+                        if data.get('latitude'):
+                            ip_obj.latitude = float(data.get('latitude'))
+                        if data.get('longitude'):
+                            ip_obj.longitude = float(data.get('longitude'))
+                    except (ValueError, TypeError):
+                        pass
+                    
+                    ip_obj.save()
+                    success_count += 1
+                    
+                else:
+                    error_count += 1
+                    
+            except Exception as e:
+                error_count += 1
+        
+        if success_count > 0:
+            self.message_user(
+                request, 
+                f"Successfully fetched geolocation for {success_count} IPs."
+            )
+        if error_count > 0:
+            self.message_user(
+                request, 
+                f"Failed to fetch geolocation for {error_count} IPs.", 
+                level='WARNING'
+            )
+    fetch_geolocation.short_description = "Fetch geolocation data (uses API quota)"
 
 
 @admin.register(UserSession)

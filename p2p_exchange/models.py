@@ -214,6 +214,7 @@ class P2PTrade(SoftDeleteModel):
         ('DISPUTED', 'Disputed'),          # Trade in dispute
         ('CANCELLED', 'Cancelled'),        # Trade cancelled
         ('EXPIRED', 'Expired'),           # Trade expired due to timeout
+        ('AML_REVIEW', 'Under AML Review'), # Trade flagged for compliance review
     ]
     
     # Related offer and users

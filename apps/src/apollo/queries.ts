@@ -147,8 +147,8 @@ export const GET_LEGAL_DOCUMENT = gql`
 
 // ZKLogin Mutations
 export const INITIALIZE_ZKLOGIN = gql`
-  mutation InitializeZkLogin($firebaseToken: String!, $providerToken: String!, $provider: String!) {
-    initializeZkLogin(firebaseToken: $firebaseToken, providerToken: $providerToken, provider: $provider) {
+  mutation InitializeZkLogin($firebaseToken: String!, $providerToken: String!, $provider: String!, $deviceFingerprint: JSONString) {
+    initializeZkLogin(firebaseToken: $firebaseToken, providerToken: $providerToken, provider: $provider, deviceFingerprint: $deviceFingerprint) {
       maxEpoch
       randomness
       authAccessToken

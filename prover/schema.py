@@ -140,6 +140,7 @@ class InitializeZkLogin(graphene.Mutation):
         firebaseToken = graphene.String(required=True)
         providerToken = graphene.String(required=True)
         provider = graphene.String(required=True)
+        deviceFingerprint = graphene.JSONString(required=False, description="Device fingerprint data")
 
     class Meta:
         description = "Initialize zkLogin process"
@@ -152,7 +153,7 @@ class InitializeZkLogin(graphene.Mutation):
     authRefreshToken = graphene.String()
 
     @staticmethod
-    def mutate(root, info, firebaseToken, providerToken, provider):
+    def mutate(root, info, firebaseToken, providerToken, provider, deviceFingerprint=None):
         try:
             logger.info("Starting zkLogin initialization")
             
@@ -200,6 +201,17 @@ class InitializeZkLogin(graphene.Mutation):
                 try:
                     user = User.objects.get(firebase_uid=firebase_uid)
                     logger.info(f"Found existing user: id={user.id}, username={user.username}, auth_token_version={user.auth_token_version}")
+                    
+                    # Check if user is banned
+                    from security.utils import check_user_banned
+                    is_banned, ban_reason = check_user_banned(user)
+                    
+                    if is_banned:
+                        logger.warning(f"Banned user attempted login: {user.id} - {ban_reason}")
+                        return InitializeZkLogin(
+                            success=False,
+                            error="Your account has been suspended. Please contact support."
+                        )
                     
                     # Check if user has any accounts, create default if none exist
                     from users.models import Account
@@ -269,6 +281,16 @@ class InitializeZkLogin(graphene.Mutation):
                 # Generate randomness (32 bytes)
                 randomness_bytes = secrets.token_bytes(32)  # Generate 32 random bytes
                 randomness = base64.b64encode(randomness_bytes).decode('utf-8')  # Convert to base64 string
+                
+                # Track device fingerprint if provided
+                if deviceFingerprint:
+                    try:
+                        from security.utils import track_user_device
+                        track_user_device(user, deviceFingerprint, info.context)
+                        logger.info(f"Device fingerprint tracked for user {user.id}")
+                    except Exception as e:
+                        logger.error(f"Error tracking device fingerprint: {e}")
+                        # Don't fail authentication if device tracking fails
 
             return InitializeZkLogin(
                 success=True,
@@ -295,6 +317,7 @@ class FinalizeZkLoginInput(graphene.InputObjectType):
     salt = graphene.String(required=True)
     accountType = graphene.String(required=True)
     accountIndex = graphene.Int(required=True)
+    deviceFingerprint = graphene.JSONString(required=False, description="Device fingerprint data")
 
 class FinalizeZkLoginPayload(graphene.ObjectType):
     success = graphene.Boolean()
@@ -328,6 +351,18 @@ def resolve_finalize_zk_login(self, info, input):
             from users.models import User
             try:
                 user = User.objects.get(firebase_uid=firebase_uid)
+                
+                # Check if user is banned
+                from security.utils import check_user_banned
+                is_banned, ban_reason = check_user_banned(user)
+                
+                if is_banned:
+                    logger.warning(f"Banned user attempted login: {user.id} - {ban_reason}")
+                    return FinalizeZkLoginPayload(
+                        success=False,
+                        error="Your account has been suspended. Please contact support."
+                    )
+                
             except User.DoesNotExist:
                 logger.error("User not found for Firebase UID: %s", firebase_uid)
                 return FinalizeZkLoginPayload(
@@ -426,6 +461,16 @@ def resolve_finalize_zk_login(self, info, input):
                     success=False,
                     error="Failed to save Sui address"
                 )
+
+            # Track device fingerprint if provided
+            if input.deviceFingerprint:
+                try:
+                    from security.utils import track_user_device
+                    track_user_device(user, input.deviceFingerprint, info.context)
+                    logger.info(f"Device fingerprint tracked for user {user.id}")
+                except Exception as e:
+                    logger.error(f"Error tracking device fingerprint: {e}")
+                    # Don't fail authentication if device tracking fails
 
             # Calculate is_phone_verified based on phone_number and phone_country
             is_phone_verified = bool(account.user.phone_number and account.user.phone_country)
