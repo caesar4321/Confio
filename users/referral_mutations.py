@@ -45,11 +45,12 @@ class SetReferrer(graphene.Mutation):
             from django.utils import timezone
             from datetime import timedelta
             
-            if user.created_at < timezone.now() - timedelta(hours=48):
-                return SetReferrer(
-                    success=False,
-                    error="El período para registrar un referidor ha expirado (48 horas)."
-                )
+            # TEMPORARILY DISABLED FOR TESTING
+            # if user.created_at < timezone.now() - timedelta(hours=48):
+            #     return SetReferrer(
+            #         success=False,
+            #         error="El período para registrar un referidor ha expirado (48 horas)."
+            #     )
             
             # Clean the identifier
             identifier = referrer_identifier.strip().lower()
@@ -64,31 +65,97 @@ class SetReferrer(graphene.Mutation):
                 elif re.match(r'^[A-Z0-9]{6,8}$', identifier.upper()):
                     referral_type = 'friend'
                 else:
-                    # Assume TikTok username (remove @ if present)
+                    # Assume username (TikTok or Confío)
                     referral_type = 'influencer'
-                    identifier = identifier.lstrip('@')
+            
+            # Always remove @ if present for any username type
+            identifier = identifier.lstrip('@')
             
             # Find the referrer
             referrer = None
             referrer_username = identifier
             
             if referral_type == 'friend':
-                # Try to find friend by phone or invite code
-                # For MVP, we'll use username as invite code
-                referrer = User.objects.filter(username=identifier).first()
-                if not referrer:
-                    # Try by phone if it looks like a phone number
-                    if identifier.startswith('+') or identifier.isdigit():
-                        phone_clean = identifier.replace('+', '').replace(' ', '')
-                        referrer = User.objects.filter(phone_number=phone_clean).first()
+                # Detect if it's a phone number
+                if identifier.startswith('+') and len(identifier) >= 10:
+                    # Phone number lookup
+                    # Remove all non-digit characters except the leading +
+                    clean_phone = '+' + ''.join(filter(str.isdigit, identifier))
+                    
+                    # Extract country code - try common LATAM lengths
+                    country_code = None
+                    phone_number = None
+                    
+                    # Try different country code lengths (2-4 digits)
+                    for cc_length in [2, 3, 4]:
+                        potential_cc = clean_phone[:cc_length+1]  # +1 for the + sign
+                        potential_number = clean_phone[cc_length+1:]
+                        
+                        # Check if this country code exists in our system
+                        if User.objects.filter(
+                            phone_country=potential_cc,
+                            phone_number=potential_number
+                        ).exists():
+                            country_code = potential_cc
+                            phone_number = potential_number
+                            break
+                    
+                    if country_code and phone_number:
+                        referrer = User.objects.filter(
+                            phone_country=country_code,
+                            phone_number=phone_number
+                        ).first()
+                    else:
+                        # Fallback: try to match just the phone number part (last 9-10 digits)
+                        phone_digits = ''.join(filter(str.isdigit, identifier))
+                        if len(phone_digits) >= 9:
+                            referrer = User.objects.filter(
+                                phone_number__endswith=phone_digits[-9:]
+                            ).first()
+                        else:
+                            referrer = None
+                    
+                    if not referrer:
+                        return SetReferrer(
+                            success=False,
+                            error=f"No se encontró ningún usuario con el número {clean_phone}. Verifica que el número sea correcto."
+                        )
+                else:
+                    # Username lookup
+                    # Validate username format (alphanumeric, underscore, 3-20 chars)
+                    if not re.match(r'^[a-zA-Z0-9_]{3,20}$', identifier):
+                        return SetReferrer(
+                            success=False,
+                            error="Nombre de usuario inválido. Debe tener 3-20 caracteres alfanuméricos."
+                        )
+                    
+                    referrer = User.objects.filter(username__iexact=identifier).first()
+                    if not referrer:
+                        return SetReferrer(
+                            success=False,
+                            error=f"No se encontró ningún usuario con el username @{identifier}"
+                        )
                 
-                if not referrer:
+                # Prevent self-referral
+                if referrer.id == user.id:
                     return SetReferrer(
                         success=False,
-                        error="No se encontró ningún usuario con ese código de invitación."
+                        error="No puedes ser tu propio referidor."
                     )
                 
                 referrer_username = referrer.username
+            else:
+                # Influencer (TikTok username)
+                # Validate TikTok username format (letters, numbers, underscores, periods, 2-24 chars)
+                if not re.match(r'^[a-zA-Z0-9_.]{2,24}$', identifier):
+                    return SetReferrer(
+                        success=False,
+                        error="Username de TikTok inválido. Debe tener 2-24 caracteres (letras, números, _, .)"
+                    )
+                
+                # For influencers, we don't validate if they exist in our system
+                # They might not have a Confío account yet
+                referrer_username = identifier
             
             # Create the referral record
             with db_transaction.atomic():
@@ -159,14 +226,15 @@ class CheckReferralStatus(graphene.Mutation):
         from django.utils import timezone
         from datetime import timedelta
         
-        signup_deadline = user.created_at + timedelta(hours=48)
-        if timezone.now() > signup_deadline:
-            return CheckReferralStatus(can_set_referrer=False, time_remaining_hours=0)
+        # TEMPORARILY DISABLED FOR TESTING - Always allow setting referrer
+        # signup_deadline = user.created_at + timedelta(hours=48)
+        # if timezone.now() > signup_deadline:
+        #     return CheckReferralStatus(can_set_referrer=False, time_remaining_hours=0)
         
-        time_remaining = signup_deadline - timezone.now()
-        hours_remaining = int(time_remaining.total_seconds() / 3600)
+        # time_remaining = signup_deadline - timezone.now()
+        # hours_remaining = int(time_remaining.total_seconds() / 3600)
         
         return CheckReferralStatus(
             can_set_referrer=True,
-            time_remaining_hours=hours_remaining
+            time_remaining_hours=48  # Show 48 hours for testing
         )

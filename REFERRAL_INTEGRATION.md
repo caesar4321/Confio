@@ -14,10 +14,17 @@ New users see ONE question during onboarding:
 - Nadie, lo encontré solo
 ```
 
-### 2. Unified Achievement: "Conexión Exitosa"
-- **Trigger**: Enter referrer + complete first transaction
-- **Reward**: 4 CONFIO to BOTH parties ($1 each)
+### 2. Two Clear Achievements
+- **"Conexión Exitosa"** (🎯): For the INVITED user - "I was invited by someone"
+  - Trigger: You enter a referrer code AND complete your first transaction
+  - Reward: 4 CONFIO
+  
+- **"Referido Exitoso"** (🤝): For the INVITER - "I invited someone else"
+  - Trigger: Someone you invited completes their first transaction
+  - Reward: 4 CONFIO
+  
 - **One-time only**: Can't change referrer after 48 hours
+- **Important**: No rewards are given until the referred user completes their first transaction
 
 ### 3. Backend Flow
 ```
@@ -58,7 +65,7 @@ category: 'social'
 
 ## Expected Impact
 
-- **CAC**: $1 per successful referral (50¢ each side)
+- **CAC**: Low cost per successful referral
 - **Viral coefficient**: Target 1.5x
 - **Conversion**: 30-40% of referred users transact
 
@@ -71,13 +78,13 @@ Current 5 achievements work together:
 4. 💎 **Hodler 30 días** (12 CONFIO) - Retention
 5. 📊 **10 Intercambios** (20 CONFIO) - Habit
 
-Total possible: 45 CONFIO ($11.25)
-Expected average: 20 CONFIO ($5.00)
+Total possible: 45 CONFIO
+Expected average: 20 CONFIO
 
 ## Julian's TikTok Strategy
 
 Content ideas:
-- "Pon mi username 'julianmoon' y gana $1"
+- "Pon mi username 'julianmoon' y gana CONFIO"
 - "Cómo un coreano ayuda a LATAM"
 - Speed comparisons vs banks
 - Real user testimonials

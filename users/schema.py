@@ -27,6 +27,7 @@ from .graphql_employee import (
     EmployeeQueries, EmployeeMutations,
     BusinessEmployeeType, EmployerBusinessType
 )
+from .referral_mutations import SetReferrer, CheckReferralStatus
 # Removed circular import - P2PPaymentMethodType will be referenced by string
 
 User = get_user_model()
@@ -2885,3 +2886,7 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
 	submit_tiktok_share = SubmitTikTokShare.Field()
 	verify_tiktok_share = VerifyTikTokShare.Field()
 	update_influencer_status = UpdateInfluencerStatus.Field()
+	
+	# Unified referral system mutations
+	set_referrer = SetReferrer.Field()
+	check_referral_status = CheckReferralStatus.Field()
