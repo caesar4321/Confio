@@ -236,6 +236,7 @@ class InitializeZkLogin(graphene.Mutation):
                     logger.info(f"Created new user: id={user.id}, username={user.username}")
                     
                     # Attach device fingerprint and IP for achievement fraud prevention
+                    logger.info(f"deviceFingerprint type: {type(deviceFingerprint)}, value: {deviceFingerprint}")
                     if deviceFingerprint:
                         try:
                             import hashlib
