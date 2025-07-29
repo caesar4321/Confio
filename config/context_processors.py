@@ -87,7 +87,7 @@ def admin_dashboard_stats(request):
                 status='COMPLETED',
                 deleted_at__isnull=True
             ).aggregate(
-                total=Sum('total_amount')
+                total=Sum('crypto_amount')  # Sum crypto amount (cUSD)
             )['total'] or 0,
         }
         
