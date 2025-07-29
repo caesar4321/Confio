@@ -1789,28 +1789,41 @@ The referral system supports three types of referrals in a single flow:
 
 ### CONFIO Token Economics
 
-- **Internal rewards token** - Not exposed as monetary value in the app
-- **Total Rewards Pool**: Designed to optimize for $2-2.50 CPI (Cost Per Install)
-- **Distribution Strategy**: 
-  - Easy actions: $0.25-$0.50 (onboarding, basic transactions)
-  - Core actions: $2-$12.50 (P2P trading - highest priority)
-  - Viral actions: $1-$62.50 (scaled based on reach)
-  - Long-term retention: $3-$10 (holding, veteran status)
+- **Internal rewards token** - Locked until presale/launch to ensure value appreciation
+- **Simplified Achievement System**: 6 core achievements focused on user adoption
 
-### TikTok Viral Integration
+### Core Achievements (Logros)
 
-#### Influencer Referral System
-- Users paste TikTok username of influencer who referred them
-- Both influencer and new user receive 4 CONFIO ($1) when user completes first transaction
-- Dual username verification (influencer's + user's own) prevents abuse
-- No URL parameters needed - pure username-based tracking
+1. **Pionero Beta** (1 CONFIO)
+   - First 10,000 users only
+   - Exclusive future benefits (mystery rewards)
+   - Automatic on signup
 
-#### Viral Content Rewards
-Progressive rewards based on TikTok video views:
-- 1K views: 4 CONFIO ($1)
-- 10K views: 20 CONFIO ($5)
-- 100K views: 80 CONFIO ($20)
-- 1M views: 250 CONFIO ($62.50)
+2. **Primera Transacción** (4 CONFIO)
+   - Complete first transaction (send or receive)
+   - Core onboarding metric
+
+3. **Conexión con Amigos** (3 CONFIO)
+   - Add 3 friends to contacts
+   - Network growth incentive
+
+4. **10 Intercambios** (20 CONFIO)
+   - Complete 10 P2P trades
+   - Highest reward for core app usage
+
+5. **Influencer Destacado** (Variable 10-250 CONFIO)
+   - Share app on TikTok
+   - Rewards scale with video views (10K views = 10 CONFIO, up to 1M+ = 250 CONFIO)
+
+6. **Hodler 30 días** (12 CONFIO)
+   - Maintain balance for 30 days
+   - Retention incentive
+
+### Unified Referral System
+- Single referral input for any identifier (username, code, phone)
+- 48-hour window after signup to set referrer
+- Both parties receive rewards on first transaction
+- Prevents gaming through one-time-only referral setting
 
 ### Implementation Architecture
 
