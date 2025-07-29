@@ -340,18 +340,20 @@ class PioneroBetaTrackerAdmin(admin.ModelAdmin):
     progress_display.short_description = "Progress"
     
     def count_display(self, obj):
+        count_str = f"{obj.count:,}"
         return format_html(
-            '<span style="font-size: 18px; font-weight: bold;">{:,}</span>',
-            obj.count
+            '<span style="font-size: 18px; font-weight: bold;">{}</span>',
+            count_str
         )
     count_display.short_description = "Users Awarded"
     
     def remaining_display(self, obj):
         remaining = obj.get_remaining_slots()
         color = '#DC2626' if remaining < 100 else '#F59E0B' if remaining < 500 else '#10B981'
+        remaining_str = f"{remaining:,}"
         return format_html(
-            '<span style="font-size: 18px; font-weight: bold; color: {};">{:,}</span>',
-            color, remaining
+            '<span style="font-size: 18px; font-weight: bold; color: {};">{}</span>',
+            color, remaining_str
         )
     remaining_display.short_description = "Slots Remaining"
     
@@ -378,23 +380,25 @@ class PioneroBetaTrackerAdmin(admin.ModelAdmin):
     def progress_bar(self, obj):
         percentage = (obj.count / 10000) * 100
         color = '#10B981' if percentage < 80 else '#F59E0B' if percentage < 95 else '#DC2626'
+        count_str = f"{obj.count:,}"
+        percentage_str = f"{percentage:.1f}"
         
         return format_html(
             '<div style="margin: 20px 0;">'
             '<div style="display: flex; justify-content: space-between; margin-bottom: 10px;">'
-            '<span style="font-size: 24px; font-weight: bold;">{:,} / 10,000</span>'
-            '<span style="font-size: 24px; font-weight: bold; color: {};">{:.1f}%</span>'
+            '<span style="font-size: 24px; font-weight: bold;">{} / 10,000</span>'
+            '<span style="font-size: 24px; font-weight: bold; color: {};">{}%</span>'
             '</div>'
             '<div style="width: 100%; height: 40px; background: #e5e7eb; border-radius: 20px; overflow: hidden; position: relative;">'
             '<div style="width: {}%; height: 100%; background: {}; transition: width 0.3s;"></div>'
             '<div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-weight: bold; color: #374151;">'
-            '{:,} users registered'
+            '{} users registered'
             '</div>'
             '</div>'
             '</div>',
-            obj.count, color, percentage,
+            count_str, color, percentage_str,
             percentage, color,
-            obj.count
+            count_str
         )
     progress_bar.short_description = "Progress"
     
@@ -422,11 +426,15 @@ class PioneroBetaTrackerAdmin(admin.ModelAdmin):
                 
                 days_to_full = int(remaining / rate_per_day)
         
+        rate_str = f"{rate_per_day:.0f}"
+        days_str = f"{days_to_full}d" if isinstance(days_to_full, int) else days_to_full
+        confio_str = f"{obj.count:,}"
+        
         return format_html(
             '<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 20px 0;">'
             '<div style="background: #f3f4f6; padding: 15px; border-radius: 10px; text-align: center;">'
             '<div style="font-size: 12px; color: #6b7280; margin-bottom: 5px;">Current Rate</div>'
-            '<div style="font-size: 20px; font-weight: bold; color: #1f2937;">{:.0f}/day</div>'
+            '<div style="font-size: 20px; font-weight: bold; color: #1f2937;">{}/day</div>'
             '</div>'
             '<div style="background: #f3f4f6; padding: 15px; border-radius: 10px; text-align: center;">'
             '<div style="font-size: 12px; color: #6b7280; margin-bottom: 5px;">Est. Days to Full</div>'
@@ -434,12 +442,12 @@ class PioneroBetaTrackerAdmin(admin.ModelAdmin):
             '</div>'
             '<div style="background: #f3f4f6; padding: 15px; border-radius: 10px; text-align: center;">'
             '<div style="font-size: 12px; color: #6b7280; margin-bottom: 5px;">Value Awarded</div>'
-            '<div style="font-size: 20px; font-weight: bold; color: #00BFA5;">{:,} CONFIO</div>'
+            '<div style="font-size: 20px; font-weight: bold; color: #00BFA5;">{} CONFIO</div>'
             '</div>'
             '</div>',
-            rate_per_day,
-            f"{days_to_full}d" if isinstance(days_to_full, int) else days_to_full,
-            obj.count  # 1 CONFIO per user
+            rate_str,
+            days_str,
+            confio_str  # 1 CONFIO per user
         )
     statistics.short_description = "Statistics"
     
