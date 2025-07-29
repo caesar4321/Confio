@@ -2628,3 +2628,13 @@ export const UPDATE_INFLUENCER_STATUS = gql`
     }
   }
 `;
+
+export const CHECK_REFERRAL_STATUS = gql`
+  mutation CheckReferralStatus {
+    checkReferralStatus {
+      canSetReferrer
+      timeRemainingHours
+      existingReferrer
+    }
+  }
+`;

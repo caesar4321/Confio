@@ -9,11 +9,12 @@ import {
   GET_ACHIEVEMENT_TYPES,
   GET_USER_ACHIEVEMENTS,
   CLAIM_ACHIEVEMENT_REWARD,
-  CREATE_INFLUENCER_REFERRAL,
   SUBMIT_TIKTOK_SHARE,
-  GET_MY_CONFIO_BALANCE
+  GET_MY_CONFIO_BALANCE,
+  CHECK_REFERRAL_STATUS
 } from '../apollo/queries';
 import { ShareAchievementModal } from '../components/ShareAchievementModal';
+import { ReferralInputModal } from '../components/ReferralInputModal';
 
 const colors = {
   primary: '#34d399',
@@ -69,10 +70,9 @@ export const AchievementsScreen = () => {
   const navigation = useNavigation();
   const { userProfile } = useAuth();
   const { activeAccount } = useAccount();
-  const [influencerUsername, setInfluencerUsername] = useState('');
-  const [myTikTokUsername, setMyTikTokUsername] = useState('');
-  const [showInfluencerInput, setShowInfluencerInput] = useState(false);
+  const [showReferralModal, setShowReferralModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [canShowReferralBox, setCanShowReferralBox] = useState(true); // Temporarily enabled for testing
   const [selectedAchievement, setSelectedAchievement] = useState<{
     id: string;
     name: string;
@@ -88,13 +88,26 @@ export const AchievementsScreen = () => {
   
   // GraphQL mutations
   const [claimAchievementReward] = useMutation(CLAIM_ACHIEVEMENT_REWARD);
-  const [createInfluencerReferral] = useMutation(CREATE_INFLUENCER_REFERRAL);
   const [submitTikTokShare] = useMutation(SUBMIT_TIKTOK_SHARE);
+  const [checkReferralStatus] = useMutation(CHECK_REFERRAL_STATUS);
   
   // Process the achievement data
   const achievementTypes: AchievementType[] = achievementTypesData?.achievementTypes || [];
   const userAchievements: Achievement[] = userAchievementsData?.userAchievements || [];
   
+  // Check referral status on mount
+  React.useEffect(() => {
+    checkReferralStatus().then(({ data }) => {
+      if (data?.checkReferralStatus) {
+        setCanShowReferralBox(data.checkReferralStatus.canSetReferrer);
+      }
+    }).catch(err => {
+      console.error('Error checking referral status:', err);
+      // On error, show the box anyway for testing
+      setCanShowReferralBox(true);
+    });
+  }, []);
+
   // Debug logging
   React.useEffect(() => {
     console.log('AchievementsScreen Debug:');
@@ -272,71 +285,6 @@ export const AchievementsScreen = () => {
     }
   };
 
-  const cleanTikTokUsername = (username: string): string => {
-    // Remove @ if present and clean invalid characters
-    // TikTok usernames: letters, numbers, underscores, periods (1-24 chars)
-    return username
-      .replace(/^@+/, '') // Remove leading @
-      .replace(/[^a-zA-Z0-9_.]/g, '') // Keep only valid chars
-      .toLowerCase()
-      .slice(0, 24); // Max length limit
-  };
-
-  const handleInfluencerReferral = async () => {
-    const cleanedInfluencer = cleanTikTokUsername(influencerUsername);
-    const cleanedMyUsername = cleanTikTokUsername(myTikTokUsername);
-    
-    if (!cleanedInfluencer) {
-      Alert.alert('Error', 'Por favor ingresa el usuario del influencer');
-      return;
-    }
-    
-    if (!cleanedMyUsername) {
-      Alert.alert('Error', 'Por favor ingresa tu usuario de TikTok');
-      return;
-    }
-    
-    if (cleanedInfluencer.length < 2 || cleanedMyUsername.length < 2) {
-      Alert.alert('Error', 'Los nombres de usuario deben tener al menos 2 caracteres');
-      return;
-    }
-    
-    if (cleanedInfluencer === cleanedMyUsername) {
-      Alert.alert('Error', 'No puedes ser tu propio influencer');
-      return;
-    }
-    
-    try {
-      const result = await createInfluencerReferral({
-        variables: {
-          tiktokUsername: cleanedInfluencer,
-          attributionData: JSON.stringify({
-            source: 'achievements_screen',
-            platform: Platform.OS,
-            my_tiktok_username: cleanedMyUsername,
-            original_input: influencerUsername
-          })
-        }
-      });
-      
-      if (result.data?.createInfluencerReferral?.success) {
-        Alert.alert(
-          '¡Referencia Registrada!',
-          '¡Genial! Has registrado tu referencia del influencer. Ambos recibirán $1 en CONFIO cuando completes tu primera transacción.',
-          [{ text: 'OK' }]
-        );
-        setInfluencerUsername('');
-        setMyTikTokUsername('');
-        setShowInfluencerInput(false);
-        refetchAchievements();
-      } else {
-        Alert.alert('Error', result.data?.createInfluencerReferral?.error || 'No se pudo registrar la referencia');
-      }
-    } catch (error) {
-      console.error('Error creating influencer referral:', error);
-      Alert.alert('Error', 'Ocurrió un error al registrar la referencia');
-    }
-  };
 
 
   const handleShare = async (achievement: Achievement) => {
@@ -521,87 +469,24 @@ export const AchievementsScreen = () => {
           </View>
         </TouchableOpacity>
 
-        {/* 2. ¿Te trajo un influencer? - SECONDARY (Orange) */}
-        {!showInfluencerInput ? (
+        {/* 2. Unified Referral - SECONDARY (Orange) - Only show if can set referrer */}
+        {canShowReferralBox && (
           <TouchableOpacity 
             style={styles.orangeCard}
-            onPress={() => setShowInfluencerInput(true)}
+            onPress={() => setShowReferralModal(true)}
           >
             <View style={styles.cardHeader}>
               <Icon name="users" size={20} color="#F59E0B" />
-              <Text style={styles.orangeTitle}>¿Te trajo un influencer?</Text>
+              <Text style={styles.orangeTitle}>¿Quién te invitó a Confío?</Text>
             </View>
             <Text style={styles.orangeText}>
-              Si llegaste por un TikTok de un influencer, ingresa su usuario aquí para que ambos reciban 4 CONFIO 💰
+              Ingresa el código de tu amigo o el @username del influencer para que ambos reciban 4 CONFIO
             </Text>
             <View style={styles.learnMoreRow}>
               <Text style={styles.orangeLearnMore}>Agregar referencia</Text>
               <Icon name="chevron-right" size={16} color="#F59E0B" />
             </View>
           </TouchableOpacity>
-        ) : (
-          <View style={styles.orangeInputCard}>
-            <View style={styles.orangeInputHeader}>
-              <Icon name="users" size={20} color="#F59E0B" />
-              <Text style={styles.orangeInputTitle}>Referencia de Influencer</Text>
-            </View>
-            <Text style={styles.influencerInputLabel}>Usuario de TikTok del influencer:</Text>
-            <View style={styles.inputWithAt}>
-              <Text style={styles.atSymbol}>@</Text>
-              <TextInput
-                style={styles.influencerInputWithAt}
-                value={influencerUsername}
-                onChangeText={(text) => {
-                  const cleaned = cleanTikTokUsername(text);
-                  setInfluencerUsername(cleaned);
-                }}
-                placeholder="confio_venezuela"
-                placeholderTextColor="#9CA3AF"
-                autoCapitalize="none"
-                autoCorrect={false}
-                maxLength={24}
-              />
-            </View>
-            
-            <Text style={styles.influencerInputLabel}>Usuario de Mi TikTok:</Text>
-            <View style={styles.inputWithAt}>
-              <Text style={styles.atSymbol}>@</Text>
-              <TextInput
-                style={styles.influencerInputWithAt}
-                value={myTikTokUsername}
-                onChangeText={(text) => {
-                  const cleaned = cleanTikTokUsername(text);
-                  setMyTikTokUsername(cleaned);
-                }}
-                placeholder="mi_usuario"
-                placeholderTextColor="#9CA3AF"
-                autoCapitalize="none"
-                autoCorrect={false}
-                maxLength={24}
-              />
-            </View>
-            <Text style={styles.inputHint}>
-              Necesitamos ambos usuarios para prevenir abuso y fraude
-            </Text>
-            <View style={styles.influencerButtonRow}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => {
-                  setShowInfluencerInput(false);
-                  setInfluencerUsername('');
-                  setMyTikTokUsername('');
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.submitButton}
-                onPress={handleInfluencerReferral}
-              >
-                <Text style={styles.submitButtonText}>Registrar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
         )}
         
         {/* 3. Mi Progreso Viral - TERTIARY (Mint) */}
@@ -787,6 +672,16 @@ export const AchievementsScreen = () => {
           achievement={selectedAchievement}
         />
       )}
+      
+      <ReferralInputModal
+        visible={showReferralModal}
+        onClose={() => setShowReferralModal(false)}
+        onSuccess={() => {
+          setShowReferralModal(false);
+          // Optionally refresh achievements
+          refetchAchievements();
+        }}
+      />
     </SafeAreaView>
   );
 };

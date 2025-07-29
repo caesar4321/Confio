@@ -9,9 +9,12 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  FlatList,
 } from 'react-native';
 import { useMutation, useQuery } from '@apollo/client';
 import { gql } from '@apollo/client';
+import Icon from 'react-native-vector-icons/Feather';
+import { countries, Country } from '../utils/countries';
 
 const CHECK_REFERRAL_STATUS = gql`
   mutation CheckReferralStatus {
@@ -46,8 +49,10 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
   onSuccess,
 }) => {
   const [referrerInput, setReferrerInput] = useState('');
-  const [inputType, setInputType] = useState<'influencer' | 'friend'>('influencer');
+  const [inputType, setInputType] = useState<'influencer' | 'friend' | 'phone'>('influencer');
   const [showSuccess, setShowSuccess] = useState(false);
+  const [selectedCountry, setSelectedCountry] = useState<Country>(countries.find(c => c[2] === 'VE') || countries[0]); // Default to Venezuela
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
   
   const [checkStatus] = useMutation(CHECK_REFERRAL_STATUS);
   const [setReferrer, { loading }] = useMutation(SET_REFERRER);
@@ -66,6 +71,8 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
             setError(`Ya tienes registrado a: ${data.checkReferralStatus.existingReferrer}`);
           }
         }
+      }).catch(err => {
+        console.error('Error checking referral status:', err);
       });
     }
   }, [visible]);
@@ -76,10 +83,22 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
       return;
     }
 
+    let finalIdentifier = referrerInput.trim();
+    
+    // Add @ prefix for usernames if not present
+    if ((inputType === 'influencer' || inputType === 'friend') && !finalIdentifier.startsWith('@')) {
+      finalIdentifier = '@' + finalIdentifier;
+    }
+    
+    // Add country code for phone numbers
+    if (inputType === 'phone') {
+      finalIdentifier = selectedCountry[1] + finalIdentifier.replace(/[^0-9]/g, '');
+    }
+
     try {
       const { data } = await setReferrer({
         variables: {
-          referrerIdentifier: referrerInput.trim(),
+          referrerIdentifier: finalIdentifier,
         },
       });
 
@@ -160,7 +179,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
                       inputType === 'influencer' && styles.typeButtonTextActive,
                     ]}
                   >
-                    Influencer TikTok
+                    Influencer
                   </Text>
                 </TouchableOpacity>
                 
@@ -177,27 +196,74 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
                       inputType === 'friend' && styles.typeButtonTextActive,
                     ]}
                   >
-                    Amigo/Familiar
+                    @Username
+                  </Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.typeButton,
+                    inputType === 'phone' && styles.typeButtonActive,
+                  ]}
+                  onPress={() => setInputType('phone')}
+                >
+                  <Text
+                    style={[
+                      styles.typeButtonText,
+                      inputType === 'phone' && styles.typeButtonTextActive,
+                    ]}
+                  >
+                    Teléfono
                   </Text>
                 </TouchableOpacity>
               </View>
 
-              <TextInput
-                style={styles.input}
-                value={referrerInput}
-                onChangeText={(text) => {
-                  setReferrerInput(text);
-                  setError('');
-                }}
-                placeholder={
-                  inputType === 'influencer'
-                    ? '@username del TikTok'
-                    : 'Código o teléfono de tu amigo'
-                }
-                placeholderTextColor="#9CA3AF"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
+              {inputType === 'phone' ? (
+                <View style={styles.phoneInputContainer}>
+                  <TouchableOpacity
+                    style={styles.countryCodeButton}
+                    onPress={() => setShowCountryPicker(true)}
+                  >
+                    <Text style={styles.countryCodeText}>
+                      {selectedCountry[3]} {selectedCountry[1]}
+                    </Text>
+                    <Icon name="chevron-down" size={16} color="#6B7280" />
+                  </TouchableOpacity>
+                  <TextInput
+                    style={styles.phoneInput}
+                    value={referrerInput}
+                    onChangeText={(text) => {
+                      setReferrerInput(text.replace(/[^0-9]/g, ''));
+                      setError('');
+                    }}
+                    placeholder="412 345 6789"
+                    placeholderTextColor="#9CA3AF"
+                    keyboardType="phone-pad"
+                    maxLength={15}
+                  />
+                </View>
+              ) : (
+                <View style={styles.usernameInputContainer}>
+                  <Text style={styles.atPrefix}>@</Text>
+                  <TextInput
+                    style={styles.usernameInput}
+                    value={referrerInput}
+                    onChangeText={(text) => {
+                      // Remove @ if user types it
+                      setReferrerInput(text.replace('@', ''));
+                      setError('');
+                    }}
+                    placeholder={
+                      inputType === 'influencer'
+                        ? 'username del TikTok'
+                        : 'username de Confío'
+                    }
+                    placeholderTextColor="#9CA3AF"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </View>
+              )}
 
               {error ? (
                 <Text style={styles.errorText}>{error}</Text>
@@ -205,7 +271,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
 
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
-                  💡 Ambos recibirán 4 CONFIO ($1) cuando completes tu primera transacción
+                  💡 Ambos recibirán 4 CONFIO cuando completes tu primera transacción
                 </Text>
               </View>
 
@@ -242,6 +308,59 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
           )}
         </View>
       </KeyboardAvoidingView>
+      
+      {/* Country Code Picker Modal */}
+      <Modal
+        visible={showCountryPicker}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowCountryPicker(false)}
+      >
+        <View style={styles.pickerOverlay}>
+          <View style={styles.pickerContent}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Selecciona tu país</Text>
+              <TouchableOpacity
+                style={styles.pickerCloseButton}
+                onPress={() => setShowCountryPicker(false)}
+              >
+                <Icon name="x" size={24} color="#6B7280" />
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={countries}
+              keyExtractor={(item) => item[1] + item[2]}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[
+                    styles.countryItem,
+                    selectedCountry[2] === item[2] && styles.countryItemSelected,
+                  ]}
+                  onPress={() => {
+                    setSelectedCountry(item);
+                    setShowCountryPicker(false);
+                  }}
+                >
+                  <Text style={styles.countryFlag}>{item[3]}</Text>
+                  <Text style={styles.countryName}>{item[0]}</Text>
+                  <Text style={styles.countryCode}>{item[1]}</Text>
+                  {selectedCountry[2] === item[2] && (
+                    <Icon name="check" size={20} color="#00BFA5" />
+                  )}
+                </TouchableOpacity>
+              )}
+              initialNumToRender={20}
+              maxToRenderPerBatch={10}
+              windowSize={21}
+              getItemLayout={(data, index) => ({
+                length: 65,
+                offset: 65 * index,
+                index,
+              })}
+            />
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 };
@@ -424,5 +543,104 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#374151',
+  },
+  phoneInputContainer: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    gap: 8,
+  },
+  countryCodeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 16,
+    gap: 4,
+  },
+  countryCodeText: {
+    fontSize: 16,
+    color: '#1F2937',
+  },
+  phoneInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    padding: 16,
+    fontSize: 16,
+  },
+  usernameInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  atPrefix: {
+    paddingLeft: 16,
+    paddingRight: 4,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#00BFA5',
+  },
+  usernameInput: {
+    flex: 1,
+    padding: 16,
+    paddingLeft: 0,
+    fontSize: 16,
+  },
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  pickerContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '80%',
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  pickerCloseButton: {
+    padding: 4,
+  },
+  countryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+  },
+  countryItemSelected: {
+    backgroundColor: '#F0FDF4',
+  },
+  countryFlag: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  countryName: {
+    flex: 1,
+    fontSize: 16,
+    color: '#1F2937',
+  },
+  countryCode: {
+    fontSize: 16,
+    color: '#6B7280',
+    marginRight: 12,
   },
 });

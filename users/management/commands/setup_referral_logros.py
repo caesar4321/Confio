@@ -11,29 +11,29 @@ class Command(BaseCommand):
     help = 'Setup referral achievement that works for both influencer and friend invites'
 
     def handle(self, *args, **options):
-        # Update the existing achievement to be more generic
+        # Achievement for the INVITED user (referred)
         achievement, created = AchievementType.objects.update_or_create(
             slug='llegaste_por_influencer',
             defaults={
                 'name': 'Conexión Exitosa',
-                'description': 'Fuiste invitado y completaste tu primera transacción',
+                'description': 'Te uniste por invitación y completaste tu primera transacción',
                 'category': 'social',
-                'confio_reward': Decimal('4'),  # Both sides get 4 CONFIO
+                'confio_reward': Decimal('4'),
                 'display_order': 2,
                 'is_active': True,
                 'icon_emoji': '🎯',
             }
         )
         
-        # Also create/update a hidden achievement for the referrer
+        # Achievement for the INVITER (referrer)
         referrer_achievement, _ = AchievementType.objects.update_or_create(
             slug='successful_referral',
             defaults={
                 'name': 'Referido Exitoso',
-                'description': 'Tu invitado completó su primera transacción',
+                'description': 'Invitaste a alguien que completó su primera transacción',
                 'category': 'social',
-                'confio_reward': Decimal('4'),  # Referrer also gets 4 CONFIO
-                'display_order': 100,  # Hidden from main list
+                'confio_reward': Decimal('4'),
+                'display_order': 15,  # Show after main achievements
                 'is_active': True,
                 'icon_emoji': '🤝',
             }
@@ -43,11 +43,14 @@ class Command(BaseCommand):
             self.style.SUCCESS(
                 f'\n✅ Referral system integrated with Logros!\n\n'
                 f'How it works:\n'
-                f'1. New user enters TikTok username OR friend code during onboarding\n'
+                f'1. New user enters @username or phone during referral window\n'
                 f'2. System tracks referral relationship (one-time only)\n'
                 f'3. When new user completes first transaction:\n'
-                f'   - New user gets "Conexión Exitosa" + 4 CONFIO\n'
-                f'   - Referrer gets automatic 4 CONFIO reward\n\n'
+                f'   - INVITED user gets "Conexión Exitosa" (I was invited) + 4 CONFIO\n'
+                f'   - INVITER gets "Referido Exitoso" (I invited someone) + 4 CONFIO\n\n'
+                f'Clear difference:\n'
+                f'• Conexión Exitosa = YOU were invited by someone\n'
+                f'• Referido Exitoso = YOU invited someone else\n\n'
                 f'Benefits:\n'
                 f'- Single unified flow (no separate paths)\n'
                 f'- Quality control (requires real transaction)\n'

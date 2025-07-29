@@ -1762,60 +1762,34 @@ location ^~ /.well-known/ {
 
 ## 🏆 Achievements (Logros) System
 
-The Confío app includes a comprehensive gamified achievement system designed to drive user engagement, encourage core app usage, and promote viral growth through TikTok integration.
+The Confío app includes a simplified achievement system focused on core user behaviors that drive retention and organic growth.
 
-### Achievement Categories
+### MVP Achievements (5 Core Behaviors)
 
-#### 🏠 **Bienvenida** (Welcome)
-| Achievement | Description | Reward | Icon |
-|-------------|-------------|---------|------|
-| **Pionero Beta** | Únete a Confío durante la fase beta - Exclusivo para los primeros usuarios | 1 CONFIO ($0.25) | 🚀 |
+| Achievement | Description | Reward | Icon | Trigger |
+|-------------|-------------|---------|------|---------|
+| **Pionero Beta** | Únete durante la fase beta | 1 CONFIO | 🚀 | Account creation during beta |
+| **Conexión Exitosa** | Te uniste por invitación y completaste tu primera transacción | 4 CONFIO | 🎯 | Enter referrer + first transaction (INVITED user) |
+| **Primera Compra P2P** | Completa tu primera compra/venta P2P | 8 CONFIO | 🔄 | First P2P trade completion |
+| **Hodler** | Mantén saldo por 30 días | 12 CONFIO | 💎 | Hold balance for 30 consecutive days |
+| **10 Intercambios** | Completa 10 transacciones P2P | 20 CONFIO | 📈 | Complete 10 P2P trades |
+| **Referido Exitoso** | Invitaste a alguien que completó su primera transacción | 4 CONFIO | 🤝 | Someone you invited completes first transaction (INVITER) |
 
-#### 🛡️ **Verificación** (Verification)
-| Achievement | Description | Reward | Icon |
-|-------------|-------------|---------|------|
-| **Verificado** | Completa la verificación de identidad | 2 CONFIO ($0.50) | 🛡️ |
+### Unified Referral System
 
-#### 💱 **Intercambios** (Trading) - Highest Value Actions
-| Achievement | Description | Reward | Icon |
-|-------------|-------------|---------|------|
-| **Primera Compra** | Completa tu primer intercambio P2P exitoso | 8 CONFIO ($2.00) | 🔄 |
-| **10 Intercambios** | Completa 10 intercambios P2P exitosos | 20 CONFIO ($5.00) | 📊 |
-| **Trader Frecuente** | Completa 50 intercambios P2P exitosos | 40 CONFIO ($10.00) | 📈 |
-| **Trader $1,000** | Alcanza $1,000 USD en volumen total de intercambios | 50 CONFIO ($12.50) | 💰 |
-| **Trader $10,000** | Alcanza $10,000 USD en volumen total de intercambios | 200 CONFIO ($50.00) | 💎 |
+The referral system supports three types of referrals in a single flow:
+1. **Influencer** - TikTok @username
+2. **Friend Username** - Confío @username  
+3. **Friend Phone** - Phone number with country code
 
-#### 💸 **Pagos y Transacciones** (Payments)
-| Achievement | Description | Reward | Icon |
-|-------------|-------------|---------|------|
-| **Primera Recepción** | Recibe cUSD por primera vez | 1 CONFIO ($0.25) | 📥 |
-| **Primer Envío** | Envía cUSD por primera vez | 1 CONFIO ($0.25) | 📤 |
-| **Primer Pago** | Realiza tu primer pago a un comercio | 2 CONFIO ($0.50) | 🛍️ |
-| **Viajero** | Envía dinero a 3 países diferentes | 10 CONFIO ($2.50) | 🌍 |
-| **Comerciante** | Acepta 10 pagos como negocio | 20 CONFIO ($5.00) | 🏪 |
-
-#### 🤝 **Comunidad** (Community)
-| Achievement | Description | Reward | Icon |
-|-------------|-------------|---------|------|
-| **Llegaste por Influencer** | Te registraste siguiendo a un influencer de TikTok | 4 CONFIO ($1.00) | 🎯 |
-| **Primera Viral** | Tu TikTok sobre Confío alcanzó 1,000 visualizaciones | 4 CONFIO ($1.00) | 🎬 |
-| **Hodler** | Mantén cUSD en tu cuenta por 30 días | 12 CONFIO ($3.00) | 💎 |
-| **Explosión Viral** | Tu TikTok sobre Confío alcanzó 10,000 visualizaciones | 20 CONFIO ($5.00) | 💥 |
-| **Veterano** | Mantén tu cuenta activa por 6 meses | 40 CONFIO ($10.00) | 🎖️ |
-| **Mega Viral** | Tu TikTok sobre Confío alcanzó 100,000 visualizaciones | 80 CONFIO ($20.00) | 🚀 |
-| **Tendencia Nacional** | Tu TikTok sobre Confío alcanzó 1,000,000 visualizaciones | 250 CONFIO ($62.50) | 🏆 |
-
-#### 👑 **Embajador** (Ambassador) - Influencer Tiers
-| Achievement | Description | Reward | Icon |
-|-------------|-------------|---------|------|
-| **Nano-Influencer** | Trae entre 1-10 referidos que completen su registro | 4 CONFIO ($1.00) | 🌱 |
-| **Micro-Influencer** | Trae entre 11-100 referidos activos - Badge especial desbloqueado | 8 CONFIO ($2.00) | ⭐ |
-| **Macro-Influencer** | Trae entre 101-1000 referidos - Perks exclusivos | 20 CONFIO ($5.00) | 💫 |
-| **Embajador Confío** | Trae 1000+ referidos - Programa de partnership personalizado | Custom Deal | 👑 |
+**How it works:**
+- New users have 48 hours after signup to enter a referrer
+- Both parties receive rewards only after the referred user completes their first transaction
+- Clear distinction: "Conexión Exitosa" for invited users, "Referido Exitoso" for inviters
 
 ### CONFIO Token Economics
 
-- **Exchange Rate**: 4 CONFIO = $1 USD (never expose this pricing publicly in the app)
+- **Internal rewards token** - Not exposed as monetary value in the app
 - **Total Rewards Pool**: Designed to optimize for $2-2.50 CPI (Cost Per Install)
 - **Distribution Strategy**: 
   - Easy actions: $0.25-$0.50 (onboarding, basic transactions)
@@ -1852,25 +1826,25 @@ Progressive rewards based on TikTok video views:
 # Queries
 achievementTypes
 userAchievements
-myInfluencerStats
 
 # Mutations
 claimAchievementReward(achievementId: ID!)
-createInfluencerReferral(tiktokUsername: String!, attributionData: String)
-submitTikTokShare(tiktokUrl: String!, shareType: String!, achievementId: ID)
+setReferrer(referrerIdentifier: String!)
+checkReferralStatus
 ```
 
 #### Frontend Components
 - **AchievementsScreen** (`apps/src/screens/AchievementsScreen.tsx`):
-  - Displays achievement progress with categories
-  - Influencer referral input with real-time username cleaning
+  - Displays achievement progress
+  - Shows referral box only during 48-hour window
   - Claim rewards functionality
   - Share achievements to social media
 
-- **MiProgresoViralScreen** (`apps/src/screens/MiProgresoViralScreen.tsx`):
-  - Dashboard for influencer statistics
-  - Referral tracking and tier progression
-  - Viral content performance metrics
+- **ReferralInputModal** (`apps/src/components/ReferralInputModal.tsx`):
+  - Unified referral input for influencer/friend/phone
+  - Country code picker for phone numbers
+  - Real-time validation and error messages
+  - Auto-detection of referral type
 
 ### Anti-Abuse Measures
 
@@ -1895,23 +1869,21 @@ python manage.py reorder_achievements
 
 ### Visual Design
 
-- **Achievement Cards**: Clean design with emoji icons, progress bars, and reward amounts
-- **Category Colors**:
-  - Bienvenida: Green (#34d399)
-  - Verificación: Orange (#FFB800)
-  - Intercambios: Purple (#8b5cf6)
-  - Pagos: Red (#FF6B6B)
-  - Comunidad: Blue (#3b82f6)
-  - Embajador: Gold (#FFD700)
-- **Mi Progreso Viral**: Mint color (#3ADBBB) for active engagement feel
+- **Achievement Cards**: Clean design with emoji icons, progress bars, and CONFIO rewards
+- **Unified Color Scheme**: Teal/mint (#34d399) as primary achievement color
+- **Referral Modal**: 
+  - Three input types: Influencer, @Username, Phone
+  - Country code picker with 244 countries
+  - Real-time validation feedback
+- **Orange Referral Box**: Prominent call-to-action during 48-hour window
 
-### Future Enhancements
+### Key Simplifications from Original Design
 
-1. **Achievement Badges**: Visual badges for profile display
-2. **Leaderboards**: Regional and global achievement rankings
-3. **Seasonal Achievements**: Limited-time challenges
-4. **Achievement Combos**: Bonus rewards for completing sets
-5. **Social Proof**: Show which friends completed achievements
+1. **Reduced from 30+ to 6 achievements** - Focus on core behaviors only
+2. **Removed viral/UGC achievements** - Official content strategy instead
+3. **Unified referral flow** - Single entry point for all referral types
+4. **Clear achievement distinction** - "Conexión Exitosa" vs "Referido Exitoso"
+5. **No monetary values shown** - CONFIO displayed as points, not dollars
 
 ## 📱 Social Financial Marketing Strategy: "Sigue al fundador"
 
