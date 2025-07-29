@@ -2205,3 +2205,43 @@ class SuspiciousActivity(SoftDeleteModel):
     
     def __str__(self):
         return f"{self.user.username} - {self.action} - {self.created_at.strftime('%Y-%m-%d')}"
+
+
+class PioneroBetaTracker(models.Model):
+    """
+    Singleton model to track Pionero Beta achievement distribution
+    Ensures accurate counting of the first 10,000 users
+    """
+    count = models.IntegerField(default=0)
+    last_user_id = models.IntegerField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Pionero Beta Tracker"
+        verbose_name_plural = "Pionero Beta Tracker"
+    
+    @classmethod
+    def increment_and_check(cls):
+        """
+        Atomically increment counter and check if under 10,000
+        Returns (success, current_count)
+        """
+        from django.db import transaction
+        
+        with transaction.atomic():
+            tracker, created = cls.objects.select_for_update().get_or_create(pk=1)
+            if tracker.count >= 10000:
+                return False, tracker.count
+            
+            tracker.count += 1
+            tracker.save()
+            return True, tracker.count
+    
+    @classmethod
+    def get_remaining_slots(cls):
+        """Get remaining Pionero Beta slots"""
+        tracker, created = cls.objects.get_or_create(pk=1)
+        return max(0, 10000 - tracker.count)
+    
+    def __str__(self):
+        return f"Pionero Beta: {self.count}/10,000"

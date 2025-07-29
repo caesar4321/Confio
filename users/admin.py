@@ -3,7 +3,7 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils import timezone
-from .models import User, Account, Business, IdentityVerification, Country, Bank, BankInfo, ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare, InfluencerAmbassador, AmbassadorActivity, SuspiciousActivity
+from .models import User, Account, Business, IdentityVerification, Country, Bank, BankInfo, ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare, InfluencerAmbassador, AmbassadorActivity, SuspiciousActivity, PioneroBetaTracker
 from .models_unified import UnifiedTransactionTable
 from .models_employee import BusinessEmployee, EmployeeInvitation
 
@@ -1328,3 +1328,21 @@ class SuspiciousActivityAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         """Optimize queries"""
         return super().get_queryset(request).select_related('user', 'reviewed_by')
+
+@admin.register(PioneroBetaTracker)
+class PioneroBetaTrackerAdmin(admin.ModelAdmin):
+    """Admin for Pionero Beta tracker (singleton)"""
+    list_display = ("count", "remaining_slots", "last_user_id", "updated_at")
+    readonly_fields = ("count", "last_user_id", "updated_at", "remaining_slots")
+    
+    def remaining_slots(self, obj):
+        return f"{obj.get_remaining_slots():,}"
+    remaining_slots.short_description = "Remaining Slots"
+    
+    def has_add_permission(self, request):
+        # Only allow one instance
+        return PioneroBetaTracker.objects.count() == 0
+    
+    def has_delete_permission(self, request, obj=None):
+        # Prevent deletion
+        return False
