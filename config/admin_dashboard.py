@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from users.models import User, Account, Business, IdentityVerification, Country, Bank, BankInfo
-from users.admin_views import achievement_dashboard
+from achievements.admin_views import achievement_dashboard
 from p2p_exchange.models import P2POffer, P2PTrade, P2PUserStats, P2PDispute
 from send.models import SendTransaction
 from payments.models import PaymentTransaction
@@ -353,7 +353,7 @@ class ConfioAdminSite(admin.AdminSite):
     
     def achievement_dashboard_view(self, request):
         """Achievement system dashboard - delegate to the dedicated view"""
-        from users.admin_views import achievement_dashboard as dashboard_func
+        from achievements.admin_views import achievement_dashboard as dashboard_func
         return dashboard_func(request)
 
 
