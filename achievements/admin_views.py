@@ -125,4 +125,4 @@ def achievement_dashboard(request):
         'achievements': achievements,
     }
     
-    return render(request, 'admin/users/achievement_dashboard.html', context)
+    return render(request, 'admin/achievements/achievement_dashboard.html', context)
