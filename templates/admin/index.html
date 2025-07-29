@@ -1,5 +1,5 @@
 {% extends "admin/index.html" %}
-{% load static %}
+{% load static i18n %}
 
 {% block extrahead %}
 {{ block.super }}
@@ -63,10 +63,228 @@
         color: #1f2937;
         border-color: #d1d5db;
     }
+    
+    /* Fraud Stats Styles */
+    .fraud-stats-section {
+        background: #f3f4f6;
+        padding: 20px;
+        margin-bottom: 30px;
+        border-radius: 8px;
+        border: 1px solid #e5e7eb;
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+    }
+    
+    .stat-card {
+        background: white;
+        padding: 15px;
+        border-radius: 6px;
+        text-align: center;
+        border: 1px solid #e5e7eb;
+    }
+    
+    .stat-value {
+        font-size: 28px;
+        font-weight: bold;
+        color: #1f2937;
+        margin-bottom: 5px;
+    }
+    
+    .stat-label {
+        font-size: 14px;
+        color: #6b7280;
+    }
+    
+    .stat-sublabel {
+        font-size: 12px;
+        color: #9ca3af;
+        margin-top: 3px;
+    }
+    
+    .danger { color: #dc2626; }
+    .warning { color: #f59e0b; }
+    .success { color: #10b981; }
+    .info { color: #3b82f6; }
+    
+    .alert-warning {
+        padding: 12px;
+        background: #fef3c7;
+        border: 1px solid #fcd34d;
+        border-radius: 4px;
+        margin-bottom: 15px;
+        color: #92400e;
+        font-size: 14px;
+    }
+    
+    .fraud-action-buttons {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    
+    .fraud-action-buttons a {
+        display: inline-block;
+        padding: 10px 20px;
+        background: #6c757d;
+        color: white;
+        text-decoration: none;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+    
+    .fraud-action-buttons a:hover {
+        background: #5a6268;
+        color: white;
+    }
+    
+    .fraud-action-buttons a.primary {
+        background: #dc3545;
+    }
+    
+    .fraud-action-buttons a.primary:hover {
+        background: #c82333;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
+
+<!-- Fraud Detection Statistics -->
+{% if fraud_stats %}
+<div class="fraud-stats-section">
+    <h2 style="margin-top: 0; margin-bottom: 20px; color: #1f2937;">
+        🔍 Fraud Detection Overview
+    </h2>
+    
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ fraud_stats.total_achievements|default:"0" }}</div>
+            <div class="stat-label">Total Achievements</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value danger">{{ fraud_stats.fraud_detected|default:"0" }}</div>
+            <div class="stat-label">Confirmed Fraud</div>
+            {% if fraud_stats.total_achievements > 0 %}
+            <div class="stat-sublabel">
+                ({{ fraud_stats.fraud_percentage|floatformat:1 }}%)
+            </div>
+            {% endif %}
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value warning">{{ fraud_stats.suspicious_activity|default:"0" }}</div>
+            <div class="stat-label">Suspicious Activity</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value info">{{ fraud_stats.multi_user_devices|default:"0" }}</div>
+            <div class="stat-label">Multi-User Devices</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value success">${{ fraud_stats.potential_loss_usd|default:"0"|floatformat:2 }}</div>
+            <div class="stat-label">Potential Loss</div>
+            <div class="stat-sublabel">
+                {{ fraud_stats.potential_loss|default:"0"|floatformat:0 }} CONFIO
+            </div>
+        </div>
+    </div>
+    
+    {% if fraud_stats.fraud_detected > 0 or fraud_stats.suspicious_activity > 0 %}
+    <div class="alert-warning">
+        <strong>⚠️ Security Alert:</strong> 
+        {% if fraud_stats.fraud_detected > 0 %}
+        {{ fraud_stats.fraud_detected }} confirmed fraudulent achievement{{ fraud_stats.fraud_detected|pluralize }}.
+        {% endif %}
+        {% if fraud_stats.suspicious_activity > 0 %}
+        {{ fraud_stats.suspicious_activity }} achievement{{ fraud_stats.suspicious_activity|pluralize }} with suspicious activity.
+        {% endif %}
+    </div>
+    {% endif %}
+    
+    <div class="fraud-action-buttons">
+        <a href="{% url 'admin:achievements_userachievement_fraud_dashboard' %}" class="primary">
+            🔍 View Detailed Fraud Dashboard
+        </a>
+        <a href="{% url 'admin:achievements_userachievement_changelist' %}?fraud_status=fraud">
+            View All Fraud Cases
+        </a>
+        <a href="{% url 'admin:achievements_userachievement_changelist' %}?fraud_status=multi_device">
+            View Multi-Device Issues
+        </a>
+    </div>
+</div>
+{% endif %}
+
+<!-- User Growth & Engagement -->
+{% if user_stats %}
+<div class="fraud-stats-section">
+    <h2 style="margin-top: 0; margin-bottom: 20px; color: #1f2937;">
+        👥 User Growth & Engagement
+    </h2>
+    
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ user_stats.total_users|default:"0" }}</div>
+            <div class="stat-label">Total Users</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value success">{{ user_stats.new_users_today|default:"0" }}</div>
+            <div class="stat-label">New Today</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value info">{{ user_stats.new_users_week|default:"0" }}</div>
+            <div class="stat-label">New This Week</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value" style="color: #8b5cf6;">{{ user_stats.verified_phones|default:"0" }}</div>
+            <div class="stat-label">Phone Verified</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- P2P Exchange Activity -->
+{% if p2p_stats %}
+<div class="fraud-stats-section">
+    <h2 style="margin-top: 0; margin-bottom: 20px; color: #1f2937;">
+        💱 P2P Exchange Activity
+    </h2>
+    
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value">{{ p2p_stats.total_trades|default:"0" }}</div>
+            <div class="stat-label">Total Trades</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value success">{{ p2p_stats.completed_trades|default:"0" }}</div>
+            <div class="stat-label">Completed</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value warning">{{ p2p_stats.pending_trades|default:"0" }}</div>
+            <div class="stat-label">Pending</div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-value" style="color: #059669; font-size: 24px;">${{ p2p_stats.total_volume|default:"0"|floatformat:0 }}</div>
+            <div class="stat-label">Total Volume</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Analytics Dashboard Section -->
 <div class="dashboard-section">
     <h3>📊 Analytics Dashboard</h3>
     <p>Access comprehensive analytics and insights for your Confío platform.</p>
