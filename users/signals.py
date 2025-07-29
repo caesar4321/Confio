@@ -340,16 +340,24 @@ User = get_user_model()
 def create_welcome_achievement(sender, instance, created, **kwargs):
     """
     Automatically award the Pionero Beta achievement to new users
+    Only for the first 10,000 users
     """
     if created:
         try:
+            # Check if we've already given out 10,000 Pionero Beta achievements
             pionero_achievement = AchievementType.objects.get(slug='pionero_beta')
-            UserAchievement.objects.create(
-                user=instance,
-                achievement_type=pionero_achievement,
-                status='earned',
-                earned_at=instance.date_joined
-            )
+            
+            existing_count = UserAchievement.objects.filter(
+                achievement_type=pionero_achievement
+            ).count()
+            
+            if existing_count < 10000:
+                UserAchievement.objects.create(
+                    user=instance,
+                    achievement_type=pionero_achievement,
+                    status='earned',
+                    earned_at=instance.date_joined
+                )
         except AchievementType.DoesNotExist:
             # Achievement type doesn't exist yet, skip
             pass
@@ -360,8 +368,8 @@ def handle_p2p_trade_achievements(sender, instance, created, **kwargs):
     """
     Handle achievements related to P2P trades
     """
-    # Only process completed trades
-    if instance.status not in ['CRYPTO_RELEASED', 'COMPLETED']:
+    # Only process fully completed trades
+    if instance.status != 'COMPLETED':
         return
     
     # Skip if soft deleted
@@ -394,10 +402,10 @@ def handle_p2p_trade_achievements(sender, instance, created, **kwargs):
                 # Check if this user was referred and award referrer achievement
                 check_referral_achievement(user)
             
-            # Check for "10 Intercambios" achievement
+            # Check for "10 Intercambios" achievement (only COMPLETED trades)
             trades_count = P2PTrade.objects.filter(
                 Q(buyer_user=user) | Q(seller_user=user),
-                status__in=['CRYPTO_RELEASED', 'COMPLETED'],
+                status='COMPLETED',  # Only count fully completed trades
                 deleted_at__isnull=True
             ).count()
             
