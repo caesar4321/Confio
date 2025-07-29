@@ -11,7 +11,7 @@ import {
 import { useQuery } from '@apollo/client';
 import { gql } from '@apollo/client';
 import { NavigationProp } from '@react-navigation/native';
-import LinearGradient from 'react-native-linear-gradient';
+import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 
 const GET_AMBASSADOR_PROFILE = gql`
   query GetAmbassadorProfile {
@@ -135,10 +135,20 @@ export const AmbassadorDashboardScreen: React.FC<AmbassadorDashboardScreenProps>
       }
     >
       {/* Header with Tier Badge */}
-      <LinearGradient
-        colors={getTierColor(profile.tier)}
-        style={styles.header}
-      >
+      <View style={styles.header}>
+        <Svg
+          height="100%"
+          width="100%"
+          style={StyleSheet.absoluteFillObject}
+        >
+          <Defs>
+            <LinearGradient id="tierGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor={getTierColor(profile.tier)[0]} />
+              <Stop offset="100%" stopColor={getTierColor(profile.tier)[1]} />
+            </LinearGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#tierGradient)" />
+        </Svg>
         <Text style={styles.tierIcon}>{getTierIcon(profile.tier)}</Text>
         <Text style={styles.tierName}>{profile.tierDisplay}</Text>
         <Text style={styles.status}>{profile.statusDisplay}</Text>
@@ -149,7 +159,7 @@ export const AmbassadorDashboardScreen: React.FC<AmbassadorDashboardScreenProps>
             <Text style={styles.referralCode}>{profile.customReferralCode}</Text>
           </View>
         )}
-      </LinearGradient>
+      </View>
 
       {/* Performance Metrics */}
       <View style={styles.metricsContainer}>
@@ -366,27 +376,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderBottomLeftRadius: 30,
     borderBottomRightRadius: 30,
+    position: 'relative',
+    overflow: 'hidden',
   },
   tierIcon: {
     fontSize: 60,
     marginBottom: 10,
+    zIndex: 1,
   },
   tierName: {
     fontSize: 28,
     fontWeight: '700',
     color: 'white',
     marginBottom: 5,
+    zIndex: 1,
   },
   status: {
     fontSize: 16,
     color: 'rgba(255, 255, 255, 0.9)',
     marginBottom: 20,
+    zIndex: 1,
   },
   referralCodeContainer: {
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 20,
+    zIndex: 1,
   },
   referralCodeLabel: {
     fontSize: 12,

@@ -10,7 +10,7 @@ import {
 import { NavigationProp } from '@react-navigation/native';
 import { useQuery } from '@apollo/client';
 import { gql } from '@apollo/client';
-import LinearGradient from 'react-native-linear-gradient';
+import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 
 const GET_CORE_ACHIEVEMENTS = gql`
   query GetCoreAchievements {
@@ -64,14 +64,24 @@ export const SimpleAchievementsScreen: React.FC<SimpleAchievementsScreenProps> =
   return (
     <ScrollView style={styles.container}>
       {/* Simple Header */}
-      <LinearGradient
-        colors={['#00BFA5', '#008F7A']}
-        style={styles.header}
-      >
+      <View style={styles.header}>
+        <Svg
+          height="100%"
+          width="100%"
+          style={StyleSheet.absoluteFillObject}
+        >
+          <Defs>
+            <LinearGradient id="headerGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <Stop offset="0%" stopColor="#00BFA5" />
+              <Stop offset="100%" stopColor="#008F7A" />
+            </LinearGradient>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#headerGradient)" />
+        </Svg>
         <Text style={styles.headerTitle}>Gana $CONFIO</Text>
         <Text style={styles.balance}>{balance.toFixed(0)} $CONFIO</Text>
         <Text style={styles.balanceSubtext}>ganados hasta ahora</Text>
-      </LinearGradient>
+      </View>
 
       {/* Core Message */}
       <View style={styles.mainCard}>
@@ -179,21 +189,26 @@ const styles = StyleSheet.create({
   header: {
     padding: 30,
     alignItems: 'center',
+    position: 'relative',
+    overflow: 'hidden',
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: '700',
     color: 'white',
     marginBottom: 10,
+    zIndex: 1,
   },
   balance: {
     fontSize: 48,
     fontWeight: '700',
     color: 'white',
+    zIndex: 1,
   },
   balanceSubtext: {
     fontSize: 16,
     color: 'rgba(255, 255, 255, 0.8)',
+    zIndex: 1,
   },
   mainCard: {
     backgroundColor: 'white',

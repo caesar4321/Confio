@@ -30,6 +30,7 @@ class ConfioAdminSite(admin.AdminSite):
     def get_urls(self):
         urls = super().get_urls()
         custom_urls = [
+            path('', self.admin_view(self.dashboard_view), name='index'),
             path('dashboard/', self.admin_view(self.dashboard_view), name='dashboard'),
             path('p2p-analytics/', self.admin_view(self.p2p_analytics_view), name='p2p_analytics'),
             path('user-analytics/', self.admin_view(self.user_analytics_view), name='user_analytics'),

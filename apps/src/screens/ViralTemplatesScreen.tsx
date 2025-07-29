@@ -8,10 +8,12 @@ import {
   Linking,
   Share,
   Alert,
+  Clipboard,
+  Modal,
 } from 'react-native';
 import { NavigationProp } from '@react-navigation/native';
-import LinearGradient from 'react-native-linear-gradient';
-import Clipboard from '@react-native-clipboard/clipboard';
+import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
+import Icon from 'react-native-vector-icons/Feather';
 
 interface ViralTemplatesScreenProps {
   navigation: NavigationProp<any>;
@@ -189,15 +191,18 @@ export const ViralTemplatesScreen: React.FC<ViralTemplatesScreenProps> = ({ navi
 
   return (
     <ScrollView style={styles.container}>
-      <LinearGradient
-        colors={['#00BFA5', '#00A693']}
-        style={styles.header}
-      >
-        <Text style={styles.headerTitle}>🎬 Ideas para TikTok</Text>
-        <Text style={styles.headerSubtitle}>
-          Plantillas probadas para crear contenido viral
-        </Text>
-      </LinearGradient>
+      <View style={styles.header}>
+        <TouchableOpacity 
+          onPress={() => navigation.goBack()} 
+          style={styles.backButton}
+        >
+          <Icon name="arrow-left" size={24} color="#fff" />
+        </TouchableOpacity>
+        <View style={styles.headerContent}>
+          <Text style={styles.headerTitle}>Ideas para TikTok</Text>
+        </View>
+        <View style={styles.headerSpacer} />
+      </View>
 
       <View style={styles.tipsContainer}>
         <Text style={styles.sectionTitle}>💡 Tips Generales</Text>
@@ -265,12 +270,17 @@ export const ViralTemplatesScreen: React.FC<ViralTemplatesScreenProps> = ({ navi
       </View>
 
       {/* Template Detail Modal */}
-      {selectedTemplate && (
+      <Modal
+        visible={!!selectedTemplate}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setSelectedTemplate(null)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalIcon}>{selectedTemplate.icon}</Text>
-              <Text style={styles.modalTitle}>{selectedTemplate.title}</Text>
+              <Text style={styles.modalIcon}>{selectedTemplate?.icon}</Text>
+              <Text style={styles.modalTitle}>{selectedTemplate?.title}</Text>
               <TouchableOpacity
                 style={styles.closeButton}
                 onPress={() => setSelectedTemplate(null)}
@@ -279,51 +289,59 @@ export const ViralTemplatesScreen: React.FC<ViralTemplatesScreenProps> = ({ navi
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.modalScroll}>
-              <Text style={styles.modalSectionTitle}>📝 Guión Completo</Text>
-              <TouchableOpacity
-                style={styles.scriptBox}
-                onPress={() => copyToClipboard(selectedTemplate.script)}
-              >
-                <Text style={styles.scriptText}>{selectedTemplate.script}</Text>
-                <Text style={styles.copyHint}>Toca para copiar</Text>
-              </TouchableOpacity>
+            <ScrollView 
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              showsVerticalScrollIndicator={true}
+            >
+              {selectedTemplate ? (
+                <>
+                  <Text style={styles.modalSectionTitle}>📝 Guión Completo</Text>
+                  <TouchableOpacity
+                    style={styles.scriptBox}
+                    onPress={() => selectedTemplate && copyToClipboard(selectedTemplate.script)}
+                  >
+                    <Text style={styles.scriptText}>{selectedTemplate?.script}</Text>
+                    <Text style={styles.copyHint}>Toca para copiar</Text>
+                  </TouchableOpacity>
 
-              <Text style={styles.modalSectionTitle}>💡 Tips de Producción</Text>
-              {selectedTemplate.tips.map((tip, index) => (
-                <Text key={index} style={styles.tipItem}>• {tip}</Text>
-              ))}
+                  <Text style={styles.modalSectionTitle}>💡 Tips de Producción</Text>
+                  {selectedTemplate?.tips?.map((tip, index) => (
+                    <Text key={index} style={styles.tipItem}>• {tip}</Text>
+                  ))}
 
-              <Text style={styles.modalSectionTitle}>#️⃣ Hashtags</Text>
-              <TouchableOpacity
-                style={styles.hashtagBox}
-                onPress={() => copyToClipboard(selectedTemplate.hashtags)}
-              >
-                <Text style={styles.hashtagTextModal}>{selectedTemplate.hashtags}</Text>
-              </TouchableOpacity>
+                  <Text style={styles.modalSectionTitle}>#️⃣ Hashtags</Text>
+                  <TouchableOpacity
+                    style={styles.hashtagBox}
+                    onPress={() => selectedTemplate && copyToClipboard(selectedTemplate.hashtags)}
+                  >
+                    <Text style={styles.hashtagTextModal}>{selectedTemplate?.hashtags}</Text>
+                  </TouchableOpacity>
 
-              <View style={styles.modalActions}>
-                <TouchableOpacity
-                  style={styles.shareButton}
-                  onPress={() => shareTemplate(selectedTemplate)}
-                >
-                  <Text style={styles.shareButtonText}>Compartir Idea</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  style={styles.createButton}
-                  onPress={() => {
-                    setSelectedTemplate(null);
-                    Linking.openURL('https://www.tiktok.com/upload');
-                  }}
-                >
-                  <Text style={styles.createButtonText}>Crear Video</Text>
-                </TouchableOpacity>
-              </View>
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity
+                      style={styles.shareButton}
+                      onPress={() => selectedTemplate && shareTemplate(selectedTemplate)}
+                    >
+                      <Text style={styles.shareButtonText}>Compartir Idea</Text>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={styles.createButton}
+                      onPress={() => {
+                        setSelectedTemplate(null);
+                        Linking.openURL('https://www.tiktok.com/upload');
+                      }}
+                    >
+                      <Text style={styles.createButtonText}>Crear Video</Text>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              ) : null}
             </ScrollView>
           </View>
         </View>
-      )}
+      </Modal>
     </ScrollView>
   );
 };
@@ -334,19 +352,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
   },
   header: {
-    padding: 30,
+    backgroundColor: '#34d399',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+  },
+  backButton: {
+    padding: 8,
+  },
+  headerContent: {
+    flex: 1,
     alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: '700',
     color: 'white',
-    marginBottom: 10,
   },
-  headerSubtitle: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.9)',
-    textAlign: 'center',
+  headerSpacer: {
+    width: 40,
   },
   tipsContainer: {
     padding: 20,
@@ -470,11 +497,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -484,8 +507,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     borderRadius: 20,
     width: '100%',
-    maxHeight: '80%',
-    overflow: 'hidden',
+    maxHeight: '90%',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -515,7 +542,12 @@ const styles = StyleSheet.create({
     color: '#6c757d',
   },
   modalScroll: {
+    maxHeight: '100%',
+  },
+  modalScrollContent: {
     padding: 20,
+    paddingBottom: 30,
+    flexGrow: 1,
   },
   modalSectionTitle: {
     fontSize: 18,

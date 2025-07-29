@@ -25,10 +25,30 @@ def achievement_dashboard(request):
     pionero_remaining = pionero_tracker.get_remaining_slots()
     pionero_percentage = (pionero_count / 10000) * 100
     
-    # Calculate days to full (simple projection)
-    days_since_launch = max(1, (timezone.now() - User.objects.earliest('date_joined').date_joined).days)
-    rate_per_day = pionero_count / days_since_launch if days_since_launch > 0 else 1
-    days_to_full = (10000 - pionero_count) / rate_per_day if rate_per_day > 0 else 999
+    # Calculate days to full based on target growth rate
+    # Target: 100K users in 3 months = ~1,111 users per day
+    # For first 10K: ~9 days at full growth rate
+    # But use actual growth rate if available
+    if pionero_count > 0:
+        try:
+            earliest_user = User.objects.filter(is_active=True).earliest('date_joined')
+            days_since_launch = max(1, (timezone.now() - earliest_user.date_joined).days)
+            rate_per_day = pionero_count / days_since_launch
+            
+            # If rate is too slow, assume viral growth will kick in
+            # Target minimum rate: 200 users/day for 10K in 50 days
+            if rate_per_day < 200:
+                # Interpolate between current rate and target rate based on progress
+                progress_factor = pionero_count / 10000
+                target_rate = 200 + (progress_factor * 800)  # Accelerating to 1000/day
+                rate_per_day = max(rate_per_day, target_rate * 0.5)  # Conservative estimate
+            
+            days_to_full = (10000 - pionero_count) / rate_per_day
+            days_to_full = min(days_to_full, 30)  # Cap at 30 days
+        except:
+            days_to_full = 20  # Default estimate
+    else:
+        days_to_full = 30  # Initial estimate
     
     # Get overall stats
     total_users = User.objects.filter(is_active=True).count()
