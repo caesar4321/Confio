@@ -34,12 +34,12 @@ class Command(BaseCommand):
                 'is_active': True,
             },
             
-            # Viral (Essential)
+            # Social (Essential for viral growth)
             {
                 'slug': 'friend_referral',
                 'name': 'Invita un Amigo',
                 'description': 'Tu amigo completa su primera transacción',
-                'category': 'viral',
+                'category': 'social',
                 'confio_reward': 4,
                 'display_order': 3,
                 'is_active': True,
