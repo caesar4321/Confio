@@ -14,7 +14,8 @@ from django.utils.html import format_html
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from users.models import User, Account, Business, IdentityVerification, Country, Bank, BankInfo
+from users.models import User, Account, Business, Country, Bank, BankInfo
+from security.models import IdentityVerification
 from achievements.admin_views import achievement_dashboard
 from p2p_exchange.models import P2POffer, P2PTrade, P2PUserStats, P2PDispute
 from send.models import SendTransaction
@@ -362,7 +363,8 @@ confio_admin_site = ConfioAdminSite(name='confio_admin')
 
 # Re-register all models with the custom admin site
 from django.contrib.auth.models import Group
-from users.admin import UserAdmin, AccountAdmin, BusinessAdmin, IdentityVerificationAdmin, CountryAdmin, BankAdmin, BankInfoAdmin, UnifiedTransactionAdmin, BusinessEmployeeAdmin, EmployeeInvitationAdmin
+from users.admin import UserAdmin, AccountAdmin, BusinessAdmin, CountryAdmin, BankAdmin, BankInfoAdmin, UnifiedTransactionAdmin, BusinessEmployeeAdmin, EmployeeInvitationAdmin
+from security.admin import IdentityVerificationAdmin, SuspiciousActivityAdmin
 from p2p_exchange.admin import (
     P2PPaymentMethodAdmin, P2POfferAdmin, P2PTradeAdmin, 
     P2PMessageAdmin, P2PUserStatsAdmin, P2PEscrowAdmin,
@@ -378,7 +380,17 @@ confio_admin_site.register(Group)
 confio_admin_site.register(User, UserAdmin)
 confio_admin_site.register(Account, AccountAdmin)
 confio_admin_site.register(Business, BusinessAdmin)
+# Security models
 confio_admin_site.register(IdentityVerification, IdentityVerificationAdmin)
+from security.models import SuspiciousActivity, UserBan, IPAddress, UserSession, DeviceFingerprint, UserDevice, AMLCheck
+from security.admin import UserBanAdmin, IPAddressAdmin, UserSessionAdmin, DeviceFingerprintAdmin, UserDeviceAdmin, AMLCheckAdmin
+confio_admin_site.register(SuspiciousActivity, SuspiciousActivityAdmin)
+confio_admin_site.register(UserBan, UserBanAdmin)
+confio_admin_site.register(IPAddress, IPAddressAdmin)
+confio_admin_site.register(UserSession, UserSessionAdmin)
+confio_admin_site.register(DeviceFingerprint, DeviceFingerprintAdmin)
+confio_admin_site.register(UserDevice, UserDeviceAdmin)
+confio_admin_site.register(AMLCheck, AMLCheckAdmin)
 confio_admin_site.register(Country, CountryAdmin)
 confio_admin_site.register(Bank, BankAdmin)
 confio_admin_site.register(BankInfo, BankInfoAdmin)
@@ -402,11 +414,10 @@ confio_admin_site.register(InfluencerReferral, InfluencerReferralAdmin)
 confio_admin_site.register(TikTokViralShare, TikTokViralShareAdmin)
 
 # Ambassador models
-from achievements.models import InfluencerAmbassador, AmbassadorActivity, SuspiciousActivity, PioneroBetaTracker
-from achievements.admin import InfluencerAmbassadorAdmin, AmbassadorActivityAdmin, SuspiciousActivityAdmin, PioneroBetaTrackerAdmin
+from achievements.models import InfluencerAmbassador, AmbassadorActivity, PioneroBetaTracker
+from achievements.admin import InfluencerAmbassadorAdmin, AmbassadorActivityAdmin, PioneroBetaTrackerAdmin
 confio_admin_site.register(InfluencerAmbassador, InfluencerAmbassadorAdmin)
 confio_admin_site.register(AmbassadorActivity, AmbassadorActivityAdmin)
-confio_admin_site.register(SuspiciousActivity, SuspiciousActivityAdmin)
 confio_admin_site.register(PioneroBetaTracker, PioneroBetaTrackerAdmin)
 
 # Unified Transaction Tables

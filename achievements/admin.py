@@ -7,7 +7,7 @@ from django.db.models import Count, Sum, Q
 from .models import (
     AchievementType, UserAchievement, InfluencerReferral, 
     TikTokViralShare, ConfioRewardBalance, ConfioRewardTransaction,
-    InfluencerAmbassador, AmbassadorActivity, SuspiciousActivity,
+    InfluencerAmbassador, AmbassadorActivity,
     PioneroBetaTracker
 )
 
@@ -297,15 +297,6 @@ class AmbassadorActivityAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('ambassador',)
 
-
-@admin.register(SuspiciousActivity)
-class SuspiciousActivityAdmin(admin.ModelAdmin):
-    """Admin for suspicious activities"""
-    list_display = ('user', 'activity_type', 'status', 'severity_score', 'created_at')
-    list_filter = ('activity_type', 'status', 'severity_score', 'created_at')
-    search_fields = ('user__username', 'user__email', 'investigation_notes')
-    readonly_fields = ('created_at', 'updated_at')
-    raw_id_fields = ('user', 'investigated_by')
 
 
 @admin.register(PioneroBetaTracker)

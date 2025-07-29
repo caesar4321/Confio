@@ -3,7 +3,7 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils import timezone
-from .models import User, Account, Business, IdentityVerification, Country, Bank, BankInfo
+from .models import User, Account, Business, Country, Bank, BankInfo
 from .models_unified import UnifiedTransactionTable
 from .models_employee import BusinessEmployee, EmployeeInvitation
 
@@ -155,54 +155,6 @@ class BusinessAdmin(admin.ModelAdmin):
         return "0 employees"
     employees_count.short_description = "Employees"
 
-@admin.register(IdentityVerification)
-class IdentityVerificationAdmin(admin.ModelAdmin):
-    list_display = ('user', 'full_name', 'document_type', 'document_number', 'status_display', 'created_at', 'verified_at')
-    list_filter = ('status', 'document_type', 'verified_country', 'created_at', 'verified_at')
-    search_fields = ('user__username', 'user__email', 'verified_first_name', 'verified_last_name', 'document_number')
-    readonly_fields = ('full_name', 'full_address', 'created_at', 'updated_at')
-    
-    fieldsets = (
-        ('User Information', {
-            'fields': ('user', 'status')
-        }),
-        ('Personal Information', {
-            'fields': ('verified_first_name', 'verified_last_name', 'verified_date_of_birth', 'verified_nationality')
-        }),
-        ('Address Information', {
-            'fields': ('verified_address', 'verified_city', 'verified_state', 'verified_country', 'verified_postal_code')
-        }),
-        ('Document Information', {
-            'fields': ('document_type', 'document_number', 'document_issuing_country', 'document_expiry_date')
-        }),
-        ('Document Files', {
-            'fields': ('document_front_image', 'document_back_image', 'selfie_with_document')
-        }),
-        ('Verification Details', {
-            'fields': ('verified_by', 'verified_at', 'rejected_reason')
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',)
-        }),
-    )
-    
-    def status_display(self, obj):
-        colors = {
-            'verified': 'green',
-            'pending': 'orange',
-            'rejected': 'red',
-            'expired': 'gray'
-        }
-        return format_html(
-            '<span style="color: {}; font-weight: bold;">{}</span>',
-            colors.get(obj.status, 'black'),
-            obj.get_status_display()
-        )
-    status_display.short_description = "Status"
-    
-    def get_queryset(self, request):
-        return super().get_queryset(request).select_related('user', 'verified_by')
 
 @admin.register(Country)
 class CountryAdmin(admin.ModelAdmin):

@@ -218,7 +218,7 @@ class AbusePreventionService:
     @classmethod
     def log_suspicious_activity(cls, user, action: str, flags: List[str], metadata: Dict):
         """Log suspicious activity for review"""
-        from .models import SuspiciousActivity
+        from security.models import SuspiciousActivity
         
         SuspiciousActivity.objects.create(
             user=user,
@@ -314,7 +314,7 @@ class AbusePreventionService:
             score += min(30, trade_count * 3)  # 3 points per trade, max 30
         
         # No suspicious activity (20 points)
-        from .models import SuspiciousActivity
+        from security.models import SuspiciousActivity
         
         suspicious_count = SuspiciousActivity.objects.filter(
             user=user,
