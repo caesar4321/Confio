@@ -235,6 +235,31 @@ class InitializeZkLogin(graphene.Mutation):
                     )
                     logger.info(f"Created new user: id={user.id}, username={user.username}")
                     
+                    # Attach device fingerprint and IP for achievement fraud prevention
+                    if input.deviceFingerprint:
+                        try:
+                            import hashlib
+                            import json
+                            # Calculate fingerprint hash
+                            fingerprint_data = json.loads(input.deviceFingerprint) if isinstance(input.deviceFingerprint, str) else input.deviceFingerprint
+                            fingerprint_str = json.dumps(fingerprint_data, sort_keys=True)
+                            fingerprint_hash = hashlib.sha256(fingerprint_str.encode()).hexdigest()
+                            user._device_fingerprint_hash = fingerprint_hash
+                            logger.info(f"Attached device fingerprint hash {fingerprint_hash[:8]}... to new user {user.id}")
+                        except Exception as e:
+                            logger.error(f"Error processing device fingerprint: {e}")
+                    
+                    # Attach IP address if available
+                    if info.context and hasattr(info.context, 'META'):
+                        x_forwarded_for = info.context.META.get('HTTP_X_FORWARDED_FOR')
+                        if x_forwarded_for:
+                            ip = x_forwarded_for.split(',')[0].strip()
+                        else:
+                            ip = info.context.META.get('REMOTE_ADDR', '')
+                        if ip:
+                            user._registration_ip = ip
+                            logger.info(f"Attached registration IP {ip} to new user {user.id}")
+                    
                     # Create default personal account for the new user
                     from users.models import Account
                     default_account = Account.objects.create(
