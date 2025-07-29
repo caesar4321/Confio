@@ -31,8 +31,8 @@ class UserDeviceType(DjangoObjectType):
     
     class Meta:
         model = UserDevice
-        fields = ('id', 'is_trusted', 'first_used', 'last_used', 
-                 'total_sessions', 'trust_reason')
+        fields = ('id', 'device', 'is_trusted', 'first_used', 'last_used', 
+                 'total_sessions', 'trusted_at')
     
     def resolve_device_name(self, info):
         """Generate a friendly device name from fingerprint details"""
@@ -128,7 +128,6 @@ class TrustDevice(graphene.Mutation):
             
             # Mark as trusted
             user_device.is_trusted = True
-            user_device.trust_reason = trust_reason or "User verified via code"
             user_device.trusted_at = timezone.now()
             user_device.save()
             

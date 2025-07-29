@@ -307,9 +307,10 @@ class UserAchievementType(DjangoObjectType):
 	
 	class Meta:
 		model = UserAchievement
-		fields = ('id', 'user', 'account', 'achievement_type', 'status', 'earned_at', 
-				 'claimed_at', 'progress_data', 'earned_value', 'verified_by', 
-				 'verification_notes', 'created_at', 'updated_at')
+		fields = ('id', 'user', 'achievement_type', 'status', 'earned_at', 
+				 'claimed_at', 'progress_data', 'earned_value', 'expires_at',
+				 'device_fingerprint_hash', 'claim_ip_address', 'security_metadata',
+				 'created_at', 'updated_at')
 	
 	def resolve_can_claim_reward(self, info):
 		return self.can_claim_reward
@@ -378,8 +379,8 @@ class InfluencerAmbassadorType(DjangoObjectType):
 		model = InfluencerAmbassador
 		fields = ('id', 'user', 'tier', 'status', 'total_referrals', 'active_referrals',
 				 'total_viral_views', 'monthly_viral_views', 'referral_transaction_volume',
-				 'confio_earned', 'tier_achieved_at', 'next_tier_progress', 'custom_referral_code',
-				 'performance_score', 'dedicated_support', 'last_activity_at', 'created_at')
+				 'confio_earned', 'tier_achieved_at', 'tier_progress', 'custom_referral_code',
+				 'performance_score', 'dedicatedSupport', 'last_activity_at', 'created_at')
 	
 	def resolve_benefits(self, info):
 		if not self.benefits:
@@ -410,7 +411,7 @@ class AmbassadorActivityType(DjangoObjectType):
 	
 	class Meta:
 		model = AmbassadorActivity
-		fields = ('id', 'ambassador', 'activity_type', 'description', 'confio_rewarded',
+		fields = ('id', 'ambassador', 'activity_type', 'description', 'confio_earned',
 				 'metadata', 'created_at')
 	
 	def resolve_activity_type_display(self, info):
@@ -433,11 +434,9 @@ class ConfioBalanceType(DjangoObjectType):
 	class Meta:
 		model = ConfioRewardBalance
 		fields = [
-			'id', 'total_earned', 'total_locked', 'total_unlocked',
-			'achievement_rewards', 'referral_rewards', 'viral_rewards',
-			'presale_purchase', 'other_rewards', 'lock_until',
-			'last_reward_at', 'daily_reward_count', 'daily_reward_amount',
-			'migration_status', 'created_at'
+			'id', 'user', 'total_earned', 'total_locked', 'total_unlocked',
+			'total_spent', 'next_unlock_date', 'next_unlock_amount',
+			'created_at', 'updated_at'
 		]
 
 
@@ -450,9 +449,8 @@ class ConfioRewardTransactionType(DjangoObjectType):
 	class Meta:
 		model = ConfioRewardTransaction
 		fields = [
-			'id', 'transaction_type', 'amount', 'balance_after',
-			'source', 'description', 'achievement', 'referral',
-			'metadata', 'created_at'
+			'id', 'user', 'transaction_type', 'amount', 'balance_after',
+			'reference_type', 'reference_id', 'description', 'created_at'
 		]
 
 
