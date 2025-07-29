@@ -318,7 +318,7 @@ class UserAchievementType(DjangoObjectType):
 class InfluencerReferralType(DjangoObjectType):
 	class Meta:
 		model = InfluencerReferral
-		fields = ('id', 'referred_user', 'tiktok_username', 'influencer_user', 'status',
+		fields = ('id', 'referred_user', 'referrer_identifier', 'influencer_user', 'status',
 				 'first_transaction_at', 'total_transaction_volume', 'referrer_confio_awarded',
 				 'referee_confio_awarded', 'reward_claimed_at', 'attribution_data',
 				 'created_at', 'updated_at')
@@ -535,7 +535,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	achievement_types = graphene.List(AchievementTypeType, category=graphene.String())
 	user_achievements = graphene.List(UserAchievementType, status=graphene.String())
 	achievement_leaderboard = graphene.List(UserAchievementType, achievement_slug=graphene.String())
-	influencer_stats = graphene.Field(InfluencerStatsType, tiktok_username=graphene.String(required=True))
+	influencer_stats = graphene.Field(InfluencerStatsType, referrer_identifier=graphene.String(required=True))
 	my_influencer_stats = graphene.Field(InfluencerStatsType)
 	user_influencer_referrals = graphene.List(InfluencerReferralType)
 	
@@ -1131,10 +1131,10 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		
 		return queryset.order_by('-earned_at')[:50]  # Top 50
 	
-	def resolve_influencer_stats(self, info, tiktok_username):
+	def resolve_influencer_stats(self, info, referrer_identifier):
 		"""Get stats for a specific TikTok influencer"""
-		stats = InfluencerReferral.get_influencer_stats(tiktok_username)
-		is_eligible = InfluencerReferral.check_ambassador_eligibility(tiktok_username)
+		stats = InfluencerReferral.get_influencer_stats(referrer_identifier)
+		is_eligible = InfluencerReferral.check_ambassador_eligibility(referrer_identifier)
 		
 		return InfluencerStatsType(
 			total_referrals=stats['total_referrals'],
@@ -2497,7 +2497,7 @@ class CreateInfluencerReferral(graphene.Mutation):
 			# Create the referral record
 			referral = InfluencerReferral.objects.create(
 				referred_user=user,
-				tiktok_username=clean_username,
+				referrer_identifier=clean_username,
 				status='pending',
 				attribution_data=attribution_data or {}
 			)
@@ -2674,7 +2674,7 @@ class VerifyTikTokShare(graphene.Mutation):
 class UpdateInfluencerStatus(graphene.Mutation):
 	"""Admin mutation to update influencer status and award ambassador status"""
 	class Arguments:
-		tiktok_username = graphene.String(required=True)
+		referrer_identifier = graphene.String(required=True)
 		new_status = graphene.String(required=True)
 	
 	success = graphene.Boolean()
@@ -2682,7 +2682,7 @@ class UpdateInfluencerStatus(graphene.Mutation):
 	updated_count = graphene.Int()
 	
 	@classmethod
-	def mutate(cls, root, info, tiktok_username, new_status):
+	def mutate(cls, root, info, referrer_identifier, new_status):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return UpdateInfluencerStatus(success=False, error="Authentication required")
@@ -2705,7 +2705,7 @@ class UpdateInfluencerStatus(graphene.Mutation):
 			
 			# Update all referrals for this influencer
 			updated_count = InfluencerReferral.objects.filter(
-				tiktok_username__iexact=tiktok_username
+				referrer_identifier__iexact=referrer_identifier
 			).update(status=new_status)
 			
 			return UpdateInfluencerStatus(

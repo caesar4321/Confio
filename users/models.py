@@ -1273,13 +1273,18 @@ class UserAchievement(SoftDeleteModel):
 
 
 class InfluencerReferral(SoftDeleteModel):
-    """Tracks referrals from TikTok influencers"""
+    """Tracks referrals from influencers and friends"""
     
     STATUS_CHOICES = [
         ('pending', 'Pendiente'),
         ('active', 'Activo'),
         ('converted', 'Convertido'),
         ('ambassador', 'Embajador'),
+    ]
+    
+    REFERRAL_TYPE_CHOICES = [
+        ('influencer', 'Influencer'),
+        ('friend', 'Friend'),
     ]
     
     # Referral participants
@@ -1290,11 +1295,19 @@ class InfluencerReferral(SoftDeleteModel):
         help_text="User who was referred"
     )
     
-    # Influencer information
-    tiktok_username = models.CharField(
+    # Referrer information
+    referrer_identifier = models.CharField(
         max_length=100,
         db_index=True,
-        help_text="TikTok username of the influencer (without @)"
+        help_text="Username, phone number, or influencer handle of the referrer"
+    )
+    
+    # Referral type
+    referral_type = models.CharField(
+        max_length=20,
+        choices=REFERRAL_TYPE_CHOICES,
+        default='influencer',
+        help_text='Type of referral'
     )
     influencer_user = models.ForeignKey(
         User,
@@ -1353,7 +1366,7 @@ class InfluencerReferral(SoftDeleteModel):
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['tiktok_username']),
+            models.Index(fields=['referrer_identifier']),
             models.Index(fields=['status']),
             models.Index(fields=['created_at']),
         ]
@@ -1361,7 +1374,7 @@ class InfluencerReferral(SoftDeleteModel):
         verbose_name_plural = "Influencer Referrals"
     
     def __str__(self):
-        return f"@{self.tiktok_username} → {self.referred_user.username} ({self.get_status_display()})"
+        return f"@{self.referrer_identifier} → {self.referred_user.username} ({self.get_status_display()})"
     
     def mark_as_converted(self):
         """Mark referral as converted (user made first transaction)"""
@@ -1376,9 +1389,9 @@ class InfluencerReferral(SoftDeleteModel):
         self.save(update_fields=['total_transaction_volume'])
     
     @classmethod
-    def get_influencer_stats(cls, tiktok_username):
+    def get_influencer_stats(cls, referrer_identifier):
         """Get stats for a specific influencer"""
-        referrals = cls.objects.filter(tiktok_username__iexact=tiktok_username)
+        referrals = cls.objects.filter(referrer_identifier__iexact=referrer_identifier)
         return {
             'total_referrals': referrals.count(),
             'active_referrals': referrals.filter(status='active').count(),
@@ -1388,9 +1401,9 @@ class InfluencerReferral(SoftDeleteModel):
         }
     
     @classmethod
-    def check_ambassador_eligibility(cls, tiktok_username, min_referrals=20, min_volume=1000):
+    def check_ambassador_eligibility(cls, referrer_identifier, min_referrals=20, min_volume=1000):
         """Check if an influencer is eligible for ambassador status"""
-        stats = cls.get_influencer_stats(tiktok_username)
+        stats = cls.get_influencer_stats(referrer_identifier)
         return (
             stats['converted_referrals'] >= min_referrals and 
             stats['total_volume'] >= min_volume

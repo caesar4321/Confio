@@ -971,9 +971,9 @@ class UserAchievementAdmin(admin.ModelAdmin):
 @admin.register(InfluencerReferral)
 class InfluencerReferralAdmin(admin.ModelAdmin):
     """Admin for influencer referrals"""
-    list_display = ('tiktok_username', 'referred_user', 'status', 'created_at')
+    list_display = ('referrer_identifier', 'referred_user', 'status', 'created_at')
     list_filter = ('status', 'created_at')
-    search_fields = ('referred_user__username', 'referred_user__email', 'tiktok_username')
+    search_fields = ('referred_user__username', 'referred_user__email', 'referrer_identifier')
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('referred_user', 'influencer_user')
     

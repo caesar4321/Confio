@@ -82,7 +82,9 @@ def check_suspicious_activity(action: str):
                 metadata['device_fingerprint'] = info.context.device_fingerprint
             
             # Add action-specific metadata
-            if action == 'referral_submit' and 'tiktok_username' in kwargs:
+            if action == 'referral_submit' and 'referrer_identifier' in kwargs:
+                metadata['referred_username'] = kwargs['referrer_identifier']
+            elif action == 'referral_submit' and 'tiktok_username' in kwargs:  # Backward compatibility
                 metadata['referred_username'] = kwargs['tiktok_username']
             
             # Check for suspicious patterns
