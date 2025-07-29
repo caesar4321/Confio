@@ -236,12 +236,12 @@ class InitializeZkLogin(graphene.Mutation):
                     logger.info(f"Created new user: id={user.id}, username={user.username}")
                     
                     # Attach device fingerprint and IP for achievement fraud prevention
-                    if input.deviceFingerprint:
+                    if deviceFingerprint:
                         try:
                             import hashlib
                             import json
                             # Calculate fingerprint hash
-                            fingerprint_data = json.loads(input.deviceFingerprint) if isinstance(input.deviceFingerprint, str) else input.deviceFingerprint
+                            fingerprint_data = json.loads(deviceFingerprint) if isinstance(deviceFingerprint, str) else deviceFingerprint
                             fingerprint_str = json.dumps(fingerprint_data, sort_keys=True)
                             fingerprint_hash = hashlib.sha256(fingerprint_str.encode()).hexdigest()
                             user._device_fingerprint_hash = fingerprint_hash
