@@ -6,7 +6,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from django.db.models import Count, Sum, Q
 from django.utils import timezone
 from datetime import timedelta
-from .models import User
+from users.models import User
 from achievements.models import (
     AchievementType, UserAchievement, 
     PioneroBetaTracker, ConfioRewardBalance
