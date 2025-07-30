@@ -345,7 +345,7 @@ export type MainStackParamList = {
   ConfioTokenomics: undefined;
   MiProgresoViral: undefined;
   ViralTemplates: undefined;
-  NotificationSettings: undefined;
+  // NotificationSettings: undefined; // Hidden: Notifications mandatory
 };
 
 // Root Stack - Top level navigation

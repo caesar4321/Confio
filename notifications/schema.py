@@ -1,7 +1,8 @@
 import graphene
 from graphene_django import DjangoObjectType
 from graphql import GraphQLError
-from django.db.models import Q, Exists, OuterRef
+from django.db.models import Q, Exists, OuterRef, Value
+from django.db import models
 from django.utils import timezone
 from datetime import timedelta
 
@@ -70,6 +71,9 @@ class NotificationType(DjangoObjectType):
     """GraphQL type for Notification model"""
     is_read = graphene.Boolean()
     notification_type = NotificationTypeEnum()
+    related_send_transaction = graphene.Field('send.schema.SendTransactionType')
+    related_p2p_trade = graphene.Field('p2p_exchange.schema.P2PTradeType')
+    related_payment_transaction = graphene.Field('payments.schema.PaymentTransactionType')
     
     class Meta:
         model = Notification
@@ -81,14 +85,62 @@ class NotificationType(DjangoObjectType):
         ]
     
     def resolve_is_read(self, info):
-        """For broadcast notifications, check if current user has read it"""
-        if self.is_broadcast and hasattr(info.context, 'user') and info.context.user.is_authenticated:
-            return NotificationRead.objects.filter(
-                notification=self,
-                user=info.context.user
-            ).exists()
-        # For personal notifications, use the is_read field from database
-        return getattr(self, 'is_read', False)
+        """Check if notification is read in current account context"""
+        if hasattr(info.context, 'user') and info.context.user.is_authenticated:
+            user = info.context.user
+            
+            # Get current account context from JWT
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            business_id = jwt_context.get('business_id')
+            
+            if business_id:
+                # Business account context
+                return NotificationRead.objects.filter(
+                    notification=self,
+                    user=user,
+                    business_id=business_id,
+                    account__isnull=True
+                ).exists()
+            else:
+                # Personal account context
+                account_id = jwt_context.get('account_id')
+                return NotificationRead.objects.filter(
+                    notification=self,
+                    user=user,
+                    account_id=account_id,
+                    business__isnull=True
+                ).exists()
+        return False
+    
+    def resolve_related_send_transaction(self, info):
+        """Fetch related SendTransaction if this notification is about a send transaction"""
+        if self.related_object_type == 'SendTransaction' and self.related_object_id:
+            try:
+                from send.models import SendTransaction
+                return SendTransaction.objects.get(id=self.related_object_id)
+            except (SendTransaction.DoesNotExist, ImportError):
+                return None
+        return None
+    
+    def resolve_related_p2p_trade(self, info):
+        """Fetch related P2PTrade if this notification is about a P2P trade"""
+        if self.related_object_type == 'P2PTrade' and self.related_object_id:
+            try:
+                from p2p_exchange.models import P2PTrade
+                return P2PTrade.objects.get(id=self.related_object_id)
+            except (P2PTrade.DoesNotExist, ImportError):
+                return None
+        return None
+    
+    def resolve_related_payment_transaction(self, info):
+        """Fetch related PaymentTransaction if this notification is about a payment"""
+        if self.related_object_type == 'PaymentTransaction' and self.related_object_id:
+            try:
+                from payments.models import PaymentTransaction
+                return PaymentTransaction.objects.get(id=self.related_object_id)
+            except (PaymentTransaction.DoesNotExist, ImportError):
+                return None
+        return None
 
 
 class NotificationPreferenceType(DjangoObjectType):
@@ -127,19 +179,56 @@ class NotificationConnection(graphene.Connection):
     def resolve_unread_count(self, info):
         if hasattr(info.context, 'user') and info.context.user.is_authenticated:
             user = info.context.user
+            
+            # Get JWT context to determine current account
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            if not jwt_context:
+                return 0
+            
+            account_type = jwt_context['account_type']
+            business_id = jwt_context.get('business_id')
+            
+            # Get read notification IDs for this user in this account context
+            if business_id:
+                # Business account context
+                read_notification_ids = NotificationRead.objects.filter(
+                    user=user,
+                    business_id=business_id,
+                    account__isnull=True
+                ).values_list('notification_id', flat=True)
+            else:
+                # Personal account context
+                account_id = jwt_context.get('account_id')
+                read_notification_ids = NotificationRead.objects.filter(
+                    user=user,
+                    account_id=account_id,
+                    business__isnull=True
+                ).values_list('notification_id', flat=True)
+            
+            # Build query based on account context
+            personal_query = Q(user=user, is_broadcast=False)
+            
+            # Filter by account context from JWT
+            if business_id:
+                # Count business-specific notifications
+                personal_query &= Q(business_id=business_id)
+            else:
+                # Count personal account notifications
+                # Note: We filter by user, which gives us all personal notifications
+                personal_query &= Q(business__isnull=True)
+            
             # Count unread personal notifications
             personal_unread = Notification.objects.filter(
-                user=user,
-                is_broadcast=False
+                personal_query
             ).exclude(
-                id__in=NotificationRead.objects.filter(user=user).values('notification_id')
+                id__in=read_notification_ids
             ).count()
             
             # Count unread broadcast notifications
             broadcast_unread = Notification.objects.filter(
                 is_broadcast=True
             ).exclude(
-                id__in=NotificationRead.objects.filter(user=user).values('notification_id')
+                id__in=read_notification_ids
             ).count()
             
             return personal_unread + broadcast_unread
@@ -215,31 +304,74 @@ class Query(graphene.ObjectType):
         if 'notification_type' in kwargs:
             qs = qs.filter(notification_type=kwargs['notification_type'])
         
+        # Get read notification IDs based on account context
+        if business_id:
+            # Business account context
+            read_notification_ids = NotificationRead.objects.filter(
+                user=user,
+                business_id=business_id,
+                account__isnull=True
+            ).values_list('notification_id', flat=True)
+        else:
+            # Personal account context
+            # Find the user's account for context
+            try:
+                account = Account.objects.get(
+                    user=user,
+                    account_type=account_type,
+                    account_index=account_index
+                )
+                read_notification_ids = NotificationRead.objects.filter(
+                    user=user,
+                    account_id=account.id,
+                    business__isnull=True
+                ).values_list('notification_id', flat=True)
+            except Account.DoesNotExist:
+                # Fallback to empty if account not found
+                read_notification_ids = []
+        
         # Handle is_read filter
         if 'is_read' in kwargs:
-            read_notification_ids = NotificationRead.objects.filter(
-                user=user
-            ).values_list('notification_id', flat=True)
-            
             if kwargs['is_read']:
                 # Show read notifications
-                qs = qs.filter(
-                    Q(id__in=read_notification_ids) |  # Broadcast notifications marked as read
-                    Q(is_broadcast=False, id__in=read_notification_ids)  # Personal notifications marked as read
-                )
+                qs = qs.filter(id__in=read_notification_ids)
             else:
                 # Show unread notifications
                 qs = qs.exclude(id__in=read_notification_ids)
         
-        # Annotate with is_read status for the current user
-        qs = qs.annotate(
-            is_read=Exists(
-                NotificationRead.objects.filter(
-                    notification_id=OuterRef('id'),
-                    user=user
+        # Annotate with is_read status for the current user and account context
+        if business_id:
+            qs = qs.annotate(
+                is_read=Exists(
+                    NotificationRead.objects.filter(
+                        notification_id=OuterRef('id'),
+                        user=user,
+                        business_id=business_id,
+                        account__isnull=True
+                    )
                 )
             )
-        )
+        else:
+            # For personal accounts
+            try:
+                account = Account.objects.get(
+                    user=user,
+                    account_type=account_type,
+                    account_index=account_index
+                )
+                qs = qs.annotate(
+                    is_read=Exists(
+                        NotificationRead.objects.filter(
+                            notification_id=OuterRef('id'),
+                            user=user,
+                            account_id=account.id,
+                            business__isnull=True
+                        )
+                    )
+                )
+            except Account.DoesNotExist:
+                # If no account found, nothing is read
+                qs = qs.annotate(is_read=models.Value(False))
         
         return qs.order_by('-created_at')
     
@@ -253,11 +385,27 @@ class Query(graphene.ObjectType):
             
             # Check access: user must own the notification or it must be a broadcast
             if notification.is_broadcast or notification.user == user:
-                # Annotate with is_read status
-                is_read = NotificationRead.objects.filter(
-                    notification=notification,
-                    user=user
-                ).exists()
+                # Get JWT context to determine current account
+                jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+                business_id = jwt_context.get('business_id')
+                
+                # Check read status based on account context
+                if business_id:
+                    is_read = NotificationRead.objects.filter(
+                        notification=notification,
+                        user=user,
+                        business_id=business_id,
+                        account__isnull=True
+                    ).exists()
+                else:
+                    account_id = jwt_context.get('account_id')
+                    is_read = NotificationRead.objects.filter(
+                        notification=notification,
+                        user=user,
+                        account_id=account_id,
+                        business__isnull=True
+                    ).exists()
+                
                 notification.is_read = is_read
                 return notification
             else:
@@ -317,10 +465,22 @@ class Query(graphene.ObjectType):
                 # If account not found, count general notifications
                 personal_query &= Q(account__isnull=True, business__isnull=True)
         
-        # Get read notification IDs for this user
-        read_notification_ids = NotificationRead.objects.filter(
-            user=user
-        ).values_list('notification_id', flat=True)
+        # Get read notification IDs for this user in this account context
+        if business_id:
+            # Business account context
+            read_notification_ids = NotificationRead.objects.filter(
+                user=user,
+                business_id=business_id,
+                account__isnull=True
+            ).values_list('notification_id', flat=True)
+        else:
+            # Personal account context
+            account_id = jwt_context.get('account_id')
+            read_notification_ids = NotificationRead.objects.filter(
+                user=user,
+                account_id=account_id,
+                business__isnull=True
+            ).values_list('notification_id', flat=True)
         
         # Count unread personal notifications
         personal_unread = Notification.objects.filter(
@@ -364,11 +524,27 @@ class MarkNotificationRead(graphene.Mutation):
             if not (notification.is_broadcast or notification.user == user):
                 raise GraphQLError("You don't have permission to mark this notification as read")
             
-            # Create or update read record
-            NotificationRead.objects.get_or_create(
-                notification=notification,
-                user=user
-            )
+            # Get current account context from JWT
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            business_id = jwt_context.get('business_id')
+            
+            if business_id:
+                # Business account context
+                NotificationRead.objects.get_or_create(
+                    notification=notification,
+                    user=user,
+                    business_id=business_id,
+                    defaults={'account': None}
+                )
+            else:
+                # Personal account context
+                account_id = jwt_context.get('account_id')
+                NotificationRead.objects.get_or_create(
+                    notification=notification,
+                    user=user,
+                    account_id=account_id,
+                    defaults={'business': None}
+                )
             
             # Set is_read for response
             notification.is_read = True
@@ -380,7 +556,7 @@ class MarkNotificationRead(graphene.Mutation):
 
 
 class MarkAllNotificationsRead(graphene.Mutation):
-    """Mark all notifications as read for the user"""
+    """Mark all notifications as read for the user in current account context"""
     success = graphene.Boolean()
     marked_count = graphene.Int()
     
@@ -388,15 +564,43 @@ class MarkAllNotificationsRead(graphene.Mutation):
     def mutate(self, info):
         user = info.context.user
         
-        # Get all unread notifications for the user
-        read_notification_ids = NotificationRead.objects.filter(
-            user=user
-        ).values_list('notification_id', flat=True)
+        # Get current account context from JWT
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+        business_id = jwt_context.get('business_id')
+        account_type = jwt_context['account_type']
         
-        # Get personal unread notifications
+        # Get all read notification IDs for this user in this account context
+        if business_id:
+            # Business account context
+            read_notification_ids = NotificationRead.objects.filter(
+                user=user,
+                business_id=business_id,
+                account__isnull=True
+            ).values_list('notification_id', flat=True)
+        else:
+            # Personal account context
+            account_id = jwt_context.get('account_id')
+            read_notification_ids = NotificationRead.objects.filter(
+                user=user,
+                account_id=account_id,
+                business__isnull=True
+            ).values_list('notification_id', flat=True)
+        
+        # Build query for personal notifications based on account context
+        personal_query = Q(user=user, is_broadcast=False)
+        
+        if business_id:
+            # Get business-specific notifications
+            personal_query &= Q(business_id=business_id)
+        else:
+            # Get personal account notifications
+            # Note: We only need to filter by user for personal accounts
+            # The account field in Notification is used for specific account targeting
+            personal_query &= Q(business__isnull=True)
+        
+        # Get personal unread notifications for this account context
         personal_unread = Notification.objects.filter(
-            user=user,
-            is_broadcast=False
+            personal_query
         ).exclude(id__in=read_notification_ids)
         
         # Get broadcast unread notifications
@@ -408,17 +612,39 @@ class MarkAllNotificationsRead(graphene.Mutation):
         marked_count = 0
         
         for notification in personal_unread:
-            NotificationRead.objects.get_or_create(
-                notification=notification,
-                user=user
-            )
+            if business_id:
+                NotificationRead.objects.get_or_create(
+                    notification=notification,
+                    user=user,
+                    business_id=business_id,
+                    defaults={'account': None}
+                )
+            else:
+                account_id = jwt_context.get('account_id')
+                NotificationRead.objects.get_or_create(
+                    notification=notification,
+                    user=user,
+                    account_id=account_id,
+                    defaults={'business': None}
+                )
             marked_count += 1
         
         for notification in broadcast_unread:
-            NotificationRead.objects.get_or_create(
-                notification=notification,
-                user=user
-            )
+            if business_id:
+                NotificationRead.objects.get_or_create(
+                    notification=notification,
+                    user=user,
+                    business_id=business_id,
+                    defaults={'account': None}
+                )
+            else:
+                account_id = jwt_context.get('account_id')
+                NotificationRead.objects.get_or_create(
+                    notification=notification,
+                    user=user,
+                    account_id=account_id,
+                    defaults={'business': None}
+                )
             marked_count += 1
         
         return MarkAllNotificationsRead(success=True, marked_count=marked_count)
