@@ -32,7 +32,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS } from '../apollo/queries';
+import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS } from '../apollo/queries';
 // import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations'; // Removed - handled in USDCConversion screen
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import moment from 'moment';
@@ -263,6 +263,12 @@ export const AccountDetailScreen = () => {
   if (unifiedError) {
     console.error('AccountDetailScreen - Query error details:', unifiedError);
   }
+  
+  // Check if presale is globally active
+  const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, {
+    fetchPolicy: 'cache-and-network',
+  });
+  const isPresaleActive = presaleStatusData?.isPresaleActive === true;
 
   // Conversion mutations
   // const [convertUsdcToCusd] = useMutation(CONVERT_USDC_TO_CUSD); // Removed - handled in USDCConversion screen
@@ -1289,8 +1295,8 @@ export const AccountDetailScreen = () => {
           )}
         </View>
 
-        {/* Show locked status for CONFIO tokens */}
-        {route.params.accountType === 'confio' && canViewBalance && showBalance && (
+        {/* Show locked status for CONFIO tokens - only if balance > 0 */}
+        {route.params.accountType === 'confio' && canViewBalance && showBalance && parseFloat(account.balance) > 0 && (
           <View style={styles.lockedStatusContainer}>
             <View style={styles.lockedStatusRow}>
               <Icon name="lock" size={14} color="#fbbf24" />
@@ -1623,8 +1629,8 @@ export const AccountDetailScreen = () => {
           </View>
             )}
 
-            {/* CONFIO Presale Section - Only show for CONFIO accounts */}
-            {route.params.accountType === 'confio' && (
+            {/* CONFIO Presale Section - Only show for CONFIO accounts and if presale is active */}
+            {route.params.accountType === 'confio' && isPresaleActive && (
               <View style={styles.confioPresaleSection}>
                 <View style={styles.sectionHeaderContainer}>
                   <Text style={styles.sectionTitle}>🚀 Preventa Exclusiva</Text>

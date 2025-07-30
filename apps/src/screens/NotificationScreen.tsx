@@ -6,6 +6,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { PendingInvitationBanner } from '../components/PendingInvitationBanner';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import { useQuery } from '@apollo/client';
+import { GET_PRESALE_STATUS } from '../apollo/queries';
 
 type NotificationScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -22,6 +24,12 @@ interface Notification {
 
 export const NotificationScreen = () => {
   const navigation = useNavigation<NotificationScreenNavigationProp>();
+  
+  // Check if presale is globally active
+  const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, {
+    fetchPolicy: 'cache-and-network',
+  });
+  const isPresaleActive = presaleStatusData?.isPresaleActive === true;
   const [notifications, setNotifications] = useState<Notification[]>([
     {
       id: 1,
@@ -115,9 +123,10 @@ export const NotificationScreen = () => {
         {/* Pending Employee Invitations */}
         <PendingInvitationBanner />
         
-        {/* CONFIO Presale Banner */}
-        <View style={styles.presaleBanner}>
-          <TouchableOpacity 
+        {/* CONFIO Presale Banner - Only show if presale is active */}
+        {isPresaleActive && (
+          <View style={styles.presaleBanner}>
+            <TouchableOpacity 
             style={styles.presaleBannerContent}
             onPress={() => navigation.navigate('ConfioPresale')}
             activeOpacity={0.9}
@@ -137,6 +146,7 @@ export const NotificationScreen = () => {
             </View>
           </TouchableOpacity>
         </View>
+        )}
         
         {notifications.length === 0 ? (
           <View style={styles.emptyState}>

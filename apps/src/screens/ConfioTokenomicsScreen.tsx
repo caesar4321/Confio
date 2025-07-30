@@ -39,7 +39,7 @@ export const ConfioTokenomicsScreen = () => {
 
   const tokenomicsData = [
     {
-      category: 'Fundador',
+      category: 'Fundador y Equipo',
       percentage: '95%',
       amount: formatWithLocale(founderTokens),
       description: 'Mayoría absoluta del fundador, como cualquier startup exitosa',

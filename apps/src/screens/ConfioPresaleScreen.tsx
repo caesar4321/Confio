@@ -1,10 +1,14 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Image, SafeAreaView, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Image, SafeAreaView, Alert, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import { useQuery } from '@apollo/client';
+import { GET_ALL_PRESALE_PHASES, GET_ACTIVE_PRESALE } from '../apollo/queries';
+import { formatNumber } from '../utils/numberFormatting';
+import { useCountry } from '../contexts/CountryContext';
 
 const colors = {
   primary: '#34d399',
@@ -24,51 +28,39 @@ type ConfioPresaleScreenNavigationProp = NativeStackNavigationProp<MainStackPara
 
 export const ConfioPresaleScreen = () => {
   const navigation = useNavigation<ConfioPresaleScreenNavigationProp>();
+  const { selectedCountry } = useCountry();
+  
+  // Fetch presale phases from server
+  const { data, loading, error } = useQuery(GET_ALL_PRESALE_PHASES, {
+    fetchPolicy: 'cache-and-network',
+  });
+  
+  // Also fetch active presale to check if any phase is active
+  const { data: activePresaleData } = useQuery(GET_ACTIVE_PRESALE, {
+    fetchPolicy: 'cache-and-network',
+  });
 
-  const presalePhases = [
-    {
-      phase: 'Fase 1',
-      title: 'Raíces Fuertes',
-      price: '0.25 cUSD',
-      unit: '$CONFIO',
-      goal: '$1M',
-      target: 'Comunidad base',
-      location: '🌱 Donde todo comienza',
-      status: 'coming_soon',
-      description: 'Fortaleciendo nuestra comunidad fundadora con el mejor precio',
-      vision: ['Tu dinero más seguro', 'Pagos instantáneos', 'Comunidad sólida']
-    },
-    {
-      phase: 'Fase 2', 
-      title: 'Expansión Regional',
-      price: '0.50 cUSD',
-      unit: '$CONFIO',
-      goal: '$10M',
-      target: 'Nuevos mercados',
-      location: '🌎 Creciendo juntos',
-      status: 'upcoming',
-      description: 'Llevando Confío a más países hermanos de Latinoamérica',
-      vision: ['Red entre países', 'Más oportunidades', 'Economía conectada']
-    },
-    {
-      phase: 'Fase 3',
-      title: 'Alcance Continental',
-      price: '1.00 cUSD',
-      unit: '$CONFIO',
-      goal: 'Por definir',
-      target: 'Inversores globales',
-      location: '🌎 Todo el continente',
-      status: 'future',
-      description: 'Confío conquista América con el respaldo de inversores internacionales',
-      vision: ['Presencia continental', 'Inversión internacional', 'Liderazgo regional']
-    }
-  ];
+  // Use server data
+  const presalePhases = data?.allPresalePhases ? data.allPresalePhases.map((phase: any) => ({
+    phase: `Fase ${phase.phaseNumber}`,
+    title: phase.name,
+    price: `${parseFloat(phase.pricePerToken).toFixed(2)} cUSD`,
+    unit: '$CONFIO',
+    goal: phase.goalAmount >= 1000000 ? `$${phase.goalAmount / 1000000}M` : `$${phase.goalAmount / 1000}K`,
+    target: phase.targetAudience,
+    location: phase.locationEmoji,
+    status: phase.status || 'upcoming',
+    description: phase.description.split('.')[0], // Take first sentence
+    vision: phase.visionPoints || []
+  })) : [];
 
   const getStatusColor = (status: string) => {
     switch(status) {
       case 'coming_soon': return colors.secondary;
+      case 'active': return colors.primary;
       case 'upcoming': return colors.accent;
-      case 'future': return '#9CA3AF';
+      case 'completed': return '#17a2b8';
+      case 'paused': return '#dc3545';
       default: return '#9CA3AF';
     }
   };
@@ -76,8 +68,10 @@ export const ConfioPresaleScreen = () => {
   const getStatusText = (status: string) => {
     switch(status) {
       case 'coming_soon': return 'Próximamente';
+      case 'active': return 'Activa';
       case 'upcoming': return 'Siguiente';
-      case 'future': return 'Futuro';
+      case 'completed': return 'Completada';
+      case 'paused': return 'Pausada';
       default: return 'Pendiente';
     }
   };
@@ -89,6 +83,45 @@ export const ConfioPresaleScreen = () => {
       [{ text: 'Entendido', style: 'default' }]
     );
   };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Icon name="arrow-left" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Preventa $CONFIO</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.secondary} />
+          <Text style={styles.loadingText}>Cargando fases de preventa...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error || !data?.allPresalePhases || data.allPresalePhases.length === 0) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Icon name="arrow-left" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Preventa $CONFIO</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.errorContainer}>
+          <Icon name="alert-circle" size={48} color={colors.secondary} />
+          <Text style={styles.errorText}>No se pudieron cargar las fases de preventa</Text>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.errorButton}>
+            <Text style={styles.errorButtonText}>Volver</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -213,13 +246,23 @@ export const ConfioPresaleScreen = () => {
             Únete a miles de personas que ya creen en un futuro financiero mejor
           </Text>
           
-          <TouchableOpacity 
-            style={styles.ctaButton}
-            onPress={() => navigation.navigate('ConfioPresaleParticipate')}
-          >
-            <Icon name="star" size={20} color="#fff" />
-            <Text style={styles.ctaButtonText}>Participar en la Preventa</Text>
-          </TouchableOpacity>
+          {activePresaleData?.activePresalePhase ? (
+            <TouchableOpacity 
+              style={styles.ctaButton}
+              onPress={() => navigation.navigate('ConfioPresaleParticipate')}
+            >
+              <Icon name="star" size={20} color="#fff" />
+              <Text style={styles.ctaButtonText}>Participar en la Preventa</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity 
+              style={styles.ctaButton}
+              onPress={handleJoinWaitlist}
+            >
+              <Icon name="bell" size={20} color="#fff" />
+              <Text style={styles.ctaButtonText}>Notificar</Text>
+            </TouchableOpacity>
+          )}
           
           <TouchableOpacity 
             style={styles.secondaryButton}
@@ -545,5 +588,40 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 40,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6B7280',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  errorButton: {
+    backgroundColor: colors.secondary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 20,
+  },
+  errorButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

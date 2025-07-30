@@ -2665,3 +2665,66 @@ export const ACCEPT_INVITATION = gql`
     }
   }
 `;
+
+// Presale Queries
+export const GET_PRESALE_STATUS = gql`
+  query GetPresaleStatus {
+    isPresaleActive
+  }
+`;
+
+export const GET_ACTIVE_PRESALE = gql`
+  query GetActivePresale {
+    activePresalePhase {
+      phaseNumber
+      name
+      description
+      pricePerToken
+      totalRaised
+      totalParticipants
+      tokensSold
+      progressPercentage
+      minPurchase
+      maxPurchase
+      goalAmount
+      status
+    }
+  }
+`;
+
+export const GET_ALL_PRESALE_PHASES = gql`
+  query GetAllPresalePhases {
+    allPresalePhases {
+      phaseNumber
+      name
+      description
+      pricePerToken
+      totalRaised
+      totalParticipants
+      tokensSold
+      progressPercentage
+      minPurchase
+      maxPurchase
+      goalAmount
+      status
+      targetAudience
+      locationEmoji
+      visionPoints
+    }
+  }
+`;
+
+export const PURCHASE_PRESALE_TOKENS = gql`
+  mutation PurchasePresaleTokens($cusdAmount: Decimal!) {
+    purchasePresaleTokens(cusdAmount: $cusdAmount) {
+      success
+      message
+      purchase {
+        id
+        confioAmount
+        cusdAmount
+        status
+      }
+    }
+  }
+`;
