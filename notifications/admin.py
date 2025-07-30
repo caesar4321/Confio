@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils import timezone
-from .models import Notification, NotificationRead, NotificationPreference
+from .models import Notification, NotificationRead, NotificationPreference, FCMDeviceToken
 
 
 class NotificationReadInline(admin.TabularInline):
@@ -202,3 +202,113 @@ class NotificationPreferenceAdmin(admin.ModelAdmin):
         
         return ', '.join(enabled) if enabled else 'None'
     push_summary.short_description = 'Push Categories'
+
+
+class FCMDeviceTokenAdmin(admin.ModelAdmin):
+    list_display = [
+        'id', 'user_display', 'device_type_badge', 'device_name',
+        'is_active_badge', 'last_used', 'failure_info'
+    ]
+    list_filter = [
+        'device_type', 'is_active', 'created_at', 'last_used'
+    ]
+    search_fields = [
+        'user__email', 'user__phone_number', 'device_id', 
+        'device_name', 'token'
+    ]
+    readonly_fields = [
+        'token_preview', 'created_at', 'updated_at', 'last_used',
+        'failure_count', 'last_failure', 'last_failure_reason'
+    ]
+    
+    fieldsets = (
+        ('User & Device', {
+            'fields': ('user', 'device_type', 'device_id', 'device_name', 'app_version')
+        }),
+        ('Token Information', {
+            'fields': ('token', 'token_preview', 'is_active')
+        }),
+        ('Usage & Status', {
+            'fields': ('last_used', 'failure_count', 'last_failure', 'last_failure_reason')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at')
+        })
+    )
+    
+    def user_display(self, obj):
+        return f"{obj.user.email} ({obj.user.phone_number or 'No phone'})"
+    user_display.short_description = 'User'
+    
+    def device_type_badge(self, obj):
+        colors = {
+            'ios': '#007AFF',
+            'android': '#3DDC84',
+            'web': '#FF6900'
+        }
+        color = colors.get(obj.device_type, '#9E9E9E')
+        icon = '📱' if obj.device_type in ['ios', 'android'] else '🌐'
+        
+        return format_html(
+            '{} <span style="background-color: {}; color: white; padding: 3px 8px; '
+            'border-radius: 3px; font-size: 11px;">{}</span>',
+            icon, color, obj.device_type.upper()
+        )
+    device_type_badge.short_description = 'Type'
+    
+    def is_active_badge(self, obj):
+        if obj.is_active:
+            return format_html(
+                '<span style="background-color: #4CAF50; color: white; padding: 3px 8px; '
+                'border-radius: 3px; font-size: 11px;">✓ ACTIVE</span>'
+            )
+        return format_html(
+            '<span style="background-color: #F44336; color: white; padding: 3px 8px; '
+            'border-radius: 3px; font-size: 11px;">✗ INACTIVE</span>'
+        )
+    is_active_badge.short_description = 'Status'
+    
+    def failure_info(self, obj):
+        if obj.failure_count == 0:
+            return format_html(
+                '<span style="color: #4CAF50;">✓ No failures</span>'
+            )
+        
+        color = '#FF9800' if obj.failure_count < 3 else '#F44336'
+        return format_html(
+            '<span style="color: {};">⚠ {} failure{}</span>',
+            color, obj.failure_count, 's' if obj.failure_count != 1 else ''
+        )
+    failure_info.short_description = 'Failures'
+    
+    def token_preview(self, obj):
+        """Show first and last 10 characters of token for security"""
+        if len(obj.token) > 20:
+            return f"{obj.token[:10]}...{obj.token[-10:]}"
+        return obj.token
+    token_preview.short_description = 'Token Preview'
+    
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.select_related('user')
+    
+    actions = ['activate_tokens', 'deactivate_tokens', 'reset_failure_counts']
+    
+    def activate_tokens(self, request, queryset):
+        count = queryset.update(is_active=True)
+        self.message_user(request, f'{count} token(s) activated.')
+    activate_tokens.short_description = 'Activate selected tokens'
+    
+    def deactivate_tokens(self, request, queryset):
+        count = queryset.update(is_active=False)
+        self.message_user(request, f'{count} token(s) deactivated.')
+    deactivate_tokens.short_description = 'Deactivate selected tokens'
+    
+    def reset_failure_counts(self, request, queryset):
+        count = queryset.update(
+            failure_count=0,
+            last_failure=None,
+            last_failure_reason=''
+        )
+        self.message_user(request, f'Reset failure counts for {count} token(s).')
+    reset_failure_counts.short_description = 'Reset failure counts'

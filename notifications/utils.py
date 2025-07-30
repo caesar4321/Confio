@@ -6,6 +6,10 @@ from django.db import transaction
 from django.utils import timezone
 from .models import Notification, NotificationType as NotificationTypeChoices
 from users.models import User, Account, Business
+from .fcm_service import send_push_notification
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def create_notification(
@@ -65,9 +69,16 @@ def create_notification(
         broadcast_target=broadcast_target
     )
     
-    # TODO: Implement push notification sending
-    # if send_push and should_send_push(user, notification_type):
-    #     send_push_notification(notification)
+    # Send push notification if enabled
+    if send_push:
+        try:
+            result = send_push_notification(notification)
+            if result.get('success'):
+                logger.info(f"Push notification sent successfully for notification {notification.id}")
+            else:
+                logger.warning(f"Failed to send push notification for notification {notification.id}: {result.get('error')}")
+        except Exception as e:
+            logger.error(f"Error sending push notification for notification {notification.id}: {e}")
     
     return notification
 

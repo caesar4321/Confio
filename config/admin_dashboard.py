@@ -538,7 +538,8 @@ confio_admin_site.register(PresaleStats, PresaleStatsAdmin)
 confio_admin_site.register(UserPresaleLimit, UserPresaleLimitAdmin)
 
 # Notification models
-from notifications.models import Notification, NotificationPreference
-from notifications.admin import NotificationAdmin, NotificationPreferenceAdmin
+from notifications.models import Notification, NotificationPreference, FCMDeviceToken
+from notifications.admin import NotificationAdmin, NotificationPreferenceAdmin, FCMDeviceTokenAdmin
 confio_admin_site.register(Notification, NotificationAdmin)
 confio_admin_site.register(NotificationPreference, NotificationPreferenceAdmin)
+confio_admin_site.register(FCMDeviceToken, FCMDeviceTokenAdmin)

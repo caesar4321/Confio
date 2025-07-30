@@ -142,3 +142,66 @@ class NotificationPreference(models.Model):
     
     def __str__(self):
         return f"Notification Preferences - {self.user.email}"
+
+
+class FCMDeviceToken(models.Model):
+    """Store FCM device tokens for push notifications"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='fcm_tokens')
+    token = models.TextField(unique=True)
+    
+    # Device information
+    device_type = models.CharField(max_length=20, choices=[
+        ('ios', 'iOS'),
+        ('android', 'Android'),
+        ('web', 'Web')
+    ])
+    device_id = models.CharField(max_length=255, blank=True, help_text="Unique device identifier")
+    device_name = models.CharField(max_length=255, blank=True, help_text="Device model/name")
+    app_version = models.CharField(max_length=50, blank=True)
+    
+    # Token status
+    is_active = models.BooleanField(default=True)
+    last_used = models.DateTimeField(default=timezone.now)
+    
+    # Error tracking
+    failure_count = models.IntegerField(default=0)
+    last_failure = models.DateTimeField(null=True, blank=True)
+    last_failure_reason = models.TextField(blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['user', 'is_active']),
+            models.Index(fields=['token']),
+            models.Index(fields=['device_id']),
+        ]
+        unique_together = ['user', 'device_id']
+    
+    def __str__(self):
+        return f"FCM Token - {self.user.email} - {self.device_type} - {'Active' if self.is_active else 'Inactive'}"
+    
+    def mark_failure(self, reason=""):
+        """Mark token as failed and increment failure count"""
+        self.failure_count += 1
+        self.last_failure = timezone.now()
+        self.last_failure_reason = reason
+        
+        # Deactivate token after 5 failures
+        if self.failure_count >= 5:
+            self.is_active = False
+        
+        self.save()
+    
+    def mark_success(self):
+        """Reset failure count on successful send"""
+        if self.failure_count > 0:
+            self.failure_count = 0
+            self.last_failure = None
+            self.last_failure_reason = ""
+            self.save()
+        
+        # Update last used
+        self.last_used = timezone.now()
+        self.save(update_fields=['last_used'])
