@@ -424,6 +424,8 @@ class ConfioBalanceType(DjangoObjectType):
 	total_earned = graphene.Float()
 	total_locked = graphene.Float()
 	total_unlocked = graphene.Float()
+	total_spent = graphene.Float()
+	next_unlock_amount = graphene.Float()
 	achievement_rewards = graphene.Float()
 	referral_rewards = graphene.Float()
 	viral_rewards = graphene.Float()
@@ -1267,7 +1269,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		# Get or create balance
 		balance, created = ConfioRewardBalance.objects.get_or_create(
 			user=user,
-			defaults={'lock_until': timezone.now() + timedelta(days=365)}
+			defaults={}
 		)
 		return balance
 	

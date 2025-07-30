@@ -37,6 +37,9 @@ import { CreateOfferScreen } from '../screens/CreateOfferScreen';
 import { BankInfoScreen } from '../screens/BankInfoScreen';
 import { AchievementsScreen } from '../screens/AchievementsScreen';
 import { ConfioTokenInfoScreen } from '../screens/ConfioTokenInfoScreen';
+import { ConfioPresaleScreen } from '../screens/ConfioPresaleScreen';
+import { ConfioPresaleParticipateScreen } from '../screens/ConfioPresaleParticipateScreen';
+import { ConfioTokenomicsScreen } from '../screens/ConfioTokenomicsScreen';
 import { MiProgresoViralScreen } from '../screens/MiProgresoViralScreen';
 import { ViralTemplatesScreen } from '../screens/ViralTemplatesScreen';
 
@@ -290,6 +293,21 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="ConfioTokenInfo"
         component={ConfioTokenInfoScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="ConfioPresale"
+        component={ConfioPresaleScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="ConfioPresaleParticipate"
+        component={ConfioPresaleParticipateScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="ConfioTokenomics"
+        component={ConfioTokenomicsScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen

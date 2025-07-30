@@ -1289,6 +1289,27 @@ export const AccountDetailScreen = () => {
           )}
         </View>
 
+        {/* Show locked status for CONFIO tokens */}
+        {route.params.accountType === 'confio' && canViewBalance && showBalance && (
+          <View style={styles.lockedStatusContainer}>
+            <View style={styles.lockedStatusRow}>
+              <Icon name="lock" size={14} color="#fbbf24" />
+              <Text style={styles.lockedStatusText}>
+                Bloqueado: ${account.balance} $CONFIO
+              </Text>
+            </View>
+            <View style={styles.lockedStatusRow}>
+              <Icon name="unlock" size={14} color="#ffffff" style={{ opacity: 0.5 }} />
+              <Text style={styles.lockedStatusText}>
+                Disponible: $0.00 $CONFIO
+              </Text>
+            </View>
+            <Text style={styles.lockedStatusDescription}>
+              Se desbloquearán cuando Confío alcance adopción masiva en toda Latinoamérica
+            </Text>
+          </View>
+        )}
+
         <Text style={styles.balanceDescription}>{account.description}</Text>
         {/* Hide address for employees without viewBusinessAddress permission */}
         {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.viewBusinessAddress) && account.address && (
@@ -1602,6 +1623,41 @@ export const AccountDetailScreen = () => {
           </View>
             )}
 
+            {/* CONFIO Presale Section - Only show for CONFIO accounts */}
+            {route.params.accountType === 'confio' && (
+              <View style={styles.confioPresaleSection}>
+                <View style={styles.sectionHeaderContainer}>
+                  <Text style={styles.sectionTitle}>🚀 Preventa Exclusiva</Text>
+                </View>
+                
+                <View style={styles.confioPresaleCard}>
+                  <View style={styles.confioPresaleHeader}>
+                    <View style={styles.confioPresaleInfo}>
+                      <Text style={styles.confioPresaleTitle}>Únete a la Preventa de $CONFIO</Text>
+                      <Text style={styles.confioPresaleDescription}>
+                        Acceso anticipado a las monedas $CONFIO
+                      </Text>
+                    </View>
+                  </View>
+                  
+                  <TouchableOpacity
+                    style={styles.confioPresaleButton}
+                    onPress={() => navigation.navigate('ConfioPresale')}
+                  >
+                    <Icon name="star" size={16} color="#fff" style={styles.actionIcon} />
+                    <View style={styles.actionTextContainer}>
+                      <Text style={[styles.confioPresaleButtonText, { color: '#ffffff' }]}>
+                        Ver Detalles
+                      </Text>
+                      <Text style={[styles.confioPresaleSubtext, { color: 'rgba(255,255,255,0.8)' }]}>
+                        Información completa
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
             {/* Enhanced Transactions Section */}
             <View style={styles.transactionsSection}>
               <View style={styles.transactionsHeader}>
@@ -1905,6 +1961,31 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     opacity: 0.8,
     marginBottom: 4,
+  },
+  lockedStatusContainer: {
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    borderRadius: 12,
+    padding: 12,
+    marginVertical: 8,
+    gap: 6,
+  },
+  lockedStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  lockedStatusText: {
+    fontSize: 13,
+    color: '#ffffff',
+    opacity: 0.9,
+  },
+  lockedStatusDescription: {
+    fontSize: 11,
+    color: '#ffffff',
+    opacity: 0.7,
+    marginTop: 4,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
   addressContainer: {
     flexDirection: 'row',
@@ -2809,5 +2890,75 @@ const styles = StyleSheet.create({
   loadMoreText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  // CONFIO Presale Section styles - matching USD section format
+  confioPresaleSection: {
+    paddingHorizontal: 16,
+    marginBottom: 0,
+  },
+  confioPresaleCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
+  },
+  confioPresaleHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  confioPresaleInfo: {
+    flex: 1,
+  },
+  confioPresaleTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  confioPresaleDescription: {
+    fontSize: 13,
+    color: '#6b7280',
+    lineHeight: 18,
+  },
+  confioPresaleButton: {
+    backgroundColor: '#8b5cf6',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#8b5cf6',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.3,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 4,
+      },
+    }),
+  },
+  confioPresaleButtonText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  confioPresaleSubtext: {
+    fontSize: 12,
   },
 }); 

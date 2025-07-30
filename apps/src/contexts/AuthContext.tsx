@@ -41,6 +41,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   checkLocalAuthState: () => Promise<boolean>;
   handleSuccessfulLogin: (isPhoneVerified: boolean) => Promise<void>;
+  completePhoneVerification: () => Promise<void>;
   profileData: ProfileData | null;
   isProfileLoading: boolean;
   refreshProfile: (accountType?: 'personal' | 'business', businessId?: string) => Promise<void>;
@@ -100,6 +101,44 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           query: GET_ME,
           fetchPolicy: 'network-only',
         });
+        
+        // Validate phone verification status and sync with zkLogin data
+        const serverPhoneVerified = data?.me?.phoneNumber && data?.me?.phoneCountry;
+        console.log('Profile refresh - Server phone verification status:', serverPhoneVerified);
+        
+        try {
+          const authService = AuthService.getInstance();
+          const zkLoginData = await authService.getStoredZkLoginData();
+          
+          if (zkLoginData && zkLoginData.isPhoneVerified !== serverPhoneVerified) {
+            console.log(`Profile refresh - Syncing zkLogin phone verification: ${zkLoginData.isPhoneVerified} -> ${serverPhoneVerified}`);
+            zkLoginData.isPhoneVerified = serverPhoneVerified;
+            await authService.storeZkLoginData(zkLoginData);
+            
+            // If phone verification was lost on server but user is authenticated, require re-verification
+            if (!serverPhoneVerified && isAuthenticated) {
+              console.log('Profile refresh - Phone verification lost on server, requiring re-verification');
+              setIsAuthenticated(false);
+              if (isNavigationReady && navigationRef.current) {
+                navigationRef.current.reset({
+                  index: 0,
+                  routes: [
+                    {
+                      name: 'Auth',
+                      params: {
+                        screen: 'PhoneVerification',
+                      },
+                    },
+                  ],
+                });
+              }
+              return; // Exit early to prevent setting profile data
+            }
+          }
+        } catch (syncError) {
+          console.error('Error syncing phone verification status:', syncError);
+        }
+        
         setProfileData({
           userProfile: data?.me || null,
           businessProfile: undefined,
@@ -160,13 +199,14 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const handleSuccessfulLogin = async (isPhoneVerified: boolean) => {
     try {
       console.log('Handling successful login...');
-      setIsAuthenticated(true);
-      await refreshProfile('personal'); // Refresh personal profile after successful login
       if (isPhoneVerified) {
         console.log('User has verified phone number');
+        setIsAuthenticated(true);
+        await refreshProfile('personal'); // Refresh personal profile after successful login
         navigateToScreen('Main');
       } else {
         console.log('User needs phone verification');
+        // Don't set isAuthenticated to true yet - keep user in Auth flow
         if (isNavigationReady && navigationRef.current) {
           navigationRef.current.reset({
             index: 0,
@@ -203,11 +243,31 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                                 zkLoginData.clientId;
         
         console.log('Has required fields:', hasRequiredFields);
+        console.log('Is phone verified (from zkLogin):', zkLoginData.isPhoneVerified);
         
         if (hasRequiredFields) {
-          console.log('Valid zkLogin data found');
-          setIsAuthenticated(true);
-          navigateToScreen('Main');
+          if (zkLoginData.isPhoneVerified) {
+            console.log('Valid zkLogin data found with verified phone');
+            setIsAuthenticated(true);
+            navigateToScreen('Main');
+          } else {
+            console.log('Valid zkLogin data found but phone not verified');
+            // Keep user in Auth flow for phone verification
+            setIsAuthenticated(false);
+            if (isNavigationReady && navigationRef.current) {
+              navigationRef.current.reset({
+                index: 0,
+                routes: [
+                  {
+                    name: 'Auth',
+                    params: {
+                      screen: 'PhoneVerification',
+                    },
+                  },
+                ],
+              });
+            }
+          }
         } else {
           console.log('Invalid zkLogin data, missing required fields');
           setIsAuthenticated(false);
@@ -255,6 +315,29 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     }
   };
 
+  const completePhoneVerification = async () => {
+    try {
+      console.log('Completing phone verification...');
+      
+      // Update the stored zkLoginData to mark phone as verified
+      const authService = AuthService.getInstance();
+      const zkLoginData = await authService.getStoredZkLoginData();
+      
+      if (zkLoginData) {
+        // Update the phone verification status
+        zkLoginData.isPhoneVerified = true;
+        await authService.storeZkLoginData(zkLoginData);
+        console.log('Updated zkLogin data with phone verification status');
+      }
+      
+      setIsAuthenticated(true);
+      await refreshProfile('personal');
+      navigateToScreen('Main');
+    } catch (error) {
+      console.error('Error completing phone verification:', error);
+    }
+  };
+
   return (
     <AuthContext.Provider value={{ 
       isAuthenticated, 
@@ -262,6 +345,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       signOut, 
       checkLocalAuthState, 
       handleSuccessfulLogin, 
+      completePhoneVerification,
       profileData, 
       isProfileLoading, 
       refreshProfile,

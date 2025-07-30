@@ -138,6 +138,17 @@ export class AuthService {
     try {
       console.log('Starting Google Sign-In process...');
       
+      // Sign out first to force account selection
+      try {
+        const isSignedIn = await GoogleSignin.isSignedIn();
+        if (isSignedIn) {
+          console.log('User already signed in to Google, signing out to force account selection...');
+          await GoogleSignin.signOut();
+        }
+      } catch (error) {
+        console.log('Error checking/signing out from Google:', error);
+      }
+      
       // 1) Sign in with Google first
       console.log('Checking Play Services...');
       await GoogleSignin.hasPlayServices();
@@ -382,6 +393,21 @@ export class AuthService {
       return JSON.parse(credentials.password);
     } catch (error) {
       console.error('Error retrieving zkLogin data:', error);
+      throw error;
+    }
+  }
+
+  async storeZkLoginData(zkLoginData: any) {
+    try {
+      await Keychain.setGenericPassword(
+        ZKLOGIN_KEYCHAIN_USERNAME,
+        JSON.stringify(zkLoginData),
+        {
+          service: ZKLOGIN_KEYCHAIN_SERVICE,
+        }
+      );
+    } catch (error) {
+      console.error('Error storing zkLogin data:', error);
       throw error;
     }
   }

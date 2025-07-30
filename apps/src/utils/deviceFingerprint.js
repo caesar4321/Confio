@@ -11,33 +11,71 @@ class DeviceFingerprint {
   
   static async generateFingerprint() {
     try {
-      const fingerprint = {
-        // Basic Device Information
-        deviceInfo: await this.getBasicDeviceInfo(),
-        // Screen Information
-        screenInfo: this.getScreenInfo(),
-        // System Information
-        systemInfo: await this.getSystemInfo(),
-        // Timezone and Locale
-        localeInfo: await this.getLocaleInfo(),
-        // Behavioral Data
-        behavioralInfo: await this.getBehavioralInfo(),
-        // Persistent Identifier
-        persistentId: await this.getPersistentId(),
-        // Hardware fingerprint
-        hardwareInfo: await this.getHardwareInfo(),
-        // React Native specific info
-        rnInfo: await this.getReactNativeInfo(),
-        // Timestamp
-        timestamp: new Date().toISOString(),
-        // Version for tracking fingerprint format changes
-        fingerprintVersion: '1.0'
+      // Get the stable device ID directly
+      const deviceId = await this.getStableDeviceId();
+      
+      // Return ONLY the deviceId - nothing else matters for fingerprinting
+      return {
+        deviceId: deviceId
       };
-
-      return fingerprint;
     } catch (error) {
       console.error('Error generating device fingerprint:', error);
-      return this.getFallbackFingerprint();
+      // Even in fallback, try to get something stable
+      try {
+        const model = await DeviceInfo.getModel();
+        return {
+          deviceId: `fallback_${Platform.OS}_${model}`
+        };
+      } catch (e) {
+        return {
+          deviceId: `fallback_${Platform.OS}_unknown`
+        };
+      }
+    }
+  }
+  
+  static async getStableDeviceId() {
+    try {
+      // For Android, use Android ID which is stable until factory reset
+      if (Platform.OS === 'android') {
+        const androidId = await DeviceInfo.getAndroidId();
+        if (androidId && androidId !== 'unknown') {
+          return androidId;
+        }
+      }
+      
+      // For iOS or if Android ID fails, create a stable ID from device characteristics
+      const deviceId = await DeviceInfo.getDeviceId(); // e.g., "iPhone7,2" or "SM-G935F"
+      const brand = await DeviceInfo.getBrand(); // e.g., "Apple" or "Samsung"
+      const systemVersion = await DeviceInfo.getSystemVersion(); // e.g., "13.0"
+      
+      // Try to get a persistent ID from keychain
+      const stored = await getGenericPassword({ service: 'confio_persistent_device_id' });
+      if (stored && stored.password) {
+        return stored.password;
+      }
+      
+      // Generate a new persistent ID based on device characteristics
+      const baseString = `${Platform.OS}_${deviceId}_${brand}`;
+      const persistentId = this.simpleHash(baseString);
+      
+      // Store it for future use
+      await setGenericPassword(
+        'persistent_id',
+        persistentId,
+        { service: 'confio_persistent_device_id' }
+      );
+      
+      return persistentId;
+    } catch (error) {
+      console.error('Error getting stable device ID:', error);
+      // Last resort - use device model
+      try {
+        const model = await DeviceInfo.getModel();
+        return `fallback_${Platform.OS}_${model}`;
+      } catch (e) {
+        return `fallback_${Platform.OS}_unknown`;
+      }
     }
   }
 
@@ -305,36 +343,104 @@ class DeviceFingerprint {
         return stored.password;
       }
 
-      // Generate new persistent ID
+      // Generate new persistent ID based on stable device characteristics
+      const stableId = await this.generateStableDeviceId();
+      
+      // Store in keychain for faster access
+      await setGenericPassword(
+        'device_id', 
+        stableId,
+        { service: 'confio_device_id' }
+      );
+      
+      return stableId;
+    } catch (error) {
+      console.error('Error getting persistent ID:', error);
+      // Return a stable ID based on available info
+      return this.generateFallbackStableId();
+    }
+  }
+
+  static async generateStableDeviceId() {
+    try {
       const deviceInfo = await this.getBasicDeviceInfo();
       const systemInfo = await this.getSystemInfo();
       const screenInfo = this.getScreenInfo();
       
-      // Create a signature from device characteristics
-      const deviceSignature = [
-        deviceInfo.platform,
-        systemInfo.model || 'unknown',
-        systemInfo.platformVersion || Platform.Version,
-        screenInfo.screenWidth,
-        screenInfo.screenHeight,
-        screenInfo.pixelRatio
-      ].join('-');
+      // Collect all stable identifiers available
+      const stableComponents = [];
       
-      const randomComponent = Math.random().toString(36).substring(2, 15);
-      const persistentId = `cfio_${deviceSignature}_${randomComponent}_${Date.now()}`;
+      // Android ID is stable across app reinstalls (until factory reset)
+      if (systemInfo.androidId && systemInfo.androidId !== 'unknown') {
+        stableComponents.push(`aid:${systemInfo.androidId}`);
+      }
       
-      // Store in keychain
-      await setGenericPassword(
-        'device_id', 
-        persistentId,
-        { service: 'confio_device_id' }
-      );
+      // Device model and manufacturer are stable
+      if (systemInfo.model) {
+        stableComponents.push(`model:${systemInfo.model}`);
+      }
+      if (systemInfo.manufacturer) {
+        stableComponents.push(`mfr:${systemInfo.manufacturer}`);
+      }
+      if (systemInfo.brand) {
+        stableComponents.push(`brand:${systemInfo.brand}`);
+      }
       
-      return persistentId;
+      // Screen characteristics are stable
+      stableComponents.push(`screen:${screenInfo.screenWidth}x${screenInfo.screenHeight}@${screenInfo.pixelRatio}`);
+      
+      // Device type and platform
+      if (deviceInfo.deviceType) {
+        stableComponents.push(`type:${deviceInfo.deviceType}`);
+      }
+      stableComponents.push(`os:${deviceInfo.platform}-${systemInfo.systemVersion || Platform.Version}`);
+      
+      // iOS specific stable identifiers
+      if (Platform.OS === 'ios' && deviceInfo.deviceId) {
+        stableComponents.push(`did:${deviceInfo.deviceId}`);
+      }
+      
+      // Create a stable hash from these components
+      const stableString = stableComponents.join('|');
+      
+      // If we have Android ID or iOS device ID, use it as primary identifier
+      if (systemInfo.androidId && systemInfo.androidId !== 'unknown') {
+        return `cfio_android_${systemInfo.androidId}_${this.simpleHash(stableString)}`;
+      } else if (Platform.OS === 'ios' && deviceInfo.deviceId) {
+        return `cfio_ios_${deviceInfo.deviceId}_${this.simpleHash(stableString)}`;
+      } else {
+        // Fallback to hash-based ID
+        return `cfio_device_${this.simpleHash(stableString)}`;
+      }
     } catch (error) {
-      console.error('Error getting persistent ID:', error);
-      return `fallback_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      console.error('Error generating stable device ID:', error);
+      return this.generateFallbackStableId();
     }
+  }
+
+  static generateFallbackStableId() {
+    // Generate a stable ID based on minimal available info
+    const screen = Dimensions.get('screen');
+    const fallbackString = [
+      Platform.OS,
+      Platform.Version,
+      screen.width,
+      screen.height,
+      screen.scale
+    ].join('-');
+    
+    return `cfio_fallback_${this.simpleHash(fallbackString)}`;
+  }
+
+  static simpleHash(str) {
+    // Simple hash function for creating stable IDs
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return Math.abs(hash).toString(36);
   }
 
   static async getHardwareInfo() {
@@ -463,42 +569,28 @@ class DeviceFingerprint {
 
   static getFallbackFingerprint() {
     // Minimal fingerprint when main generation fails
-    const screen = Dimensions.get('screen');
-    
     return {
-      deviceInfo: {
-        platform: Platform.OS,
-        platformVersion: Platform.Version
-      },
-      screenInfo: {
-        screenWidth: screen.width,
-        screenHeight: screen.height,
-        pixelRatio: screen.scale || 1
-      },
-      localeInfo: {
-        timezone: 'unknown',
-        locale: 'unknown',
-        timezoneOffset: new Date().getTimezoneOffset()
-      },
+      deviceId: `fallback_${Platform.OS}_${Date.now()}`,
+      platform: Platform.OS,
+      model: 'unknown',
+      systemVersion: Platform.Version.toString(),
       timestamp: new Date().toISOString(),
       isFallback: true,
-      fingerprintVersion: '1.0'
+      fingerprintVersion: '2.0'
     };
   }
 
   static async generateHash(fingerprint) {
     try {
-      // Create a deterministic hash from the fingerprint
-      const fingerprintString = JSON.stringify(fingerprint, Object.keys(fingerprint).sort());
-      
-      let hash = 0;
-      for (let i = 0; i < fingerprintString.length; i++) {
-        const char = fingerprintString.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash; // Convert to 32-bit integer
+      // Simply use the device ID as the hash since it's already unique and stable
+      if (fingerprint.deviceId) {
+        // Create a SHA-256-like hash of the device ID for consistency
+        return this.simpleHash(fingerprint.deviceId);
       }
       
-      return Math.abs(hash).toString(36);
+      // Fallback to hashing the entire fingerprint
+      const fingerprintString = JSON.stringify(fingerprint, Object.keys(fingerprint).sort());
+      return this.simpleHash(fingerprintString);
     } catch (error) {
       console.error('Error generating fingerprint hash:', error);
       return 'hash-error-' + Date.now();

@@ -278,8 +278,10 @@
                         {% endif %}
                     </td>
                     <td>
-                        {% if achievement.total_earned > 0 %}
-                        {{ achievement.fraud_count|floatformat:0|default:0|add:achievement.suspicious_count|floatformat:0|default:0|mul:100|div:achievement.total_earned|floatformat:1 }}%
+                        {% if achievement.fraud_percentage > 0 %}
+                        <span class="{% if achievement.fraud_percentage > 10 %}danger{% elif achievement.fraud_percentage > 5 %}warning{% endif %}">
+                            {{ achievement.fraud_percentage|floatformat:1 }}%
+                        </span>
                         {% else %}
                         -
                         {% endif %}
