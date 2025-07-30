@@ -106,15 +106,26 @@ class Notification(models.Model):
 
 
 class NotificationRead(models.Model):
-    """Track which users have read broadcast notifications"""
+    """Track which users have read notifications in specific account contexts"""
     notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name='reads')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notification_reads')
-    read_at = models.DateTimeField(auto_now_add=True)
+    
+    # Account context - to track reads per account (personal vs business)
+    account = models.ForeignKey(Account, on_delete=models.CASCADE, null=True, blank=True, related_name='notification_reads')
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, null=True, blank=True, related_name='notification_reads')
+    
+    read_at = models.DateTimeField(auto_now_add=True, db_index=True)
     
     class Meta:
-        unique_together = ['notification', 'user']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['notification', 'user', 'account', 'business'],
+                name='unique_notification_read_per_context'
+            )
+        ]
         indexes = [
             models.Index(fields=['user', 'notification']),
+            models.Index(fields=['user', 'account', 'business'], name='notif_user_acc_bus_idx'),
         ]
 
 

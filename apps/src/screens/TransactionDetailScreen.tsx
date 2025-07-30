@@ -54,6 +54,9 @@ export const TransactionDetailScreen = () => {
 
   // Check if this is a USDC transaction
   const isUSDCTransaction = transactionData && ['deposit', 'withdrawal', 'conversion'].includes(transactionData.type);
+  
+  // If we have transactionData with an ID but need to fetch fresh data, we could do it here
+  // For now, we'll use the data as-is since it's fresh from the notification
 
   // Sample transaction data - in real app, this would come from props or API
   const transactions = {
@@ -129,7 +132,17 @@ export const TransactionDetailScreen = () => {
   };
 
   const currentTx = transactionData || transactions[transactionType];
-  const isInvitedFriend = currentTx.isInvitedFriend || false;
+  
+  // If no transaction data is available, show a loading or error state
+  if (!currentTx) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.errorText}>No se pudo cargar la información de la transacción</Text>
+      </View>
+    );
+  }
+  
+  const isInvitedFriend = currentTx?.isInvitedFriend || false;
 
   const handleCopy = (text: string, type: string) => {
     Clipboard.setString(text);
@@ -782,7 +795,7 @@ export const TransactionDetailScreen = () => {
               styles.amountText,
               (currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal') && styles.negativeAmount
             ]}>
-              {currentTx.type === 'deposit' ? '+' : currentTx.type === 'withdrawal' ? '-' : ''}{currentTx.amount} {currentTx.currency}
+              {currentTx.type === 'deposit' ? '+' : currentTx.type === 'withdrawal' ? '-' : ''}{currentTx.amount || '0.00'} {currentTx.currency || 'cUSD'}
             </Text>
             
             <Text style={styles.transactionTitle}>
@@ -972,7 +985,7 @@ export const TransactionDetailScreen = () => {
                 <View style={styles.participantInfo}>
                   <View style={styles.avatarContainer}>
                     <Text style={styles.avatarText}>
-                      {currentTx.amount.startsWith('+') 
+                      {currentTx.amount?.startsWith('+') 
                         ? (currentTx.from ? currentTx.from.charAt(0) : 'U')
                         : (currentTx.to ? currentTx.to.charAt(0) : 'U')
                       }
@@ -980,20 +993,20 @@ export const TransactionDetailScreen = () => {
                   </View>
                   <View style={styles.participantDetails}>
                     <Text style={styles.participantName}>
-                      {currentTx.amount.startsWith('+') ? currentTx.from : currentTx.to}
+                      {currentTx.amount?.startsWith('+') ? currentTx.from : currentTx.to}
                     </Text>
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
-                        {currentTx.amount.startsWith('+') ? currentTx.fromAddress : currentTx.toAddress}
+                        {currentTx.amount?.startsWith('+') ? currentTx.fromAddress : currentTx.toAddress}
                       </Text>
                       <TouchableOpacity 
                         onPress={() => handleCopy(
-                          currentTx.amount.startsWith('+') ? currentTx.fromAddress : currentTx.toAddress, 
-                          currentTx.amount.startsWith('+') ? 'from' : 'to'
+                          currentTx.amount?.startsWith('+') ? currentTx.fromAddress : currentTx.toAddress, 
+                          currentTx.amount?.startsWith('+') ? 'from' : 'to'
                         )}
                         style={styles.copyButton}
                       >
-                        {copied === (currentTx.amount.startsWith('+') ? 'from' : 'to') ? (
+                        {copied === (currentTx.amount?.startsWith('+') ? 'from' : 'to') ? (
                           <Icon name="check" size={16} color={colors.accent} />
                         ) : (
                           <Icon name="copy" size={16} color={colors.accent} />
@@ -1044,7 +1057,7 @@ export const TransactionDetailScreen = () => {
               </View>
 
               {/* Location for payments - only show when user is paying a business */}
-              {currentTx.type === 'payment' && currentTx.amount.startsWith('-') && currentTx.location && (
+              {currentTx.type === 'payment' && currentTx.amount?.startsWith('-') && currentTx.location && (
                 <View style={styles.infoRow}>
                   <Icon name="map-pin" size={20} color="#9ca3af" style={styles.infoIcon} />
                   <View style={styles.infoContent}>
@@ -1080,7 +1093,7 @@ export const TransactionDetailScreen = () => {
                      currentTx.type === 'exchange' ? 'Monto intercambiado' : 'Monto enviado'}
                   </Text>
                   <Text style={styles.feeAmount}>
-                    {Math.abs(parseFloat(currentTx.amount.replace(/[+-]/g, ''))).toFixed(2)} {currentTx.currency}
+                    {currentTx.amount ? Math.abs(parseFloat(currentTx.amount.replace(/[+-]/g, ''))).toFixed(2) : '0.00'} {currentTx.currency || 'cUSD'}
                   </Text>
                 </View>
                 
@@ -1098,7 +1111,7 @@ export const TransactionDetailScreen = () => {
                     <View style={styles.feeRow}>
                       <Text style={styles.totalLabel}>Total debitado</Text>
                       <Text style={styles.totalAmount}>
-                        {currentTx.amount} {currentTx.currency}
+                        {currentTx.amount || '0.00'} {currentTx.currency || 'cUSD'}
                       </Text>
                     </View>
                   </>
@@ -1108,7 +1121,7 @@ export const TransactionDetailScreen = () => {
               {/* Transaction ID */}
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>ID de Operación</Text>
-                <Text style={styles.summaryValue}>#{currentTx.hash.slice(-8).toUpperCase()}</Text>
+                <Text style={styles.summaryValue}>#{currentTx.hash?.slice(-8).toUpperCase() || 'N/A'}</Text>
               </View>
 
               {/* Status */}
@@ -1156,7 +1169,7 @@ export const TransactionDetailScreen = () => {
               <TouchableOpacity style={styles.shareButton} onPress={() => {
                 Alert.alert(
                   'Compartir invitación',
-                  `Comparte este mensaje:\n\n¡Hola! Te envié ${currentTx.amount} ${currentTx.currency} por Confío. Tienes 7 días para reclamarlo. Descarga la app aquí: [link]`
+                  `Comparte este mensaje:\n\n¡Hola! Te envié ${currentTx.amount || '0.00'} ${currentTx.currency || 'cUSD'} por Confío. Tienes 7 días para reclamarlo. Descarga la app aquí: [link]`
                 );
               }}>
                 <Icon name="share-2" size={20} color="#fff" style={{ marginRight: 8 }} />

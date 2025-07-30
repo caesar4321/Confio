@@ -1977,6 +1977,23 @@ export const GET_NOTIFICATIONS = gql`
             id
             name
           }
+          # Optional: Fetch fresh related data if needed
+          # Uncomment these fields if you want to fetch fresh data instead of using cached data
+          # relatedSendTransaction {
+          #   id
+          #   amount
+          #   tokenType
+          #   status
+          #   senderDisplayName
+          #   recipientDisplayName
+          #   createdAt
+          # }
+          # relatedP2pTrade {
+          #   id
+          #   cryptoAmount
+          #   fiatAmount
+          #   status
+          # }
         }
       }
     }

@@ -92,7 +92,22 @@ export const NotificationScreen = () => {
         // Navigate to offer details or trade confirmation
       } else if (url.includes('transaction/')) {
         const transactionId = url.split('transaction/')[1];
-        navigation.navigate('TransactionDetail', { transactionId });
+        // Use the complete transaction data stored in the notification
+        const transactionData = notification.data;
+        
+        console.log('[NotificationScreen] Navigating to transaction:', {
+          transactionId,
+          notificationType: notification.notificationType,
+          hasData: !!transactionData,
+          dataKeys: transactionData ? Object.keys(transactionData) : [],
+        });
+        
+        // Navigate to TransactionDetail with complete data
+        // The data field now contains all necessary fields for TransactionDetailScreen
+        navigation.navigate('TransactionDetail', { 
+          transactionType: transactionData?.transaction_type || 'send',
+          transactionData: transactionData || { id: transactionId }
+        });
       } else if (url.includes('business/')) {
         const businessId = url.split('business/')[1];
         // Navigate to business details
