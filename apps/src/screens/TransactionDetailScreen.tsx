@@ -52,13 +52,30 @@ export const TransactionDetailScreen = () => {
   const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
 
   // Get transaction type from route params
-  const { transactionType, transactionData } = route.params;
+  const { transactionType, transactionData: rawTransactionData } = route.params;
+  
+  // Parse transactionData if it's a string (GraphQL JSONField returns as string)
+  let transactionData = rawTransactionData;
+  if (typeof rawTransactionData === 'string') {
+    try {
+      transactionData = JSON.parse(rawTransactionData);
+    } catch (e) {
+      console.error('[TransactionDetailScreen] Failed to parse transaction data:', e);
+      transactionData = null;
+    }
+  }
   
   // Fetch transaction data if we only have an ID and minimal data
   // Check if we have the essential fields for display
   const hasCompleteData = transactionData?.amount && transactionData?.from && transactionData?.to;
   const needsFetch = (transactionData?.id || transactionData?.transaction_id) && !hasCompleteData;
   const transactionId = transactionData?.id || transactionData?.transaction_id;
+  
+  console.log('[TransactionDetailScreen] Data parsing:', {
+    rawDataType: typeof rawTransactionData,
+    parsedDataType: typeof transactionData,
+    isParsed: typeof rawTransactionData === 'string' && typeof transactionData === 'object'
+  });
   
   console.log('[TransactionDetailScreen] Fetch check:', {
     needsFetch,
