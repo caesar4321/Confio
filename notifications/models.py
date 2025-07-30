@@ -1,0 +1,144 @@
+from django.db import models
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+from users.models import Account, Business
+
+User = get_user_model()
+
+
+class NotificationType(models.TextChoices):
+    # Send transactions
+    SEND_RECEIVED = 'SEND_RECEIVED', 'Send Received'
+    SEND_SENT = 'SEND_SENT', 'Send Sent'
+    SEND_INVITATION_SENT = 'SEND_INVITATION_SENT', 'Send Invitation Sent'
+    SEND_INVITATION_CLAIMED = 'SEND_INVITATION_CLAIMED', 'Send Invitation Claimed'
+    SEND_INVITATION_EXPIRED = 'SEND_INVITATION_EXPIRED', 'Send Invitation Expired'
+    SEND_FROM_EXTERNAL = 'SEND_FROM_EXTERNAL', 'Send from External Wallet'
+    
+    # Payment transactions
+    PAYMENT_RECEIVED = 'PAYMENT_RECEIVED', 'Payment Received'
+    PAYMENT_SENT = 'PAYMENT_SENT', 'Payment Sent'
+    INVOICE_PAID = 'INVOICE_PAID', 'Invoice Paid'
+    
+    # P2P Trade transactions
+    P2P_OFFER_RECEIVED = 'P2P_OFFER_RECEIVED', 'P2P Offer Received'
+    P2P_OFFER_ACCEPTED = 'P2P_OFFER_ACCEPTED', 'P2P Offer Accepted'
+    P2P_OFFER_REJECTED = 'P2P_OFFER_REJECTED', 'P2P Offer Rejected'
+    P2P_TRADE_STARTED = 'P2P_TRADE_STARTED', 'P2P Trade Started'
+    P2P_PAYMENT_CONFIRMED = 'P2P_PAYMENT_CONFIRMED', 'P2P Payment Confirmed'
+    P2P_CRYPTO_RELEASED = 'P2P_CRYPTO_RELEASED', 'P2P Crypto Released'
+    P2P_TRADE_COMPLETED = 'P2P_TRADE_COMPLETED', 'P2P Trade Completed'
+    P2P_TRADE_CANCELLED = 'P2P_TRADE_CANCELLED', 'P2P Trade Cancelled'
+    P2P_TRADE_DISPUTED = 'P2P_TRADE_DISPUTED', 'P2P Trade Disputed'
+    
+    # Conversion transactions
+    CONVERSION_COMPLETED = 'CONVERSION_COMPLETED', 'Conversion Completed'
+    CONVERSION_FAILED = 'CONVERSION_FAILED', 'Conversion Failed'
+    
+    # USDC Deposit/Withdrawal
+    USDC_DEPOSIT_PENDING = 'USDC_DEPOSIT_PENDING', 'USDC Deposit Pending'
+    USDC_DEPOSIT_COMPLETED = 'USDC_DEPOSIT_COMPLETED', 'USDC Deposit Completed'
+    USDC_DEPOSIT_FAILED = 'USDC_DEPOSIT_FAILED', 'USDC Deposit Failed'
+    USDC_WITHDRAWAL_PENDING = 'USDC_WITHDRAWAL_PENDING', 'USDC Withdrawal Pending'
+    USDC_WITHDRAWAL_COMPLETED = 'USDC_WITHDRAWAL_COMPLETED', 'USDC Withdrawal Completed'
+    USDC_WITHDRAWAL_FAILED = 'USDC_WITHDRAWAL_FAILED', 'USDC Withdrawal Failed'
+    
+    # Account related
+    ACCOUNT_VERIFIED = 'ACCOUNT_VERIFIED', 'Account Verified'
+    SECURITY_ALERT = 'SECURITY_ALERT', 'Security Alert'
+    NEW_LOGIN = 'NEW_LOGIN', 'New Login Detected'
+    
+    # Business related
+    BUSINESS_EMPLOYEE_ADDED = 'BUSINESS_EMPLOYEE_ADDED', 'Added as Business Employee'
+    BUSINESS_EMPLOYEE_REMOVED = 'BUSINESS_EMPLOYEE_REMOVED', 'Removed from Business'
+    BUSINESS_PERMISSION_CHANGED = 'BUSINESS_PERMISSION_CHANGED', 'Business Permissions Changed'
+    
+    # General
+    PROMOTION = 'PROMOTION', 'Promotion'
+    SYSTEM = 'SYSTEM', 'System Notification'
+    ANNOUNCEMENT = 'ANNOUNCEMENT', 'Announcement'
+
+
+class Notification(models.Model):
+    # For personalized notifications (1:1)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications', null=True, blank=True)
+    account = models.ForeignKey(Account, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, null=True, blank=True, related_name='notifications')
+    
+    # For broadcast notifications (announcements)
+    is_broadcast = models.BooleanField(default=False)
+    broadcast_target = models.CharField(max_length=50, null=True, blank=True, help_text="Target audience: 'all', 'verified', 'business', etc.")
+    
+    notification_type = models.CharField(max_length=50, choices=NotificationType.choices)
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    
+    # Additional data as JSON for flexibility
+    data = models.JSONField(default=dict, blank=True)
+    
+    # For linking to specific objects
+    related_object_type = models.CharField(max_length=50, null=True, blank=True)
+    related_object_id = models.CharField(max_length=100, null=True, blank=True)
+    
+    # Action URL for deep linking
+    action_url = models.CharField(max_length=200, null=True, blank=True, help_text="Deep link for notification action")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    # For push notifications
+    push_sent = models.BooleanField(default=False)
+    push_sent_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=['is_broadcast', '-created_at']),
+            models.Index(fields=['account', '-created_at']),
+            models.Index(fields=['business', '-created_at']),
+        ]
+    
+    def __str__(self):
+        if self.is_broadcast:
+            return f"BROADCAST: {self.notification_type} - {self.title}"
+        return f"{self.notification_type} - {self.title} - {self.user.email if self.user else 'No user'}"
+
+
+class NotificationRead(models.Model):
+    """Track which users have read broadcast notifications"""
+    notification = models.ForeignKey(Notification, on_delete=models.CASCADE, related_name='reads')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notification_reads')
+    read_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ['notification', 'user']
+        indexes = [
+            models.Index(fields=['user', 'notification']),
+        ]
+
+
+class NotificationPreference(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='notification_preferences')
+    
+    # Push notification preferences
+    push_enabled = models.BooleanField(default=True)
+    push_transactions = models.BooleanField(default=True)
+    push_p2p = models.BooleanField(default=True)
+    push_security = models.BooleanField(default=True)
+    push_promotions = models.BooleanField(default=True)
+    push_announcements = models.BooleanField(default=True)
+    
+    # In-app notification preferences (always enabled for important notifications)
+    in_app_enabled = models.BooleanField(default=True)
+    in_app_transactions = models.BooleanField(default=True)
+    in_app_p2p = models.BooleanField(default=True)
+    in_app_security = models.BooleanField(default=True)
+    in_app_promotions = models.BooleanField(default=True)
+    in_app_announcements = models.BooleanField(default=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    def __str__(self):
+        return f"Notification Preferences - {self.user.email}"

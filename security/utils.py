@@ -147,104 +147,54 @@ def check_kyc_required(user, operation_type: str, amount: Optional[Decimal] = No
     return False, ""
 
 
-def perform_aml_check(user, transaction_type: str, amount: Decimal) -> Dict:
+def perform_aml_check(user, transaction_type: str, amount: Decimal = None) -> Dict:
     """
     Perform AML (Anti-Money Laundering) check
-    Returns risk assessment dict
+    Focused on blocking sanctioned/suspicious users, not amounts
+    Amount limits are handled by KYC levels
     """
-    from .models import AMLCheck, SuspiciousActivity
-    from send.models import SendTransaction
-    from p2p_exchange.models import P2PTrade
+    from .models import UserBan, SuspiciousActivity
     
-    risk_factors = {}
-    risk_score = 0
-    actions_required = []
+    # Check if user is sanctioned/banned
+    is_banned, ban_reason = check_user_banned(user)
+    if is_banned:
+        return {
+            'blocked': True,
+            'reason': f'Account restricted: {ban_reason}',
+            'risk_score': 100,
+            'risk_factors': {'banned': True}
+        }
     
-    # Get recent transaction data
-    thirty_days_ago = timezone.now() - timedelta(days=30)
-    seven_days_ago = timezone.now() - timedelta(days=7)
-    
-    # Calculate transaction volumes
-    recent_sends = SendTransaction.objects.filter(
-        sender_user=user,
-        created_at__gte=thirty_days_ago,
-        status='CONFIRMED'
-    )
-    
-    recent_p2p = P2PTrade.objects.filter(
-        Q(buyer_user=user) | Q(seller_user=user),
-        created_at__gte=thirty_days_ago,
-        status='COMPLETED'
-    )
-    
-    # Risk factor: High transaction volume
-    total_volume_30d = (
-        recent_sends.aggregate(total=Sum(Cast('amount', DecimalField(max_digits=20, decimal_places=2))))['total'] or Decimal('0')
-    ) + (
-        recent_p2p.aggregate(total=Sum('fiat_amount'))['total'] or Decimal('0')
-    )
-    
-    if total_volume_30d > Decimal('10000'):
-        risk_factors['high_volume'] = f"${total_volume_30d} in 30 days"
-        risk_score += 30
-    
-    # Risk factor: Rapid transactions
-    rapid_txns = recent_sends.filter(created_at__gte=seven_days_ago).count()
-    rapid_p2p = recent_p2p.filter(created_at__gte=seven_days_ago).count()
-    
-    if rapid_txns + rapid_p2p > 20:
-        risk_factors['rapid_transactions'] = f"{rapid_txns + rapid_p2p} in 7 days"
-        risk_score += 20
-    
-    # Risk factor: Multiple countries
-    countries = set()
-    for trade in recent_p2p:
-        countries.add(trade.country_code)
-    
-    if len(countries) > 3:
-        risk_factors['multiple_countries'] = f"{len(countries)} countries"
-        risk_score += 15
-    
-    # Risk factor: Previous suspicious activity
-    previous_suspicious = SuspiciousActivity.objects.filter(
+    # Check for confirmed suspicious activity
+    confirmed_suspicious = SuspiciousActivity.objects.filter(
         user=user,
-        status__in=['confirmed', 'investigating']
-    ).count()
+        status='confirmed'
+    ).exists()
     
-    if previous_suspicious > 0:
-        risk_factors['previous_suspicious'] = f"{previous_suspicious} incidents"
-        risk_score += 25
+    if confirmed_suspicious:
+        return {
+            'blocked': True,
+            'reason': 'Account under review for suspicious activity',
+            'risk_score': 100,
+            'risk_factors': {'confirmed_suspicious': True}
+        }
     
-    # Risk factor: Large single transaction
-    if amount > Decimal('5000'):
-        risk_factors['large_transaction'] = f"${amount}"
-        risk_score += 20
+    # Check if user is on sanctions list (simplified check)
+    # In production, this would check against OFAC, EU sanctions, etc.
+    if hasattr(user, 'is_sanctioned') and user.is_sanctioned:
+        return {
+            'blocked': True,
+            'reason': 'Sanctioned individual',
+            'risk_score': 100,
+            'risk_factors': {'sanctioned': True}
+        }
     
-    # Determine actions required
-    if risk_score >= 70:
-        actions_required.append('manual_review')
-        actions_required.append('enhanced_due_diligence')
-    elif risk_score >= 50:
-        actions_required.append('enhanced_monitoring')
-    
-    # Create AML check record
-    aml_check = AMLCheck.objects.create(
-        user=user,
-        check_type='triggered',
-        risk_score=min(risk_score, 100),
-        risk_factors=risk_factors,
-        transaction_volume_30d=total_volume_30d,
-        transaction_count_30d=rapid_txns + rapid_p2p,
-        actions_required=actions_required,
-        status='pending' if risk_score >= 50 else 'cleared'
-    )
-    
+    # User is clear for transactions
     return {
-        'risk_score': risk_score,
-        'risk_factors': risk_factors,
-        'actions_required': actions_required,
-        'requires_review': risk_score >= 50,
-        'aml_check_id': aml_check.id
+        'blocked': False,
+        'reason': '',
+        'risk_score': 0,
+        'risk_factors': {}
     }
 
 
@@ -331,6 +281,63 @@ def require_kyc(operation_type: str):
                 }, status=403)
             
             return func(request, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
+# GraphQL Decorators
+def graphql_require_kyc(operation_type: str):
+    """GraphQL decorator to require KYC for specific mutations"""
+    def decorator(mutate_func):
+        @wraps(mutate_func)
+        def wrapper(cls, root, info, *args, **kwargs):
+            user = getattr(info.context, 'user', None)
+            if not user or not user.is_authenticated:
+                return cls(success=False, errors=["Authentication required"])
+            
+            # Extract amount from input if available
+            amount = None
+            if 'input' in kwargs:
+                input_data = kwargs['input']
+                if hasattr(input_data, 'amount'):
+                    amount = Decimal(str(input_data.amount))
+            
+            required, reason = check_kyc_required(user, operation_type, amount)
+            
+            if required:
+                return cls(success=False, errors=[reason])
+            
+            return mutate_func(cls, root, info, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def graphql_require_aml():
+    """GraphQL decorator to require AML check (blocks sanctioned/banned users)"""
+    def decorator(mutate_func):
+        @wraps(mutate_func)
+        def wrapper(cls, root, info, *args, **kwargs):
+            user = getattr(info.context, 'user', None)
+            if not user or not user.is_authenticated:
+                return cls(success=False, errors=["Authentication required"])
+            
+            # Get transaction type from mutation name
+            mutation_name = cls.__name__.lower()
+            if 'send' in mutation_name:
+                transaction_type = 'send'
+            elif 'pay' in mutation_name:
+                transaction_type = 'pay'
+            elif 'trade' in mutation_name:
+                transaction_type = 'trade'
+            else:
+                transaction_type = 'transaction'
+            
+            aml_result = perform_aml_check(user=user, transaction_type=transaction_type)
+            
+            if aml_result.get('blocked', False):
+                return cls(success=False, errors=[aml_result.get('reason', 'Transaction blocked by AML')])
+            
+            return mutate_func(cls, root, info, *args, **kwargs)
         return wrapper
     return decorator
 

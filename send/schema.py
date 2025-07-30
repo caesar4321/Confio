@@ -1,6 +1,6 @@
 import graphene
 from graphene_django import DjangoObjectType
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError, PermissionDenied
 from django.db import models, transaction
 from .models import SendTransaction
 from .validators import validate_transaction_amount, validate_recipient
@@ -8,6 +8,7 @@ from django.conf import settings
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from users.models import Account
+from security.utils import graphql_require_kyc, graphql_require_aml
 
 User = get_user_model()
 
@@ -68,6 +69,8 @@ class CreateSendTransaction(graphene.Mutation):
     errors = graphene.List(graphene.String)
 
     @classmethod
+    @graphql_require_aml()
+    @graphql_require_kyc('send_money')
     def mutate(cls, root, info, input):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
@@ -77,12 +80,35 @@ class CreateSendTransaction(graphene.Mutation):
                 errors=["Authentication required"]
             )
 
+        # Import what we need
+        from decimal import Decimal
+        from users.jwt_context import get_jwt_business_context_with_validation
+        
         # Debug logging
         print(f"CreateSendTransaction: User {user.id} attempting send")
         print(f"CreateSendTransaction: Input received: {input}")
         print(f"CreateSendTransaction: Idempotency key: {getattr(input, 'idempotency_key', 'NOT PROVIDED')}")
+        
+        # Validate the transaction amount
+        try:
+            validate_transaction_amount(input.amount)
+        except ValidationError as e:
+            return CreateSendTransaction(
+                send_transaction=None,
+                success=False,
+                errors=[str(e)]
+            )
+        
+        # Get JWT context and check permissions
+        jwt_context = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+        if not jwt_context:
+            return CreateSendTransaction(
+                send_transaction=None,
+                success=False,
+                errors=["No access or permission to send funds"]
+            )
 
-        # Use atomic transaction with SELECT FOR UPDATE to prevent race conditions
+        # Now proceed with database operations
         try:
             with transaction.atomic():
                 # Check for existing transaction with same idempotency key
@@ -105,37 +131,6 @@ class CreateSendTransaction(graphene.Mutation):
                         print(f"CreateSendTransaction: No existing transaction found, proceeding with creation")
                 else:
                     print(f"CreateSendTransaction: No idempotency key provided")
-
-                # Validate the transaction amount
-                validate_transaction_amount(input.amount)
-                
-                # Import security checks
-                from security.utils import check_kyc_required, perform_aml_check
-                from decimal import Decimal
-                
-                # Check KYC requirement
-                kyc_required, kyc_reason = check_kyc_required(
-                    user, 
-                    'send_money', 
-                    Decimal(input.amount)
-                )
-                
-                if kyc_required:
-                    return CreateSendTransaction(
-                        send_transaction=None,
-                        success=False,
-                        errors=[kyc_reason]
-                    )
-
-                # Get JWT context with validation and permission check
-                from users.jwt_context import get_jwt_business_context_with_validation
-                jwt_context = get_jwt_business_context_with_validation(info, required_permission='send_funds')
-                if not jwt_context:
-                    return CreateSendTransaction(
-                        send_transaction=None,
-                        success=False,
-                        errors=["No access or permission to send funds"]
-                    )
                     
                 account_type = jwt_context['account_type']
                 account_index = jwt_context['account_index']
@@ -179,6 +174,7 @@ class CreateSendTransaction(graphene.Mutation):
                     )
                 
                 sender_address = active_account.sui_address
+                sender_account = active_account  # Store for later use in notifications
 
                 # Find recipient and their Sui address
                 recipient_user = None
@@ -304,8 +300,8 @@ class CreateSendTransaction(graphene.Mutation):
                         # Clean and normalize phone number - remove all non-digits
                         recipient_phone = ''.join(filter(str.isdigit, input.recipient_phone))
 
-                # Use amount as provided by frontend (no automatic conversion)
-                amount_str = str(input.amount)
+                # Convert amount to Decimal for database storage
+                amount_decimal = Decimal(str(input.amount))
                 
                 # Calculate invitation expiry if this is an invitation
                 from datetime import timedelta
@@ -313,8 +309,8 @@ class CreateSendTransaction(graphene.Mutation):
                 if recipient_user is None and bool(recipient_phone):
                     invitation_expires_at = timezone.now() + timedelta(days=7)
                 
-                # Create the send transaction
-                send_transaction = SendTransaction.objects.create(
+                # Create the send transaction (but don't save yet)
+                send_transaction = SendTransaction(
                     # Legacy user fields (kept for compatibility)
                     sender_user=user,
                     recipient_user=recipient_user,
@@ -332,7 +328,7 @@ class CreateSendTransaction(graphene.Mutation):
                     # Transaction details
                     sender_address=sender_address,
                     recipient_address=recipient_address,  # Use the determined address
-                    amount=amount_str,
+                    amount=amount_decimal,
                     token_type=input.token_type,
                     memo=input.memo or '',
                     status='PENDING',
@@ -341,53 +337,85 @@ class CreateSendTransaction(graphene.Mutation):
                     invitation_expires_at=invitation_expires_at
                 )
                 
-                # Perform AML check for the transaction
-                aml_result = perform_aml_check(
-                    user=user,
-                    transaction_type='send',
-                    amount=Decimal(input.amount)
-                )
-                
-                # Check if transaction should be blocked based on AML risk
-                if aml_result['requires_review']:
-                    send_transaction.status = 'AML_REVIEW'
-                    send_transaction.save()
-                    
-                    # Create suspicious activity if high risk
-                    if aml_result['risk_score'] >= 70:
-                        from security.utils import create_suspicious_activity
-                        create_suspicious_activity(
-                            user=user,
-                            activity_type='high_risk_transaction',
-                            detection_data={
-                                'transaction_id': send_transaction.id,
-                                'transaction_type': 'send',
-                                'amount': str(input.amount),
-                                'risk_score': aml_result['risk_score'],
-                                'risk_factors': aml_result['risk_factors']
-                            },
-                            severity=min(aml_result['risk_score'] // 10, 10)
-                        )
-                    
-                    return CreateSendTransaction(
-                        send_transaction=send_transaction,
-                        success=True,
-                        errors=["Transaction is under review due to compliance requirements"]
-                    )
-
-                # TODO: Implement sponsored transaction logic here
-                # This will be handled by a background task
-                
-                # TEMPORARY: Mark send transaction as CONFIRMED for testing
-                # This ensures the UI shows the correct status
-                send_transaction.status = 'CONFIRMED'
-                # Generate a unique transaction hash using ID, microsecond timestamp, and UUID
+                # Import time and uuid at the beginning
                 import time
                 import uuid
-                microsecond_timestamp = int(time.time() * 1000000)  # Microsecond precision
-                unique_id = str(uuid.uuid4())[:8]  # First 8 characters of UUID
-                send_transaction.transaction_hash = f"test_send_tx_{send_transaction.id}_{microsecond_timestamp}_{unique_id}"
+                
+                # Generate unique components for transaction hash
+                microsecond_timestamp = int(time.time() * 1000000)
+                unique_id = str(uuid.uuid4())[:8]
+                
+                # All non-blocked transactions proceed immediately
+                send_transaction.status = 'CONFIRMED'
+                send_transaction.transaction_hash = f"test_send_tx_{microsecond_timestamp}_{unique_id}"
+                
+                # Save the transaction
                 send_transaction.save()
+
+                # Create notifications
+                from notifications.utils import create_notification
+                from notifications.models import NotificationType
+                
+                # Notification for sender
+                create_notification(
+                    user=user,
+                    account=sender_account,
+                    business=sender_business,
+                    notification_type=NotificationType.SEND_SENT,
+                    title="Envío completado",
+                    message=f"Enviaste {str(amount_decimal)} {input.token_type} a {recipient_display_name}",
+                    data={
+                        'amount': str(amount_decimal),
+                        'token_type': input.token_type,
+                        'transaction_id': str(send_transaction.id),
+                        'recipient_name': recipient_display_name,
+                        'recipient_phone': recipient_phone,
+                    },
+                    related_object_type='SendTransaction',
+                    related_object_id=str(send_transaction.id),
+                    action_url=f'confio://transaction/{send_transaction.id}'
+                )
+                
+                # Notification for recipient (if they exist)
+                if recipient_user:
+                    create_notification(
+                        user=recipient_user,
+                        account=recipient_account,
+                        business=recipient_business,
+                        notification_type=NotificationType.SEND_RECEIVED,
+                        title="Pago recibido",
+                        message=f"Recibiste {str(amount_decimal)} {input.token_type} de {sender_display_name}",
+                        data={
+                            'amount': str(amount_decimal),
+                            'token_type': input.token_type,
+                            'transaction_id': str(send_transaction.id),
+                            'sender_name': sender_display_name,
+                            'sender_phone': sender_phone,
+                        },
+                        related_object_type='SendTransaction',
+                        related_object_id=str(send_transaction.id),
+                        action_url=f'confio://transaction/{send_transaction.id}'
+                    )
+                elif recipient_phone:
+                    # This is an invitation - create invitation notification for sender
+                    create_notification(
+                        user=user,
+                        account=sender_account,
+                        business=sender_business,
+                        notification_type=NotificationType.SEND_INVITATION_SENT,
+                        title="Invitación enviada",
+                        message=f"Enviaste {str(amount_decimal)} {input.token_type} a {recipient_phone}. Tienen 7 días para reclamar.",
+                        data={
+                            'amount': str(amount_decimal),
+                            'token_type': input.token_type,
+                            'transaction_id': str(send_transaction.id),
+                            'recipient_phone': recipient_phone,
+                            'expires_at': invitation_expires_at.isoformat() if invitation_expires_at else None,
+                        },
+                        related_object_type='SendTransaction',
+                        related_object_id=str(send_transaction.id),
+                        action_url=f'confio://transaction/{send_transaction.id}'
+                    )
 
                 return CreateSendTransaction(
                     send_transaction=send_transaction,

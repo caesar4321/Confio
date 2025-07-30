@@ -8,6 +8,7 @@ from django.db.models import F
 from .models import Invoice, PaymentTransaction
 from send.validators import validate_transaction_amount
 from django.conf import settings
+from security.utils import graphql_require_kyc, graphql_require_aml
 
 class InvoiceInput(graphene.InputObjectType):
     """Input type for creating a new invoice"""
@@ -98,6 +99,8 @@ class CreateInvoice(graphene.Mutation):
     errors = graphene.List(graphene.String)
 
     @classmethod
+    @graphql_require_aml()
+    @graphql_require_kyc('accept_payments')
     def mutate(cls, root, info, input):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
@@ -278,6 +281,8 @@ class PayInvoice(graphene.Mutation):
     errors = graphene.List(graphene.String)
 
     @classmethod
+    @graphql_require_aml()
+    @graphql_require_kyc('send_money')
     def mutate(cls, root, info, invoice_id, idempotency_key=None):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):

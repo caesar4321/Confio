@@ -1,5 +1,7 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { useProfileMenu } from '../hooks/useProfileMenu';
+import { useQuery } from '@apollo/client';
+import { GET_UNREAD_NOTIFICATION_COUNT } from '../apollo/queries';
 
 interface HeaderContextType {
   unreadNotifications: number;
@@ -16,9 +18,22 @@ interface HeaderProviderProps {
 }
 
 export const HeaderProvider: React.FC<HeaderProviderProps> = ({ children }) => {
-  const [unreadNotifications, setUnreadNotifications] = useState(3);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [currentAccountAvatar, setCurrentAccountAvatar] = useState('');
   const profileMenu = useProfileMenu();
+  
+  // Query for unread notification count
+  const { data: unreadCountData } = useQuery(GET_UNREAD_NOTIFICATION_COUNT, {
+    fetchPolicy: 'cache-and-network',
+    pollInterval: 30000, // Poll every 30 seconds
+  });
+  
+  // Update unread count when query data changes
+  useEffect(() => {
+    if (unreadCountData?.unreadNotificationCount !== undefined) {
+      setUnreadNotifications(unreadCountData.unreadNotificationCount);
+    }
+  }, [unreadCountData]);
 
   return (
     <HeaderContext.Provider

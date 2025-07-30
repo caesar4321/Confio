@@ -104,13 +104,14 @@ class SendTransaction(SoftDeleteModel):
     recipient_address = models.CharField(max_length=66)  # Sui addresses are 0x + 32 bytes (66 chars total)
 
     # Transaction details
-    amount = models.CharField(max_length=32)  # Store as string to handle large numbers
+    amount = models.DecimalField(max_digits=19, decimal_places=6)  # Support up to 9,999,999,999,999.999999
     token_type = models.CharField(max_length=10, choices=TOKEN_TYPES)
     memo = models.TextField(blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
     transaction_hash = models.CharField(
         max_length=66, 
         blank=True,
+        null=True,
         unique=True,
         help_text="Sui transaction digest (0x + 32 bytes, 66 hex characters total)"
     )  # Sui transaction hash

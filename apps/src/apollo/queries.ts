@@ -1945,6 +1945,69 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
   }
 `;
 
+// Notifications queries
+export const GET_NOTIFICATIONS = gql`
+  query GetNotifications($first: Int, $after: String, $notificationType: NotificationTypeEnum, $isRead: Boolean) {
+    notifications(first: $first, after: $after, notificationType: $notificationType, isRead: $isRead) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      totalCount
+      unreadCount
+      edges {
+        node {
+          id
+          notificationType
+          title
+          message
+          isRead
+          createdAt
+          data
+          relatedObjectType
+          relatedObjectId
+          actionUrl
+          isBroadcast
+          broadcastTarget
+          account {
+            id
+            accountType
+          }
+          business {
+            id
+            name
+          }
+        }
+      }
+    }
+  }
+`;
+
+export const GET_NOTIFICATION_PREFERENCES = gql`
+  query GetNotificationPreferences {
+    notificationPreferences {
+      pushEnabled
+      pushTransactions
+      pushP2p
+      pushSecurity
+      pushPromotions
+      pushAnnouncements
+      inAppEnabled
+      inAppTransactions
+      inAppP2p
+      inAppSecurity
+      inAppPromotions
+      inAppAnnouncements
+    }
+  }
+`;
+
+export const GET_UNREAD_NOTIFICATION_COUNT = gql`
+  query GetUnreadNotificationCount {
+    unreadNotificationCount
+  }
+`;
+
 // NEW: JWT-context-aware transactions query
 export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
   query GetCurrentAccountTransactions($limit: Int, $offset: Int, $tokenTypes: [String]) {

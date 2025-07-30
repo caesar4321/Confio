@@ -10,12 +10,13 @@ from conversion import schema as conversion_schema
 from usdc_transactions import schema as usdc_transactions_schema
 from security import schema as security_schema
 from presale import schema as presale_schema
+from notifications import schema as notifications_schema
 import graphene
 import logging
 
 logger = logging.getLogger(__name__)
 
-class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, usdc_transactions_schema.Query, security_schema.Query, presale_schema.PresaleQueries, graphene.ObjectType):
+class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, usdc_transactions_schema.Query, security_schema.Query, presale_schema.PresaleQueries, notifications_schema.Query, graphene.ObjectType):
 	# Override the legalDocument field to make it public
 	legalDocument = users_schema.Query.legalDocument
 	# Expose the user query
@@ -33,6 +34,7 @@ class Mutation(
 	usdc_transactions_schema.Mutation,
 	security_schema.Mutation,
 	presale_schema.PresaleMutations,
+	notifications_schema.Mutation,
 	graphene.ObjectType
 ):
 	pass
