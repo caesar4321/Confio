@@ -99,7 +99,9 @@ export const NotificationScreen = () => {
           transactionId,
           notificationType: notification.notificationType,
           hasData: !!transactionData,
+          dataType: typeof transactionData,
           dataKeys: transactionData ? Object.keys(transactionData) : [],
+          data: transactionData
         });
         
         // Navigate to TransactionDetail with complete data

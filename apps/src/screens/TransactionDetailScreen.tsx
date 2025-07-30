@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -11,7 +11,8 @@ import {
   Linking,
   StatusBar,
   Image,
-  Clipboard
+  Clipboard,
+  ActivityIndicator
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -23,6 +24,7 @@ import cUSDLogo from '../assets/png/cUSD.png';
 import moment from 'moment';
 import 'moment/locale/es';
 import { useQuery } from '@apollo/client';
+import { GET_SEND_TRANSACTION_BY_ID } from '../apollo/queries';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -51,12 +53,30 @@ export const TransactionDetailScreen = () => {
 
   // Get transaction type from route params
   const { transactionType, transactionData } = route.params;
+  
+  // Fetch transaction data if we only have an ID and minimal data
+  // Check if we have the essential fields for display
+  const hasCompleteData = transactionData?.amount && transactionData?.from && transactionData?.to;
+  const needsFetch = (transactionData?.id || transactionData?.transaction_id) && !hasCompleteData;
+  const transactionId = transactionData?.id || transactionData?.transaction_id;
+  
+  console.log('[TransactionDetailScreen] Fetch check:', {
+    needsFetch,
+    transactionId,
+    hasAmount: !!transactionData?.amount,
+    dataKeys: transactionData ? Object.keys(transactionData) : []
+  });
+  
+  const { data: fetchedData, loading: fetchLoading, error: fetchError } = useQuery(
+    GET_SEND_TRANSACTION_BY_ID,
+    {
+      variables: { id: transactionId },
+      skip: !needsFetch || !transactionId,
+    }
+  );
 
   // Check if this is a USDC transaction
   const isUSDCTransaction = transactionData && ['deposit', 'withdrawal', 'conversion'].includes(transactionData.type);
-  
-  // If we have transactionData with an ID but need to fetch fresh data, we could do it here
-  // For now, we'll use the data as-is since it's fresh from the notification
 
   // Sample transaction data - in real app, this would come from props or API
   const transactions = {
@@ -131,9 +151,82 @@ export const TransactionDetailScreen = () => {
     }
   };
 
-  const currentTx = transactionData || transactions[transactionType];
+  // Log what data we received
+  console.log('[TransactionDetailScreen] Route params:', {
+    transactionType,
+    hasTransactionData: !!transactionData,
+    transactionDataKeys: transactionData ? Object.keys(transactionData) : [],
+    transactionData: transactionData,
+    needsFetch,
+    fetchedData: fetchedData?.sendTransaction,
+    fetchError: fetchError?.message
+  });
   
-  // If no transaction data is available, show a loading or error state
+  // Transform fetched data to match the expected format
+  let txData = transactionData;
+  if (fetchedData?.sendTransaction && needsFetch) {
+    const tx = fetchedData.sendTransaction;
+    const isSent = tx.senderUser?.id === tx.recipientUser?.id; // This needs proper user context
+    
+    console.log('[TransactionDetailScreen] Transforming fetched data:', {
+      tx,
+      isSent,
+      amount: tx.amount,
+      tokenType: tx.tokenType,
+    });
+    
+    txData = {
+      ...transactionData,
+      type: isSent ? 'sent' : 'received',
+      from: tx.senderDisplayName || tx.senderUser?.firstName || 'Usuario',
+      fromAddress: tx.senderAddress,
+      to: tx.recipientDisplayName || tx.recipientUser?.firstName || 'Usuario',
+      toAddress: tx.recipientAddress,
+      amount: isSent ? `-${tx.amount}` : `+${tx.amount}`,
+      currency: tx.tokenType,
+      date: moment(tx.createdAt).format('YYYY-MM-DD'),
+      time: moment(tx.createdAt).format('HH:mm'),
+      status: tx.status?.toLowerCase() || 'completed',
+      hash: tx.transactionHash || '',
+      note: tx.memo || '',
+      avatar: (isSent ? tx.recipientDisplayName : tx.senderDisplayName)?.[0] || 'U',
+      isInvitedFriend: !!tx.invitationExpiresAt,
+      transaction_type: 'send',
+    };
+  }
+  
+  // If transactionData exists and has content, use it directly
+  const currentTx = (transactionData && Object.keys(transactionData).length > 1) 
+    ? transactionData 
+    : (txData || transactions[transactionType]);
+  
+  console.log('[TransactionDetailScreen] currentTx selection:', {
+    hasTransactionData: !!(transactionData && Object.keys(transactionData).length > 1),
+    hasTxData: !!txData,
+    usingFallback: !!(transactions[transactionType])
+  });
+  console.log('[TransactionDetailScreen] currentTx:', currentTx);
+  console.log('[TransactionDetailScreen] currentTx details:', {
+    amount: currentTx?.amount,
+    currency: currentTx?.currency,
+    status: currentTx?.status,
+    type: currentTx?.type,
+    from: currentTx?.from,
+    to: currentTx?.to,
+    keys: currentTx ? Object.keys(currentTx) : []
+  });
+  
+  // Show loading state while fetching
+  if (fetchLoading) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color={colors.accent} />
+        <Text style={styles.loadingText}>Cargando transacción...</Text>
+      </View>
+    );
+  }
+  
+  // If no transaction data is available, show an error state
   if (!currentTx) {
     return (
       <View style={styles.container}>
@@ -216,6 +309,22 @@ export const TransactionDetailScreen = () => {
     container: {
       flex: 1,
       backgroundColor: colors.neutral,
+    },
+    centerContent: {
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    loadingText: {
+      marginTop: 16,
+      fontSize: 16,
+      color: colors.dark,
+    },
+    errorText: {
+      fontSize: 16,
+      color: colors.dark,
+      textAlign: 'center',
+      marginTop: 50,
+      paddingHorizontal: 20,
     },
     scrollView: {
       flex: 1,
@@ -803,7 +912,7 @@ export const TransactionDetailScreen = () => {
             </Text>
             
             <View style={[styles.statusBadge, { backgroundColor: statusColors.bg }]}>
-              {currentTx.status?.toLowerCase() === 'completed' && (
+              {(currentTx.status?.toLowerCase() === 'completed' || currentTx.status?.toLowerCase() === 'confirmed') && (
                 <Icon name="check-circle" size={16} color={statusColors.text} style={styles.statusIcon} />
               )}
               {currentTx.status?.toLowerCase() === 'pending' && (
@@ -817,6 +926,7 @@ export const TransactionDetailScreen = () => {
               )}
               <Text style={[styles.statusText, { color: statusColors.text }]}>
                 {currentTx.status?.toLowerCase() === 'completed' ? 'Completado' :
+                 currentTx.status?.toLowerCase() === 'confirmed' ? 'Completado' :
                  currentTx.status?.toLowerCase() === 'pending' ? 'Pendiente' :
                  currentTx.status?.toLowerCase() === 'processing' ? 'Procesando' :
                  currentTx.status?.toLowerCase() === 'failed' ? 'Fallido' : 'Desconocido'}
