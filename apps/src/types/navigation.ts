@@ -340,6 +340,9 @@ export type MainStackParamList = {
   } | undefined;
   Achievements: undefined;
   ConfioTokenInfo: undefined;
+  ConfioPresale: undefined;
+  ConfioPresaleParticipate: undefined;
+  ConfioTokenomics: undefined;
   MiProgresoViral: undefined;
   ViralTemplates: undefined;
 };

@@ -187,7 +187,7 @@ export const ConfioTokenInfoScreen = () => {
           </Text>
           <TouchableOpacity 
             style={styles.ctaButton}
-            onPress={() => navigation.goBack()}
+            onPress={() => navigation.navigate('Achievements')}
           >
             <Text style={styles.ctaButtonText}>Ver Mis Logros</Text>
             <Icon name="arrow-right" size={20} color="#fff" />

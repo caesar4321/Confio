@@ -16,6 +16,7 @@ def admin_dashboard_stats(request):
     if not (request.user.is_authenticated and request.user.is_staff):
         return {}
     
+    
     try:
         # Fraud Statistics
         total_achievements = UserAchievement.objects.count()

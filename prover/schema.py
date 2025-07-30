@@ -236,15 +236,24 @@ class InitializeZkLogin(graphene.Mutation):
                     logger.info(f"Created new user: id={user.id}, username={user.username}")
                     
                     # Attach device fingerprint and IP for achievement fraud prevention
-                    logger.info(f"deviceFingerprint type: {type(deviceFingerprint)}, value: {deviceFingerprint}")
                     if deviceFingerprint:
                         try:
                             import hashlib
                             import json
-                            # Calculate fingerprint hash
+                            # Parse fingerprint data
                             fingerprint_data = json.loads(deviceFingerprint) if isinstance(deviceFingerprint, str) else deviceFingerprint
-                            fingerprint_str = json.dumps(fingerprint_data, sort_keys=True)
-                            fingerprint_hash = hashlib.sha256(fingerprint_str.encode()).hexdigest()
+                            
+                            # Use the deviceId directly as the fingerprint hash since it's already unique
+                            if isinstance(fingerprint_data, dict) and 'deviceId' in fingerprint_data:
+                                # Use deviceId directly - it's already a stable identifier
+                                device_id = fingerprint_data['deviceId']
+                                # Create a consistent hash format
+                                fingerprint_hash = hashlib.sha256(device_id.encode()).hexdigest()
+                            else:
+                                # Fallback for old format
+                                fingerprint_str = json.dumps(fingerprint_data, sort_keys=True)
+                                fingerprint_hash = hashlib.sha256(fingerprint_str.encode()).hexdigest()
+                            
                             user._device_fingerprint_hash = fingerprint_hash
                             logger.info(f"Attached device fingerprint hash {fingerprint_hash[:8]}... to new user {user.id}")
                         except Exception as e:

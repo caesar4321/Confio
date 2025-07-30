@@ -274,8 +274,8 @@ class AbusePreventionService:
         requirements['has_transactions'] = has_p2p or has_send
         
         # Check KYC
-        requirements['kyc_verified'] = user.identity_verifications.filter(
-            status='approved'
+        requirements['kyc_verified'] = user.security_verifications.filter(
+            status='verified'
         ).exists()
         
         return requirements

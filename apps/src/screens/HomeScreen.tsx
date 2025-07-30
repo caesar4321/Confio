@@ -652,6 +652,44 @@ export const HomeScreen = () => {
           </Animated.View>
         </Animated.View>
         
+        {/* CONFIO Presale Banner */}
+        <Animated.View 
+          style={[
+            styles.presaleBanner,
+            {
+              opacity: fadeAnim,
+              transform: [
+                { 
+                  translateY: fadeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [20, 0],
+                  })
+                }
+              ],
+            }
+          ]}
+        >
+          <TouchableOpacity 
+            style={styles.presaleBannerContent}
+            onPress={() => navigation.navigate('ConfioPresale')}
+            activeOpacity={0.9}
+          >
+            <View style={styles.presaleBannerLeft}>
+              <View style={styles.presaleBadge}>
+                <Text style={styles.presaleBadgeText}>🚀 PREVENTA</Text>
+              </View>
+              <Text style={styles.presaleBannerTitle}>Únete a la Preventa de $CONFIO</Text>
+              <Text style={styles.presaleBannerSubtitle}>
+                Sé de los primeros en obtener monedas $CONFIO antes del lanzamiento público
+              </Text>
+            </View>
+            <View style={styles.presaleBannerRight}>
+              <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
+              <Icon name="chevron-right" size={20} color="#8b5cf6" />
+            </View>
+          </TouchableOpacity>
+        </Animated.View>
+        
         {/* Quick Actions */}
         <Animated.View 
           style={[
@@ -1031,6 +1069,64 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 20,
     lineHeight: 20,
+  },
+  // CONFIO Presale Banner styles
+  presaleBanner: {
+    marginHorizontal: 20,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  presaleBannerContent: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#8b5cf6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  presaleBannerLeft: {
+    flex: 1,
+    marginRight: 12,
+  },
+  presaleBadge: {
+    backgroundColor: '#8b5cf6',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
+  presaleBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  presaleBannerTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1e293b',
+    marginBottom: 4,
+  },
+  presaleBannerSubtitle: {
+    fontSize: 13,
+    color: '#64748b',
+    lineHeight: 18,
+  },
+  presaleBannerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  presaleBannerLogo: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
   },
   // Legacy styles kept for compatibility
   content: {

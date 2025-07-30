@@ -9,6 +9,8 @@ import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { getCountryByIso } from '../utils/countries';
 import { usePushNotificationPrompt } from '../hooks/usePushNotificationPrompt';
 import { PushNotificationModal } from '../components/PushNotificationModal';
+import { useQuery } from '@apollo/client';
+import { GET_USER_ACHIEVEMENTS, GET_ACHIEVEMENT_TYPES } from '../apollo/queries';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -49,6 +51,16 @@ export const ProfileScreen = () => {
   const navigation = useNavigation<ProfileScreenNavigationProp>();
   const { showModal, handleAllow, handleDeny, checkAndShowPrompt, needsSettings } = usePushNotificationPrompt();
   const [hasCheckedThisFocus, setHasCheckedThisFocus] = React.useState(false);
+  
+  // Fetch real achievements
+  const { data: achievementsData, loading: achievementsLoading } = useQuery(GET_USER_ACHIEVEMENTS, {
+    fetchPolicy: 'cache-and-network',
+  });
+  
+  // Fetch all available achievement types to get the correct total count
+  const { data: achievementTypesData, loading: achievementTypesLoading } = useQuery(GET_ACHIEVEMENT_TYPES, {
+    fetchPolicy: 'cache-and-network',
+  });
 
   // Debug active account changes to ensure real-time updates
   React.useEffect(() => {
@@ -125,18 +137,30 @@ export const ProfileScreen = () => {
     }
   };
 
-  // Simplified achievement data for cleaner display
-  const achievements = [
-    { id: 1, name: 'Primeros Pasos', icon: 'user-check', completed: true, shared: true, date: '15 Nov' },
-    { id: 2, name: 'Primera Compra', icon: 'users', completed: true, shared: false, date: '18 Nov' },
-    { id: 3, name: 'Primer Envío', icon: 'send', completed: true, shared: true, date: '20 Nov' },
-    { id: 4, name: 'Primera Recepción', icon: 'download', completed: true, shared: false, date: '22 Nov' },
-    { id: 5, name: 'Primer Pago', icon: 'credit-card', completed: true, shared: false, date: '25 Nov' },
-    { id: 6, name: 'Verificado', icon: 'shield', completed: false, shared: false },
-    { id: 7, name: '10 Intercambios', icon: 'trending-up', completed: false, shared: false },
-  ];
-
-  const completedCount = achievements.filter(a => a.completed).length;
+  // Get real achievements from query
+  const userAchievements = achievementsData?.userAchievements || [];
+  const achievementTypes = achievementTypesData?.achievementTypes || [];
+  
+  // Debug achievements data (can be removed after testing)
+  React.useEffect(() => {
+    console.log('ProfileScreen Debug:');
+    console.log('- achievementsData:', achievementsData);
+    console.log('- userAchievements:', userAchievements);
+    console.log('- achievementTypes:', achievementTypes);
+    console.log('- completedCount:', userAchievements.filter(a => 
+      a.status?.toLowerCase() === 'earned' || a.status?.toLowerCase() === 'claimed'
+    ).length);
+    console.log('- totalAchievements:', achievementTypes.length);
+  }, [achievementsData, userAchievements, achievementTypes, achievementsLoading, achievementTypesLoading]);
+  
+  // Count completed achievements (earned or claimed)
+  // Note: GraphQL returns uppercase statuses like "CLAIMED", "EARNED"
+  const completedCount = userAchievements.filter(a => 
+    a.status?.toLowerCase() === 'earned' || a.status?.toLowerCase() === 'claimed'
+  ).length;
+  
+  // Use the total number of available achievement types (not just user's achievements)
+  const totalAchievements = achievementTypes.length || 0;
 
   // Get display information based on active account
   const getDisplayInfo = () => {
@@ -228,22 +252,33 @@ export const ProfileScreen = () => {
             <Text style={styles.cardTitle}>Logros</Text>
           </View>
           <View style={styles.achievementProgress}>
-            <Text style={styles.achievementProgressText}>{completedCount}/{achievements.length}</Text>
+            <Text style={styles.achievementProgressText}>
+              {(achievementsLoading || achievementTypesLoading) ? '...' : `${completedCount}/${totalAchievements}`}
+            </Text>
             <Icon name="chevron-right" size={16} color="#9CA3AF" />
           </View>
         </View>
         <View style={styles.achievementPreview}>
-          {achievements.slice(0, 5).map((achievement) => (
+          {userAchievements.slice(0, 5).map((achievement, index) => (
             <View 
-              key={achievement.id} 
+              key={achievement.id || index} 
               style={[
                 styles.achievementDot,
-                achievement.completed ? styles.achievementDotCompleted : styles.achievementDotLocked
+                (achievement.status === 'earned' || achievement.status === 'claimed') 
+                  ? styles.achievementDotCompleted 
+                  : styles.achievementDotLocked
               ]}
             />
           ))}
-          {achievements.length > 5 && (
-            <Text style={styles.achievementMore}>+{achievements.length - 5}</Text>
+          {/* Show placeholder dots if we have less than 5 achievements */}
+          {userAchievements.length < 5 && Array.from({ length: 5 - userAchievements.length }).map((_, index) => (
+            <View 
+              key={`placeholder-${index}`} 
+              style={[styles.achievementDot, styles.achievementDotLocked]}
+            />
+          ))}
+          {totalAchievements > 5 && (
+            <Text style={styles.achievementMore}>+{totalAchievements - 5}</Text>
           )}
         </View>
       </TouchableOpacity>

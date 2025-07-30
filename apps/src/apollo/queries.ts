@@ -2334,11 +2334,6 @@ export const GET_USER_ACHIEVEMENTS = gql`
         firstName
         lastName
       }
-      account {
-        id
-        accountId
-        displayName
-      }
       achievementType {
         id
         slug
@@ -2349,19 +2344,12 @@ export const GET_USER_ACHIEVEMENTS = gql`
         color
         confioReward
         rewardDisplay
-        }
+      }
       status
       earnedAt
       claimedAt
       progressData
       earnedValue
-      verifiedBy {
-        id
-        username
-      }
-      verificationNotes
-      canClaimReward
-      rewardAmount
       createdAt
       updatedAt
     }
@@ -2426,15 +2414,11 @@ export const GET_MY_CONFIO_BALANCE = gql`
       totalEarned
       totalLocked
       totalUnlocked
-      achievementRewards
-      referralRewards
-      viralRewards
-      presalePurchase
-      otherRewards
-      lockUntil
-      lastRewardAt
-      dailyRewardCount
-      dailyRewardAmount
+      totalSpent
+      nextUnlockDate
+      nextUnlockAmount
+      createdAt
+      updatedAt
     }
   }
 `;
@@ -2635,6 +2619,49 @@ export const CHECK_REFERRAL_STATUS = gql`
       canSetReferrer
       timeRemainingHours
       existingReferrer
+    }
+  }
+`;
+
+// Employee invitation queries (from invitee perspective)
+export const GET_MY_INVITATIONS = gql`
+  query GetMyInvitations {
+    myInvitations {
+      id
+      business {
+        id
+        name
+      }
+      invitedBy {
+        id
+        firstName
+        lastName
+        username
+      }
+      role
+      status
+      message
+      invitationCode
+      createdAt
+      expiresAt
+    }
+  }
+`;
+
+export const ACCEPT_INVITATION = gql`
+  mutation AcceptInvitation($invitationCode: String!) {
+    acceptInvitation(invitationCode: $invitationCode) {
+      success
+      errors
+      employee {
+        id
+        business {
+          id
+          name
+        }
+        role
+        permissions
+      }
     }
   }
 `;

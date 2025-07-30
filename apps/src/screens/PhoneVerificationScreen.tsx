@@ -16,8 +16,9 @@ import {
   Button,
   Alert,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { CompositeNavigationProp } from '@react-navigation/native';
 import Feather from 'react-native-vector-icons/Feather';
 import TelegramLogo from '../assets/svg/TelegramLogo.svg';
 import { countries, Country } from '../utils/countries';
@@ -25,18 +26,17 @@ import { useMutation } from '@apollo/client';
 import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE, UPDATE_PHONE_NUMBER } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
 import { useCountrySelection } from '../hooks/useCountrySelection';
+import { AuthStackParamList, MainStackParamList } from '../types/navigation';
 
-type RootStackParamList = {
-  Auth: undefined;
-  PhoneVerification: undefined;
-  Home: undefined;
-};
-
-type PhoneVerificationScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'PhoneVerification'>;
+type PhoneVerificationScreenNavigationProp = CompositeNavigationProp<
+  NativeStackNavigationProp<AuthStackParamList, 'PhoneVerification'>,
+  NativeStackNavigationProp<MainStackParamList>
+>;
 
 const PhoneVerificationScreen = () => {
   const navigation = useNavigation<PhoneVerificationScreenNavigationProp>();
-  const { handleSuccessfulLogin, userProfile, refreshProfile } = useAuth();
+  const route = useRoute();
+  const { handleSuccessfulLogin, completePhoneVerification, userProfile, refreshProfile } = useAuth();
   const [phoneNumber, setPhoneNumber] = useState('');
   const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal, setSelectedCountry } = useCountrySelection();
   const [verificationMethod, setVerificationMethod] = useState<'telegram' | 'sms' | null>(null);
@@ -155,16 +155,23 @@ const PhoneVerificationScreen = () => {
               Alert.alert('Error', updateData?.updatePhoneNumber?.error || 'Failed to update phone number');
             }
           } else {
-            // Auth flow - proceed with login
+            // Auth flow - complete phone verification and authenticate
             Alert.alert('Success', 'Phone number verified!');
-            await handleSuccessfulLogin(true);
+            await completePhoneVerification();
           }
         } else {
           Alert.alert('Error', data.verifyTelegramCode.error || 'Verification failed');
         }
       } else if (verificationMethod === 'sms') {
         // TODO: Implement SMS verification once the mutation is available
-        await handleSuccessfulLogin(true);
+        Alert.alert('Success', 'Phone number verified!');
+        if (userProfile) {
+          // Main flow - navigate back
+          navigation.goBack();
+        } else {
+          // Auth flow - complete phone verification
+          await completePhoneVerification();
+        }
       } else {
         Alert.alert('Error', 'Invalid verification method');
       }
@@ -193,7 +200,18 @@ const PhoneVerificationScreen = () => {
     
     return (
     <View style={styles.screenContainer}>
-      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+      <TouchableOpacity 
+        style={styles.backButton} 
+        onPress={() => {
+          if (userProfile) {
+            // In main flow - just go back
+            navigation.goBack();
+          } else {
+            // In auth flow - navigate back to login screen
+            navigation.navigate('Login');
+          }
+        }}
+      >
         <Feather name="arrow-left" size={24} color={colors.darkGray} />
       </TouchableOpacity>
 

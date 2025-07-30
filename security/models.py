@@ -458,6 +458,114 @@ class IPAddress(models.Model):
         return f"{self.ip_address} ({self.country_code})"
 
 
+class IPDeviceUser(models.Model):
+    """Track associations between IPs, Devices, and Users for fraud detection"""
+    
+    ip_address = models.ForeignKey(
+        IPAddress,
+        on_delete=models.CASCADE,
+        related_name='device_user_associations'
+    )
+    device_fingerprint = models.ForeignKey(
+        'DeviceFingerprint',
+        on_delete=models.CASCADE,
+        related_name='ip_user_associations'
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='ip_device_associations'
+    )
+    
+    # Activity tracking
+    first_seen = models.DateTimeField(
+        default=timezone.now,
+        help_text="First time this IP-Device-User combination was seen"
+    )
+    last_seen = models.DateTimeField(
+        default=timezone.now,
+        help_text="Last activity from this combination"
+    )
+    total_sessions = models.IntegerField(
+        default=1,
+        help_text="Total sessions from this combination"
+    )
+    
+    # Location info at time of association
+    location_info = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Location data: city, region, coordinates, etc."
+    )
+    
+    # Risk indicators
+    is_suspicious = models.BooleanField(
+        default=False,
+        help_text="Flagged as suspicious combination"
+    )
+    risk_factors = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of risk factors: rapid_location_change, multiple_users_same_ip, etc."
+    )
+    
+    # Authentication context
+    auth_method = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="How user authenticated: google, apple, etc."
+    )
+    
+    class Meta:
+        verbose_name = "IP-Device-User Association"
+        verbose_name_plural = "IP-Device-User Associations"
+        unique_together = ['ip_address', 'device_fingerprint', 'user']
+        indexes = [
+            models.Index(fields=['user', 'last_seen']),
+            models.Index(fields=['device_fingerprint', 'last_seen']),
+            models.Index(fields=['ip_address', 'last_seen']),
+            models.Index(fields=['is_suspicious']),
+            models.Index(fields=['first_seen', 'last_seen']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.device_fingerprint.fingerprint[:8]}... - {self.ip_address.ip_address}"
+    
+    def calculate_risk_factors(self):
+        """Calculate and update risk factors for this association"""
+        risk_factors = []
+        
+        # Check if this IP has multiple users
+        ip_user_count = IPDeviceUser.objects.filter(
+            ip_address=self.ip_address
+        ).values('user').distinct().count()
+        
+        if ip_user_count > 5:  # More than 5 users on same IP
+            risk_factors.append('high_user_count_on_ip')
+        
+        # Check if this device has multiple users
+        device_user_count = self.device_fingerprint.users.count()
+        if device_user_count > 1:
+            risk_factors.append('multiple_users_same_device')
+        
+        # Check rapid location changes
+        # (This would need to be implemented based on session history)
+        
+        # Check if IP is VPN/Tor/Datacenter
+        if self.ip_address.is_vpn:
+            risk_factors.append('vpn_detected')
+        if self.ip_address.is_tor:
+            risk_factors.append('tor_detected')
+        if self.ip_address.is_datacenter:
+            risk_factors.append('datacenter_ip')
+        
+        self.risk_factors = risk_factors
+        self.is_suspicious = len(risk_factors) > 0
+        self.save(update_fields=['risk_factors', 'is_suspicious'])
+        
+        return risk_factors
+
+
 class UserSession(models.Model):
     """Track user sessions for security monitoring"""
     

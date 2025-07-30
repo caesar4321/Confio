@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.db.models import Count, Q
 from .models import (
     IdentityVerification, SuspiciousActivity, UserBan,
-    IPAddress, UserSession, DeviceFingerprint, UserDevice, AMLCheck
+    IPAddress, UserSession, DeviceFingerprint, UserDevice, AMLCheck, IPDeviceUser
 )
 
 
@@ -784,6 +784,234 @@ class UserDeviceAdmin(admin.ModelAdmin):
     def device_short(self, obj):
         return f"{obj.device.fingerprint[:20]}..."
     device_short.short_description = 'Device'
+
+
+@admin.register(IPDeviceUser)
+class IPDeviceUserAdmin(admin.ModelAdmin):
+    """Admin for IP-Device-User associations for fraud detection"""
+    list_display = (
+        'user_link', 'ip_link', 'device_short', 'total_sessions',
+        'is_suspicious_badge', 'auth_method', 'last_seen'
+    )
+    list_filter = (
+        'is_suspicious', 'auth_method', 'first_seen', 'last_seen'
+    )
+    search_fields = (
+        'user__username', 'user__email',
+        'ip_address__ip_address', 'device_fingerprint__fingerprint'
+    )
+    readonly_fields = (
+        'first_seen', 'last_seen', 'risk_factors_display',
+        'location_info_display', 'fraud_patterns_display'
+    )
+    raw_id_fields = ('user', 'ip_address', 'device_fingerprint')
+    
+    fieldsets = (
+        ('Association Information', {
+            'fields': (
+                'user', 'ip_address', 'device_fingerprint', 'auth_method'
+            )
+        }),
+        ('Activity Tracking', {
+            'fields': (
+                'first_seen', 'last_seen', 'total_sessions'
+            )
+        }),
+        ('Risk Assessment', {
+            'fields': (
+                'is_suspicious', 'risk_factors', 'risk_factors_display'
+            )
+        }),
+        ('Location Information', {
+            'fields': (
+                'location_info', 'location_info_display'
+            ),
+            'classes': ('collapse',)
+        }),
+        ('Fraud Analysis', {
+            'fields': ('fraud_patterns_display',),
+            'classes': ('collapse',)
+        })
+    )
+    
+    actions = ['mark_as_suspicious', 'mark_as_safe', 'calculate_risk_factors', 'analyze_fraud_patterns']
+    
+    def user_link(self, obj):
+        url = reverse('admin:users_user_change', args=[obj.user.id])
+        return format_html('<a href="{}">{}</a>', url, obj.user.username)
+    user_link.short_description = 'User'
+    user_link.admin_order_field = 'user__username'
+    
+    def ip_link(self, obj):
+        url = reverse('admin:security_ipaddress_change', args=[obj.ip_address.id])
+        return format_html(
+            '<a href="{}" style="font-family: monospace;">{}</a>',
+            url, obj.ip_address.ip_address
+        )
+    ip_link.short_description = 'IP Address'
+    ip_link.admin_order_field = 'ip_address__ip_address'
+    
+    def device_short(self, obj):
+        url = reverse('admin:security_devicefingerprint_change', args=[obj.device_fingerprint.id])
+        return format_html(
+            '<a href="{}" style="font-family: monospace;">{}</a>',
+            url, f"{obj.device_fingerprint.fingerprint[:16]}..."
+        )
+    device_short.short_description = 'Device'
+    device_short.admin_order_field = 'device_fingerprint__fingerprint'
+    
+    def is_suspicious_badge(self, obj):
+        if obj.is_suspicious:
+            risk_count = len(obj.risk_factors) if obj.risk_factors else 0
+            return format_html(
+                '<span style="color: #DC3545; font-weight: bold;">⚠️ Suspicious ({})</span>',
+                risk_count
+            )
+        return format_html('<span style="color: #28A745;">✓ Clean</span>')
+    is_suspicious_badge.short_description = 'Status'
+    is_suspicious_badge.admin_order_field = 'is_suspicious'
+    
+    def risk_factors_display(self, obj):
+        if not obj.risk_factors:
+            return "No risk factors identified"
+        
+        html = '<ul style="margin: 0; padding-left: 20px;">'
+        for factor in obj.risk_factors:
+            html += f'<li><strong>{factor.replace("_", " ").title()}</strong></li>'
+        html += '</ul>'
+        return format_html(html)
+    risk_factors_display.short_description = 'Risk Factors'
+    
+    def location_info_display(self, obj):
+        if not obj.location_info:
+            return "No location data"
+        
+        import json
+        return format_html(
+            '<pre style="white-space: pre-wrap; font-size: 11px;">{}</pre>',
+            json.dumps(obj.location_info, indent=2)
+        )
+    location_info_display.short_description = 'Location Data'
+    
+    def fraud_patterns_display(self, obj):
+        """Show fraud patterns analysis for this association"""
+        try:
+            from security.utils import get_ip_fraud_patterns, get_device_fraud_patterns, get_user_fraud_patterns
+            
+            # Get patterns for this specific association
+            ip_patterns = get_ip_fraud_patterns(
+                ip_address=obj.ip_address.ip_address,
+                days=30
+            )
+            
+            device_patterns = get_device_fraud_patterns(
+                device_fingerprint=obj.device_fingerprint.fingerprint,
+                days=30
+            )
+            
+            user_patterns = get_user_fraud_patterns(
+                user_id=obj.user.id,
+                days=30
+            )
+            
+            html = '<div style="font-size: 11px;">'
+            
+            # IP Patterns
+            html += f'<h4 style="margin: 5px 0;">IP Patterns (Risk: {ip_patterns["risk_score"]}/100)</h4>'
+            if ip_patterns['patterns']:
+                html += '<ul style="margin: 0; padding-left: 15px;">'
+                for pattern in ip_patterns['patterns'][:3]:  # Show top 3
+                    html += f'<li><strong>{pattern["type"]}:</strong> {pattern["description"]}</li>'
+                html += '</ul>'
+            else:
+                html += '<em>No suspicious IP patterns</em>'
+            
+            # Device Patterns
+            html += f'<h4 style="margin: 5px 0;">Device Patterns (Risk: {device_patterns["risk_score"]}/100)</h4>'
+            if device_patterns['patterns']:
+                html += '<ul style="margin: 0; padding-left: 15px;">'
+                for pattern in device_patterns['patterns'][:3]:  # Show top 3
+                    html += f'<li><strong>{pattern["type"]}:</strong> {pattern["description"]}</li>'
+                html += '</ul>'
+            else:
+                html += '<em>No suspicious device patterns</em>'
+            
+            # User Patterns
+            html += f'<h4 style="margin: 5px 0;">User Patterns (Risk: {user_patterns["risk_score"]}/100)</h4>'
+            if user_patterns['patterns']:
+                html += '<ul style="margin: 0; padding-left: 15px;">'
+                for pattern in user_patterns['patterns'][:3]:  # Show top 3
+                    html += f'<li><strong>{pattern["type"]}:</strong> {pattern["description"]}</li>'
+                html += '</ul>'
+            else:
+                html += '<em>No suspicious user patterns</em>'
+            
+            html += '</div>'
+            return format_html(html)
+            
+        except Exception as e:
+            return format_html(
+                '<div style="color: #DC3545;">Error analyzing patterns: {}</div>',
+                str(e)
+            )
+    fraud_patterns_display.short_description = 'Fraud Analysis'
+    
+    def mark_as_suspicious(self, request, queryset):
+        count = queryset.update(is_suspicious=True)
+        self.message_user(request, f"{count} associations marked as suspicious.")
+    mark_as_suspicious.short_description = "Mark as suspicious"
+    
+    def mark_as_safe(self, request, queryset):
+        count = queryset.update(is_suspicious=False, risk_factors=[])
+        self.message_user(request, f"{count} associations marked as safe.")
+    mark_as_safe.short_description = "Mark as safe"
+    
+    def calculate_risk_factors(self, request, queryset):
+        count = 0
+        for association in queryset:
+            association.calculate_risk_factors()
+            count += 1
+        self.message_user(request, f"Risk factors calculated for {count} associations.")
+    calculate_risk_factors.short_description = "Recalculate risk factors"
+    
+    def analyze_fraud_patterns(self, request, queryset):
+        """Analyze fraud patterns for selected associations"""
+        try:
+            from security.utils import get_ip_fraud_patterns, get_device_fraud_patterns, get_user_fraud_patterns
+            
+            high_risk_count = 0
+            total_analyzed = 0
+            
+            for association in queryset[:10]:  # Limit to 10 to avoid timeout
+                # Check if any patterns indicate high risk
+                ip_patterns = get_ip_fraud_patterns(ip_address=association.ip_address.ip_address, days=30)
+                device_patterns = get_device_fraud_patterns(device_fingerprint=association.device_fingerprint.fingerprint, days=30)
+                user_patterns = get_user_fraud_patterns(user_id=association.user.id, days=30)
+                
+                max_risk = max(ip_patterns['risk_score'], device_patterns['risk_score'], user_patterns['risk_score'])
+                
+                if max_risk > 70:
+                    association.is_suspicious = True
+                    association.save(update_fields=['is_suspicious'])
+                    high_risk_count += 1
+                
+                total_analyzed += 1
+            
+            if total_analyzed > 0:
+                self.message_user(
+                    request, 
+                    f"Analyzed {total_analyzed} associations. {high_risk_count} marked as high-risk."
+                )
+            else:
+                self.message_user(request, "No associations to analyze.")
+                
+        except Exception as e:
+            self.message_user(
+                request, 
+                f"Error during fraud analysis: {str(e)}", 
+                level='ERROR'
+            )
+    analyze_fraud_patterns.short_description = "Analyze fraud patterns (top 10)"
 
 
 @admin.register(AMLCheck)

@@ -261,7 +261,7 @@ export const AchievementsScreen = () => {
   ], []);
 
   const handleClaimReward = async (achievement: Achievement) => {
-    if (achievement.status !== 'earned') return;
+    if (achievement.status?.toLowerCase() !== 'earned') return;
     
     try {
       const result = await claimAchievementReward({
@@ -288,7 +288,7 @@ export const AchievementsScreen = () => {
 
 
   const handleShare = async (achievement: Achievement) => {
-    if (achievement.status !== 'earned' && achievement.status !== 'claimed') return;
+    if (achievement.status?.toLowerCase() !== 'earned' && achievement.status?.toLowerCase() !== 'claimed') return;
     
     setSelectedAchievement({
       id: achievement.id,
@@ -374,7 +374,7 @@ export const AchievementsScreen = () => {
     return Math.min((current / target) * 100, 100);
   };
 
-  const completedCount = (achievements || []).filter(a => a.status === 'earned' || a.status === 'claimed').length;
+  const completedCount = (achievements || []).filter(a => a.status?.toLowerCase() === 'earned' || a.status?.toLowerCase() === 'claimed').length;
   
   // Use actual CONFIO balance from database
   const confioBalance = confioBalanceData?.myConfioBalance;
@@ -382,7 +382,7 @@ export const AchievementsScreen = () => {
   
   // Calculate pending rewards (earned but not claimed)
   const pendingConfio = (achievements || [])
-    .filter(a => a.status === 'earned')
+    .filter(a => a.status?.toLowerCase() === 'earned')
     .reduce((sum, a) => sum + (a.achievementType?.confioReward || 0), 0);
 
   const categories = [
@@ -534,7 +534,7 @@ export const AchievementsScreen = () => {
         {/* Categories */}
         {categories.map(category => {
           const categoryAchievements = (achievements || []).filter(a => a.achievementType?.category?.toLowerCase() === category.key);
-          const categoryCompleted = categoryAchievements.filter(a => a.status === 'earned' || a.status === 'claimed').length;
+          const categoryCompleted = categoryAchievements.filter(a => a.status?.toLowerCase() === 'earned' || a.status?.toLowerCase() === 'claimed').length;
           
           // Skip empty categories
           if (categoryAchievements.length === 0) {
@@ -558,20 +558,20 @@ export const AchievementsScreen = () => {
                   key={achievement.id}
                   style={[
                     styles.achievementCard,
-                    (achievement.status === 'earned' || achievement.status === 'claimed') && styles.achievementCardCompleted
+                    (achievement.status?.toLowerCase() === 'earned' || achievement.status?.toLowerCase() === 'claimed') && styles.achievementCardCompleted
                   ]}
                   onPress={() => {
-                    if (achievement?.status === 'earned') {
+                    if (achievement?.status?.toLowerCase() === 'earned') {
                       handleClaimReward(achievement);
-                    } else if (achievement?.status === 'claimed') {
+                    } else if (achievement?.status?.toLowerCase() === 'claimed') {
                       handleShare(achievement);
                     }
                   }}
-                  disabled={!achievement || achievement.status === 'pending'}
+                  disabled={!achievement || achievement.status?.toLowerCase() === 'pending'}
                 >
                   <View style={[
                     styles.achievementIcon,
-                    (achievement?.status === 'earned' || achievement?.status === 'claimed') && styles.achievementIconCompleted
+                    (achievement?.status?.toLowerCase() === 'earned' || achievement?.status?.toLowerCase() === 'claimed') && styles.achievementIconCompleted
                   ]}>
                     {achievement?.achievementType?.iconEmoji ? (
                       <Text style={styles.achievementEmoji}>{achievement.achievementType.iconEmoji}</Text>
@@ -579,7 +579,7 @@ export const AchievementsScreen = () => {
                       <Icon 
                         name={getCategoryIcon(achievement?.achievementType?.category || 'onboarding')} 
                         size={24} 
-                        color={(achievement?.status === 'earned' || achievement?.status === 'claimed') ? '#fff' : '#9CA3AF'} 
+                        color={(achievement?.status?.toLowerCase() === 'earned' || achievement?.status?.toLowerCase() === 'claimed') ? '#fff' : '#9CA3AF'} 
                       />
                     )}
                   </View>
@@ -588,16 +588,16 @@ export const AchievementsScreen = () => {
                     <View style={styles.achievementTitleRow}>
                       <Text style={[
                         styles.achievementName,
-                        achievement?.status === 'pending' && styles.achievementNameLocked
+                        achievement?.status?.toLowerCase() === 'pending' && styles.achievementNameLocked
                       ]}>
                         {achievement?.name || 'Unknown Achievement'}
                       </Text>
-                      {achievement?.status === 'earned' && (
+                      {achievement?.status?.toLowerCase() === 'earned' && (
                         <View style={styles.claimableBadge}>
                           <Text style={styles.claimableText}>¡Reclamar!</Text>
                         </View>
                       )}
-                      {achievement?.status === 'claimed' && (
+                      {achievement?.status?.toLowerCase() === 'claimed' && (
                         <Icon name="check-circle" size={16} color={colors.primary} />
                       )}
                     </View>
@@ -605,7 +605,7 @@ export const AchievementsScreen = () => {
                       {achievement?.description || 'No description available'}
                     </Text>
                     
-                    {achievement?.progressData && achievement?.status === 'pending' && (
+                    {achievement?.progressData && achievement?.status?.toLowerCase() === 'pending' && (
                       <View style={styles.achievementProgressContainer}>
                         <View style={styles.achievementProgressBg}>
                           <View 
@@ -630,26 +630,26 @@ export const AchievementsScreen = () => {
 
                     {achievement?.earnedAt && (
                       <Text style={styles.achievementDate}>
-                        {achievement?.status === 'claimed' ? 'Reclamado' : 'Completado'}: {new Date(achievement.earnedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+                        {achievement?.status?.toLowerCase() === 'claimed' ? 'Reclamado' : 'Completado'}: {new Date(achievement.earnedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
                       </Text>
                     )}
                   </View>
 
-                  {(achievement?.status === 'earned' || achievement?.status === 'claimed') && (
+                  {(achievement?.status?.toLowerCase() === 'earned' || achievement?.status?.toLowerCase() === 'claimed') && (
                     <TouchableOpacity 
                       style={styles.actionButton}
                       onPress={() => {
-                        if (achievement?.status === 'earned') {
+                        if (achievement?.status?.toLowerCase() === 'earned') {
                           handleClaimReward(achievement);
-                        } else if (achievement?.status === 'claimed') {
+                        } else if (achievement?.status?.toLowerCase() === 'claimed') {
                           handleShare(achievement);
                         }
                       }}
                     >
                       <Icon 
-                        name={achievement?.status === 'earned' ? "gift" : "share-2"} 
+                        name={achievement?.status?.toLowerCase() === 'earned' ? "gift" : "share-2"} 
                         size={20} 
-                        color={achievement?.status === 'earned' ? colors.violet : colors.accent} 
+                        color={achievement?.status?.toLowerCase() === 'earned' ? colors.violet : colors.accent} 
                       />
                     </TouchableOpacity>
                   )}

@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, StatusBar, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import { PendingInvitationBanner } from '../components/PendingInvitationBanner';
+import CONFIOLogo from '../assets/png/CONFIO.png';
 
 type NotificationScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -113,6 +114,29 @@ export const NotificationScreen = () => {
       <ScrollView style={styles.notificationsList} showsVerticalScrollIndicator={false}>
         {/* Pending Employee Invitations */}
         <PendingInvitationBanner />
+        
+        {/* CONFIO Presale Banner */}
+        <View style={styles.presaleBanner}>
+          <TouchableOpacity 
+            style={styles.presaleBannerContent}
+            onPress={() => navigation.navigate('ConfioPresale')}
+            activeOpacity={0.9}
+          >
+            <View style={styles.presaleBannerLeft}>
+              <View style={styles.presaleBadge}>
+                <Text style={styles.presaleBadgeText}>🚀 PREVENTA</Text>
+              </View>
+              <Text style={styles.presaleBannerTitle}>Preventa Exclusiva de $CONFIO</Text>
+              <Text style={styles.presaleBannerSubtitle}>
+                Únete ahora y obtén acceso anticipado a las monedas $CONFIO
+              </Text>
+            </View>
+            <View style={styles.presaleBannerRight}>
+              <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
+              <Icon name="chevron-right" size={20} color="#8b5cf6" />
+            </View>
+          </TouchableOpacity>
+        </View>
         
         {notifications.length === 0 ? (
           <View style={styles.emptyState}>
@@ -303,5 +327,62 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  // CONFIO Presale Banner styles
+  presaleBanner: {
+    marginHorizontal: 16,
+    marginVertical: 12,
+  },
+  presaleBannerContent: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#8b5cf6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  presaleBannerLeft: {
+    flex: 1,
+    marginRight: 12,
+  },
+  presaleBadge: {
+    backgroundColor: '#8b5cf6',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+  },
+  presaleBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  presaleBannerTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#1e293b',
+    marginBottom: 4,
+  },
+  presaleBannerSubtitle: {
+    fontSize: 13,
+    color: '#64748b',
+    lineHeight: 18,
+  },
+  presaleBannerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  presaleBannerLogo: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
   },
 }); 
