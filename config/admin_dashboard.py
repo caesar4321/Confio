@@ -199,6 +199,29 @@ class ConfioAdminSite(admin.AdminSite):
             'trade', 'initiator_user'
         ).order_by('-opened_at')[:5]
         
+        # Presale metrics
+        from presale.models import PresalePhase, PresalePurchase, PresaleSettings
+        presale_settings = PresaleSettings.get_settings()
+        active_presale = PresalePhase.objects.filter(status='active').first() if presale_settings.is_presale_active else None
+        print(f"DEBUG: Presale enabled: {presale_settings.is_presale_active}, Active presale: {active_presale}")  # Debug line
+        if active_presale and presale_settings.is_presale_active:
+            context['presale_active'] = True
+            context['presale_phase'] = active_presale.phase_number
+            context['presale_name'] = active_presale.name
+            context['presale_raised'] = active_presale.total_raised
+            context['presale_goal'] = active_presale.goal_amount
+            context['presale_progress'] = active_presale.progress_percentage
+            context['presale_participants'] = active_presale.total_participants
+            context['presale_price'] = active_presale.price_per_token
+            
+            # Recent purchases
+            context['recent_presale_purchases'] = PresalePurchase.objects.filter(
+                phase=active_presale,
+                status='completed'
+            ).select_related('user').order_by('-created_at')[:5]
+        else:
+            context['presale_active'] = False
+        
         return render(request, 'admin/dashboard.html', context)
     
     def p2p_analytics_view(self, request):
@@ -504,3 +527,12 @@ from usdc_transactions.models import USDCDeposit, USDCWithdrawal
 from usdc_transactions.admin import USDCDepositAdmin, USDCWithdrawalAdmin
 confio_admin_site.register(USDCDeposit, USDCDepositAdmin)
 confio_admin_site.register(USDCWithdrawal, USDCWithdrawalAdmin)
+
+# Presale models
+from presale.models import PresalePhase, PresalePurchase, PresaleStats, UserPresaleLimit, PresaleSettings
+from presale.admin import PresalePhaseAdmin, PresalePurchaseAdmin, PresaleStatsAdmin, UserPresaleLimitAdmin, PresaleSettingsAdmin
+confio_admin_site.register(PresaleSettings, PresaleSettingsAdmin)
+confio_admin_site.register(PresalePhase, PresalePhaseAdmin)
+confio_admin_site.register(PresalePurchase, PresalePurchaseAdmin)
+confio_admin_site.register(PresaleStats, PresaleStatsAdmin)
+confio_admin_site.register(UserPresaleLimit, UserPresaleLimitAdmin)

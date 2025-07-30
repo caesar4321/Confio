@@ -2095,6 +2095,123 @@ python manage.py reorder_achievements
 4. **Clear achievement distinction** - "Conexión Exitosa" vs "Referido Exitoso"
 5. **No monetary values shown** - CONFIO displayed as points, not dollars
 
+## 🚀 CONFIO Token Presale System
+
+Confío includes a comprehensive presale system for the CONFIO utility token, designed with transparency and community participation in mind.
+
+### Token Distribution
+
+- **95% Founder & Team**: Majority control like any successful startup
+- **5% Community Presale**: Opportunity for early supporters, not VCs
+
+### Presale Phases
+
+| Phase | Name | Price | Goal | Target | Status |
+|-------|------|-------|------|--------|--------|
+| **Phase 1** | Raíces Fuertes | 0.25 cUSD | $1M | 🇻🇪🇦🇷🇧🇴 Community base | Active/Coming Soon |
+| **Phase 2** | Expansión Regional | 0.50 cUSD | $10M | 🌎 New markets | Upcoming |
+| **Phase 3** | Alcance Continental | 1.00 cUSD | TBD | 🌍 Global investors | Future |
+
+### Key Features
+
+1. **Global On/Off Switch**: Master control to enable/disable all presale features
+2. **Phase Management**: Activate phases independently with different pricing
+3. **Purchase Limits**: Min/max purchase amounts per transaction and per user
+4. **Real-time Tracking**: Dashboard shows progress, participants, and funds raised
+5. **Token Locking**: All purchased tokens remain locked until mass adoption
+
+### Technical Implementation
+
+#### Django Models (`presale/models.py`)
+- **PresaleSettings**: Singleton model for global presale control
+- **PresalePhase**: Individual presale phases with pricing and limits
+- **PresalePurchase**: Transaction records for token purchases
+- **PresaleStats**: Aggregated statistics per phase
+- **UserPresaleLimit**: Per-user purchase tracking for limits
+
+#### GraphQL Integration
+```graphql
+# Check if presale is active (no auth required)
+query GetPresaleStatus {
+  isPresaleActive
+}
+
+# Get active presale phase
+query GetActivePresale {
+  activePresalePhase {
+    phaseNumber
+    pricePerToken
+    minPurchase
+    maxPurchase
+    totalRaised
+    progressPercentage
+  }
+}
+
+# Purchase tokens
+mutation PurchasePresaleTokens($cusdAmount: String!) {
+  purchasePresaleTokens(cusdAmount: $cusdAmount) {
+    success
+    purchase {
+      confioAmount
+      transactionHash
+    }
+  }
+}
+```
+
+#### UI Components
+- **ConfioPresaleScreen**: Main presale information and phases
+- **ConfioTokenomicsScreen**: Transparent token distribution explanation
+- **ConfioPresaleParticipateScreen**: Token purchase interface
+- **Conditional Banners**: Show only when `isPresaleActive === true`
+
+### Admin Management
+
+1. **Enable/Disable Presale**:
+   - Navigate to Admin → Presale Settings
+   - Toggle "Is presale active" checkbox
+   - Save to enable/disable all presale features
+
+2. **Manage Phases**:
+   - Admin → Presale Phases
+   - Set status: coming_soon, active, completed, paused
+   - Configure pricing, limits, and goals
+
+3. **Monitor Progress**:
+   - Real-time dashboard in admin panel
+   - View purchases, participants, and funds raised
+   - Export data for analysis
+
+### Setup Commands
+
+```bash
+# Initial presale setup
+python manage.py setup_presale
+
+# Update presale data
+python manage.py update_presale_data
+
+# Update descriptions
+python manage.py update_presale_descriptions
+```
+
+### Security & Compliance
+
+1. **Server-side Validation**: All purchase limits enforced on backend
+2. **JWT-based Access**: User identity verified through JWT tokens
+3. **No Price Predictions**: Avoiding legal issues with growth promises
+4. **Clear Lock Terms**: Tokens locked "until mass adoption" (no specific date)
+5. **Risk Disclosure**: Clear warnings about investment risks
+
+### User Experience
+
+- **Accessible Language**: Avoiding crypto jargon ("monedas" not "tokens")
+- **Country-aware Formatting**: Numbers formatted based on user's country
+- **Mobile-first Design**: Optimized for React Native app
+- **Progress Visualization**: Real-time progress bars and participant counts
+- **Social Proof**: Show number of participants and community growth
+
 ## 📱 Social Financial Marketing Strategy: "Sigue al fundador"
 
 ### Overview

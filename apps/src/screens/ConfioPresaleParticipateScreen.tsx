@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, Image, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, Image, TextInput, Alert, ActivityIndicator } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -7,6 +7,8 @@ import { MainStackParamList } from '../types/navigation';
 import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 import CONFIOLogo from '../assets/png/CONFIO.png';
+import { useQuery, useMutation } from '@apollo/client';
+import { GET_ACTIVE_PRESALE, PURCHASE_PRESALE_TOKENS } from '../apollo/queries';
 
 const colors = {
   primary: '#34d399',
@@ -29,16 +31,56 @@ export const ConfioPresaleParticipateScreen = () => {
   const { selectedCountry } = useCountry();
   
   const [amount, setAmount] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   
   // Use the app's selected country for formatting
   const countryCode = selectedCountry?.[2] || 'VE';
   const formatWithLocale = (num: number, options = {}) => 
     formatNumber(num, countryCode, { minimumFractionDigits: 2, maximumFractionDigits: 2, ...options });
 
-  const presalePrice = 0.25; // cUSD per CONFIO
-  const minAmount = 10; // Minimum 10 cUSD
-  const maxAmount = 1000; // Maximum 1000 cUSD for Fase 1
+  // Fetch presale data
+  const { data, loading, error, refetch } = useQuery(GET_ACTIVE_PRESALE, {
+    fetchPolicy: 'cache-and-network',
+  });
+
+  // Purchase mutation
+  const [purchaseTokens, { loading: purchaseLoading }] = useMutation(PURCHASE_PRESALE_TOKENS, {
+    onCompleted: (data) => {
+      if (data.purchasePresaleTokens.success) {
+        Alert.alert(
+          '¡Intercambio Exitoso!',
+          `Has intercambiado ${amount} cUSD por ${formatWithLocale(parseFloat(data.purchasePresaleTokens.purchase.confioAmount), { minimumFractionDigits: 2 })} $CONFIO.\n\nLas monedas están en tu cuenta pero permanecerán bloqueadas mientras construimos juntos.`,
+          [
+            {
+              text: 'Ver Mi Cuenta',
+              onPress: () => {
+                navigation.navigate('BottomTabs', { screen: 'Home' });
+              },
+            },
+          ]
+        );
+        setAmount('');
+        refetch(); // Refresh presale data
+      }
+    },
+    onError: (error) => {
+      Alert.alert('Error', error.message);
+    }
+  });
+
+  // Get presale data from query
+  const presale = data?.activePresalePhase;
+  const presalePrice = presale ? parseFloat(presale.pricePerToken) : 0.25;
+  const minAmount = presale ? parseFloat(presale.minPurchase) : 10;
+  const maxAmount = presale ? parseFloat(presale.maxPurchase) : 1000;
+  
+  const presaleData = {
+    raised: presale ? parseFloat(presale.totalRaised) : 0,
+    goal: presale ? parseFloat(presale.goalAmount) : 1000000,
+    participants: presale?.totalParticipants || 0,
+  };
+  
+  const percentComplete = Math.min((presaleData.raised / presaleData.goal) * 100, 100);
+  const hasExceededGoal = presaleData.raised > presaleData.goal;
 
   const calculateTokens = (cUsdAmount: number) => {
     return cUsdAmount / presalePrice;
@@ -49,25 +91,11 @@ export const ConfioPresaleParticipateScreen = () => {
   const isValidAmount = parsedAmount >= minAmount && parsedAmount <= maxAmount;
 
   const executeSwap = async () => {
-    setIsLoading(true);
-    
-    // Simulate swap transaction
-    setTimeout(() => {
-      setIsLoading(false);
-      Alert.alert(
-        '¡Intercambio Exitoso!',
-        `Has intercambiado ${amount} cUSD por ${formatWithLocale(tokensReceived, { minimumFractionDigits: 2 })} $CONFIO.\n\nLas monedas están en tu cuenta pero permanecerán bloqueadas mientras construimos juntos.`,
-        [
-          {
-            text: 'Ver Mi Cuenta',
-            onPress: () => {
-              navigation.navigate('BottomTabs', { screen: 'Home' });
-            },
-          },
-        ]
-      );
-      setAmount('');
-    }, 3000);
+    purchaseTokens({
+      variables: {
+        cusdAmount: amount
+      }
+    });
   };
 
   const handleSwap = async () => {
@@ -92,6 +120,45 @@ export const ConfioPresaleParticipateScreen = () => {
     );
   };
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Icon name="arrow-left" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Intercambiar por $CONFIO</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.secondary} />
+          <Text style={styles.loadingText}>Cargando datos de preventa...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error || !presale) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Icon name="arrow-left" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Intercambiar por $CONFIO</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+        <View style={styles.errorContainer}>
+          <Icon name="alert-circle" size={48} color={colors.secondary} />
+          <Text style={styles.errorText}>No hay preventa activa en este momento</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
+            <Text style={styles.retryButtonText}>Reintentar</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -112,40 +179,71 @@ export const ConfioPresaleParticipateScreen = () => {
               resizeMode="contain"
             />
           </View>
-          <Text style={styles.heroTitle}>Preventa Fase 1</Text>
+          <Text style={styles.heroTitle}>Preventa Fase {presale?.phaseNumber || 1}</Text>
           <Text style={styles.heroSubtitle}>
-            Raíces Fuertes - Donde todo comienza 🌱
+            {presale?.name || 'Raíces Fuertes'} - {presale?.phaseNumber === 1 ? 'Donde todo comienza 🌱' : presale?.description || ''}
           </Text>
           
           <View style={styles.priceBadge}>
-            <Text style={styles.priceText}>0.25 cUSD por $CONFIO</Text>
+            <Text style={styles.priceText}>{presalePrice.toFixed(2)} cUSD por $CONFIO</Text>
           </View>
         </View>
 
         {/* Current Status */}
         <View style={styles.statusSection}>
           <View style={styles.statusCard}>
-            <Text style={styles.statusTitle}>¡Fase 1 Activa!</Text>
+            <Text style={styles.statusTitle}>
+              {hasExceededGoal ? '¡Meta Superada! 🎉' : `¡Fase ${presale?.phaseNumber || 1} Activa!`}
+            </Text>
             <Text style={styles.statusDescription}>
-              ¡La Fase 1 está activa! Puedes intercambiar cUSD por $CONFIO al precio más bajo de la historia. 
-              Oferta limitada mientras tengamos monedas disponibles.
+              {hasExceededGoal 
+                ? `La comunidad ha superado todas las expectativas. La Fase ${presale?.phaseNumber || 1} continúa disponible por tiempo limitado.`
+                : `¡La Fase ${presale?.phaseNumber || 1} está activa! Puedes intercambiar cUSD por $CONFIO al precio más bajo de la historia. Oferta limitada mientras tengamos monedas disponibles.`
+              }
             </Text>
             <View style={styles.progressContainer}>
-              <Text style={styles.progressLabel}>Recaudado en Fase 1</Text>
-              <Text style={styles.progressAmount}>{formatWithLocale(650000, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} cUSD</Text>
-              <Text style={styles.progressGoal}>Meta: {formatWithLocale(1000000, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} cUSD</Text>
+              <Text style={styles.progressLabel}>Recaudado en Fase {presale?.phaseNumber || 1}</Text>
+              <Text style={[styles.progressAmount, hasExceededGoal && styles.progressAmountExceeded]}>
+                {formatWithLocale(presaleData.raised, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} cUSD
+              </Text>
+              
+              {hasExceededGoal ? (
+                <View style={styles.exceededContainer}>
+                  <Text style={styles.progressGoal}>
+                    Meta original: {formatWithLocale(presaleData.goal, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} cUSD
+                  </Text>
+                  <View style={styles.exceededBadge}>
+                    <Icon name="trending-up" size={14} color="#fff" />
+                    <Text style={styles.exceededText}>
+                      {Math.round(((presaleData.raised - presaleData.goal) / presaleData.goal) * 100)}% sobre la meta
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <Text style={styles.progressGoal}>
+                  Meta: {formatWithLocale(presaleData.goal, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} cUSD
+                </Text>
+              )}
               
               <View style={styles.progressBarContainer}>
                 <View style={styles.progressBar}>
-                  <View style={[styles.progressFill, { width: '65%' }]} />
+                  <View style={[
+                    styles.progressFill, 
+                    { width: `${percentComplete}%` },
+                    hasExceededGoal && styles.progressFillExceeded
+                  ]} />
                 </View>
-                <Text style={styles.progressPercentage}>65% completado</Text>
+                <Text style={[styles.progressPercentage, hasExceededGoal && styles.progressPercentageExceeded]}>
+                  {hasExceededGoal ? '¡Meta alcanzada!' : `${Math.round(percentComplete)}% completado`}
+                </Text>
               </View>
               
               <View style={styles.participantStats}>
-                <Icon name="users" size={14} color={colors.primary} />
+                <Icon name="users" size={14} color={hasExceededGoal ? colors.secondary : colors.primary} />
                 <Text style={styles.participantText}>
-                  <Text style={styles.participantCount}>1,234</Text> personas ya participaron
+                  <Text style={[styles.participantCount, hasExceededGoal && styles.participantCountExceeded]}>
+                    {formatWithLocale(presaleData.participants, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                  </Text> personas ya participaron
                 </Text>
               </View>
             </View>
@@ -185,7 +283,7 @@ export const ConfioPresaleParticipateScreen = () => {
                 </View>
                 <View style={styles.resultRow}>
                   <Text style={styles.resultLabel}>Precio por moneda:</Text>
-                  <Text style={styles.resultValue}>0.25 cUSD</Text>
+                  <Text style={styles.resultValue}>{presalePrice.toFixed(2)} cUSD</Text>
                 </View>
                 {!isValidAmount && (
                   <Text style={styles.errorText}>
@@ -205,9 +303,9 @@ export const ConfioPresaleParticipateScreen = () => {
               (!isValidAmount || parsedAmount === 0) && styles.swapButtonDisabled
             ]}
             onPress={handleSwap}
-            disabled={!isValidAmount || parsedAmount === 0 || isLoading}
+            disabled={!isValidAmount || parsedAmount === 0 || purchaseLoading}
           >
-            {isLoading ? (
+            {purchaseLoading ? (
               <Text style={styles.swapButtonText}>Procesando Intercambio...</Text>
             ) : (
               <>
@@ -242,7 +340,7 @@ export const ConfioPresaleParticipateScreen = () => {
             <View style={styles.benefitItem}>
               <Icon name="star" size={20} color={colors.secondary} />
               <Text style={styles.benefitText}>
-                <Text style={styles.benefitBold}>Precio más bajo:</Text> 0.25 cUSD por moneda vs precios futuros más altos
+                <Text style={styles.benefitBold}>Precio más bajo:</Text> {presalePrice.toFixed(2)} cUSD por moneda vs precios futuros más altos
               </Text>
             </View>
             
@@ -480,6 +578,37 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: colors.primary,
   },
+  progressAmountExceeded: {
+    color: colors.secondary,
+  },
+  exceededContainer: {
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+  },
+  exceededBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.secondary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 6,
+  },
+  exceededText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  progressFillExceeded: {
+    backgroundColor: colors.secondary,
+  },
+  progressPercentageExceeded: {
+    color: colors.secondary,
+  },
+  participantCountExceeded: {
+    color: colors.secondary,
+  },
   swapSection: {
     paddingHorizontal: 20,
     paddingBottom: 24,
@@ -657,5 +786,40 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 40,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6B7280',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  retryButton: {
+    backgroundColor: colors.secondary,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 20,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

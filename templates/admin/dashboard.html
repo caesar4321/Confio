@@ -155,6 +155,38 @@
         color: #1f2937;
     }
     
+    .metric-progress {
+        margin-top: 8px;
+    }
+    
+    .progress-bar {
+        width: 100%;
+        height: 8px;
+        background: #e5e7eb;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    
+    .progress-fill {
+        height: 100%;
+        background: #3b82f6;
+        transition: width 0.3s ease;
+    }
+    
+    .alert {
+        padding: 16px;
+        border-radius: 8px;
+        margin-bottom: 30px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .alert a {
+        color: inherit;
+        text-decoration: underline;
+    }
+    
     .chart-container {
         background: white;
         border-radius: 12px;
@@ -256,6 +288,55 @@
         </div>
     </div>
     
+    <!-- Presale Status -->
+    <h2 class="section-title">🚀 CONFIO Token Presale TEST</h2>
+    <p>Presale Active: {{ presale_active|default:"NOT SET" }}</p>
+    {% if presale_active %}
+    <h2 class="section-title">🚀 CONFIO Token Presale - Phase {{ presale_phase }}: {{ presale_name }}</h2>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Total Raised</div>
+            <div class="metric-value">${{ presale_raised|floatformat:2|intcomma }}</div>
+            <div class="metric-change">Goal: ${{ presale_goal|floatformat:0|intcomma }}</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-label">Progress</div>
+            <div class="metric-value">{{ presale_progress|floatformat:1 }}%</div>
+            <div class="metric-progress">
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {{ presale_progress }}%; background: #8b5cf6;"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-label">Participants</div>
+            <div class="metric-value">{{ presale_participants|intcomma }}</div>
+            <div class="metric-change">Unique buyers</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-label">Price per Token</div>
+            <div class="metric-value">${{ presale_price }}</div>
+            <div class="metric-change">CONFIO/cUSD</div>
+        </div>
+    </div>
+    
+    <div class="quick-actions">
+        <a href="/admin/presale/presalephase/" class="action-button">
+            Manage Presale Phases
+        </a>
+        <a href="/admin/presale/presalepurchase/" class="action-button secondary">
+            View All Purchases
+        </a>
+    </div>
+    {% else %}
+    <div class="alert" style="background: #fef3c7; color: #92400e; padding: 16px; border-radius: 8px; margin-bottom: 30px;">
+        <strong>⚠️ No Active Presale</strong> - <a href="/admin/presale/presalephase/">Activate a presale phase</a>
+    </div>
+    {% endif %}
+
     <!-- Fraud Detection Statistics -->
     {% if fraud_stats %}
     <h2 class="section-title">🔍 Fraud Detection Overview</h2>

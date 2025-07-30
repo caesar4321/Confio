@@ -32,7 +32,7 @@ import { useAccount } from '../contexts/AccountContext';
 import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
 import { useQuery } from '@apollo/client';
-import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
+import { GET_ACCOUNT_BALANCE, GET_PRESALE_STATUS } from '../apollo/queries';
 import { useCountry } from '../contexts/CountryContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
@@ -134,6 +134,12 @@ export const HomeScreen = () => {
     variables: { tokenType: 'CONFIO' },
     fetchPolicy: 'no-cache', // Completely bypass cache to ensure correct account context
   });
+  
+  // Check if presale is globally active
+  const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, {
+    fetchPolicy: 'cache-and-network',
+  });
+  const isPresaleActive = presaleStatusData?.isPresaleActive === true;
   
   // Refetch balances when active account changes
   useEffect(() => {
@@ -652,8 +658,9 @@ export const HomeScreen = () => {
           </Animated.View>
         </Animated.View>
         
-        {/* CONFIO Presale Banner */}
-        <Animated.View 
+        {/* CONFIO Presale Banner - Only show if presale is active */}
+        {isPresaleActive && (
+          <Animated.View 
           style={[
             styles.presaleBanner,
             {
@@ -689,6 +696,7 @@ export const HomeScreen = () => {
             </View>
           </TouchableOpacity>
         </Animated.View>
+        )}
         
         {/* Quick Actions */}
         <Animated.View 
