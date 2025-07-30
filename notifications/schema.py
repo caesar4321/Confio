@@ -5,10 +5,11 @@ from django.db.models import Q, Exists, OuterRef
 from django.utils import timezone
 from datetime import timedelta
 
-from .models import Notification, NotificationRead, NotificationPreference, NotificationType
+from .models import Notification, NotificationRead, NotificationPreference, NotificationType, FCMDeviceToken
 from users.models import User, Account
 from graphql_jwt.decorators import login_required
 from users.jwt_context import get_jwt_business_context_with_validation
+from .fcm_service import register_device_token, unregister_device_token, send_test_push
 
 
 class NotificationTypeEnum(graphene.Enum):
@@ -102,6 +103,16 @@ class NotificationPreferenceType(DjangoObjectType):
         ]
 
 
+class FCMDeviceTokenType(DjangoObjectType):
+    """GraphQL type for FCMDeviceToken model"""
+    class Meta:
+        model = FCMDeviceToken
+        fields = [
+            'id', 'device_type', 'device_id', 'device_name', 'app_version',
+            'is_active', 'last_used', 'created_at', 'updated_at'
+        ]
+
+
 class NotificationConnection(graphene.Connection):
     """Pagination connection for notifications"""
     class Meta:
@@ -154,6 +165,8 @@ class Query(graphene.ObjectType):
     notification_preferences = graphene.Field(NotificationPreferenceType)
     
     unread_notification_count = graphene.Int()
+    
+    fcm_device_tokens = graphene.List(FCMDeviceTokenType)
     
     @login_required
     def resolve_notifications(self, info, **kwargs):
@@ -324,6 +337,12 @@ class Query(graphene.ObjectType):
         ).count()
         
         return personal_unread + broadcast_unread
+    
+    @login_required
+    def resolve_fcm_device_tokens(self, info):
+        """Get user's FCM device tokens"""
+        user = info.context.user
+        return FCMDeviceToken.objects.filter(user=user, is_active=True)
 
 
 class MarkNotificationRead(graphene.Mutation):
@@ -483,12 +502,89 @@ class CreateTestNotification(graphene.Mutation):
         )
 
 
+class RegisterFCMToken(graphene.Mutation):
+    """Register an FCM device token for push notifications"""
+    class Arguments:
+        token = graphene.String(required=True)
+        device_type = graphene.String(required=True)  # 'ios', 'android', 'web'
+        device_id = graphene.String(required=True)
+        device_name = graphene.String(required=False)
+        app_version = graphene.String(required=False)
+    
+    success = graphene.Boolean()
+    device_token = graphene.Field(FCMDeviceTokenType)
+    
+    @login_required
+    def mutate(self, info, token, device_type, device_id, device_name=None, app_version=None):
+        user = info.context.user
+        
+        # Validate device type
+        if device_type not in ['ios', 'android', 'web']:
+            raise GraphQLError("Invalid device_type. Must be 'ios', 'android', or 'web'")
+        
+        try:
+            device_token = register_device_token(
+                user=user,
+                token=token,
+                device_type=device_type,
+                device_id=device_id,
+                device_name=device_name,
+                app_version=app_version
+            )
+            
+            return RegisterFCMToken(success=True, device_token=device_token)
+            
+        except Exception as e:
+            raise GraphQLError(f"Failed to register FCM token: {str(e)}")
+
+
+class UnregisterFCMToken(graphene.Mutation):
+    """Unregister an FCM device token"""
+    class Arguments:
+        device_id = graphene.String(required=True)
+    
+    success = graphene.Boolean()
+    
+    @login_required
+    def mutate(self, info, device_id):
+        user = info.context.user
+        
+        success = unregister_device_token(user, device_id)
+        
+        if not success:
+            raise GraphQLError("Device token not found")
+        
+        return UnregisterFCMToken(success=True)
+
+
+class SendTestPushNotification(graphene.Mutation):
+    """Send a test push notification to the current user"""
+    success = graphene.Boolean()
+    sent_count = graphene.Int()
+    failed_count = graphene.Int()
+    
+    @login_required
+    def mutate(self, info):
+        user = info.context.user
+        
+        result = send_test_push(user)
+        
+        return SendTestPushNotification(
+            success=result.get('success', False),
+            sent_count=result.get('sent', 0),
+            failed_count=result.get('failed', 0)
+        )
+
+
 class Mutation(graphene.ObjectType):
     """Notification mutations"""
     mark_notification_read = MarkNotificationRead.Field()
     mark_all_notifications_read = MarkAllNotificationsRead.Field()
     update_notification_preferences = UpdateNotificationPreferences.Field()
     create_test_notification = CreateTestNotification.Field()
+    register_fcm_token = RegisterFCMToken.Field()
+    unregister_fcm_token = UnregisterFCMToken.Field()
+    send_test_push_notification = SendTestPushNotification.Field()
 
 
 # Schema to be included in main schema

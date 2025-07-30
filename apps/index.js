@@ -9,6 +9,9 @@ require("./polyfills.js");
 import { enableScreens } from 'react-native-screens';
 enableScreens();
 
+// Register background messaging handler
+import './src/services/backgroundMessaging';
+
 // Apollo Client setup and error messages
 import { ApolloClient, InMemoryCache, ApolloProvider } from '@apollo/client';
 import { loadErrorMessages, loadDevMessages } from "@apollo/client/dev";

@@ -14,6 +14,8 @@ import { AuthNavigator } from './navigation/AuthNavigator';
 import { MainNavigator } from './navigation/MainNavigator';
 import { RootStackParamList } from './types/navigation';
 import { initializeApp } from './services/appInitializer';
+import messagingService from './services/messagingService';
+import { navigationRef } from './navigation/RootNavigation';
 
 // Enable screens before any navigation setup
 enableScreens();
@@ -27,6 +29,15 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const Navigation: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
   console.log('Navigation render:', { isAuthenticated, isLoading });
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Initialize messaging service when user is authenticated
+      messagingService.initialize().catch(error => {
+        console.error('Failed to initialize messaging service:', error);
+      });
+    }
+  }, [isAuthenticated]);
 
   if (isLoading) {
     console.log('Showing loading indicator');
@@ -56,12 +67,10 @@ const Navigation: React.FC = () => {
 };
 
 const AppContent: React.FC = () => {
-  const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null);
-
   return (
     <NavigationContainer ref={navigationRef}>
       <AuthProvider 
-        navigationRef={navigationRef as React.RefObject<NavigationContainerRef<RootStackParamList>>}
+        navigationRef={navigationRef as any}
       >
         <AccountProvider>
           <CountryProvider>
