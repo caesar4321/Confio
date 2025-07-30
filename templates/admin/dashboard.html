@@ -258,6 +258,7 @@
         <a href="{% url 'confio_admin:user_analytics' %}" class="action-button secondary">User Analytics</a>
         <a href="{% url 'confio_admin:transaction_analytics' %}" class="action-button secondary">Transaction Analytics</a>
         <a href="{% url 'confio_admin:achievement_dashboard' %}" class="action-button">🏆 Achievement Dashboard</a>
+        <a href="{% url 'confio_admin:notifications_notification_broadcast' %}" class="action-button">📡 Send Broadcast</a>
         <a href="{% url 'confio_admin:p2p_exchange_p2poffer_add' %}" class="action-button secondary">Create Test Offer</a>
     </div>
     
@@ -462,6 +463,18 @@
             <div class="metric-label">Conversions Today</div>
             <div class="metric-value">{{ conversions_today|intcomma }}</div>
             <div class="metric-change">{{ conversions_this_week }} this week</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-label">Notifications Today</div>
+            <div class="metric-value">{{ notifications_sent_today|intcomma }}</div>
+            <div class="metric-change">{{ push_notifications_today }} push sent</div>
+        </div>
+        
+        <div class="metric-card">
+            <div class="metric-label">Active Devices</div>
+            <div class="metric-value">{{ active_fcm_tokens|intcomma }}</div>
+            <div class="metric-change">Ready for push</div>
         </div>
     </div>
     

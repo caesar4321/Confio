@@ -1,0 +1,91 @@
+{% extends "admin/change_list.html" %}
+{% load static %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .notification-actions {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 5px;
+        padding: 15px;
+        margin-bottom: 20px;
+    }
+    
+    .notification-actions h3 {
+        margin-top: 0;
+        color: #495057;
+        font-size: 16px;
+    }
+    
+    .action-button {
+        display: inline-block;
+        padding: 10px 20px;
+        margin-right: 10px;
+        background: #007bff;
+        color: white;
+        text-decoration: none;
+        border-radius: 5px;
+        font-weight: bold;
+    }
+    
+    .action-button:hover {
+        background: #0056b3;
+        color: white;
+        text-decoration: none;
+    }
+    
+    .action-button.secondary {
+        background: #6c757d;
+    }
+    
+    .action-button.secondary:hover {
+        background: #545b62;
+    }
+    
+    .stats-summary {
+        float: right;
+        text-align: right;
+    }
+    
+    .stat-item {
+        display: inline-block;
+        margin-left: 20px;
+    }
+    
+    .stat-number {
+        font-size: 20px;
+        font-weight: bold;
+        color: #28a745;
+    }
+    
+    .stat-label {
+        display: block;
+        color: #6c757d;
+        font-size: 12px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="notification-actions">
+    <h3>Quick Actions</h3>
+    <div>
+        <a href="{{ broadcast_url }}" class="action-button">
+            📡 Send Broadcast Notification
+        </a>
+        <a href="{{ stats_url }}" class="action-button secondary">
+            📊 View Statistics
+        </a>
+        
+        <div class="stats-summary">
+            <div class="stat-item">
+                <span class="stat-number">{{ cl.result_count }}</span>
+                <span class="stat-label">Total Notifications</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{ block.super }}
+{% endblock %}

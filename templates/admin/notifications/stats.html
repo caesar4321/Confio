@@ -1,0 +1,204 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .stats-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+    }
+    
+    .stat-card {
+        background: #fff;
+        border: 1px solid #dee2e6;
+        border-radius: 5px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .stat-card h3 {
+        margin-top: 0;
+        color: #495057;
+        font-size: 16px;
+    }
+    
+    .stat-value {
+        font-size: 36px;
+        font-weight: bold;
+        color: #007bff;
+        margin: 10px 0;
+    }
+    
+    .stat-card.success .stat-value {
+        color: #28a745;
+    }
+    
+    .stat-card.warning .stat-value {
+        color: #ffc107;
+    }
+    
+    .stat-card.info .stat-value {
+        color: #17a2b8;
+    }
+    
+    .chart-container {
+        background: #fff;
+        border: 1px solid #dee2e6;
+        border-radius: 5px;
+        padding: 20px;
+        margin-bottom: 30px;
+    }
+    
+    .type-breakdown {
+        margin-top: 20px;
+    }
+    
+    .type-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 0;
+        border-bottom: 1px solid #eee;
+    }
+    
+    .type-bar {
+        height: 20px;
+        background: #e9ecef;
+        border-radius: 10px;
+        overflow: hidden;
+        flex-grow: 1;
+        margin: 0 10px;
+    }
+    
+    .type-fill {
+        height: 100%;
+        background: #007bff;
+        transition: width 0.3s ease;
+    }
+    
+    .date-filter {
+        text-align: right;
+        margin-bottom: 20px;
+    }
+    
+    .date-filter select {
+        padding: 8px 15px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="stats-container">
+    <h1>{{ title }}</h1>
+    
+    <div class="date-filter">
+        <form method="get" id="dateFilterForm">
+            <label for="days">Time Period:</label>
+            <select name="days" id="days" onchange="document.getElementById('dateFilterForm').submit();">
+                <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 days</option>
+                <option value="14" {% if days == 14 %}selected{% endif %}>Last 14 days</option>
+                <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 days</option>
+                <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 days</option>
+            </select>
+        </form>
+    </div>
+    
+    <div class="stats-grid">
+        <div class="stat-card">
+            <h3>Total Notifications</h3>
+            <div class="stat-value">{{ stats.total_sent|default:"0" }}</div>
+        </div>
+        
+        <div class="stat-card success">
+            <h3>Push Notifications Sent</h3>
+            <div class="stat-value">{{ stats.push_sent|default:"0" }}</div>
+        </div>
+        
+        <div class="stat-card warning">
+            <h3>Broadcast Messages</h3>
+            <div class="stat-value">{{ stats.broadcasts|default:"0" }}</div>
+        </div>
+        
+        <div class="stat-card info">
+            <h3>Personal Notifications</h3>
+            <div class="stat-value">{{ stats.personal|default:"0" }}</div>
+        </div>
+    </div>
+    
+    <div class="chart-container">
+        <h3>Notifications by Type</h3>
+        <div class="type-breakdown">
+            {% for type_name, count in stats.by_type.items %}
+            <div class="type-item">
+                <span style="min-width: 200px;">{{ type_name }}</span>
+                <div class="type-bar">
+                    <div class="type-fill" style="width: {% widthratio count stats.total_sent 100 %}%;"></div>
+                </div>
+                <span style="min-width: 60px; text-align: right;">{{ count }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <div class="chart-container">
+        <h3>Daily Activity</h3>
+        <canvas id="dailyChart" height="100"></canvas>
+    </div>
+    
+    <div style="text-align: center; margin-top: 30px;">
+        <a href="{% url 'admin:notifications_notification_changelist' %}" class="btn btn-secondary">
+            ← Back to Notifications
+        </a>
+        <a href="{% url 'admin:notifications_notification_broadcast' %}" class="btn btn-primary">
+            📡 Send Broadcast
+        </a>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+<script>
+// Daily activity chart
+const ctx = document.getElementById('dailyChart').getContext('2d');
+const dailyData = {{ stats.daily_counts|safe|default:"[]" }};
+
+new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: dailyData.map(d => new Date(d.date).toLocaleDateString()),
+        datasets: [{
+            label: 'Notifications Sent',
+            data: dailyData.map(d => d.count),
+            borderColor: '#007bff',
+            backgroundColor: 'rgba(0, 123, 255, 0.1)',
+            tension: 0.1
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    stepSize: 1
+                }
+            }
+        }
+    }
+});
+</script>
+{% endblock %}
