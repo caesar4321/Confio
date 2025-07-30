@@ -16,6 +16,7 @@ import { RootStackParamList } from './types/navigation';
 import { initializeApp } from './services/appInitializer';
 import messagingService from './services/messagingService';
 import { navigationRef } from './navigation/RootNavigation';
+import { initializeNotifee } from './services/notifeeConfig';
 
 // Enable screens before any navigation setup
 enableScreens();
@@ -23,6 +24,11 @@ enableScreens();
 // Initialize app services immediately
 console.log('[PERF] App.tsx loaded, initializing app services');
 initializeApp();
+
+// Initialize Notifee
+initializeNotifee().catch(error => {
+  console.error('Failed to initialize Notifee:', error);
+});
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 

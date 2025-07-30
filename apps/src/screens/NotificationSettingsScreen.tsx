@@ -8,10 +8,12 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation } from '@apollo/client';
-import Icon from 'react-native-vector-icons/Ionicons';
+import Icon from 'react-native-vector-icons/Feather';
+import notifee, { AndroidImportance } from '@notifee/react-native';
 import messagingService from '../services/messagingService';
 import {
   UPDATE_NOTIFICATION_PREFERENCES,
@@ -107,6 +109,44 @@ const NotificationSettingsScreen: React.FC = () => {
     }
   };
 
+  const handleTestLocalNotification = async () => {
+    try {
+      // Create channel first for Android
+      if (Platform.OS === 'android') {
+        await notifee.createChannel({
+          id: 'default',
+          name: 'Default Channel',
+          importance: AndroidImportance.HIGH,
+        });
+      }
+      
+      // Test local notification with Notifee
+      await notifee.displayNotification({
+        title: 'Test Local Notification',
+        body: 'This is a test notification from Confío',
+        android: {
+          channelId: 'default',
+          smallIcon: 'ic_stat_ic_notification',
+          color: '#8b5cf6',  // Confío violet accent color
+          pressAction: {
+            id: 'default',
+          },
+        },
+        ios: {
+          foregroundPresentationOptions: {
+            badge: true,
+            sound: true,
+            banner: true,
+          },
+        },
+      });
+      Alert.alert('Success', 'Local notification displayed');
+    } catch (error) {
+      console.error('Error displaying local notification:', error);
+      Alert.alert('Error', 'Failed to display local notification');
+    }
+  };
+
   if (loading || queryLoading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -130,7 +170,7 @@ const NotificationSettingsScreen: React.FC = () => {
         {/* System Notifications */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Icon name="notifications-outline" size={24} color="#333" />
+            <Icon name="bell" size={24} color="#333" />
             <Text style={styles.sectionTitle}>System Notifications</Text>
           </View>
           
@@ -154,7 +194,7 @@ const NotificationSettingsScreen: React.FC = () => {
         {systemNotificationsEnabled && (
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Icon name="options-outline" size={24} color="#333" />
+              <Icon name="sliders" size={24} color="#333" />
               <Text style={styles.sectionTitle}>Push Notification Categories</Text>
             </View>
             
@@ -257,7 +297,7 @@ const NotificationSettingsScreen: React.FC = () => {
         {/* In-App Notifications */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Icon name="phone-portrait-outline" size={24} color="#333" />
+            <Icon name="smartphone" size={24} color="#333" />
             <Text style={styles.sectionTitle}>In-App Notifications</Text>
           </View>
           
@@ -277,15 +317,27 @@ const NotificationSettingsScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Test Notification */}
-        {systemNotificationsEnabled && preferences.pushEnabled && (
-          <TouchableOpacity
-            style={styles.testButton}
-            onPress={handleSendTestNotification}
-          >
-            <Icon name="send-outline" size={20} color="#FFF" />
-            <Text style={styles.testButtonText}>Send Test Notification</Text>
-          </TouchableOpacity>
+        {/* Test Notifications */}
+        {systemNotificationsEnabled && (
+          <>
+            {preferences.pushEnabled && (
+              <TouchableOpacity
+                style={styles.testButton}
+                onPress={handleSendTestNotification}
+              >
+                <Icon name="send" size={20} color="#FFF" />
+                <Text style={styles.testButtonText}>Send Test Push Notification</Text>
+              </TouchableOpacity>
+            )}
+            
+            <TouchableOpacity
+              style={[styles.testButton, { backgroundColor: '#3ADBBB', marginTop: 10 }]}
+              onPress={handleTestLocalNotification}
+            >
+              <Icon name="bell" size={20} color="#000" />
+              <Text style={[styles.testButtonText, { color: '#000' }]}>Test Local Notification</Text>
+            </TouchableOpacity>
+          </>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -366,7 +418,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#6200EA',
+    backgroundColor: '#8b5cf6',
     marginHorizontal: 20,
     marginTop: 30,
     paddingVertical: 15,

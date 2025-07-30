@@ -323,6 +323,15 @@ export const ProfileScreen = () => {
               <Icon name="chevron-right" size={16} color="#9CA3AF" />
             </TouchableOpacity>
           )}
+          
+          <TouchableOpacity 
+            style={styles.cardOption}
+            onPress={() => navigation.navigate('NotificationSettings')}
+          >
+            <Icon name="bell" size={18} color="#6B7280" />
+            <Text style={styles.cardOptionText}>Notificaciones</Text>
+            <Icon name="chevron-right" size={16} color="#9CA3AF" />
+          </TouchableOpacity>
         </View>
       </View>
 

@@ -1,5 +1,5 @@
 import messaging from '@react-native-firebase/messaging';
-import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
+import notifee, { AndroidImportance, AndroidStyle, EventType } from '@notifee/react-native';
 import { Platform } from 'react-native';
 import * as Keychain from 'react-native-keychain';
 import DeviceInfo from 'react-native-device-info';
@@ -24,7 +24,7 @@ class MessagingService {
 
   async initialize() {
     try {
-      // Request permission
+      // Request permission through Firebase
       const authStatus = await messaging().requestPermission();
       const enabled =
         authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
@@ -33,6 +33,11 @@ class MessagingService {
       if (!enabled) {
         console.log('Notification permission denied');
         return;
+      }
+
+      // For iOS, also request Notifee permissions for foreground notifications
+      if (Platform.OS === 'ios') {
+        await notifee.requestPermission();
       }
 
       // Get or generate device ID
@@ -97,6 +102,19 @@ class MessagingService {
         }
       } catch (e) {
         // No stored token
+      }
+      
+      // For iOS, we need to register for remote notifications first
+      if (Platform.OS === 'ios') {
+        await messaging().registerDeviceForRemoteMessages();
+      }
+      
+      // Get APNs token for iOS (required for Firebase to work)
+      if (Platform.OS === 'ios') {
+        const apnsToken = await messaging().getAPNSToken();
+        if (!apnsToken) {
+          console.log('Failed to get APNs token - notifications may not work');
+        }
       }
       
       // Get current token from Firebase
@@ -216,12 +234,14 @@ class MessagingService {
   }
 
   private async displayNotification(remoteMessage: any) {
-    // Create a channel for Android
-    const channelId = await notifee.createChannel({
-      id: 'default',
-      name: 'Default Channel',
-      importance: AndroidImportance.HIGH,
-    });
+    // For Android, ensure channel exists
+    if (Platform.OS === 'android') {
+      await notifee.createChannel({
+        id: 'default',
+        name: 'Default Channel',
+        importance: AndroidImportance.HIGH,
+      });
+    }
 
     // Display the notification
     await notifee.displayNotification({
@@ -229,51 +249,40 @@ class MessagingService {
       body: remoteMessage.notification?.body || '',
       data: remoteMessage.data,
       android: {
-        channelId,
-        importance: AndroidImportance.HIGH,
+        channelId: 'default',
+        smallIcon: 'ic_stat_ic_notification',
+        largeIcon: 'ic_launcher',
+        color: '#8b5cf6',  // Confío violet accent color
         pressAction: {
           id: 'default',
         },
+        // Group notifications properly
+        groupId: 'confio_notifications',
+        groupSummary: false,  // Individual notifications should not be summaries
       },
       ios: {
-        sound: 'default',
+        foregroundPresentationOptions: {
+          badge: true,
+          sound: true,
+          banner: true,
+          list: true,
+        },
+        categoryId: 'default',
       },
     });
   }
 
   private async createNotificationChannel() {
-    // Create channels for different notification types
-    const channels = [
-      {
-        id: 'default',
-        name: 'Default Notifications',
-        importance: AndroidImportance.HIGH,
-      },
-      {
-        id: 'transactions',
-        name: 'Transaction Notifications',
-        importance: AndroidImportance.HIGH,
-      },
-      {
-        id: 'p2p',
-        name: 'P2P Trading Notifications',
-        importance: AndroidImportance.HIGH,
-      },
-      {
-        id: 'security',
-        name: 'Security Alerts',
-        importance: AndroidImportance.HIGH,
-      },
-      {
-        id: 'announcements',
-        name: 'Announcements',
-        importance: AndroidImportance.DEFAULT,
-      },
-    ];
-
-    for (const channel of channels) {
-      await notifee.createChannel(channel);
-    }
+    // Create default notification channel for Android
+    await notifee.createChannel({
+      id: 'default',
+      name: 'Confío Notifications',
+      importance: AndroidImportance.HIGH,
+      sound: 'default',
+      vibration: true,
+      lights: true,
+      lightColor: '#72D9BC',  // Notification mint color for LED
+    });
   }
 
   private handleNotificationOpen(remoteMessage: any) {
