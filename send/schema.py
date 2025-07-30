@@ -366,7 +366,7 @@ class CreateSendTransaction(graphene.Mutation):
                     message=f"Enviaste {str(amount_decimal)} {input.token_type} a {recipient_display_name}",
                     data={
                         'transaction_type': 'send',
-                        'amount': str(amount_decimal),
+                        'amount': f'-{str(amount_decimal)}',  # Negative for sent
                         'token_type': input.token_type,
                         'currency': input.token_type,
                         'transaction_id': str(send_transaction.id),
@@ -381,7 +381,7 @@ class CreateSendTransaction(graphene.Mutation):
                         'memo': send_transaction.memo,
                         'transaction_hash': send_transaction.transaction_hash,
                         'is_invited_friend': bool(recipient_phone and not recipient_user),
-                        # For TransactionDetailScreen
+                        # For TransactionDetailScreen - amount needs sign
                         'type': 'sent',
                         'to': recipient_display_name,
                         'toAddress': send_transaction.recipient_address,
@@ -409,7 +409,7 @@ class CreateSendTransaction(graphene.Mutation):
                         message=f"Recibiste {str(amount_decimal)} {input.token_type} de {sender_display_name}",
                         data={
                             'transaction_type': 'send',
-                            'amount': str(amount_decimal),
+                            'amount': f'+{str(amount_decimal)}',  # Positive for received
                             'token_type': input.token_type,
                             'currency': input.token_type,
                             'transaction_id': str(send_transaction.id),
@@ -450,7 +450,7 @@ class CreateSendTransaction(graphene.Mutation):
                         message=f"Enviaste {str(amount_decimal)} {input.token_type} a {recipient_phone}. Tienen 7 días para reclamar.",
                         data={
                             'transaction_type': 'send',
-                            'amount': str(amount_decimal),
+                            'amount': f'-{str(amount_decimal)}',  # Negative for sent invitation
                             'token_type': input.token_type,
                             'currency': input.token_type,
                             'transaction_id': str(send_transaction.id),

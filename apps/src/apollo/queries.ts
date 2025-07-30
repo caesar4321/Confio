@@ -2025,6 +2025,49 @@ export const GET_UNREAD_NOTIFICATION_COUNT = gql`
   }
 `;
 
+export const GET_SEND_TRANSACTION_BY_ID = gql`
+  query GetSendTransactionById($id: ID!) {
+    sendTransaction(id: $id) {
+      id
+      senderUser {
+        id
+        username
+        firstName
+        lastName
+        phone
+      }
+      recipientUser {
+        id
+        username
+        firstName
+        lastName
+        phone
+      }
+      senderBusiness {
+        id
+        name
+      }
+      recipientBusiness {
+        id
+        name
+      }
+      senderDisplayName
+      recipientDisplayName
+      senderPhone
+      recipientPhone
+      senderAddress
+      recipientAddress
+      amount
+      tokenType
+      memo
+      status
+      transactionHash
+      createdAt
+      invitationExpiresAt
+    }
+  }
+`;
+
 // NEW: JWT-context-aware transactions query
 export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
   query GetCurrentAccountTransactions($limit: Int, $offset: Int, $tokenTypes: [String]) {
