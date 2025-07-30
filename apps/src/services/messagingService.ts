@@ -1,5 +1,6 @@
 import messaging from '@react-native-firebase/messaging';
-import { Platform, Alert } from 'react-native';
+import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
+import { Platform } from 'react-native';
 import * as Keychain from 'react-native-keychain';
 import DeviceInfo from 'react-native-device-info';
 import { apolloClient } from '../apollo/client';
@@ -43,7 +44,10 @@ class MessagingService {
       // Set up message handlers
       this.setupMessageHandlers();
 
-      // Note: Android notification channels are handled by Firebase by default
+      // Create notification channel for Android
+      if (Platform.OS === 'android') {
+        await this.createNotificationChannel();
+      }
 
       console.log('Messaging service initialized');
     } catch (error) {
@@ -169,21 +173,7 @@ class MessagingService {
     // Handle messages when app is in foreground
     messaging().onMessage(async remoteMessage => {
       console.log('Foreground message received:', remoteMessage);
-      // Display a simple alert for foreground notifications
-      // In production, you might want to use a custom in-app notification component
-      if (remoteMessage.notification) {
-        Alert.alert(
-          remoteMessage.notification.title || 'Notification',
-          remoteMessage.notification.body || '',
-          [
-            { text: 'Dismiss', style: 'cancel' },
-            { 
-              text: 'View', 
-              onPress: () => this.handleNotificationOpen(remoteMessage)
-            }
-          ]
-        );
-      }
+      await this.displayNotification(remoteMessage);
     });
 
     // Handle notification opened from background state
@@ -214,15 +204,77 @@ class MessagingService {
       this.fcmToken = token;
     });
 
-    // Note: For advanced notification handling, consider installing @notifee/react-native
+    // Handle Notifee events
+    notifee.onForegroundEvent(({ type, detail }) => {
+      if (type === EventType.PRESS) {
+        console.log('Notification pressed:', detail.notification);
+        if (detail.notification?.data) {
+          this.handleNotificationData(detail.notification.data);
+        }
+      }
+    });
   }
 
-  // Note: displayNotification method removed - using Alert for foreground notifications
-  // Background notifications are handled automatically by FCM
+  private async displayNotification(remoteMessage: any) {
+    // Create a channel for Android
+    const channelId = await notifee.createChannel({
+      id: 'default',
+      name: 'Default Channel',
+      importance: AndroidImportance.HIGH,
+    });
 
-  // Note: Android notification channels are created automatically by FCM
-  // For custom channels, you would need to configure them in your Android native code
-  // or install @notifee/react-native
+    // Display the notification
+    await notifee.displayNotification({
+      title: remoteMessage.notification?.title || 'Confío',
+      body: remoteMessage.notification?.body || '',
+      data: remoteMessage.data,
+      android: {
+        channelId,
+        importance: AndroidImportance.HIGH,
+        pressAction: {
+          id: 'default',
+        },
+      },
+      ios: {
+        sound: 'default',
+      },
+    });
+  }
+
+  private async createNotificationChannel() {
+    // Create channels for different notification types
+    const channels = [
+      {
+        id: 'default',
+        name: 'Default Notifications',
+        importance: AndroidImportance.HIGH,
+      },
+      {
+        id: 'transactions',
+        name: 'Transaction Notifications',
+        importance: AndroidImportance.HIGH,
+      },
+      {
+        id: 'p2p',
+        name: 'P2P Trading Notifications',
+        importance: AndroidImportance.HIGH,
+      },
+      {
+        id: 'security',
+        name: 'Security Alerts',
+        importance: AndroidImportance.HIGH,
+      },
+      {
+        id: 'announcements',
+        name: 'Announcements',
+        importance: AndroidImportance.DEFAULT,
+      },
+    ];
+
+    for (const channel of channels) {
+      await notifee.createChannel(channel);
+    }
+  }
 
   private handleNotificationOpen(remoteMessage: any) {
     const data = remoteMessage.data;

@@ -19,6 +19,7 @@ import com.reactnativecommunity.cameraroll.CameraRollPackage
 import com.rt2zz.reactnativecontacts.ReactNativeContacts
 import io.invertase.firebase.messaging.ReactNativeFirebaseMessagingPackage
 import com.learnium.RNDeviceInfo.RNDeviceInfo
+import io.invertase.notifee.NotifeePackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -35,6 +36,7 @@ class MainApplication : Application(), ReactApplication {
               add(ReactNativeContacts())
               add(ReactNativeFirebaseMessagingPackage())
               add(RNDeviceInfo())
+              add(NotifeePackage())
             }
 
         override fun getJSMainModuleName(): String = "index"
