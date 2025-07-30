@@ -17,29 +17,22 @@ from django.db import models
 
 logger = logging.getLogger(__name__)
 
-# Initialize Firebase Admin SDK
-def initialize_firebase():
-    """Initialize Firebase Admin SDK with service account credentials"""
+# Check Firebase initialization
+def check_firebase_initialized():
+    """Check if Firebase Admin SDK is already initialized"""
     try:
         # Check if already initialized
         firebase_admin.get_app()
+        logger.info("Firebase Admin SDK already initialized")
+        return True
     except ValueError:
-        # Not initialized, proceed with initialization
-        cred_path = getattr(settings, 'FIREBASE_CREDENTIALS_PATH', None)
-        
-        if cred_path and os.path.exists(cred_path):
-            cred = credentials.Certificate(cred_path)
-            firebase_admin.initialize_app(cred)
-            logger.info("Firebase Admin SDK initialized successfully")
-        else:
-            logger.warning("Firebase credentials not found. Push notifications will be disabled.")
-            return False
-    
-    return True
+        # Not initialized
+        logger.error("Firebase Admin SDK not initialized. Please check config/settings.py")
+        return False
 
 
-# Initialize on module load
-FIREBASE_INITIALIZED = initialize_firebase()
+# Check on module load
+FIREBASE_INITIALIZED = check_firebase_initialized()
 
 
 def send_push_notification(

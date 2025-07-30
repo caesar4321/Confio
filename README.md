@@ -1603,7 +1603,7 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
 > - Firebase Configuration Files (⚠️ **Critical Development Files**):
 >   - `google-services.json` (⚠️ **Location**: `/Confio/apps/android/app/google-services.json`): Android Firebase config
 >   - `GoogleService-Info.plist` (⚠️ **Location**: `/Confio/apps/ios/Confio/GoogleService-Info.plist`): iOS Firebase config
->   - `service-account.json` (⚠️ **Location**: `/Confio/config/service-account.json`): Firebase Admin SDK service account key
+>   - `firebase-service-account.json` (⚠️ **Location**: `/Confio/config/firebase-service-account.json`): Firebase Admin SDK service account key
 >     - Required for server-side Firebase operations (e.g., token verification)
 >     - Download from Firebase Console > Project Settings > Service Accounts > Generate New Private Key
 > - `confio.tar.gz` (deployment archive)
@@ -2357,3 +2357,72 @@ def mutate(cls, root, info, input):
 5. No database queries until all checks pass
 
 The system is now much cleaner and follows proper separation of concerns!
+
+## 📱 Push Notifications with Firebase Cloud Messaging
+
+### Overview
+
+Confío uses Firebase Cloud Messaging (FCM) for push notifications, with an efficient batch-sending architecture that minimizes server load and properly handles invalid tokens.
+
+### Key Features
+
+1. **Batch Sending by Default**: All notifications use FCM's multicast API, even single messages
+2. **Automatic Token Management**: Invalid tokens are immediately deactivated based on FCM error codes
+3. **User Preferences**: Granular control over notification categories
+4. **Deep Linking**: Notifications can navigate users to specific screens
+5. **Background Handling**: Messages processed even when app is closed
+
+### Backend Configuration
+
+Firebase Admin SDK is already initialized in `config/settings.py` using the service account file at:
+```
+config/firebase-service-account.json
+```
+
+### Architecture
+
+#### Token Management
+- FCM tokens stored in `FCMDeviceToken` model with failure tracking
+- Tokens automatically deactivated after 5 consecutive failures
+- Invalid tokens immediately removed based on FCM error responses:
+  - `UnregisteredError` - Device no longer registered
+  - `SenderIdMismatchError` - Token belongs to different app
+  - `invalid-registration-token` - Invalid token format
+
+#### Batch Processing
+```python
+# All messages sent via send_batch_notifications()
+# Automatically splits into chunks of 500 (FCM limit)
+# Handles individual response errors per token
+```
+
+### Management Commands
+
+```bash
+# Test push notifications
+python manage.py test_fcm_batch --user-email user@example.com
+
+# Clean up invalid/stale tokens
+python manage.py cleanup_fcm_tokens --days-inactive 90
+
+# View cleanup options
+python manage.py cleanup_fcm_tokens --help
+```
+
+### Mobile App Integration
+
+The React Native app includes:
+- Automatic token registration on app launch
+- Secure token storage using react-native-keychain
+- Background message handling with Notifee
+- Deep link navigation from notifications
+- Settings screen for notification preferences
+
+### Notification Categories
+
+Users can control notifications by category:
+- **Transactions**: Payments sent/received, conversions
+- **P2P Trading**: Trade updates, offers, disputes
+- **Security**: Login alerts, security notifications
+- **Promotions**: Special offers and rewards
+- **Announcements**: Platform updates and news
