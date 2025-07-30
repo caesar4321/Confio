@@ -183,6 +183,28 @@ class ConvertUSDCToCUSD(graphene.Mutation):
                 conversion.from_transaction_hash = f"0x{uuid.uuid4().hex}"
                 conversion.to_transaction_hash = f"0x{uuid.uuid4().hex}"
                 conversion.mark_completed()
+                
+                # Create notification for conversion completion
+                from notifications.utils import create_transaction_notification
+                notification_user = actor_user if actor_user else (actor_business.accounts.first().user if actor_business else None)
+                if notification_user:
+                    create_transaction_notification(
+                        transaction_type='conversion',
+                        sender_user=notification_user,
+                        amount=str(amount_decimal),
+                        token_type='USDC',
+                        transaction_id=str(conversion.id),
+                        transaction_model='Conversion',
+                        additional_data={
+                            'from_amount': str(amount_decimal),
+                            'from_token': 'USDC',
+                            'to_amount': str(to_amount),
+                            'to_token': 'cUSD',
+                            'conversion_type': 'usdc_to_cusd',
+                            'exchange_rate': str(exchange_rate),
+                            'fee_amount': str(fee_amount)
+                        }
+                    )
             
             print(f"[CONVERSION] Conversion created successfully: {conversion.id}")
             
@@ -344,6 +366,28 @@ class ConvertCUSDToUSDC(graphene.Mutation):
                 conversion.from_transaction_hash = f"0x{uuid.uuid4().hex}"
                 conversion.to_transaction_hash = f"0x{uuid.uuid4().hex}"
                 conversion.mark_completed()
+                
+                # Create notification for conversion completion
+                from notifications.utils import create_transaction_notification
+                notification_user = actor_user if actor_user else (actor_business.accounts.first().user if actor_business else None)
+                if notification_user:
+                    create_transaction_notification(
+                        transaction_type='conversion',
+                        sender_user=notification_user,
+                        amount=str(amount_decimal),
+                        token_type='cUSD',
+                        transaction_id=str(conversion.id),
+                        transaction_model='Conversion',
+                        additional_data={
+                            'from_amount': str(amount_decimal),
+                            'from_token': 'cUSD',
+                            'to_amount': str(to_amount),
+                            'to_token': 'USDC',
+                            'conversion_type': 'cusd_to_usdc',
+                            'exchange_rate': str(exchange_rate),
+                            'fee_amount': str(fee_amount)
+                        }
+                    )
             
             return ConvertCUSDToUSDC(
                 conversion=conversion,

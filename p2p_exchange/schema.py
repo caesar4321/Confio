@@ -21,6 +21,7 @@ from .models import (
     P2PFavoriteTrader
 )
 from .default_payment_methods import get_payment_methods_for_country
+from security.utils import graphql_require_kyc, graphql_require_aml
 
 User = get_user_model()
 
@@ -1136,6 +1137,8 @@ class CreateP2PTrade(graphene.Mutation):
         return COUNTRY_TO_CURRENCY.get(country_code, 'USD')  # Default to USD if unknown
 
     @classmethod
+    @graphql_require_aml()
+    @graphql_require_kyc('p2p_trade')
     def mutate(cls, root, info, input):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
@@ -1190,24 +1193,6 @@ class CreateP2PTrade(graphene.Mutation):
 
             # Calculate fiat amount
             fiat_amount = input.cryptoAmount * offer.rate
-            
-            # Import security checks
-            from security.utils import check_kyc_required, perform_aml_check
-            from decimal import Decimal
-            
-            # Check KYC requirement for P2P trading
-            kyc_required, kyc_reason = check_kyc_required(
-                user, 
-                'p2p_trade', 
-                fiat_amount
-            )
-            
-            if kyc_required:
-                return CreateP2PTrade(
-                    trade=None,
-                    success=False,
-                    errors=[kyc_reason]
-                )
 
             # Get user's account if specified and determine entity type
             user_entity = user  # Default to user for personal trades
@@ -1352,6 +1337,51 @@ class CreateP2PTrade(graphene.Mutation):
                     errors=["Trade is under review due to compliance requirements"]
                 )
             
+            # Create notifications for trade creation
+            from notifications.utils import create_p2p_notification
+            
+            # Determine buyer and seller display names
+            buyer_name = trade.buyer_business.name if trade.buyer_business else f"{trade.buyer_user.first_name} {trade.buyer_user.last_name}".strip() or trade.buyer_user.username
+            seller_name = trade.seller_business.name if trade.seller_business else f"{trade.seller_user.first_name} {trade.seller_user.last_name}".strip() or trade.seller_user.username
+            
+            # Notification for buyer
+            buyer_user = trade.buyer_user if trade.buyer_user else (trade.buyer_business.accounts.first().user if trade.buyer_business else None)
+            if buyer_user:
+                create_p2p_notification(
+                    notification_type='P2P_TRADE_STARTED',
+                    user=buyer_user,
+                    trade_id=str(trade.id),
+                    offer_id=str(offer.id),
+                    amount=str(trade.crypto_amount),
+                    token_type=trade.offer.token_type,
+                    counterparty_name=seller_name,
+                    additional_data={
+                        'fiat_amount': str(trade.fiat_amount),
+                        'fiat_currency': trade.offer.fiat_currency,
+                        'payment_method': payment_method.display_name,
+                        'trade_type': 'buy'
+                    }
+                )
+            
+            # Notification for seller
+            seller_user = trade.seller_user if trade.seller_user else (trade.seller_business.accounts.first().user if trade.seller_business else None)
+            if seller_user:
+                create_p2p_notification(
+                    notification_type='P2P_TRADE_STARTED',
+                    user=seller_user,
+                    trade_id=str(trade.id),
+                    offer_id=str(offer.id),
+                    amount=str(trade.crypto_amount),
+                    token_type=trade.offer.token_type,
+                    counterparty_name=buyer_name,
+                    additional_data={
+                        'fiat_amount': str(trade.fiat_amount),
+                        'fiat_currency': trade.offer.fiat_currency,
+                        'payment_method': payment_method.display_name,
+                        'trade_type': 'sell'
+                    }
+                )
+            
             # Create escrow record for this trade
             from .models import P2PEscrow
             escrow = P2PEscrow.objects.create(
@@ -1408,6 +1438,8 @@ class UpdateP2PTradeStatus(graphene.Mutation):
     errors = graphene.List(graphene.String)
 
     @classmethod
+    @graphql_require_aml()
+    @graphql_require_kyc('p2p_trade')
     def mutate(cls, root, info, input):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
@@ -1529,6 +1561,113 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                     
                     P2PTradeConfirmation.objects.create(**confirmation_data)
 
+            # Create notifications for status updates
+            from notifications.utils import create_p2p_notification
+            
+            # Determine buyer and seller display names
+            buyer_name = trade.buyer_business.name if trade.buyer_business else f"{trade.buyer_user.first_name} {trade.buyer_user.last_name}".strip() or trade.buyer_user.username
+            seller_name = trade.seller_business.name if trade.seller_business else f"{trade.seller_user.first_name} {trade.seller_user.last_name}".strip() or trade.seller_user.username
+            
+            # Get the other party's user
+            if is_buyer:
+                other_party_user = trade.seller_user if trade.seller_user else (trade.seller_business.accounts.first().user if trade.seller_business else None)
+                other_party_name = seller_name
+            else:
+                other_party_user = trade.buyer_user if trade.buyer_user else (trade.buyer_business.accounts.first().user if trade.buyer_business else None)
+                other_party_name = buyer_name
+            
+            # Create notifications based on status change
+            if input.status == 'PAYMENT_PENDING' and is_buyer:
+                # Buyer marked payment as sent - notify seller
+                if other_party_user:
+                    create_p2p_notification(
+                        notification_type='P2P_PAYMENT_CONFIRMED',
+                        user=other_party_user,
+                        trade_id=str(trade.id),
+                        offer_id=str(trade.offer.id),
+                        amount=str(trade.crypto_amount),
+                        token_type=trade.offer.token_type,
+                        counterparty_name=buyer_name,
+                        additional_data={
+                            'fiat_amount': str(trade.fiat_amount),
+                            'fiat_currency': trade.offer.fiat_currency,
+                            'payment_reference': input.payment_reference or '',
+                            'payment_notes': input.payment_notes or ''
+                        }
+                    )
+            
+            elif input.status == 'CRYPTO_RELEASED' and is_seller:
+                # Seller released crypto - notify buyer
+                if other_party_user:
+                    create_p2p_notification(
+                        notification_type='P2P_CRYPTO_RELEASED',
+                        user=other_party_user,
+                        trade_id=str(trade.id),
+                        offer_id=str(trade.offer.id),
+                        amount=str(trade.crypto_amount),
+                        token_type=trade.offer.token_type,
+                        counterparty_name=seller_name,
+                        additional_data={
+                            'fiat_amount': str(trade.fiat_amount),
+                            'fiat_currency': trade.offer.fiat_currency
+                        }
+                    )
+            
+            elif input.status == 'COMPLETED':
+                # Trade completed - notify both parties
+                buyer_user = trade.buyer_user if trade.buyer_user else (trade.buyer_business.accounts.first().user if trade.buyer_business else None)
+                seller_user = trade.seller_user if trade.seller_user else (trade.seller_business.accounts.first().user if trade.seller_business else None)
+                
+                if buyer_user:
+                    create_p2p_notification(
+                        notification_type='P2P_TRADE_COMPLETED',
+                        user=buyer_user,
+                        trade_id=str(trade.id),
+                        offer_id=str(trade.offer.id),
+                        amount=str(trade.crypto_amount),
+                        token_type=trade.offer.token_type,
+                        counterparty_name=seller_name,
+                        additional_data={
+                            'fiat_amount': str(trade.fiat_amount),
+                            'fiat_currency': trade.offer.fiat_currency,
+                            'trade_type': 'buy'
+                        }
+                    )
+                
+                if seller_user:
+                    create_p2p_notification(
+                        notification_type='P2P_TRADE_COMPLETED',
+                        user=seller_user,
+                        trade_id=str(trade.id),
+                        offer_id=str(trade.offer.id),
+                        amount=str(trade.crypto_amount),
+                        token_type=trade.offer.token_type,
+                        counterparty_name=buyer_name,
+                        additional_data={
+                            'fiat_amount': str(trade.fiat_amount),
+                            'fiat_currency': trade.offer.fiat_currency,
+                            'trade_type': 'sell'
+                        }
+                    )
+            
+            elif input.status == 'CANCELLED':
+                # Trade cancelled - notify the other party
+                if other_party_user:
+                    create_p2p_notification(
+                        notification_type='P2P_TRADE_CANCELLED',
+                        user=other_party_user,
+                        trade_id=str(trade.id),
+                        offer_id=str(trade.offer.id),
+                        amount=str(trade.crypto_amount),
+                        token_type=trade.offer.token_type,
+                        counterparty_name=buyer_name if is_buyer else seller_name,
+                        additional_data={
+                            'fiat_amount': str(trade.fiat_amount),
+                            'fiat_currency': trade.offer.fiat_currency,
+                            'cancelled_by': 'buyer' if is_buyer else 'seller'
+                        }
+                    )
+            
             # Broadcast the status update via WebSocket
             from channels.layers import get_channel_layer
             from asgiref.sync import async_to_sync

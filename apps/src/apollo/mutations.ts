@@ -126,3 +126,73 @@ export const CREATE_USDC_WITHDRAWAL = gql`
     }
   }
 `;
+
+// Notification mutations
+export const MARK_NOTIFICATION_READ = gql`
+  mutation MarkNotificationRead($notificationId: ID!) {
+    markNotificationRead(notificationId: $notificationId) {
+      success
+      notification {
+        id
+        isRead
+      }
+    }
+  }
+`;
+
+export const MARK_ALL_NOTIFICATIONS_READ = gql`
+  mutation MarkAllNotificationsRead {
+    markAllNotificationsRead {
+      success
+      markedCount
+    }
+  }
+`;
+
+export const UPDATE_NOTIFICATION_PREFERENCES = gql`
+  mutation UpdateNotificationPreferences(
+    $pushEnabled: Boolean
+    $pushTransactions: Boolean
+    $pushP2p: Boolean
+    $pushSecurity: Boolean
+    $pushPromotions: Boolean
+    $pushAnnouncements: Boolean
+    $inAppEnabled: Boolean
+    $inAppTransactions: Boolean
+    $inAppP2p: Boolean
+    $inAppSecurity: Boolean
+    $inAppPromotions: Boolean
+    $inAppAnnouncements: Boolean
+  ) {
+    updateNotificationPreferences(
+      pushEnabled: $pushEnabled
+      pushTransactions: $pushTransactions
+      pushP2p: $pushP2p
+      pushSecurity: $pushSecurity
+      pushPromotions: $pushPromotions
+      pushAnnouncements: $pushAnnouncements
+      inAppEnabled: $inAppEnabled
+      inAppTransactions: $inAppTransactions
+      inAppP2p: $inAppP2p
+      inAppSecurity: $inAppSecurity
+      inAppPromotions: $inAppPromotions
+      inAppAnnouncements: $inAppAnnouncements
+    ) {
+      success
+      preferences {
+        pushEnabled
+        pushTransactions
+        pushP2p
+        pushSecurity
+        pushPromotions
+        pushAnnouncements
+        inAppEnabled
+        inAppTransactions
+        inAppP2p
+        inAppSecurity
+        inAppPromotions
+        inAppAnnouncements
+      }
+    }
+  }
+`;

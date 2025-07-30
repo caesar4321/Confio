@@ -776,7 +776,7 @@ type AccountType {
   avatarLetter: String
   isEmployee: Boolean
   employeeRole: String
-  employeePermissions: JSONString
+  employeePermissions: EmployeePermissionsType
   employeeRecordId: ID
 }
 
@@ -831,13 +831,22 @@ enum UsersBusinessCategoryChoices {
   OTHER
 }
 
-"""
-Allows use of a JSON String for input / output from the GraphQL schema.
-
-Use of this type is *not recommended* as you lose the benefits of having a defined, static
-schema (one of the key benefits of GraphQL).
-"""
-scalar JSONString
+"""Employee permissions object type"""
+type EmployeePermissionsType {
+  viewBalance: Boolean
+  sendFunds: Boolean
+  acceptPayments: Boolean
+  viewTransactions: Boolean
+  manageEmployees: Boolean
+  viewBusinessAddress: Boolean
+  viewAnalytics: Boolean
+  editBusinessInfo: Boolean
+  manageBankAccounts: Boolean
+  manageP2p: Boolean
+  createInvoices: Boolean
+  manageInvoices: Boolean
+  exportData: Boolean
+}
 
 type CountryCodeType {
   code: String
@@ -857,6 +866,258 @@ type LegalDocumentType {
   lastUpdated: String
   language: String
   isLegallyBinding: Boolean
+}
+
+"""
+Allows use of a JSON String for input / output from the GraphQL schema.
+
+Use of this type is *not recommended* as you lose the benefits of having a defined, static
+schema (one of the key benefits of GraphQL).
+"""
+scalar JSONString
+
+type AchievementTypeType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  """Unique identifier for this achievement type"""
+  slug: String!
+
+  """Display name for this achievement"""
+  name: String!
+
+  """Description of what the user needs to do"""
+  description: String!
+
+  """Category this achievement belongs to"""
+  category: AchievementsAchievementTypeCategoryChoices!
+
+  """Emoji icon for this achievement"""
+  iconEmoji: String
+
+  """Color for this achievement (hex code)"""
+  color: String!
+
+  """Amount of CONFIO tokens to reward"""
+  confioReward: Decimal!
+
+  """Order to display this achievement"""
+  displayOrder: Int!
+
+  """Whether this achievement is currently active"""
+  isActive: Boolean!
+
+  """Whether users can earn this achievement multiple times"""
+  isRepeatable: Boolean!
+
+  """Whether this achievement requires manual admin review"""
+  requiresManualReview: Boolean!
+  rewardDisplay: String
+}
+
+"""An enumeration."""
+enum AchievementsAchievementTypeCategoryChoices {
+  """Onboarding"""
+  ONBOARDING
+
+  """Trading"""
+  TRADING
+
+  """Payments"""
+  PAYMENTS
+
+  """Social"""
+  SOCIAL
+
+  """Verification"""
+  VERIFICATION
+
+  """Ambassador"""
+  AMBASSADOR
+}
+
+"""The `Decimal` scalar type represents a python Decimal."""
+scalar Decimal
+
+type UserAchievementType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  user: UserType!
+  achievementType: AchievementTypeType!
+  status: AchievementsUserAchievementStatusChoices!
+
+  """JSON data tracking progress towards this achievement"""
+  progressData: JSONString!
+
+  """When the achievement was earned"""
+  earnedAt: DateTime
+
+  """When the reward was claimed"""
+  claimedAt: DateTime
+
+  """When the achievement expires (if applicable)"""
+  expiresAt: DateTime
+
+  """Actual value earned (for variable rewards)"""
+  earnedValue: Decimal
+
+  """Hash of device fingerprint when achievement was earned"""
+  deviceFingerprintHash: String
+
+  """IP address when achievement was earned"""
+  claimIpAddress: String
+
+  """Additional security metadata for fraud detection"""
+  securityMetadata: JSONString!
+  canClaimReward: Boolean
+  rewardAmount: Decimal
+}
+
+"""An enumeration."""
+enum AchievementsUserAchievementStatusChoices {
+  """Pendiente"""
+  PENDING
+
+  """Ganado"""
+  EARNED
+
+  """Reclamado"""
+  CLAIMED
+
+  """Expirado"""
+  EXPIRED
+}
+
+type InfluencerReferralType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  referredUser: UserType!
+
+  """Identifier of the referrer (@username, code, etc.)"""
+  referrerIdentifier: String!
+
+  """Actual user who made the referral (if registered)"""
+  influencerUser: UserType
+  status: AchievementsInfluencerReferralStatusChoices!
+
+  """When the referred user made their first transaction"""
+  firstTransactionAt: DateTime
+
+  """Total volume of transactions by this user"""
+  totalTransactionVolume: Decimal!
+
+  """CONFIO awarded to the referrer"""
+  referrerConfioAwarded: Decimal!
+
+  """CONFIO awarded to the referred user"""
+  refereeConfioAwarded: Decimal!
+
+  """When the referral reward was claimed"""
+  rewardClaimedAt: DateTime
+
+  """Additional attribution data"""
+  attributionData: JSONString!
+}
+
+"""An enumeration."""
+enum AchievementsInfluencerReferralStatusChoices {
+  """Activo"""
+  ACTIVE
+
+  """Convertido"""
+  CONVERTED
+
+  """Inactivo"""
+  INACTIVE
+}
+
+type TikTokViralShareType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  user: UserType!
+
+  """Achievement being shared (if applicable)"""
+  achievement: UserAchievementType
+
+  """URL of the TikTok video"""
+  tiktokUrl: String!
+
+  """TikTok username of the creator"""
+  tiktokUsername: String!
+
+  """List of hashtags used in the video"""
+  hashtagsUsed: JSONString!
+  shareType: AchievementsTikTokViralShareShareTypeChoices!
+  status: AchievementsTikTokViralShareStatusChoices!
+
+  """Number of views on the TikTok video"""
+  viewCount: Int!
+
+  """Number of likes on the TikTok video"""
+  likeCount: Int!
+
+  """Number of shares of the TikTok video"""
+  shareCount: Int!
+
+  """Base CONFIO reward for sharing"""
+  baseConfioReward: Decimal!
+
+  """Bonus CONFIO based on view performance"""
+  viewBonusConfio: Decimal!
+
+  """Total CONFIO awarded for this share"""
+  totalConfioAwarded: Decimal!
+  verifiedBy: UserType
+  verifiedAt: DateTime
+
+  """Admin notes about verification"""
+  verificationNotes: String!
+  hasRequiredHashtags: Boolean
+  performanceTier: String
+}
+
+"""An enumeration."""
+enum AchievementsTikTokViralShareShareTypeChoices {
+  """Logro"""
+  ACHIEVEMENT
+
+  """Tutorial"""
+  TUTORIAL
+
+  """Testimonio"""
+  TESTIMONIAL
+
+  """Creativo"""
+  CREATIVE
+}
+
+"""An enumeration."""
+enum AchievementsTikTokViralShareStatusChoices {
+  """Pendiente de Verificación"""
+  PENDING_VERIFICATION
+
+  """Verificado"""
+  VERIFIED
+
+  """Rechazado"""
+  REJECTED
+
+  """Recompensado"""
+  REWARDED
+}
+
+"""Stats for a specific TikTok influencer"""
+type InfluencerStatsType {
+  totalReferrals: Int
+  activeReferrals: Int
+  convertedReferrals: Int
+  totalVolume: Float
+  totalConfioEarned: Float
+  isAmbassadorEligible: Boolean
 }
 
 """GraphQL type for unified transaction view"""
@@ -981,6 +1242,9 @@ enum UsersUnifiedTransactionTableStatusChoices {
 
   """Failed"""
   FAILED
+
+  """Under AML Review"""
+  AML_REVIEW
 }
 
 """An enumeration."""
@@ -1042,7 +1306,7 @@ type SendTransactionType {
   recipientPhone: String!
   senderAddress: String!
   recipientAddress: String!
-  amount: String!
+  amount: Decimal!
   tokenType: SendSendTransactionTokenTypeChoices!
   memo: String!
   status: SendSendTransactionStatusChoices!
@@ -1118,6 +1382,9 @@ enum SendSendTransactionStatusChoices {
 
   """Failed"""
   FAILED
+
+  """Under AML Review"""
+  AML_REVIEW
 }
 
 """GraphQL type for Invoice model"""
@@ -1139,7 +1406,7 @@ type InvoiceType {
   """Display name for the merchant"""
   merchantDisplayName: String!
   merchantAccount: AccountType!
-  amount: String!
+  amount: Decimal!
   tokenType: PaymentsInvoiceTokenTypeChoices!
   description: String!
   status: PaymentsInvoiceStatusChoices!
@@ -1227,7 +1494,7 @@ type PaymentTransactionType {
   merchantAccount: AccountType!
   payerAddress: String!
   merchantAddress: String!
-  amount: String!
+  amount: Decimal!
   tokenType: PaymentsPaymentTransactionTokenTypeChoices!
   description: String!
   status: PaymentsPaymentTransactionStatusChoices!
@@ -1347,9 +1614,6 @@ enum P2PExchangeP2POfferTokenTypeChoices {
   CONFIO
 }
 
-"""The `Decimal` scalar type represents a python Decimal."""
-scalar Decimal
-
 """An enumeration."""
 enum P2PExchangeP2POfferStatusChoices {
   """Active"""
@@ -1450,6 +1714,9 @@ enum P2PExchangeP2PTradeStatusChoices {
 
   """Expired"""
   EXPIRED
+
+  """Under AML Review"""
+  AML_REVIEW
 }
 
 """GraphQL type for P2P escrow records"""
@@ -2110,7 +2377,202 @@ enum UsdcTransactionsUnifiedUSDCTransactionTableStatusChoices {
   FAILED
 }
 
+type IdentityVerificationType {
+  id: ID!
+  createdAt: DateTime!
+
+  """First name as verified from documents"""
+  verifiedFirstName: String!
+
+  """Last name as verified from documents"""
+  verifiedLastName: String!
+
+  """Type of identification document"""
+  documentType: SecurityIdentityVerificationDocumentTypeChoices!
+
+  """Current verification status"""
+  status: SecurityIdentityVerificationStatusChoices!
+
+  """Date and time when verification was approved"""
+  verifiedAt: DateTime
+}
+
+"""An enumeration."""
+enum SecurityIdentityVerificationDocumentTypeChoices {
+  """Cédula de Identidad"""
+  NATIONAL_ID
+
+  """Pasaporte"""
+  PASSPORT
+
+  """Licencia de Conducir"""
+  DRIVERS_LICENSE
+
+  """Documento de Identidad Extranjero"""
+  FOREIGN_ID
+}
+
+"""An enumeration."""
+enum SecurityIdentityVerificationStatusChoices {
+  """Pendiente"""
+  PENDING
+
+  """Verificado"""
+  VERIFIED
+
+  """Rechazado"""
+  REJECTED
+
+  """Expirado"""
+  EXPIRED
+}
+
+type UserDeviceType {
+  id: ID!
+  firstUsed: DateTime!
+  lastUsed: DateTime!
+  totalSessions: Int!
+
+  """User has verified this device"""
+  isTrusted: Boolean!
+  trustedAt: DateTime
+  deviceName: String
+}
+
+type AMLCheckType {
+  id: ID!
+  createdAt: DateTime!
+  status: SecurityAMLCheckStatusChoices!
+
+  """AML risk score 0-100"""
+  riskScore: Int!
+
+  """Identified risk factors"""
+  riskFactors: JSONString!
+
+  """Required actions based on check"""
+  actionsRequired: JSONString!
+}
+
+"""An enumeration."""
+enum SecurityAMLCheckStatusChoices {
+  """Pendiente"""
+  PENDING
+
+  """Aprobado"""
+  CLEARED
+
+  """Marcado"""
+  FLAGGED
+
+  """Escalado"""
+  ESCALATED
+
+  """Bloqueado"""
+  BLOCKED
+}
+
+type PresalePhaseType {
+  id: ID!
+  phaseNumber: Int!
+  name: String!
+  description: String!
+  pricePerToken: Decimal!
+  goalAmount: Decimal!
+  minPurchase: Decimal!
+  maxPurchase: Decimal!
+
+  """Maximum total purchase per user for this phase"""
+  maxPerUser: Decimal
+  status: String
+
+  """Target audience for this phase"""
+  targetAudience: String!
+
+  """Emoji and location text"""
+  locationEmoji: String!
+  visionPoints: [String]
+  startDate: DateTime
+  endDate: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  purchases: [PresalePurchaseType!]!
+  stats: PresaleStatsType
+  userpresalelimitSet: [UserPresaleLimitType!]!
+  totalRaised: Decimal
+  totalParticipants: Int
+  tokensSold: Decimal
+  progressPercentage: Float
+}
+
+type PresalePurchaseType {
+  id: ID!
+  user: UserType!
+  phase: PresalePhaseType!
+  cusdAmount: Decimal!
+  confioAmount: Decimal!
+
+  """Price at time of purchase"""
+  pricePerToken: Decimal!
+  status: PresalePresalePurchaseStatusChoices!
+
+  """Blockchain transaction hash"""
+  transactionHash: String
+  fromAddress: String
+  notes: String!
+  createdAt: DateTime!
+  completedAt: DateTime
+}
+
+"""An enumeration."""
+enum PresalePresalePurchaseStatusChoices {
+  """Pending"""
+  PENDING
+
+  """Processing"""
+  PROCESSING
+
+  """Completed"""
+  COMPLETED
+
+  """Failed"""
+  FAILED
+
+  """Refunded"""
+  REFUNDED
+}
+
+type PresaleStatsType {
+  id: ID!
+  phase: PresalePhaseType!
+  totalRaised: Decimal!
+  totalParticipants: Int!
+  totalTokensSold: Decimal!
+  averagePurchase: Decimal!
+  lastUpdated: DateTime!
+}
+
+type UserPresaleLimitType {
+  id: ID!
+  user: UserType!
+  phase: PresalePhaseType!
+  totalPurchased: Decimal!
+  lastPurchaseAt: DateTime
+}
+
 type Query {
+  notifications(notificationType: NotificationTypeEnum, isRead: Boolean, accountId: String, businessId: String, before: String, after: String, first: Int, last: Int): NotificationConnection
+  notification(id: ID!): NotificationType
+  notificationPreferences: NotificationPreferenceType
+  unreadNotificationCount: Int
+  isPresaleActive: Boolean
+  activePresalePhase: PresalePhaseType
+  allPresalePhases: [PresalePhaseType]
+  presalePhase(phaseNumber: Int!): PresalePhaseType
+  myPresalePurchases: [PresalePurchaseType]
+  myPresaleLimit(phaseNumber: Int!): UserPresaleLimitType
+  myDevices: [UserDeviceType]
+  myKycStatus: IdentityVerificationType
   usdcDeposits(limit: Int): [USDCDepositType]
   usdcWithdrawals(limit: Int): [USDCWithdrawalType]
   unifiedUsdcTransactions(limit: Int, offset: Int, transactionType: String): [UnifiedUSDCTransactionType]
@@ -2121,8 +2583,8 @@ type Query {
   exchangeRates(sourceCurrency: String = "VES", targetCurrency: String = "USD", rateType: String, limit: Int = 10): [ExchangeRateType]
   p2pOffers(exchangeType: String, tokenType: String, paymentMethod: String, countryCode: String, favoritesOnly: Boolean): [P2POfferType]
   p2pOffer(id: ID!): P2POfferType
-  myP2pOffers(accountId: String): [P2POfferType]
-  myP2pTrades(accountId: String, offset: Int = 0, limit: Int = 10): P2PTradePaginatedType
+  myP2pOffers: [P2POfferType]
+  myP2pTrades(offset: Int = 0, limit: Int = 10): P2PTradePaginatedType
   p2pTrade(id: ID!): P2PTradeType
   p2pTradeMessages(tradeId: ID!): [P2PMessageType]
   p2pPaymentMethods(countryCode: String): [P2PPaymentMethodType]
@@ -2154,7 +2616,15 @@ type Query {
   businessInvitations(businessId: ID!, status: String): [EmployeeInvitationType]
 
   """Get employees of current business (uses JWT context)"""
-  currentBusinessEmployees(includeInactive: Boolean = false): [BusinessEmployeeType]
+  currentBusinessEmployees(
+    includeInactive: Boolean = false
+
+    """Number of employees to fetch"""
+    first: Int
+
+    """Cursor for pagination"""
+    after: String
+  ): [BusinessEmployeeType]
 
   """Get invitations for current business (uses JWT context)"""
   currentBusinessInvitations(status: String): [EmployeeInvitationType]
@@ -2176,9 +2646,141 @@ type Query {
   legalDocument(docType: String!, language: String): LegalDocumentType
   countries(isActive: Boolean): [CountryType]
   banks(countryCode: String): [BankType]
-  userBankAccounts(accountId: ID): [BankInfoType]
+  userBankAccounts: [BankInfoType]
   bankInfo(id: ID!): BankInfoType
   checkUsersByPhones(phoneNumbers: [String]!): [UserByPhoneType]
+  achievementTypes(category: String): [AchievementTypeType]
+  userAchievements(status: String): [UserAchievementType]
+  achievementLeaderboard(achievementSlug: String): [UserAchievementType]
+  influencerStats(referrerIdentifier: String!): InfluencerStatsType
+  myInfluencerStats: InfluencerStatsType
+  userInfluencerReferrals: [InfluencerReferralType]
+  myAmbassadorProfile: InfluencerAmbassadorType
+  ambassadorLeaderboard(tier: String): [InfluencerAmbassadorType]
+  myAmbassadorActivities(limit: Int): [AmbassadorActivityType]
+  myConfioBalance: ConfioBalanceType
+  myConfioTransactions(limit: Int, offset: Int): [ConfioRewardTransactionType]
+  userTiktokShares(status: String): [TikTokViralShareType]
+}
+
+"""Pagination connection for notifications"""
+type NotificationConnection {
+  """Pagination data for this connection."""
+  pageInfo: PageInfo!
+
+  """Contains the nodes in this connection."""
+  edges: [NotificationEdge]!
+  totalCount: Int
+  unreadCount: Int
+}
+
+"""
+The Relay compliant `PageInfo` type, containing data necessary to paginate this connection.
+"""
+type PageInfo {
+  """When paginating forwards, are there more items?"""
+  hasNextPage: Boolean!
+
+  """When paginating backwards, are there more items?"""
+  hasPreviousPage: Boolean!
+
+  """When paginating backwards, the cursor to continue."""
+  startCursor: String
+
+  """When paginating forwards, the cursor to continue."""
+  endCursor: String
+}
+
+"""A Relay edge containing a `Notification` and its cursor."""
+type NotificationEdge {
+  """The item at the end of the edge"""
+  node: NotificationType
+
+  """A cursor for use in pagination"""
+  cursor: String!
+}
+
+"""GraphQL type for Notification model"""
+type NotificationType {
+  id: ID!
+  user: UserType
+  account: AccountType
+  business: BusinessType
+  isBroadcast: Boolean!
+
+  """Target audience: 'all', 'verified', 'business', etc."""
+  broadcastTarget: String
+  notificationType: NotificationTypeEnum
+  title: String!
+  message: String!
+  data: JSONString!
+  relatedObjectType: String
+  relatedObjectId: String
+
+  """Deep link for notification action"""
+  actionUrl: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  pushSent: Boolean!
+  pushSentAt: DateTime
+  isRead: Boolean
+}
+
+"""GraphQL enum for notification types"""
+enum NotificationTypeEnum {
+  SEND_RECEIVED
+  SEND_SENT
+  SEND_INVITATION_SENT
+  SEND_INVITATION_CLAIMED
+  SEND_INVITATION_EXPIRED
+  SEND_FROM_EXTERNAL
+  PAYMENT_RECEIVED
+  PAYMENT_SENT
+  INVOICE_PAID
+  P2P_OFFER_RECEIVED
+  P2P_OFFER_ACCEPTED
+  P2P_OFFER_REJECTED
+  P2P_TRADE_STARTED
+  P2P_PAYMENT_CONFIRMED
+  P2P_CRYPTO_RELEASED
+  P2P_TRADE_COMPLETED
+  P2P_TRADE_CANCELLED
+  P2P_TRADE_DISPUTED
+  CONVERSION_COMPLETED
+  CONVERSION_FAILED
+  USDC_DEPOSIT_PENDING
+  USDC_DEPOSIT_COMPLETED
+  USDC_DEPOSIT_FAILED
+  USDC_WITHDRAWAL_PENDING
+  USDC_WITHDRAWAL_COMPLETED
+  USDC_WITHDRAWAL_FAILED
+  ACCOUNT_VERIFIED
+  SECURITY_ALERT
+  NEW_LOGIN
+  BUSINESS_EMPLOYEE_ADDED
+  BUSINESS_EMPLOYEE_REMOVED
+  BUSINESS_PERMISSION_CHANGED
+  PROMOTION
+  SYSTEM
+  ANNOUNCEMENT
+}
+
+"""GraphQL type for NotificationPreference model"""
+type NotificationPreferenceType {
+  pushEnabled: Boolean!
+  pushTransactions: Boolean!
+  pushP2p: Boolean!
+  pushSecurity: Boolean!
+  pushPromotions: Boolean!
+  pushAnnouncements: Boolean!
+  inAppEnabled: Boolean!
+  inAppTransactions: Boolean!
+  inAppP2p: Boolean!
+  inAppSecurity: Boolean!
+  inAppPromotions: Boolean!
+  inAppAnnouncements: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
 }
 
 """Represents a business where user is employed"""
@@ -2359,103 +2961,6 @@ enum UsersEmployeeActivityLogActionChoices {
   SETTINGS_CHANGED
 }
 
-type IdentityVerificationType {
-  id: ID!
-  createdAt: DateTime!
-  updatedAt: DateTime!
-
-  """User being verified"""
-  user: UserType!
-
-  """First name as verified from documents"""
-  verifiedFirstName: String!
-
-  """Last name as verified from documents"""
-  verifiedLastName: String!
-
-  """Date of birth as verified from documents"""
-  verifiedDateOfBirth: Date!
-
-  """Nationality ISO code (e.g., VEN, ARG, COL)"""
-  verifiedNationality: String!
-
-  """Full address as verified from documents"""
-  verifiedAddress: String!
-
-  """City as verified from documents"""
-  verifiedCity: String!
-
-  """State/Province as verified from documents"""
-  verifiedState: String!
-
-  """Country ISO code as verified from documents"""
-  verifiedCountry: String!
-
-  """Postal code as verified from documents"""
-  verifiedPostalCode: String
-
-  """Type of identification document"""
-  documentType: UsersIdentityVerificationDocumentTypeChoices!
-
-  """Document number/ID"""
-  documentNumber: String!
-
-  """Country that issued the document"""
-  documentIssuingCountry: String!
-
-  """Document expiry date if applicable"""
-  documentExpiryDate: Date
-
-  """Current verification status"""
-  status: UsersIdentityVerificationStatusChoices!
-
-  """Admin user who approved the verification"""
-  verifiedBy: UserType
-
-  """Date and time when verification was approved"""
-  verifiedAt: DateTime
-
-  """Reason for rejection if verification was rejected"""
-  rejectedReason: String
-}
-
-"""
-The `Date` scalar type represents a Date
-value as specified by
-[iso8601](https://en.wikipedia.org/wiki/ISO_8601).
-"""
-scalar Date
-
-"""An enumeration."""
-enum UsersIdentityVerificationDocumentTypeChoices {
-  """Cédula de Identidad"""
-  NATIONAL_ID
-
-  """Pasaporte"""
-  PASSPORT
-
-  """Licencia de Conducir"""
-  DRIVERS_LICENSE
-
-  """Documento de Identidad Extranjero"""
-  FOREIGN_ID
-}
-
-"""An enumeration."""
-enum UsersIdentityVerificationStatusChoices {
-  """Pendiente"""
-  PENDING
-
-  """Verificado"""
-  VERIFIED
-
-  """Rechazado"""
-  REJECTED
-
-  """Expirado"""
-  EXPIRED
-}
-
 type BankInfoType {
   id: ID!
   createdAt: DateTime!
@@ -2534,7 +3039,215 @@ type UserByPhoneType {
   activeAccountSuiAddress: String
 }
 
+"""Ambassador profile with tier and performance metrics"""
+type InfluencerAmbassadorType {
+  id: ID!
+  createdAt: DateTime!
+  user: UserType!
+  tier: AchievementsInfluencerAmbassadorTierChoices!
+  status: AchievementsInfluencerAmbassadorStatusChoices!
+
+  """Total number of referrals made"""
+  totalReferrals: Int!
+
+  """Number of currently active referrals"""
+  activeReferrals: Int!
+
+  """Total views across all viral content"""
+  totalViralViews: BigInt!
+
+  """Viral views in the current month"""
+  monthlyViralViews: Int!
+
+  """Total transaction volume from referrals"""
+  referralTransactionVolume: Decimal!
+
+  """Total CONFIO earned as ambassador"""
+  confioEarned: Decimal!
+
+  """Custom referral code for this ambassador"""
+  customReferralCode: String
+
+  """When the current tier was achieved"""
+  tierAchievedAt: DateTime
+
+  """Overall performance score (0-100)"""
+  performanceScore: Int!
+
+  """Has access to dedicated support"""
+  dedicatedSupport: Boolean!
+
+  """Last time ambassador was active"""
+  lastActivityAt: DateTime!
+  benefits: AmbassadorBenefitsType
+  tierProgress: Int
+  tierDisplay: String
+  statusDisplay: String
+}
+
+"""An enumeration."""
+enum AchievementsInfluencerAmbassadorTierChoices {
+  """Bronce"""
+  BRONZE
+
+  """Plata"""
+  SILVER
+
+  """Oro"""
+  GOLD
+
+  """Diamante"""
+  DIAMOND
+}
+
+"""An enumeration."""
+enum AchievementsInfluencerAmbassadorStatusChoices {
+  """Activo"""
+  ACTIVE
+
+  """Pausado"""
+  PAUSED
+
+  """Terminado"""
+  TERMINATED
+}
+
+"""
+The `BigInt` scalar type represents non-fractional whole numeric values.
+`BigInt` is not constrained to 32-bit like the `Int` type and thus is a less
+compatible type.
+"""
+scalar BigInt
+
+"""Ambassador tier benefits"""
+type AmbassadorBenefitsType {
+  referralBonus: Float
+  viralRate: Float
+  customCode: Boolean
+  dedicatedSupport: Boolean
+  monthlyBonus: Float
+  exclusiveEvents: Boolean
+  earlyFeatures: Boolean
+}
+
+"""Ambassador activity log"""
+type AmbassadorActivityType {
+  id: ID!
+  createdAt: DateTime!
+  ambassador: InfluencerAmbassadorType!
+  activityType: AchievementsAmbassadorActivityActivityTypeChoices!
+  description: String!
+
+  """CONFIO earned for this activity"""
+  confioEarned: Decimal!
+
+  """Additional activity metadata"""
+  metadata: JSONString!
+  activityTypeDisplay: String
+}
+
+"""An enumeration."""
+enum AchievementsAmbassadorActivityActivityTypeChoices {
+  """Referido"""
+  REFERRAL
+
+  """Contenido Viral"""
+  VIRAL_CONTENT
+
+  """Participación Comunitaria"""
+  COMMUNITY_ENGAGEMENT
+
+  """Participación en Eventos"""
+  EVENT_PARTICIPATION
+
+  """Hito Alcanzado"""
+  MILESTONE_ACHIEVED
+}
+
+"""User's CONFIO token balance (pre-blockchain accounting)"""
+type ConfioBalanceType {
+  id: ID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  user: UserType!
+  totalEarned: Float
+  totalLocked: Float
+  totalUnlocked: Float
+  totalSpent: Float
+
+  """Next scheduled unlock date"""
+  nextUnlockDate: DateTime
+  nextUnlockAmount: Float
+  achievementRewards: Float
+  referralRewards: Float
+  viralRewards: Float
+  presalePurchase: Float
+  otherRewards: Float
+  dailyRewardAmount: Float
+}
+
+"""CONFIO reward transaction history"""
+type ConfioRewardTransactionType {
+  id: ID!
+  createdAt: DateTime!
+  user: UserType!
+  transactionType: AchievementsConfioRewardTransactionTransactionTypeChoices!
+  amount: Float
+  balanceAfter: Float
+
+  """Type of action that caused this transaction"""
+  referenceType: String!
+
+  """ID of the record that caused this transaction"""
+  referenceId: String!
+
+  """Human-readable description of this transaction"""
+  description: String!
+}
+
+"""An enumeration."""
+enum AchievementsConfioRewardTransactionTransactionTypeChoices {
+  """Ganado"""
+  EARNED
+
+  """Desbloqueado"""
+  UNLOCKED
+
+  """Gastado"""
+  SPENT
+
+  """Transferido"""
+  TRANSFERRED
+
+  """Ajustado"""
+  ADJUSTED
+}
+
 type Mutation {
+  """Mark a notification as read"""
+  markNotificationRead(notificationId: ID!): MarkNotificationRead
+
+  """Mark all notifications as read for the user"""
+  markAllNotificationsRead: MarkAllNotificationsRead
+
+  """Update user's notification preferences"""
+  updateNotificationPreferences(inAppAnnouncements: Boolean, inAppEnabled: Boolean, inAppP2p: Boolean, inAppPromotions: Boolean, inAppSecurity: Boolean, inAppTransactions: Boolean, pushAnnouncements: Boolean, pushEnabled: Boolean, pushP2p: Boolean, pushPromotions: Boolean, pushSecurity: Boolean, pushTransactions: Boolean): UpdateNotificationPreferences
+
+  """Create a test notification (for development/testing)"""
+  createTestNotification(broadcastTarget: String, isBroadcast: Boolean, message: String!, notificationType: NotificationTypeEnum!, title: String!): CreateTestNotification
+
+  """Mutation to purchase CONFIO tokens during presale"""
+  purchasePresaleTokens(cusdAmount: Decimal!, phaseNumber: Int): PurchasePresaleTokens
+
+  """Mark a device as trusted after verification"""
+  trustDevice(deviceFingerprint: JSONString!, trustReason: String, verificationCode: String!): TrustDevice
+
+  """Request a verification code to trust a device"""
+  requestDeviceTrust(deviceFingerprint: JSONString!, method: String = "email"): RequestDeviceTrust
+
+  """Check KYC status for current user"""
+  checkKycStatus(amount: Decimal, operationType: String!): CheckKYCStatus
+
   """Mutation for creating a new USDC deposit"""
   createUsdcDeposit(input: USDCDepositInput!): CreateUSDCDeposit
 
@@ -2598,7 +3311,13 @@ type Mutation {
   verifyTelegramCode(code: String!, countryCode: String!, phoneNumber: String!): VerifyTelegramCode
 
   """Initialize zkLogin process"""
-  initializeZkLogin(firebaseToken: String!, provider: String!, providerToken: String!): InitializeZkLogin
+  initializeZkLogin(
+    """Device fingerprint data"""
+    deviceFingerprint: JSONString
+    firebaseToken: String!
+    provider: String!
+    providerToken: String!
+  ): InitializeZkLogin
   finalizeZkLogin(input: FinalizeZkLoginInput!): FinalizeZkLoginPayload
   addBusinessEmployee(input: AddBusinessEmployeeInput!): AddBusinessEmployee
   updateBusinessEmployee(input: UpdateBusinessEmployeeInput!): UpdateBusinessEmployee
@@ -2619,8 +3338,8 @@ type Mutation {
   rejectIdentityVerification(reason: String!, verificationId: ID!): RejectIdentityVerification
   createBusiness(address: String, businessRegistrationNumber: String, category: String!, description: String, name: String!): CreateBusiness
   updateBusiness(address: String, businessId: ID!, businessRegistrationNumber: String, category: String!, description: String, name: String!): UpdateBusiness
-  updateAccountSuiAddress(accountId: ID!, suiAddress: String!): UpdateAccountSuiAddress
-  createBankInfo(accountHolderName: String!, accountId: ID!, accountNumber: String, accountType: String, email: String, identificationNumber: String, isDefault: Boolean, paymentMethodId: ID!, phoneNumber: String, username: String): CreateBankInfo
+  updateAccountSuiAddress(suiAddress: String!): UpdateAccountSuiAddress
+  createBankInfo(accountHolderName: String!, accountNumber: String, accountType: String, email: String, identificationNumber: String, isDefault: Boolean, paymentMethodId: ID!, phoneNumber: String, username: String): CreateBankInfo
   updateBankInfo(accountHolderName: String!, accountNumber: String!, accountType: String!, bankInfoId: ID!, identificationNumber: String, isDefault: Boolean): UpdateBankInfo
   deleteBankInfo(bankInfoId: ID!): DeleteBankInfo
   setDefaultBankInfo(bankInfoId: ID!): SetDefaultBankInfo
@@ -2632,6 +3351,79 @@ type Mutation {
 
   """Delete test users - FOR TESTING ONLY"""
   deleteTestUsers: DeleteTestUsers
+  claimAchievementReward(achievementId: ID!): ClaimAchievementReward
+
+  """Track a TikTok share for an achievement"""
+  trackTiktokShare(achievementId: ID!, tiktokUrl: String!): TrackTikTokShare
+  createInfluencerReferral(attributionData: JSONString, referrerIdentifier: String!): CreateInfluencerReferral
+  submitTiktokShare(achievementId: ID, hashtagsUsed: [String]!, shareType: String!, tiktokUrl: String!, tiktokUsername: String!): SubmitTikTokShare
+
+  """Admin mutation to verify TikTok shares and award bonuses"""
+  verifyTiktokShare(likeCount: Int, shareCount: Int, shareId: ID!, verificationNotes: String, viewCount: Int): VerifyTikTokShare
+
+  """Admin mutation to update influencer status and award ambassador status"""
+  updateInfluencerStatus(newStatus: String!, referrerIdentifier: String!): UpdateInfluencerStatus
+
+  """
+  Single mutation for setting referrer (influencer or friend)
+  Can only be done once per user within 48 hours of signup
+  """
+  setReferrer(referralType: String, referrerIdentifier: String!): SetReferrer
+
+  """Check if user can still set a referrer"""
+  checkReferralStatus: CheckReferralStatus
+}
+
+"""Mark a notification as read"""
+type MarkNotificationRead {
+  success: Boolean
+  notification: NotificationType
+}
+
+"""Mark all notifications as read for the user"""
+type MarkAllNotificationsRead {
+  success: Boolean
+  markedCount: Int
+}
+
+"""Update user's notification preferences"""
+type UpdateNotificationPreferences {
+  success: Boolean
+  preferences: NotificationPreferenceType
+}
+
+"""Create a test notification (for development/testing)"""
+type CreateTestNotification {
+  success: Boolean
+  notification: NotificationType
+}
+
+"""Mutation to purchase CONFIO tokens during presale"""
+type PurchasePresaleTokens {
+  success: Boolean
+  message: String
+  purchase: PresalePurchaseType
+}
+
+"""Mark a device as trusted after verification"""
+type TrustDevice {
+  success: Boolean
+  error: String
+  device: UserDeviceType
+}
+
+"""Request a verification code to trust a device"""
+type RequestDeviceTrust {
+  success: Boolean
+  error: String
+  message: String
+}
+
+"""Check KYC status for current user"""
+type CheckKYCStatus {
+  kycRequired: Boolean
+  reason: String
+  verificationStatus: String
 }
 
 """Mutation for creating a new USDC deposit"""
@@ -2713,7 +3505,6 @@ input CreateP2POfferInput {
   countryCode: String!
   terms: String
   responseTimeMinutes: Int
-  accountId: String
 }
 
 type UpdateP2POffer {
@@ -2732,7 +3523,6 @@ input CreateP2PTradeInput {
   offerId: ID!
   cryptoAmount: Decimal!
   paymentMethodId: ID!
-  accountId: String
 }
 
 type UpdateP2PTradeStatus {
@@ -2946,6 +3736,9 @@ input FinalizeZkLoginInput {
   salt: String!
   accountType: String!
   accountIndex: Int!
+
+  """Device fingerprint data"""
+  deviceFingerprint: JSONString
 }
 
 type AddBusinessEmployee {
@@ -2955,8 +3748,6 @@ type AddBusinessEmployee {
 }
 
 input AddBusinessEmployeeInput {
-  businessId: ID!
-
   """Phone number of employee to add"""
   userPhone: String!
   role: String = "cashier"
@@ -3008,7 +3799,6 @@ type InviteEmployee {
 }
 
 input InviteEmployeeInput {
-  businessId: ID!
   employeePhone: String!
   employeePhoneCountry: String!
   employeeName: String
@@ -3068,6 +3858,13 @@ type SubmitIdentityVerification {
   error: String
   verification: IdentityVerificationType
 }
+
+"""
+The `Date` scalar type represents a Date
+value as specified by
+[iso8601](https://en.wikipedia.org/wiki/ISO_8601).
+"""
+scalar Date
 
 type ApproveIdentityVerification {
   success: Boolean
@@ -3138,6 +3935,65 @@ type DeleteTestUsers {
   success: Boolean
   error: String
   deletedCount: Int
+}
+
+type ClaimAchievementReward {
+  success: Boolean
+  error: String
+  achievement: UserAchievementType
+  confioAwarded: Decimal
+}
+
+"""Track a TikTok share for an achievement"""
+type TrackTikTokShare {
+  success: Boolean
+  shareId: ID
+  error: String
+}
+
+type CreateInfluencerReferral {
+  success: Boolean
+  error: String
+  referral: InfluencerReferralType
+}
+
+type SubmitTikTokShare {
+  success: Boolean
+  error: String
+  share: TikTokViralShareType
+}
+
+"""Admin mutation to verify TikTok shares and award bonuses"""
+type VerifyTikTokShare {
+  success: Boolean
+  error: String
+  share: TikTokViralShareType
+  confioAwarded: Decimal
+}
+
+"""Admin mutation to update influencer status and award ambassador status"""
+type UpdateInfluencerStatus {
+  success: Boolean
+  error: String
+  updatedCount: Int
+}
+
+"""
+Single mutation for setting referrer (influencer or friend)
+Can only be done once per user within 48 hours of signup
+"""
+type SetReferrer {
+  success: Boolean
+  error: String
+  referralType: String
+  message: String
+}
+
+"""Check if user can still set a referrer"""
+type CheckReferralStatus {
+  canSetReferrer: Boolean
+  timeRemainingHours: Int
+  existingReferrer: String
 }
 
 type Subscription {

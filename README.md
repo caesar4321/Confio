@@ -2305,3 +2305,55 @@ The strategy adapts to regional preferences:
 - **Visual Content**: TikTok-first approach aligns with LATAM's video consumption habits
 
 This social financial approach positions Confío not just as a utility app but as a movement for financial inclusion in Latin America, with Julian's personal story as the emotional anchor.
+
+## 🔐 Security Architecture: KYC/AML Decorators
+
+### Summary of Changes
+
+I've successfully refactored all financial transactions to use decorators for KYC and AML checks:
+
+### 1. Created GraphQL Decorators:
+
+- `@graphql_require_aml()` - Blocks sanctioned/banned users
+- `@graphql_require_kyc(operation_type)` - Checks KYC limits (currently always passes for MVP)
+
+### 2. Applied Decorators to All Financial Mutations:
+
+**Send Transactions:**
+```python
+@graphql_require_aml()
+@graphql_require_kyc('send_money')
+def mutate(cls, root, info, input):
+```
+
+**P2P Trading:**
+```python
+@graphql_require_aml()
+@graphql_require_kyc('p2p_trade')
+def mutate(cls, root, info, input):
+```
+
+**Payments:**
+```python
+@graphql_require_aml()
+@graphql_require_kyc('accept_payments')  # For CreateInvoice
+@graphql_require_kyc('send_money')      # For PayInvoice
+```
+
+### 3. Benefits:
+
+- **Clean Architecture** - Security checks happen before any database operations
+- **No DB Engagement** - Failed security checks exit early without touching the database
+- **Reusable Pattern** - Same decorators can be used for any new financial mutations
+- **Simple AML** - Only blocks sanctioned/banned users (no complex amount calculations)
+- **Future-Ready KYC** - Structure in place for when you need to implement KYC levels
+
+### 4. How It Works:
+
+1. User makes request
+2. `@graphql_require_aml()` checks if user is banned/sanctioned
+3. `@graphql_require_kyc()` checks transaction limits (currently always passes)
+4. Only if both pass does the mutation code execute
+5. No database queries until all checks pass
+
+The system is now much cleaner and follows proper separation of concerns!

@@ -536,3 +536,9 @@ confio_admin_site.register(PresalePhase, PresalePhaseAdmin)
 confio_admin_site.register(PresalePurchase, PresalePurchaseAdmin)
 confio_admin_site.register(PresaleStats, PresaleStatsAdmin)
 confio_admin_site.register(UserPresaleLimit, UserPresaleLimitAdmin)
+
+# Notification models
+from notifications.models import Notification, NotificationPreference
+from notifications.admin import NotificationAdmin, NotificationPreferenceAdmin
+confio_admin_site.register(Notification, NotificationAdmin)
+confio_admin_site.register(NotificationPreference, NotificationPreferenceAdmin)

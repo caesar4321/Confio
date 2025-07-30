@@ -1,11 +1,22 @@
 from django.core.exceptions import ValidationError
+from decimal import Decimal
 import re
 
-def validate_transaction_amount(amount: str) -> None:
+def validate_transaction_amount(amount) -> None:
     """Validate the transaction amount"""
     try:
-        # Convert to float to validate it's a valid number (handles decimals)
-        amount_float = float(amount)
+        # Convert to Decimal for precise monetary calculations
+        if isinstance(amount, str):
+            amount_decimal = Decimal(amount)
+        elif isinstance(amount, (int, float)):
+            amount_decimal = Decimal(str(amount))
+        elif isinstance(amount, Decimal):
+            amount_decimal = amount
+        else:
+            raise ValueError(f"Invalid amount type: {type(amount)}")
+        
+        # Use decimal for comparison
+        amount_float = float(amount_decimal)
         
         # Check if amount is positive
         if amount_float <= 0:
