@@ -1,7 +1,10 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils import timezone
+from django.urls import path, reverse
+from django.utils.safestring import mark_safe
 from .models import Notification, NotificationRead, NotificationPreference, FCMDeviceToken
+from .admin_views import broadcast_notification_view, notification_stats_view
 
 
 class NotificationReadInline(admin.TabularInline):
@@ -12,6 +15,7 @@ class NotificationReadInline(admin.TabularInline):
 
 
 class NotificationAdmin(admin.ModelAdmin):
+    change_list_template = 'admin/notifications/notification_changelist.html'
     list_display = [
         'id', 'notification_type_badge', 'title', 'user_display', 
         'is_broadcast_badge', 'push_sent_badge', 'created_at'
@@ -132,6 +136,22 @@ class NotificationAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs.select_related('user', 'account', 'business')
+    
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('broadcast/', self.admin_site.admin_view(broadcast_notification_view), 
+                 name='notifications_notification_broadcast'),
+            path('stats/', self.admin_site.admin_view(notification_stats_view),
+                 name='notifications_notification_stats'),
+        ]
+        return custom_urls + urls
+    
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context['broadcast_url'] = reverse('admin:notifications_notification_broadcast')
+        extra_context['stats_url'] = reverse('admin:notifications_notification_stats')
+        return super().changelist_view(request, extra_context=extra_context)
 
 
 class NotificationPreferenceAdmin(admin.ModelAdmin):

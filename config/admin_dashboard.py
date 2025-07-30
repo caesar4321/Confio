@@ -156,6 +156,22 @@ class ConfioAdminSite(admin.AdminSite):
             created_at__gte=week_start
         ).count()
         
+        # Notification metrics
+        from notifications.models import Notification, FCMDeviceToken
+        context['notifications_sent_today'] = Notification.objects.filter(
+            created_at__gte=today_start
+        ).count()
+        context['push_notifications_today'] = Notification.objects.filter(
+            created_at__gte=today_start,
+            push_sent=True
+        ).count()
+        context['active_fcm_tokens'] = FCMDeviceToken.objects.filter(
+            is_active=True
+        ).count()
+        context['last_broadcast'] = Notification.objects.filter(
+            is_broadcast=True
+        ).order_by('-created_at').first()
+        
         # Monthly volumes
         conversions_volume = Conversion.objects.filter(
             created_at__gte=month_start,

@@ -1,0 +1,228 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .broadcast-form {
+        max-width: 800px;
+        margin: 0 auto;
+    }
+    
+    .form-row {
+        padding: 10px 0;
+        border-bottom: 1px solid #eee;
+    }
+    
+    .form-row label {
+        display: inline-block;
+        width: 200px;
+        font-weight: bold;
+        vertical-align: top;
+    }
+    
+    .form-row .help {
+        display: block;
+        margin-left: 200px;
+        color: #666;
+        font-size: 12px;
+        margin-top: 5px;
+    }
+    
+    .stats-box {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 5px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+    
+    .stats-box h3 {
+        margin-top: 0;
+        color: #495057;
+    }
+    
+    .stat-item {
+        display: inline-block;
+        margin-right: 30px;
+    }
+    
+    .stat-number {
+        font-size: 24px;
+        font-weight: bold;
+        color: #007bff;
+    }
+    
+    .stat-label {
+        display: block;
+        color: #6c757d;
+        font-size: 14px;
+    }
+    
+    .preview-box {
+        background: #fff;
+        border: 2px solid #007bff;
+        border-radius: 10px;
+        padding: 20px;
+        margin: 20px 0;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    .preview-title {
+        font-size: 18px;
+        font-weight: bold;
+        margin-bottom: 10px;
+    }
+    
+    .preview-message {
+        color: #495057;
+        line-height: 1.5;
+    }
+    
+    .button-row {
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 2px solid #dee2e6;
+    }
+    
+    .button-row button {
+        margin-right: 10px;
+    }
+    
+    .warning-box {
+        background: #fff3cd;
+        border: 1px solid #ffeeba;
+        color: #856404;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+    }
+    
+    input[type="text"], textarea, select {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+    
+    .errorlist {
+        color: #dc3545;
+        list-style: none;
+        padding: 0;
+        margin: 5px 0 0 200px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="broadcast-form">
+    <h1>{{ title }}</h1>
+    
+    <!-- Target Audience Stats -->
+    <div class="stats-box">
+        <h3>Target Audience: {{ stats.target_description }}</h3>
+        <div>
+            <div class="stat-item">
+                <span class="stat-number">{{ stats.user_count|default:"0" }}</span>
+                <span class="stat-label">Total Users</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">{{ stats.device_count|default:"0" }}</span>
+                <span class="stat-label">Active Devices</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-number">{{ stats.push_enabled_count|default:"0" }}</span>
+                <span class="stat-label">Push Enabled</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Preview Box (if preview data exists) -->
+    {% if preview_data %}
+    <div class="preview-box">
+        <h3>📱 Notification Preview</h3>
+        <div class="preview-title">{{ preview_data.title }}</div>
+        <div class="preview-message">{{ preview_data.message }}</div>
+        <div style="margin-top: 10px; color: #6c757d; font-size: 12px;">
+            Type: {{ preview_data.type }}
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- Warning Box -->
+    <div class="warning-box">
+        <strong>⚠️ Important:</strong> Broadcast notifications will be sent to {{ stats.user_count|default:"0" }} users. 
+        Always test with a single user first before broadcasting.
+    </div>
+    
+    <!-- Form -->
+    <form method="post">
+        {% csrf_token %}
+        
+        {% for field in form %}
+        <div class="form-row">
+            <label for="{{ field.id_for_label }}">{{ field.label }}:</label>
+            <div style="display: inline-block; width: calc(100% - 210px);">
+                {{ field }}
+                {% if field.help_text %}
+                <div class="help">{{ field.help_text }}</div>
+                {% endif %}
+                {{ field.errors }}
+            </div>
+        </div>
+        {% endfor %}
+        
+        <div class="button-row">
+            <button type="submit" name="preview" class="btn btn-info">
+                👁️ Preview
+            </button>
+            <button type="submit" name="send_test" class="btn btn-warning">
+                🧪 Send Test
+            </button>
+            <button type="submit" name="send_broadcast" class="btn btn-primary" 
+                    onclick="return confirm('Are you sure you want to send this broadcast to {{ stats.user_count|default:0 }} users?');">
+                📡 Send Broadcast
+            </button>
+            <a href="{% url 'admin:notifications_notification_changelist' %}" class="btn btn-secondary">
+                Cancel
+            </a>
+        </div>
+    </form>
+</div>
+
+<script>
+// Auto-update stats when target changes
+document.addEventListener('DOMContentLoaded', function() {
+    const targetSelect = document.getElementById('id_broadcast_target');
+    if (targetSelect) {
+        targetSelect.addEventListener('change', function() {
+            // In a real implementation, this would make an AJAX call to update stats
+            // For now, we'll just show an indication that stats need updating
+            const statsBox = document.querySelector('.stats-box');
+            if (statsBox) {
+                statsBox.style.opacity = '0.5';
+            }
+        });
+    }
+    
+    // JSON validation for data field
+    const dataField = document.getElementById('id_data');
+    if (dataField) {
+        dataField.addEventListener('blur', function() {
+            if (this.value.trim()) {
+                try {
+                    JSON.parse(this.value);
+                    this.style.borderColor = '#28a745';
+                } catch (e) {
+                    this.style.borderColor = '#dc3545';
+                }
+            } else {
+                this.style.borderColor = '#ddd';
+            }
+        });
+    }
+});
+</script>
+{% endblock %}
