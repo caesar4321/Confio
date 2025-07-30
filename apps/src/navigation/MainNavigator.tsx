@@ -42,6 +42,7 @@ import { ConfioPresaleParticipateScreen } from '../screens/ConfioPresaleParticip
 import { ConfioTokenomicsScreen } from '../screens/ConfioTokenomicsScreen';
 import { MiProgresoViralScreen } from '../screens/MiProgresoViralScreen';
 import { ViralTemplatesScreen } from '../screens/ViralTemplatesScreen';
+import NotificationSettingsScreen from '../screens/NotificationSettingsScreen';
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
 console.log('MainNavigator: TransactionSuccessScreen imported:', !!TransactionSuccessScreen);
@@ -318,6 +319,11 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="ViralTemplates"
         component={ViralTemplatesScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="NotificationSettings"
+        component={NotificationSettingsScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>

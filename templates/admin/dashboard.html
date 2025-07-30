@@ -131,28 +131,32 @@
     }
     
     .action-button {
-        background: #3b82f6;
-        color: white;
+        background: #8b5cf6;
+        color: white !important;
         padding: 12px 24px;
         border-radius: 8px;
         text-decoration: none;
         font-weight: 500;
         transition: background 0.2s;
+        display: inline-block;
     }
     
     .action-button:hover {
-        background: #2563eb;
-        color: white;
+        background: #7c3aed;
+        color: white !important;
+        text-decoration: none;
     }
     
     .action-button.secondary {
-        background: #f3f4f6;
-        color: #1f2937;
+        background: #a78bfa;
+        color: white !important;
+        border: 1px solid #9333ea;
     }
     
     .action-button.secondary:hover {
-        background: #e5e7eb;
-        color: #1f2937;
+        background: #9333ea;
+        color: white !important;
+        text-decoration: none;
     }
     
     .metric-progress {
@@ -169,7 +173,7 @@
     
     .progress-fill {
         height: 100%;
-        background: #3b82f6;
+        background: #8b5cf6;
         transition: width 0.3s ease;
     }
     
@@ -259,6 +263,7 @@
         <a href="{% url 'confio_admin:transaction_analytics' %}" class="action-button secondary">Transaction Analytics</a>
         <a href="{% url 'confio_admin:achievement_dashboard' %}" class="action-button">🏆 Achievement Dashboard</a>
         <a href="{% url 'confio_admin:notifications_notification_broadcast' %}" class="action-button">📡 Send Broadcast</a>
+        <a href="{% url 'confio_admin:notifications_notification_stats' %}" class="action-button secondary">📊 Push Notification Stats</a>
         <a href="{% url 'confio_admin:p2p_exchange_p2poffer_add' %}" class="action-button secondary">Create Test Offer</a>
     </div>
     

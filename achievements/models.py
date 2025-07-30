@@ -1032,10 +1032,30 @@ class PioneroBetaTracker(models.Model):
         instance, created = cls.objects.get_or_create(pk=1)
         return instance
     
+    @classmethod
+    def increment_and_check(cls):
+        """Atomically increment counter and check if award is allowed"""
+        from django.db import transaction
+        
+        with transaction.atomic():
+            tracker, created = cls.objects.select_for_update().get_or_create(pk=1)
+            
+            if tracker.count >= 10000:
+                return False, tracker.count
+            
+            tracker.count += 1
+            tracker.save(update_fields=['count', 'updated_at'])
+            
+            return True, tracker.count
+    
     @property
     def remaining_spots(self):
         """Get remaining spots for Pionero Beta"""
         return max(0, 10000 - self.count)
+    
+    def get_remaining_slots(self):
+        """Get remaining slots for Pionero Beta (alias for remaining_spots)"""
+        return self.remaining_spots
     
     def __str__(self):
         return f"Pionero Beta: {self.count}/10,000 usuarios"

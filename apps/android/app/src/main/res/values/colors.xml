@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FFFFFF</color>
+    
+    <!-- Confío Brand Colors -->
+    <color name="primary">#34d399</color>
+    <color name="primary_dark">#10b981</color>
+    <color name="accent">#8b5cf6</color>
+    <color name="mint">#3ADBBB</color>
+    <color name="mint_light">#B8F0E4</color>
+    <color name="notification_mint">#72D9BC</color>
+    
+    <!-- Notification Color -->
+    <color name="notification_color">@color/accent</color>
 </resources> 

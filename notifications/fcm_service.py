@@ -226,24 +226,30 @@ def send_batch_notifications(
             payload=messaging.APNSPayload(aps=aps),
             headers={
                 'apns-priority': '10',
-                'apns-push-type': 'alert'
+                'apns-push-type': 'alert',
+                'apns-topic': 'com.Confio.Confio',  # Your iOS bundle ID
+                'apns-expiration': '0'  # Deliver immediately
             }
         )
         
-        # Create multicast message
-        multicast_message = messaging.MulticastMessage(
-            notification=messaging.Notification(
-                title=title,
-                body=body
-            ),
-            data=data,
-            tokens=tokens_only,
-            android=android_config,
-            apns=apns_config
-        )
+        # Create individual messages for send_each
+        messages = []
+        for token_str, token_id in batch_tokens:
+            message = messaging.Message(
+                notification=messaging.Notification(
+                    title=title,
+                    body=body
+                ),
+                data=data,
+                token=token_str,
+                android=android_config,
+                apns=apns_config
+            )
+            messages.append(message)
         
         try:
-            batch_response = messaging.send_multicast(multicast_message)
+            # Use send_each instead of send_multicast
+            batch_response = messaging.send_each(messages)
             results['sent'] += batch_response.success_count
             results['failed'] += batch_response.failure_count
             results['success'] = results['sent'] > 0
