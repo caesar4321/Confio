@@ -32,7 +32,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS } from '../apollo/queries';
+import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS, GET_ACCOUNT_BALANCE } from '../apollo/queries';
 // import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations'; // Removed - handled in USDCConversion screen
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import moment from 'moment';
@@ -210,12 +210,21 @@ export const AccountDetailScreen = () => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const searchAnim = useRef(new Animated.Value(0)).current;
 
+  // Fetch real-time balance for the account
+  const { data: balanceData, refetch: refetchBalance } = useQuery(GET_ACCOUNT_BALANCE, {
+    variables: { tokenType: route.params.accountType === 'cusd' ? 'cUSD' : 'CONFIO' },
+    fetchPolicy: 'no-cache',
+  });
+  
+  // Use real-time balance if available, otherwise fallback to route params
+  const currentBalance = balanceData?.accountBalance || route.params.accountBalance;
+  
   // Account data from navigation params
   const accountAddress = route.params.accountAddress || '';
   const account = {
     name: route.params.accountName,
     symbol: route.params.accountSymbol,
-    balance: route.params.accountBalance,
+    balance: currentBalance,
     balanceHidden: "•••••••",
     color: route.params.accountType === 'cusd' ? colors.primary : colors.secondary,
     textColor: route.params.accountType === 'cusd' ? colors.primaryText : colors.secondaryText,
@@ -336,15 +345,19 @@ export const AccountDetailScreen = () => {
     }
     
     try {
-      const { data } = await refetchUnified({
-        accountType: activeAccount?.type || 'personal',
-        accountIndex: activeAccount?.index || 0,
-        limit: 20,
-        offset: 0,
-        tokenTypes: route.params.accountType === 'cusd' ? 
-      (activeAccount?.isEmployee ? ['cUSD', 'CUSD'] : ['cUSD', 'CUSD', 'USDC']) : 
-      ['CONFIO']
-      });
+      // Refresh both balance and transactions
+      const [balanceResult, { data }] = await Promise.all([
+        refetchBalance(),
+        refetchUnified({
+          accountType: activeAccount?.type || 'personal',
+          accountIndex: activeAccount?.index || 0,
+          limit: 20,
+          offset: 0,
+          tokenTypes: route.params.accountType === 'cusd' ? 
+        (activeAccount?.isEmployee ? ['cUSD', 'CUSD'] : ['cUSD', 'CUSD', 'USDC']) : 
+        ['CONFIO']
+        })
+      ]);
       setAllTransactions(data?.currentAccountTransactions || []);
       setTransactionLimit(20);
       setTransactionOffset(0);
@@ -354,7 +367,7 @@ export const AccountDetailScreen = () => {
     } finally {
       setRefreshing(false);
     }
-  }, [refetchUnified]);
+  }, [refetchUnified, refetchBalance, activeAccount, route.params.accountType]);
 
   // NEW: Transform unified transactions into the format expected by the UI
   const formatUnifiedTransactions = () => {
