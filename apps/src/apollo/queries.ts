@@ -2034,14 +2034,16 @@ export const GET_SEND_TRANSACTION_BY_ID = gql`
         username
         firstName
         lastName
-        phone
+        phoneCountry
+        phoneNumber
       }
       recipientUser {
         id
         username
         firstName
         lastName
-        phone
+        phoneCountry
+        phoneNumber
       }
       senderBusiness {
         id

@@ -111,368 +111,11 @@ export const TransactionDetailScreen = () => {
   const [copied, setCopied] = useState('');
   const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
 
-  // Get transaction type from route params
-  const { transactionType, transactionData: rawTransactionData } = route.params;
-  
-  // Parse transactionData if it's a string (GraphQL JSONField returns as string)
-  let transactionData = rawTransactionData;
-  if (typeof rawTransactionData === 'string') {
-    try {
-      transactionData = JSON.parse(rawTransactionData);
-    } catch (e) {
-      console.error('[TransactionDetailScreen] Failed to parse transaction data:', e);
-      transactionData = null;
-    }
-  }
-  
-  // Fetch transaction data if we only have an ID and minimal data
-  // Check if we have the essential fields for display
-  const hasCompleteData = transactionData?.amount && transactionData?.from && transactionData?.to;
-  const needsFetch = (transactionData?.id || transactionData?.transaction_id) && !hasCompleteData;
-  const transactionId = transactionData?.id || transactionData?.transaction_id;
-  
-  console.log('[TransactionDetailScreen] Data parsing:', {
-    rawDataType: typeof rawTransactionData,
-    parsedDataType: typeof transactionData,
-    isParsed: typeof rawTransactionData === 'string' && typeof transactionData === 'object'
-  });
-  
-  console.log('[TransactionDetailScreen] Fetch check:', {
-    needsFetch,
-    transactionId,
-    hasAmount: !!transactionData?.amount,
-    dataKeys: transactionData ? Object.keys(transactionData) : []
-  });
-  
-  const { data: fetchedData, loading: fetchLoading, error: fetchError } = useQuery(
-    GET_SEND_TRANSACTION_BY_ID,
-    {
-      variables: { id: transactionId },
-      skip: !needsFetch || !transactionId,
-    }
-  );
-
-  // Check if this is a USDC transaction
-  const isUSDCTransaction = transactionData && ['deposit', 'withdrawal', 'conversion'].includes(transactionData.type);
-
-  // Sample transaction data - in real app, this would come from props or API
-  const transactions = {
-    received: {
-      type: 'received',
-      from: 'María González',
-      fromAddress: '0x1a2b3c4d...7890abcd',
-      amount: '+125.50',
-      currency: 'cUSD',
-      date: '2025-06-10',
-      time: '14:30',
-      status: 'completed',
-      hash: '0xabc123def456789012345678901234567890abcdef',
-      blockNumber: '2,847,392',
-      gasUsed: '21,000',
-      gasFee: '0.001',
-      confirmations: 127,
-      note: 'Pago por almuerzo - Gracias! 🍕',
-      avatar: 'M'
-    },
-    sent: {
-      type: 'sent',
-      to: 'Carlos Remolina',
-      toAddress: '0x9876543a...bcdef123',
-      amount: '-89.25',
-      currency: 'cUSD',
-      date: '2025-06-09',
-      time: '16:45',
-      status: 'completed',
-      hash: '0xdef456abc123789012345678901234567890fedcba',
-      blockNumber: '2,846,891',
-      gasUsed: '21,000',
-      gasFee: '0.001',
-      confirmations: 234,
-      note: 'Pago servicios freelance',
-      avatar: 'C'
-    },
-    exchange: {
-      type: 'exchange',
-      from: 'USDC',
-      to: 'cUSD',
-      amount: '+500.00',
-      currency: 'cUSD',
-      date: '2025-06-08',
-      time: '10:15',
-      status: 'completed',
-      hash: '0xghi789abc456012345678901234567890abcdefgh',
-      blockNumber: '2,846,123',
-      gasUsed: '45,000',
-      gasFee: '0.002',
-      confirmations: 456,
-      exchangeRate: '1 USDC = 1 cUSD',
-      avatar: null
-    },
-    payment: {
-      type: 'payment',
-      to: 'Supermercado Central',
-      toAddress: '0x5555666a...7777888b',
-      amount: '-32.75',
-      currency: 'cUSD',
-      date: '2025-06-07',
-      time: '18:45',
-      status: 'completed',
-      hash: '0xjkl012mno345678901234567890abcdef123456789',
-      blockNumber: '2,845,567',
-      gasUsed: '21,000',
-      gasFee: '0.001',
-      confirmations: 789,
-      location: 'Av. Libertador, Caracas',
-      merchantId: 'SUP001',
-      avatar: 'S'
-    }
-  };
-
-  // Log what data we received
-  console.log('[TransactionDetailScreen] Route params:', {
-    transactionType,
-    hasTransactionData: !!transactionData,
-    transactionDataKeys: transactionData ? Object.keys(transactionData) : [],
-    transactionData: transactionData,
-    needsFetch,
-    fetchedData: fetchedData?.sendTransaction,
-    fetchError: fetchError?.message
-  });
-  
-  // Transform fetched data to match the expected format
-  let txData = transactionData;
-  if (fetchedData?.sendTransaction && needsFetch) {
-    const tx = fetchedData.sendTransaction;
-    const isSent = tx.senderUser?.id === tx.recipientUser?.id; // This needs proper user context
-    
-    console.log('[TransactionDetailScreen] Transforming fetched data:', {
-      tx,
-      isSent,
-      amount: tx.amount,
-      tokenType: tx.tokenType,
-    });
-    
-    txData = {
-      ...transactionData,
-      type: isSent ? 'sent' : 'received',
-      from: tx.senderDisplayName || tx.senderUser?.firstName || 'Usuario',
-      fromAddress: tx.senderAddress,
-      to: tx.recipientDisplayName || tx.recipientUser?.firstName || 'Usuario',
-      toAddress: tx.recipientAddress,
-      amount: isSent ? `-${tx.amount}` : `+${tx.amount}`,
-      currency: tx.tokenType,
-      date: moment.utc(tx.createdAt).local().format('YYYY-MM-DD'),
-      time: moment.utc(tx.createdAt).local().format('HH:mm'),
-      status: tx.status?.toLowerCase() || 'completed',
-      hash: tx.transactionHash || '',
-      note: tx.memo || '',
-      avatar: (isSent ? tx.recipientDisplayName : tx.senderDisplayName)?.[0] || 'U',
-      isInvitedFriend: !!tx.invitationExpiresAt,
-      transaction_type: 'send',
-      // Add phone numbers from fetched data
-      sender_phone: tx.senderPhone,
-      recipient_phone: tx.recipientPhone,
-      senderPhone: tx.senderPhone,
-      recipientPhone: tx.recipientPhone,
-    };
-  }
-  
-  // If transactionData exists and has content, normalize it
-  let normalizedTransactionData = transactionData;
-  if (transactionData && Object.keys(transactionData).length > 1) {
-    // Normalize field names from notification data (snake_case to camelCase)
-    normalizedTransactionData = {
-      ...transactionData,
-      // Map transaction_type to type for consistency
-      type: transactionData.transaction_type || transactionData.transactionType || transactionData.type,
-      createdAt: transactionData.created_at || transactionData.createdAt,
-      transactionType: transactionData.transaction_type || transactionData.transactionType,
-      tokenType: transactionData.token_type || transactionData.tokenType || transactionData.currency,
-      transactionId: transactionData.transaction_id || transactionData.transactionId || transactionData.id,
-      recipientName: transactionData.recipient_name || transactionData.recipientName,
-      recipientPhone: transactionData.recipient_phone || transactionData.recipientPhone,
-      recipientAddress: transactionData.recipient_address || transactionData.recipientAddress,
-      senderName: transactionData.sender_name || transactionData.senderName,
-      senderPhone: transactionData.sender_phone || transactionData.senderPhone,
-      senderAddress: transactionData.sender_address || transactionData.senderAddress,
-      transactionHash: transactionData.transaction_hash || transactionData.transactionHash,
-    };
-  }
-  
-  const currentTx = (normalizedTransactionData && Object.keys(normalizedTransactionData).length > 1) 
-    ? normalizedTransactionData 
-    : (txData || transactions[transactionType]);
-  
-  console.log('[TransactionDetailScreen] currentTx selection:', {
-    hasTransactionData: !!(transactionData && Object.keys(transactionData).length > 1),
-    hasTxData: !!txData,
-    usingFallback: !!(transactions[transactionType])
-  });
-  console.log('[TransactionDetailScreen] currentTx:', currentTx);
-  console.log('[TransactionDetailScreen] currentTx datetime fields:', {
-    date: currentTx?.date,
-    time: currentTx?.time,
-    createdAt: currentTx?.createdAt,
-    created_at: currentTx?.created_at,
-    timestamp: currentTx?.timestamp,
-  });
-  
-  // Debug timezone conversion
-  if (currentTx?.createdAt) {
-    const deviceOffset = new Date().getTimezoneOffset();
-    console.log('[TransactionDetailScreen] Timezone debug:', {
-      rawCreatedAt: currentTx.createdAt,
-      parsedUTC: moment.utc(currentTx.createdAt).format('YYYY-MM-DD HH:mm:ss'),
-      convertedLocal: moment.utc(currentTx.createdAt).local().format('YYYY-MM-DD HH:mm:ss'),
-      deviceTimezoneOffset: `${deviceOffset} minutes (${-deviceOffset/60} hours)`,
-      currentLocalTime: moment().format('YYYY-MM-DD HH:mm:ss'),
-      momentLocalTime: moment.utc(currentTx.createdAt).local().format(),
-      isUTC: moment.utc(currentTx.createdAt).isUTC(),
-      isLocal: moment.utc(currentTx.createdAt).local().isLocal(),
-    });
-  }
-  console.log('[TransactionDetailScreen] currentTx details:', {
-    amount: currentTx?.amount,
-    currency: currentTx?.currency,
-    status: currentTx?.status,
-    type: currentTx?.type,
-    from: currentTx?.from,
-    to: currentTx?.to,
-    sender_phone: currentTx?.sender_phone,
-    recipient_phone: currentTx?.recipient_phone,
-    keys: currentTx ? Object.keys(currentTx) : []
-  });
-  
-  // Show loading state while fetching
-  if (fetchLoading) {
-    return (
-      <View style={[styles.container, styles.centerContent]}>
-        <ActivityIndicator size="large" color={colors.accent} />
-        <Text style={styles.loadingText}>Cargando transacción...</Text>
-      </View>
-    );
-  }
-  
-  // If no transaction data is available, show an error state
-  if (!currentTx) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>No se pudo cargar la información de la transacción</Text>
-      </View>
-    );
-  }
-  
-  const isInvitedFriend = currentTx?.isInvitedFriend || false;
-  
-  // Debug phone numbers
-  console.log('[TransactionDetailScreen] Phone number data:', {
-    sender_phone: currentTx?.sender_phone,
-    senderPhone: currentTx?.senderPhone,
-    recipient_phone: currentTx?.recipient_phone,
-    recipientPhone: currentTx?.recipientPhone,
-    fromPhone: currentTx?.fromPhone,
-    toPhone: currentTx?.toPhone,
-    // Also check raw transactionData
-    raw_sender_phone: transactionData?.sender_phone,
-    raw_recipient_phone: transactionData?.recipient_phone,
-    all_keys: currentTx ? Object.keys(currentTx) : [],
-  });
-  
-  // Get contact names for display - check all possible phone fields
-  const senderPhone = currentTx?.sender_phone || currentTx?.senderPhone || currentTx?.fromPhone || transactionData?.sender_phone;
-  const recipientPhone = currentTx?.recipient_phone || currentTx?.recipientPhone || currentTx?.toPhone || transactionData?.recipient_phone;
-  
-  console.log('[TransactionDetailScreen] Contact lookup:', {
-    senderPhone,
-    recipientPhone,
-    fallbackSenderName: currentTx?.from || currentTx?.senderName,
-    fallbackRecipientName: currentTx?.to || currentTx?.recipientName,
-  });
-  
-  const senderContactInfo = useContactNameSync(senderPhone, currentTx?.from || currentTx?.senderName || currentTx?.sender_name);
-  const recipientContactInfo = useContactNameSync(recipientPhone, currentTx?.to || currentTx?.recipientName || currentTx?.recipient_name);
-  
-  console.log('[TransactionDetailScreen] Contact info results:', {
-    senderContactInfo,
-    recipientContactInfo,
-  });
-  
-  // Use contact names if available
-  const displayFromName = senderContactInfo.displayName;
-  const displayToName = recipientContactInfo.displayName;
-
-  const handleCopy = (text: string, type: string) => {
-    Clipboard.setString(text);
-    Alert.alert('Copiado', 'Dirección copiada al portapapeles');
-    setCopied(type);
-    setTimeout(() => setCopied(''), 2000);
-  };
-
-  const getTransactionIcon = (type: string) => {
-    switch(type) {
-      case 'received':
-        return <Icon name="arrow-down" size={24} color="#10b981" />;
-      case 'sent':
-        return <Icon name="arrow-up" size={24} color="#ef4444" />;
-      case 'exchange':
-      case 'conversion':
-        return <Icon name="refresh-cw" size={24} color="#3b82f6" />;
-      case 'payment':
-        return <Icon name="shopping-bag" size={24} color="#8b5cf6" />;
-      case 'deposit':
-        return <Icon name="arrow-down-circle" size={24} color="#10b981" />;
-      case 'withdrawal':
-        return <Icon name="arrow-up-circle" size={24} color="#ef4444" />;
-      default:
-        return <Icon name="arrow-up" size={24} color="#6b7280" />;
-    }
-  };
-
-  const getTransactionTitle = (tx: any) => {
-    switch(tx.type) {
-      case 'received':
-        return `Recibido de ${displayFromName}`;
-      case 'sent':
-        return `Enviado a ${displayToName}`;
-      case 'exchange':
-        return `Intercambio ${tx.from} → ${tx.to}`;
-      case 'conversion':
-        return tx.formattedTitle || `Conversión ${tx.currency || 'USDC'} → ${tx.secondaryCurrency || 'cUSD'}`;
-      case 'payment':
-        // Check if it's a received payment (positive amount) or sent payment (negative amount)
-        return tx.amount.startsWith('+') 
-          ? `Pago recibido de ${displayFromName}`
-          : `Pago a ${displayToName}`;
-      case 'deposit':
-        return tx.formattedTitle || `Depósito ${tx.currency}`;
-      case 'withdrawal':
-        return tx.formattedTitle || `Retiro ${tx.currency}`;
-      default:
-        return 'Transacción';
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch(status?.toLowerCase()) {
-      case 'completed':
-        return { text: '#059669', bg: '#d1fae5' };
-      case 'pending':
-      case 'processing':
-        return { text: '#d97706', bg: '#fef3c7' };
-      case 'failed':
-        return { text: '#dc2626', bg: '#fee2e2' };
-      default:
-        return { text: '#6b7280', bg: '#f3f4f6' };
-    }
-  };
-
-  const statusColors = getStatusColor(currentTx.status);
-
-  // Create styles with dynamic values
+  // Define styles early to avoid undefined errors
   const styles = StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: colors.neutral,
+      backgroundColor: colors.primary,
     },
     centerContent: {
       justifyContent: 'center',
@@ -481,134 +124,101 @@ export const TransactionDetailScreen = () => {
     loadingText: {
       marginTop: 16,
       fontSize: 16,
-      color: colors.dark,
+      color: colors.accent,
     },
     errorText: {
       fontSize: 16,
-      color: colors.dark,
+      color: '#ef4444',
       textAlign: 'center',
-      marginTop: 50,
-      paddingHorizontal: 20,
+      padding: 20,
     },
     scrollView: {
       flex: 1,
     },
     header: {
-      backgroundColor: colors.primary,
-      paddingTop: insets.top + 8,
-      paddingBottom: 32,
+      paddingTop: insets.top,
       paddingHorizontal: 20,
+      paddingBottom: 30,
+      backgroundColor: colors.primary,
     },
-    headerTop: {
+    headerRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
       marginBottom: 24,
     },
-    headerButton: {
-      padding: 8,
+    backButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: 'rgba(255, 255, 255, 0.2)',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     headerTitle: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      color: '#fff',
-    },
-    transactionSummary: {
-      alignItems: 'center',
-    },
-    iconContainer: {
-      width: 64,
-      height: 64,
-      backgroundColor: '#fff',
-      borderRadius: 32,
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginBottom: 16,
-    },
-    amountText: {
-      fontSize: 32,
-      fontWeight: 'bold',
-      color: '#fff',
-      marginBottom: 8,
-    },
-    negativeAmount: {
-      color: '#fecaca', // red-200
-    },
-    transactionTitle: {
-      fontSize: 18,
+      fontSize: 20,
       fontWeight: '600',
       color: '#fff',
-      marginBottom: 12,
-      textAlign: 'center',
     },
-    statusBadge: {
-      flexDirection: 'row',
+    statusContainer: {
       alignItems: 'center',
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 20,
+      marginBottom: 16,
     },
     statusIcon: {
-      marginRight: 4,
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: 'rgba(255, 255, 255, 0.2)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 12,
     },
     statusText: {
-      fontSize: 14,
+      fontSize: 16,
       fontWeight: '500',
+      color: '#fff',
+      marginBottom: 4,
+    },
+    amountText: {
+      fontSize: 36,
+      fontWeight: 'bold',
+      color: '#fff',
+      marginBottom: 4,
+    },
+    currencyText: {
+      fontSize: 20,
+      color: '#fff',
+      opacity: 0.8,
     },
     content: {
-      marginTop: -16,
-      paddingHorizontal: 16,
-      paddingBottom: 24,
-    },
-    card: {
+      flex: 1,
       backgroundColor: '#fff',
-      borderRadius: 16,
-      padding: 24,
-      marginBottom: 16,
-      ...Platform.select({
-        ios: {
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: 2 },
-          shadowOpacity: 0.06,
-          shadowRadius: 4,
-        },
-        android: {
-          elevation: 2,
-        },
-      }),
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      paddingTop: 24,
+      paddingHorizontal: 20,
+      paddingBottom: 20,
     },
-    cardContent: {
-      gap: 16,
-    },
-    cardTitle: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      color: colors.dark,
-      marginBottom: 16,
-    },
-    participantInfo: {
-      flexDirection: 'row',
+    avatarSection: {
       alignItems: 'center',
+      marginBottom: 24,
     },
-    avatarContainer: {
-      width: 48,
-      height: 48,
-      backgroundColor: colors.neutralDark,
-      borderRadius: 24,
+    avatar: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      backgroundColor: colors.secondary,
+      alignItems: 'center',
       justifyContent: 'center',
-      alignItems: 'center',
-      marginRight: 16,
+      marginBottom: 12,
     },
     avatarText: {
-      fontSize: 18,
+      fontSize: 24,
       fontWeight: 'bold',
-      color: '#6b7280',
+      color: '#fff',
     },
-    participantDetails: {
-      flex: 1,
-    },
-    participantName: {
-      fontSize: 16,
+    receiverName: {
+      fontSize: 20,
       fontWeight: 'bold',
       color: colors.dark,
       marginBottom: 4,
@@ -620,283 +230,115 @@ export const TransactionDetailScreen = () => {
     addressText: {
       fontSize: 14,
       color: '#6b7280',
-      marginRight: 8,
-      flex: 1,
     },
-    copyButton: {
-      padding: 4,
-    },
-    exchangeInfo: {
-      alignItems: 'center',
-      backgroundColor: '#eff6ff',
-      padding: 16,
-      borderRadius: 12,
-    },
-    exchangeIcons: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 8,
-    },
-    exchangeIcon: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    exchangeIconText: {
-      color: '#fff',
-      fontWeight: 'bold',
-      fontSize: 14,
-    },
-    exchangeArrow: {
-      marginHorizontal: 8,
-    },
-    exchangeRate: {
-      fontSize: 14,
-      color: '#1d4ed8',
-      fontWeight: '500',
-    },
-    infoRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-    },
-    infoIcon: {
-      marginRight: 12,
-      marginTop: 2,
-    },
-    infoContent: {
-      flex: 1,
-    },
-    infoTitle: {
-      fontSize: 16,
-      fontWeight: '500',
-      color: colors.dark,
-      marginBottom: 2,
-    },
-    infoSubtitle: {
-      fontSize: 14,
-      color: '#6b7280',
-    },
-    noteContainer: {
-      backgroundColor: colors.neutral,
-      padding: 16,
-      borderRadius: 12,
-    },
-    noteHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 8,
-    },
-    noteTitle: {
-      fontSize: 14,
-      fontWeight: '500',
-      color: '#374151',
-    },
-    noteText: {
-      fontSize: 14,
-      color: '#6b7280',
-      lineHeight: 20,
-    },
-    summaryContainer: {
-      gap: 16,
-    },
-    feeBreakdown: {
-      backgroundColor: colors.neutral,
-      padding: 16,
-      borderRadius: 12,
-      gap: 12,
-    },
-    feeRow: {
+    dateTimeRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
+      marginBottom: 16,
+      paddingHorizontal: 4,
     },
-    feeLabel: {
-      fontSize: 14,
-      color: '#6B7280',
-      flex: 1,
-    },
-    feeAmount: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      color: colors.dark,
-    },
-    freeFee: {
+    dateTimeItem: {
       flexDirection: 'row',
       alignItems: 'center',
     },
-    freeFeeText: {
-      fontSize: 14,
-      color: '#10b981',
-      fontWeight: '500',
-      marginRight: 4,
-    },
-    freeFeeSubtext: {
-      fontSize: 12,
-      color: '#6b7280',
-    },
-    divider: {
-      height: 1,
-      backgroundColor: '#e5e7eb',
-      marginVertical: 4,
-    },
-    totalLabel: {
-      fontSize: 14,
-      fontWeight: '500',
-      color: colors.dark,
-    },
-    totalAmount: {
-      fontSize: 18,
-      fontWeight: 'bold',
-      color: colors.dark,
-    },
-    summaryRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-    },
-    summaryLabel: {
+    dateTimeText: {
       fontSize: 14,
       color: '#6b7280',
+      marginLeft: 6,
     },
-    summaryValue: {
-      fontSize: 14,
-      fontWeight: '500',
-      color: colors.dark,
-    },
-    statusContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    statusValue: {
-      fontSize: 14,
-      fontWeight: '500',
-      color: '#10b981',
-      marginLeft: 4,
-    },
-    valuePropositionOuter: {
-      backgroundColor: '#A7F3D0', // emerald-200
-      borderRadius: 16,
-      padding: 16,
+    section: {
       marginBottom: 20,
-      marginHorizontal: 0,
     },
-    valueRow: {
+    sectionHeader: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: 6,
-    },
-    valueIcon: {
-      marginRight: 8,
-    },
-    valueTitle: {
-      fontWeight: 'bold',
-      fontSize: 16,
-      color: '#059669',
-    },
-    valueDescription: {
-      fontSize: 14,
-      color: '#059669',
       marginBottom: 12,
     },
-    valueHighlightBox: {
-      backgroundColor: '#D1FAE5', // emerald-100
+    sectionIcon: {
+      marginRight: 8,
+    },
+    sectionTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.dark,
+    },
+    card: {
+      backgroundColor: colors.neutral,
       borderRadius: 12,
-      padding: 14,
+      padding: 16,
     },
-    valueHighlightText: {
+    row: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    label: {
       fontSize: 14,
-      color: '#065F46',
-      lineHeight: 20,
+      color: '#6b7280',
     },
-    bold: {
-      fontWeight: 'bold',
+    value: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.dark,
+    },
+    noteCard: {
+      backgroundColor: colors.primaryLight,
+      borderRadius: 12,
+      padding: 16,
+    },
+    noteText: {
+      fontSize: 16,
+      color: '#065f46',
+      fontStyle: 'italic',
+      lineHeight: 22,
+    },
+    actionButton: {
+      flex: 1,
+      backgroundColor: colors.primary,
+      paddingVertical: 14,
+      borderRadius: 12,
+      alignItems: 'center',
+      marginHorizontal: 6,
+    },
+    actionButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#fff',
+    },
+    secondaryButton: {
+      backgroundColor: colors.neutral,
+    },
+    secondaryButtonText: {
+      color: colors.dark,
+    },
+    buttonRow: {
+      flexDirection: 'row',
+      marginTop: 24,
+      marginHorizontal: -6,
     },
     blockchainButton: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: colors.neutralDark,
       paddingVertical: 12,
-      borderRadius: 12,
-    },
-    blockchainIcon: {
-      marginRight: 8,
+      paddingHorizontal: 20,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: '#e5e7eb',
     },
     blockchainButtonText: {
       fontSize: 14,
-      fontWeight: '500',
-      color: '#6b7280',
+      color: '#374151',
+      marginLeft: 8,
     },
-    actionsContainer: {
-      gap: 12,
+    blockchainDetails: {
+      marginTop: 16,
     },
-    primaryAction: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.primary,
-      paddingVertical: 16,
-      borderRadius: 12,
-    },
-    primaryActionText: {
-      fontSize: 16,
-      fontWeight: '500',
-      color: '#fff',
-    },
-    secondaryAction: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.neutralDark,
-      paddingVertical: 16,
-      borderRadius: 12,
-    },
-    secondaryActionText: {
-      fontSize: 16,
-      fontWeight: '500',
-      color: '#6b7280',
-    },
-    actionIcon: {
-      marginRight: 8,
-    },
-    modalOverlay: {
-      flex: 1,
-      backgroundColor: 'rgba(0, 0, 0, 0.5)',
-      justifyContent: 'center',
-      alignItems: 'center',
-      padding: 20,
-    },
-    modalContent: {
-      backgroundColor: '#fff',
-      borderRadius: 20,
-      width: '100%',
-      maxWidth: 400,
-      maxHeight: '80%',
-    },
-    modalHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: 24,
-      borderBottomWidth: 1,
-      borderBottomColor: '#e5e7eb',
-    },
-    modalTitle: {
-      fontSize: 20,
-      fontWeight: 'bold',
-      color: colors.dark,
-    },
-    modalBody: {
-      padding: 24,
-    },
-    modalSection: {
-      marginBottom: 20,
-    },
-    modalSectionTitle: {
+    blockchainTitle: {
       fontSize: 14,
-      fontWeight: '500',
+      fontWeight: '600',
       color: '#374151',
       marginBottom: 8,
     },
@@ -1039,7 +481,715 @@ export const TransactionDetailScreen = () => {
       fontSize: 16,
       fontWeight: '600',
     },
+    // Additional styles from duplicate block
+    headerTop: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 24,
+    },
+    headerButton: {
+      padding: 8,
+    },
+    transactionSummary: {
+      alignItems: 'center',
+    },
+    iconContainer: {
+      width: 64,
+      height: 64,
+      backgroundColor: '#fff',
+      borderRadius: 32,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    negativeAmount: {
+      color: '#fecaca', // red-200
+    },
+    transactionTitle: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: '#fff',
+      marginBottom: 12,
+      textAlign: 'center',
+    },
+    statusBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 20,
+    },
+    statusIcon: {
+      marginRight: 4,
+    },
+    statusText: {
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    cardContent: {
+      gap: 16,
+    },
+    participantInfo: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    avatarContainer: {
+      width: 48,
+      height: 48,
+      backgroundColor: colors.neutralDark,
+      borderRadius: 24,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 16,
+    },
+    participantDetails: {
+      flex: 1,
+    },
+    participantName: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: colors.dark,
+      marginBottom: 4,
+    },
+    copyButton: {
+      padding: 4,
+    },
+    exchangeInfo: {
+      alignItems: 'center',
+      backgroundColor: '#eff6ff',
+      padding: 16,
+      borderRadius: 12,
+    },
+    exchangeIcons: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    exchangeIcon: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    exchangeIconText: {
+      color: '#fff',
+      fontWeight: 'bold',
+      fontSize: 14,
+    },
+    exchangeArrow: {
+      marginHorizontal: 8,
+    },
+    exchangeRate: {
+      fontSize: 14,
+      color: '#1d4ed8',
+      fontWeight: '500',
+    },
+    infoRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+    },
+    infoIcon: {
+      marginRight: 12,
+      marginTop: 2,
+    },
+    infoContent: {
+      flex: 1,
+    },
+    infoTitle: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: colors.dark,
+      marginBottom: 2,
+    },
+    infoSubtitle: {
+      fontSize: 14,
+      color: '#6b7280',
+    },
+    summaryContainer: {
+      gap: 16,
+    },
+    feeBreakdown: {
+      backgroundColor: colors.neutral,
+      padding: 16,
+      borderRadius: 12,
+      gap: 12,
+    },
+    feeRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    feeLabel: {
+      fontSize: 14,
+      color: '#6B7280',
+      flex: 1,
+    },
+    feeAmount: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: colors.dark,
+    },
+    freeFee: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    freeFeeText: {
+      fontSize: 14,
+      color: '#10b981',
+      fontWeight: '500',
+      marginRight: 4,
+    },
+    freeFeeSubtext: {
+      fontSize: 12,
+      color: '#6b7280',
+    },
+    divider: {
+      height: 1,
+      backgroundColor: '#e5e7eb',
+      marginVertical: 4,
+    },
+    totalLabel: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.dark,
+    },
+    totalAmount: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: colors.dark,
+    },
+    summaryRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    summaryLabel: {
+      fontSize: 14,
+      color: '#6b7280',
+    },
+    summaryValue: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.dark,
+    },
+    statusContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    statusValue: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: '#10b981',
+      marginLeft: 4,
+    },
+    valuePropositionOuter: {
+      backgroundColor: '#A7F3D0', // emerald-200
+      borderRadius: 16,
+      padding: 16,
+      marginBottom: 20,
+      marginHorizontal: 0,
+    },
+    valueRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 6,
+    },
+    valueIcon: {
+      marginRight: 8,
+    },
+    valueTitle: {
+      fontWeight: 'bold',
+      fontSize: 16,
+      color: '#059669',
+    },
+    valueDescription: {
+      fontSize: 14,
+      color: '#059669',
+      marginBottom: 12,
+    },
+    valueHighlightBox: {
+      backgroundColor: '#D1FAE5', // emerald-100
+      borderRadius: 12,
+      padding: 14,
+    },
+    valueHighlightText: {
+      fontSize: 14,
+      color: '#065F46',
+      lineHeight: 20,
+    },
+    bold: {
+      fontWeight: 'bold',
+    },
+    actionsContainer: {
+      gap: 12,
+    },
+    primaryAction: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primary,
+      paddingVertical: 16,
+      borderRadius: 12,
+    },
+    primaryActionText: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: '#fff',
+    },
+    secondaryAction: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.neutralDark,
+      paddingVertical: 16,
+      borderRadius: 12,
+    },
+    secondaryActionText: {
+      fontSize: 16,
+      fontWeight: '500',
+      color: '#6b7280',
+    },
+    actionIcon: {
+      marginRight: 8,
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 20,
+    },
+    modalContent: {
+      backgroundColor: '#fff',
+      borderRadius: 20,
+      width: '100%',
+      maxWidth: 400,
+      maxHeight: '80%',
+    },
+    modalHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: 24,
+      borderBottomWidth: 1,
+      borderBottomColor: '#e5e7eb',
+    },
+    modalTitle: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: colors.dark,
+    },
+    modalBody: {
+      padding: 24,
+    },
+    modalSection: {
+      marginBottom: 20,
+    },
+    modalSectionTitle: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: '#374151',
+      marginBottom: 8,
+    },
+  })
+
+  // Get transaction type from route params
+  const { transactionType, transactionData: rawTransactionData } = route.params;
+  
+  // Parse transactionData if it's a string (GraphQL JSONField returns as string)
+  let transactionData = rawTransactionData;
+  if (typeof rawTransactionData === 'string') {
+    try {
+      transactionData = JSON.parse(rawTransactionData);
+    } catch (e) {
+      console.error('[TransactionDetailScreen] Failed to parse transaction data:', e);
+      transactionData = null;
+    }
+  }
+  
+  // Fetch transaction data if we only have an ID and minimal data
+  // Check if we have the essential fields for display
+  const hasCompleteData = transactionData?.amount && transactionData?.from && transactionData?.to;
+  const needsFetch = (transactionData?.id || transactionData?.transaction_id) && !hasCompleteData;
+  const transactionId = transactionData?.id || transactionData?.transaction_id;
+  
+  console.log('[TransactionDetailScreen] Data parsing:', {
+    rawDataType: typeof rawTransactionData,
+    parsedDataType: typeof transactionData,
+    isParsed: typeof rawTransactionData === 'string' && typeof transactionData === 'object'
   });
+  
+  console.log('[TransactionDetailScreen] Fetch check:', {
+    needsFetch,
+    transactionId,
+    hasAmount: !!transactionData?.amount,
+    dataKeys: transactionData ? Object.keys(transactionData) : []
+  });
+  
+  const { data: fetchedData, loading: fetchLoading, error: fetchError } = useQuery(
+    GET_SEND_TRANSACTION_BY_ID,
+    {
+      variables: { id: transactionId },
+      skip: !needsFetch || !transactionId,
+    }
+  );
+
+  // Check if this is a USDC transaction
+  const isUSDCTransaction = transactionData && ['deposit', 'withdrawal', 'conversion'].includes(transactionData.type);
+
+  // Sample transaction data - in real app, this would come from props or API
+  const transactions = {
+    received: {
+      type: 'received',
+      from: 'María González',
+      fromAddress: '0x1a2b3c4d...7890abcd',
+      amount: '+125.50',
+      currency: 'cUSD',
+      date: '2025-06-10',
+      time: '14:30',
+      status: 'completed',
+      hash: '0xabc123def456789012345678901234567890abcdef',
+      blockNumber: '2,847,392',
+      gasUsed: '21,000',
+      gasFee: '0.001',
+      confirmations: 127,
+      note: 'Pago por almuerzo - Gracias! 🍕',
+      avatar: 'M'
+    },
+    sent: {
+      type: 'sent',
+      to: 'Carlos Remolina',
+      toAddress: '0x9876543a...bcdef123',
+      amount: '-89.25',
+      currency: 'cUSD',
+      date: '2025-06-09',
+      time: '16:45',
+      status: 'completed',
+      hash: '0xdef456abc123789012345678901234567890fedcba',
+      blockNumber: '2,846,891',
+      gasUsed: '21,000',
+      gasFee: '0.001',
+      confirmations: 234,
+      note: 'Pago servicios freelance',
+      avatar: 'C'
+    },
+    exchange: {
+      type: 'exchange',
+      from: 'USDC',
+      to: 'cUSD',
+      amount: '+500.00',
+      currency: 'cUSD',
+      date: '2025-06-08',
+      time: '10:15',
+      status: 'completed',
+      hash: '0xghi789abc456012345678901234567890abcdefgh',
+      blockNumber: '2,846,123',
+      gasUsed: '45,000',
+      gasFee: '0.002',
+      confirmations: 456,
+      exchangeRate: '1 USDC = 1 cUSD',
+      avatar: null
+    },
+    conversion: {
+      type: 'conversion',
+      from: 'USDC',
+      to: 'cUSD',
+      amount: '+100.00',
+      currency: 'USDC',
+      secondaryCurrency: 'cUSD',
+      date: '2025-06-08',
+      time: '10:15',
+      status: 'completed',
+      hash: '0xconv123abc456789012345678901234567890def',
+      formattedTitle: 'Conversión USDC → cUSD',
+      avatar: null
+    },
+    payment: {
+      type: 'payment',
+      to: 'Supermercado Central',
+      toAddress: '0x5555666a...7777888b',
+      amount: '-32.75',
+      currency: 'cUSD',
+      date: '2025-06-07',
+      time: '18:45',
+      status: 'completed',
+      hash: '0xjkl012mno345678901234567890abcdef123456789',
+      blockNumber: '2,845,567',
+      gasUsed: '21,000',
+      gasFee: '0.001',
+      confirmations: 789,
+      location: 'Av. Libertador, Caracas',
+      merchantId: 'SUP001',
+      avatar: 'S'
+    }
+  };
+
+  // Log what data we received
+  console.log('[TransactionDetailScreen] Route params:', {
+    transactionType,
+    hasTransactionData: !!transactionData,
+    transactionDataKeys: transactionData ? Object.keys(transactionData) : [],
+    transactionData: transactionData,
+    needsFetch,
+    fetchedData: fetchedData?.sendTransaction,
+    fetchError: fetchError?.message
+  });
+  
+  // Transform fetched data to match the expected format
+  let txData = transactionData;
+  if (fetchedData?.sendTransaction && needsFetch) {
+    const tx = fetchedData.sendTransaction;
+    const isSent = tx.senderUser?.id === tx.recipientUser?.id; // This needs proper user context
+    
+    console.log('[TransactionDetailScreen] Transforming fetched data:', {
+      tx,
+      isSent,
+      amount: tx.amount,
+      tokenType: tx.tokenType,
+    });
+    
+    txData = {
+      ...transactionData,
+      type: isSent ? 'sent' : 'received',
+      from: tx.senderDisplayName || tx.senderUser?.firstName || 'Usuario',
+      fromAddress: tx.senderAddress,
+      to: tx.recipientDisplayName || tx.recipientUser?.firstName || 'Usuario',
+      toAddress: tx.recipientAddress,
+      amount: isSent ? `-${tx.amount}` : `+${tx.amount}`,
+      currency: tx.tokenType,
+      date: moment.utc(tx.createdAt).local().format('YYYY-MM-DD'),
+      time: moment.utc(tx.createdAt).local().format('HH:mm'),
+      status: tx.status?.toLowerCase() || 'completed',
+      hash: tx.transactionHash || '',
+      note: tx.memo || '',
+      avatar: (isSent ? tx.recipientDisplayName : tx.senderDisplayName)?.[0] || 'U',
+      isInvitedFriend: !!tx.invitationExpiresAt,
+      transaction_type: 'send',
+      // Add phone numbers from fetched data
+      sender_phone: tx.senderUser?.phoneCountry && tx.senderUser?.phoneNumber ? 
+        `${tx.senderUser.phoneCountry}${tx.senderUser.phoneNumber}` : tx.senderPhone,
+      recipient_phone: tx.recipientUser?.phoneCountry && tx.recipientUser?.phoneNumber ? 
+        `${tx.recipientUser.phoneCountry}${tx.recipientUser.phoneNumber}` : tx.recipientPhone,
+      senderPhone: tx.senderUser?.phoneCountry && tx.senderUser?.phoneNumber ? 
+        `${tx.senderUser.phoneCountry}${tx.senderUser.phoneNumber}` : tx.senderPhone,
+      recipientPhone: tx.recipientUser?.phoneCountry && tx.recipientUser?.phoneNumber ? 
+        `${tx.recipientUser.phoneCountry}${tx.recipientUser.phoneNumber}` : tx.recipientPhone,
+    };
+  }
+  
+  // If transactionData exists and has content, normalize it
+  let normalizedTransactionData = transactionData;
+  if (transactionData && Object.keys(transactionData).length > 1) {
+    // Handle USDC conversion transactions
+    let type = transactionData.transaction_type || transactionData.transactionType || transactionData.type;
+    
+    // If it has conversion_type, it's a conversion transaction
+    if (transactionData.conversion_type) {
+      type = 'conversion';
+    }
+    
+    // Normalize field names from notification data (snake_case to camelCase)
+    normalizedTransactionData = {
+      ...transactionData,
+      // Map transaction_type to type for consistency
+      type: type,
+      createdAt: transactionData.created_at || transactionData.createdAt || transactionData.timestamp,
+      transactionType: transactionData.transaction_type || transactionData.transactionType,
+      tokenType: transactionData.token_type || transactionData.tokenType || transactionData.currency,
+      transactionId: transactionData.transaction_id || transactionData.transactionId || transactionData.id,
+      recipientName: transactionData.recipient_name || transactionData.recipientName,
+      recipientPhone: transactionData.recipient_phone || transactionData.recipientPhone,
+      recipientAddress: transactionData.recipient_address || transactionData.recipientAddress,
+      senderName: transactionData.sender_name || transactionData.senderName,
+      senderPhone: transactionData.sender_phone || transactionData.senderPhone,
+      senderAddress: transactionData.sender_address || transactionData.senderAddress,
+      transactionHash: transactionData.transaction_hash || transactionData.transactionHash,
+      hash: transactionData.transaction_hash || transactionData.transactionHash || transactionData.hash,
+      // For conversions
+      currency: transactionData.from_token || transactionData.token_type || transactionData.currency || 'USDC',
+      secondaryCurrency: transactionData.to_token || 'cUSD',
+      amount: transactionData.amount || transactionData.from_amount || transactionData.to_amount,
+      status: transactionData.status || 'completed',
+      // Format date if timestamp is available
+      date: transactionData.timestamp ? moment.utc(transactionData.timestamp).local().format('YYYY-MM-DD') : transactionData.date,
+      time: transactionData.timestamp ? moment.utc(transactionData.timestamp).local().format('HH:mm') : transactionData.time,
+      // Format conversion title
+      formattedTitle: transactionData.conversion_type === 'usdc_to_cusd' ? 'Conversión USDC → cUSD' : 
+                      transactionData.conversion_type === 'cusd_to_usdc' ? 'Conversión cUSD → USDC' : null,
+    };
+  }
+  
+  const currentTx = (normalizedTransactionData && Object.keys(normalizedTransactionData).length > 1) 
+    ? normalizedTransactionData 
+    : (txData || transactions[transactionType]);
+  
+  console.log('[TransactionDetailScreen] currentTx selection:', {
+    hasTransactionData: !!(transactionData && Object.keys(transactionData).length > 1),
+    hasTxData: !!txData,
+    usingFallback: !!(transactions[transactionType])
+  });
+  console.log('[TransactionDetailScreen] currentTx:', currentTx);
+  console.log('[TransactionDetailScreen] currentTx datetime fields:', {
+    date: currentTx?.date,
+    time: currentTx?.time,
+    createdAt: currentTx?.createdAt,
+    created_at: currentTx?.created_at,
+    timestamp: currentTx?.timestamp,
+  });
+  
+  // Debug timezone conversion
+  if (currentTx?.createdAt) {
+    const deviceOffset = new Date().getTimezoneOffset();
+    console.log('[TransactionDetailScreen] Timezone debug:', {
+      rawCreatedAt: currentTx.createdAt,
+      parsedUTC: moment.utc(currentTx.createdAt).format('YYYY-MM-DD HH:mm:ss'),
+      convertedLocal: moment.utc(currentTx.createdAt).local().format('YYYY-MM-DD HH:mm:ss'),
+      deviceTimezoneOffset: `${deviceOffset} minutes (${-deviceOffset/60} hours)`,
+      currentLocalTime: moment().format('YYYY-MM-DD HH:mm:ss'),
+      momentLocalTime: moment.utc(currentTx.createdAt).local().format(),
+      isUTC: moment.utc(currentTx.createdAt).isUTC(),
+      isLocal: moment.utc(currentTx.createdAt).local().isLocal(),
+    });
+  }
+  console.log('[TransactionDetailScreen] currentTx details:', {
+    amount: currentTx?.amount,
+    currency: currentTx?.currency,
+    status: currentTx?.status,
+    type: currentTx?.type,
+    from: currentTx?.from,
+    to: currentTx?.to,
+    sender_phone: currentTx?.sender_phone,
+    recipient_phone: currentTx?.recipient_phone,
+    keys: currentTx ? Object.keys(currentTx) : []
+  });
+  
+  // Get contact names for display - check all possible phone fields
+  // MUST be called before any early returns to follow React hooks rules
+  const senderPhone = currentTx?.sender_phone || currentTx?.senderPhone || currentTx?.fromPhone || transactionData?.sender_phone;
+  const recipientPhone = currentTx?.recipient_phone || currentTx?.recipientPhone || currentTx?.toPhone || transactionData?.recipient_phone;
+  
+  console.log('[TransactionDetailScreen] Contact lookup:', {
+    senderPhone,
+    recipientPhone,
+    fallbackSenderName: currentTx?.from || currentTx?.senderName,
+    fallbackRecipientName: currentTx?.to || currentTx?.recipientName,
+  });
+  
+  const senderContactInfo = useContactNameSync(senderPhone, currentTx?.from || currentTx?.senderName || currentTx?.sender_name);
+  const recipientContactInfo = useContactNameSync(recipientPhone, currentTx?.to || currentTx?.recipientName || currentTx?.recipient_name);
+  
+  console.log('[TransactionDetailScreen] Contact info results:', {
+    senderContactInfo,
+    recipientContactInfo,
+  });
+  
+  // Show loading state while fetching
+  if (fetchLoading) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color={colors.accent} />
+        <Text style={styles.loadingText}>Cargando transacción...</Text>
+      </View>
+    );
+  }
+  
+  // If no transaction data is available, show an error state
+  if (!currentTx) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.errorText}>No se pudo cargar la información de la transacción</Text>
+      </View>
+    );
+  }
+  
+  const isInvitedFriend = currentTx?.isInvitedFriend || false;
+  
+  // Debug phone numbers
+  console.log('[TransactionDetailScreen] Phone number data:', {
+    sender_phone: currentTx?.sender_phone,
+    senderPhone: currentTx?.senderPhone,
+    recipient_phone: currentTx?.recipient_phone,
+    recipientPhone: currentTx?.recipientPhone,
+    fromPhone: currentTx?.fromPhone,
+    toPhone: currentTx?.toPhone,
+    // Also check raw transactionData
+    raw_sender_phone: transactionData?.sender_phone,
+    raw_recipient_phone: transactionData?.recipient_phone,
+    all_keys: currentTx ? Object.keys(currentTx) : [],
+  });
+  
+  // Use contact names if available
+  const displayFromName = senderContactInfo.displayName;
+  const displayToName = recipientContactInfo.displayName;
+
+  const handleCopy = (text: string, type: string) => {
+    Clipboard.setString(text);
+    Alert.alert('Copiado', 'Dirección copiada al portapapeles');
+    setCopied(type);
+    setTimeout(() => setCopied(''), 2000);
+  };
+
+  const getTransactionIcon = (type: string) => {
+    switch(type) {
+      case 'received':
+        return <Icon name="arrow-down" size={24} color="#10b981" />;
+      case 'sent':
+        return <Icon name="arrow-up" size={24} color="#ef4444" />;
+      case 'exchange':
+      case 'conversion':
+        return <Icon name="refresh-cw" size={24} color="#3b82f6" />;
+      case 'payment':
+        return <Icon name="shopping-bag" size={24} color="#8b5cf6" />;
+      case 'deposit':
+        return <Icon name="arrow-down-circle" size={24} color="#10b981" />;
+      case 'withdrawal':
+        return <Icon name="arrow-up-circle" size={24} color="#ef4444" />;
+      default:
+        return <Icon name="arrow-up" size={24} color="#6b7280" />;
+    }
+  };
+
+  const getTransactionTitle = (tx: any) => {
+    switch(tx.type) {
+      case 'received':
+        return `Recibido de ${displayFromName}`;
+      case 'sent':
+        return `Enviado a ${displayToName}`;
+      case 'exchange':
+        return `Intercambio ${tx.from} → ${tx.to}`;
+      case 'conversion':
+        return tx.formattedTitle || `Conversión ${tx.currency || 'USDC'} → ${tx.secondaryCurrency || 'cUSD'}`;
+      case 'payment':
+        // Check if it's a received payment (positive amount) or sent payment (negative amount)
+        return tx.amount.startsWith('+') 
+          ? `Pago recibido de ${displayFromName}`
+          : `Pago a ${displayToName}`;
+      case 'deposit':
+        return tx.formattedTitle || `Depósito ${tx.currency}`;
+      case 'withdrawal':
+        return tx.formattedTitle || `Retiro ${tx.currency}`;
+      default:
+        return 'Transacción';
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch(status?.toLowerCase()) {
+      case 'completed':
+        return { text: '#059669', bg: '#d1fae5' };
+      case 'pending':
+      case 'processing':
+        return { text: '#d97706', bg: '#fef3c7' };
+      case 'failed':
+        return { text: '#dc2626', bg: '#fee2e2' };
+      default:
+        return { text: '#6b7280', bg: '#f3f4f6' };
+    }
+  };
+
+  const statusColors = getStatusColor(currentTx.status);
 
   return (
     <View style={styles.container}>

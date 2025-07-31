@@ -202,7 +202,9 @@ class ConvertUSDCToCUSD(graphene.Mutation):
                             'to_token': 'cUSD',
                             'conversion_type': 'usdc_to_cusd',
                             'exchange_rate': str(exchange_rate),
-                            'fee_amount': str(fee_amount)
+                            'fee_amount': str(fee_amount),
+                            'timestamp': conversion.created_at.isoformat(),
+                            'transaction_hash': conversion.to_transaction_hash or conversion.from_transaction_hash or ''
                         }
                     )
             
@@ -385,7 +387,9 @@ class ConvertCUSDToUSDC(graphene.Mutation):
                             'to_token': 'USDC',
                             'conversion_type': 'cusd_to_usdc',
                             'exchange_rate': str(exchange_rate),
-                            'fee_amount': str(fee_amount)
+                            'fee_amount': str(fee_amount),
+                            'timestamp': conversion.created_at.isoformat(),
+                            'transaction_hash': conversion.to_transaction_hash or conversion.from_transaction_hash or ''
                         }
                     )
             
