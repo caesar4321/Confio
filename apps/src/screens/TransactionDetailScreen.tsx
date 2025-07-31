@@ -1004,11 +1004,15 @@ export const TransactionDetailScreen = () => {
       recipientName: transactionData.recipient_name || transactionData.recipientName,
       recipientPhone: transactionData.recipient_phone || transactionData.recipientPhone,
       recipientAddress: transactionData.recipient_address || transactionData.recipientAddress,
+      recipient_phone: transactionData.recipient_phone || transactionData.recipientPhone,
+      recipient_address: transactionData.recipient_address || transactionData.recipientAddress,
       senderName: transactionData.sender_name || transactionData.senderName,
       senderPhone: transactionData.sender_phone || transactionData.senderPhone,
       senderAddress: transactionData.sender_address || transactionData.senderAddress,
       transactionHash: transactionData.transaction_hash || transactionData.transactionHash,
       hash: transactionData.transaction_hash || transactionData.transactionHash || transactionData.hash,
+      is_invited_friend: transactionData.is_invited_friend,
+      is_external_address: transactionData.is_external_address,
       // For conversions
       currency: transactionData.from_token || transactionData.token_type || transactionData.currency || 'USDC',
       secondaryCurrency: transactionData.to_token || 'cUSD',
@@ -1169,7 +1173,14 @@ export const TransactionDetailScreen = () => {
       case 'received':
         return `Recibido de ${displayFromName}`;
       case 'sent':
-        return `Enviado a ${displayToName}`;
+        if (displayToName) {
+          return `Enviado a ${displayToName}`;
+        } else if (tx.is_invited_friend || tx.recipient_phone) {
+          return 'Enviado a amigo invitado';
+        } else if (tx.is_external_address || tx.toAddress || tx.recipient_address) {
+          return 'Enviado a dirección externa';
+        }
+        return 'Enviado';
       case 'exchange':
         return `Intercambio ${tx.from} → ${tx.to}`;
       case 'conversion':
@@ -1428,6 +1439,15 @@ export const TransactionDetailScreen = () => {
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
                         {(() => {
+                          console.log('[TransactionDetailScreen] Address display debug:', {
+                            recipientPhone,
+                            recipient_phone: currentTx.recipient_phone,
+                            toAddress: currentTx.toAddress,
+                            recipient_address: currentTx.recipient_address,
+                            is_invited_friend: currentTx.is_invited_friend,
+                            is_external_address: currentTx.is_external_address,
+                          });
+                          
                           // Show phone number for invited friends
                           if (recipientPhone || currentTx.recipient_phone) {
                             return formatPhoneNumber(recipientPhone || currentTx.recipient_phone);
@@ -1437,10 +1457,10 @@ export const TransactionDetailScreen = () => {
                           if (currentTx.toAddress || currentTx.recipient_address) {
                             const address = currentTx.toAddress || currentTx.recipient_address;
                             // Format address: show first 10 and last 6 characters
-                            if (address.length > 20) {
+                            if (address && address.length > 20) {
                               return `${address.substring(0, 10)}...${address.substring(address.length - 6)}`;
                             }
-                            return address;
+                            return address || '';
                           }
                           
                           return '';
@@ -1448,7 +1468,9 @@ export const TransactionDetailScreen = () => {
                       </Text>
                       <TouchableOpacity 
                         onPress={() => handleCopy(
-                          recipientPhone ? formatPhoneNumber(recipientPhone) : currentTx.toAddress, 
+                          recipientPhone || currentTx.recipient_phone 
+                            ? formatPhoneNumber(recipientPhone || currentTx.recipient_phone) 
+                            : (currentTx.toAddress || currentTx.recipient_address || ''), 
                           'to'
                         )}
                         style={styles.copyButton}
