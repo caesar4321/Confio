@@ -260,7 +260,6 @@ export const CreateOfferScreen = () => {
               paymentMethodIds: selectedPaymentMethods,
               countryCode: selectedCountry?.[2], // Pass the country code
               terms: terms.trim(),
-              accountId: activeAccount?.id, // Pass the current account ID
             },
           },
         });

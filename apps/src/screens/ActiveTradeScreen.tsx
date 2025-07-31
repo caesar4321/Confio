@@ -22,6 +22,7 @@ import { useQuery, useMutation, gql } from '@apollo/client';
 import { GET_P2P_TRADE, DISPUTE_P2P_TRADE } from '../apollo/queries';
 import { formatLocalDateTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
+import { useAccount } from '../contexts/AccountContext';
 
 // Temporary workaround - define mutation locally if import fails
 const DISPUTE_P2P_TRADE_LOCAL = gql`
@@ -75,6 +76,7 @@ export const ActiveTradeScreen: React.FC = () => {
   const route = useRoute<ActiveTradeRouteProp>();
   const { trade: routeTrade } = route.params;
   const { userProfile } = useAuth();
+  const { activeAccount, accounts } = useAccount();
   
   // All useState hooks must be called unconditionally
   const [activeTradeStep, setActiveTradeStep] = useState(1);
@@ -98,12 +100,31 @@ export const ActiveTradeScreen: React.FC = () => {
   // Use full trade data if available, otherwise use route params
   const fullTradeData = tradeDetailsData?.p2pTrade;
   const currentUserId = userProfile?.id;
+  const currentBusinessId = activeAccount?.business?.id;
   
-  // Determine if current user is buyer or seller using new fields
-  const iAmBuyer = fullTradeData ? 
-    (fullTradeData.buyerUser?.id === currentUserId || fullTradeData.buyer?.id === currentUserId) : false;
-  const iAmSeller = fullTradeData ? 
-    (fullTradeData.sellerUser?.id === currentUserId || fullTradeData.seller?.id === currentUserId) : false;
+  // Get all my business IDs from all accounts
+  const myBusinessIds = accounts
+    ?.filter(acc => acc.type === 'business' && acc.business?.id)
+    .map(acc => String(acc.business.id)) || [];
+  
+  // Determine if current user is buyer or seller - check both user and business accounts
+  const iAmBuyer = fullTradeData ? (
+    // Check personal account
+    (fullTradeData.buyerUser?.id === currentUserId || fullTradeData.buyer?.id === currentUserId) ||
+    // Check business account
+    (currentBusinessId && fullTradeData.buyerBusiness?.id && String(fullTradeData.buyerBusiness.id) === String(currentBusinessId)) ||
+    // Check if buyer business is in my list of businesses
+    (fullTradeData.buyerBusiness && myBusinessIds.includes(String(fullTradeData.buyerBusiness.id)))
+  ) : false;
+  
+  const iAmSeller = fullTradeData ? (
+    // Check personal account
+    (fullTradeData.sellerUser?.id === currentUserId || fullTradeData.seller?.id === currentUserId) ||
+    // Check business account
+    (currentBusinessId && fullTradeData.sellerBusiness?.id && String(fullTradeData.sellerBusiness.id) === String(currentBusinessId)) ||
+    // Check if seller business is in my list of businesses
+    (fullTradeData.sellerBusiness && myBusinessIds.includes(String(fullTradeData.sellerBusiness.id)))
+  ) : false;
   
   const trade = fullTradeData ? {
     id: fullTradeData.id,
@@ -113,7 +134,8 @@ export const ActiveTradeScreen: React.FC = () => {
     tradeType: iAmBuyer ? 'buy' : 'sell', // Current user's perspective
     trader: iAmBuyer ? {
       // If I'm buyer, show seller info
-      name: fullTradeData.sellerDisplayName || 
+      name: fullTradeData.sellerBusiness?.name || 
+        fullTradeData.sellerDisplayName || 
         `${fullTradeData.sellerUser?.firstName || ''} ${fullTradeData.sellerUser?.lastName || ''}`.trim() || 
         fullTradeData.sellerUser?.username || 
         `${fullTradeData.seller?.firstName || ''} ${fullTradeData.seller?.lastName || ''}`.trim() || 
@@ -126,7 +148,8 @@ export const ActiveTradeScreen: React.FC = () => {
       successRate: fullTradeData.sellerStats?.successRate || 0,
     } : {
       // If I'm seller, show buyer info
-      name: fullTradeData.buyerDisplayName || 
+      name: fullTradeData.buyerBusiness?.name || 
+        fullTradeData.buyerDisplayName || 
         `${fullTradeData.buyerUser?.firstName || ''} ${fullTradeData.buyerUser?.lastName || ''}`.trim() || 
         fullTradeData.buyerUser?.username || 
         `${fullTradeData.buyer?.firstName || ''} ${fullTradeData.buyer?.lastName || ''}`.trim() || 
@@ -220,6 +243,16 @@ export const ActiveTradeScreen: React.FC = () => {
     tradeId: routeTrade?.id,
     fullDataStatus: fullTradeData?.status,
     fullDataStep: fullTradeData?.step,
+    currentUserId,
+    currentBusinessId,
+    myBusinessIds,
+    iAmBuyer,
+    iAmSeller,
+    buyerUser: fullTradeData?.buyerUser,
+    buyerBusiness: fullTradeData?.buyerBusiness,
+    sellerUser: fullTradeData?.sellerUser,
+    sellerBusiness: fullTradeData?.sellerBusiness,
+    traderName: trade?.trader?.name,
   });
   
   console.log('[ActiveTradeScreen] Using mutation:', !!mutationToUse, mutationToUse === DISPUTE_P2P_TRADE_LOCAL ? 'local' : 'imported');
@@ -913,26 +946,67 @@ export const ActiveTradeScreen: React.FC = () => {
             const iAmBuyer = trade.tradeType === 'buy';
             const fullTradeData = tradeDetailsData?.p2pTrade;
             
-            // Get the correct counterparty info and stats
-            const counterpartyInfo = iAmBuyer ? fullTradeData?.seller : fullTradeData?.buyer;
+            // Get counterparty information - handle both personal and business accounts
+            let counterpartyName = '';
+            let counterpartyInfo = null;
+            
+            if (iAmBuyer) {
+              // I'm the buyer, so I rate the seller
+              if (fullTradeData?.sellerBusiness) {
+                counterpartyName = fullTradeData.sellerBusiness.name;
+                counterpartyInfo = fullTradeData.sellerBusiness;
+              } else if (fullTradeData?.sellerUser) {
+                counterpartyInfo = fullTradeData.sellerUser;
+                counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Vendedor';
+              } else if (fullTradeData?.sellerDisplayName) {
+                counterpartyName = fullTradeData.sellerDisplayName;
+              } else if (fullTradeData?.seller) {
+                // Fallback to old field
+                counterpartyInfo = fullTradeData.seller;
+                counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Vendedor';
+              } else {
+                counterpartyName = trade.trader?.name || 'Vendedor';
+              }
+            } else {
+              // I'm the seller, so I rate the buyer
+              if (fullTradeData?.buyerBusiness) {
+                counterpartyName = fullTradeData.buyerBusiness.name;
+                counterpartyInfo = fullTradeData.buyerBusiness;
+              } else if (fullTradeData?.buyerUser) {
+                counterpartyInfo = fullTradeData.buyerUser;
+                counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Comprador';
+              } else if (fullTradeData?.buyerDisplayName) {
+                counterpartyName = fullTradeData.buyerDisplayName;
+              } else if (fullTradeData?.buyer) {
+                // Fallback to old field
+                counterpartyInfo = fullTradeData.buyer;
+                counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Comprador';
+              } else {
+                counterpartyName = trade.trader?.name || 'Comprador';
+              }
+            }
+            
+            // Get the correct counterparty stats
             const counterpartyStats = iAmBuyer ? fullTradeData?.sellerStats : fullTradeData?.buyerStats;
             
             console.log('[ActiveTradeScreen] Rating navigation:', {
               iAmBuyer,
               tradeType: trade.tradeType,
-              counterpartyInfo,
+              buyerUser: fullTradeData?.buyerUser,
+              buyerBusiness: fullTradeData?.buyerBusiness,
+              sellerUser: fullTradeData?.sellerUser,
+              sellerBusiness: fullTradeData?.sellerBusiness,
+              buyerDisplayName: fullTradeData?.buyerDisplayName,
+              sellerDisplayName: fullTradeData?.sellerDisplayName,
+              counterpartyName,
               counterpartyStats,
               hasRating: trade.hasRating,
-              // Fallback to original data if full data not loaded
-              usingFallback: !fullTradeData,
             });
             
             navigation.navigate('TraderRating', {
               tradeId: trade.id,
               trader: {
-                name: counterpartyInfo 
-                  ? `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Usuario'
-                  : trade.trader?.name || 'Comerciante',
+                name: counterpartyName,
                 verified: counterpartyStats?.isVerified || trade.trader?.verified || false,
                 completedTrades: counterpartyStats?.completedTrades || trade.trader?.completedTrades || 0,
                 successRate: counterpartyStats?.successRate || trade.trader?.successRate || 0

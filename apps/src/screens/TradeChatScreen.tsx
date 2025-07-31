@@ -33,6 +33,7 @@ import { getCurrencySymbol, getCurrencyForCountry } from '../utils/currencyMappi
 import { useAccountManager } from '../hooks/useAccountManager';
 import { useAccount } from '../contexts/AccountContext';
 import { useNumberFormat } from '../utils/numberFormatting';
+import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 
 type TradeChatRouteProp = RouteProp<MainStackParamList, 'TradeChat'>;
 type TradeChatNavigationProp = NativeStackNavigationProp<MainStackParamList, 'TradeChat'>;
@@ -90,8 +91,8 @@ export const TradeChatScreen: React.FC = () => {
           sellerBusiness: trade.sellerBusiness,
           buyerType: trade.buyerType,
           sellerType: trade.sellerType,
-          iAmBuyer: tradeType === 'buy',
-          myRole: tradeType === 'buy' ? 'buyer' : 'seller'
+          iAmBuyer: computedTradeType === 'buy',
+          myRole: computedTradeType === 'buy' ? 'buyer' : 'seller'
         });
         
         // Log my current role in the trade
@@ -304,37 +305,124 @@ export const TradeChatScreen: React.FC = () => {
   useEffect(() => {
     if (!tradeDetailsData?.p2pTrade || !userProfile?.id) return;
     
+    // IMPORTANT: Wait for activeAccount and accounts to be loaded
+    if (!activeAccount || !accounts) {
+      console.log('[TradeChatScreen] Waiting for activeAccount and accounts to load...', {
+        hasActiveAccount: !!activeAccount,
+        hasAccounts: !!accounts
+      });
+      return;
+    }
+    
     const trade = tradeDetailsData.p2pTrade;
     const myUserId = String(userProfile.id);
     
+    // For business accounts, we need to check the business ID
+    const isBusinessAccount = activeAccount?.type === 'business';
+    const myBusinessId = activeAccount?.business?.id ? String(activeAccount.business.id) : null;
+    
+    // Get all my business IDs from all accounts
+    const myBusinessIds = accounts
+      ?.filter(acc => acc.type === 'business' && acc.business?.id)
+      .map(acc => String(acc.business.id)) || [];
+    
+    console.log('[TradeChatScreen] Trade type computation - Raw data:', {
+      trade: {
+        buyerUser: trade.buyerUser,
+        buyerBusiness: trade.buyerBusiness,
+        sellerUser: trade.sellerUser,
+        sellerBusiness: trade.sellerBusiness,
+        buyer: trade.buyer,
+        seller: trade.seller,
+      },
+      myContext: {
+        myUserId,
+        myBusinessId,
+        myBusinessIds,
+        isBusinessAccount,
+        activeAccount: activeAccount,
+        allAccounts: accounts,
+      }
+    });
+    
     // Check if I'm the buyer
-    const iAmBuyer = (
-      (trade.buyerUser && String(trade.buyerUser.id) === myUserId) ||
-      (trade.buyer && String(trade.buyer.id) === myUserId)
-    );
+    let iAmBuyer = false;
+    
+    if (isBusinessAccount && myBusinessId) {
+      // Business account viewing - only check business fields
+      const buyerBusinessId = trade.buyerBusiness?.id;
+      iAmBuyer = buyerBusinessId && String(buyerBusinessId) === String(myBusinessId);
+      console.log('[TradeChatScreen] Business account buyer check:', {
+        myBusinessId,
+        buyerBusinessId,
+        matches: iAmBuyer,
+        note: 'Business account only checks business fields'
+      });
+    } else {
+      // Personal account viewing - only check personal fields
+      iAmBuyer = (
+        (trade.buyerUser && String(trade.buyerUser.id) === myUserId) ||
+        (trade.buyer && String(trade.buyer.id) === myUserId)
+      );
+      console.log('[TradeChatScreen] Personal account buyer check:', {
+        myUserId,
+        buyerUserId: trade.buyerUser?.id,
+        buyerId: trade.buyer?.id,
+        matches: iAmBuyer,
+        note: 'Personal account only checks user fields'
+      });
+    }
     
     // Check if I'm the seller
-    const iAmSeller = (
-      (trade.sellerUser && String(trade.sellerUser.id) === myUserId) ||
-      (trade.seller && String(trade.seller.id) === myUserId)
-    );
+    let iAmSeller = false;
+    
+    if (isBusinessAccount && myBusinessId) {
+      // Business account viewing - only check business fields
+      const sellerBusinessId = trade.sellerBusiness?.id;
+      iAmSeller = sellerBusinessId && String(sellerBusinessId) === String(myBusinessId);
+      console.log('[TradeChatScreen] Business account seller check:', {
+        myBusinessId,
+        sellerBusinessId,
+        matches: iAmSeller,
+        note: 'Business account only checks business fields'
+      });
+    } else {
+      // Personal account viewing - only check personal fields
+      iAmSeller = (
+        (trade.sellerUser && String(trade.sellerUser.id) === myUserId) ||
+        (trade.seller && String(trade.seller.id) === myUserId)
+      );
+      console.log('[TradeChatScreen] Personal account seller check:', {
+        myUserId,
+        sellerUserId: trade.sellerUser?.id,
+        sellerId: trade.seller?.id,
+        matches: iAmSeller,
+        note: 'Personal account only checks user fields'
+      });
+    }
     
     const newComputedType = iAmBuyer ? 'buy' : iAmSeller ? 'sell' : tradeType;
     
-    console.log('[TradeChatScreen] Computing trade type:', {
+    console.log('[TradeChatScreen] Computing trade type - Final result:', {
       myUserId,
+      myBusinessId,
+      isBusinessAccount,
+      activeAccountType: activeAccount?.type,
       buyerUserId: trade.buyerUser?.id,
+      buyerBusinessId: trade.buyerBusiness?.id,
       sellerUserId: trade.sellerUser?.id,
+      sellerBusinessId: trade.sellerBusiness?.id,
       iAmBuyer,
       iAmSeller,
       oldType: computedTradeType,
-      newType: newComputedType
+      newType: newComputedType,
+      willUpdate: newComputedType !== computedTradeType
     });
     
     if (newComputedType !== computedTradeType) {
       setComputedTradeType(newComputedType);
     }
-  }, [tradeDetailsData?.p2pTrade, userProfile?.id]);
+  }, [tradeDetailsData?.p2pTrade, userProfile?.id, activeAccount, accounts]);
 
   // Update trade step when status changes from polling
   useEffect(() => {
@@ -422,10 +510,10 @@ export const TradeChatScreen: React.FC = () => {
         status: tradeDetailsData.p2pTrade.status,
         currentStep: currentTradeStep,
         newStep: newStep,
-        tradeType: tradeType,
-        isBuyer: tradeType === 'buy',
-        shouldShowMarkAsPaidButton: newStep === 2 && tradeType === 'buy',
-        shouldShowReleaseFundsButton: newStep === 3 && tradeType === 'sell',
+        tradeType: computedTradeType,
+        isBuyer: computedTradeType === 'buy',
+        shouldShowMarkAsPaidButton: newStep === 2 && computedTradeType === 'buy',
+        shouldShowReleaseFundsButton: newStep === 3 && computedTradeType === 'sell',
         timestamp: new Date().toISOString()
       });
       
@@ -752,10 +840,39 @@ export const TradeChatScreen: React.FC = () => {
               const tradeData = tradeDetailsData?.p2pTrade;
               
               // Determine who is rating whom based on the current user's role
-              const iAmBuyer = tradeType === 'buy';
-              const counterpartyInfo = iAmBuyer 
-                ? (tradeData?.sellerUser || tradeData?.seller) 
-                : (tradeData?.buyerUser || tradeData?.buyer);
+              const iAmBuyer = computedTradeType === 'buy';
+              
+              // Get counterparty information - handle both personal and business accounts
+              let counterpartyName = '';
+              let counterpartyInfo = null;
+              
+              if (iAmBuyer) {
+                // I'm the buyer, so I rate the seller
+                if (tradeData?.sellerBusiness) {
+                  counterpartyName = tradeData.sellerBusiness.name;
+                  counterpartyInfo = tradeData.sellerBusiness;
+                } else if (tradeData?.sellerUser) {
+                  counterpartyInfo = tradeData.sellerUser;
+                  counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Vendedor';
+                } else if (tradeData?.sellerDisplayName) {
+                  counterpartyName = tradeData.sellerDisplayName;
+                } else {
+                  counterpartyName = 'Vendedor';
+                }
+              } else {
+                // I'm the seller, so I rate the buyer
+                if (tradeData?.buyerBusiness) {
+                  counterpartyName = tradeData.buyerBusiness.name;
+                  counterpartyInfo = tradeData.buyerBusiness;
+                } else if (tradeData?.buyerUser) {
+                  counterpartyInfo = tradeData.buyerUser;
+                  counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Comprador';
+                } else if (tradeData?.buyerDisplayName) {
+                  counterpartyName = tradeData.buyerDisplayName;
+                } else {
+                  counterpartyName = 'Comprador';
+                }
+              }
               
               // Get the actual stats for the counterparty
               const counterpartyStats = iAmBuyer 
@@ -764,13 +881,15 @@ export const TradeChatScreen: React.FC = () => {
               
               console.log('🎯 Rating navigation - Stats debug:', {
                 iAmBuyer,
-                tradeType,
-                buyerInfo: tradeData?.buyer,
-                sellerInfo: tradeData?.seller,
-                buyerStats: tradeData?.buyerStats,
-                sellerStats: tradeData?.sellerStats,
+                tradeType: computedTradeType,
+                buyerUser: tradeData?.buyerUser,
+                buyerBusiness: tradeData?.buyerBusiness,
+                sellerUser: tradeData?.sellerUser,
+                sellerBusiness: tradeData?.sellerBusiness,
+                buyerDisplayName: tradeData?.buyerDisplayName,
+                sellerDisplayName: tradeData?.sellerDisplayName,
+                counterpartyName,
                 counterpartyStats,
-                offerStats: tradeData?.offer?.userStats,
               });
               
               // Use the stats if available, otherwise fallback to default
@@ -779,9 +898,6 @@ export const TradeChatScreen: React.FC = () => {
                 completedTrades: 0,
                 successRate: 0,
               };
-              
-              // If I'm the buyer, I rate the seller. If I'm the seller, I rate the buyer.
-              const ratingTargetName = iAmBuyer ? 'vendedor' : 'comprador';
               
               // Check if already rated
               if (tradeData?.hasRating) {
@@ -792,9 +908,7 @@ export const TradeChatScreen: React.FC = () => {
               navigation.navigate('TraderRating', {
                 tradeId,
                 trader: {
-                  name: iAmBuyer 
-                    ? (tradeData?.sellerDisplayName || `${counterpartyInfo?.firstName || ''} ${counterpartyInfo?.lastName || ''}`.trim() || counterpartyInfo?.username || 'Vendedor')
-                    : (tradeData?.buyerDisplayName || `${counterpartyInfo?.firstName || ''} ${counterpartyInfo?.lastName || ''}`.trim() || counterpartyInfo?.username || 'Comprador'),
+                  name: counterpartyName,
                   verified: stats.isVerified || false,
                   completedTrades: stats.completedTrades || 0,
                   successRate: stats.successRate || 0,
@@ -821,10 +935,10 @@ export const TradeChatScreen: React.FC = () => {
           // This ensures the UI updates even if the user initiated the change
           console.log('🎯 After WebSocket update - Button visibility check:', {
             currentTradeStep: newStep,
-            tradeType,
+            tradeType: computedTradeType,
             hasSharedPaymentDetails: newStep >= 2,
-            shouldShowMarkAsPaidButton: newStep === 2 && tradeType === 'buy',
-            shouldShowReleaseFundsButton: newStep === 3 && tradeType === 'sell',
+            shouldShowMarkAsPaidButton: newStep === 2 && computedTradeType === 'buy',
+            shouldShowReleaseFundsButton: newStep === 3 && computedTradeType === 'sell',
             timestamp: new Date().toISOString()
           });
           
@@ -1252,8 +1366,8 @@ export const TradeChatScreen: React.FC = () => {
       console.log('✅ Payment details shared successfully:', {
         currentTradeStep,
         tradeStatus: tradeDetailsData?.p2pTrade?.status,
-        tradeType,
-        shouldBuyerSeeMarkAsPaidButton: currentTradeStep === 2 && tradeType === 'buy'
+        tradeType: computedTradeType,
+        shouldBuyerSeeMarkAsPaidButton: currentTradeStep === 2 && computedTradeType === 'buy'
       });
       
     } catch (error) {
@@ -1375,10 +1489,39 @@ export const TradeChatScreen: React.FC = () => {
                 const tradeData = tradeDetailsData?.p2pTrade;
                 
                 // Determine who is rating whom based on the current user's role
-                const iAmSeller = tradeType === 'sell';
-                const counterpartyInfo = iAmSeller 
-                  ? (tradeData?.buyerUser || tradeData?.buyer) 
-                  : (tradeData?.sellerUser || tradeData?.seller);
+                const iAmSeller = computedTradeType === 'sell';
+                
+                // Get counterparty information - handle both personal and business accounts
+                let counterpartyName = '';
+                let counterpartyInfo = null;
+                
+                if (iAmSeller) {
+                  // I'm the seller, so I rate the buyer
+                  if (tradeData?.buyerBusiness) {
+                    counterpartyName = tradeData.buyerBusiness.name;
+                    counterpartyInfo = tradeData.buyerBusiness;
+                  } else if (tradeData?.buyerUser) {
+                    counterpartyInfo = tradeData.buyerUser;
+                    counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Comprador';
+                  } else if (tradeData?.buyerDisplayName) {
+                    counterpartyName = tradeData.buyerDisplayName;
+                  } else {
+                    counterpartyName = 'Comprador';
+                  }
+                } else {
+                  // I'm the buyer, so I rate the seller (shouldn't happen here but handle it)
+                  if (tradeData?.sellerBusiness) {
+                    counterpartyName = tradeData.sellerBusiness.name;
+                    counterpartyInfo = tradeData.sellerBusiness;
+                  } else if (tradeData?.sellerUser) {
+                    counterpartyInfo = tradeData.sellerUser;
+                    counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Vendedor';
+                  } else if (tradeData?.sellerDisplayName) {
+                    counterpartyName = tradeData.sellerDisplayName;
+                  } else {
+                    counterpartyName = 'Vendedor';
+                  }
+                }
                 
                 // Get the actual stats for the counterparty
                 const counterpartyStats = iAmSeller 
@@ -1387,13 +1530,15 @@ export const TradeChatScreen: React.FC = () => {
                 
                 console.log('🎯 Seller rating navigation - Stats debug:', {
                   iAmSeller,
-                  tradeType,
-                  buyerInfo: tradeData?.buyer,
-                  sellerInfo: tradeData?.seller,
-                  buyerStats: tradeData?.buyerStats,
-                  sellerStats: tradeData?.sellerStats,
+                  tradeType: computedTradeType,
+                  buyerUser: tradeData?.buyerUser,
+                  buyerBusiness: tradeData?.buyerBusiness,
+                  sellerUser: tradeData?.sellerUser,
+                  sellerBusiness: tradeData?.sellerBusiness,
+                  buyerDisplayName: tradeData?.buyerDisplayName,
+                  sellerDisplayName: tradeData?.sellerDisplayName,
+                  counterpartyName,
                   counterpartyStats,
-                  offerStats: tradeData?.offer?.userStats,
                 });
                 
                 // Use the stats if available, otherwise fallback to default
@@ -1412,9 +1557,7 @@ export const TradeChatScreen: React.FC = () => {
                 navigation.navigate('TraderRating', {
                   tradeId,
                   trader: {
-                    name: iAmSeller 
-                      ? (tradeData?.buyerDisplayName || `${counterpartyInfo?.firstName || ''} ${counterpartyInfo?.lastName || ''}`.trim() || counterpartyInfo?.username || 'Comprador')
-                      : (tradeData?.sellerDisplayName || `${counterpartyInfo?.firstName || ''} ${counterpartyInfo?.lastName || ''}`.trim() || counterpartyInfo?.username || 'Vendedor'),
+                    name: counterpartyName,
                     verified: stats.isVerified || false,
                     completedTrades: stats.completedTrades || 0,
                     successRate: stats.successRate || 0,
@@ -1507,11 +1650,62 @@ export const TradeChatScreen: React.FC = () => {
 
     if (isPaymentInfo) {
       const isPaymentFromUser = msg.sender === 'user';
+      
+      // Extract payment method info from the message text
+      let paymentMethodName = '';
+      let providerType = 'bank'; // default to bank
+      
+      // Try to extract payment method name from the message
+      const paymentMethodMatch = msg.text.match(/Datos de Pago - (.+?)\n/);
+      if (paymentMethodMatch) {
+        paymentMethodName = paymentMethodMatch[1];
+      }
+      
+      // Check if it's Pago Móvil
+      if (paymentMethodName.toLowerCase().includes('pago móvil') || 
+          paymentMethodName.toLowerCase().includes('pago movil')) {
+        providerType = 'fintech';
+      }
+      
+      // Get the payment method details from trade data if available
+      const tradePaymentMethod = tradeDetailsData?.p2pTrade?.paymentMethod;
+      let paymentMethodIcon = null;
+      if (tradePaymentMethod) {
+        providerType = tradePaymentMethod.providerType || providerType;
+        paymentMethodIcon = tradePaymentMethod.icon;
+      }
+      
+      // Get appropriate icon with fallback
+      let iconName = getPaymentMethodIcon(paymentMethodIcon, providerType, paymentMethodName);
+      
+      console.log('[TradeChatScreen] Payment icon resolution:', {
+        paymentMethodName,
+        providerType,
+        iconName,
+        paymentMethodIcon,
+        tradePaymentMethod: tradePaymentMethod?.name,
+        tradeProviderType: tradePaymentMethod?.providerType,
+        tradeIcon: tradePaymentMethod?.icon
+      });
+      
+      // Ensure we have a valid icon name, fallback to credit-card if something goes wrong
+      if (!iconName || iconName === 'question' || iconName === '?') {
+        console.log('[TradeChatScreen] Invalid icon name detected:', iconName, '- falling back to credit-card');
+        iconName = 'credit-card';
+      }
+      
+      // Additional validation - check if it's a valid Feather icon
+      const validFeatherIcons = ['credit-card', 'smartphone', 'dollar-sign', 'send', 'repeat', 'trending-up'];
+      if (!validFeatherIcons.includes(iconName)) {
+        console.log('[TradeChatScreen] Icon not in valid set:', iconName, '- falling back to credit-card');
+        iconName = 'credit-card';
+      }
+      
       return (
         <View style={[styles.paymentInfoContainer, isPaymentFromUser ? styles.userPaymentInfoContainer : styles.traderPaymentInfoContainer]}>
           <View style={[styles.paymentInfoBubble, isPaymentFromUser ? styles.userPaymentInfoBubble : styles.traderPaymentInfoBubble]}>
             <View style={styles.paymentInfoHeader}>
-              <Icon name="credit-card" size={16} color={isPaymentFromUser ? '#ffffff' : colors.primary} style={styles.paymentIcon} />
+              <Icon name={iconName} size={16} color={isPaymentFromUser ? '#ffffff' : colors.primary} style={styles.paymentIcon} />
               <Text style={[styles.paymentInfoTitle, isPaymentFromUser && styles.userPaymentInfoTitle]}>Datos de pago compartidos</Text>
             </View>
             <Text style={[styles.paymentInfoText, isPaymentFromUser && styles.userPaymentInfoText]}>{msg.text}</Text>
@@ -1598,7 +1792,7 @@ export const TradeChatScreen: React.FC = () => {
             <View style={styles.tradeInfo}>
               <Icon name="trending-up" size={16} color={colors.primary} style={styles.tradeIcon} />
               <Text style={styles.tradeAmount}>
-                {tradeType === 'buy' 
+                {computedTradeType === 'buy' 
                   ? `${formatNumber(parseFloat(tradeData.amount))} ${tradeData.crypto} por ${tradeData.totalBs}` 
                   : `${tradeData.totalBs} por ${formatNumber(parseFloat(tradeData.amount))} ${tradeData.crypto}`}
               </Text>
@@ -1633,7 +1827,7 @@ export const TradeChatScreen: React.FC = () => {
                 {(() => {
                   const tradeRate = parseFloat(tradeData.rate);
                   const difference = ((tradeRate - marketRate) / marketRate) * 100;
-                  const isGood = tradeType === 'buy' ? difference < 0 : difference > 0;
+                  const isGood = computedTradeType === 'buy' ? difference < 0 : difference > 0;
                   
                   if (Math.abs(difference) > 1) { // Only show if difference > 1%
                     return (
