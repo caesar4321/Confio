@@ -1,12 +1,15 @@
 import graphene
 from graphene_django import DjangoObjectType
 from django.core.exceptions import ValidationError
-from django.db import models
+from django.db import models, transaction as db_transaction
 from .models import USDCDeposit, USDCWithdrawal
 from .models_unified import UnifiedUSDCTransactionTable
 from django.conf import settings
 from django.utils import timezone
 from decimal import Decimal
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class USDCDepositType(DjangoObjectType):
@@ -183,42 +186,48 @@ class CreateUSDCDeposit(graphene.Mutation):
                 actor_type = 'business'
                 actor_display_name = active_account.business.name
 
-            # Create the deposit
-            deposit = USDCDeposit.objects.create(
-                actor_user=user,
-                actor_business=actor_business,
-                actor_type=actor_type,
-                actor_display_name=actor_display_name,
-                actor_address=active_account.sui_address or '',
-                amount=Decimal(input.amount),
-                source_address=input.source_address,
-                status='PENDING'
-            )
-            
-            # Since KYC is disabled, automatically complete the deposit
-            deposit.mark_completed()
-            
-            # Create notification for deposit
-            from notifications.utils import create_notification
-            from notifications.models import NotificationType as NotificationTypeChoices
-            create_notification(
-                user=user,
-                notification_type=NotificationTypeChoices.USDC_DEPOSIT_COMPLETED,
-                title="Depósito USDC completado",
-                message=f"Tu depósito de {input.amount} USDC se ha completado exitosamente",
-                data={
-                    'transaction_id': str(deposit.deposit_id),
-                    'transaction_type': 'deposit',
-                    'type': 'deposit',  # Add this for TransactionDetailScreen
-                    'amount': str(input.amount),
-                    'currency': 'USDC',
-                    'status': 'completed',
-                    'notification_type': 'USDC_DEPOSIT_COMPLETED'
-                },
-                related_object_type='USDCDeposit',
-                related_object_id=str(deposit.id),
-                action_url=f"confio://transaction/{deposit.deposit_id}"
-            )
+            # Use database transaction to ensure atomicity
+            with db_transaction.atomic():
+                # Create the deposit
+                deposit = USDCDeposit.objects.create(
+                    actor_user=user,
+                    actor_business=actor_business,
+                    actor_type=actor_type,
+                    actor_display_name=actor_display_name,
+                    actor_address=active_account.sui_address or '',
+                    amount=Decimal(input.amount),
+                    source_address=input.source_address,
+                    status='PENDING'
+                )
+                
+                # Since KYC is disabled, automatically complete the deposit
+                deposit.mark_completed()
+                
+                # Create notification for deposit - moved inside transaction
+                from notifications.utils import create_notification
+                from notifications.models import NotificationType as NotificationTypeChoices
+                
+                logger.info(f"Creating notification for deposit {deposit.deposit_id}")
+                notification = create_notification(
+                    user=user,
+                    notification_type=NotificationTypeChoices.USDC_DEPOSIT_COMPLETED,
+                    title="Depósito USDC completado",
+                    message=f"Tu depósito de {input.amount} USDC se ha completado exitosamente",
+                    data={
+                        'transaction_id': str(deposit.deposit_id),
+                        'transaction_type': 'deposit',
+                        'type': 'deposit',  # Add this for TransactionDetailScreen
+                        'amount': str(input.amount),
+                        'currency': 'USDC',
+                        'status': 'completed',
+                        'notification_type': 'USDC_DEPOSIT_COMPLETED'
+                    },
+                    related_object_type='USDCDeposit',
+                    related_object_id=str(deposit.id),
+                    action_url=f"confio://transaction/{deposit.deposit_id}"
+                )
+                
+                logger.info(f"Notification created with ID: {notification.id}")
 
             return CreateUSDCDeposit(
                 deposit=deposit,
@@ -251,9 +260,6 @@ class CreateUSDCWithdrawal(graphene.Mutation):
 
     @classmethod
     def mutate(cls, root, info, input):
-        import logging
-        logger = logging.getLogger(__name__)
-        
         logger.info(f"CreateUSDCWithdrawal mutation called with input: {input}")
         
         user = getattr(info.context, 'user', None)
@@ -335,49 +341,55 @@ class CreateUSDCWithdrawal(graphene.Mutation):
             logger.info(f"  destination_address: {input.destinationAddress}")
             logger.info(f"  service_fee: {input.serviceFee or '0'}")
             
-            # Create the withdrawal
-            withdrawal = USDCWithdrawal.objects.create(
-                actor_user=user,
-                actor_business=actor_business,
-                actor_type=actor_type,
-                actor_display_name=actor_display_name,
-                actor_address=active_account.sui_address or '',
-                amount=Decimal(input.amount),
-                destination_address=input.destinationAddress,
-                service_fee=Decimal(input.serviceFee or '0'),
-                status='PENDING'
-            )
-            
-            logger.info(f"Withdrawal created successfully with ID: {withdrawal.id}, withdrawal_id: {withdrawal.withdrawal_id}")
-            
-            # Since KYC is disabled and we only do AML checks,
-            # automatically complete the withdrawal (simulating instant processing)
-            # In production, this would be handled by a background task after AML checks
-            withdrawal.mark_completed()
-            logger.info(f"Withdrawal {withdrawal.id} marked as completed")
-            
-            # Create notification for withdrawal
-            from notifications.utils import create_notification
-            from notifications.models import NotificationType as NotificationTypeChoices
-            create_notification(
-                user=user,
-                notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_COMPLETED,
-                title="Retiro USDC completado",
-                message=f"Tu retiro de {input.amount} USDC se ha completado exitosamente",
-                data={
-                    'transaction_id': str(withdrawal.withdrawal_id),
-                    'transaction_type': 'withdrawal',
-                    'type': 'withdrawal',  # Add this for TransactionDetailScreen
-                    'amount': str(input.amount),
-                    'currency': 'USDC',
-                    'destination_address': input.destinationAddress,
-                    'status': 'completed',
-                    'notification_type': 'USDC_WITHDRAWAL_COMPLETED'
-                },
-                related_object_type='USDCWithdrawal',
-                related_object_id=str(withdrawal.id),
-                action_url=f"confio://transaction/{withdrawal.withdrawal_id}"
-            )
+            # Use database transaction to ensure atomicity
+            with db_transaction.atomic():
+                # Create the withdrawal
+                withdrawal = USDCWithdrawal.objects.create(
+                    actor_user=user,
+                    actor_business=actor_business,
+                    actor_type=actor_type,
+                    actor_display_name=actor_display_name,
+                    actor_address=active_account.sui_address or '',
+                    amount=Decimal(input.amount),
+                    destination_address=input.destinationAddress,
+                    service_fee=Decimal(input.serviceFee or '0'),
+                    status='PENDING'
+                )
+                
+                logger.info(f"Withdrawal created successfully with ID: {withdrawal.id}, withdrawal_id: {withdrawal.withdrawal_id}")
+                
+                # Since KYC is disabled and we only do AML checks,
+                # automatically complete the withdrawal (simulating instant processing)
+                # In production, this would be handled by a background task after AML checks
+                withdrawal.mark_completed()
+                logger.info(f"Withdrawal {withdrawal.id} marked as completed")
+                
+                # Create notification for withdrawal - moved inside transaction
+                from notifications.utils import create_notification
+                from notifications.models import NotificationType as NotificationTypeChoices
+                
+                logger.info(f"Creating notification for withdrawal {withdrawal.withdrawal_id}")
+                notification = create_notification(
+                    user=user,
+                    notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_COMPLETED,
+                    title="Retiro USDC completado",
+                    message=f"Tu retiro de {input.amount} USDC se ha completado exitosamente",
+                    data={
+                        'transaction_id': str(withdrawal.withdrawal_id),
+                        'transaction_type': 'withdrawal',
+                        'type': 'withdrawal',  # Add this for TransactionDetailScreen
+                        'amount': str(input.amount),
+                        'currency': 'USDC',
+                        'destination_address': input.destinationAddress,
+                        'status': 'completed',
+                        'notification_type': 'USDC_WITHDRAWAL_COMPLETED'
+                    },
+                    related_object_type='USDCWithdrawal',
+                    related_object_id=str(withdrawal.id),
+                    action_url=f"confio://transaction/{withdrawal.withdrawal_id}"
+                )
+                
+                logger.info(f"Notification created with ID: {notification.id}")
 
             return CreateUSDCWithdrawal(
                 withdrawal=withdrawal,
