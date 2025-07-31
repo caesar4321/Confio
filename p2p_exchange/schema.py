@@ -2466,11 +2466,11 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                     # This case won't happen anymore as we auto-complete on PAYMENT_RECEIVED
                     pass
                 elif trade.status == 'COMPLETED':
-                    # When trade is completed (seller confirmed payment), notify both parties
-                    # For buyer: funds have been released to their account
+                    # When trade is completed, send completion notification to both parties
+                    # Both buyer and seller get "Intercambio Completado" notification
                     if trade.buyer_user:
                         create_p2p_notification(
-                            notification_type=NotificationTypeChoices.P2P_CRYPTO_RELEASED,
+                            notification_type=NotificationTypeChoices.P2P_TRADE_COMPLETED,
                             user=trade.buyer_user,
                             trade_id=str(trade.id),
                             amount=str(trade.crypto_amount),
@@ -2478,7 +2478,6 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                             counterparty_name=trade.seller_display_name,
                             additional_data=notification_data
                         )
-                    # For seller: trade completed successfully
                     if trade.seller_user:
                         create_p2p_notification(
                             notification_type=NotificationTypeChoices.P2P_TRADE_COMPLETED,
