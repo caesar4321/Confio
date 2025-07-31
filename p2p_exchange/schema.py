@@ -1350,6 +1350,7 @@ class CreateP2PTrade(graphene.Mutation):
                 create_p2p_notification(
                     notification_type='P2P_TRADE_STARTED',
                     user=buyer_user,
+                    business=trade.buyer_business,
                     trade_id=str(trade.id),
                     offer_id=str(offer.id),
                     amount=str(trade.crypto_amount),
@@ -1369,6 +1370,7 @@ class CreateP2PTrade(graphene.Mutation):
                 create_p2p_notification(
                     notification_type='P2P_TRADE_STARTED',
                     user=seller_user,
+                    business=trade.seller_business,
                     trade_id=str(trade.id),
                     offer_id=str(offer.id),
                     amount=str(trade.crypto_amount),
@@ -2456,6 +2458,7 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                         create_p2p_notification(
                             notification_type=NotificationTypeChoices.P2P_PAYMENT_CONFIRMED,
                             user=trade.seller_user,
+                            business=trade.seller_business,
                             trade_id=str(trade.id),
                             amount=str(trade.crypto_amount),
                             token_type=trade.offer.token_type,
@@ -2472,6 +2475,7 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                         create_p2p_notification(
                             notification_type=NotificationTypeChoices.P2P_TRADE_COMPLETED,
                             user=trade.buyer_user,
+                            business=trade.buyer_business,
                             trade_id=str(trade.id),
                             amount=str(trade.crypto_amount),
                             token_type=trade.offer.token_type,
@@ -2482,6 +2486,7 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                         create_p2p_notification(
                             notification_type=NotificationTypeChoices.P2P_TRADE_COMPLETED,
                             user=trade.seller_user,
+                            business=trade.seller_business,
                             trade_id=str(trade.id),
                             amount=str(trade.crypto_amount),
                             token_type=trade.offer.token_type,
