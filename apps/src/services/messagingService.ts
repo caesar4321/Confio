@@ -524,23 +524,50 @@ class MessagingService {
           break;
         case 'p2p':
           if (parts[1] === 'trade' && parts[2]) {
-            navigationRef.current?.navigate('P2PTradeDetail', { tradeId: parts[2] });
+            navigationRef.current?.navigate('Main' as never, {
+              screen: 'ActiveTrade',
+              params: { 
+                trade: { 
+                  id: parts[2] 
+                } 
+              }
+            } as never);
           } else if (parts[1] === 'offer' && parts[2]) {
-            navigationRef.current?.navigate('P2POfferDetail', { offerId: parts[2] });
+            // For now, navigate to Exchange tab as there's no dedicated offer detail screen
+            navigationRef.current?.navigate('Main' as never, {
+              screen: 'BottomTabs',
+              params: {
+                screen: 'Exchange'
+              }
+            } as never);
           }
           break;
         case 'business':
           if (parts[1]) {
-            navigationRef.current?.navigate('BusinessDetail', { businessId: parts[1] });
+            // Navigate to Business tab for business-related notifications
+            navigationRef.current?.navigate('Main' as never, {
+              screen: 'BottomTabs',
+              params: {
+                screen: 'Business'
+              }
+            } as never);
           }
           break;
         case 'settings':
           if (parts[1] === 'security') {
-            navigationRef.current?.navigate('SecuritySettings');
+            // Navigate to Settings tab
+            navigationRef.current?.navigate('Main' as never, {
+              screen: 'BottomTabs',
+              params: {
+                screen: 'Settings'
+              }
+            } as never);
           }
           break;
         default:
-          navigationRef.current?.navigate('Notifications');
+          navigationRef.current?.navigate('Main' as never, {
+            screen: 'Notifications'
+          } as never);
       }
     }
   }
@@ -571,20 +598,30 @@ class MessagingService {
         break;
       case 'P2PTrade':
         navigationRef.current?.navigate('Main' as never, {
-          screen: 'P2PTradeDetail',
-          params: { tradeId: id }
+          screen: 'ActiveTrade',
+          params: { 
+            trade: { 
+              id: id 
+            } 
+          }
         } as never);
         break;
       case 'P2POffer':
+        // Navigate to Exchange tab as there's no dedicated offer detail screen
         navigationRef.current?.navigate('Main' as never, {
-          screen: 'P2POfferDetail',
-          params: { offerId: id }
+          screen: 'BottomTabs',
+          params: {
+            screen: 'Exchange'
+          }
         } as never);
         break;
       case 'Business':
+        // Navigate to Business tab
         navigationRef.current?.navigate('Main' as never, {
-          screen: 'BusinessDetail',
-          params: { businessId: id }
+          screen: 'BottomTabs',
+          params: {
+            screen: 'Business'
+          }
         } as never);
         break;
       default:
