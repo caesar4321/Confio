@@ -2,11 +2,11 @@ from django.core.management.base import BaseCommand
 from notifications.models import Notification
 from usdc_transactions.models import USDCDeposit, USDCWithdrawal
 from conversion.models import Conversion
-from users.models import BusinessEmployee
+from users.models import BusinessEmployee, Account
 
 
 class Command(BaseCommand):
-    help = 'Fix business field for USDC and conversion notifications'
+    help = 'Fix business and account fields for USDC and conversion notifications'
 
     def handle(self, *args, **options):
         fixed_count = 0
@@ -27,6 +27,17 @@ class Command(BaseCommand):
                         notification.save()
                         fixed_count += 1
                         self.stdout.write(f"Fixed deposit notification {notification.id} for business {deposit.actor_business.name}")
+                    elif deposit.actor_type == 'user' and deposit.actor_user:
+                        # Find the user's personal account
+                        account = Account.objects.filter(
+                            user=deposit.actor_user,
+                            account_type='personal'
+                        ).first()
+                        if account:
+                            notification.account = account
+                            notification.save()
+                            fixed_count += 1
+                            self.stdout.write(f"Fixed deposit notification {notification.id} for personal account")
                 except USDCDeposit.DoesNotExist:
                     self.stdout.write(f"Deposit {notification.related_object_id} not found for notification {notification.id}")
         
@@ -46,6 +57,17 @@ class Command(BaseCommand):
                         notification.save()
                         fixed_count += 1
                         self.stdout.write(f"Fixed withdrawal notification {notification.id} for business {withdrawal.actor_business.name}")
+                    elif withdrawal.actor_type == 'user' and withdrawal.actor_user:
+                        # Find the user's personal account
+                        account = Account.objects.filter(
+                            user=withdrawal.actor_user,
+                            account_type='personal'
+                        ).first()
+                        if account:
+                            notification.account = account
+                            notification.save()
+                            fixed_count += 1
+                            self.stdout.write(f"Fixed withdrawal notification {notification.id} for personal account")
                 except USDCWithdrawal.DoesNotExist:
                     self.stdout.write(f"Withdrawal {notification.related_object_id} not found for notification {notification.id}")
         
@@ -65,6 +87,17 @@ class Command(BaseCommand):
                         notification.save()
                         fixed_count += 1
                         self.stdout.write(f"Fixed conversion notification {notification.id} for business {conversion.actor_business.name}")
+                    elif conversion.actor_type == 'user' and conversion.actor_user:
+                        # Find the user's personal account
+                        account = Account.objects.filter(
+                            user=conversion.actor_user,
+                            account_type='personal'
+                        ).first()
+                        if account:
+                            notification.account = account
+                            notification.save()
+                            fixed_count += 1
+                            self.stdout.write(f"Fixed conversion notification {notification.id} for personal account")
                 except Conversion.DoesNotExist:
                     self.stdout.write(f"Conversion {notification.related_object_id} not found for notification {notification.id}")
         
