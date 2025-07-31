@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { formatLocalDate, formatLocalTime } from '../utils/dateUtils';
 import { useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
@@ -803,7 +804,7 @@ export const TradeChatScreen: React.FC = () => {
                   crypto: crypto,
                   totalPaid: (parseFloat(amount) * parseFloat(offer.rate)).toFixed(2),
                   method: tradeData?.paymentMethod?.displayName || 'N/A',
-                  date: new Date().toLocaleDateString(),
+                  date: formatLocalDate(new Date().toISOString()),
                   duration: `${Math.floor((900 - timeRemaining) / 60)} minutos`,
                 }
               });
@@ -1423,7 +1424,7 @@ export const TradeChatScreen: React.FC = () => {
                     crypto: crypto,
                     totalPaid: (parseFloat(amount) * parseFloat(offer.rate)).toFixed(2),
                     method: tradeData?.paymentMethod?.displayName || 'N/A',
-                    date: new Date().toLocaleDateString(),
+                    date: formatLocalDate(new Date().toISOString()),
                     duration: `${Math.floor((900 - timeRemaining) / 60)} minutos`,
                   }
                 });
@@ -1484,10 +1485,8 @@ export const TradeChatScreen: React.FC = () => {
   };
 
   const formatTimestamp = (timestamp: Date) => {
-    return timestamp.toLocaleTimeString('es-VE', { 
-      hour: '2-digit', 
-      minute: '2-digit' 
-    });
+    // Convert to ISO string to ensure proper handling
+    return formatLocalTime(timestamp.toISOString());
   };
 
   const MessageBubble: React.FC<{ msg: Message }> = ({ msg }) => {

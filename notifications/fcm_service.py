@@ -7,6 +7,7 @@ import logging
 from typing import Dict, List, Optional, Any
 from django.conf import settings
 from django.utils import timezone
+from datetime import datetime
 
 import firebase_admin
 from firebase_admin import credentials, messaging
@@ -49,8 +50,10 @@ def send_push_notification(
     Returns:
         Dict with send results
     """
+    logger.info(f"send_push_notification called for notification {notification.id}, FIREBASE_INITIALIZED={FIREBASE_INITIALIZED}")
+    
     if not FIREBASE_INITIALIZED:
-        logger.warning("Firebase not initialized. Skipping push notification.")
+        logger.error("Firebase not initialized. Skipping push notification.")
         return {'success': False, 'error': 'Firebase not initialized'}
     
     if notification.is_broadcast:
@@ -66,7 +69,10 @@ def send_user_push(
     """Send push notification to a specific user using batch send"""
     user = notification.user
     if not user:
+        logger.warning(f"No user specified for notification {notification.id}")
         return {'success': False, 'error': 'No user specified'}
+    
+    logger.info(f"Sending push notification to user {user.id} for notification {notification.id}")
     
     # Check user preferences
     try:
@@ -77,12 +83,12 @@ def send_user_push(
         
         # Check category-specific preferences
         if not should_send_push(prefs, notification.notification_type):
-            logger.info(f"Push notifications disabled for type {notification.notification_type}")
+            logger.info(f"Push notifications disabled for type {notification.notification_type} for user {user.id}")
             return {'success': False, 'error': 'Push notifications disabled for this type'}
     
     except NotificationPreference.DoesNotExist:
         # No preferences = send by default
-        pass
+        logger.info(f"No notification preferences found for user {user.id}, sending by default")
     
     # Get active FCM tokens for user with their IDs
     token_data = list(FCMDeviceToken.objects.filter(
@@ -90,17 +96,30 @@ def send_user_push(
         is_active=True
     ).values_list('token', 'id'))
     
+    logger.info(f"Found {len(token_data)} active FCM tokens for user {user.id}")
+    
     if not token_data:
-        logger.info(f"No active FCM tokens for user {user.id}")
+        logger.warning(f"No active FCM tokens for user {user.id}")
         return {'success': False, 'error': 'No active FCM tokens'}
     
     # Prepare notification data
     push_data = prepare_push_data(notification, additional_data)
     
     # Get unread count for badge
-    unread_count = user.notifications.filter(is_read=False).count()
+    # Use the NotificationRead model to check unread notifications
+    from .models import NotificationRead
+    read_notification_ids = NotificationRead.objects.filter(
+        user=user
+    ).values_list('notification_id', flat=True)
+    
+    unread_count = user.notifications.exclude(
+        id__in=read_notification_ids
+    ).count()
     
     # Use batch send for all tokens (even if just 1)
+    logger.info(f"Sending push notification to {len(token_data)} tokens for notification {notification.id}")
+    logger.info(f"Token data: {token_data}")
+    
     return send_batch_notifications(
         tokens=token_data,
         title=notification.title,
@@ -197,7 +216,9 @@ def send_batch_notifications(
             title=title,
             body=body,
             sound='default',
-            channel_id=channel_id
+            channel_id=channel_id,
+            # Add tag to prevent duplicate notifications
+            tag=f"notification_{notification.id if notification else 'broadcast'}"
         )
         
         if badge_count is not None:
@@ -206,7 +227,9 @@ def send_batch_notifications(
         android_config = messaging.AndroidConfig(
             priority='high',
             notification=android_notification,
-            data=data
+            data=data,
+            # Collapse key to replace old notifications with same key
+            collapse_key=f"notification_{notification.id if notification else 'broadcast'}"
         )
         
         # Build iOS config
@@ -234,18 +257,35 @@ def send_batch_notifications(
         
         # Create individual messages for send_each
         messages = []
-        for token_str, token_id in batch_tokens:
+        logger.info(f"Creating messages for {len(batch_tokens)} tokens in batch")
+        
+        # Generate a unique message ID for this notification
+        import uuid
+        message_id = str(uuid.uuid4())
+        
+        for idx, (token_str, token_id) in enumerate(batch_tokens):
+            logger.info(f"Creating message {idx+1} for token ID {token_id}")
+            
+            # Add message ID to data to help with deduplication
+            message_data = data.copy()
+            message_data['message_id'] = message_id
+            
+            # Log the exact message being sent
+            logger.info(f"Message data for token {token_id}: {message_data}")
+            
             message = messaging.Message(
                 notification=messaging.Notification(
                     title=title,
                     body=body
                 ),
-                data=data,
+                data=message_data,
                 token=token_str,
                 android=android_config,
                 apns=apns_config
             )
             messages.append(message)
+        
+        logger.info(f"Total messages to send: {len(messages)}")
         
         try:
             # Use send_each instead of send_multicast

@@ -17,6 +17,7 @@ import { useQuery } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
+import { formatNumber } from '../utils/numberFormatting';
 
 type PaymentConfirmationRouteProp = RouteProp<{
   PaymentConfirmation: {
@@ -65,6 +66,12 @@ export const PaymentConfirmationScreen = () => {
 
 
   const { invoiceData } = route.params;
+  
+  // Helper function to format amount with 2 decimal places
+  const formatAmount = (amount: string | number): string => {
+    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+    return numAmount.toFixed(2);
+  };
 
   // Function to translate business categories to user-friendly Spanish labels
   const translateCategory = (category: string): string => {
@@ -237,7 +244,7 @@ export const PaymentConfirmationScreen = () => {
             </View>
             
             <Text style={styles.amountText}>
-              ${currentPayment.amount} {currentPayment.currency}
+              ${formatAmount(currentPayment.amount)} {currentPayment.currency}
             </Text>
             
             <Text style={styles.recipientText}>
@@ -340,7 +347,7 @@ export const PaymentConfirmationScreen = () => {
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Monto</Text>
                 <Text style={styles.summaryAmount}>
-                  ${currentPayment.amount} {currentPayment.currency}
+                  ${formatAmount(currentPayment.amount)} {currentPayment.currency}
                 </Text>
               </View>
               
@@ -357,7 +364,7 @@ export const PaymentConfirmationScreen = () => {
               <View style={styles.summaryRow}>
                 <Text style={styles.totalLabel}>Total a pagar</Text>
                 <Text style={styles.totalAmount}>
-                  ${currentPayment.amount} {currentPayment.currency}
+                  ${formatAmount(currentPayment.amount)} {currentPayment.currency}
                 </Text>
               </View>
             </View>
@@ -383,7 +390,7 @@ export const PaymentConfirmationScreen = () => {
               <View style={styles.warningContent}>
                 <Text style={styles.warningTitle}>Saldo insuficiente</Text>
                 <Text style={styles.warningText}>
-                  Necesitas ${currentPayment.amount} pero solo tienes ${walletData.balance} en {walletData.name}
+                  Necesitas ${formatAmount(currentPayment.amount)} pero solo tienes ${formatAmount(walletData.balance)} en {walletData.name}
                 </Text>
               </View>
             </View>

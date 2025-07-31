@@ -279,7 +279,7 @@ export const TransactionProcessingScreen = () => {
         const mutationInput: any = {
           amount: transactionData.amount,
           tokenType: transactionData.currency,
-          memo: transactionData.memo || `Send ${transactionData.amount} ${transactionData.currency} to ${transactionData.recipient}`,
+          memo: transactionData.memo || '', // Use provided memo or empty string
           idempotencyKey: idempotencyKey,
           recipientDisplayName: transactionData.recipient
         };

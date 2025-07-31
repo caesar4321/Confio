@@ -4,6 +4,7 @@ import { NavigationContainerRef } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
 import { useApolloClient } from '@apollo/client';
 import { GET_ME, GET_BUSINESS_PROFILE } from '../apollo/queries';
+import { pushNotificationService } from '../services/pushNotificationService';
 
 interface UserProfile {
   id: string;
@@ -89,6 +90,14 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         state: undefined
       }],
     });
+    
+    // After navigating to Main, process any pending push notifications
+    if (screenName === 'Main') {
+      console.log('[AuthContext] Navigated to Main, processing pending notifications...');
+      setTimeout(() => {
+        pushNotificationService.processPendingNotification();
+      }, 1000); // Give time for Main navigator to mount
+    }
   };
 
   // Fetch profile from server based on account type

@@ -17,6 +17,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
 import moment from 'moment';
 import 'moment/locale/es';
+import { useContactNameSync } from '../hooks/useContactName';
 
 moment.locale('es');
 
@@ -152,7 +153,7 @@ export const USDCHistoryScreen = () => {
   };
 
   const formatDate = (dateString: string) => {
-    const date = moment(dateString);
+    const date = moment.utc(dateString).local();
     const now = moment();
     
     if (date.isSame(now, 'day')) {
@@ -225,25 +226,34 @@ export const USDCHistoryScreen = () => {
         to: transaction.actorDisplayName,
         fromAddress: transaction.sourceAddress,
         toAddress: transaction.destinationAddress,
-        date: moment(transaction.createdAt).format('YYYY-MM-DD'),
-        time: moment(transaction.createdAt).format('HH:mm'),
+        date: moment.utc(transaction.createdAt).local().format('YYYY-MM-DD'),
+        time: moment.utc(transaction.createdAt).local().format('HH:mm'),
         hash: transaction.transactionId,
         network: transaction.network || 'SUI',
       }
     });
   };
 
-  const renderItem = ({ item }: { item: USDCTransactionRecord }) => (
-    <TouchableOpacity style={styles.historyItem} onPress={() => handleTransactionPress(item)}>
-      <View style={styles.itemHeader}>
-        <View style={[styles.iconContainer, { backgroundColor: getIconColor(item) + '20' }]}>
-          <Icon name={getIcon(item)} size={24} color={getIconColor(item)} />
-        </View>
-        <View style={styles.itemInfo}>
-          <Text style={styles.itemTitle}>{getTitle(item)}</Text>
-          <Text style={styles.itemDate}>{formatDate(item.createdAt)}</Text>
-        </View>
-        <View style={styles.amountContainer}>
+  const renderItem = ({ item }: { item: USDCTransactionRecord }) => {
+    // Get contact name for display if it's a conversion transaction with an actor
+    let displayTitle = getTitle(item);
+    if (item.transactionType === 'conversion' && item.actorDisplayName) {
+      // For conversions, the backend already provides the proper formatted title
+      // But we can enhance it with contact names if we have phone numbers
+      displayTitle = item.formattedTitle || displayTitle;
+    }
+    
+    return (
+      <TouchableOpacity style={styles.historyItem} onPress={() => handleTransactionPress(item)}>
+        <View style={styles.itemHeader}>
+          <View style={[styles.iconContainer, { backgroundColor: getIconColor(item) + '20' }]}>
+            <Icon name={getIcon(item)} size={24} color={getIconColor(item)} />
+          </View>
+          <View style={styles.itemInfo}>
+            <Text style={styles.itemTitle}>{displayTitle}</Text>
+            <Text style={styles.itemDate}>{formatDate(item.createdAt)}</Text>
+          </View>
+          <View style={styles.amountContainer}>
           {item.transactionType.toLowerCase() === 'conversion' && item.secondaryAmount ? (
             <>
               <Text style={styles.fromAmount}>-{item.amount} {item.currency}</Text>
@@ -306,7 +316,8 @@ export const USDCHistoryScreen = () => {
         </View>
       </View>
     </TouchableOpacity>
-  );
+    );
+  };
 
   const EmptyState = () => (
     <View style={styles.emptyContainer}>

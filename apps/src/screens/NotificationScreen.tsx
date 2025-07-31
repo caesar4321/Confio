@@ -203,7 +203,7 @@ export const NotificationScreen = () => {
 
   const formatTime = (dateString: string) => {
     moment.locale('es');
-    const date = moment(dateString);
+    const date = moment.utc(dateString).local();
     const now = moment();
     const diffInHours = now.diff(date, 'hours');
     

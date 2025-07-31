@@ -141,7 +141,7 @@ export const SendToFriendScreen = () => {
           action: 'Enviando',
           isOnConfio: friend.isOnConfio,
           // recipientAddress removed - server will determine this
-          memo: `Send ${amount} ${config.name} to ${friend.name}${friend.phone ? ` (${friend.phone})` : ''}`,
+          memo: '', // Empty memo - user can add notes in a future feature
           idempotencyKey: idempotencyKey
         }
       });
