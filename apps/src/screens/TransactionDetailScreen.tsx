@@ -21,6 +21,7 @@ import { MainStackParamList } from '../types/navigation';
 import Icon from 'react-native-vector-icons/Feather';
 import USDCLogo from '../assets/png/USDC.png';
 import cUSDLogo from '../assets/png/cUSD.png';
+import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import moment from 'moment';
 import 'moment/locale/es';
 import { useQuery } from '@apollo/client';
@@ -268,6 +269,12 @@ export const TransactionDetailScreen = () => {
       borderRadius: 12,
       padding: 16,
     },
+    cardTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      color: colors.dark,
+      marginBottom: 16,
+    },
     row: {
       flexDirection: 'row',
       justifyContent: 'space-between',
@@ -307,6 +314,196 @@ export const TransactionDetailScreen = () => {
       fontWeight: '600',
       color: '#fff',
     },
+    // Missing card styles
+    cardContent: {
+      flex: 1,
+    },
+    summaryContainer: {
+      gap: 16,
+    },
+    feeBreakdown: {
+      backgroundColor: '#f9fafb',
+      borderRadius: 8,
+      padding: 12,
+    },
+    feeRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    feeLabel: {
+      fontSize: 14,
+      color: '#6b7280',
+    },
+    feeAmount: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.dark,
+    },
+    feeValueFree: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#10b981',
+    },
+    feeValueNote: {
+      fontSize: 12,
+      color: '#6b7280',
+      marginLeft: 4,
+    },
+    divider: {
+      height: 1,
+      backgroundColor: '#e5e7eb',
+      marginVertical: 8,
+    },
+    totalLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.dark,
+    },
+    totalAmount: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: colors.dark,
+    },
+    summaryRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    summaryLabel: {
+      fontSize: 14,
+      color: '#6b7280',
+    },
+    summaryValue: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: colors.dark,
+    },
+    statusContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    statusIcon: {
+      marginRight: 4,
+    },
+    statusValue: {
+      fontSize: 14,
+      fontWeight: '500',
+      color: '#10b981',
+    },
+    invitationCard: {
+      backgroundColor: '#fef2f2',
+      borderColor: '#ef4444',
+      borderWidth: 1,
+    },
+    invitationHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    invitationCardTitle: {
+      fontSize: 18,
+      fontWeight: 'bold',
+      marginLeft: 8,
+    },
+    invitationCardText: {
+      fontSize: 14,
+      color: '#1f2937',
+      marginBottom: 12,
+      lineHeight: 20,
+    },
+    invitationInfoBox: {
+      borderRadius: 8,
+      borderWidth: 1,
+      padding: 12,
+      marginBottom: 16,
+    },
+    invitationInfoTitle: {
+      fontSize: 14,
+      fontWeight: 'bold',
+      marginBottom: 8,
+    },
+    invitationInfoRow: {
+      flexDirection: 'row',
+      marginBottom: 4,
+    },
+    invitationInfoText: {
+      fontSize: 13,
+      color: '#374151',
+      lineHeight: 18,
+    },
+    shareButton: {
+      backgroundColor: '#ef4444',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 12,
+      borderRadius: 8,
+    },
+    shareButtonText: {
+      color: '#fff',
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    valuePropositionOuter: {
+      backgroundColor: '#A7F3D0',
+      borderRadius: 16,
+      padding: 16,
+    },
+    valueRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    valueIcon: {
+      marginRight: 8,
+    },
+    valueTitle: {
+      fontSize: 16,
+      fontWeight: 'bold',
+      color: colors.dark,
+    },
+    valueDescription: {
+      fontSize: 14,
+      color: '#374151',
+      marginBottom: 12,
+      lineHeight: 20,
+    },
+    valueHighlightBox: {
+      backgroundColor: '#fff',
+      borderRadius: 12,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: '#d1fae5',
+    },
+    valueHighlightText: {
+      fontSize: 13,
+      color: '#065f46',
+      lineHeight: 20,
+    },
+    bold: {
+      fontWeight: 'bold',
+    },
+    actionsContainer: {
+      gap: 12,
+    },
+    primaryAction: {
+      backgroundColor: colors.primary,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 14,
+      borderRadius: 12,
+    },
+    primaryActionText: {
+      color: '#fff',
+      fontSize: 16,
+      fontWeight: '600',
+    },
+    actionIcon: {
+      marginRight: 8,
+    },
     secondaryButton: {
       backgroundColor: colors.neutral,
     },
@@ -332,6 +529,47 @@ export const TransactionDetailScreen = () => {
       fontSize: 14,
       color: '#374151',
       marginLeft: 8,
+    },
+    blockchainIcon: {
+      marginRight: 4,
+    },
+    // Missing participant styles
+    participantInfo: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 16,
+    },
+    avatarContainer: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: colors.secondary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 12,
+    },
+    avatarText: {
+      fontSize: 20,
+      fontWeight: 'bold',
+      color: '#fff',
+    },
+    participantDetails: {
+      flex: 1,
+    },
+    participantName: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.dark,
+      marginBottom: 4,
+    },
+    transactionTitle: {
+      fontSize: 16,
+      color: '#fff',
+      textAlign: 'center',
+      marginTop: 8,
+    },
+    negativeAmount: {
+      color: '#fee2e2',
     },
     blockchainDetails: {
       marginTop: 16,
@@ -819,7 +1057,15 @@ export const TransactionDetailScreen = () => {
     rawDataType: typeof rawTransactionData,
     parsedDataType: typeof transactionData,
     isParsed: typeof rawTransactionData === 'string' && typeof transactionData === 'object',
-    transactionData: transactionData
+    transactionData: transactionData,
+    recipient_phone: transactionData?.recipient_phone,
+    recipient_address: transactionData?.recipient_address,
+    toAddress: transactionData?.toAddress,
+    is_invited_friend: transactionData?.is_invited_friend,
+    is_invited_friend_type: typeof transactionData?.is_invited_friend,
+    is_external_address: transactionData?.is_external_address,
+    is_external_address_type: typeof transactionData?.is_external_address,
+    allKeys: transactionData ? Object.keys(transactionData) : []
   });
   
   console.log('[TransactionDetailScreen] Fetch check:', {
@@ -1004,6 +1250,9 @@ export const TransactionDetailScreen = () => {
       recipientName: transactionData.recipient_name || transactionData.recipientName,
       recipientPhone: transactionData.recipient_phone || transactionData.recipientPhone,
       recipientAddress: transactionData.recipient_address || transactionData.recipientAddress,
+      is_external_address: transactionData.is_external_address,
+      is_invited_friend: transactionData.is_invited_friend,
+      isInvitedFriend: transactionData.is_invited_friend || transactionData.isInvitedFriend,
       recipient_phone: transactionData.recipient_phone || transactionData.recipientPhone,
       recipient_address: transactionData.recipient_address || transactionData.recipientAddress,
       senderName: transactionData.sender_name || transactionData.senderName,
@@ -1013,6 +1262,11 @@ export const TransactionDetailScreen = () => {
       hash: transactionData.transaction_hash || transactionData.transactionHash || transactionData.hash,
       is_invited_friend: transactionData.is_invited_friend,
       is_external_address: transactionData.is_external_address,
+      // Override 'to' and 'from' if they contain truncated addresses
+      to: (transactionData.to && transactionData.to.includes('...') && transactionData.to.startsWith('0x')) 
+        ? '' : transactionData.to,
+      from: (transactionData.from && transactionData.from.includes('...') && transactionData.from.startsWith('0x')) 
+        ? '' : transactionData.from,
       // For conversions
       currency: transactionData.from_token || transactionData.token_type || transactionData.currency || 'USDC',
       secondaryCurrency: transactionData.to_token || 'cUSD',
@@ -1094,12 +1348,41 @@ export const TransactionDetailScreen = () => {
     fallbackRecipientName: currentTx?.to || currentTx?.recipientName,
   });
   
-  const senderContactInfo = useContactNameSync(senderPhone, currentTx?.from || currentTx?.senderName || currentTx?.sender_name);
-  const recipientContactInfo = useContactNameSync(recipientPhone, currentTx?.to || currentTx?.recipientName || currentTx?.recipient_name);
+  // Don't use truncated addresses as fallback names
+  const senderFallbackName = currentTx?.from || currentTx?.senderName || currentTx?.sender_name;
+  const recipientFallbackName = (() => {
+    const name = currentTx?.to || currentTx?.recipientName || currentTx?.recipient_name;
+    // If it's a truncated address, don't use it as a name
+    if (name && name.includes('...') && name.startsWith('0x')) {
+      return '';
+    }
+    return name;
+  })();
+  
+  const senderContactInfo = useContactNameSync(senderPhone, senderFallbackName);
+  // Only use contact sync if we have a phone number or a valid name
+  const shouldUseContactSync = recipientPhone || (recipientFallbackName && !recipientFallbackName.startsWith('0x'));
+  console.log('[TransactionDetailScreen] Contact sync decision:', {
+    recipientPhone,
+    recipientFallbackName,
+    shouldUseContactSync,
+    is_external_address: currentTx?.is_external_address,
+    is_invited_friend: currentTx?.is_invited_friend,
+    hasRecipientUser: !!currentTx?.recipient_user,
+    toField: currentTx?.to,
+    recipientAddress: currentTx?.recipient_address
+  });
+  
+  const recipientContactInfo = shouldUseContactSync
+    ? useContactNameSync(recipientPhone, recipientFallbackName)
+    : { displayName: '', isFromContacts: false };
   
   console.log('[TransactionDetailScreen] Contact info results:', {
     senderContactInfo,
     recipientContactInfo,
+    recipientFallbackName,
+    recipientPhone,
+    displayToName: recipientContactInfo.displayName
   });
   
   // Show loading state while fetching
@@ -1121,7 +1404,20 @@ export const TransactionDetailScreen = () => {
     );
   }
   
-  const isInvitedFriend = currentTx?.isInvitedFriend || false;
+  const isInvitedFriend = currentTx?.isInvitedFriend || currentTx?.is_invited_friend || false;
+  const isExternalAddress = currentTx?.is_external_address || false;
+  
+  // Debug invitation status
+  console.log('[TransactionDetailScreen] Invitation status:', {
+    isInvitedFriend,
+    isExternalAddress,
+    isInvitedFriend_camelCase: currentTx?.isInvitedFriend,
+    is_invited_friend_snake_case: currentTx?.is_invited_friend,
+    is_external_address: currentTx?.is_external_address,
+    type: currentTx?.type,
+    recipient_phone: currentTx?.recipient_phone,
+    willShowInvitationCard: isInvitedFriend && !isExternalAddress && (currentTx?.type === 'send' || currentTx?.type === 'sent'),
+  });
   
   // Debug phone numbers
   console.log('[TransactionDetailScreen] Phone number data:', {
@@ -1139,7 +1435,13 @@ export const TransactionDetailScreen = () => {
   
   // Use contact names if available
   const displayFromName = senderContactInfo.displayName;
-  const displayToName = recipientContactInfo.displayName;
+  let displayToName = recipientContactInfo.displayName;
+  
+  console.log('[TransactionDetailScreen] Display names:', {
+    displayFromName,
+    displayToName,
+    recipientContactInfo
+  });
 
   const handleCopy = (text: string, type: string) => {
     Clipboard.setString(text);
@@ -1169,15 +1471,36 @@ export const TransactionDetailScreen = () => {
   };
 
   const getTransactionTitle = (tx: any) => {
+    console.log('[TransactionDetailScreen] getTransactionTitle called with:', {
+      type: tx.type,
+      typeEquality: tx.type === 'sent',
+      typeofType: typeof tx.type,
+      displayToName
+    });
+    
     switch(tx.type) {
       case 'received':
         return `Recibido de ${displayFromName}`;
+      // Both 'send' and 'sent' are handled for compatibility
+      // Backend now uses 'send' for consistency with other types (payment, deposit, etc.)
+      // but 'sent' might exist in older data
+      case 'send':
       case 'sent':
+        console.log('[TransactionDetailScreen] Title logic for sent:', {
+          displayToName,
+          hasDisplayToName: !!displayToName,
+          is_invited_friend: tx.is_invited_friend,
+          recipient_phone: tx.recipient_phone,
+          is_external_address: tx.is_external_address,
+          toAddress: tx.toAddress,
+          recipient_address: tx.recipient_address
+        });
+        
         if (displayToName) {
           return `Enviado a ${displayToName}`;
-        } else if (tx.is_invited_friend || tx.recipient_phone) {
+        } else if (tx.is_invited_friend && tx.recipient_phone) {
           return 'Enviado a amigo invitado';
-        } else if (tx.is_external_address || tx.toAddress || tx.recipient_address) {
+        } else if (tx.is_external_address || (tx.toAddress && !tx.recipient_phone) || (tx.recipient_address && !tx.recipient_phone)) {
           return 'Enviado a dirección externa';
         }
         return 'Enviado';
@@ -1240,14 +1563,24 @@ export const TransactionDetailScreen = () => {
             
             <Text style={[
               styles.amountText,
-              (currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal' || 
+              (currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal' || 
                (currentTx.type === 'conversion' && currentTx.amount?.startsWith('-'))) && styles.negativeAmount
             ]}>
               {formatAmountWithSign(currentTx.amount)} {currentTx.currency || 'cUSD'}
             </Text>
             
             <Text style={styles.transactionTitle}>
-              {getTransactionTitle(currentTx)}
+              {(() => {
+                const title = getTransactionTitle(currentTx);
+                console.log('[TransactionDetailScreen] TITLE DISPLAY:', {
+                  title,
+                  type: currentTx.type,
+                  displayToName,
+                  to: currentTx.to,
+                  is_external_address: currentTx.is_external_address
+                });
+                return title;
+              })()}
             </Text>
             
             <View style={[styles.statusBadge, { backgroundColor: statusColors.bg }]}>
@@ -1272,7 +1605,7 @@ export const TransactionDetailScreen = () => {
               </Text>
             </View>
             
-            {isInvitedFriend && currentTx.type === 'sent' && (
+            {isInvitedFriend && !isExternalAddress && currentTx.type === 'send' && (
               <View style={styles.invitationNotice}>
                 <Icon name="alert-triangle" size={16} color="#fff" style={{ marginRight: 6 }} />
                 <Text style={styles.invitationText}>Tu amigo tiene 7 días para reclamar</Text>
@@ -1411,20 +1744,38 @@ export const TransactionDetailScreen = () => {
                 </View>
               )}
 
-              {currentTx.type === 'sent' && (
+              {(currentTx.type === 'send' || currentTx.type === 'sent') && (
                 <View style={styles.participantInfo}>
                   <View style={styles.avatarContainer}>
-                    <Text style={styles.avatarText}>{currentTx.avatar}</Text>
+                    <Text style={styles.avatarText}>
+                      {currentTx.avatar || (currentTx.is_external_address ? '0' : 'U')}
+                    </Text>
                   </View>
                   <View style={styles.participantDetails}>
                     <Text style={styles.participantName}>
+                      {(() => {
+                        console.log('[TransactionDetailScreen] SENT NAME LOGIC - Full data:', {
+                          displayToName,
+                          currentTx_keys: Object.keys(currentTx),
+                          to: currentTx.to,
+                          recipient_name: currentTx.recipient_name,
+                          is_external_address: currentTx.is_external_address,
+                          is_invited_friend: currentTx.is_invited_friend,
+                          recipient_phone: currentTx.recipient_phone,
+                          toAddress: currentTx.toAddress,
+                          recipient_address: currentTx.recipient_address,
+                          recipientAddress: currentTx.recipientAddress,
+                          recipientPhone: currentTx.recipientPhone
+                        });
+                        return null;
+                      })()}
                       {(() => {
                         // If we have a display name from contacts or transaction data
                         if (displayToName) return displayToName;
                         
                         // For invited friends (non-Confío users)
-                        if (currentTx.is_invited_friend || (currentTx.recipient_phone && !displayToName)) {
-                          return 'Invitación enviada';
+                        if (currentTx.is_invited_friend && currentTx.recipient_phone) {
+                          return `Invitación enviada${currentTx.recipient_display_name ? ` a ${currentTx.recipient_display_name}` : ''}`;
                         }
                         
                         // For external addresses
@@ -1432,38 +1783,44 @@ export const TransactionDetailScreen = () => {
                           return 'Dirección externa';
                         }
                         
-                        // Fallback to whatever we have
-                        return currentTx.to || currentTx.recipient_name || 'Desconocido';
+                        // Fallback - but don't use truncated addresses
+                        const fallbackName = currentTx.to || currentTx.recipient_name || 'Desconocido';
+                        // If the fallback looks like a truncated address, don't use it
+                        if (fallbackName.includes('...') && fallbackName.startsWith('0x')) {
+                          return 'Dirección externa';
+                        }
+                        return fallbackName || `DEBUG FALLBACK ${new Date().getTime()}`;
                       })()}
                     </Text>
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
                         {(() => {
-                          console.log('[TransactionDetailScreen] Address display debug:', {
+                          // Direct logging
+                          console.log('[TransactionDetailScreen] ADDRESS SECTION:', JSON.stringify({
                             recipientPhone,
                             recipient_phone: currentTx.recipient_phone,
                             toAddress: currentTx.toAddress,
                             recipient_address: currentTx.recipient_address,
                             is_invited_friend: currentTx.is_invited_friend,
                             is_external_address: currentTx.is_external_address,
-                          });
+                          }));
                           
-                          // Show phone number for invited friends
-                          if (recipientPhone || currentTx.recipient_phone) {
-                            return formatPhoneNumber(recipientPhone || currentTx.recipient_phone);
-                          }
-                          
-                          // Show address for external wallets
-                          if (currentTx.toAddress || currentTx.recipient_address) {
-                            const address = currentTx.toAddress || currentTx.recipient_address;
-                            // Format address: show first 10 and last 6 characters
-                            if (address && address.length > 20) {
-                              return `${address.substring(0, 10)}...${address.substring(address.length - 6)}`;
+                          // For external addresses - show the full address
+                          if (currentTx.is_external_address || (currentTx.toAddress && !currentTx.recipient_phone)) {
+                            const fullAddress = currentTx.toAddress || currentTx.recipient_address;
+                            if (fullAddress && fullAddress.length > 40) {
+                              return `${fullAddress.substring(0, 10)}...${fullAddress.substring(fullAddress.length - 6)}`;
                             }
-                            return address || '';
+                            return fullAddress || 'Sin dirección';
                           }
                           
-                          return '';
+                          // For invited friends - show phone
+                          if (currentTx.is_invited_friend && currentTx.recipient_phone) {
+                            const phone = recipientPhone || currentTx.recipient_phone;
+                            return phone ? formatPhoneNumber(phone) : 'Sin número';
+                          }
+                          
+                          return 'DEBUG: No data';
                         })()}
                       </Text>
                       <TouchableOpacity 
@@ -1621,7 +1978,7 @@ export const TransactionDetailScreen = () => {
                   </View>
                 </View>
                 
-                {(currentTx.type === 'sent' || currentTx.type === 'payment') && (
+                {(currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment') && (
                   <>
                     <View style={styles.divider} />
                     <View style={styles.feeRow}>
@@ -1663,7 +2020,7 @@ export const TransactionDetailScreen = () => {
           </View>
 
           {/* Invitation Info Card for non-Confío friends */}
-          {isInvitedFriend && currentTx.type === 'sent' && (
+          {isInvitedFriend && !isExternalAddress && currentTx.type === 'send' && (
             <View style={[styles.card, styles.invitationCard]}>
               <View style={styles.invitationHeader}>
                 <Icon name="alert-circle" size={24} color="#ef4444" />
@@ -1687,20 +2044,67 @@ export const TransactionDetailScreen = () => {
                 </View>
               </View>
               
-              <TouchableOpacity style={styles.shareButton} onPress={() => {
-                Alert.alert(
-                  'Compartir invitación',
-                  `Comparte este mensaje:\n\n¡Hola! Te envié ${formatAmount(currentTx.amount)} ${currentTx.currency || 'cUSD'} por Confío. Tienes 7 días para reclamarlo. Descarga la app aquí: [link]`
-                );
-              }}>
-                <Icon name="share-2" size={20} color="#fff" style={{ marginRight: 8 }} />
+              <TouchableOpacity 
+                style={styles.shareButton} 
+                onPress={async () => {
+                  try {
+                    console.log('[WhatsApp Share] Starting share process...');
+                    const recipientName = currentTx.recipient_display_name || 'amigo';
+                    const phone = recipientPhone || currentTx.recipient_phone;
+                    const amount = formatAmount(currentTx.amount);
+                    const currency = currentTx.currency || 'cUSD';
+                    
+                    console.log('[WhatsApp Share] Data:', { recipientName, phone, amount, currency });
+                    
+                    // Create the invitation message
+                    const message = `¡Hola! Te envié ${amount} ${currency} por Confío. 🎉\n\nTienes 7 días para reclamarlo. Descarga la app y crea tu cuenta:\n\n📲 Android: https://play.google.com/store/apps/details?id=com.confio\n📲 iOS: https://apps.apple.com/app/confio/id6473710976\n\n¡Es gratis y en segundos recibes tu dinero!`;
+                    
+                    // Encode the message for WhatsApp
+                    const encodedMessage = encodeURIComponent(message);
+                    
+                    // Create WhatsApp URL with pre-filled message
+                    let whatsappUrl = '';
+                    if (phone) {
+                      // If we have the recipient's phone, send directly to them
+                      const cleanPhone = phone.replace(/[^\d]/g, '');
+                      whatsappUrl = `whatsapp://send?phone=${cleanPhone}&text=${encodedMessage}`;
+                    } else {
+                      // Otherwise, just open WhatsApp with the message
+                      whatsappUrl = `whatsapp://send?text=${encodedMessage}`;
+                    }
+                    
+                    console.log('[WhatsApp Share] URL:', whatsappUrl);
+                    
+                    try {
+                      // Try to open WhatsApp directly
+                      await Linking.openURL(whatsappUrl);
+                    } catch (error) {
+                      console.log('[WhatsApp Share] WhatsApp app not installed, trying web...', error);
+                      // Fallback to web WhatsApp
+                      const webWhatsappUrl = phone 
+                        ? `https://wa.me/${phone.replace(/[^\d]/g, '')}?text=${encodedMessage}`
+                        : `https://wa.me/?text=${encodedMessage}`;
+                      
+                      await Linking.openURL(webWhatsappUrl);
+                    }
+                  } catch (error) {
+                    console.error('[WhatsApp Share] Error:', error);
+                    Alert.alert(
+                      'Error',
+                      'No se pudo abrir WhatsApp. Por favor, asegúrate de tener WhatsApp instalado.',
+                      [{ text: 'OK' }]
+                    );
+                  }
+                }}
+              >
+                <WhatsAppLogo width={20} height={20} style={{ marginRight: 8 }} />
                 <Text style={styles.shareButtonText}>Compartir invitación por WhatsApp</Text>
               </TouchableOpacity>
             </View>
           )}
 
           {/* Confío Value Proposition */}
-          {(currentTx.type === 'received' || currentTx.type === 'sent') && (
+          {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent') && (
             <View style={styles.card}>
               <Text style={styles.cardTitle}>¿Por qué elegir Confío?</Text>
               <View style={styles.valuePropositionOuter}>
@@ -1741,7 +2145,7 @@ export const TransactionDetailScreen = () => {
             <Text style={styles.cardTitle}>Acciones</Text>
             
             <View style={styles.actionsContainer}>
-              {(currentTx.type === 'received' || currentTx.type === 'sent') && (
+              {(currentTx.type === 'received' || currentTx.type === 'send' || currentTx.type === 'sent') && (
                 <TouchableOpacity 
                   style={styles.primaryAction}
                   onPress={() => {
@@ -1756,13 +2160,13 @@ export const TransactionDetailScreen = () => {
                       friendPhone,
                       senderPhone,
                       recipientPhone,
-                      isInvitedFriend: currentTx.isInvitedFriend
+                      isInvitedFriend: currentTx.isInvitedFriend || currentTx.is_invited_friend
                     });
                     
                     // For navigation, we need to determine if this is a Confío user
                     // If it's an invited friend (non-Confío user), we shouldn't navigate
                     // Note: isInvitedFriend means they are NOT on Confío (invitation transaction)
-                    if (currentTx.isInvitedFriend) {
+                    if (currentTx.isInvitedFriend || currentTx.is_invited_friend) {
                       // This is a non-Confío friend, navigate differently
                       Alert.alert(
                         'Usuario no está en Confío',
