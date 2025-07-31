@@ -80,7 +80,11 @@ export class PushNotificationService {
           console.log('[PushNotificationService] Navigating to ActiveTrade:', tradeId);
           RootNavigation.navigate('Main', {
             screen: 'ActiveTrade',
-            params: { tradeId }
+            params: { 
+              trade: { 
+                id: tradeId 
+              } 
+            }
           });
         } else if (action_url.includes('transaction/')) {
           const transactionId = action_url.split('transaction/')[1];
