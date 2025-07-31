@@ -2389,10 +2389,17 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                     trade.status = 'PAYMENT_CONFIRMED'
                     status_updated = True
                     
-                    # Note: is_escrowed should be set to True when blockchain confirms escrow
-                    # This would typically happen async after trade creation
-                    # For now, we're simulating it here, but in production this would be
-                    # set by a webhook or polling service checking blockchain status
+                    # Auto-complete the trade when seller confirms payment
+                    # In a real implementation, this would trigger the blockchain release
+                    trade.status = 'COMPLETED'
+                    trade.completed_at = timezone.now()
+                    
+                    # Update escrow status
+                    if hasattr(trade, 'escrow'):
+                        escrow = trade.escrow
+                        escrow.is_released = True
+                        escrow.released_at = timezone.now()
+                        escrow.save()
                         
             elif confirmation_type == 'CRYPTO_RELEASED':
                 # This is now handled by PAYMENT_RECEIVED
@@ -2456,7 +2463,11 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                             additional_data=notification_data
                         )
                 elif trade.status == 'PAYMENT_CONFIRMED':
-                    # Notify buyer that seller confirmed payment
+                    # This case won't happen anymore as we auto-complete on PAYMENT_RECEIVED
+                    pass
+                elif trade.status == 'COMPLETED':
+                    # When trade is completed (seller confirmed payment), notify both parties
+                    # For buyer: funds have been released to their account
                     if trade.buyer_user:
                         create_p2p_notification(
                             notification_type=NotificationTypeChoices.P2P_CRYPTO_RELEASED,
@@ -2467,18 +2478,7 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                             counterparty_name=trade.seller_display_name,
                             additional_data=notification_data
                         )
-                elif trade.status == 'COMPLETED':
-                    # Notify both parties that trade is completed
-                    if trade.buyer_user:
-                        create_p2p_notification(
-                            notification_type=NotificationTypeChoices.P2P_TRADE_COMPLETED,
-                            user=trade.buyer_user,
-                            trade_id=str(trade.id),
-                            amount=str(trade.crypto_amount),
-                            token_type=trade.offer.token_type,
-                            counterparty_name=trade.seller_display_name,
-                            additional_data=notification_data
-                        )
+                    # For seller: trade completed successfully
                     if trade.seller_user:
                         create_p2p_notification(
                             notification_type=NotificationTypeChoices.P2P_TRADE_COMPLETED,
