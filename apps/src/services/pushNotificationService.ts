@@ -92,7 +92,25 @@ export class PushNotificationService {
           Object.keys(remoteMessage.data).forEach(key => {
             if (key.startsWith('data_')) {
               const fieldName = key.substring(5); // Remove 'data_' prefix
-              transactionData[fieldName] = remoteMessage.data[key];
+              let value = remoteMessage.data[key];
+              
+              // Parse boolean strings
+              if (value === 'true' || value === 'True') {
+                value = true;
+              } else if (value === 'false' || value === 'False') {
+                value = false;
+              }
+              
+              transactionData[fieldName] = value;
+              
+              // Log boolean fields for debugging
+              if (fieldName === 'is_external_address' || fieldName === 'is_invited_friend') {
+                console.log(`[PushNotificationService] Boolean field ${fieldName}:`, {
+                  original: remoteMessage.data[key],
+                  parsed: value,
+                  type: typeof value
+                });
+              }
             }
           });
           

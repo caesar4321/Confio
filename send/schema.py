@@ -385,7 +385,7 @@ class CreateSendTransaction(graphene.Mutation):
                         'transaction_hash': send_transaction.transaction_hash,
                         'is_invited_friend': bool(recipient_phone and not recipient_user),
                         # For TransactionDetailScreen - amount needs sign
-                        'type': 'sent',
+                        'type': 'send',
                         'to': recipient_display_name if recipient_display_name else '',
                         'toAddress': send_transaction.recipient_address,
                         'is_external_address': bool(not recipient_user and not recipient_phone and recipient_address),
@@ -451,7 +451,7 @@ class CreateSendTransaction(graphene.Mutation):
                         business=sender_business,
                         notification_type=NotificationType.SEND_INVITATION_SENT,
                         title="Invitación enviada",
-                        message=f"Enviaste {str(amount_decimal)} {input.token_type} a {recipient_phone}. Tienen 7 días para reclamar.",
+                        message=f"Enviaste {str(amount_decimal)} {input.token_type} a {recipient_display_name if recipient_display_name else recipient_phone}. Tienen 7 días para reclamar.",
                         data={
                             'transaction_type': 'send',
                             'amount': f'-{str(amount_decimal)}',  # Negative for sent invitation
@@ -470,7 +470,7 @@ class CreateSendTransaction(graphene.Mutation):
                             'transaction_hash': send_transaction.transaction_hash,
                             'is_invited_friend': True,
                             # For TransactionDetailScreen
-                            'type': 'sent',
+                            'type': 'send',
                             'to': recipient_display_name if recipient_display_name else '',  # Include display name if provided
                             'toAddress': send_transaction.recipient_address,
                             'recipient_name': recipient_display_name,

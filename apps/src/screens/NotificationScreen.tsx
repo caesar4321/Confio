@@ -248,6 +248,18 @@ export const NotificationScreen = () => {
           }
         }
         
+        // For invitation notifications - replace phone number in message
+        if (parsedData.recipient_phone) {
+          const recipientContact = contactService.getContactByPhoneSync(parsedData.recipient_phone);
+          if (recipientContact) {
+            // Replace phone number with contact name in the message
+            processedText = processedText.replace(parsedData.recipient_phone, recipientContact.name);
+          } else if (parsedData.recipient_name && parsedData.recipient_name !== parsedData.recipient_phone) {
+            // If we have a recipient_name that's different from the phone, use it
+            processedText = processedText.replace(parsedData.recipient_phone, parsedData.recipient_name);
+          }
+        }
+        
         // For P2P notifications
         if (parsedData.trader_phone && parsedData.trader_name) {
           const traderContact = contactService.getContactByPhoneSync(parsedData.trader_phone);
