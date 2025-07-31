@@ -2,6 +2,8 @@ import React from 'react';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccountManager } from '../hooks/useAccountManager';
+import moment from 'moment';
+import 'moment/locale/es';
 
 const Profile: React.FC = () => {
   const { profileData, isProfileLoading } = useAuth();
@@ -38,7 +40,7 @@ const Profile: React.FC = () => {
             <Text>Registration Number: {businessProfile.businessRegistrationNumber}</Text>
           )}
           {businessProfile.createdAt && (
-            <Text>Created: {new Date(businessProfile.createdAt).toLocaleDateString()}</Text>
+            <Text>Created: {moment.utc(businessProfile.createdAt).local().format('DD/MM/YYYY')}</Text>
           )}
         </View>
       ) : userProfile ? (
@@ -70,7 +72,7 @@ const Profile: React.FC = () => {
             <Text>Verification Status: {userProfile.verificationStatus}</Text>
           )}
           {userProfile.lastVerifiedDate && (
-            <Text>Last Verified: {new Date(userProfile.lastVerifiedDate).toLocaleDateString()}</Text>
+            <Text>Last Verified: {moment.utc(userProfile.lastVerifiedDate).local().format('DD/MM/YYYY')}</Text>
           )}
         </View>
       ) : (

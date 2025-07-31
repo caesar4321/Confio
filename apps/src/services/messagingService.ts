@@ -6,24 +6,49 @@ import DeviceInfo from 'react-native-device-info';
 import { apolloClient } from '../apollo/client';
 import { REGISTER_FCM_TOKEN, UNREGISTER_FCM_TOKEN } from '../graphql/mutations/notifications';
 import { navigationRef } from '../navigation/RootNavigation';
+import notificationDedup from './notificationDeduplication';
 
 const FCM_TOKEN_SERVICE = 'confio_fcm_token';
 const DEVICE_ID_SERVICE = 'confio_device_id';
+
+// Global singleton to prevent multiple instances across reloads
+let globalMessagingInstance: MessagingService | null = null;
 
 class MessagingService {
   private static instance: MessagingService;
   private fcmToken: string | null = null;
   private deviceId: string | null = null;
+  private displayedMessageIds: Set<string> = new Set();
+  private displayedNotificationIds: Set<string> = new Set();
+  private messageHandlersSetup: boolean = false;
+  private unsubscribeHandlers: (() => void)[] = [];
+  private instanceId: string;
+
+  constructor() {
+    this.instanceId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    console.log(`[MessagingService] Creating instance: ${this.instanceId}`);
+  }
 
   static getInstance(): MessagingService {
-    if (!MessagingService.instance) {
-      MessagingService.instance = new MessagingService();
+    // Use global singleton to persist across hot reloads
+    if (!globalMessagingInstance) {
+      globalMessagingInstance = new MessagingService();
+      // Store reference on window for debugging
+      if (typeof window !== 'undefined') {
+        (window as any).__messagingService = globalMessagingInstance;
+      }
     }
-    return MessagingService.instance;
+    return globalMessagingInstance;
   }
 
   async initialize() {
     try {
+      // Prevent re-initialization
+      if (this.fcmToken && this.messageHandlersSetup) {
+        console.log('Messaging service already initialized, skipping');
+        return;
+      }
+
       // Request permission through Firebase
       const authStatus = await messaging().requestPermission();
       const enabled =
@@ -188,17 +213,86 @@ class MessagingService {
   }
 
   private setupMessageHandlers() {
+    console.log(`[${this.instanceId}] Setting up message handlers`);
+    
+    // Always clean up previous handlers first
+    this.cleanup();
+    
+    // Check if another instance already has handlers set up
+    if (typeof window !== 'undefined' && (window as any).__activeMessagingInstance) {
+      const activeInstance = (window as any).__activeMessagingInstance;
+      if (activeInstance !== this.instanceId) {
+        console.log(`[${this.instanceId}] Another instance (${activeInstance}) is already handling messages, skipping setup`);
+        return;
+      }
+    }
+    
+    // Mark this instance as the active one
+    if (typeof window !== 'undefined') {
+      (window as any).__activeMessagingInstance = this.instanceId;
+    }
+    
+    this.messageHandlersSetup = true;
+
     // Handle messages when app is in foreground
-    messaging().onMessage(async remoteMessage => {
-      console.log('Foreground message received:', remoteMessage);
+    const unsubscribeOnMessage = messaging().onMessage(async remoteMessage => {
+      const timestamp = new Date().toISOString();
+      const messageId = remoteMessage.data?.message_id;
+      const notificationId = remoteMessage.data?.notification_id;
+      const firebaseMessageId = remoteMessage.messageId; // This is the unique ID from Firebase
+      
+      console.log(`[${timestamp}] [${this.instanceId}] Foreground message received:`, {
+        messageId,
+        notificationId,
+        firebaseMessageId,
+        title: remoteMessage.notification?.title,
+        sentTime: remoteMessage.sentTime,
+        data: remoteMessage.data
+      });
+      
+      // CRITICAL: Use Firebase messageId for deduplication since it's always present
+      const deduplicationKey = firebaseMessageId || notificationId || `${timestamp}_${remoteMessage.notification?.title}`;
+      
+      console.log(`[${timestamp}] [${this.instanceId}] Checking global dedup with key:`, deduplicationKey);
+      
+      if (notificationDedup.isDuplicate(deduplicationKey, notificationId)) {
+        console.log(`[${timestamp}] [${this.instanceId}] Global dedup: Duplicate notification detected, skipping`);
+        return;
+      }
+      
+      // Still check local cache as backup
+      if (messageId && this.displayedMessageIds.has(messageId)) {
+        console.log(`[${timestamp}] Local dedup: Duplicate notification detected with message_id: ${messageId}, skipping`);
+        return;
+      }
+      
+      if (notificationId && this.displayedNotificationIds.has(notificationId)) {
+        console.log(`[${timestamp}] Local dedup: Duplicate notification detected with notification_id: ${notificationId}, skipping`);
+        return;
+      }
+      
+      // Add to local cache as well
+      if (messageId) {
+        this.displayedMessageIds.add(messageId);
+        setTimeout(() => this.displayedMessageIds.delete(messageId), 5 * 60 * 1000);
+      }
+      
+      if (notificationId) {
+        this.displayedNotificationIds.add(notificationId);
+        setTimeout(() => this.displayedNotificationIds.delete(notificationId), 5 * 60 * 1000);
+      }
+      
       await this.displayNotification(remoteMessage);
     });
+    this.unsubscribeHandlers.push(unsubscribeOnMessage);
 
     // Handle notification opened from background state
-    messaging().onNotificationOpenedApp(remoteMessage => {
-      console.log('Notification opened from background:', remoteMessage);
+    const unsubscribeOnNotificationOpened = messaging().onNotificationOpenedApp(remoteMessage => {
+      console.log('[MessagingService] ===== NOTIFICATION OPENED FROM BACKGROUND =====');
+      console.log('[MessagingService] Remote message:', JSON.stringify(remoteMessage, null, 2));
       this.handleNotificationOpen(remoteMessage);
     });
+    this.unsubscribeHandlers.push(unsubscribeOnNotificationOpened);
 
     // Check if app was opened from a notification (killed state)
     messaging()
@@ -211,7 +305,7 @@ class MessagingService {
       });
 
     // Handle token refresh
-    messaging().onTokenRefresh(async token => {
+    const unsubscribeOnTokenRefresh = messaging().onTokenRefresh(async token => {
       console.log('FCM token refreshed:', token);
       await this.registerToken(token);
       await Keychain.setInternetCredentials(
@@ -221,11 +315,16 @@ class MessagingService {
       );
       this.fcmToken = token;
     });
+    this.unsubscribeHandlers.push(unsubscribeOnTokenRefresh);
 
     // Handle Notifee events
     notifee.onForegroundEvent(({ type, detail }) => {
+      console.log('[MessagingService] ===== NOTIFEE FOREGROUND EVENT =====');
+      console.log('[MessagingService] Event type:', type);
+      console.log('[MessagingService] Event detail:', JSON.stringify(detail, null, 2));
+      
       if (type === EventType.PRESS) {
-        console.log('Notification pressed:', detail.notification);
+        console.log('[MessagingService] Notifee notification pressed:', detail.notification);
         if (detail.notification?.data) {
           this.handleNotificationData(detail.notification.data);
         }
@@ -234,6 +333,16 @@ class MessagingService {
   }
 
   private async displayNotification(remoteMessage: any) {
+    const timestamp = new Date().toISOString();
+    const messageId = remoteMessage.data?.message_id;
+    const notificationId = remoteMessage.data?.notification_id || messageId || `notif_${Date.now()}`;
+    
+    console.log(`[${timestamp}] displayNotification called with:`, {
+      notificationId,
+      messageId,
+      title: remoteMessage.notification?.title
+    });
+
     // For Android, ensure channel exists
     if (Platform.OS === 'android') {
       await notifee.createChannel({
@@ -243,33 +352,41 @@ class MessagingService {
       });
     }
 
-    // Display the notification
-    await notifee.displayNotification({
-      title: remoteMessage.notification?.title || 'Confío',
-      body: remoteMessage.notification?.body || '',
-      data: remoteMessage.data,
-      android: {
-        channelId: 'default',
-        smallIcon: 'ic_stat_ic_notification',
-        largeIcon: 'ic_launcher',
-        color: '#8b5cf6',  // Confío violet accent color
-        pressAction: {
-          id: 'default',
+    try {
+      // Display the notification
+      await notifee.displayNotification({
+        id: notificationId, // Set explicit ID to prevent duplicates
+        title: remoteMessage.notification?.title || 'Confío',
+        body: remoteMessage.notification?.body || '',
+        data: remoteMessage.data,
+        android: {
+          channelId: 'default',
+          smallIcon: 'ic_stat_ic_notification',
+          largeIcon: 'ic_launcher',
+          color: '#8b5cf6',  // Confío violet accent color
+          pressAction: {
+            id: 'default',
+          },
+          // Group notifications properly
+          groupId: 'confio_notifications',
+          groupSummary: false,  // Individual notifications should not be summaries
+          // Use tag to replace existing notification with same ID
+          tag: notificationId,
         },
-        // Group notifications properly
-        groupId: 'confio_notifications',
-        groupSummary: false,  // Individual notifications should not be summaries
-      },
-      ios: {
-        foregroundPresentationOptions: {
-          badge: true,
-          sound: true,
-          banner: true,
-          list: true,
+        ios: {
+          foregroundPresentationOptions: {
+            badge: true,
+            sound: true,
+            banner: true,
+            list: true,
+          },
+          categoryId: 'default',
         },
-        categoryId: 'default',
-      },
-    });
+      });
+      console.log(`[${timestamp}] Notification displayed successfully with ID: ${notificationId}`);
+    } catch (error) {
+      console.error(`[${timestamp}] Error displaying notification:`, error);
+    }
   }
 
   private async createNotificationChannel() {
@@ -286,39 +403,114 @@ class MessagingService {
   }
 
   private handleNotificationOpen(remoteMessage: any) {
+    console.log('Notification opened:', remoteMessage);
     const data = remoteMessage.data;
     if (data) {
+      console.log('Notification data:', data);
       this.handleNotificationData(data);
+    } else {
+      console.log('No data in notification');
     }
   }
 
   private handleNotificationData(data: any) {
+    console.log('[MessagingService] handleNotificationData called with:', data);
+    
     // Navigate based on notification data
     const { action_url, notification_type, related_type, related_id } = data;
 
-    if (action_url) {
-      // Parse deep link and navigate
-      this.navigateToDeepLink(action_url);
-    } else if (related_type && related_id) {
-      // Navigate based on related object
-      this.navigateToRelatedObject(related_type, related_id);
-    } else if (notification_type) {
-      // Navigate to notifications screen
-      navigationRef.current?.navigate('Notifications');
+    // Extract transaction data from data_ prefixed fields
+    const transactionData: any = {};
+    Object.keys(data).forEach(key => {
+      if (key.startsWith('data_')) {
+        const actualKey = key.substring(5); // Remove 'data_' prefix
+        transactionData[actualKey] = data[key];
+      }
+    });
+    
+    // Also include the notification_type in transaction data for type detection
+    if (notification_type) {
+      transactionData.notification_type = notification_type;
     }
+
+    console.log('[MessagingService] Extracted transaction data:', transactionData);
+    console.log('[MessagingService] Navigation params:', { action_url, notification_type, related_type, related_id });
+
+    // Ensure navigation is ready before attempting to navigate
+    const attemptNavigation = () => {
+      if (!navigationRef.current || !navigationRef.current.isReady()) {
+        console.log('Navigation not ready, retrying in 100ms...');
+        setTimeout(attemptNavigation, 100);
+        return;
+      }
+
+      if (action_url) {
+        // Parse deep link and navigate
+        this.navigateToDeepLink(action_url, transactionData);
+      } else if (related_type && related_id) {
+        // Navigate based on related object
+        this.navigateToRelatedObject(related_type, related_id, transactionData);
+      } else if (notification_type) {
+        // Navigate to notifications screen using nested navigation
+        navigationRef.current?.navigate('Main' as never, {
+          screen: 'Notifications'
+        } as never);
+      }
+    };
+
+    attemptNavigation();
   }
 
-  private navigateToDeepLink(url: string) {
-    // Parse deep link format: confio://screen/params
-    const match = url.match(/confio:\/\/(.+)/);
-    if (match) {
-      const path = match[1];
-      const parts = path.split('/');
-      
+  private navigateToDeepLink(url: string, transactionData?: any) {
+    console.log('[MessagingService] navigateToDeepLink called with:', { url, transactionData });
+    
+    // Parse deep link format: confio://screen/params OR /screen/params
+    let path = url;
+    
+    // Handle confio:// prefix if present
+    const confioMatch = url.match(/confio:\/\/(.+)/);
+    if (confioMatch) {
+      path = confioMatch[1];
+    } else if (url.startsWith('/')) {
+      // Handle URLs that start with / (like /transaction/123)
+      path = url.substring(1); // Remove leading slash
+    }
+    
+    const parts = path.split('/');
+    console.log('[MessagingService] Parsed path parts:', parts);
+    
+    if (parts.length > 0) {
       switch (parts[0]) {
         case 'transaction':
           if (parts[1]) {
-            navigationRef.current?.navigate('TransactionDetail', { id: parts[1] });
+            // Navigate with transaction data if available, otherwise minimal data
+            const navData = transactionData && Object.keys(transactionData).length > 0 
+              ? transactionData 
+              : { id: parts[1] };
+            
+            // Determine transaction type
+            let transactionType = transactionData?.transaction_type || 'send';
+            
+            // Check if this is a payment transaction based on notification data
+            const notificationType = transactionData?.notification_type;
+            if (notificationType === 'PAYMENT_SENT' || notificationType === 'PAYMENT_RECEIVED') {
+              transactionType = 'payment';
+            }
+            
+            console.log('[MessagingService] Navigating to TransactionDetail:', {
+              transactionType,
+              navData,
+              notificationType
+            });
+            
+            // Use nested navigation for TransactionDetail
+            navigationRef.current?.navigate('Main' as never, {
+              screen: 'TransactionDetail',
+              params: { 
+                transactionType,
+                transactionData: navData
+              }
+            } as never);
           }
           break;
         case 'p2p':
@@ -344,23 +536,52 @@ class MessagingService {
     }
   }
 
-  private navigateToRelatedObject(type: string, id: string) {
+  private navigateToRelatedObject(type: string, id: string, transactionData?: any) {
     switch (type) {
       case 'SendTransaction':
       case 'PaymentTransaction':
-        navigationRef.current?.navigate('TransactionDetail', { id });
+      case 'payment':
+        // Navigate with transaction data if available, otherwise minimal data
+        const navData = transactionData && Object.keys(transactionData).length > 0 
+          ? { ...transactionData, id } 
+          : { id };
+        
+        // Determine transaction type
+        let transactionType = transactionData?.transaction_type || 'send';
+        if (type === 'PaymentTransaction' || type === 'payment') {
+          transactionType = 'payment';
+        }
+        
+        navigationRef.current?.navigate('Main' as never, {
+          screen: 'TransactionDetail',
+          params: { 
+            transactionType,
+            transactionData: navData
+          }
+        } as never);
         break;
       case 'P2PTrade':
-        navigationRef.current?.navigate('P2PTradeDetail', { tradeId: id });
+        navigationRef.current?.navigate('Main' as never, {
+          screen: 'P2PTradeDetail',
+          params: { tradeId: id }
+        } as never);
         break;
       case 'P2POffer':
-        navigationRef.current?.navigate('P2POfferDetail', { offerId: id });
+        navigationRef.current?.navigate('Main' as never, {
+          screen: 'P2POfferDetail',
+          params: { offerId: id }
+        } as never);
         break;
       case 'Business':
-        navigationRef.current?.navigate('BusinessDetail', { businessId: id });
+        navigationRef.current?.navigate('Main' as never, {
+          screen: 'BusinessDetail',
+          params: { businessId: id }
+        } as never);
         break;
       default:
-        navigationRef.current?.navigate('Notifications');
+        navigationRef.current?.navigate('Main' as never, {
+          screen: 'Notifications'
+        } as never);
     }
   }
 
@@ -389,6 +610,26 @@ class MessagingService {
       console.error('Error requesting permissions:', error);
       return false;
     }
+  }
+
+  // Clean up handlers to prevent duplicates
+  private cleanup() {
+    console.log(`[${this.instanceId}] Cleaning up messaging handlers`);
+    
+    // Clear active instance marker if it's this instance
+    if (typeof window !== 'undefined' && (window as any).__activeMessagingInstance === this.instanceId) {
+      (window as any).__activeMessagingInstance = null;
+    }
+    
+    this.unsubscribeHandlers.forEach(unsubscribe => {
+      try {
+        unsubscribe();
+      } catch (error) {
+        console.error('Error unsubscribing handler:', error);
+      }
+    });
+    this.unsubscribeHandlers = [];
+    this.messageHandlersSetup = false;
   }
 }
 

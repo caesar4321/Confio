@@ -519,6 +519,63 @@ export class ContactService {
       return this.contactsCache[phoneNumber];
     }
 
+    // Handle Confio format: "DO9293993618" (2-letter country code + phone number)
+    const countryCodeMatch = phoneNumber.match(/^([A-Z]{2})(.+)$/);
+    if (countryCodeMatch) {
+      const [, countryCode, phoneWithoutCountry] = countryCodeMatch;
+      
+      // Try lookup with just the phone number part
+      if (this.contactsCache[phoneWithoutCountry]) {
+        return this.contactsCache[phoneWithoutCountry];
+      }
+      
+      // Map country codes to dialing codes
+      const countryDialingCodes: Record<string, string> = {
+        'DO': '1809', // Dominican Republic
+        'US': '1',
+        'CA': '1',
+        'VE': '58',
+        'CO': '57',
+        'MX': '52',
+        'AR': '54',
+        'BR': '55',
+        'CL': '56',
+        'PE': '51',
+        'EC': '593',
+        // Add more as needed
+      };
+      
+      const dialingCode = countryDialingCodes[countryCode];
+      if (dialingCode) {
+        // Try various formats
+        const withDialingCode = dialingCode + phoneWithoutCountry;
+        const withPlus = '+' + dialingCode + phoneWithoutCountry;
+        const justDialingWithoutCountry = '+' + phoneWithoutCountry;
+        
+        if (this.contactsCache[withDialingCode]) {
+          return this.contactsCache[withDialingCode];
+        }
+        if (this.contactsCache[withPlus]) {
+          return this.contactsCache[withPlus];
+        }
+        if (this.contactsCache[justDialingWithoutCountry]) {
+          return this.contactsCache[justDialingWithoutCountry];
+        }
+        
+        // For countries like DO that share +1, try without area code
+        if (dialingCode.startsWith('1')) {
+          const withJust1 = '1' + phoneWithoutCountry;
+          const withPlus1 = '+1' + phoneWithoutCountry;
+          if (this.contactsCache[withJust1]) {
+            return this.contactsCache[withJust1];
+          }
+          if (this.contactsCache[withPlus1]) {
+            return this.contactsCache[withPlus1];
+          }
+        }
+      }
+    }
+
     // Try cleaned lookup
     const cleaned = phoneNumber.replace(/\D/g, '');
     if (cleaned && this.contactsCache[cleaned]) {

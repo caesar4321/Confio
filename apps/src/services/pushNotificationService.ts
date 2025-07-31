@@ -1,6 +1,7 @@
 import messaging, { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { Platform, PermissionsAndroid } from 'react-native';
 import * as Keychain from 'react-native-keychain';
+import * as RootNavigation from '../navigation/RootNavigation';
 
 const NOTIFICATION_PERMISSION_KEY = 'push_notification_permission';
 const NOTIFICATION_TOKEN_KEY = 'push_notification_token';
@@ -10,6 +11,7 @@ const NOTIFICATION_PROMPT_TIMESTAMP_KEY = 'push_notification_prompt_timestamp';
 export class PushNotificationService {
   private static instance: PushNotificationService;
   private isInitialized = false;
+  private pendingNotification: FirebaseMessagingTypes.RemoteMessage | null = null;
 
   private constructor() {}
 
@@ -18,6 +20,132 @@ export class PushNotificationService {
       PushNotificationService.instance = new PushNotificationService();
     }
     return PushNotificationService.instance;
+  }
+
+  /**
+   * Process any pending notification navigation
+   * This should be called after the app is fully initialized and authenticated
+   */
+  processPendingNotification(): void {
+    console.log('[PushNotificationService] processPendingNotification called', {
+      hasPending: !!this.pendingNotification
+    });
+    
+    if (this.pendingNotification) {
+      const notification = this.pendingNotification;
+      this.pendingNotification = null;
+      
+      // Delay slightly to ensure navigation is fully ready
+      setTimeout(() => {
+        this.handleNotificationNavigation(notification);
+      }, 500);
+    }
+  }
+
+  /**
+   * Handle notification navigation based on data payload
+   */
+  private handleNotificationNavigation(remoteMessage: FirebaseMessagingTypes.RemoteMessage): void {
+    console.log('[PushNotificationService] Handling notification navigation:', {
+      data: remoteMessage.data,
+      notification: remoteMessage.notification
+    });
+    
+    if (!remoteMessage.data) {
+      console.log('[PushNotificationService] No data in remote message');
+      return;
+    }
+    
+    // Wait for navigation to be ready
+    const attemptNavigation = () => {
+      if (!RootNavigation.navigationRef.isReady()) {
+        console.log('[PushNotificationService] Navigation not ready, retrying...');
+        setTimeout(attemptNavigation, 100);
+        return;
+      }
+      
+      const { action_url, extra_type, extra_transactionType, notification_type } = remoteMessage.data;
+      
+      console.log('[PushNotificationService] Processing notification navigation:', {
+        action_url,
+        extra_type,
+        extra_transactionType,
+        notification_type
+      });
+      
+      // Parse action URL if it exists
+      if (action_url) {
+        if (action_url.includes('p2p/trade/')) {
+          const tradeId = action_url.split('p2p/trade/')[1];
+          console.log('[PushNotificationService] Navigating to ActiveTrade:', tradeId);
+          RootNavigation.navigate('Main', {
+            screen: 'ActiveTrade',
+            params: { tradeId }
+          });
+        } else if (action_url.includes('transaction/')) {
+          const transactionId = action_url.split('transaction/')[1];
+          
+          // Reconstruct transaction data from notification data fields
+          const transactionData: any = {};
+          
+          // Copy all data_ prefixed fields to transaction data
+          Object.keys(remoteMessage.data).forEach(key => {
+            if (key.startsWith('data_')) {
+              const fieldName = key.substring(5); // Remove 'data_' prefix
+              transactionData[fieldName] = remoteMessage.data[key];
+            }
+          });
+          
+          // Determine transaction type
+          let transactionType = extra_transactionType || extra_type || 'send';
+          
+          // Map notification types to transaction types if needed
+          if (notification_type === 'PAYMENT_SENT' || notification_type === 'PAYMENT_RECEIVED') {
+            transactionType = 'payment';
+            // For payment transactions, ensure we have the correct transaction ID
+            if (!transactionData.id && transactionData.payment_transaction_id) {
+              transactionData.id = transactionData.payment_transaction_id;
+            }
+          }
+          
+          console.log('[PushNotificationService] Navigating to TransactionDetail:', {
+            transactionType,
+            transactionData,
+            transactionId,
+            notification_type
+          });
+          
+          // Navigate to Main stack first, then to TransactionDetail
+          // This ensures we're in the correct navigator
+          RootNavigation.navigate('Main', {
+            screen: 'TransactionDetail',
+            params: {
+              transactionType,
+              transactionData: { 
+                ...transactionData,
+                id: transactionId,
+                transaction_type: transactionType
+              }
+            }
+          });
+        } else {
+          console.log('[PushNotificationService] Unknown action URL format:', action_url);
+          // Fallback to NotificationScreen
+          RootNavigation.navigate('Main', {
+            screen: 'Notifications'
+          });
+        }
+      } else {
+        console.log('[PushNotificationService] No action URL, navigating to NotificationScreen');
+        // Fallback to NotificationScreen if no specific action
+        RootNavigation.navigate('Main', {
+          screen: 'Notifications'
+        });
+      }
+    };
+    
+    // Start navigation attempt
+    attemptNavigation();
   }
 
   /**
@@ -47,14 +175,20 @@ export class PushNotificationService {
       // Handle notification opened app
       messaging().onNotificationOpenedApp((remoteMessage) => {
         console.log('Notification caused app to open from background state:', remoteMessage.notification);
-        // Navigate to specific screen based on notification data
+        // For background state, the app is already initialized so we can navigate
+        // But we should still check if navigation is ready
+        setTimeout(() => {
+          this.handleNotificationNavigation(remoteMessage);
+        }, 500);
       });
 
       // Check whether an initial notification is available
       const initialNotification = await messaging().getInitialNotification();
       if (initialNotification) {
         console.log('Notification caused app to open from quit state:', initialNotification.notification);
-        // Navigate to specific screen based on notification data
+        // Store the notification to be processed after app is fully initialized
+        this.pendingNotification = initialNotification;
+        console.log('[PushNotificationService] Stored initial notification as pending');
       }
 
       this.isInitialized = true;

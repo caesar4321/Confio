@@ -25,6 +25,7 @@ import moment from 'moment';
 import 'moment/locale/es';
 import { useQuery } from '@apollo/client';
 import { GET_SEND_TRANSACTION_BY_ID } from '../apollo/queries';
+import { useContactNameSync } from '../hooks/useContactName';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -42,6 +43,65 @@ const colors = {
   neutral: '#f9fafb', // gray-50
   neutralDark: '#f3f4f6', // gray-100
   dark: '#111827', // gray-900
+};
+
+// Helper function to format amount with proper decimals
+const formatAmount = (amount: string | number | undefined): string => {
+  if (!amount) return '0.00';
+  const numericAmount = typeof amount === 'string' ? parseFloat(amount.replace(/[+-]/g, '')) : amount;
+  return numericAmount.toFixed(2);
+};
+
+// Helper function to format amount with sign
+const formatAmountWithSign = (amount: string | undefined): string => {
+  if (!amount) return '0.00';
+  const sign = amount.startsWith('-') ? '-' : amount.startsWith('+') ? '+' : '';
+  const numericPart = formatAmount(amount);
+  return sign + numericPart;
+};
+
+// Helper function to format phone numbers for display
+const formatPhoneNumber = (phone: string | undefined): string => {
+  if (!phone) return '';
+  
+  // Extract country code and phone number
+  // Format: "AS9293993619" where AS = American Samoa, DO = Dominican Republic, etc.
+  const countryCodeMatch = phone.match(/^([A-Z]{2})(.+)$/);
+  if (!countryCodeMatch) return phone;
+  
+  const [, countryPrefix, phoneNumber] = countryCodeMatch;
+  
+  // Map common country prefixes to dialing codes
+  const countryDialingCodes: { [key: string]: string } = {
+    'US': '1',    // United States
+    'AS': '1',    // American Samoa
+    'DO': '1',    // Dominican Republic  
+    'VE': '58',   // Venezuela
+    'CO': '57',   // Colombia
+    'MX': '52',   // Mexico
+    'AR': '54',   // Argentina
+    'PE': '51',   // Peru
+    'CL': '56',   // Chile
+    'EC': '593',  // Ecuador
+    'BR': '55',   // Brazil
+    'UY': '598',  // Uruguay
+    'PY': '595',  // Paraguay
+    'BO': '591',  // Bolivia
+    // Add more as needed
+  };
+  
+  const dialingCode = countryDialingCodes[countryPrefix] || '';
+  
+  // Format based on length and country
+  if (dialingCode === '1' && phoneNumber.length === 10) {
+    // North American format: +1 (XXX) XXX-XXXX
+    return `+${dialingCode} (${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3, 6)}-${phoneNumber.slice(6)}`;
+  } else if (dialingCode) {
+    // International format: +XX XXXX XXXXXX (adjust spacing as needed)
+    return `+${dialingCode} ${phoneNumber}`;
+  }
+  
+  return phone; // Return as-is if we can't format it
 };
 
 export const TransactionDetailScreen = () => {
@@ -201,20 +261,46 @@ export const TransactionDetailScreen = () => {
       toAddress: tx.recipientAddress,
       amount: isSent ? `-${tx.amount}` : `+${tx.amount}`,
       currency: tx.tokenType,
-      date: moment(tx.createdAt).format('YYYY-MM-DD'),
-      time: moment(tx.createdAt).format('HH:mm'),
+      date: moment.utc(tx.createdAt).local().format('YYYY-MM-DD'),
+      time: moment.utc(tx.createdAt).local().format('HH:mm'),
       status: tx.status?.toLowerCase() || 'completed',
       hash: tx.transactionHash || '',
       note: tx.memo || '',
       avatar: (isSent ? tx.recipientDisplayName : tx.senderDisplayName)?.[0] || 'U',
       isInvitedFriend: !!tx.invitationExpiresAt,
       transaction_type: 'send',
+      // Add phone numbers from fetched data
+      sender_phone: tx.senderPhone,
+      recipient_phone: tx.recipientPhone,
+      senderPhone: tx.senderPhone,
+      recipientPhone: tx.recipientPhone,
     };
   }
   
-  // If transactionData exists and has content, use it directly
-  const currentTx = (transactionData && Object.keys(transactionData).length > 1) 
-    ? transactionData 
+  // If transactionData exists and has content, normalize it
+  let normalizedTransactionData = transactionData;
+  if (transactionData && Object.keys(transactionData).length > 1) {
+    // Normalize field names from notification data (snake_case to camelCase)
+    normalizedTransactionData = {
+      ...transactionData,
+      // Map transaction_type to type for consistency
+      type: transactionData.transaction_type || transactionData.transactionType || transactionData.type,
+      createdAt: transactionData.created_at || transactionData.createdAt,
+      transactionType: transactionData.transaction_type || transactionData.transactionType,
+      tokenType: transactionData.token_type || transactionData.tokenType || transactionData.currency,
+      transactionId: transactionData.transaction_id || transactionData.transactionId || transactionData.id,
+      recipientName: transactionData.recipient_name || transactionData.recipientName,
+      recipientPhone: transactionData.recipient_phone || transactionData.recipientPhone,
+      recipientAddress: transactionData.recipient_address || transactionData.recipientAddress,
+      senderName: transactionData.sender_name || transactionData.senderName,
+      senderPhone: transactionData.sender_phone || transactionData.senderPhone,
+      senderAddress: transactionData.sender_address || transactionData.senderAddress,
+      transactionHash: transactionData.transaction_hash || transactionData.transactionHash,
+    };
+  }
+  
+  const currentTx = (normalizedTransactionData && Object.keys(normalizedTransactionData).length > 1) 
+    ? normalizedTransactionData 
     : (txData || transactions[transactionType]);
   
   console.log('[TransactionDetailScreen] currentTx selection:', {
@@ -223,6 +309,28 @@ export const TransactionDetailScreen = () => {
     usingFallback: !!(transactions[transactionType])
   });
   console.log('[TransactionDetailScreen] currentTx:', currentTx);
+  console.log('[TransactionDetailScreen] currentTx datetime fields:', {
+    date: currentTx?.date,
+    time: currentTx?.time,
+    createdAt: currentTx?.createdAt,
+    created_at: currentTx?.created_at,
+    timestamp: currentTx?.timestamp,
+  });
+  
+  // Debug timezone conversion
+  if (currentTx?.createdAt) {
+    const deviceOffset = new Date().getTimezoneOffset();
+    console.log('[TransactionDetailScreen] Timezone debug:', {
+      rawCreatedAt: currentTx.createdAt,
+      parsedUTC: moment.utc(currentTx.createdAt).format('YYYY-MM-DD HH:mm:ss'),
+      convertedLocal: moment.utc(currentTx.createdAt).local().format('YYYY-MM-DD HH:mm:ss'),
+      deviceTimezoneOffset: `${deviceOffset} minutes (${-deviceOffset/60} hours)`,
+      currentLocalTime: moment().format('YYYY-MM-DD HH:mm:ss'),
+      momentLocalTime: moment.utc(currentTx.createdAt).local().format(),
+      isUTC: moment.utc(currentTx.createdAt).isUTC(),
+      isLocal: moment.utc(currentTx.createdAt).local().isLocal(),
+    });
+  }
   console.log('[TransactionDetailScreen] currentTx details:', {
     amount: currentTx?.amount,
     currency: currentTx?.currency,
@@ -230,6 +338,8 @@ export const TransactionDetailScreen = () => {
     type: currentTx?.type,
     from: currentTx?.from,
     to: currentTx?.to,
+    sender_phone: currentTx?.sender_phone,
+    recipient_phone: currentTx?.recipient_phone,
     keys: currentTx ? Object.keys(currentTx) : []
   });
   
@@ -253,6 +363,43 @@ export const TransactionDetailScreen = () => {
   }
   
   const isInvitedFriend = currentTx?.isInvitedFriend || false;
+  
+  // Debug phone numbers
+  console.log('[TransactionDetailScreen] Phone number data:', {
+    sender_phone: currentTx?.sender_phone,
+    senderPhone: currentTx?.senderPhone,
+    recipient_phone: currentTx?.recipient_phone,
+    recipientPhone: currentTx?.recipientPhone,
+    fromPhone: currentTx?.fromPhone,
+    toPhone: currentTx?.toPhone,
+    // Also check raw transactionData
+    raw_sender_phone: transactionData?.sender_phone,
+    raw_recipient_phone: transactionData?.recipient_phone,
+    all_keys: currentTx ? Object.keys(currentTx) : [],
+  });
+  
+  // Get contact names for display - check all possible phone fields
+  const senderPhone = currentTx?.sender_phone || currentTx?.senderPhone || currentTx?.fromPhone || transactionData?.sender_phone;
+  const recipientPhone = currentTx?.recipient_phone || currentTx?.recipientPhone || currentTx?.toPhone || transactionData?.recipient_phone;
+  
+  console.log('[TransactionDetailScreen] Contact lookup:', {
+    senderPhone,
+    recipientPhone,
+    fallbackSenderName: currentTx?.from || currentTx?.senderName,
+    fallbackRecipientName: currentTx?.to || currentTx?.recipientName,
+  });
+  
+  const senderContactInfo = useContactNameSync(senderPhone, currentTx?.from || currentTx?.senderName || currentTx?.sender_name);
+  const recipientContactInfo = useContactNameSync(recipientPhone, currentTx?.to || currentTx?.recipientName || currentTx?.recipient_name);
+  
+  console.log('[TransactionDetailScreen] Contact info results:', {
+    senderContactInfo,
+    recipientContactInfo,
+  });
+  
+  // Use contact names if available
+  const displayFromName = senderContactInfo.displayName;
+  const displayToName = recipientContactInfo.displayName;
 
   const handleCopy = (text: string, type: string) => {
     Clipboard.setString(text);
@@ -284,9 +431,9 @@ export const TransactionDetailScreen = () => {
   const getTransactionTitle = (tx: any) => {
     switch(tx.type) {
       case 'received':
-        return `Recibido de ${tx.from}`;
+        return `Recibido de ${displayFromName}`;
       case 'sent':
-        return `Enviado a ${tx.to}`;
+        return `Enviado a ${displayToName}`;
       case 'exchange':
         return `Intercambio ${tx.from} → ${tx.to}`;
       case 'conversion':
@@ -294,8 +441,8 @@ export const TransactionDetailScreen = () => {
       case 'payment':
         // Check if it's a received payment (positive amount) or sent payment (negative amount)
         return tx.amount.startsWith('+') 
-          ? `Pago recibido de ${tx.from}`
-          : `Pago a ${tx.to}`;
+          ? `Pago recibido de ${displayFromName}`
+          : `Pago a ${displayToName}`;
       case 'deposit':
         return tx.formattedTitle || `Depósito ${tx.currency}`;
       case 'withdrawal':
@@ -921,7 +1068,7 @@ export const TransactionDetailScreen = () => {
               styles.amountText,
               (currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal') && styles.negativeAmount
             ]}>
-              {currentTx.type === 'deposit' ? '+' : currentTx.type === 'withdrawal' ? '-' : ''}{currentTx.amount || '0.00'} {currentTx.currency || 'cUSD'}
+              {formatAmountWithSign(currentTx.amount)} {currentTx.currency || 'cUSD'}
             </Text>
             
             <Text style={styles.transactionTitle}>
@@ -1066,11 +1213,16 @@ export const TransactionDetailScreen = () => {
                     <Text style={styles.avatarText}>{currentTx.avatar}</Text>
                   </View>
                   <View style={styles.participantDetails}>
-                    <Text style={styles.participantName}>{currentTx.from}</Text>
+                    <Text style={styles.participantName}>{displayFromName}</Text>
                     <View style={styles.addressContainer}>
-                      <Text style={styles.addressText}>{currentTx.fromAddress}</Text>
+                      <Text style={styles.addressText}>
+                        {senderPhone ? formatPhoneNumber(senderPhone) : currentTx.fromAddress}
+                      </Text>
                       <TouchableOpacity 
-                        onPress={() => handleCopy(currentTx.fromAddress, 'from')}
+                        onPress={() => handleCopy(
+                          senderPhone ? formatPhoneNumber(senderPhone) : currentTx.fromAddress, 
+                          'from'
+                        )}
                         style={styles.copyButton}
                       >
                         {copied === 'from' ? (
@@ -1090,11 +1242,16 @@ export const TransactionDetailScreen = () => {
                     <Text style={styles.avatarText}>{currentTx.avatar}</Text>
                   </View>
                   <View style={styles.participantDetails}>
-                    <Text style={styles.participantName}>{currentTx.to}</Text>
+                    <Text style={styles.participantName}>{displayToName}</Text>
                     <View style={styles.addressContainer}>
-                      <Text style={styles.addressText}>{currentTx.toAddress}</Text>
+                      <Text style={styles.addressText}>
+                        {recipientPhone ? formatPhoneNumber(recipientPhone) : currentTx.toAddress}
+                      </Text>
                       <TouchableOpacity 
-                        onPress={() => handleCopy(currentTx.toAddress, 'to')}
+                        onPress={() => handleCopy(
+                          recipientPhone ? formatPhoneNumber(recipientPhone) : currentTx.toAddress, 
+                          'to'
+                        )}
                         style={styles.copyButton}
                       >
                         {copied === 'to' ? (
@@ -1120,25 +1277,13 @@ export const TransactionDetailScreen = () => {
                   </View>
                   <View style={styles.participantDetails}>
                     <Text style={styles.participantName}>
-                      {currentTx.amount?.startsWith('+') ? currentTx.from : currentTx.to}
+                      {currentTx.amount?.startsWith('+') ? displayFromName : displayToName}
                     </Text>
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
-                        {currentTx.amount?.startsWith('+') ? currentTx.fromAddress : currentTx.toAddress}
+                        {/* Hide phone/address for payment transactions to preserve privacy */}
+                        {''}
                       </Text>
-                      <TouchableOpacity 
-                        onPress={() => handleCopy(
-                          currentTx.amount?.startsWith('+') ? currentTx.fromAddress : currentTx.toAddress, 
-                          currentTx.amount?.startsWith('+') ? 'from' : 'to'
-                        )}
-                        style={styles.copyButton}
-                      >
-                        {copied === (currentTx.amount?.startsWith('+') ? 'from' : 'to') ? (
-                          <Icon name="check" size={16} color={colors.accent} />
-                        ) : (
-                          <Icon name="copy" size={16} color={colors.accent} />
-                        )}
-                      </TouchableOpacity>
                     </View>
                   </View>
                 </View>
@@ -1164,21 +1309,44 @@ export const TransactionDetailScreen = () => {
                 <Icon name="clock" size={20} color="#9ca3af" style={styles.infoIcon} />
                 <View style={styles.infoContent}>
                   <Text style={styles.infoTitle}>
-                    {currentTx.date && currentTx.time 
-                      ? `${moment(currentTx.date).format('DD/MM/YYYY')} • ${currentTx.time}`
-                      : currentTx.createdAt 
-                        ? `${moment(currentTx.createdAt).format('DD/MM/YYYY')} • ${moment(currentTx.createdAt).format('HH:mm')}`
-                        : 'Fecha no disponible'
-                    }
+                    {(() => {
+                      // Prioritize createdAt if it exists (from notifications)
+                      if (currentTx.createdAt && currentTx.createdAt.includes('T')) {
+                        // Parse ISO timestamp using native Date to ensure proper timezone handling
+                        const date = new Date(currentTx.createdAt);
+                        return `${moment(date).format('DD/MM/YYYY')} • ${moment(date).format('HH:mm')}`;
+                      } else if (currentTx.date && currentTx.time) {
+                        // Already formatted date and time from AccountDetailScreen
+                        return `${moment(currentTx.date, 'YYYY-MM-DD').format('DD/MM/YYYY')} • ${currentTx.time}`;
+                      }
+                      return 'Fecha no disponible';
+                    })()}
                   </Text>
                   <Text style={styles.infoSubtitle}>
-                    {currentTx.timestamp 
-                      ? moment(currentTx.timestamp).locale('es').fromNow()
-                      : currentTx.createdAt
-                        ? moment(currentTx.createdAt).locale('es').fromNow()
-                        : currentTx.date 
-                          ? moment(currentTx.date, 'YYYY-MM-DD').locale('es').fromNow()
-                          : ''}
+                    {(() => {
+                      // If we have a raw ISO timestamp (from notifications)
+                      if (currentTx.createdAt && currentTx.createdAt.includes('T')) {
+                        const date = new Date(currentTx.createdAt);
+                        return moment(date).locale('es').fromNow();
+                      }
+                      // If we have a timestamp field, it might be an ISO string or a date string
+                      else if (currentTx.timestamp) {
+                        if (currentTx.timestamp.includes('T')) {
+                          const date = new Date(currentTx.timestamp);
+                          return moment(date).locale('es').fromNow();
+                        } else {
+                          return moment(currentTx.timestamp).locale('es').fromNow();
+                        }
+                      }
+                      // If we only have date (already formatted), combine with time if available
+                      else if (currentTx.date) {
+                        const dateTime = currentTx.time 
+                          ? moment(`${currentTx.date} ${currentTx.time}`, 'YYYY-MM-DD HH:mm')
+                          : moment(currentTx.date, 'YYYY-MM-DD');
+                        return dateTime.locale('es').fromNow();
+                      }
+                      return '';
+                    })()}
                   </Text>
                 </View>
               </View>
@@ -1220,7 +1388,7 @@ export const TransactionDetailScreen = () => {
                      currentTx.type === 'exchange' ? 'Monto intercambiado' : 'Monto enviado'}
                   </Text>
                   <Text style={styles.feeAmount}>
-                    {currentTx.amount ? Math.abs(parseFloat(currentTx.amount.replace(/[+-]/g, ''))).toFixed(2) : '0.00'} {currentTx.currency || 'cUSD'}
+                    {formatAmount(currentTx.amount)} {currentTx.currency || 'cUSD'}
                   </Text>
                 </View>
                 
@@ -1238,7 +1406,7 @@ export const TransactionDetailScreen = () => {
                     <View style={styles.feeRow}>
                       <Text style={styles.totalLabel}>Total debitado</Text>
                       <Text style={styles.totalAmount}>
-                        {currentTx.amount || '0.00'} {currentTx.currency || 'cUSD'}
+                        {formatAmountWithSign(currentTx.amount)} {currentTx.currency || 'cUSD'}
                       </Text>
                     </View>
                   </>
@@ -1296,7 +1464,7 @@ export const TransactionDetailScreen = () => {
               <TouchableOpacity style={styles.shareButton} onPress={() => {
                 Alert.alert(
                   'Compartir invitación',
-                  `Comparte este mensaje:\n\n¡Hola! Te envié ${currentTx.amount || '0.00'} ${currentTx.currency || 'cUSD'} por Confío. Tienes 7 días para reclamarlo. Descarga la app aquí: [link]`
+                  `Comparte este mensaje:\n\n¡Hola! Te envié ${formatAmount(currentTx.amount)} ${currentTx.currency || 'cUSD'} por Confío. Tienes 7 días para reclamarlo. Descarga la app aquí: [link]`
                 );
               }}>
                 <Icon name="share-2" size={20} color="#fff" style={{ marginRight: 8 }} />
@@ -1352,14 +1520,16 @@ export const TransactionDetailScreen = () => {
                   style={styles.primaryAction}
                   onPress={() => {
                     // Navigate to SendToFriend screen
-                    const friendName = currentTx.type === 'received' ? currentTx.from : currentTx.to;
-                    const friendPhone = currentTx.type === 'received' ? currentTx.fromPhone : currentTx.toPhone;
+                    const friendName = currentTx.type === 'received' ? displayFromName : displayToName;
+                    const friendPhone = currentTx.type === 'received' ? senderPhone : recipientPhone;
                     
                     // Debug logging to understand the data
                     console.log('[TransactionDetail] Navigation data:', {
                       transactionType: currentTx.type,
                       friendName,
                       friendPhone,
+                      senderPhone,
+                      recipientPhone,
                       isInvitedFriend: currentTx.isInvitedFriend
                     });
                     
@@ -1395,7 +1565,7 @@ export const TransactionDetailScreen = () => {
                 >
                   <Icon name="user" size={16} color="#fff" style={styles.actionIcon} />
                   <Text style={styles.primaryActionText}>
-                    {currentTx.type === 'received' ? `Enviar a ${currentTx.from}` : `Enviar de nuevo a ${currentTx.to}`}
+                    {currentTx.type === 'received' ? `Enviar a ${displayFromName}` : `Enviar de nuevo a ${displayToName}`}
                   </Text>
                 </TouchableOpacity>
               )}

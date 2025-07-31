@@ -72,13 +72,15 @@ def create_notification(
     # Send push notification if enabled
     if send_push:
         try:
+            logger.info(f"Attempting to send push notification for notification {notification.id}, user {user.id if user else 'broadcast'}")
             result = send_push_notification(notification)
+            logger.info(f"Push notification result for notification {notification.id}: {result}")
             if result.get('success'):
-                logger.info(f"Push notification sent successfully for notification {notification.id}")
+                logger.info(f"Push notification sent successfully for notification {notification.id}: {result.get('sent')} sent, {result.get('failed')} failed")
             else:
-                logger.warning(f"Failed to send push notification for notification {notification.id}: {result.get('error')}")
+                logger.warning(f"Failed to send push notification for notification {notification.id}: {result.get('error')}, details: {result}")
         except Exception as e:
-            logger.error(f"Error sending push notification for notification {notification.id}: {e}")
+            logger.error(f"Error sending push notification for notification {notification.id}: {e}", exc_info=True)
     
     return notification
 

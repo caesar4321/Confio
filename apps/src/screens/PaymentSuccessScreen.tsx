@@ -14,6 +14,7 @@ import {
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { colors } from '../config/theme';
+import { formatLocalDate, formatLocalTime } from '../utils/dateUtils';
 
 type PaymentSuccessRouteProp = RouteProp<{
   PaymentSuccess: {
@@ -176,7 +177,7 @@ export const PaymentSuccessScreen = () => {
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Fecha y hora</Text>
                   <Text style={styles.detailValue}>
-                    {new Date().toLocaleDateString('es-ES')} • {new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                    {formatLocalDate(new Date().toISOString())} • {formatLocalTime(new Date().toISOString())}
                   </Text>
                 </View>
 

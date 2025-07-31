@@ -111,6 +111,20 @@ export const AccountDetailScreen = () => {
   const { formatNumber, formatCurrency } = useNumberFormat();
   const { activeAccount } = useAccount();
   
+  // Helper function to format transaction amounts to 2 decimal places
+  const formatTransactionAmount = (amount: string): string => {
+    // Remove any sign (+/-) temporarily
+    const sign = amount.startsWith('-') ? '-' : amount.startsWith('+') ? '+' : '';
+    const numericAmount = amount.replace(/^[+-]/, '');
+    
+    // Parse and format to 2 decimal places
+    const parsedAmount = parseFloat(numericAmount);
+    const formattedAmount = parsedAmount.toFixed(2);
+    
+    // Return with sign
+    return sign + formattedAmount;
+  };
+  
   // Check if employee has permission to view balance
   const canViewBalance = !activeAccount?.isEmployee || activeAccount?.employeePermissions?.viewBalance;
   const [showBalance, setShowBalance] = useState(canViewBalance);
@@ -965,7 +979,7 @@ export const AccountDetailScreen = () => {
             styles.transactionAmountText,
             transaction.amount.startsWith('-') ? styles.negativeAmount : styles.positiveAmount
           ]}>
-            {transaction.amount} {transaction.currency}
+            {formatTransactionAmount(transaction.amount)} {transaction.currency}
           </Text>
           <View style={styles.transactionStatus}>
             <Text style={styles.statusText}>Completado</Text>

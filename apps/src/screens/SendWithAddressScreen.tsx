@@ -113,7 +113,7 @@ export const SendWithAddressScreen = () => {
           recipient: destination.substring(0, 10) + '...',
           action: 'Enviando',
           recipientAddress: destination,
-          memo: `Send ${amount} ${config.name} to ${destination.substring(0, 10)}...`,
+          memo: '', // Empty memo - user can add notes in a future feature
           idempotencyKey: idempotencyKey
         }
       });

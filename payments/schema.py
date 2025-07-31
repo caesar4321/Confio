@@ -471,6 +471,127 @@ class PayInvoice(graphene.Mutation):
                 payment_transaction.transaction_hash = f"test_pay_tx_{payment_transaction.id}_{microsecond_timestamp}_{unique_id}"
                 payment_transaction.save()
                 
+                # Create notifications for both payer and merchant
+                try:
+                    print(f"PayInvoice: Creating notifications for payment {payment_transaction.id}")
+                    from notifications.models import Notification, NotificationType
+                    from decimal import Decimal
+                    
+                    # Convert amount to string for display with 2 decimal places
+                    amount_decimal = Decimal(str(payment_transaction.amount))
+                    amount_str = f"{amount_decimal:.2f}"
+                    print(f"PayInvoice: Amount string: {amount_str}")
+                    
+                    # Create notification for payer (sender)
+                    payer_notification = Notification.objects.create(
+                        user=user,
+                        account=payer_account,
+                        business=payer_business,
+                        notification_type=NotificationType.PAYMENT_SENT,
+                        title="Pago enviado",
+                        message=f"Pagaste {amount_str} {payment_transaction.token_type} a {merchant_display_name}",
+                        data={
+                            'transaction_type': 'payment',
+                            'amount': f'-{amount_str}',  # Negative for sent
+                            'token_type': payment_transaction.token_type,
+                            'currency': payment_transaction.token_type,
+                            'transaction_id': str(payment_transaction.id),
+                            'payment_transaction_id': payment_transaction.payment_transaction_id,
+                            'merchant_name': merchant_display_name,
+                            'merchant_address': payment_transaction.merchant_address,
+                            'payer_name': payer_display_name,
+                            'payer_phone': payer_phone,
+                            'payer_address': payment_transaction.payer_address,
+                            'status': payment_transaction.status.lower(),
+                            'created_at': payment_transaction.created_at.isoformat(),
+                            'description': payment_transaction.description or '',
+                            'transaction_hash': payment_transaction.transaction_hash,
+                            'invoice_id': invoice.invoice_id,
+                            # For TransactionDetailScreen
+                            'type': 'sent',
+                            'to': merchant_display_name,
+                            'toAddress': payment_transaction.merchant_address,
+                            'from': payer_display_name,
+                            'fromAddress': payment_transaction.payer_address,
+                            'date': payment_transaction.created_at.strftime('%Y-%m-%d'),
+                            'time': payment_transaction.created_at.strftime('%H:%M'),
+                            'hash': payment_transaction.transaction_hash,
+                        },
+                        related_object_type='payment',
+                        related_object_id=payment_transaction.id,
+                        action_url=f'confio://transaction/{payment_transaction.id}'
+                    )
+                    
+                    # Create notification for merchant (receiver)
+                    merchant_notification = Notification.objects.create(
+                        user=invoice.created_by_user,
+                        account=invoice.merchant_account,
+                        business=merchant_business,
+                        notification_type=NotificationType.PAYMENT_RECEIVED,
+                        title="Pago recibido",
+                        message=f"Recibiste {amount_str} {payment_transaction.token_type} de {payer_display_name}",
+                        data={
+                            'transaction_type': 'payment',
+                            'amount': f'+{amount_str}',  # Positive for received
+                            'token_type': payment_transaction.token_type,
+                            'currency': payment_transaction.token_type,
+                            'transaction_id': str(payment_transaction.id),
+                            'payment_transaction_id': payment_transaction.payment_transaction_id,
+                            'payer_name': payer_display_name,
+                            'payer_phone': payer_phone,
+                            'payer_address': payment_transaction.payer_address,
+                            'merchant_name': merchant_display_name,
+                            'merchant_address': payment_transaction.merchant_address,
+                            'status': payment_transaction.status.lower(),
+                            'created_at': payment_transaction.created_at.isoformat(),
+                            'description': payment_transaction.description or '',
+                            'transaction_hash': payment_transaction.transaction_hash,
+                            'invoice_id': invoice.invoice_id,
+                            # For TransactionDetailScreen
+                            'type': 'received',
+                            'from': payer_display_name,
+                            'fromAddress': payment_transaction.payer_address,
+                            'to': merchant_display_name,
+                            'toAddress': payment_transaction.merchant_address,
+                            'date': payment_transaction.created_at.strftime('%Y-%m-%d'),
+                            'time': payment_transaction.created_at.strftime('%H:%M'),
+                            'hash': payment_transaction.transaction_hash,
+                        },
+                        related_object_type='payment',
+                        related_object_id=payment_transaction.id,
+                        action_url=f'confio://transaction/{payment_transaction.id}'
+                    )
+                
+                    # Send push notifications
+                    from notifications.fcm_service import send_push_notification
+                    
+                    # Send to payer
+                    print(f"PayInvoice: Sending push notification to payer {user.id}")
+                    payer_push_result = send_push_notification(
+                        notification=payer_notification,
+                        additional_data={
+                            'type': 'payment',
+                            'transactionType': 'payment'
+                        }
+                    )
+                    print(f"PayInvoice: Payer push result: {payer_push_result}")
+                    
+                    # Send to merchant
+                    print(f"PayInvoice: Sending push notification to merchant {invoice.created_by_user.id}")
+                    merchant_push_result = send_push_notification(
+                        notification=merchant_notification,
+                        additional_data={
+                            'type': 'payment',
+                            'transactionType': 'payment'
+                        }
+                    )
+                    print(f"PayInvoice: Merchant push result: {merchant_push_result}")
+                except Exception as e:
+                    # Log the error but don't fail the payment
+                    print(f"Error creating payment notifications: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
                 # Log activity if merchant is an employee accepting payment
                 from users.models_employee import BusinessEmployee, EmployeeActivityLog
                 
