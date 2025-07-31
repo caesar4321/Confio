@@ -193,6 +193,7 @@ def create_transaction_notification(
 def create_p2p_notification(
     notification_type: str,
     user: User,
+    business: Optional['Business'] = None,
     trade_id: Optional[str] = None,
     offer_id: Optional[str] = None,
     amount: Optional[str] = None,
@@ -251,6 +252,7 @@ def create_p2p_notification(
     
     return create_notification(
         user=user,
+        business=business,
         notification_type=notification_type,
         title=config.get('title', 'P2P Notification'),
         message=config.get('message', 'P2P trade update'),
