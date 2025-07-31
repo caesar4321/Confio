@@ -101,7 +101,7 @@ class UnifiedUSDCTransactionTable(models.Model):
     error_message = models.TextField(blank=True, null=True)
     
     # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)  # When record is created in unified table
+    created_at = models.DateTimeField(help_text='When the transaction was created')
     transaction_date = models.DateTimeField()  # Original transaction date from source
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(blank=True, null=True)

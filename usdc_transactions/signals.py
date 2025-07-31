@@ -47,6 +47,7 @@ def create_unified_usdc_transaction_from_deposit(deposit):
                 'error_message': deposit.error_message,
                 
                 # Timestamps
+                'created_at': deposit.created_at,
                 'transaction_date': deposit.created_at,
                 'completed_at': deposit.completed_at,
             }
@@ -98,6 +99,7 @@ def create_unified_usdc_transaction_from_withdrawal(withdrawal):
                 'error_message': withdrawal.error_message,
                 
                 # Timestamps
+                'created_at': withdrawal.created_at,
                 'transaction_date': withdrawal.created_at,
                 'completed_at': withdrawal.completed_at,
             }
@@ -165,6 +167,7 @@ def create_unified_usdc_transaction_from_conversion(conversion):
                 'error_message': conversion.error_message,
                 
                 # Timestamps
+                'created_at': conversion.created_at,
                 'transaction_date': conversion.created_at,
                 'completed_at': conversion.completed_at,
             }
