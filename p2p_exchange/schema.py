@@ -1577,7 +1577,7 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                 other_party_name = buyer_name
             
             # Create notifications based on status change
-            if input.status == 'PAYMENT_PENDING' and is_buyer:
+            if input.status == 'PAYMENT_SENT' and is_buyer:
                 # Buyer marked payment as sent - notify seller
                 if other_party_user:
                     create_p2p_notification(
@@ -1593,6 +1593,24 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                             'fiat_currency': trade.offer.currency_code,
                             'payment_reference': input.payment_reference or '',
                             'payment_notes': input.payment_notes or ''
+                        }
+                    )
+            
+            elif input.status == 'PAYMENT_CONFIRMED' and is_seller:
+                # Seller confirmed payment received - notify buyer
+                if other_party_user:
+                    create_p2p_notification(
+                        notification_type='P2P_PAYMENT_CONFIRMED',
+                        user=other_party_user,
+                        trade_id=str(trade.id),
+                        offer_id=str(trade.offer.id),
+                        amount=str(trade.crypto_amount),
+                        token_type=trade.offer.token_type,
+                        counterparty_name=seller_name,
+                        additional_data={
+                            'fiat_amount': str(trade.fiat_amount),
+                            'fiat_currency': trade.offer.currency_code,
+                            'message': 'El vendedor ha confirmado recibir el pago'
                         }
                     )
             
