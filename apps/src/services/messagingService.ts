@@ -497,6 +497,15 @@ class MessagingService {
               transactionType = 'payment';
             }
             
+            // Check if this is a USDC transaction
+            if (notificationType === 'USDC_DEPOSIT_COMPLETED') {
+              transactionType = 'deposit';
+            } else if (notificationType === 'USDC_WITHDRAWAL_COMPLETED') {
+              transactionType = 'withdrawal';
+            } else if (notificationType === 'CONVERSION_COMPLETED') {
+              transactionType = 'conversion';
+            }
+            
             console.log('[MessagingService] Navigating to TransactionDetail:', {
               transactionType,
               navData,

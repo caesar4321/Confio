@@ -828,16 +828,17 @@ export const TransactionDetailScreen = () => {
     dataKeys: transactionData ? Object.keys(transactionData) : []
   });
   
+  // Check if this is a USDC transaction first
+  const isUSDCTransaction = transactionType === 'deposit' || transactionType === 'withdrawal' || transactionType === 'conversion' ||
+    (transactionData && ['deposit', 'withdrawal', 'conversion'].includes(transactionData.type || transactionData.transaction_type));
+
   const { data: fetchedData, loading: fetchLoading, error: fetchError } = useQuery(
     GET_SEND_TRANSACTION_BY_ID,
     {
       variables: { id: transactionId },
-      skip: !needsFetch || !transactionId,
+      skip: !needsFetch || !transactionId || isUSDCTransaction, // Skip for USDC transactions
     }
   );
-
-  // Check if this is a USDC transaction
-  const isUSDCTransaction = transactionData && ['deposit', 'withdrawal', 'conversion'].includes(transactionData.type);
 
   // Sample transaction data - in real app, this would come from props or API
   const transactions = {
