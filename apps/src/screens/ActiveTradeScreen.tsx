@@ -150,12 +150,28 @@ export const ActiveTradeScreen: React.FC = () => {
     completedAt: fullTradeData.completedAt,
   } : routeTrade;
   
+  // Helper function to get step from trade status
+  const getStepFromStatus = (status: string) => {
+    switch (status) {
+      case 'PENDING': return 1;
+      case 'PAYMENT_PENDING': return 2;
+      case 'PAYMENT_SENT': return 3;
+      case 'PAYMENT_CONFIRMED': return 4;
+      case 'PAYMENT_RECEIVED': return 4;
+      case 'CRYPTO_RELEASED': return 4;
+      case 'COMPLETED': return 4;
+      case 'CANCELLED': return 1;
+      default: return 1;
+    }
+  };
+
   // Update activeTradeStep when trade data is loaded
   useEffect(() => {
-    if (trade?.step) {
-      setActiveTradeStep(trade.step);
+    if (trade?.status) {
+      const step = getStepFromStatus(trade.status);
+      setActiveTradeStep(step);
     }
-  }, [trade?.step]);
+  }, [trade?.status]);
   
   // Update timeRemaining when trade data is loaded
   useEffect(() => {

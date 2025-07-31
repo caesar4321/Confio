@@ -216,33 +216,33 @@ def create_p2p_notification(
     # Map notification types to titles and messages
     notification_configs = {
         NotificationTypeChoices.P2P_OFFER_RECEIVED: {
-            'title': 'New P2P Offer',
-            'message': f'You have a new offer for {amount} {token_type}',
+            'title': 'Nueva Oferta P2P',
+            'message': f'Tienes una nueva oferta de intercambio por ${amount}',
             'action_url': f'confio://p2p/offer/{offer_id}'
         },
         NotificationTypeChoices.P2P_OFFER_ACCEPTED: {
-            'title': 'Offer Accepted',
-            'message': f'Your offer for {amount} {token_type} was accepted',
+            'title': 'Oferta Aceptada',
+            'message': f'Tu oferta de intercambio por ${amount} fue aceptada',
             'action_url': f'confio://p2p/trade/{trade_id}'
         },
         NotificationTypeChoices.P2P_TRADE_STARTED: {
-            'title': 'Trade Started',
-            'message': f'Your P2P trade for {amount} {token_type} has started',
+            'title': 'Intercambio Iniciado',
+            'message': f'Tu intercambio por ${amount} ha comenzado',
             'action_url': f'confio://p2p/trade/{trade_id}'
         },
         NotificationTypeChoices.P2P_PAYMENT_CONFIRMED: {
-            'title': 'Payment Confirmed',
-            'message': f'{counterparty_name} confirmed payment for your trade',
+            'title': 'Pago Marcado',
+            'message': f'{counterparty_name} marcó el pago como enviado',
             'action_url': f'confio://p2p/trade/{trade_id}'
         },
         NotificationTypeChoices.P2P_CRYPTO_RELEASED: {
-            'title': 'Crypto Released',
-            'message': f'{amount} {token_type} has been released to {counterparty_name}',
+            'title': 'Fondos Liberados',
+            'message': f'Se liberaron ${amount} a tu cuenta',
             'action_url': f'confio://p2p/trade/{trade_id}'
         },
         NotificationTypeChoices.P2P_TRADE_COMPLETED: {
-            'title': 'Trade Completed',
-            'message': f'Your P2P trade for {amount} {token_type} is complete',
+            'title': 'Intercambio Completado',
+            'message': f'Tu intercambio por ${amount} se completó exitosamente',
             'action_url': f'confio://p2p/trade/{trade_id}'
         },
     }

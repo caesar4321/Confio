@@ -2417,6 +2417,79 @@ class ConfirmP2PTradeStep(graphene.Mutation):
             if status_updated:
                 trade.save()
                 
+                # Create notifications based on status change
+                from notifications.utils import create_p2p_notification
+                from notifications.models import NotificationType as NotificationTypeChoices
+                
+                # Get the other party info
+                if is_buyer:
+                    other_user = trade.seller_user
+                    other_name = trade.seller_display_name
+                else:
+                    other_user = trade.buyer_user
+                    other_name = trade.buyer_display_name
+                
+                # Send notification based on status
+                notification_data = {
+                    'amount': str(trade.crypto_amount),
+                    'token_type': trade.offer.token_type,
+                    'trade_id': str(trade.id),
+                    'counterparty_name': other_name,
+                    'fiat_amount': str(trade.fiat_amount),
+                    'fiat_currency': trade.offer.currency_code,
+                    'payment_method': trade.payment_method.name if trade.payment_method else '',
+                    'trader_name': trade.seller_display_name if is_buyer else trade.buyer_display_name,
+                    'trader_phone': trade.seller_user.phone_number if is_buyer and trade.seller_user else trade.buyer_user.phone_number if is_seller and trade.buyer_user else None,
+                    'counterparty_phone': other_user.phone_number if other_user else None
+                }
+                
+                if trade.status == 'PAYMENT_SENT':
+                    # Notify seller that buyer marked as paid
+                    if trade.seller_user:
+                        create_p2p_notification(
+                            notification_type=NotificationTypeChoices.P2P_PAYMENT_CONFIRMED,
+                            user=trade.seller_user,
+                            trade_id=str(trade.id),
+                            amount=str(trade.crypto_amount),
+                            token_type=trade.offer.token_type,
+                            counterparty_name=trade.buyer_display_name,
+                            additional_data=notification_data
+                        )
+                elif trade.status == 'PAYMENT_CONFIRMED':
+                    # Notify buyer that seller confirmed payment
+                    if trade.buyer_user:
+                        create_p2p_notification(
+                            notification_type=NotificationTypeChoices.P2P_CRYPTO_RELEASED,
+                            user=trade.buyer_user,
+                            trade_id=str(trade.id),
+                            amount=str(trade.crypto_amount),
+                            token_type=trade.offer.token_type,
+                            counterparty_name=trade.seller_display_name,
+                            additional_data=notification_data
+                        )
+                elif trade.status == 'COMPLETED':
+                    # Notify both parties that trade is completed
+                    if trade.buyer_user:
+                        create_p2p_notification(
+                            notification_type=NotificationTypeChoices.P2P_TRADE_COMPLETED,
+                            user=trade.buyer_user,
+                            trade_id=str(trade.id),
+                            amount=str(trade.crypto_amount),
+                            token_type=trade.offer.token_type,
+                            counterparty_name=trade.seller_display_name,
+                            additional_data=notification_data
+                        )
+                    if trade.seller_user:
+                        create_p2p_notification(
+                            notification_type=NotificationTypeChoices.P2P_TRADE_COMPLETED,
+                            user=trade.seller_user,
+                            trade_id=str(trade.id),
+                            amount=str(trade.crypto_amount),
+                            token_type=trade.offer.token_type,
+                            counterparty_name=trade.buyer_display_name,
+                            additional_data=notification_data
+                        )
+                
                 # Send WebSocket notification
                 channel_layer = get_channel_layer()
                 message = {
