@@ -78,14 +78,27 @@ export class PushNotificationService {
         if (action_url.includes('p2p/trade/')) {
           const tradeId = action_url.split('p2p/trade/')[1];
           console.log('[PushNotificationService] Navigating to ActiveTrade:', tradeId);
-          RootNavigation.navigate('Main', {
-            screen: 'ActiveTrade',
-            params: { 
-              trade: { 
-                id: tradeId 
-              } 
-            }
-          });
+          // Use the navigation ref directly for nested navigation
+          if (RootNavigation.navigationRef.isReady()) {
+            RootNavigation.navigationRef.navigate('Main' as never, {
+              screen: 'ActiveTrade',
+              params: { 
+                trade: { 
+                  id: tradeId 
+                } 
+              }
+            } as never);
+          } else {
+            console.log('[PushNotificationService] Navigation not ready, will retry...');
+            // Retry after a delay
+            setTimeout(() => {
+              RootNavigation.navigate('ActiveTrade' as never, { 
+                trade: { 
+                  id: tradeId 
+                } 
+              } as never);
+            }, 1000);
+          }
         } else if (action_url.includes('transaction/')) {
           const transactionId = action_url.split('transaction/')[1];
           
@@ -139,30 +152,56 @@ export class PushNotificationService {
           
           // Navigate to Main stack first, then to TransactionDetail
           // This ensures we're in the correct navigator
-          RootNavigation.navigate('Main', {
-            screen: 'TransactionDetail',
-            params: {
-              transactionType,
-              transactionData: { 
-                ...transactionData,
-                id: transactionId,
-                transaction_type: transactionType
+          if (RootNavigation.navigationRef.isReady()) {
+            RootNavigation.navigationRef.navigate('Main' as never, {
+              screen: 'TransactionDetail',
+              params: {
+                transactionType,
+                transactionData: { 
+                  ...transactionData,
+                  id: transactionId,
+                  transaction_type: transactionType
+                }
               }
-            }
-          });
+            } as never);
+          } else {
+            console.log('[PushNotificationService] Navigation not ready for transaction, will retry...');
+            setTimeout(() => {
+              RootNavigation.navigate('TransactionDetail' as never, {
+                transactionType,
+                transactionData: { 
+                  ...transactionData,
+                  id: transactionId,
+                  transaction_type: transactionType
+                }
+              } as never);
+            }, 1000);
+          }
         } else {
           console.log('[PushNotificationService] Unknown action URL format:', action_url);
           // Fallback to NotificationScreen
-          RootNavigation.navigate('Main', {
-            screen: 'Notifications'
-          });
+          if (RootNavigation.navigationRef.isReady()) {
+            RootNavigation.navigationRef.navigate('Main' as never, {
+              screen: 'Notifications'
+            } as never);
+          } else {
+            setTimeout(() => {
+              RootNavigation.navigate('Notifications' as never);
+            }, 1000);
+          }
         }
       } else {
         console.log('[PushNotificationService] No action URL, navigating to NotificationScreen');
         // Fallback to NotificationScreen if no specific action
-        RootNavigation.navigate('Main', {
-          screen: 'Notifications'
-        });
+        if (RootNavigation.navigationRef.isReady()) {
+          RootNavigation.navigationRef.navigate('Main' as never, {
+            screen: 'Notifications'
+          } as never);
+        } else {
+          setTimeout(() => {
+            RootNavigation.navigate('Notifications' as never);
+          }, 1000);
+        }
       }
     };
     
