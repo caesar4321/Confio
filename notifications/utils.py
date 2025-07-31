@@ -215,20 +215,23 @@ def create_p2p_notification(
         data.update(additional_data)
     
     # Map notification types to titles and messages
+    # Format token type for display (cUSD or CONFIO)
+    display_token = token_type if token_type else ''
+    
     notification_configs = {
         NotificationTypeChoices.P2P_OFFER_RECEIVED: {
             'title': 'Nueva Oferta P2P',
-            'message': f'Tienes una nueva oferta de intercambio por ${amount}',
+            'message': f'Tienes una nueva oferta de intercambio por ${amount} {display_token}',
             'action_url': f'confio://p2p/offer/{offer_id}'
         },
         NotificationTypeChoices.P2P_OFFER_ACCEPTED: {
             'title': 'Oferta Aceptada',
-            'message': f'Tu oferta de intercambio por ${amount} fue aceptada',
+            'message': f'Tu oferta de intercambio por ${amount} {display_token} fue aceptada',
             'action_url': f'confio://p2p/trade/{trade_id}'
         },
         NotificationTypeChoices.P2P_TRADE_STARTED: {
             'title': 'Intercambio Iniciado',
-            'message': f'Tu intercambio por ${amount} ha comenzado',
+            'message': f'Tu intercambio por ${amount} {display_token} ha comenzado',
             'action_url': f'confio://p2p/trade/{trade_id}'
         },
         NotificationTypeChoices.P2P_PAYMENT_CONFIRMED: {
@@ -238,12 +241,12 @@ def create_p2p_notification(
         },
         NotificationTypeChoices.P2P_CRYPTO_RELEASED: {
             'title': 'Fondos Liberados',
-            'message': f'Se liberaron ${amount} a tu cuenta',
+            'message': f'Se liberaron ${amount} {display_token} a tu cuenta',
             'action_url': f'confio://p2p/trade/{trade_id}'
         },
         NotificationTypeChoices.P2P_TRADE_COMPLETED: {
             'title': 'Intercambio Completado',
-            'message': f'Tu intercambio por ${amount} se completó exitosamente',
+            'message': f'Tu intercambio por ${amount} {display_token} se completó exitosamente',
             'action_url': f'confio://p2p/trade/{trade_id}'
         },
     }
