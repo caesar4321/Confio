@@ -416,6 +416,15 @@ class MessagingService {
   private handleNotificationData(data: any) {
     console.log('[MessagingService] handleNotificationData called with:', data);
     
+    // Handle legacy notification format that might try to navigate directly
+    if (data.name === 'P2PTradeDetail' && data.params?.tradeId) {
+      console.log('[MessagingService] Handling legacy P2PTradeDetail navigation');
+      // Convert to new format
+      data.action_url = `confio://p2p/trade/${data.params.tradeId}`;
+      delete data.name;
+      delete data.params;
+    }
+    
     // Navigate based on notification data
     const { action_url, notification_type, related_type, related_id } = data;
 
@@ -573,6 +582,14 @@ class MessagingService {
   }
 
   private navigateToRelatedObject(type: string, id: string, transactionData?: any) {
+    console.log('[MessagingService] navigateToRelatedObject called with:', { type, id, transactionData });
+    
+    // Handle legacy P2PTradeDetail navigation (for old notifications)
+    if (type === 'P2PTradeDetail') {
+      console.log('[MessagingService] Redirecting legacy P2PTradeDetail to ActiveTrade');
+      type = 'P2PTrade';
+    }
+    
     switch (type) {
       case 'SendTransaction':
       case 'PaymentTransaction':

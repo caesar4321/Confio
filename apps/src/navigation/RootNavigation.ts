@@ -5,12 +5,29 @@ export const navigationRef = createNavigationContainerRef();
 export function navigate(name: string, params?: any) {
   console.log('[RootNavigation] navigate called:', { name, params, isReady: navigationRef.isReady() });
   
+  // Handle legacy screen names
+  if (name === 'P2PTradeDetail' && params?.tradeId) {
+    console.log('[RootNavigation] Converting legacy P2PTradeDetail navigation to ActiveTrade');
+    name = 'ActiveTrade';
+    params = { trade: { id: params.tradeId } };
+  }
+  
   if (navigationRef.isReady()) {
     try {
       navigationRef.navigate(name as never, params as never);
       console.log('[RootNavigation] Navigation successful');
     } catch (error) {
       console.error('[RootNavigation] Navigation error:', error);
+      // If navigation fails, try to navigate to a safe fallback
+      if (name.includes('Trade') || name.includes('P2P')) {
+        console.log('[RootNavigation] Falling back to Exchange screen');
+        navigationRef.navigate('Main' as never, {
+          screen: 'BottomTabs',
+          params: {
+            screen: 'Exchange'
+          }
+        } as never);
+      }
     }
   } else {
     console.log('[RootNavigation] Navigation not ready, queuing navigation...');
