@@ -86,7 +86,11 @@ export const NotificationScreen = () => {
       const url = notification.actionUrl;
       if (url.includes('p2p/trade/')) {
         const tradeId = url.split('p2p/trade/')[1];
-        navigation.navigate('ActiveTrade', { tradeId });
+        navigation.navigate('ActiveTrade', { 
+          trade: { 
+            id: tradeId 
+          } 
+        });
       } else if (url.includes('p2p/offer/')) {
         const offerId = url.split('p2p/offer/')[1];
         // Navigate to offer details or trade confirmation
