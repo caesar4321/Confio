@@ -129,9 +129,15 @@ export const USDCConversionScreen = () => {
             {
               text: 'OK',
               onPress: () => {
-                // Clear the form and stay on the same screen
-                setAmount('');
-                setIsProcessing(false);
+                // Navigate back to AccountDetail with refresh
+                navigation.navigate('AccountDetail' as never, {
+                  accountType: 'cusd',
+                  accountName: 'Confío Dollar',
+                  accountSymbol: '$cUSD',
+                  accountBalance: '0', // AccountDetailScreen will fetch real balance
+                  accountAddress: activeAccount?.suiAddress || '',
+                  refreshTimestamp: Date.now()
+                } as never);
               },
             },
           ]
