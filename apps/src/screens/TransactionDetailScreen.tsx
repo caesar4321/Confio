@@ -1012,10 +1012,13 @@ export const TransactionDetailScreen = () => {
       currency: transactionData.from_token || transactionData.token_type || transactionData.currency || 'USDC',
       secondaryCurrency: transactionData.to_token || 'cUSD',
       // For conversions: cUSD -> USDC should be negative (money out), USDC -> cUSD should be positive (money in)
+      // For withdrawals: always negative (money out)
       amount: transactionData.conversion_type === 'cusd_to_usdc' 
         ? `-${transactionData.from_amount || transactionData.amount || '0'}`
         : transactionData.conversion_type === 'usdc_to_cusd'
         ? `+${transactionData.to_amount || transactionData.amount || '0'}`
+        : type === 'withdrawal'
+        ? `-${transactionData.amount || '0'}`.replace('--', '-') // Ensure single negative sign
         : transactionData.amount || transactionData.from_amount || transactionData.to_amount,
       status: transactionData.status || 'completed',
       // Format date if timestamp is available
@@ -1024,6 +1027,9 @@ export const TransactionDetailScreen = () => {
       // Format conversion title
       formattedTitle: transactionData.conversion_type === 'usdc_to_cusd' ? 'Conversión USDC → cUSD' : 
                       transactionData.conversion_type === 'cusd_to_usdc' ? 'Conversión cUSD → USDC' : null,
+      // For withdrawals
+      destinationAddress: transactionData.destination_address || transactionData.destinationAddress,
+      toAddress: transactionData.destination_address || transactionData.destinationAddress || transactionData.toAddress,
     };
   }
   
@@ -1573,7 +1579,12 @@ export const TransactionDetailScreen = () => {
               {/* Transaction ID */}
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>ID de Operación</Text>
-                <Text style={styles.summaryValue}>#{currentTx.hash?.slice(-8).toUpperCase() || 'N/A'}</Text>
+                <Text style={styles.summaryValue}>
+                  #{currentTx.hash?.slice(-8).toUpperCase() || 
+                    currentTx.transactionId?.slice(-8).toUpperCase() || 
+                    currentTx.transaction_id?.slice(-8).toUpperCase() || 
+                    'N/A'}
+                </Text>
               </View>
 
               {/* Status */}
