@@ -93,6 +93,7 @@ def create_transaction_notification(
     transaction_type: str,
     sender_user: Optional[User] = None,
     recipient_user: Optional[User] = None,
+    business: Optional[Business] = None,
     amount: str = None,
     token_type: str = None,
     transaction_id: str = None,
@@ -106,6 +107,7 @@ def create_transaction_notification(
         transaction_type: 'send', 'payment', 'p2p', 'conversion', 'deposit', 'withdrawal'
         sender_user: User who sent the transaction
         recipient_user: User who received the transaction
+        business: Business account if applicable
         amount: Transaction amount
         token_type: Token type (cUSD, CONFIO, USDC)
         transaction_id: ID of the transaction
@@ -175,6 +177,7 @@ def create_transaction_notification(
         
         return create_notification(
             user=sender_user,
+            business=business,  # Pass business context if provided
             notification_type=NotificationTypeChoices.CONVERSION_COMPLETED,
             title="Conversión completada",
             message=f"Convertiste {from_amount} {from_token} a {to_amount} {to_token}",
