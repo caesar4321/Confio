@@ -191,6 +191,7 @@ class ConvertUSDCToCUSD(graphene.Mutation):
                     create_transaction_notification(
                         transaction_type='conversion',
                         sender_user=notification_user,
+                        account=active_account if actor_type == 'user' else None,  # Pass account for personal accounts
                         business=actor_business,  # Pass business context for business accounts
                         amount=str(amount_decimal),
                         token_type='USDC',
@@ -377,6 +378,7 @@ class ConvertCUSDToUSDC(graphene.Mutation):
                     create_transaction_notification(
                         transaction_type='conversion',
                         sender_user=notification_user,
+                        account=active_account if actor_type == 'user' else None,  # Pass account for personal accounts
                         business=actor_business,  # Pass business context for business accounts
                         amount=str(amount_decimal),
                         token_type='cUSD',
