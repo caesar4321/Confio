@@ -1357,7 +1357,7 @@ class CreateP2PTrade(graphene.Mutation):
                     counterparty_name=seller_name,
                     additional_data={
                         'fiat_amount': str(trade.fiat_amount),
-                        'fiat_currency': trade.offer.fiat_currency,
+                        'fiat_currency': trade.offer.currency_code,
                         'payment_method': payment_method.display_name,
                         'trade_type': 'buy'
                     }
@@ -1376,7 +1376,7 @@ class CreateP2PTrade(graphene.Mutation):
                     counterparty_name=buyer_name,
                     additional_data={
                         'fiat_amount': str(trade.fiat_amount),
-                        'fiat_currency': trade.offer.fiat_currency,
+                        'fiat_currency': trade.offer.currency_code,
                         'payment_method': payment_method.display_name,
                         'trade_type': 'sell'
                     }
@@ -1590,7 +1590,7 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                         counterparty_name=buyer_name,
                         additional_data={
                             'fiat_amount': str(trade.fiat_amount),
-                            'fiat_currency': trade.offer.fiat_currency,
+                            'fiat_currency': trade.offer.currency_code,
                             'payment_reference': input.payment_reference or '',
                             'payment_notes': input.payment_notes or ''
                         }
@@ -1609,7 +1609,7 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                         counterparty_name=seller_name,
                         additional_data={
                             'fiat_amount': str(trade.fiat_amount),
-                            'fiat_currency': trade.offer.fiat_currency
+                            'fiat_currency': trade.offer.currency_code
                         }
                     )
             
@@ -1629,7 +1629,7 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                         counterparty_name=seller_name,
                         additional_data={
                             'fiat_amount': str(trade.fiat_amount),
-                            'fiat_currency': trade.offer.fiat_currency,
+                            'fiat_currency': trade.offer.currency_code,
                             'trade_type': 'buy'
                         }
                     )
@@ -1645,7 +1645,7 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                         counterparty_name=buyer_name,
                         additional_data={
                             'fiat_amount': str(trade.fiat_amount),
-                            'fiat_currency': trade.offer.fiat_currency,
+                            'fiat_currency': trade.offer.currency_code,
                             'trade_type': 'sell'
                         }
                     )
@@ -1663,7 +1663,7 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                         counterparty_name=buyer_name if is_buyer else seller_name,
                         additional_data={
                             'fiat_amount': str(trade.fiat_amount),
-                            'fiat_currency': trade.offer.fiat_currency,
+                            'fiat_currency': trade.offer.currency_code,
                             'cancelled_by': 'buyer' if is_buyer else 'seller'
                         }
                     )
