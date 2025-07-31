@@ -122,29 +122,33 @@ export const USDCConversionScreen = () => {
             {
               text: 'Ver historial',
               onPress: () => {
-                // Navigate back and trigger refresh
-                navigation.navigate('AccountDetail', { 
-                  accountType: 'cusd',
-                  accountName: 'Confío Dollar',
-                  accountSymbol: '$cUSD',
-                  accountBalance: '0', // Will be refreshed
-                  accountAddress: activeAccount?.suiAddress || '',
-                  refreshTimestamp: Date.now() // Force refresh
-                });
+                // Navigate back to Main tab to ensure balances are refreshed
+                navigation.navigate('Main' as never, {
+                  screen: 'HomeTabs',
+                  params: {
+                    screen: 'Home',
+                    params: {
+                      shouldNavigateToAccount: 'cusd',
+                      refreshTimestamp: Date.now()
+                    }
+                  }
+                } as never);
               },
             },
             {
               text: 'OK',
               onPress: () => {
-                // Navigate back and trigger refresh
-                navigation.navigate('AccountDetail', { 
-                  accountType: 'cusd',
-                  accountName: 'Confío Dollar',
-                  accountSymbol: '$cUSD',
-                  accountBalance: '0', // Will be refreshed
-                  accountAddress: activeAccount?.suiAddress || '',
-                  refreshTimestamp: Date.now() // Force refresh
-                });
+                // Navigate back to Main tab to ensure balances are refreshed
+                navigation.navigate('Main' as never, {
+                  screen: 'HomeTabs',
+                  params: {
+                    screen: 'Home',
+                    params: {
+                      shouldNavigateToAccount: 'cusd',
+                      refreshTimestamp: Date.now()
+                    }
+                  }
+                } as never);
               },
             },
           ]
