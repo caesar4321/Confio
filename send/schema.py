@@ -293,6 +293,9 @@ class CreateSendTransaction(graphene.Mutation):
                     # For external wallets, use the provided display name and phone if available
                     if hasattr(input, 'recipient_display_name') and input.recipient_display_name:
                         recipient_display_name = input.recipient_display_name
+                    elif hasattr(input, 'recipient_address') and input.recipient_address:
+                        # For address-only sends, don't use "External Address" as display name
+                        recipient_display_name = ""
                     if hasattr(input, 'recipient_phone') and input.recipient_phone:
                         recipient_phone = input.recipient_phone
                     # For non-Confío users, ensure we store the phone number
@@ -383,8 +386,9 @@ class CreateSendTransaction(graphene.Mutation):
                         'is_invited_friend': bool(recipient_phone and not recipient_user),
                         # For TransactionDetailScreen - amount needs sign
                         'type': 'sent',
-                        'to': recipient_display_name,
+                        'to': recipient_display_name if recipient_display_name else '',
                         'toAddress': send_transaction.recipient_address,
+                        'is_external_address': bool(not recipient_user and not recipient_phone and recipient_address),
                         'from': sender_display_name,
                         'fromAddress': send_transaction.sender_address,
                         'date': send_transaction.created_at.strftime('%Y-%m-%d'),
@@ -467,7 +471,7 @@ class CreateSendTransaction(graphene.Mutation):
                             'is_invited_friend': True,
                             # For TransactionDetailScreen
                             'type': 'sent',
-                            'to': recipient_phone,  # Phone number since no name
+                            'to': '',  # Empty for invitations - show phone in address field
                             'toAddress': send_transaction.recipient_address,
                             'from': sender_display_name,
                             'fromAddress': send_transaction.sender_address,
