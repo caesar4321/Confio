@@ -93,6 +93,17 @@ export const SendWithAddressScreen = () => {
       return;
     }
     
+    // Validate Sui address format (0x + 64 hex characters)
+    if (!destination.match(/^0x[0-9a-f]{64}$/)) {
+      if (destination.length < 66) {
+        setErrorMessage('La dirección Sui debe tener 64 caracteres hexadecimales después de 0x');
+      } else {
+        setErrorMessage('La dirección contiene caracteres inválidos. Solo se permiten números y letras a-f');
+      }
+      setShowError(true);
+      return;
+    }
+    
     setIsProcessing(true);
     
     try {
@@ -188,19 +199,43 @@ export const SendWithAddressScreen = () => {
           {/* Destination Address */}
           <View style={styles.inputContainer}>
             <Text style={styles.inputLabel}>Dirección de destino</Text>
-            <View style={styles.addressInput}>
+            <View style={[
+              styles.addressInput,
+              destination.length > 2 && destination.match(/^0x[0-9a-f]{64}$/) && { borderColor: colors.primary },
+              destination.length > 2 && !destination.match(/^0x[0-9a-f]*$/) && { borderColor: '#EF4444' }
+            ]}>
               <TextInput
                 value={destination}
-                onChangeText={setDestination}
+                onChangeText={(text) => {
+                  // Only allow 0x prefix followed by hex characters (0-9, a-f, A-F)
+                  if (text === '' || text === '0' || text === '0x') {
+                    setDestination(text);
+                  } else if (text.match(/^0x[0-9a-fA-F]*$/)) {
+                    // Limit to 66 characters total (0x + 64 hex chars)
+                    if (text.length <= 66) {
+                      setDestination(text.toLowerCase());
+                    }
+                  }
+                }}
                 placeholder="0x... (dirección en red Sui)"
                 style={styles.addressInputField}
+                autoCapitalize="none"
+                autoCorrect={false}
               />
               <TouchableOpacity style={styles.walletButton}>
                 <Icon name="credit-card" size={20} color={config.color} />
               </TouchableOpacity>
             </View>
-            <Text style={styles.inputHelper}>
-              Solo direcciones válidas en red Sui
+            <Text style={[
+              styles.inputHelper,
+              destination.length > 2 && destination.match(/^0x[0-9a-f]{64}$/) && { color: colors.primary },
+              destination.length > 2 && !destination.match(/^0x[0-9a-f]{64}$/) && { color: '#EF4444' }
+            ]}>
+              {destination.length === 0 && 'Solo direcciones válidas en red Sui'}
+              {destination.length > 0 && destination.length < 66 && `${66 - destination.length} caracteres restantes`}
+              {destination.length === 66 && destination.match(/^0x[0-9a-f]{64}$/) && '✓ Dirección válida'}
+              {destination.length === 66 && !destination.match(/^0x[0-9a-f]{64}$/) && 'Dirección inválida'}
+              {destination.length > 66 && 'Dirección demasiado larga'}
             </Text>
           </View>
 
