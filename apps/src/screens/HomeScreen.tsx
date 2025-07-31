@@ -29,6 +29,8 @@ import { jwtDecode } from 'jwt-decode';
 import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { ProfileMenu } from '../components/ProfileMenu';
 import { useAccount } from '../contexts/AccountContext';
+import { useAtomicAccountSwitch } from '../hooks/useAtomicAccountSwitch';
+import { AccountSwitchOverlay } from '../components/AccountSwitchOverlay';
 import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
 import { useQuery } from '@apollo/client';
@@ -120,10 +122,16 @@ export const HomeScreen = () => {
     activeAccount,
     accounts,
     isLoading: accountsLoading,
-    switchAccount,
     createAccount,
     refreshAccounts,
   } = useAccount();
+  
+  // Use atomic account switching
+  const { 
+    switchAccount: atomicSwitchAccount, 
+    state: switchState, 
+    isAccountSwitchInProgress 
+  } = useAtomicAccountSwitch();
   
   // Fetch real balances - use no-cache to ensure we always get the correct account balance
   const { data: cUSDBalanceData, loading: cUSDLoading, error: cUSDError, refetch: refetchCUSD } = useQuery(GET_ACCOUNT_BALANCE, {
@@ -541,12 +549,32 @@ export const HomeScreen = () => {
     try {
       console.log('HomeScreen - handleAccountSwitch called with:', accountId);
       
+      // Close the profile menu immediately to provide feedback
+      profileMenu.closeProfileMenu();
+      
       // All accounts are now real accounts from the server
       console.log('HomeScreen - Switching to account:', accountId);
-      await switchAccount(accountId);
-      profileMenu.closeProfileMenu();
+      
+      // Use atomic account switching
+      const success = await atomicSwitchAccount(accountId);
+      
+      if (success) {
+        console.log('HomeScreen - Account switch successful');
+        // Refresh balances after successful switch
+        await Promise.all([
+          refetchCUSD(),
+          refetchConfio(),
+        ]);
+      } else {
+        console.log('HomeScreen - Account switch failed');
+      }
     } catch (error) {
       console.error('Error switching account:', error);
+      Alert.alert(
+        'Error',
+        'No se pudo cambiar la cuenta. Por favor intenta nuevamente.',
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -866,6 +894,12 @@ export const HomeScreen = () => {
         selectedAccount={activeAccount?.id || displayAccounts[0]?.id || ''}
         onAccountSwitch={handleAccountSwitch}
         onCreateBusinessAccount={handleCreateBusinessAccount}
+      />
+      
+      {/* Account Switch Overlay */}
+      <AccountSwitchOverlay
+        visible={switchState.isLoading}
+        progress={switchState.progress}
       />
     </View>
   );

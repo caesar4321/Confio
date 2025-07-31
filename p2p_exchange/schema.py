@@ -1237,10 +1237,15 @@ class CreateP2PTrade(graphene.Mutation):
                 user_entity_type = 'user'
                 print(f"CreateP2PTrade - Creating personal trade for user {user.username}")
             
-            # Check offer's account type
-            if offer.account and offer.account.account_type == 'business' and offer.account.business:
-                offer_entity = offer.account.business
+            # Check offer's account type - use new direct relationships
+            if offer.offer_business:
+                offer_entity = offer.offer_business
                 offer_entity_type = 'business'
+                print(f"CreateP2PTrade - Offer is from business: {offer.offer_business.name}")
+            elif offer.offer_user:
+                offer_entity = offer.offer_user
+                offer_entity_type = 'user'
+                print(f"CreateP2PTrade - Offer is from user: {offer.offer_user.username}")
             
             # Validate user can't trade with themselves (after entity determination)
             # Personal account can trade with business account even if same underlying user
@@ -1299,6 +1304,13 @@ class CreateP2PTrade(graphene.Mutation):
                 else:
                     trade_kwargs['seller_user'] = user_entity
 
+            # Log trade creation details
+            print(f"CreateP2PTrade - Trade creation details:")
+            print(f"  - Buyer: {trade_kwargs.get('buyer_business', trade_kwargs.get('buyer_user'))}")
+            print(f"  - Seller: {trade_kwargs.get('seller_business', trade_kwargs.get('seller_user'))}")
+            print(f"  - Buyer type: {'business' if 'buyer_business' in trade_kwargs else 'user'}")
+            print(f"  - Seller type: {'business' if 'seller_business' in trade_kwargs else 'user'}")
+            
             # Create trade with new direct relationships
             trade = P2PTrade.objects.create(**trade_kwargs)
             
@@ -1585,6 +1597,7 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                     create_p2p_notification(
                         notification_type='P2P_PAYMENT_CONFIRMED',
                         user=other_party_user,
+                        business=trade.seller_business,  # Pass seller's business context
                         trade_id=str(trade.id),
                         offer_id=str(trade.offer.id),
                         amount=str(trade.crypto_amount),
@@ -1604,6 +1617,7 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                     create_p2p_notification(
                         notification_type='P2P_PAYMENT_CONFIRMED',
                         user=other_party_user,
+                        business=trade.buyer_business,  # Pass buyer's business context
                         trade_id=str(trade.id),
                         offer_id=str(trade.offer.id),
                         amount=str(trade.crypto_amount),
@@ -1622,6 +1636,7 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                     create_p2p_notification(
                         notification_type='P2P_CRYPTO_RELEASED',
                         user=other_party_user,
+                        business=trade.buyer_business,  # Pass buyer's business context
                         trade_id=str(trade.id),
                         offer_id=str(trade.offer.id),
                         amount=str(trade.crypto_amount),
@@ -1642,6 +1657,7 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                     create_p2p_notification(
                         notification_type='P2P_TRADE_COMPLETED',
                         user=buyer_user,
+                        business=trade.buyer_business,  # Pass buyer's business context
                         trade_id=str(trade.id),
                         offer_id=str(trade.offer.id),
                         amount=str(trade.crypto_amount),
@@ -1658,6 +1674,7 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                     create_p2p_notification(
                         notification_type='P2P_TRADE_COMPLETED',
                         user=seller_user,
+                        business=trade.seller_business,  # Pass seller's business context
                         trade_id=str(trade.id),
                         offer_id=str(trade.offer.id),
                         amount=str(trade.crypto_amount),
@@ -1673,9 +1690,12 @@ class UpdateP2PTradeStatus(graphene.Mutation):
             elif input.status == 'CANCELLED':
                 # Trade cancelled - notify the other party
                 if other_party_user:
+                    # Pass the other party's business context
+                    other_party_business = trade.seller_business if is_buyer else trade.buyer_business
                     create_p2p_notification(
                         notification_type='P2P_TRADE_CANCELLED',
                         user=other_party_user,
+                        business=other_party_business,
                         trade_id=str(trade.id),
                         offer_id=str(trade.offer.id),
                         amount=str(trade.crypto_amount),
@@ -2454,10 +2474,12 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                 
                 if trade.status == 'PAYMENT_SENT':
                     # Notify seller that buyer marked as paid
-                    if trade.seller_user:
+                    # Get seller user (either direct user or from business account)
+                    seller_user = trade.seller_user if trade.seller_user else (trade.seller_business.accounts.first().user if trade.seller_business else None)
+                    if seller_user:
                         create_p2p_notification(
                             notification_type=NotificationTypeChoices.P2P_PAYMENT_CONFIRMED,
-                            user=trade.seller_user,
+                            user=seller_user,
                             business=trade.seller_business,
                             trade_id=str(trade.id),
                             amount=str(trade.crypto_amount),
@@ -2471,10 +2493,12 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                 elif trade.status == 'COMPLETED':
                     # When trade is completed, send completion notification to both parties
                     # Both buyer and seller get "Intercambio Completado" notification
-                    if trade.buyer_user:
+                    # Get buyer user (either direct user or from business account)
+                    buyer_user = trade.buyer_user if trade.buyer_user else (trade.buyer_business.accounts.first().user if trade.buyer_business else None)
+                    if buyer_user:
                         create_p2p_notification(
                             notification_type=NotificationTypeChoices.P2P_TRADE_COMPLETED,
-                            user=trade.buyer_user,
+                            user=buyer_user,
                             business=trade.buyer_business,
                             trade_id=str(trade.id),
                             amount=str(trade.crypto_amount),
@@ -2482,10 +2506,12 @@ class ConfirmP2PTradeStep(graphene.Mutation):
                             counterparty_name=trade.seller_display_name,
                             additional_data=notification_data
                         )
-                    if trade.seller_user:
+                    # Get seller user (either direct user or from business account)
+                    seller_user = trade.seller_user if trade.seller_user else (trade.seller_business.accounts.first().user if trade.seller_business else None)
+                    if seller_user:
                         create_p2p_notification(
                             notification_type=NotificationTypeChoices.P2P_TRADE_COMPLETED,
-                            user=trade.seller_user,
+                            user=seller_user,
                             business=trade.seller_business,
                             trade_id=str(trade.id),
                             amount=str(trade.crypto_amount),
