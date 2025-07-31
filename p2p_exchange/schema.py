@@ -21,7 +21,7 @@ from .models import (
     P2PFavoriteTrader
 )
 from .default_payment_methods import get_payment_methods_for_country
-from security.utils import graphql_require_kyc, graphql_require_aml
+from security.utils import graphql_require_kyc, graphql_require_aml, perform_aml_check
 
 User = get_user_model()
 
