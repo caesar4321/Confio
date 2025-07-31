@@ -220,7 +220,9 @@ class CreateUSDCDeposit(graphene.Mutation):
                         'amount': str(input.amount),
                         'currency': 'USDC',
                         'status': 'completed',
-                        'notification_type': 'USDC_DEPOSIT_COMPLETED'
+                        'notification_type': 'USDC_DEPOSIT_COMPLETED',
+                        'timestamp': deposit.completed_at.isoformat() if deposit.completed_at else deposit.created_at.isoformat(),
+                        'created_at': deposit.created_at.isoformat(),
                     },
                     related_object_type='USDCDeposit',
                     related_object_id=str(deposit.id),
@@ -382,7 +384,9 @@ class CreateUSDCWithdrawal(graphene.Mutation):
                         'currency': 'USDC',
                         'destination_address': input.destinationAddress,
                         'status': 'completed',
-                        'notification_type': 'USDC_WITHDRAWAL_COMPLETED'
+                        'notification_type': 'USDC_WITHDRAWAL_COMPLETED',
+                        'timestamp': withdrawal.completed_at.isoformat() if withdrawal.completed_at else withdrawal.created_at.isoformat(),
+                        'created_at': withdrawal.created_at.isoformat(),
                     },
                     related_object_type='USDCWithdrawal',
                     related_object_id=str(withdrawal.id),
