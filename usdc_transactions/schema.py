@@ -210,7 +210,6 @@ class CreateUSDCDeposit(graphene.Mutation):
                 logger.info(f"Creating notification for deposit {deposit.deposit_id}")
                 notification = create_notification(
                     user=user,
-                    account=active_account if actor_type == 'user' else None,  # Add account for personal accounts
                     business=actor_business,  # Add business context for business accounts
                     notification_type=NotificationTypeChoices.USDC_DEPOSIT_COMPLETED,
                     title="Depósito USDC completado",
@@ -375,7 +374,6 @@ class CreateUSDCWithdrawal(graphene.Mutation):
                 logger.info(f"Creating notification for withdrawal {withdrawal.withdrawal_id}")
                 notification = create_notification(
                     user=user,
-                    account=active_account if actor_type == 'user' else None,  # Add account for personal accounts
                     business=actor_business,  # Add business context for business accounts
                     notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_COMPLETED,
                     title="Retiro USDC completado",

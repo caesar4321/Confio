@@ -281,17 +281,8 @@ class Query(graphene.ObjectType):
             personal_notifications &= Q(business_id=business_id)
         else:
             # Show personal account notifications
-            # Find the user's account
-            try:
-                account = Account.objects.get(
-                    user=user,
-                    account_type=account_type,
-                    account_index=account_index
-                )
-                personal_notifications &= Q(account=account)
-            except Account.DoesNotExist:
-                # If account not found, show general notifications
-                personal_notifications &= Q(account__isnull=True, business__isnull=True)
+            # For personal accounts, just filter by user and exclude business notifications
+            personal_notifications &= Q(business__isnull=True)
         
         # Include broadcast notifications
         broadcast_notifications = Q(is_broadcast=True)
