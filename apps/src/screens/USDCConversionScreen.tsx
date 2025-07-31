@@ -122,43 +122,31 @@ export const USDCConversionScreen = () => {
             {
               text: 'Ver historial',
               onPress: () => {
-                // Reset navigation stack and go to Home tab
-                navigation.reset({
-                  index: 0,
-                  routes: [
-                    {
-                      name: 'BottomTabs' as never,
-                      params: {
-                        screen: 'Home',
-                        params: {
-                          shouldNavigateToAccount: 'cusd',
-                          refreshTimestamp: Date.now()
-                        }
-                      }
-                    }
-                  ],
-                });
+                // Go back to home first to refresh balances
+                navigation.navigate('BottomTabs' as never, {
+                  screen: 'Home' as never,
+                } as never);
+                
+                // After a short delay, navigate to account detail
+                setTimeout(() => {
+                  navigation.navigate('AccountDetail' as never, {
+                    accountType: 'cusd',
+                    accountName: 'Confío Dollar',
+                    accountSymbol: '$cUSD',
+                    accountBalance: '0', // This will trigger refresh
+                    accountAddress: activeAccount?.suiAddress || '',
+                    refreshTimestamp: Date.now()
+                  } as never);
+                }, 500);
               },
             },
             {
               text: 'OK',
               onPress: () => {
-                // Reset navigation stack and go to Home tab
-                navigation.reset({
-                  index: 0,
-                  routes: [
-                    {
-                      name: 'BottomTabs' as never,
-                      params: {
-                        screen: 'Home',
-                        params: {
-                          shouldNavigateToAccount: 'cusd',
-                          refreshTimestamp: Date.now()
-                        }
-                      }
-                    }
-                  ],
-                });
+                // Simply go back to home
+                navigation.navigate('BottomTabs' as never, {
+                  screen: 'Home' as never,
+                } as never);
               },
             },
           ]

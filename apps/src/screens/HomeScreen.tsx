@@ -150,41 +150,14 @@ export const HomeScreen = () => {
     }
   }, [activeAccount?.id, activeAccount?.type, activeAccount?.index, refetchCUSD, refetchConfio]);
 
-  // Handle navigation params for auto-navigation after conversion
-  useEffect(() => {
-    const shouldNavigateToAccount = route.params?.shouldNavigateToAccount;
-    const refreshTimestamp = route.params?.refreshTimestamp;
-    
-    if (refreshTimestamp) {
-      // Refresh balances when coming back from conversion
+  // Force refresh balances when navigating to this screen
+  useFocusEffect(
+    useCallback(() => {
+      console.log('HomeScreen focused - refreshing balances');
       refetchCUSD();
       refetchConfio();
-    }
-    
-    if (shouldNavigateToAccount && cUSDBalance !== undefined && confioBalance !== undefined) {
-      // Clear the params to prevent re-navigation
-      navigation.setParams({ shouldNavigateToAccount: undefined, refreshTimestamp: undefined });
-      
-      // Navigate to the requested account detail
-      if (shouldNavigateToAccount === 'cusd') {
-        navigation.navigate('AccountDetail', {
-          accountType: 'cusd',
-          accountName: 'Confío Dollar',
-          accountSymbol: '$cUSD',
-          accountBalance: cUSDBalance.toFixed(2),
-          accountAddress: activeAccount?.suiAddress || '',
-        });
-      } else if (shouldNavigateToAccount === 'confio') {
-        navigation.navigate('AccountDetail', {
-          accountType: 'confio',
-          accountName: 'Confío',
-          accountSymbol: '$CONFIO',
-          accountBalance: confioBalance.toFixed(2),
-          accountAddress: activeAccount?.suiAddress || '',
-        });
-      }
-    }
-  }, [route.params, cUSDBalance, confioBalance, navigation, activeAccount]);
+    }, [refetchCUSD, refetchConfio])
+  );
   
   // Log any errors and data for debugging
   useEffect(() => {
