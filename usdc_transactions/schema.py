@@ -197,6 +197,26 @@ class CreateUSDCDeposit(graphene.Mutation):
             
             # Since KYC is disabled, automatically complete the deposit
             deposit.mark_completed()
+            
+            # Create notification for deposit
+            from notifications.utils import create_notification
+            from notifications.models import NotificationType as NotificationTypeChoices
+            create_notification(
+                user=user,
+                notification_type=NotificationTypeChoices.USDC_DEPOSIT_COMPLETED,
+                title="Depósito USDC completado",
+                message=f"Tu depósito de {input.amount} USDC se ha completado exitosamente",
+                data={
+                    'transaction_id': str(deposit.deposit_id),
+                    'transaction_type': 'deposit',
+                    'amount': str(input.amount),
+                    'currency': 'USDC',
+                    'status': 'completed'
+                },
+                related_object_type='USDCDeposit',
+                related_object_id=str(deposit.id),
+                action_url=f"confio://transaction/{deposit.deposit_id}"
+            )
 
             return CreateUSDCDeposit(
                 deposit=deposit,
@@ -333,6 +353,27 @@ class CreateUSDCWithdrawal(graphene.Mutation):
             # In production, this would be handled by a background task after AML checks
             withdrawal.mark_completed()
             logger.info(f"Withdrawal {withdrawal.id} marked as completed")
+            
+            # Create notification for withdrawal
+            from notifications.utils import create_notification
+            from notifications.models import NotificationType as NotificationTypeChoices
+            create_notification(
+                user=user,
+                notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_COMPLETED,
+                title="Retiro USDC completado",
+                message=f"Tu retiro de {input.amount} USDC se ha completado exitosamente",
+                data={
+                    'transaction_id': str(withdrawal.withdrawal_id),
+                    'transaction_type': 'withdrawal',
+                    'amount': str(input.amount),
+                    'currency': 'USDC',
+                    'destination_address': input.destinationAddress,
+                    'status': 'completed'
+                },
+                related_object_type='USDCWithdrawal',
+                related_object_id=str(withdrawal.id),
+                action_url=f"confio://transaction/{withdrawal.withdrawal_id}"
+            )
 
             return CreateUSDCWithdrawal(
                 withdrawal=withdrawal,
