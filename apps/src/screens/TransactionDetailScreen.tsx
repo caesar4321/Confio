@@ -818,7 +818,8 @@ export const TransactionDetailScreen = () => {
   console.log('[TransactionDetailScreen] Data parsing:', {
     rawDataType: typeof rawTransactionData,
     parsedDataType: typeof transactionData,
-    isParsed: typeof rawTransactionData === 'string' && typeof transactionData === 'object'
+    isParsed: typeof rawTransactionData === 'string' && typeof transactionData === 'object',
+    transactionData: transactionData
   });
   
   console.log('[TransactionDetailScreen] Fetch check:', {
@@ -1405,10 +1406,45 @@ export const TransactionDetailScreen = () => {
                     <Text style={styles.avatarText}>{currentTx.avatar}</Text>
                   </View>
                   <View style={styles.participantDetails}>
-                    <Text style={styles.participantName}>{displayToName}</Text>
+                    <Text style={styles.participantName}>
+                      {(() => {
+                        // If we have a display name from contacts or transaction data
+                        if (displayToName) return displayToName;
+                        
+                        // For invited friends (non-Confío users)
+                        if (currentTx.is_invited_friend || (currentTx.recipient_phone && !displayToName)) {
+                          return 'Invitación enviada';
+                        }
+                        
+                        // For external addresses
+                        if (currentTx.is_external_address || (currentTx.toAddress && !currentTx.recipient_phone && !displayToName)) {
+                          return 'Dirección externa';
+                        }
+                        
+                        // Fallback to whatever we have
+                        return currentTx.to || currentTx.recipient_name || 'Desconocido';
+                      })()}
+                    </Text>
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
-                        {recipientPhone ? formatPhoneNumber(recipientPhone) : currentTx.toAddress}
+                        {(() => {
+                          // Show phone number for invited friends
+                          if (recipientPhone || currentTx.recipient_phone) {
+                            return formatPhoneNumber(recipientPhone || currentTx.recipient_phone);
+                          }
+                          
+                          // Show address for external wallets
+                          if (currentTx.toAddress || currentTx.recipient_address) {
+                            const address = currentTx.toAddress || currentTx.recipient_address;
+                            // Format address: show first 10 and last 6 characters
+                            if (address.length > 20) {
+                              return `${address.substring(0, 10)}...${address.substring(address.length - 6)}`;
+                            }
+                            return address;
+                          }
+                          
+                          return '';
+                        })()}
                       </Text>
                       <TouchableOpacity 
                         onPress={() => handleCopy(
