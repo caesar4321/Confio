@@ -122,31 +122,16 @@ export const USDCConversionScreen = () => {
             {
               text: 'Ver historial',
               onPress: () => {
-                // Go back to home first to refresh balances
-                navigation.navigate('BottomTabs' as never, {
-                  screen: 'Home' as never,
-                } as never);
-                
-                // After a short delay, navigate to account detail
-                setTimeout(() => {
-                  navigation.navigate('AccountDetail' as never, {
-                    accountType: 'cusd',
-                    accountName: 'Confío Dollar',
-                    accountSymbol: '$cUSD',
-                    accountBalance: '0', // This will trigger refresh
-                    accountAddress: activeAccount?.suiAddress || '',
-                    refreshTimestamp: Date.now()
-                  } as never);
-                }, 500);
+                // Navigate to USDC History screen
+                navigation.navigate('USDCHistory' as never);
               },
             },
             {
               text: 'OK',
               onPress: () => {
-                // Simply go back to home
-                navigation.navigate('BottomTabs' as never, {
-                  screen: 'Home' as never,
-                } as never);
+                // Clear the form and stay on the same screen
+                setAmount('');
+                setIsProcessing(false);
               },
             },
           ]
