@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { Gradient } from '../components/common/Gradient';
 import { AuthService } from '../services/authService';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
 import { useHeader } from '../contexts/HeaderContext';
@@ -98,6 +98,7 @@ interface QuickAction {
 
 export const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
+  const route = useRoute<any>();
   const { setCurrentAccountAvatar, profileMenu } = useHeader();
   const { signOut, userProfile } = useAuth();
   const { userCountry, selectedCountry } = useCountry();
@@ -148,6 +149,42 @@ export const HomeScreen = () => {
       refetchConfio();
     }
   }, [activeAccount?.id, activeAccount?.type, activeAccount?.index, refetchCUSD, refetchConfio]);
+
+  // Handle navigation params for auto-navigation after conversion
+  useEffect(() => {
+    const shouldNavigateToAccount = route.params?.shouldNavigateToAccount;
+    const refreshTimestamp = route.params?.refreshTimestamp;
+    
+    if (refreshTimestamp) {
+      // Refresh balances when coming back from conversion
+      refetchCUSD();
+      refetchConfio();
+    }
+    
+    if (shouldNavigateToAccount && cUSDBalance !== undefined && confioBalance !== undefined) {
+      // Clear the params to prevent re-navigation
+      navigation.setParams({ shouldNavigateToAccount: undefined, refreshTimestamp: undefined });
+      
+      // Navigate to the requested account detail
+      if (shouldNavigateToAccount === 'cusd') {
+        navigation.navigate('AccountDetail', {
+          accountType: 'cusd',
+          accountName: 'Confío Dollar',
+          accountSymbol: '$cUSD',
+          accountBalance: cUSDBalance.toFixed(2),
+          accountAddress: activeAccount?.suiAddress || '',
+        });
+      } else if (shouldNavigateToAccount === 'confio') {
+        navigation.navigate('AccountDetail', {
+          accountType: 'confio',
+          accountName: 'Confío',
+          accountSymbol: '$CONFIO',
+          accountBalance: confioBalance.toFixed(2),
+          accountAddress: activeAccount?.suiAddress || '',
+        });
+      }
+    }
+  }, [route.params, cUSDBalance, confioBalance, navigation, activeAccount]);
   
   // Log any errors and data for debugging
   useEffect(() => {

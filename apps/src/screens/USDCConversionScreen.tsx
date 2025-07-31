@@ -122,33 +122,43 @@ export const USDCConversionScreen = () => {
             {
               text: 'Ver historial',
               onPress: () => {
-                // Navigate back to Main tab to ensure balances are refreshed
-                navigation.navigate('Main' as never, {
-                  screen: 'HomeTabs',
-                  params: {
-                    screen: 'Home',
-                    params: {
-                      shouldNavigateToAccount: 'cusd',
-                      refreshTimestamp: Date.now()
+                // Reset navigation stack and go to Home tab
+                navigation.reset({
+                  index: 0,
+                  routes: [
+                    {
+                      name: 'BottomTabs' as never,
+                      params: {
+                        screen: 'Home',
+                        params: {
+                          shouldNavigateToAccount: 'cusd',
+                          refreshTimestamp: Date.now()
+                        }
+                      }
                     }
-                  }
-                } as never);
+                  ],
+                });
               },
             },
             {
               text: 'OK',
               onPress: () => {
-                // Navigate back to Main tab to ensure balances are refreshed
-                navigation.navigate('Main' as never, {
-                  screen: 'HomeTabs',
-                  params: {
-                    screen: 'Home',
-                    params: {
-                      shouldNavigateToAccount: 'cusd',
-                      refreshTimestamp: Date.now()
+                // Reset navigation stack and go to Home tab
+                navigation.reset({
+                  index: 0,
+                  routes: [
+                    {
+                      name: 'BottomTabs' as never,
+                      params: {
+                        screen: 'Home',
+                        params: {
+                          shouldNavigateToAccount: 'cusd',
+                          refreshTimestamp: Date.now()
+                        }
+                      }
                     }
-                  }
-                } as never);
+                  ],
+                });
               },
             },
           ]
