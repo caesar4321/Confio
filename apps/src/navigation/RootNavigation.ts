@@ -5,7 +5,13 @@ export const navigationRef = createNavigationContainerRef();
 export function navigate(name: string, params?: any) {
   console.log('[RootNavigation] navigate called:', { name, params, isReady: navigationRef.isReady() });
   
-  // Handle legacy screen names
+  // LEGACY FORMAT DETECTION:
+  // The code detects if a notification is trying to use the old P2PTradeDetail screen name 
+  // and automatically converts it to ActiveTrade. This handles old/cached push notifications
+  // that were created before the screen was renamed.
+  // Old format: navigate('P2PTradeDetail', { tradeId: '26' })
+  // New format: navigate('ActiveTrade', { trade: { id: '26' } })
+  // This conversion ensures backward compatibility with notifications already sent to users.
   if (name === 'P2PTradeDetail' && params?.tradeId) {
     console.log('[RootNavigation] Converting legacy P2PTradeDetail navigation to ActiveTrade');
     name = 'ActiveTrade';
