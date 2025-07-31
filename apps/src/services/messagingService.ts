@@ -416,7 +416,11 @@ class MessagingService {
   private handleNotificationData(data: any) {
     console.log('[MessagingService] handleNotificationData called with:', data);
     
-    // Handle legacy notification format that might try to navigate directly
+    // LEGACY FORMAT DETECTION:
+    // Handle old push notifications that may have been sent with the previous screen name.
+    // Some notifications in the system might still reference 'P2PTradeDetail' which no longer exists.
+    // We convert these to the proper action_url format that will navigate to ActiveTrade.
+    // This ensures users with old notifications can still open them without errors.
     if (data.name === 'P2PTradeDetail' && data.params?.tradeId) {
       console.log('[MessagingService] Handling legacy P2PTradeDetail navigation');
       // Convert to new format
