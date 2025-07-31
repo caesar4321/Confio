@@ -54,6 +54,8 @@ def create_notification(
     if is_broadcast and user:
         raise ValueError("User should not be set for broadcast notifications")
     
+    logger.info(f"Creating notification with type: {notification_type}, user: {user.id if user else 'None'}")
+    
     notification = Notification.objects.create(
         user=user,
         account=account,
@@ -68,6 +70,8 @@ def create_notification(
         is_broadcast=is_broadcast,
         broadcast_target=broadcast_target
     )
+    
+    logger.info(f"Notification created successfully with ID: {notification.id}")
     
     # Send push notification if enabled
     if send_push:
