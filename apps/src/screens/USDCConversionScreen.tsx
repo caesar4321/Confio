@@ -125,6 +125,10 @@ export const USDCConversionScreen = () => {
                 // Navigate back and trigger refresh
                 navigation.navigate('AccountDetail', { 
                   accountType: 'cusd',
+                  accountName: 'Confío Dollar',
+                  accountSymbol: '$cUSD',
+                  accountBalance: '0', // Will be refreshed
+                  accountAddress: activeAccount?.suiAddress || '',
                   refreshTimestamp: Date.now() // Force refresh
                 });
               },
@@ -135,6 +139,10 @@ export const USDCConversionScreen = () => {
                 // Navigate back and trigger refresh
                 navigation.navigate('AccountDetail', { 
                   accountType: 'cusd',
+                  accountName: 'Confío Dollar',
+                  accountSymbol: '$cUSD',
+                  accountBalance: '0', // Will be refreshed
+                  accountAddress: activeAccount?.suiAddress || '',
                   refreshTimestamp: Date.now() // Force refresh
                 });
               },
