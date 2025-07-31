@@ -471,8 +471,9 @@ class CreateSendTransaction(graphene.Mutation):
                             'is_invited_friend': True,
                             # For TransactionDetailScreen
                             'type': 'sent',
-                            'to': '',  # Empty for invitations - show phone in address field
+                            'to': recipient_display_name if recipient_display_name else '',  # Include display name if provided
                             'toAddress': send_transaction.recipient_address,
+                            'recipient_name': recipient_display_name,
                             'from': sender_display_name,
                             'fromAddress': send_transaction.sender_address,
                             'date': send_transaction.created_at.strftime('%Y-%m-%d'),
