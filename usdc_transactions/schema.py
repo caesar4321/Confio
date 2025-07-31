@@ -194,6 +194,9 @@ class CreateUSDCDeposit(graphene.Mutation):
                 source_address=input.source_address,
                 status='PENDING'
             )
+            
+            # Since KYC is disabled, automatically complete the deposit
+            deposit.mark_completed()
 
             return CreateUSDCDeposit(
                 deposit=deposit,
@@ -324,6 +327,12 @@ class CreateUSDCWithdrawal(graphene.Mutation):
             )
             
             logger.info(f"Withdrawal created successfully with ID: {withdrawal.id}, withdrawal_id: {withdrawal.withdrawal_id}")
+            
+            # Since KYC is disabled and we only do AML checks,
+            # automatically complete the withdrawal (simulating instant processing)
+            # In production, this would be handled by a background task after AML checks
+            withdrawal.mark_completed()
+            logger.info(f"Withdrawal {withdrawal.id} marked as completed")
 
             return CreateUSDCWithdrawal(
                 withdrawal=withdrawal,
