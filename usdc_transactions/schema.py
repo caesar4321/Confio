@@ -457,20 +457,21 @@ class Query(graphene.ObjectType):
         account_index = jwt_context['account_index']
         business_id = jwt_context.get('business_id')
         
-        # Filter by user and account context
-        queryset = UnifiedUSDCTransactionTable.objects.filter(actor_user=user)
-        
-        # Filter by business if active account is business
+        # Filter by account context
         if account_type == 'business' and business_id:
             try:
                 from users.models import Business
                 business = Business.objects.get(id=business_id)
-                queryset = queryset.filter(actor_business=business)
+                # For business accounts, filter by business
+                queryset = UnifiedUSDCTransactionTable.objects.filter(actor_business=business)
             except:
                 return []
         else:
-            # For personal accounts, exclude business transactions
-            queryset = queryset.filter(actor_business__isnull=True)
+            # For personal accounts, filter by user and exclude business transactions
+            queryset = UnifiedUSDCTransactionTable.objects.filter(
+                actor_user=user,
+                actor_business__isnull=True
+            )
         
         # Filter by transaction type if specified
         if transaction_type:

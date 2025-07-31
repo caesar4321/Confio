@@ -172,8 +172,8 @@ def create_transaction_notification(
         return create_notification(
             user=sender_user,
             notification_type=NotificationTypeChoices.CONVERSION_COMPLETED,
-            title="Conversion Completed",
-            message=f"Converted {from_amount} {from_token} to {to_amount} {to_token}",
+            title="Conversión completada",
+            message=f"Convertiste {from_amount} {from_token} a {to_amount} {to_token}",
             data=data,
             related_object_type=transaction_model,
             related_object_id=transaction_id,
