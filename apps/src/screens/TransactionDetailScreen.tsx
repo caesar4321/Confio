@@ -1010,7 +1010,12 @@ export const TransactionDetailScreen = () => {
       // For conversions
       currency: transactionData.from_token || transactionData.token_type || transactionData.currency || 'USDC',
       secondaryCurrency: transactionData.to_token || 'cUSD',
-      amount: transactionData.amount || transactionData.from_amount || transactionData.to_amount,
+      // For conversions: cUSD -> USDC should be negative (money out), USDC -> cUSD should be positive (money in)
+      amount: transactionData.conversion_type === 'cusd_to_usdc' 
+        ? `-${transactionData.from_amount || transactionData.amount || '0'}`
+        : transactionData.conversion_type === 'usdc_to_cusd'
+        ? `+${transactionData.to_amount || transactionData.amount || '0'}`
+        : transactionData.amount || transactionData.from_amount || transactionData.to_amount,
       status: transactionData.status || 'completed',
       // Format date if timestamp is available
       date: transactionData.timestamp ? moment.utc(transactionData.timestamp).local().format('YYYY-MM-DD') : transactionData.date,
@@ -1216,7 +1221,8 @@ export const TransactionDetailScreen = () => {
             
             <Text style={[
               styles.amountText,
-              (currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal') && styles.negativeAmount
+              (currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal' || 
+               (currentTx.type === 'conversion' && currentTx.amount?.startsWith('-'))) && styles.negativeAmount
             ]}>
               {formatAmountWithSign(currentTx.amount)} {currentTx.currency || 'cUSD'}
             </Text>
