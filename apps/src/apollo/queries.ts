@@ -1060,6 +1060,7 @@ export const GET_P2P_TRADE = gql`
         escrowedAt
         releasedAt
       }
+      hasRating
     }
   }
 `;
