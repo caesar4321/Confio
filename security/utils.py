@@ -160,6 +160,7 @@ def perform_aml_check(user, transaction_type: str, amount: Decimal = None) -> Di
     if is_banned:
         return {
             'blocked': True,
+            'requires_review': False,
             'reason': f'Account restricted: {ban_reason}',
             'risk_score': 100,
             'risk_factors': {'banned': True}
@@ -174,6 +175,7 @@ def perform_aml_check(user, transaction_type: str, amount: Decimal = None) -> Di
     if confirmed_suspicious:
         return {
             'blocked': True,
+            'requires_review': False,
             'reason': 'Account under review for suspicious activity',
             'risk_score': 100,
             'risk_factors': {'confirmed_suspicious': True}
@@ -184,6 +186,7 @@ def perform_aml_check(user, transaction_type: str, amount: Decimal = None) -> Di
     if hasattr(user, 'is_sanctioned') and user.is_sanctioned:
         return {
             'blocked': True,
+            'requires_review': False,
             'reason': 'Sanctioned individual',
             'risk_score': 100,
             'risk_factors': {'sanctioned': True}
@@ -192,6 +195,7 @@ def perform_aml_check(user, transaction_type: str, amount: Decimal = None) -> Di
     # User is clear for transactions
     return {
         'blocked': False,
+        'requires_review': False,
         'reason': '',
         'risk_score': 0,
         'risk_factors': {}
