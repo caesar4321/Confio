@@ -80,7 +80,7 @@ class UnifiedUSDCTransactionType(DjangoObjectType):
             'network',
             'status',
             'error_message',
-            'transaction_date',  # Use transaction_date instead of created_at
+            'created_at',
             'updated_at',
             'completed_at'
         )
@@ -89,7 +89,6 @@ class UnifiedUSDCTransactionType(DjangoObjectType):
     formatted_title = graphene.String()
     icon_name = graphene.String()
     icon_color = graphene.String()
-    created_at = graphene.DateTime()  # Map to transaction_date for frontend compatibility
     
     def resolve_formatted_title(self, info):
         return self.formatted_title
@@ -99,10 +98,6 @@ class UnifiedUSDCTransactionType(DjangoObjectType):
     
     def resolve_icon_color(self, info):
         return self.icon_color
-    
-    def resolve_created_at(self, info):
-        # Return transaction_date as created_at for frontend compatibility
-        return self.transaction_date
 
 
 class USDCDepositInput(graphene.InputObjectType):
