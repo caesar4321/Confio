@@ -209,9 +209,11 @@ class CreateUSDCDeposit(graphene.Mutation):
                 data={
                     'transaction_id': str(deposit.deposit_id),
                     'transaction_type': 'deposit',
+                    'type': 'deposit',  # Add this for TransactionDetailScreen
                     'amount': str(input.amount),
                     'currency': 'USDC',
-                    'status': 'completed'
+                    'status': 'completed',
+                    'notification_type': 'USDC_DEPOSIT_COMPLETED'
                 },
                 related_object_type='USDCDeposit',
                 related_object_id=str(deposit.id),
@@ -365,10 +367,12 @@ class CreateUSDCWithdrawal(graphene.Mutation):
                 data={
                     'transaction_id': str(withdrawal.withdrawal_id),
                     'transaction_type': 'withdrawal',
+                    'type': 'withdrawal',  # Add this for TransactionDetailScreen
                     'amount': str(input.amount),
                     'currency': 'USDC',
                     'destination_address': input.destinationAddress,
-                    'status': 'completed'
+                    'status': 'completed',
+                    'notification_type': 'USDC_WITHDRAWAL_COMPLETED'
                 },
                 related_object_type='USDCWithdrawal',
                 related_object_id=str(withdrawal.id),
