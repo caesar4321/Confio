@@ -29,6 +29,7 @@ export class PushNotificationService {
    * Get pending account switch (if any)
    */
   static getPendingAccountSwitch(): string | null {
+    console.log('[PushNotificationService] getPendingAccountSwitch:', PushNotificationService.pendingAccountSwitchGlobal);
     return PushNotificationService.pendingAccountSwitchGlobal;
   }
 
@@ -36,6 +37,7 @@ export class PushNotificationService {
    * Clear pending account switch
    */
   static clearPendingAccountSwitch(): void {
+    console.log('[PushNotificationService] Clearing pending account switch');
     PushNotificationService.pendingAccountSwitchGlobal = null;
   }
 
@@ -345,6 +347,12 @@ export class PushNotificationService {
 
     try {
       console.log('[PushNotificationService] Initializing push notification service...');
+      
+      // Clear any stale pending switches from previous app sessions
+      PushNotificationService.pendingAccountSwitchGlobal = null;
+      PushNotificationService.pendingNavigationAfterSwitch = null;
+      this.pendingAccountSwitch = null;
+      console.log('[PushNotificationService] Cleared any stale pending switches');
       
       // Register background handler
       messaging().setBackgroundMessageHandler(async (remoteMessage) => {
