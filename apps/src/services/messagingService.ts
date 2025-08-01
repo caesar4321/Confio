@@ -23,6 +23,7 @@ class MessagingService {
   private messageHandlersSetup: boolean = false;
   private unsubscribeHandlers: (() => void)[] = [];
   private instanceId: string;
+  private channelCreated: boolean = false;
 
   constructor() {
     this.instanceId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -41,26 +42,20 @@ class MessagingService {
     return globalMessagingInstance;
   }
 
-  async initialize() {
+  async initialize(forceTokenRefresh: boolean = false) {
     try {
-      // Prevent re-initialization
-      if (this.fcmToken && this.messageHandlersSetup) {
-        console.log('Messaging service already initialized, skipping');
-        return;
-      }
-
-      // Request permission through Firebase
-      const authStatus = await messaging().requestPermission();
+      // Check current permission status
+      const authStatus = await messaging().hasPermission();
       const enabled =
         authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
         authStatus === messaging.AuthorizationStatus.PROVISIONAL;
 
       if (!enabled) {
-        console.log('Notification permission denied');
+        console.log('Notification permission not granted, skipping initialization');
         return;
       }
 
-      // For iOS, also request Notifee permissions for foreground notifications
+      // For iOS, also ensure Notifee permissions
       if (Platform.OS === 'ios') {
         await notifee.requestPermission();
       }
@@ -68,15 +63,26 @@ class MessagingService {
       // Get or generate device ID
       this.deviceId = await this.getOrCreateDeviceId();
 
-      // Get FCM token
-      await this.getFCMToken();
+      // Always register FCM token for the current user if they have permission
+      // This ensures new users on devices with existing permissions get registered
+      if (forceTokenRefresh || !this.fcmToken) {
+        await this.getFCMToken();
+      } else {
+        // Even if we have a token, re-register it for the current user
+        // This handles the case where a new user logs in on the same device
+        console.log('Re-registering existing FCM token for current user');
+        await this.registerToken(this.fcmToken);
+      }
 
-      // Set up message handlers
-      this.setupMessageHandlers();
+      // Set up message handlers only once
+      if (!this.messageHandlersSetup) {
+        this.setupMessageHandlers();
+      }
 
       // Create notification channel for Android
-      if (Platform.OS === 'android') {
+      if (Platform.OS === 'android' && !this.channelCreated) {
         await this.createNotificationChannel();
+        this.channelCreated = true;
       }
 
       console.log('Messaging service initialized');
@@ -576,6 +582,12 @@ class MessagingService {
               }
             } as never);
           }
+          break;
+        case 'achievements':
+          // Navigate to Achievements screen
+          navigationRef.current?.navigate('Main' as never, {
+            screen: 'Achievements'
+          } as never);
           break;
         default:
           navigationRef.current?.navigate('Main' as never, {

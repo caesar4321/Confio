@@ -2399,6 +2399,15 @@ class ClaimAchievementReward(graphene.Mutation):
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return ClaimAchievementReward(success=False, error="Authentication required")
 		
+		# Check if user is using a business account - achievements are only for personal accounts
+		from .jwt_context import get_jwt_business_context_with_validation
+		jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+		if jwt_context and jwt_context.get('account_type') == 'business':
+			return ClaimAchievementReward(
+				success=False, 
+				error="Los logros solo están disponibles para cuentas personales"
+			)
+		
 		try:
 			# Get the user's achievement
 			achievement = UserAchievement.objects.select_related('achievement_type').get(
@@ -2549,6 +2558,15 @@ class SubmitTikTokShare(graphene.Mutation):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return SubmitTikTokShare(success=False, error="Authentication required")
+		
+		# Check if user is using a business account - achievements are only for personal accounts
+		from .jwt_context import get_jwt_business_context_with_validation
+		jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+		if jwt_context and jwt_context.get('account_type') == 'business':
+			return SubmitTikTokShare(
+				success=False, 
+				error="Los logros solo están disponibles para cuentas personales"
+			)
 		
 		try:
 			# Validate share type
@@ -2740,6 +2758,15 @@ class TrackTikTokShare(graphene.Mutation):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return TrackTikTokShare(success=False, error="Authentication required")
+		
+		# Check if user is using a business account - achievements are only for personal accounts
+		from .jwt_context import get_jwt_business_context_with_validation
+		jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+		if jwt_context and jwt_context.get('account_type') == 'business':
+			return TrackTikTokShare(
+				success=False, 
+				error="Los logros solo están disponibles para cuentas personales"
+			)
 		
 		try:
 			# Validate the achievement belongs to the user

@@ -117,6 +117,9 @@ export const NotificationScreen = () => {
       } else if (url.includes('business/')) {
         const businessId = url.split('business/')[1];
         // Navigate to business details
+      } else if (url.includes('achievements/')) {
+        // Navigate to achievements screen
+        navigation.navigate('Achievements');
       }
     }
   }, [markNotificationRead, navigation]);
@@ -200,6 +203,9 @@ export const NotificationScreen = () => {
       PROMOTION: { icon: 'gift', color: '#EC4899' },
       SYSTEM: { icon: 'info', color: '#6B7280' },
       ANNOUNCEMENT: { icon: 'bell', color: '#3B82F6' },
+      
+      // Achievements
+      ACHIEVEMENT_EARNED: { icon: 'award', color: '#FFD700' },
     };
     
     return iconMap[type] || { icon: 'bell', color: '#6B7280' };

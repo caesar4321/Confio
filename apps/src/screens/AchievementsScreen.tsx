@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Share, Platform, SafeAreaView, TextInput, Alert, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Share, Platform, SafeAreaView, TextInput, Alert, Linking, Image } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
@@ -15,6 +15,7 @@ import {
 } from '../apollo/queries';
 import { ShareAchievementModal } from '../components/ShareAchievementModal';
 import { ReferralInputModal } from '../components/ReferralInputModal';
+import { PioneroBadgeModal } from '../components/PioneroBadgeModal';
 
 const colors = {
   primary: '#34d399',
@@ -72,6 +73,7 @@ export const AchievementsScreen = () => {
   const { activeAccount } = useAccount();
   const [showReferralModal, setShowReferralModal] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showPioneroModal, setShowPioneroModal] = useState(false);
   const [canShowReferralBox, setCanShowReferralBox] = useState(false);
   const [selectedAchievement, setSelectedAchievement] = useState<{
     id: string;
@@ -79,6 +81,8 @@ export const AchievementsScreen = () => {
     description: string;
     confioReward: number;
     category: string;
+    slug?: string;
+    status?: string;
   } | null>(null);
   
   // GraphQL queries
@@ -288,14 +292,24 @@ export const AchievementsScreen = () => {
 
 
   const handleShare = async (achievement: Achievement) => {
-    if (achievement.status?.toLowerCase() !== 'earned' && achievement.status?.toLowerCase() !== 'claimed') return;
+    console.log('handleShare called with:', achievement?.name, achievement?.status);
     
+    // Allow sharing for earned, claimed, or pending referral achievements
+    if (achievement.status?.toLowerCase() !== 'earned' && 
+        achievement.status?.toLowerCase() !== 'claimed' &&
+        !(achievement?.achievementType?.slug === 'referido_exitoso' && achievement?.status?.toLowerCase() === 'pending')) {
+      console.log('handleShare returning early - status check failed');
+      return;
+    }
+    
+    console.log('Setting selected achievement and showing modal');
     setSelectedAchievement({
       id: achievement.id,
       name: achievement.name,
       description: achievement.description,
       confioReward: achievement.achievementType.confioReward || 0,
       category: achievement.achievementType.category,
+      slug: achievement.achievementType.slug,
     });
     setShowShareModal(true);
   };
@@ -553,27 +567,66 @@ export const AchievementsScreen = () => {
                 </Text>
               </View>
 
-              {categoryAchievements.map(achievement => (
+              {categoryAchievements.map(achievement => {
+                // Debug logging for referral achievement
+                if (achievement?.achievementType?.slug === 'referido_exitoso') {
+                  console.log('Found referral achievement:', {
+                    slug: achievement.achievementType.slug,
+                    status: achievement.status,
+                    name: achievement.name,
+                    id: achievement.id
+                  });
+                }
+                return (
                 <TouchableOpacity
                   key={achievement.id}
                   style={[
                     styles.achievementCard,
-                    (achievement.status?.toLowerCase() === 'earned' || achievement.status?.toLowerCase() === 'claimed') && styles.achievementCardCompleted
+                    (achievement.status?.toLowerCase() === 'earned' || achievement.status?.toLowerCase() === 'claimed') && styles.achievementCardCompleted,
+                    (achievement?.achievementType?.slug === 'referido_exitoso' && achievement?.status?.toLowerCase() === 'pending') && styles.achievementCardReferral,
+                    achievement?.achievementType?.slug === 'pionero_beta' && styles.achievementCardPionero
                   ]}
                   onPress={() => {
-                    if (achievement?.status?.toLowerCase() === 'earned') {
+                    console.log('Achievement clicked:', {
+                      name: achievement?.name,
+                      slug: achievement?.achievementType?.slug,
+                      status: achievement?.status,
+                      statusLower: achievement?.status?.toLowerCase()
+                    });
+                    
+                    // Special handling for Pionero Beta - show modal
+                    if (achievement?.achievementType?.slug === 'pionero_beta') {
+                      setSelectedAchievement({
+                        id: achievement.id,
+                        name: achievement.name,
+                        description: achievement.description,
+                        confioReward: achievement.achievementType.confioReward || 0,
+                        category: achievement.achievementType.category,
+                        slug: achievement.achievementType.slug,
+                        status: achievement.status
+                      });
+                      setShowPioneroModal(true);
+                    } else if (achievement?.status?.toLowerCase() === 'earned') {
                       handleClaimReward(achievement);
-                    } else if (achievement?.status?.toLowerCase() === 'claimed') {
+                    } else if (achievement?.status?.toLowerCase() === 'claimed' || 
+                              (achievement?.achievementType?.slug === 'referido_exitoso' && achievement?.status?.toLowerCase() === 'pending')) {
                       handleShare(achievement);
                     }
                   }}
-                  disabled={!achievement || achievement.status?.toLowerCase() === 'pending'}
+                  disabled={!achievement || (achievement.status?.toLowerCase() === 'pending' && achievement?.achievementType?.slug !== 'referido_exitoso' && achievement?.achievementType?.slug !== 'pionero_beta')}
                 >
                   <View style={[
                     styles.achievementIcon,
-                    (achievement?.status?.toLowerCase() === 'earned' || achievement?.status?.toLowerCase() === 'claimed') && styles.achievementIconCompleted
+                    (achievement?.status?.toLowerCase() === 'earned' || achievement?.status?.toLowerCase() === 'claimed') && styles.achievementIconCompleted,
+                    achievement?.achievementType?.slug === 'pionero_beta' && styles.achievementIconPionero
                   ]}>
-                    {achievement?.achievementType?.iconEmoji ? (
+                    {achievement?.achievementType?.slug === 'pionero_beta' ? (
+                      <Image 
+                        source={require('../assets/png/PioneroBeta.png')} 
+                        style={styles.pioneroBadge}
+                        resizeMode="contain"
+                      />
+                    ) : achievement?.achievementType?.iconEmoji ? (
                       <Text style={styles.achievementEmoji}>{achievement.achievementType.iconEmoji}</Text>
                     ) : (
                       <Icon 
@@ -599,6 +652,13 @@ export const AchievementsScreen = () => {
                       )}
                       {achievement?.status?.toLowerCase() === 'claimed' && (
                         <Icon name="check-circle" size={16} color={colors.primary} />
+                      )}
+                      {/* Show share hint for pending referral achievement */}
+                      {achievement?.achievementType?.slug === 'referido_exitoso' && achievement?.status?.toLowerCase() === 'pending' && (
+                        <View style={styles.shareHintBadge}>
+                          <Icon name="share-2" size={12} color="#fff" />
+                          <Text style={styles.shareHintText}>Compartir</Text>
+                        </View>
                       )}
                     </View>
                     <Text style={styles.achievementDescription}>
@@ -635,13 +695,16 @@ export const AchievementsScreen = () => {
                     )}
                   </View>
 
-                  {(achievement?.status?.toLowerCase() === 'earned' || achievement?.status?.toLowerCase() === 'claimed') && (
+                  {/* Show action button for earned/claimed achievements OR for pending referral achievement */}
+                  {((achievement?.status?.toLowerCase() === 'earned' || achievement?.status?.toLowerCase() === 'claimed') || 
+                    (achievement?.achievementType?.slug === 'referido_exitoso' && achievement?.status?.toLowerCase() === 'pending')) && (
                     <TouchableOpacity 
                       style={styles.actionButton}
                       onPress={() => {
                         if (achievement?.status?.toLowerCase() === 'earned') {
                           handleClaimReward(achievement);
-                        } else if (achievement?.status?.toLowerCase() === 'claimed') {
+                        } else if (achievement?.status?.toLowerCase() === 'claimed' || 
+                                  (achievement?.achievementType?.slug === 'referido_exitoso' && achievement?.status?.toLowerCase() === 'pending')) {
                           handleShare(achievement);
                         }
                       }}
@@ -654,7 +717,7 @@ export const AchievementsScreen = () => {
                     </TouchableOpacity>
                   )}
                 </TouchableOpacity>
-              ))}
+              );})}
             </View>
           );
         })}
@@ -682,6 +745,16 @@ export const AchievementsScreen = () => {
           refetchAchievements();
         }}
       />
+      
+      {selectedAchievement && selectedAchievement.slug === 'pionero_beta' && (
+        <PioneroBadgeModal
+          visible={showPioneroModal}
+          onClose={() => {
+            setShowPioneroModal(false);
+          }}
+          achievement={selectedAchievement}
+        />
+      )}
     </SafeAreaView>
   );
 };
@@ -901,6 +974,24 @@ const styles = StyleSheet.create({
     borderColor: colors.primaryLight,
     backgroundColor: '#F0FDF4',
   },
+  achievementCardReferral: {
+    backgroundColor: '#e8f4ff',
+    borderColor: colors.accent,
+    borderWidth: 1.5,
+  },
+  achievementCardPionero: {
+    backgroundColor: '#FFF8DC',
+    borderColor: '#FFD700',
+    borderWidth: 2,
+    shadowColor: '#FFD700',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
   achievementIcon: {
     width: 48,
     height: 48,
@@ -912,6 +1003,15 @@ const styles = StyleSheet.create({
   },
   achievementIconCompleted: {
     backgroundColor: colors.primary,
+  },
+  achievementIconPionero: {
+    backgroundColor: '#FFD700',
+    borderWidth: 2,
+    borderColor: '#FFA500',
+  },
+  pioneroBadge: {
+    width: 36,
+    height: 36,
   },
   achievementContent: {
     flex: 1,
@@ -1271,6 +1371,20 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   claimableText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  shareHintBadge: {
+    backgroundColor: colors.accent,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  shareHintText: {
     fontSize: 10,
     fontWeight: '600',
     color: '#fff',

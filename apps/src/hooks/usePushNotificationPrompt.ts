@@ -29,6 +29,33 @@ export function usePushNotificationPrompt(): UsePushNotificationPromptReturn {
     console.log('[PushNotification] checkAndShowPrompt called');
     
     try {
+      // First check if we already have permission
+      const hasPermission = await pushNotificationService.hasPermission();
+      console.log('[PushNotification] Has permission:', hasPermission);
+      
+      if (hasPermission) {
+        // Permission already granted - ensure FCM token is registered for current user
+        console.log('[PushNotification] Permission already granted, ensuring FCM token is registered');
+        
+        // Get and save the FCM token for the current user
+        const token = await pushNotificationService.getAndSaveFCMToken();
+        if (token) {
+          console.log('[PushNotification] FCM token obtained and saved for current user');
+          
+          // Subscribe to topics
+          await pushNotificationService.subscribeToTopic('general');
+          await pushNotificationService.subscribeToTopic('transactions');
+          
+          // Also ensure messaging service is initialized
+          const { default: messagingService } = await import('../services/messagingService');
+          await messagingService.initialize();
+        }
+        
+        // Don't show modal since permission is already granted
+        return;
+      }
+      
+      // If no permission, check if we should show the prompt
       const shouldShow = await pushNotificationService.shouldShowPermissionPrompt();
       console.log('[PushNotification] Should show prompt:', shouldShow);
       
@@ -40,8 +67,6 @@ export function usePushNotificationPrompt(): UsePushNotificationPromptReturn {
         
         console.log('[PushNotification] Showing modal immediately');
         setShowModal(true);
-      } else {
-        console.log('[PushNotification] Not showing modal - permission already granted');
       }
     } catch (error) {
       console.error('[PushNotification] Error checking prompt status:', error);
@@ -63,6 +88,10 @@ export function usePushNotificationPrompt(): UsePushNotificationPromptReturn {
           // Subscribe to topics
           await pushNotificationService.subscribeToTopic('general');
           await pushNotificationService.subscribeToTopic('transactions');
+          
+          // Also ensure messaging service is initialized with the new permission
+          const { default: messagingService } = await import('../services/messagingService');
+          await messagingService.initialize();
         } else {
           console.log('[PushNotification] Permission was not granted');
           // Save denial status so we know to show settings prompt next time on iOS

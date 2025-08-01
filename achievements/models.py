@@ -101,8 +101,8 @@ class AchievementType(SoftDeleteModel):
             while AchievementType.objects.filter(slug=slug).exclude(pk=self.pk).exists():
                 slug = f"{base_slug}-{counter}"
                 counter += 1
-        
-        self.slug = slug
+            
+            self.slug = slug
         
         super().save(*args, **kwargs)
 

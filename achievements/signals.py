@@ -7,11 +7,51 @@ from django.db.models import Count, Q
 from .models import AchievementType, UserAchievement, InfluencerReferral, PioneroBetaTracker
 from p2p_exchange.models import P2PTrade
 from security.models import DeviceFingerprint, IPAddress, UserDevice
+from notifications.utils import create_notification
+from notifications.models import NotificationType as NotificationTypeChoices
 
 import logging
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
+
+
+def send_achievement_notification(user_achievement):
+    """
+    Send push notification when an achievement is earned
+    """
+    try:
+        # Create notification for achievement earned
+        notification = create_notification(
+            user=user_achievement.user,
+            notification_type=NotificationTypeChoices.ACHIEVEMENT_EARNED,
+            title=f"¡Logro Desbloqueado! {user_achievement.achievement_type.icon_emoji}",
+            message=f"Has ganado el logro: {user_achievement.achievement_type.name}",
+            data={
+                'achievement_id': str(user_achievement.id),
+                'achievement_slug': user_achievement.achievement_type.slug,
+                'achievement_name': user_achievement.achievement_type.name,
+                'confio_reward': str(user_achievement.achievement_type.confio_reward),
+                'icon_emoji': user_achievement.achievement_type.icon_emoji or '',
+            },
+            related_object_type='UserAchievement',
+            related_object_id=str(user_achievement.id),
+            action_url=f'confio://achievements/{user_achievement.achievement_type.slug}',
+            send_push=True
+        )
+        logger.info(f"Achievement notification sent for user {user_achievement.user.id}, achievement {user_achievement.achievement_type.slug}")
+    except Exception as e:
+        logger.error(f"Error sending achievement notification: {e}", exc_info=True)
+
+
+@receiver(post_save, sender=UserAchievement)
+def handle_achievement_earned(sender, instance, created, **kwargs):
+    """
+    Handle when a user achievement is created or updated
+    """
+    # Only send notification when achievement is newly earned
+    if instance.status == 'earned' and created:
+        send_achievement_notification(instance)
 
 
 @receiver(post_save, sender=User)
@@ -118,11 +158,15 @@ def handle_p2p_trade_achievements(sender, instance, created, **kwargs):
     if instance.deleted_at is not None:
         return
     
-    # Get both buyer and seller
+    # Get both buyer and seller - but ONLY if they're trading with personal accounts
     users_to_check = []
-    if instance.buyer_user:
+    
+    # Only add buyer_user if they're NOT using a business account
+    if instance.buyer_user and not instance.buyer_business:
         users_to_check.append(instance.buyer_user)
-    if instance.seller_user and instance.seller_user != instance.buyer_user:
+    
+    # Only add seller_user if they're NOT using a business account
+    if instance.seller_user and not instance.seller_business and instance.seller_user != instance.buyer_user:
         users_to_check.append(instance.seller_user)
     
     for user in users_to_check:
@@ -144,9 +188,12 @@ def handle_p2p_trade_achievements(sender, instance, created, **kwargs):
                 # Check if this user was referred and award referrer achievement
                 check_referral_achievement(user)
             
-            # Check for "10 Intercambios" achievement (only COMPLETED trades)
+            # Check for "10 Intercambios" achievement (only COMPLETED trades with personal accounts)
             trades_count = P2PTrade.objects.filter(
-                Q(buyer_user=user) | Q(seller_user=user),
+                (
+                    Q(buyer_user=user, buyer_business__isnull=True) | 
+                    Q(seller_user=user, seller_business__isnull=True)
+                ),
                 status='COMPLETED',  # Only count fully completed trades
                 deleted_at__isnull=True
             ).count()

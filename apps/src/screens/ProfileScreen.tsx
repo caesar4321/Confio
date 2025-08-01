@@ -244,22 +244,23 @@ export const ProfileScreen = () => {
         </View>
       </View>
 
-      {/* Achievements Card */}
-      <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Achievements')}>
-        <View style={styles.cardHeader}>
-          <View style={styles.cardTitleRow}>
-            <Icon name="award" size={20} color={colors.primary} />
-            <Text style={styles.cardTitle}>Logros</Text>
+      {/* Achievements Card - Only show for personal accounts */}
+      {activeAccount?.type.toLowerCase() !== 'business' && (
+        <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Achievements')}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleRow}>
+              <Icon name="award" size={20} color={colors.primary} />
+              <Text style={styles.cardTitle}>Logros</Text>
+            </View>
+            <View style={styles.achievementProgress}>
+              <Text style={styles.achievementProgressText}>
+                {(achievementsLoading || achievementTypesLoading) ? '...' : `${completedCount}/${totalAchievements}`}
+              </Text>
+              <Icon name="chevron-right" size={16} color="#9CA3AF" />
+            </View>
           </View>
-          <View style={styles.achievementProgress}>
-            <Text style={styles.achievementProgressText}>
-              {(achievementsLoading || achievementTypesLoading) ? '...' : `${completedCount}/${totalAchievements}`}
-            </Text>
-            <Icon name="chevron-right" size={16} color="#9CA3AF" />
-          </View>
-        </View>
-        <View style={styles.achievementPreview}>
-          {userAchievements.slice(0, 5).map((achievement, index) => (
+          <View style={styles.achievementPreview}>
+            {userAchievements.slice(0, 5).map((achievement, index) => (
             <View 
               key={achievement.id || index} 
               style={[
@@ -282,6 +283,7 @@ export const ProfileScreen = () => {
           )}
         </View>
       </TouchableOpacity>
+      )}
 
       {/* Account Management Card */}
       <View style={styles.card}>

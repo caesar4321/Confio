@@ -34,6 +34,7 @@ interface ShareAchievementModalProps {
     description: string;
     confioReward: number;
     category: string;
+    slug?: string;
   };
 }
 
@@ -47,6 +48,12 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
   const [trackTikTokShare] = useMutation(TRACK_TIKTOK_SHARE);
 
   const getShareMessage = () => {
+    // Check for specific achievement slugs first
+    if (achievement.slug === 'referido_exitoso') {
+      // Special message for sharing referral link (before earning the achievement)
+      return `💚 ¡Únete a Confío con mi invitación!\n\n🎁 Ambos ganaremos ${achievement.confioReward} $CONFIO cuando te registres y hagas tu primera transacción.\n\n📱 Descarga la app aquí:\n${SHARE_LINKS.campaigns.referral}\n\n¡La mejor forma de enviar dólares en Venezuela! 🚀\n\n${SHARE_LINKS.hashtags}`;
+    }
+    
     const baseMessage = `🎉 ¡Acabo de ganar ${achievement.confioReward} $CONFIO en la app Confío!`;
     
     const categoryMessages = {
@@ -204,21 +211,30 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>Compartir Logro</Text>
+          <Text style={styles.modalTitle}>
+            {achievement.slug === 'referido_exitoso' ? 'Invitar Amigos' : 'Compartir Logro'}
+          </Text>
           <Text style={styles.achievementName}>{achievement.name}</Text>
-          <Text style={styles.achievementReward}>{achievement.confioReward} $CONFIO</Text>
+          <Text style={styles.achievementReward}>
+            {achievement.slug === 'referido_exitoso' ? `Gana ${achievement.confioReward} $CONFIO por cada amigo` : `${achievement.confioReward} $CONFIO`}
+          </Text>
 
           <View style={styles.shareOptions}>
-            <TouchableOpacity style={styles.shareOption} onPress={handleTikTokShare}>
-              <Image source={require('../assets/png/TikTok.png')} style={styles.tiktokIcon} />
-              <Text style={styles.shareOptionText}>TikTok</Text>
-              <Text style={styles.shareOptionSubtext}>Gana vistas = Más $CONFIO</Text>
-            </TouchableOpacity>
+            {/* Only show TikTok option for earned achievements, not for pending referral */}
+            {achievement.slug !== 'referido_exitoso' && (
+              <TouchableOpacity style={styles.shareOption} onPress={handleTikTokShare}>
+                <Image source={require('../assets/png/TikTok.png')} style={styles.tiktokIcon} />
+                <Text style={styles.shareOptionText}>TikTok</Text>
+                <Text style={styles.shareOptionSubtext}>Gana vistas = Más $CONFIO</Text>
+              </TouchableOpacity>
+            )}
 
-            <TouchableOpacity style={styles.shareOption} onPress={handleWhatsAppShare}>
+            <TouchableOpacity style={[styles.shareOption, achievement.slug === 'referido_exitoso' && styles.shareOptionFull]} onPress={handleWhatsAppShare}>
               <WhatsAppIcon width={40} height={40} />
               <Text style={styles.shareOptionText}>WhatsApp</Text>
-              <Text style={styles.shareOptionSubtext}>Comparte con amigos</Text>
+              <Text style={styles.shareOptionSubtext}>
+                {achievement.slug === 'referido_exitoso' ? 'Invita amigos' : 'Comparte con amigos'}
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -291,6 +307,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f9fa',
     borderWidth: 1,
     borderColor: '#e9ecef',
+  },
+  shareOptionFull: {
+    flex: 0,
+    width: '100%',
   },
   tiktokIcon: {
     width: 40,

@@ -65,6 +65,9 @@ class NotificationTypeEnum(graphene.Enum):
     PROMOTION = 'PROMOTION'
     SYSTEM = 'SYSTEM'
     ANNOUNCEMENT = 'ANNOUNCEMENT'
+    
+    # Achievements
+    ACHIEVEMENT_EARNED = 'ACHIEVEMENT_EARNED'
 
 
 class NotificationType(DjangoObjectType):
@@ -217,16 +220,18 @@ class NotificationConnection(graphene.Connection):
                 # Note: We filter by user, which gives us all personal notifications
                 personal_query &= Q(business__isnull=True)
             
-            # Count unread personal notifications
+            # Count unread personal notifications (only from when user joined)
             personal_unread = Notification.objects.filter(
-                personal_query
+                personal_query,
+                created_at__gte=user.date_joined
             ).exclude(
                 id__in=read_notification_ids
             ).count()
             
-            # Count unread broadcast notifications
+            # Count unread broadcast notifications (only from when user joined)
             broadcast_unread = Notification.objects.filter(
-                is_broadcast=True
+                is_broadcast=True,
+                created_at__gte=user.date_joined
             ).exclude(
                 id__in=read_notification_ids
             ).count()
@@ -290,6 +295,9 @@ class Query(graphene.ObjectType):
         qs = Notification.objects.filter(
             personal_notifications | broadcast_notifications
         )
+        
+        # Only show notifications created after the user joined
+        qs = qs.filter(created_at__gte=user.date_joined)
         
         # Apply additional filters if provided
         if 'notification_type' in kwargs:
@@ -473,16 +481,18 @@ class Query(graphene.ObjectType):
                 business__isnull=True
             ).values_list('notification_id', flat=True)
         
-        # Count unread personal notifications
+        # Count unread personal notifications (only from when user joined)
         personal_unread = Notification.objects.filter(
-            personal_query
+            personal_query,
+            created_at__gte=user.date_joined
         ).exclude(
             id__in=read_notification_ids
         ).count()
         
-        # Count unread broadcast notifications
+        # Count unread broadcast notifications (only from when user joined)
         broadcast_unread = Notification.objects.filter(
-            is_broadcast=True
+            is_broadcast=True,
+            created_at__gte=user.date_joined
         ).exclude(
             id__in=read_notification_ids
         ).count()

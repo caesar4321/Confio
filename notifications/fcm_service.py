@@ -450,6 +450,7 @@ def should_send_push(prefs: NotificationPreference, notification_type: str) -> b
         'PROMOTION': 'push_promotions',
         'ANNOUNCEMENT': 'push_announcements',
         'BUSINESS': 'push_transactions',
+        'ACHIEVEMENT': 'push_promotions',  # Achievements under promotions
     }
     
     for prefix, pref_field in category_map.items():
@@ -471,6 +472,9 @@ def register_device_token(
     """
     Register or update an FCM device token
     
+    Multiple users can share the same FCM token (e.g., when users switch accounts on the same device).
+    The unique constraint is on (user, token) combination.
+    
     Args:
         user: User instance
         token: FCM token
@@ -482,13 +486,28 @@ def register_device_token(
     Returns:
         FCMDeviceToken instance
     """
-    # Update or create token
+    # First, deactivate any old tokens for this user on the same device
+    # This handles the case where a device gets a new FCM token
+    old_tokens = FCMDeviceToken.objects.filter(
+        user=user,
+        device_id=device_id
+    ).exclude(token=token)
+    
+    if old_tokens.exists():
+        logger.info(f"Deactivating {old_tokens.count()} old tokens for user {user.id} on device {device_id}")
+        old_tokens.update(
+            is_active=False,
+            updated_at=timezone.now()
+        )
+    
+    # Now register/update the token for this user
+    # Use (user, token) as the unique lookup
     device_token, created = FCMDeviceToken.objects.update_or_create(
         user=user,
-        device_id=device_id,
+        token=token,
         defaults={
-            'token': token,
             'device_type': device_type,
+            'device_id': device_id,
             'device_name': device_name or '',
             'app_version': app_version or '',
             'is_active': True,
@@ -499,16 +518,29 @@ def register_device_token(
         }
     )
     
-    if not created and device_token.token != token:
-        # Token changed for same device, update it
-        device_token.token = token
+    if not created:
+        # Token exists for this user, update device info if changed
+        if device_token.device_id != device_id:
+            logger.info(f"User {user.id} moved to different device: {device_token.device_id} -> {device_id}")
+        
+        device_token.device_id = device_id
+        device_token.device_type = device_type
+        device_token.device_name = device_name or device_token.device_name
+        device_token.app_version = app_version or device_token.app_version
         device_token.is_active = True
-        device_token.failure_count = 0
-        device_token.last_failure = None
-        device_token.last_failure_reason = ''
+        device_token.last_used = timezone.now()
         device_token.save()
     
-    logger.info(f"FCM token {'created' if created else 'updated'} for user {user.id}, device {device_id}")
+    logger.info(f"FCM token {'created' if created else 'updated'} for user {user.id}, device {device_id}, token ends with ...{token[-10:]}")
+    
+    # Check if other users are using this token
+    other_users_count = FCMDeviceToken.objects.filter(
+        token=token,
+        is_active=True
+    ).exclude(user=user).count()
+    
+    if other_users_count > 0:
+        logger.info(f"Token is shared with {other_users_count} other active user(s)")
     
     return device_token
 
