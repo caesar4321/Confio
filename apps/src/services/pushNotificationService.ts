@@ -12,6 +12,7 @@ export class PushNotificationService {
   private static instance: PushNotificationService;
   private isInitialized = false;
   private pendingNotification: FirebaseMessagingTypes.RemoteMessage | null = null;
+  private pendingAccountSwitch: string | null = null;
 
   private constructor() {}
 
@@ -26,10 +27,17 @@ export class PushNotificationService {
    * Process any pending notification navigation
    * This should be called after the app is fully initialized and authenticated
    */
-  processPendingNotification(): void {
+  async processPendingNotification(): Promise<void> {
     console.log('[PushNotificationService] processPendingNotification called', {
-      hasPending: !!this.pendingNotification
+      hasPending: !!this.pendingNotification,
+      hasPendingAccountSwitch: !!this.pendingAccountSwitch
     });
+    
+    // First handle any pending account switch
+    if (this.pendingAccountSwitch) {
+      await this.performAccountSwitch(this.pendingAccountSwitch);
+      this.pendingAccountSwitch = null;
+    }
     
     if (this.pendingNotification) {
       const notification = this.pendingNotification;
@@ -39,6 +47,45 @@ export class PushNotificationService {
       setTimeout(() => {
         this.handleNotificationNavigation(notification);
       }, 500);
+    }
+  }
+
+  /**
+   * Perform account switch with proper UI integration
+   */
+  private async performAccountSwitch(targetAccountId: string): Promise<void> {
+    try {
+      console.log('[PushNotificationService] Performing deferred account switch to:', targetAccountId);
+      
+      // Import AuthService and Apollo client for account switching
+      const { AuthService } = await import('./authService');
+      const { apolloClient } = await import('../apollo/client');
+      const authService = new AuthService();
+      
+      // Switch account with Apollo client
+      await authService.switchAccount(targetAccountId, apolloClient);
+      console.log('[PushNotificationService] Account switch completed');
+      
+      // Reset Apollo store to refresh all queries with new account context
+      try {
+        await apolloClient.resetStore();
+        console.log('[PushNotificationService] Apollo store reset after account switch');
+      } catch (error) {
+        console.error('[PushNotificationService] Error resetting Apollo store:', error);
+        // Fallback to cache eviction
+        try {
+          apolloClient.cache.evict({});
+          apolloClient.cache.gc();
+          console.log('[PushNotificationService] Cache evicted as fallback');
+        } catch (evictError) {
+          console.error('[PushNotificationService] Error evicting cache:', evictError);
+        }
+      }
+      
+      // Wait for account switch to propagate
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (error) {
+      console.error('[PushNotificationService] Error performing account switch:', error);
     }
   }
 
@@ -66,12 +113,11 @@ export class PushNotificationService {
       account_index
     });
     
-    // Check if we need to switch accounts before navigation
+    // Check if we need to switch accounts - defer the switch until app is ready
     if (account_context) {
       try {
-        // Import AuthService and Apollo client for account switching
+        // Import AuthService to check current context
         const { AuthService } = await import('./authService');
-        const { apolloClient } = await import('../apollo/client');
         const authService = new AuthService();
         
         // Get current active account context
@@ -94,7 +140,7 @@ export class PushNotificationService {
           if (needSwitch) {
             // Business account ID format: business_{businessId}_0
             targetAccountId = `business_${business_id}_0`;
-            console.log('[PushNotificationService] Need to switch to business account:', targetAccountId);
+            console.log('[PushNotificationService] Will defer switch to business account:', targetAccountId);
           }
         } else if (account_context === 'personal') {
           // Check if current account is a personal account
@@ -104,38 +150,18 @@ export class PushNotificationService {
             // Personal account ID format: personal_{index}
             const index = account_index || '0';
             targetAccountId = `personal_${index}`;
-            console.log('[PushNotificationService] Need to switch to personal account:', targetAccountId);
+            console.log('[PushNotificationService] Will defer switch to personal account:', targetAccountId);
           }
         }
         
-        // Perform the switch if needed
+        // Store the account switch for later execution when app is fully ready
         if (needSwitch && targetAccountId) {
-          console.log('[PushNotificationService] Switching to account:', targetAccountId);
-          await authService.switchAccount(targetAccountId, apolloClient);
-          console.log('[PushNotificationService] Account switch completed');
-          
-          // Reset Apollo store to refresh all queries with new account context
-          try {
-            await apolloClient.resetStore();
-            console.log('[PushNotificationService] Apollo store reset after account switch');
-          } catch (error) {
-            console.error('[PushNotificationService] Error resetting Apollo store:', error);
-            // Fallback to cache eviction
-            try {
-              apolloClient.cache.evict({});
-              apolloClient.cache.gc();
-              console.log('[PushNotificationService] Cache evicted as fallback');
-            } catch (evictError) {
-              console.error('[PushNotificationService] Error evicting cache:', evictError);
-            }
-          }
-          
-          // Wait a bit for account switch to propagate
-          await new Promise(resolve => setTimeout(resolve, 500));
+          console.log('[PushNotificationService] Storing pending account switch:', targetAccountId);
+          this.pendingAccountSwitch = targetAccountId;
         }
       } catch (error) {
-        console.error('[PushNotificationService] Error switching accounts:', error);
-        // Continue with navigation even if account switch fails
+        console.error('[PushNotificationService] Error checking account context:', error);
+        // Continue with navigation even if account check fails
       }
     }
     

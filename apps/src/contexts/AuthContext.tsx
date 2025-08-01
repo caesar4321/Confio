@@ -94,8 +94,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     // After navigating to Main, process any pending push notifications
     if (screenName === 'Main') {
       console.log('[AuthContext] Navigated to Main, processing pending notifications...');
-      setTimeout(() => {
-        pushNotificationService.processPendingNotification();
+      setTimeout(async () => {
+        await pushNotificationService.processPendingNotification();
       }, 1000); // Give time for Main navigator to mount
     }
   };
