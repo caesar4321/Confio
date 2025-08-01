@@ -498,11 +498,10 @@ class MessagingService {
     // Check if we need to switch accounts
     if (accountContext) {
       try {
-        // Import AuthService and AccountManager for account switching
+        // Import AuthService and Apollo client for account switching
         const { AuthService } = await import('./authService');
-        const { AccountManager } = await import('../utils/accountManager');
+        const { apolloClient } = await import('../apollo/client');
         const authService = new AuthService();
-        const accountManager = AccountManager.getInstance();
         
         // Get current active account context
         const currentContext = await authService.getActiveAccountContext();
@@ -541,12 +540,26 @@ class MessagingService {
         // Perform the switch if needed
         if (needSwitch && targetAccountId) {
           console.log('[MessagingService] Switching to account:', targetAccountId);
-          await authService.switchAccount(targetAccountId);
+          await authService.switchAccount(targetAccountId, apolloClient);
           console.log('[MessagingService] Account switch completed');
-        }
-        
-        // Wait a bit for account switch to propagate
-        if (needSwitch) {
+          
+          // Reset Apollo store to refresh all queries with new account context
+          try {
+            await apolloClient.resetStore();
+            console.log('[MessagingService] Apollo store reset after account switch');
+          } catch (error) {
+            console.error('[MessagingService] Error resetting Apollo store:', error);
+            // Fallback to cache eviction
+            try {
+              apolloClient.cache.evict({});
+              apolloClient.cache.gc();
+              console.log('[MessagingService] Cache evicted as fallback');
+            } catch (evictError) {
+              console.error('[MessagingService] Error evicting cache:', evictError);
+            }
+          }
+          
+          // Wait a bit for account switch to propagate
           await new Promise(resolve => setTimeout(resolve, 500));
         }
       } catch (error) {

@@ -69,8 +69,9 @@ export class PushNotificationService {
     // Check if we need to switch accounts before navigation
     if (account_context) {
       try {
-        // Import AuthService for account switching
+        // Import AuthService and Apollo client for account switching
         const { AuthService } = await import('./authService');
+        const { apolloClient } = await import('../apollo/client');
         const authService = new AuthService();
         
         // Get current active account context
@@ -110,12 +111,26 @@ export class PushNotificationService {
         // Perform the switch if needed
         if (needSwitch && targetAccountId) {
           console.log('[PushNotificationService] Switching to account:', targetAccountId);
-          await authService.switchAccount(targetAccountId);
+          await authService.switchAccount(targetAccountId, apolloClient);
           console.log('[PushNotificationService] Account switch completed');
-        }
-        
-        // Wait a bit for account switch to propagate
-        if (needSwitch) {
+          
+          // Reset Apollo store to refresh all queries with new account context
+          try {
+            await apolloClient.resetStore();
+            console.log('[PushNotificationService] Apollo store reset after account switch');
+          } catch (error) {
+            console.error('[PushNotificationService] Error resetting Apollo store:', error);
+            // Fallback to cache eviction
+            try {
+              apolloClient.cache.evict({});
+              apolloClient.cache.gc();
+              console.log('[PushNotificationService] Cache evicted as fallback');
+            } catch (evictError) {
+              console.error('[PushNotificationService] Error evicting cache:', evictError);
+            }
+          }
+          
+          // Wait a bit for account switch to propagate
           await new Promise(resolve => setTimeout(resolve, 500));
         }
       } catch (error) {
