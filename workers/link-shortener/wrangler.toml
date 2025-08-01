@@ -13,11 +13,11 @@ routes = [
 # KV namespaces for storing link data
 [[kv_namespaces]]
 binding = "LINKS"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "6c2befc8ea7e41f9a755a2c84a8fe0cf"
 
 [[kv_namespaces]]
 binding = "ANALYTICS"
-id = "YOUR_ANALYTICS_KV_ID"
+id = "dffde50153144ae1ad733007e1d01991"
 
 # Environment variables
 [vars]
