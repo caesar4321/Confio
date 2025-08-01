@@ -1,0 +1,23 @@
+{
+  "name": "confio-link-shortener",
+  "version": "1.0.0",
+  "description": "Cloudflare Workers link shortener for Confio WhatsApp share links",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "tsc",
+    "deploy": "npm run build && wrangler deploy",
+    "tail": "wrangler tail",
+    "format": "prettier --write \"src/**/*.ts\""
+  },
+  "keywords": ["cloudflare-workers", "link-shortener", "confio"],
+  "author": "Confio Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240117.0",
+    "prettier": "^3.2.4",
+    "typescript": "^5.3.3",
+    "wrangler": "^3.22.4"
+  },
+  "dependencies": {}
+}
