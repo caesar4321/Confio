@@ -44,6 +44,8 @@ class MessagingService {
 
   async initialize(forceTokenRefresh: boolean = false) {
     try {
+      console.log(`[MessagingService] Initializing with forceTokenRefresh=${forceTokenRefresh}`);
+      
       // Check current permission status
       const authStatus = await messaging().hasPermission();
       const enabled =
@@ -51,7 +53,7 @@ class MessagingService {
         authStatus === messaging.AuthorizationStatus.PROVISIONAL;
 
       if (!enabled) {
-        console.log('Notification permission not granted, skipping initialization');
+        console.log('[MessagingService] Notification permission not granted, skipping initialization');
         return;
       }
 
@@ -62,17 +64,12 @@ class MessagingService {
 
       // Get or generate device ID
       this.deviceId = await this.getOrCreateDeviceId();
+      console.log(`[MessagingService] Using device ID: ${this.deviceId}`);
 
-      // Always register FCM token for the current user if they have permission
-      // This ensures new users on devices with existing permissions get registered
-      if (forceTokenRefresh || !this.fcmToken) {
-        await this.getFCMToken();
-      } else {
-        // Even if we have a token, re-register it for the current user
-        // This handles the case where a new user logs in on the same device
-        console.log('Re-registering existing FCM token for current user');
-        await this.registerToken(this.fcmToken);
-      }
+      // Always get a fresh token and register it for the current user
+      // This is crucial for multi-user support on the same device
+      console.log('[MessagingService] Getting FCM token for current user...');
+      await this.getFCMToken();
 
       // Set up message handlers only once
       if (!this.messageHandlersSetup) {
@@ -85,9 +82,9 @@ class MessagingService {
         this.channelCreated = true;
       }
 
-      console.log('Messaging service initialized');
+      console.log('[MessagingService] Initialization complete');
     } catch (error) {
-      console.error('Error initializing messaging service:', error);
+      console.error('[MessagingService] Error during initialization:', error);
     }
   }
 
@@ -215,6 +212,53 @@ class MessagingService {
       console.log('FCM token unregistered successfully');
     } catch (error) {
       console.error('Error unregistering FCM token:', error);
+    }
+  }
+
+  async ensureTokenRegisteredForCurrentUser() {
+    try {
+      console.log('[MessagingService] Ensuring token is registered for current user...');
+      
+      // Check if we have permission
+      const authStatus = await messaging().hasPermission();
+      const enabled =
+        authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+        authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+
+      if (!enabled) {
+        console.log('[MessagingService] No notification permission, skipping token registration');
+        return false;
+      }
+
+      // Get device ID
+      if (!this.deviceId) {
+        this.deviceId = await this.getOrCreateDeviceId();
+      }
+
+      // Get current FCM token from Firebase
+      const currentToken = await messaging().getToken();
+      if (!currentToken) {
+        console.log('[MessagingService] No FCM token available');
+        return false;
+      }
+
+      // Register the token for the current user
+      console.log('[MessagingService] Registering FCM token for current user...');
+      await this.registerToken(currentToken);
+      
+      // Store the token locally
+      this.fcmToken = currentToken;
+      await Keychain.setInternetCredentials(
+        FCM_TOKEN_SERVICE,
+        'fcm_token',
+        currentToken
+      );
+
+      console.log('[MessagingService] Token successfully registered for current user');
+      return true;
+    } catch (error) {
+      console.error('[MessagingService] Error ensuring token registration:', error);
+      return false;
     }
   }
 
