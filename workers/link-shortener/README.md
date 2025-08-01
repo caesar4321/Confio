@@ -22,6 +22,19 @@ A Cloudflare Workers-based link shortener for Confio's WhatsApp share links duri
    - Desktop → Landing page with campaign data
 5. **Post-Install**: App reads referral data and navigates to achievements
 
+## Admin Panel
+
+Access the admin panel at: https://confio.lat/admin
+
+- **Username**: admin
+- **Password**: confio2024
+
+The admin panel allows you to:
+- Create short links with custom slugs
+- View link statistics and click analytics
+- Track platform distribution (iOS/Android/Desktop)
+- Monitor campaign performance
+
 ## API Endpoints
 
 ### Create Link

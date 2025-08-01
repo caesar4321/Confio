@@ -7,6 +7,8 @@ export interface Env {
   TESTFLIGHT_URL: string;
   PLAY_STORE_URL: string;
   LANDING_PAGE_URL: string;
+  ADMIN_USERNAME: string;
+  ADMIN_PASSWORD: string;
 }
 
 interface LinkData {
@@ -70,7 +72,27 @@ export default {
     
     // Handle admin UI
     if (url.pathname === '/admin' || url.pathname === '/admin/') {
-      return Response.redirect('https://confio-admin.pages.dev/admin.html', 302);
+      // Check basic auth
+      const authHeader = request.headers.get('Authorization');
+      const expectedAuth = 'Basic ' + btoa(`${env.ADMIN_USERNAME}:${env.ADMIN_PASSWORD}`);
+      
+      if (authHeader !== expectedAuth) {
+        return new Response('Unauthorized', {
+          status: 401,
+          headers: {
+            'WWW-Authenticate': 'Basic realm="Admin Panel"'
+          }
+        });
+      }
+      
+      // Serve admin HTML directly
+      const adminHTML = await getAdminHTML();
+      return new Response(adminHTML, {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-cache'
+        }
+      });
     }
     
     // Handle root domain
@@ -277,4 +299,291 @@ function generateSlug(length: number = 6): string {
     slug += chars[Math.floor(Math.random() * chars.length)];
   }
   return slug;
+}
+
+async function getAdminHTML(): Promise<string> {
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confio Link Admin</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #34d399;
+            margin-bottom: 30px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+        
+        button {
+            background: #34d399;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #2dc385;
+        }
+        
+        .result {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f0fdf4;
+            border: 1px solid #34d399;
+            border-radius: 6px;
+            display: none;
+        }
+        
+        .link-display {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .link-url {
+            flex: 1;
+            padding: 10px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-family: monospace;
+        }
+        
+        .copy-btn {
+            background: #6b7280;
+        }
+        
+        .copy-btn:hover {
+            background: #4b5563;
+        }
+        
+        .stats {
+            margin-top: 40px;
+        }
+        
+        .stat-item {
+            background: #f9fafb;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+        
+        .error {
+            color: #dc2626;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔗 Confio Link Manager</h1>
+        
+        <form id="linkForm">
+            <div class="form-group">
+                <label for="type">Tipo de enlace</label>
+                <select id="type" required>
+                    <option value="referral">Referido (48h window)</option>
+                    <option value="influencer">Influencer TikTok</option>
+                    <option value="achievement">Logro específico</option>
+                    <option value="deeplink">Deep link general</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="payload">Payload (datos del enlace)</label>
+                <input type="text" id="payload" placeholder="ej: tiktok|@usuario123" required>
+                <small style="color: #6b7280;">Formato: tipo|identificador</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="slug">Slug personalizado (opcional)</label>
+                <input type="text" id="slug" placeholder="ej: promo2024" pattern="[a-zA-Z0-9]{4,10}">
+                <small style="color: #6b7280;">4-10 caracteres alfanuméricos. Se genera automáticamente si se deja vacío.</small>
+            </div>
+            
+            <div class="form-group">
+                <label for="metadata">Metadata (JSON opcional)</label>
+                <textarea id="metadata" rows="3" placeholder='{"campaign": "whatsapp-beta", "creator": "marketing"}'></textarea>
+            </div>
+            
+            <button type="submit">Crear enlace corto</button>
+        </form>
+        
+        <div id="result" class="result">
+            <h3>✅ ¡Enlace creado!</h3>
+            <div class="link-display">
+                <input type="text" class="link-url" id="shortUrl" readonly>
+                <button class="copy-btn" onclick="copyLink()">Copiar</button>
+            </div>
+            <p style="margin-top: 10px; color: #6b7280;">
+                Este enlace detectará automáticamente la plataforma del usuario y lo redirigirá apropiadamente.
+            </p>
+        </div>
+        
+        <div id="error" class="error"></div>
+        
+        <div class="stats">
+            <h2>📊 Verificar estadísticas</h2>
+            <div class="form-group">
+                <label for="checkSlug">Slug a verificar</label>
+                <input type="text" id="checkSlug" placeholder="ej: promo2024">
+            </div>
+            <button onclick="checkStats()">Ver estadísticas</button>
+            
+            <div id="statsResult" style="margin-top: 20px;"></div>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = window.location.origin + '/api';
+        
+        document.getElementById('linkForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const type = document.getElementById('type').value;
+            const payload = document.getElementById('payload').value;
+            const slug = document.getElementById('slug').value;
+            const metadataStr = document.getElementById('metadata').value;
+            
+            let metadata = {};
+            if (metadataStr) {
+                try {
+                    metadata = JSON.parse(metadataStr);
+                } catch (err) {
+                    showError('Metadata JSON inválido');
+                    return;
+                }
+            }
+            
+            try {
+                const response = await fetch(\`\${API_BASE}/links\`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type,
+                        payload,
+                        slug: slug || undefined,
+                        metadata
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('shortUrl').value = data.shortUrl;
+                    document.getElementById('result').style.display = 'block';
+                    document.getElementById('error').textContent = '';
+                    document.getElementById('linkForm').reset();
+                } else {
+                    showError(data.error || 'Error al crear el enlace');
+                }
+            } catch (err) {
+                showError('Error de conexión');
+            }
+        });
+        
+        function copyLink() {
+            const urlInput = document.getElementById('shortUrl');
+            urlInput.select();
+            document.execCommand('copy');
+            
+            const btn = event.target;
+            const originalText = btn.textContent;
+            btn.textContent = '¡Copiado!';
+            setTimeout(() => {
+                btn.textContent = originalText;
+            }, 2000);
+        }
+        
+        async function checkStats() {
+            const slug = document.getElementById('checkSlug').value;
+            if (!slug) return;
+            
+            try {
+                const response = await fetch(\`\${API_BASE}/links/\${slug}\`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const statsHtml = \`
+                        <div class="stat-item">
+                            <strong>URL:</strong> \${data.shortUrl}<br>
+                            <strong>Tipo:</strong> \${data.data.type}<br>
+                            <strong>Payload:</strong> \${data.data.payload}<br>
+                            <strong>Clicks:</strong> \${data.data.clicks}<br>
+                            <strong>Creado:</strong> \${new Date(data.data.createdAt).toLocaleString()}<br>
+                            \${data.data.metadata ? \`<strong>Metadata:</strong> \${JSON.stringify(data.data.metadata)}\` : ''}
+                        </div>
+                        <h3>Últimos clicks:</h3>
+                        \${data.recentClicks.map(click => \`
+                            <div class="stat-item">
+                                \${new Date(click.timestamp).toLocaleString()} - 
+                                \${click.platform} - 
+                                \${click.country}
+                            </div>
+                        \`).join('')}
+                    \`;
+                    document.getElementById('statsResult').innerHTML = statsHtml;
+                } else {
+                    document.getElementById('statsResult').innerHTML = 
+                        \`<div class="error">Enlace no encontrado</div>\`;
+                }
+            } catch (err) {
+                document.getElementById('statsResult').innerHTML = 
+                    \`<div class="error">Error al cargar estadísticas</div>\`;
+            }
+        }
+        
+        function showError(message) {
+            document.getElementById('error').textContent = message;
+            document.getElementById('result').style.display = 'none';
+        }
+    </script>
+</body>
+</html>`;
 }
