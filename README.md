@@ -44,6 +44,7 @@ Confío helps people access stable dollars, send remittances, and pay each other
 | Database        | PostgreSQL                    |
 | ASGI Server     | Daphne                        |
 | CI/CD           | Cloudflare Pages              |
+| Link Shortener  | Cloudflare Workers + KV       |
 
 ## 🔒 What Confío Is Not
 
@@ -242,6 +243,18 @@ This is a **monolithic repository** containing the full Confío stack:
 │       │   └── confio.move            # CONFIO governance token implementation
 │       ├── Move.toml # Package configuration
 │       └── Move.lock # Dependency lock file
+
+├── workers/           # Cloudflare Workers services
+│   └── link-shortener/  # Link shortener for WhatsApp share links
+│       ├── src/
+│       │   └── index.ts  # Worker code for platform detection and redirects
+│       ├── public/
+│       │   └── admin.html  # Admin UI for link management
+│       ├── wrangler.toml   # Cloudflare Workers configuration
+│       ├── tsconfig.json   # TypeScript configuration
+│       ├── package.json    # Node.js dependencies
+│       ├── README.md       # Link shortener documentation
+│       └── DEPLOY.md       # Deployment instructions
 
 ├── manage.py          # Django management script
 ├── requirements.txt   # Python dependencies
@@ -511,6 +524,43 @@ function MyComponent() {
 **React Hook** (`apps/src/hooks/useAccountManager.ts`)
 - Provides easy access to account management in React components
 - Handles account state and operations
+
+## 🔗 Link Shortener (WhatsApp Share Links)
+
+Confío uses a custom Cloudflare Workers-based link shortener for WhatsApp share links during closed-beta (TestFlight). This replaces expensive third-party services with a cost-effective solution.
+
+### Features
+- **Short Links**: Generate links like `confio.lat/abc123`
+- **Platform Detection**: Automatically detects iOS/Android/Desktop
+- **Smart Redirects**:
+  - iOS → TestFlight with referral data
+  - Android → Play Store with referrer parameter
+  - Desktop → Landing page with campaign data
+- **Deferred Deep Linking**: Post-install attribution with 48-hour window
+- **Analytics**: Track clicks, platforms, and countries
+- **Cost-Effective**: Free tier covers most usage (vs $1,200/month Branch.io)
+
+### Implementation
+
+#### Worker Service (`/workers/link-shortener/`)
+- **Platform Detection**: User-agent based platform detection
+- **API Endpoints**: Create links, get statistics
+- **KV Storage**: Stores link data and analytics
+- **Admin UI**: Web interface for link management
+
+#### React Native Integration (`/apps/src/utils/deepLinkHandler.ts`)
+- **Deep Link Handler**: Processes incoming links
+- **Deferred Links**: Stores links for post-login processing
+- **Secure Storage**: Uses react-native-keychain for deferred links
+- **Navigation**: Routes users to appropriate screens
+
+### Deployment
+See `/workers/link-shortener/DEPLOY.md` for detailed deployment instructions. Key steps:
+1. Create Cloudflare KV namespaces
+2. Configure environment variables
+3. Deploy with `wrangler deploy`
+4. Set up custom domain routing
+5. Configure iOS Universal Links
 - Syncs with server-provided account data
 
 #### Usage Examples
