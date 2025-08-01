@@ -15,7 +15,6 @@ export class PushNotificationService {
   private pendingAccountSwitch: string | null = null;
   public static pendingAccountSwitchGlobal: string | null = null;
   private static pendingNavigationAfterSwitch: (() => void) | null = null;
-  public static pendingSwitchTimestamp: number = 0;
 
   private constructor() {}
 
@@ -40,13 +39,6 @@ export class PushNotificationService {
   static clearPendingAccountSwitch(): void {
     console.log('[PushNotificationService] Clearing pending account switch');
     PushNotificationService.pendingAccountSwitchGlobal = null;
-  }
-
-  /**
-   * Get pending switch timestamp
-   */
-  static getPendingSwitchTimestamp(): number {
-    return PushNotificationService.pendingSwitchTimestamp;
   }
 
   /**
@@ -151,10 +143,12 @@ export class PushNotificationService {
         
         // Store the account switch for later execution when app is fully ready
         if (needSwitch && targetAccountId) {
-          console.log('[PushNotificationService] Storing pending account switch:', targetAccountId);
+          console.log('[PushNotificationService] Storing pending account switch:', {
+            targetAccountId,
+            needSwitch
+          });
           this.pendingAccountSwitch = targetAccountId;
           PushNotificationService.pendingAccountSwitchGlobal = targetAccountId;
-          PushNotificationService.pendingSwitchTimestamp = Date.now();
           
           // Store the navigation to execute after account switch
           PushNotificationService.pendingNavigationAfterSwitch = () => {
