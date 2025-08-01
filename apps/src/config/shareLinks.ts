@@ -2,9 +2,11 @@
 export const SHARE_LINKS = {
   // Campaign links for different share contexts
   campaigns: {
-    beta: 'https://confio.lat/wa-beta',
+    beta: 'https://confio.lat/wa',
     referral: 'https://confio.lat/wa-ref', 
     tiktok: 'https://confio.lat/wa-tiktok',
+    tiktokCreator: 'https://confio.lat/tiktok',
+    telegram: 'https://confio.lat/telegram',
   },
   
   // App store links (update these when live)
@@ -34,12 +36,16 @@ export const SHARE_LINKS = {
 };
 
 // Helper function to get the appropriate share link based on context
-export const getShareLink = (context: 'beta' | 'referral' | 'tiktok' | 'general' = 'beta') => {
+export const getShareLink = (context: 'beta' | 'referral' | 'tiktok' | 'tiktokCreator' | 'telegram' | 'general' = 'beta') => {
   switch (context) {
     case 'referral':
       return SHARE_LINKS.campaigns.referral;
     case 'tiktok':
       return SHARE_LINKS.campaigns.tiktok;
+    case 'tiktokCreator':
+      return SHARE_LINKS.campaigns.tiktokCreator;
+    case 'telegram':
+      return SHARE_LINKS.campaigns.telegram;
     case 'beta':
     case 'general':
     default:

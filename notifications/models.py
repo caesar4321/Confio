@@ -53,6 +53,9 @@ class NotificationType(models.TextChoices):
     BUSINESS_EMPLOYEE_REMOVED = 'BUSINESS_EMPLOYEE_REMOVED', 'Removed from Business'
     BUSINESS_PERMISSION_CHANGED = 'BUSINESS_PERMISSION_CHANGED', 'Business Permissions Changed'
     
+    # Achievements
+    ACHIEVEMENT_EARNED = 'ACHIEVEMENT_EARNED', 'Achievement Earned'
+    
     # General
     PROMOTION = 'PROMOTION', 'Promotion'
     SYSTEM = 'SYSTEM', 'System Notification'
@@ -156,9 +159,13 @@ class NotificationPreference(models.Model):
 
 
 class FCMDeviceToken(models.Model):
-    """Store FCM device tokens for push notifications"""
+    """Store FCM device tokens for push notifications
+    
+    A single device token can be associated with multiple users,
+    allowing the same device to receive notifications for different accounts.
+    """
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='fcm_tokens')
-    token = models.TextField(unique=True)
+    token = models.TextField(help_text='FCM token - can be shared by multiple users')
     
     # Device information
     device_type = models.CharField(max_length=20, choices=[
@@ -184,11 +191,11 @@ class FCMDeviceToken(models.Model):
     
     class Meta:
         indexes = [
-            models.Index(fields=['user', 'is_active']),
-            models.Index(fields=['token']),
+            models.Index(fields=['user', 'is_active'], name='fcm_user_active_idx'),
+            models.Index(fields=['token', 'is_active'], name='fcm_token_active_idx'),
             models.Index(fields=['device_id']),
         ]
-        unique_together = ['user', 'device_id']
+        unique_together = ['user', 'token']
     
     def __str__(self):
         return f"FCM Token - {self.user.email} - {self.device_type} - {'Active' if self.is_active else 'Inactive'}"

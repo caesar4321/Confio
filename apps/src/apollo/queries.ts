@@ -184,8 +184,8 @@ export const INITIATE_TELEGRAM_VERIFICATION = gql`
 `;
 
 export const VERIFY_TELEGRAM_CODE = gql`
-  mutation VerifyTelegramCode($requestId: String!, $code: String!) {
-    verifyTelegramCode(requestId: $requestId, code: $code) {
+  mutation VerifyTelegramCode($phoneNumber: String!, $countryCode: String!, $code: String!) {
+    verifyTelegramCode(phoneNumber: $phoneNumber, countryCode: $countryCode, code: $code) {
       success
       error
     }
