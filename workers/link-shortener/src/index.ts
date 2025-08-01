@@ -109,8 +109,8 @@ export default {
     // Extract slug from path
     const slug = url.pathname.slice(1).split('/')[0];
     
-    // Validate slug format (alphanumeric, 4-10 chars)
-    if (!slug || !/^[a-zA-Z0-9]{4,10}$/.test(slug)) {
+    // Validate slug format (alphanumeric with hyphens, 4-20 chars)
+    if (!slug || !/^[a-zA-Z0-9-]{4,20}$/.test(slug)) {
       return new Response('Invalid link', { status: 404 });
     }
     
@@ -449,8 +449,8 @@ async function getAdminHTML(): Promise<string> {
             
             <div class="form-group">
                 <label for="slug">Slug personalizado (opcional)</label>
-                <input type="text" id="slug" placeholder="ej: promo2024" pattern="[a-zA-Z0-9]{4,10}">
-                <small style="color: #6b7280;">4-10 caracteres alfanuméricos. Se genera automáticamente si se deja vacío.</small>
+                <input type="text" id="slug" placeholder="ej: promo2024" pattern="[a-zA-Z0-9-]{4,20}">
+                <small style="color: #6b7280;">4-20 caracteres alfanuméricos y guiones. Se genera automáticamente si se deja vacío.</small>
             </div>
             
             <div class="form-group">
