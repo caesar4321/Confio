@@ -15,6 +15,7 @@ import { MainNavigator } from './navigation/MainNavigator';
 import { RootStackParamList } from './types/navigation';
 import { initializeApp } from './services/appInitializer';
 import messagingService from './services/messagingService';
+import { pushNotificationService } from './services/pushNotificationService';
 import { navigationRef } from './navigation/RootNavigation';
 import { initializeNotifee } from './services/notifeeConfig';
 
@@ -43,6 +44,12 @@ const Navigation: React.FC = () => {
       console.log('[App] User authenticated, initializing messaging service...');
       messagingService.initialize(true).catch(error => {
         console.error('Failed to initialize messaging service:', error);
+      });
+      
+      // Initialize push notification service
+      console.log('[App] Initializing push notification service...');
+      pushNotificationService.initialize().catch(error => {
+        console.error('Failed to initialize push notification service:', error);
       });
       
       // Also ensure token is registered for the current user

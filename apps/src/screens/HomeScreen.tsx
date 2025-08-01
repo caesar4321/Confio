@@ -591,30 +591,38 @@ export const HomeScreen = () => {
   // Check for pending account switch from push notification
   useFocusEffect(
     useCallback(() => {
-      const pendingSwitch = PushNotificationService.getPendingAccountSwitch();
-      if (pendingSwitch && handleAccountSwitch) {
-        console.log('HomeScreen - Found pending account switch:', pendingSwitch);
-        PushNotificationService.clearPendingAccountSwitch();
+      const checkPendingSwitch = async () => {
+        const pendingSwitch = PushNotificationService.getPendingAccountSwitch();
+        const pendingNavigation = PushNotificationService.getPendingNavigation();
         
-        // Use the existing handleAccountSwitch function with delay
-        setTimeout(async () => {
-          const success = await handleAccountSwitch(pendingSwitch);
+        // Only process if we have BOTH a pending switch AND navigation
+        // This ensures we're coming from a push notification context
+        if (pendingSwitch && pendingNavigation && handleAccountSwitch) {
+          console.log('HomeScreen - Found pending account switch from push notification:', pendingSwitch);
+          PushNotificationService.clearPendingAccountSwitch();
           
-          // After successful account switch, execute pending navigation
-          if (success) {
-            const pendingNavigation = PushNotificationService.getPendingNavigation();
-            if (pendingNavigation) {
-              console.log('HomeScreen - Executing pending navigation after account switch');
+          // Use the existing handleAccountSwitch function with delay
+          setTimeout(async () => {
+            const success = await handleAccountSwitch(pendingSwitch);
+            
+            // After successful account switch, execute pending navigation
+            if (success) {
+              console.log('HomeScreen - Account switch successful, executing pending navigation');
               PushNotificationService.clearPendingNavigation();
               
               // Wait a bit for the account switch to fully propagate
               setTimeout(() => {
                 pendingNavigation();
               }, 1000);
+            } else {
+              console.log('HomeScreen - Account switch failed, clearing pending navigation');
+              PushNotificationService.clearPendingNavigation();
             }
-          }
-        }, 1000); // Delay to ensure UI is ready and avoid conflicts
-      }
+          }, 1000); // Delay to ensure UI is ready and avoid conflicts
+        }
+      };
+      
+      checkPendingSwitch();
     }, [handleAccountSwitch])
   );
 
