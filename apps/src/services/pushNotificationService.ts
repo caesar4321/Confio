@@ -14,6 +14,7 @@ export class PushNotificationService {
   private pendingNotification: FirebaseMessagingTypes.RemoteMessage | null = null;
   private pendingAccountSwitch: string | null = null;
   public static pendingAccountSwitchGlobal: string | null = null;
+  private static pendingNavigationAfterSwitch: (() => void) | null = null;
 
   private constructor() {}
 
@@ -36,6 +37,20 @@ export class PushNotificationService {
    */
   static clearPendingAccountSwitch(): void {
     PushNotificationService.pendingAccountSwitchGlobal = null;
+  }
+
+  /**
+   * Get pending navigation
+   */
+  static getPendingNavigation(): (() => void) | null {
+    return PushNotificationService.pendingNavigationAfterSwitch;
+  }
+
+  /**
+   * Clear pending navigation
+   */
+  static clearPendingNavigation(): void {
+    PushNotificationService.pendingNavigationAfterSwitch = null;
   }
 
   /**
@@ -129,12 +144,42 @@ export class PushNotificationService {
           console.log('[PushNotificationService] Storing pending account switch:', targetAccountId);
           this.pendingAccountSwitch = targetAccountId;
           PushNotificationService.pendingAccountSwitchGlobal = targetAccountId;
+          
+          // Store the navigation to execute after account switch
+          PushNotificationService.pendingNavigationAfterSwitch = () => {
+            console.log('[PushNotificationService] Executing deferred navigation after account switch');
+            this.performDeferredNavigation(remoteMessage);
+          };
+          
+          // Navigate to HomeScreen first to trigger account switch
+          console.log('[PushNotificationService] Navigating to HomeScreen for account switch');
+          if (RootNavigation.navigationRef.isReady()) {
+            RootNavigation.navigationRef.navigate('Main' as never, {
+              screen: 'BottomTabs',
+              params: {
+                screen: 'Home'
+              }
+            } as never);
+          }
+          
+          // Don't continue with normal navigation
+          return;
         }
       } catch (error) {
         console.error('[PushNotificationService] Error checking account context:', error);
         // Continue with navigation even if account check fails
       }
     }
+    
+    // No account switch needed, proceed with normal navigation
+    this.performDeferredNavigation(remoteMessage);
+  }
+
+  /**
+   * Perform the actual navigation
+   */
+  private performDeferredNavigation(remoteMessage: FirebaseMessagingTypes.RemoteMessage): void {
+    const { action_url, extra_type, extra_transactionType, notification_type } = remoteMessage.data;
     
     // Wait for navigation to be ready
     const attemptNavigation = () => {

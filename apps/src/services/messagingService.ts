@@ -466,8 +466,8 @@ class MessagingService {
     }
   }
 
-  private async handleNotificationData(data: any) {
-    console.log('[MessagingService] handleNotificationData called with:', data);
+  private async handleNotificationData(data: any, skipAccountCheck: boolean = false) {
+    console.log('[MessagingService] handleNotificationData called with:', data, { skipAccountCheck });
     
     // LEGACY FORMAT DETECTION:
     // Handle old push notifications that may have been sent with the previous screen name.
@@ -497,7 +497,7 @@ class MessagingService {
     
     // For foreground notifications, also defer account switching
     // to avoid conflicts with UI state
-    if (accountContext) {
+    if (accountContext && !skipAccountCheck) {
       try {
         // Import AuthService to check current context
         const { AuthService } = await import('./authService');
@@ -542,6 +542,27 @@ class MessagingService {
         if (needSwitch && targetAccountId) {
           console.log('[MessagingService] Storing pending account switch for HomeScreen:', targetAccountId);
           PushNotificationService.pendingAccountSwitchGlobal = targetAccountId;
+          
+          // Store the navigation to execute after account switch
+          PushNotificationService.pendingNavigationAfterSwitch = () => {
+            console.log('[MessagingService] Executing deferred navigation after account switch');
+            // Re-process the notification data for navigation, skipping account check
+            this.handleNotificationData(data, true);
+          };
+          
+          // Navigate to HomeScreen first to trigger account switch
+          console.log('[MessagingService] Navigating to HomeScreen for account switch');
+          if (navigationRef.current && navigationRef.current.isReady()) {
+            navigationRef.current.navigate('Main' as never, {
+              screen: 'BottomTabs',
+              params: {
+                screen: 'Home'
+              }
+            } as never);
+          }
+          
+          // Don't continue with normal navigation
+          return;
         }
       } catch (error) {
         console.error('[MessagingService] Error checking account context:', error);
