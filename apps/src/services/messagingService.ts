@@ -542,6 +542,7 @@ class MessagingService {
         if (needSwitch && targetAccountId) {
           console.log('[MessagingService] Storing pending account switch for HomeScreen:', targetAccountId);
           PushNotificationService.pendingAccountSwitchGlobal = targetAccountId;
+          PushNotificationService.pendingSwitchTimestamp = Date.now();
           
           // Store the navigation to execute after account switch
           PushNotificationService.pendingNavigationAfterSwitch = () => {

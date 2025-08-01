@@ -589,42 +589,76 @@ export const HomeScreen = () => {
   };
 
   // Check for pending account switch from push notification
+  // Use both useEffect and useFocusEffect to handle all cases
+  const checkPendingSwitch = useCallback(async () => {
+    const pendingSwitch = PushNotificationService.getPendingAccountSwitch();
+    const pendingNavigation = PushNotificationService.getPendingNavigation();
+    
+    // Only process if we have BOTH a pending switch AND navigation
+    // This ensures we're coming from a push notification context
+    if (pendingSwitch && pendingNavigation && handleAccountSwitch) {
+      console.log('HomeScreen - Found pending account switch from push notification:', pendingSwitch);
+      PushNotificationService.clearPendingAccountSwitch();
+      
+      // Use the existing handleAccountSwitch function with delay
+      setTimeout(async () => {
+        const success = await handleAccountSwitch(pendingSwitch);
+        
+        // After successful account switch, execute pending navigation
+        if (success) {
+          console.log('HomeScreen - Account switch successful, executing pending navigation');
+          PushNotificationService.clearPendingNavigation();
+          
+          // Wait a bit for the account switch to fully propagate
+          setTimeout(() => {
+            pendingNavigation();
+          }, 1000);
+        } else {
+          console.log('HomeScreen - Account switch failed, clearing pending navigation');
+          PushNotificationService.clearPendingNavigation();
+        }
+      }, 1000); // Delay to ensure UI is ready and avoid conflicts
+    }
+  }, [handleAccountSwitch]);
+
+  // Track the last processed timestamp to avoid duplicate processing
+  const [lastProcessedTimestamp, setLastProcessedTimestamp] = useState(0);
+
+  // Check on mount and when timestamp changes
+  useEffect(() => {
+    const currentTimestamp = PushNotificationService.getPendingSwitchTimestamp();
+    if (currentTimestamp > lastProcessedTimestamp) {
+      console.log('HomeScreen - New pending switch detected, timestamp:', currentTimestamp);
+      setLastProcessedTimestamp(currentTimestamp);
+      checkPendingSwitch();
+    }
+  }, [checkPendingSwitch, lastProcessedTimestamp]);
+
+  // Also check on focus (for edge cases)
   useFocusEffect(
     useCallback(() => {
-      const checkPendingSwitch = async () => {
-        const pendingSwitch = PushNotificationService.getPendingAccountSwitch();
-        const pendingNavigation = PushNotificationService.getPendingNavigation();
-        
-        // Only process if we have BOTH a pending switch AND navigation
-        // This ensures we're coming from a push notification context
-        if (pendingSwitch && pendingNavigation && handleAccountSwitch) {
-          console.log('HomeScreen - Found pending account switch from push notification:', pendingSwitch);
-          PushNotificationService.clearPendingAccountSwitch();
-          
-          // Use the existing handleAccountSwitch function with delay
-          setTimeout(async () => {
-            const success = await handleAccountSwitch(pendingSwitch);
-            
-            // After successful account switch, execute pending navigation
-            if (success) {
-              console.log('HomeScreen - Account switch successful, executing pending navigation');
-              PushNotificationService.clearPendingNavigation();
-              
-              // Wait a bit for the account switch to fully propagate
-              setTimeout(() => {
-                pendingNavigation();
-              }, 1000);
-            } else {
-              console.log('HomeScreen - Account switch failed, clearing pending navigation');
-              PushNotificationService.clearPendingNavigation();
-            }
-          }, 1000); // Delay to ensure UI is ready and avoid conflicts
-        }
-      };
-      
-      checkPendingSwitch();
-    }, [handleAccountSwitch])
+      const currentTimestamp = PushNotificationService.getPendingSwitchTimestamp();
+      if (currentTimestamp > lastProcessedTimestamp) {
+        console.log('HomeScreen - New pending switch detected on focus, timestamp:', currentTimestamp);
+        setLastProcessedTimestamp(currentTimestamp);
+        checkPendingSwitch();
+      }
+    }, [checkPendingSwitch, lastProcessedTimestamp])
   );
+  
+  // Poll for changes when the screen is active
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const currentTimestamp = PushNotificationService.getPendingSwitchTimestamp();
+      if (currentTimestamp > lastProcessedTimestamp && PushNotificationService.getPendingAccountSwitch()) {
+        console.log('HomeScreen - Detected pending switch via polling, timestamp:', currentTimestamp);
+        setLastProcessedTimestamp(currentTimestamp);
+        checkPendingSwitch();
+      }
+    }, 500); // Check every 500ms
+
+    return () => clearInterval(interval);
+  }, [checkPendingSwitch, lastProcessedTimestamp]);
 
   if (isLoading) {
     return (
