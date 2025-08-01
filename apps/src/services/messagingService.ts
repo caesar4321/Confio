@@ -540,9 +540,11 @@ class MessagingService {
         
         // Store the account switch for HomeScreen to handle
         if (needSwitch && targetAccountId) {
-          console.log('[MessagingService] Storing pending account switch for HomeScreen:', targetAccountId);
+          console.log('[MessagingService] Storing pending account switch for HomeScreen:', {
+            targetAccountId,
+            needSwitch
+          });
           PushNotificationService.pendingAccountSwitchGlobal = targetAccountId;
-          PushNotificationService.pendingSwitchTimestamp = Date.now();
           
           // Store the navigation to execute after account switch
           PushNotificationService.pendingNavigationAfterSwitch = () => {

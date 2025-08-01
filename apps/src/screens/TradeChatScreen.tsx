@@ -1022,13 +1022,65 @@ export const TradeChatScreen: React.FC = () => {
     setIsTyping(isTyping);
   };
 
-  // Trader data from route params
+  // Get counterparty name based on whether I'm buyer or seller
+  const getCounterpartyName = () => {
+    if (!tradeDetailsData?.p2pTrade) return offer.name; // Fallback to offer name
+    
+    const trade = tradeDetailsData.p2pTrade;
+    const iAmBuyer = computedTradeType === 'buy';
+    
+    if (iAmBuyer) {
+      // I'm the buyer, show seller's name
+      if (trade.sellerBusiness) {
+        return trade.sellerBusiness.name;
+      } else if (trade.sellerUser) {
+        const name = `${trade.sellerUser.firstName || ''} ${trade.sellerUser.lastName || ''}`.trim();
+        return name || trade.sellerUser.username || 'Vendedor';
+      } else if (trade.sellerDisplayName) {
+        return trade.sellerDisplayName;
+      }
+    } else {
+      // I'm the seller, show buyer's name
+      if (trade.buyerBusiness) {
+        return trade.buyerBusiness.name;
+      } else if (trade.buyerUser) {
+        const name = `${trade.buyerUser.firstName || ''} ${trade.buyerUser.lastName || ''}`.trim();
+        return name || trade.buyerUser.username || 'Comprador';
+      } else if (trade.buyerDisplayName) {
+        return trade.buyerDisplayName;
+      }
+    }
+    
+    return offer.name; // Fallback
+  };
+
+  // Get counterparty stats based on role
+  const getCounterpartyStats = () => {
+    if (!tradeDetailsData?.p2pTrade) {
+      return {
+        isVerified: offer.userStats?.isVerified || false,
+        isOnline: offer.isOnline,
+        lastSeen: offer.lastSeen,
+        responseTime: offer.responseTime
+      };
+    }
+    
+    const trade = tradeDetailsData.p2pTrade;
+    const iAmBuyer = computedTradeType === 'buy';
+    const stats = iAmBuyer ? trade.sellerStats : trade.buyerStats;
+    
+    return {
+      isVerified: stats?.isVerified || false,
+      isOnline: stats?.isOnline || offer.isOnline,
+      lastSeen: stats?.lastSeen || offer.lastSeen,
+      responseTime: stats?.responseTime || offer.responseTime
+    };
+  };
+
+  // Trader data with correct counterparty info
   const trader: Trader = {
-    name: offer.name,
-    isOnline: offer.isOnline,
-    verified: offer.userStats?.isVerified || false, // Use real verification status from userStats
-    lastSeen: offer.lastSeen,
-    responseTime: offer.responseTime
+    name: getCounterpartyName(),
+    ...getCounterpartyStats()
   };
 
   // Trade data calculated from route params
