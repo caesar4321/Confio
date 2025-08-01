@@ -212,6 +212,17 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         console.log('User has verified phone number');
         setIsAuthenticated(true);
         await refreshProfile('personal'); // Refresh personal profile after successful login
+        
+        // Ensure FCM token is registered for the new user
+        console.log('[AuthContext] Registering FCM token for logged in user...');
+        try {
+          const { default: messagingService } = await import('../services/messagingService');
+          await messagingService.ensureTokenRegisteredForCurrentUser();
+        } catch (fcmError) {
+          console.error('[AuthContext] Failed to register FCM token:', fcmError);
+          // Don't block login if FCM registration fails
+        }
+        
         navigateToScreen('Main');
       } else {
         console.log('User needs phone verification');
@@ -341,6 +352,17 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       
       setIsAuthenticated(true);
       await refreshProfile('personal');
+      
+      // Ensure FCM token is registered after phone verification
+      console.log('[AuthContext] Registering FCM token after phone verification...');
+      try {
+        const { default: messagingService } = await import('../services/messagingService');
+        await messagingService.ensureTokenRegisteredForCurrentUser();
+      } catch (fcmError) {
+        console.error('[AuthContext] Failed to register FCM token:', fcmError);
+        // Don't block navigation if FCM registration fails
+      }
+      
       navigateToScreen('Main');
     } catch (error) {
       console.error('Error completing phone verification:', error);

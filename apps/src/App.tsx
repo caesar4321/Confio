@@ -39,8 +39,16 @@ const Navigation: React.FC = () => {
   useEffect(() => {
     if (isAuthenticated) {
       // Initialize messaging service when user is authenticated
-      messagingService.initialize().catch(error => {
+      // Force token refresh to ensure new users get registered
+      console.log('[App] User authenticated, initializing messaging service...');
+      messagingService.initialize(true).catch(error => {
         console.error('Failed to initialize messaging service:', error);
+      });
+      
+      // Also ensure token is registered for the current user
+      // This handles the case where permissions are already granted
+      messagingService.ensureTokenRegisteredForCurrentUser().catch(error => {
+        console.error('Failed to ensure token registration:', error);
       });
     }
   }, [isAuthenticated]);
