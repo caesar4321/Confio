@@ -30,6 +30,7 @@ import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { ProfileMenu } from '../components/ProfileMenu';
 import { useAccount } from '../contexts/AccountContext';
 import { useAtomicAccountSwitch } from '../hooks/useAtomicAccountSwitch';
+import { PushNotificationService } from '../services/pushNotificationService';
 import { AccountSwitchOverlay } from '../components/AccountSwitchOverlay';
 import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
@@ -584,7 +585,21 @@ export const HomeScreen = () => {
     navigation.navigate('CreateBusiness');
   };
 
-
+  // Check for pending account switch from push notification
+  useFocusEffect(
+    useCallback(() => {
+      const pendingSwitch = PushNotificationService.getPendingAccountSwitch();
+      if (pendingSwitch && handleAccountSwitch) {
+        console.log('HomeScreen - Found pending account switch:', pendingSwitch);
+        PushNotificationService.clearPendingAccountSwitch();
+        
+        // Use the existing handleAccountSwitch function with delay
+        setTimeout(() => {
+          handleAccountSwitch(pendingSwitch);
+        }, 1000); // Delay to ensure UI is ready and avoid conflicts
+      }
+    }, [handleAccountSwitch])
+  );
 
   if (isLoading) {
     return (

@@ -495,13 +495,13 @@ class MessagingService {
       accountIndex
     });
     
-    // For foreground notifications, we can try immediate account switching
-    // since the app is already active and ready
+    // For foreground notifications, also defer account switching
+    // to avoid conflicts with UI state
     if (accountContext) {
       try {
-        // Import AuthService and Apollo client for account switching
+        // Import AuthService to check current context
         const { AuthService } = await import('./authService');
-        const { apolloClient } = await import('../apollo/client');
+        const { PushNotificationService } = await import('./pushNotificationService');
         const authService = new AuthService();
         
         // Get current active account context
@@ -538,34 +538,14 @@ class MessagingService {
           }
         }
         
-        // Perform immediate switch for foreground notifications
+        // Store the account switch for HomeScreen to handle
         if (needSwitch && targetAccountId) {
-          console.log('[MessagingService] Switching to account:', targetAccountId);
-          await authService.switchAccount(targetAccountId, apolloClient);
-          console.log('[MessagingService] Account switch completed');
-          
-          // Reset Apollo store to refresh all queries with new account context
-          try {
-            await apolloClient.resetStore();
-            console.log('[MessagingService] Apollo store reset after account switch');
-          } catch (error) {
-            console.error('[MessagingService] Error resetting Apollo store:', error);
-            // Fallback to cache eviction
-            try {
-              apolloClient.cache.evict({});
-              apolloClient.cache.gc();
-              console.log('[MessagingService] Cache evicted as fallback');
-            } catch (evictError) {
-              console.error('[MessagingService] Error evicting cache:', evictError);
-            }
-          }
-          
-          // Wait longer for foreground account switch to fully propagate
-          await new Promise(resolve => setTimeout(resolve, 1500));
+          console.log('[MessagingService] Storing pending account switch for HomeScreen:', targetAccountId);
+          PushNotificationService.pendingAccountSwitchGlobal = targetAccountId;
         }
       } catch (error) {
-        console.error('[MessagingService] Error switching accounts:', error);
-        // Continue with navigation even if account switch fails
+        console.error('[MessagingService] Error checking account context:', error);
+        // Continue with navigation even if account check fails
       }
     }
     
