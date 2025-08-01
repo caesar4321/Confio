@@ -40,4 +40,4 @@ credentials/** filter=git-crypt diff=git-crypt
 \!credentials/README.md
 
 # Cloudflare Workers configuration
-workers/link-shortener/wrangler.toml filter=git-crypt diff=git-crypt 
+workers/link-shortener/wrangler.toml filter=git-crypt diff=git-crypt workers/link-shortener/setup-default-links.js filter=git-crypt diff=git-crypt
