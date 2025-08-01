@@ -69,59 +69,49 @@ export class PushNotificationService {
     // Check if we need to switch accounts before navigation
     if (account_context) {
       try {
-        // Dynamically import AccountService to avoid circular dependencies
-        const { AccountService } = await import('../services/accountService');
-        const accountService = AccountService.getInstance();
+        // Import AuthService for account switching
+        const { AuthService } = await import('./authService');
+        const authService = new AuthService();
         
-        // Get current active account
-        const currentAccount = await accountService.getActiveAccount();
-        console.log('[PushNotificationService] Current active account:', {
-          id: currentAccount?.id,
-          type: currentAccount?.type,
-          businessId: currentAccount?.business?.id
+        // Get current active account context
+        const currentContext = await authService.getActiveAccountContext();
+        console.log('[PushNotificationService] Current active account context:', {
+          type: currentContext?.type,
+          index: currentContext?.index,
+          businessId: currentContext?.businessId
         });
         
         // Check if we need to switch
         let needSwitch = false;
+        let targetAccountId = '';
         
         if (account_context === 'business' && business_id) {
           // Check if current account is the correct business account
-          needSwitch = !currentAccount || 
-                      currentAccount.type !== 'business' || 
-                      currentAccount.business?.id !== business_id;
+          needSwitch = currentContext?.type !== 'business' || 
+                      currentContext?.businessId !== business_id;
                       
           if (needSwitch) {
-            console.log('[PushNotificationService] Switching to business account:', business_id);
-            // Find and switch to the business account
-            const accounts = await accountService.getAccounts();
-            const businessAccount = accounts.find(acc => 
-              acc.type === 'business' && acc.business?.id === business_id
-            );
-            
-            if (businessAccount) {
-              await accountService.setActiveAccount(businessAccount.id);
-              console.log('[PushNotificationService] Switched to business account successfully');
-            }
+            // Business account ID format: business_{businessId}_0
+            targetAccountId = `business_${business_id}_0`;
+            console.log('[PushNotificationService] Need to switch to business account:', targetAccountId);
           }
         } else if (account_context === 'personal') {
           // Check if current account is a personal account
-          needSwitch = !currentAccount || currentAccount.type === 'business';
+          needSwitch = currentContext?.type !== 'personal';
           
           if (needSwitch) {
-            console.log('[PushNotificationService] Switching to personal account');
-            // Find and switch to personal account
-            const accounts = await accountService.getAccounts();
-            const personalAccount = accounts.find(acc => 
-              acc.type === 'personal' && 
-              acc.account_type === (account_type || 'personal') &&
-              acc.account_index === parseInt(account_index || '0')
-            );
-            
-            if (personalAccount) {
-              await accountService.setActiveAccount(personalAccount.id);
-              console.log('[PushNotificationService] Switched to personal account successfully');
-            }
+            // Personal account ID format: personal_{index}
+            const index = account_index || '0';
+            targetAccountId = `personal_${index}`;
+            console.log('[PushNotificationService] Need to switch to personal account:', targetAccountId);
           }
+        }
+        
+        // Perform the switch if needed
+        if (needSwitch && targetAccountId) {
+          console.log('[PushNotificationService] Switching to account:', targetAccountId);
+          await authService.switchAccount(targetAccountId);
+          console.log('[PushNotificationService] Account switch completed');
         }
         
         // Wait a bit for account switch to propagate
