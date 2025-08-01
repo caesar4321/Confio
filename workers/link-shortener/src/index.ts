@@ -70,8 +70,13 @@ export default {
       return handleAPI(request, env, url);
     }
     
-    // Handle admin UI
-    if (url.pathname === '/admin' || url.pathname === '/admin/') {
+    // Handle admin UI with obscure URL
+    if (url.pathname === '/dashboard-x7k9m2p5' || url.pathname === '/dashboard-x7k9m2p5/') {
+      // Check if credentials are configured
+      if (!env.ADMIN_USERNAME || !env.ADMIN_PASSWORD) {
+        return new Response('Admin panel not configured', { status: 503 });
+      }
+      
       // Check basic auth
       const authHeader = request.headers.get('Authorization');
       const expectedAuth = 'Basic ' + btoa(`${env.ADMIN_USERNAME}:${env.ADMIN_PASSWORD}`);
@@ -80,7 +85,7 @@ export default {
         return new Response('Unauthorized', {
           status: 401,
           headers: {
-            'WWW-Authenticate': 'Basic realm="Admin Panel"'
+            'WWW-Authenticate': 'Basic realm="Restricted Area"'
           }
         });
       }
@@ -90,7 +95,8 @@ export default {
       return new Response(adminHTML, {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
-          'Cache-Control': 'no-cache'
+          'Cache-Control': 'no-cache',
+          'X-Robots-Tag': 'noindex, nofollow'
         }
       });
     }

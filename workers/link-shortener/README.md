@@ -24,10 +24,9 @@ A Cloudflare Workers-based link shortener for Confio's WhatsApp share links duri
 
 ## Admin Panel
 
-Access the admin panel at: https://confio.lat/admin
+The admin panel is available at a secure URL (not publicly shared).
 
-- **Username**: admin
-- **Password**: confio2024
+To set up admin access, see [SECURE_SETUP.md](./SECURE_SETUP.md)
 
 The admin panel allows you to:
 - Create short links with custom slugs
