@@ -25,6 +25,8 @@ IOS_BUNDLE_ID = "com.Confio.Confio"
 TESTFLIGHT_URL = "https://testflight.apple.com/join/YOUR_CODE"
 PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.Confio.Confio"
 LANDING_PAGE_URL = "https://confio.lat"
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "confio2024"
 
 # Production environment (inherits all settings above)
 [env.production]
