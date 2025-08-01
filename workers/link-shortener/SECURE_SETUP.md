@@ -3,17 +3,22 @@
 ## ⚠️ Security Alert
 GitGuardian detected exposed credentials. Follow these steps to secure your deployment.
 
-## Step 1: Set Cloudflare Secrets (NOT in wrangler.toml)
+## Step 1: Git-Crypt Setup
 
+This repository uses git-crypt to securely store credentials. The `wrangler.toml` file is encrypted.
+
+### For authorized users with git-crypt key:
 ```bash
-# Set admin username
-npx wrangler secret put ADMIN_USERNAME
-# Enter: julian
+# Unlock the repository (if not already unlocked)
+git-crypt unlock
 
-# Set admin password (128 characters)
-npx wrangler secret put ADMIN_PASSWORD
-# Enter your 128-character password (see generation below)
+# The wrangler.toml will contain the actual credentials
 ```
+
+### For new team members:
+1. Ask an existing team member to add your GPG key
+2. They will run: `git-crypt add-gpg-user YOUR_GPG_KEY_ID`
+3. Pull the latest changes and unlock: `git-crypt unlock`
 
 ## Step 2: Generate Secure 128-Character Password
 
