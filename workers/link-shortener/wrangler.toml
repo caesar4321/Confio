@@ -2,12 +2,10 @@ name = "confio-link-shortener"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 
-# Production environment
-[env.production]
-workers_dev = false
+# Routes for custom domain
 routes = [
-  { pattern = "confio.lat/*", zone_id = "YOUR_ZONE_ID" },
-  { pattern = "conf.io/*", zone_id = "YOUR_ZONE_ID" }
+  { pattern = "confio.lat/*", zone_id = "1fae8d4a5dbd820442e673422099f4ec" },
+  { pattern = "www.confio.lat/*", zone_id = "1fae8d4a5dbd820442e673422099f4ec" }
 ]
 
 # KV namespaces for storing link data
@@ -27,3 +25,7 @@ IOS_BUNDLE_ID = "com.Confio.Confio"
 TESTFLIGHT_URL = "https://testflight.apple.com/join/YOUR_CODE"
 PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.Confio.Confio"
 LANDING_PAGE_URL = "https://confio.lat"
+
+# Production environment (inherits all settings above)
+[env.production]
+vars = { LANDING_PAGE_URL = "https://confio.lat" }
