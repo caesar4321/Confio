@@ -13,6 +13,7 @@ import {
 import { useMutation } from '@apollo/client';
 import { gql } from '@apollo/client';
 import WhatsAppIcon from '../assets/svg/WhatsApp.svg';
+import { SHARE_LINKS, createShareMessage } from '../config/shareLinks';
 
 const TRACK_TIKTOK_SHARE = gql`
   mutation TrackTikTokShare($achievementId: ID!, $tiktokUrl: String!) {
@@ -57,8 +58,9 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
     };
 
     const message = categoryMessages[achievement.category] || baseMessage;
+    const link = achievement.category === 'viral' ? SHARE_LINKS.campaigns.tiktok : SHARE_LINKS.campaigns.beta;
     
-    return `${message}\n\n📱 Descarga Confío y empieza a ganar:\nhttps://confio.lat\n\n#Confio #RetoConfio #LogroConfio #AppDeDolares #DolarDigital`;
+    return `${message}\n\n📱 Descarga Confío y empieza a ganar:\n${link}\n\n${SHARE_LINKS.hashtags}`;
   };
 
   const handleWhatsAppShare = () => {
@@ -79,7 +81,7 @@ export const ShareAchievementModal: React.FC<ShareAchievementModalProps> = ({
   const handleGetTikTokInfo = () => {
     Alert.alert(
       '🎬 Contenido para TikTok',
-      `¡Comparte tu experiencia con Confío!\n\n💡 Ideas para tu video:\n• Tu historia usando Confío\n• Comparar Confío vs bancos tradicionales\n• Mostrar la velocidad de las transacciones\n• Explicar cómo ahorras dinero\n\n🏆 Logro: ${achievement.name}\n💰 Ganaste: ${achievement.confioReward} $CONFIO\n\n📱 Hashtags: #Confio #RetoConfio #LogroConfio #AppDeDolares #DolarDigital\n\n🔗 Descarga: confio.lat`,
+      `¡Comparte tu experiencia con Confío!\n\n💡 Ideas para tu video:\n• Tu historia usando Confío\n• Comparar Confío vs bancos tradicionales\n• Mostrar la velocidad de las transacciones\n• Explicar cómo ahorras dinero\n\n🏆 Logro: ${achievement.name}\n💰 Ganaste: ${achievement.confioReward} $CONFIO\n\n📱 Hashtags: ${SHARE_LINKS.hashtags}\n\n🔗 Descarga: ${SHARE_LINKS.campaigns.tiktok}`,
       [
         { text: 'Crear Video', onPress: () => setShowTikTokForm(true) }
       ]

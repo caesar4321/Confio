@@ -27,6 +27,7 @@ import 'moment/locale/es';
 import { useQuery } from '@apollo/client';
 import { GET_SEND_TRANSACTION_BY_ID } from '../apollo/queries';
 import { useContactNameSync } from '../hooks/useContactName';
+import { SHARE_LINKS } from '../config/shareLinks';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 type TransactionDetailScreenRouteProp = RouteProp<MainStackParamList, 'TransactionDetail'>;
@@ -2057,7 +2058,7 @@ export const TransactionDetailScreen = () => {
                     console.log('[WhatsApp Share] Data:', { recipientName, phone, amount, currency });
                     
                     // Create the invitation message
-                    const message = `¡Hola! Te envié ${amount} ${currency} por Confío. 🎉\n\nTienes 7 días para reclamarlo. Descarga la app y crea tu cuenta:\n\n📲 Android: https://play.google.com/store/apps/details?id=com.confio\n📲 iOS: https://apps.apple.com/app/confio/id6473710976\n\n¡Es gratis y en segundos recibes tu dinero!`;
+                    const message = `¡Hola! Te envié ${amount} ${currency} por Confío. 🎉\n\nTienes 7 días para reclamarlo. Descarga la app y crea tu cuenta:\n\n📲 ${SHARE_LINKS.campaigns.beta}\n\n¡Es gratis y en segundos recibes tu dinero!`;
                     
                     // Encode the message for WhatsApp
                     const encodedMessage = encodeURIComponent(message);
