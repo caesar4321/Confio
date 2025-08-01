@@ -495,7 +495,8 @@ class MessagingService {
       accountIndex
     });
     
-    // Check if we need to switch accounts
+    // For foreground notifications, we can try immediate account switching
+    // since the app is already active and ready
     if (accountContext) {
       try {
         // Import AuthService and Apollo client for account switching
@@ -537,7 +538,7 @@ class MessagingService {
           }
         }
         
-        // Perform the switch if needed
+        // Perform immediate switch for foreground notifications
         if (needSwitch && targetAccountId) {
           console.log('[MessagingService] Switching to account:', targetAccountId);
           await authService.switchAccount(targetAccountId, apolloClient);
@@ -559,8 +560,8 @@ class MessagingService {
             }
           }
           
-          // Wait a bit for account switch to propagate
-          await new Promise(resolve => setTimeout(resolve, 500));
+          // Wait longer for foreground account switch to fully propagate
+          await new Promise(resolve => setTimeout(resolve, 1500));
         }
       } catch (error) {
         console.error('[MessagingService] Error switching accounts:', error);
