@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import { AppState, AppStateStatus } from 'react-native';
 import { useProfileMenu } from '../hooks/useProfileMenu';
 import { useQuery } from '@apollo/client';
 import { GET_UNREAD_NOTIFICATION_COUNT } from '../apollo/queries';
@@ -23,9 +24,10 @@ export const HeaderProvider: React.FC<HeaderProviderProps> = ({ children }) => {
   const profileMenu = useProfileMenu();
   
   // Query for unread notification count
-  const { data: unreadCountData } = useQuery(GET_UNREAD_NOTIFICATION_COUNT, {
+  const { data: unreadCountData, refetch: refetchUnreadCount } = useQuery(GET_UNREAD_NOTIFICATION_COUNT, {
     fetchPolicy: 'cache-and-network',
     pollInterval: 30000, // Poll every 30 seconds
+    notifyOnNetworkStatusChange: true,
   });
   
   // Update unread count when query data changes
@@ -34,6 +36,22 @@ export const HeaderProvider: React.FC<HeaderProviderProps> = ({ children }) => {
       setUnreadNotifications(unreadCountData.unreadNotificationCount);
     }
   }, [unreadCountData]);
+  
+  // Refetch notification count when app comes to foreground
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active') {
+        console.log('[HeaderContext] App became active, refetching notification count...');
+        refetchUnreadCount();
+      }
+    };
+    
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    
+    return () => {
+      subscription.remove();
+    };
+  }, [refetchUnreadCount]);
 
   return (
     <HeaderContext.Provider

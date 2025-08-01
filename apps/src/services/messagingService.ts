@@ -333,6 +333,9 @@ class MessagingService {
       }
       
       await this.displayNotification(remoteMessage);
+      
+      // Trigger notification count update
+      this.triggerNotificationCountUpdate();
     });
     this.unsubscribeHandlers.push(unsubscribeOnMessage);
 
@@ -736,6 +739,23 @@ class MessagingService {
   }
 
   // Clean up handlers to prevent duplicates
+  private triggerNotificationCountUpdate() {
+    try {
+      console.log('[MessagingService] Triggering notification count update...');
+      
+      // Use Apollo Client to refetch the notification count
+      apolloClient.refetchQueries({
+        include: ['GetUnreadNotificationCount'],
+      }).then(() => {
+        console.log('[MessagingService] Notification count refetch triggered');
+      }).catch(error => {
+        console.error('[MessagingService] Error refetching notification count:', error);
+      });
+    } catch (error) {
+      console.error('[MessagingService] Error triggering notification count update:', error);
+    }
+  }
+
   private cleanup() {
     console.log(`[${this.instanceId}] Cleaning up messaging handlers`);
     
