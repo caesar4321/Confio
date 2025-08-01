@@ -453,13 +453,15 @@ class Query(graphene.ObjectType):
             personal_query &= Q(business_id=business_id)
         else:
             # Count personal account notifications
+            # For personal accounts, include both account-specific and user-level notifications
             try:
                 account = Account.objects.get(
                     user=user,
                     account_type=account_type,
                     account_index=account_index
                 )
-                personal_query &= Q(account=account)
+                # Include notifications for this specific account OR general user notifications
+                personal_query &= (Q(account=account) | Q(account__isnull=True, business__isnull=True))
             except Account.DoesNotExist:
                 # If account not found, count general notifications
                 personal_query &= Q(account__isnull=True, business__isnull=True)
