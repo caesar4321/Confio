@@ -4,6 +4,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
+import { SHARE_LINKS } from '../config/shareLinks';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -132,7 +133,7 @@ export const TransactionSuccessScreen = () => {
 
 Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 días:
 
-📱 Descarga Confío: https://confio.lat
+📱 Descarga Confío: ${SHARE_LINKS.campaigns.beta}
 💰 Monto: $${transactionData.amount} ${formatCurrency(transactionData.currency)}
 ⏰ Válido hasta: ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('es-ES')}
 

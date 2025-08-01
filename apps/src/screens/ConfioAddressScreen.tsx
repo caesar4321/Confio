@@ -20,6 +20,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { Header } from '../navigation/Header';
 import ViewShot from 'react-native-view-shot';
+import { SHARE_LINKS } from '../config/shareLinks';
 
 const colors = {
   primary: '#00d4aa',
@@ -41,7 +42,7 @@ export const ConfioAddressScreen = () => {
   const { userProfile } = useAuth();
   const [hasSharedBefore, setHasSharedBefore] = useState(false);
   const username = userProfile?.username ? `@${userProfile.username}` : '@usuario';
-  const addressUrl = userProfile?.username ? `https://confio.lat/@${userProfile.username}` : 'https://confio.lat/@usuario';
+  const addressUrl = userProfile?.username ? SHARE_LINKS.web.userAddress(userProfile.username) : SHARE_LINKS.web.userAddress('usuario');
   const qrRef = useRef<ViewShot>(null);
 
   const handleShare = async () => {

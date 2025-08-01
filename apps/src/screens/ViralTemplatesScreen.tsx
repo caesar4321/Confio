@@ -14,6 +14,7 @@ import {
 import { NavigationProp } from '@react-navigation/native';
 import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/Feather';
+import { SHARE_LINKS } from '../config/shareLinks';
 
 interface ViralTemplatesScreenProps {
   navigation: NavigationProp<any>;
@@ -173,7 +174,7 @@ export const ViralTemplatesScreen: React.FC<ViralTemplatesScreenProps> = ({ navi
   const shareTemplate = async (template: VideoTemplate) => {
     try {
       await Share.share({
-        message: `🎬 Idea para TikTok: ${template.title}\n\n${template.script}\n\n${template.hashtags}\n\n📱 Descarga Confío: confio.lat`,
+        message: `🎬 Idea para TikTok: ${template.title}\n\n${template.script}\n\n${template.hashtags}\n\n📱 Descarga Confío: ${SHARE_LINKS.campaigns.tiktok}`,
       });
     } catch (error) {
       Alert.alert('Error', 'No se pudo compartir');
