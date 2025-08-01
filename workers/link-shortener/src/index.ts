@@ -209,6 +209,23 @@ async function handleAPI(request: Request, env: Env, url: URL): Promise<Response
     return new Response(null, { headers: corsHeaders });
   }
   
+  // Check authentication for all API endpoints
+  const authHeader = request.headers.get('Authorization');
+  const expectedAuth = 'Basic ' + btoa(`${env.ADMIN_USERNAME}:${env.ADMIN_PASSWORD}`);
+  
+  if (authHeader !== expectedAuth) {
+    return new Response(
+      JSON.stringify({ error: 'Unauthorized' }),
+      { 
+        status: 401, 
+        headers: {
+          ...corsHeaders,
+          'WWW-Authenticate': 'Basic realm="API Access"'
+        }
+      }
+    );
+  }
+  
   try {
     // Create link endpoint
     if (path === '/api/links' && request.method === 'POST') {
@@ -249,6 +266,32 @@ async function handleAPI(request: Request, env: Env, url: URL): Promise<Response
           data: linkData 
         }), 
         { status: 201, headers: corsHeaders }
+      );
+    }
+    
+    // List all links
+    if (path === '/api/links' && request.method === 'GET') {
+      const linksList = await env.LINKS.list();
+      const links = await Promise.all(
+        linksList.keys.map(async (key) => {
+          const dataStr = await env.LINKS.get(key.name);
+          if (!dataStr) return null;
+          
+          const data = JSON.parse(dataStr);
+          return {
+            slug: key.name,
+            shortUrl: `https://confio.lat/${key.name}`,
+            ...data
+          };
+        })
+      );
+      
+      return new Response(
+        JSON.stringify({ 
+          links: links.filter(Boolean),
+          total: links.filter(Boolean).length
+        }), 
+        { headers: corsHeaders }
       );
     }
     
