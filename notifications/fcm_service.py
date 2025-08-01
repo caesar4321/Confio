@@ -411,6 +411,22 @@ def prepare_push_data(notification, additional_data: Optional[Dict[str, Any]] = 
         'created_at': notification.created_at.isoformat(),
     }
     
+    # Add account context for proper routing
+    if notification.business:
+        data['account_context'] = 'business'
+        data['business_id'] = str(notification.business.id)
+        data['business_name'] = notification.business.name
+    elif notification.account:
+        data['account_context'] = 'personal'
+        data['account_id'] = str(notification.account.id)
+        data['account_type'] = notification.account.account_type
+        data['account_index'] = str(notification.account.account_index)
+    else:
+        # Default to personal account for user-level notifications
+        data['account_context'] = 'personal'
+        data['account_type'] = 'personal'
+        data['account_index'] = '0'
+    
     # Add notification data if it exists
     if notification.data:
         for key, value in notification.data.items():

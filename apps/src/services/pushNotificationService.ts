@@ -45,7 +45,7 @@ export class PushNotificationService {
   /**
    * Handle notification navigation based on data payload
    */
-  private handleNotificationNavigation(remoteMessage: FirebaseMessagingTypes.RemoteMessage): void {
+  private async handleNotificationNavigation(remoteMessage: FirebaseMessagingTypes.RemoteMessage): Promise<void> {
     console.log('[PushNotificationService] Handling notification navigation:', {
       data: remoteMessage.data,
       notification: remoteMessage.notification
@@ -54,6 +54,84 @@ export class PushNotificationService {
     if (!remoteMessage.data) {
       console.log('[PushNotificationService] No data in remote message');
       return;
+    }
+    
+    // Extract account context from notification data
+    const { account_context, business_id, account_type, account_index } = remoteMessage.data;
+    
+    console.log('[PushNotificationService] Account context from notification:', {
+      account_context,
+      business_id,
+      account_type,
+      account_index
+    });
+    
+    // Check if we need to switch accounts before navigation
+    if (account_context) {
+      try {
+        // Dynamically import AccountService to avoid circular dependencies
+        const { AccountService } = await import('../services/accountService');
+        const accountService = AccountService.getInstance();
+        
+        // Get current active account
+        const currentAccount = await accountService.getActiveAccount();
+        console.log('[PushNotificationService] Current active account:', {
+          id: currentAccount?.id,
+          type: currentAccount?.type,
+          businessId: currentAccount?.business?.id
+        });
+        
+        // Check if we need to switch
+        let needSwitch = false;
+        
+        if (account_context === 'business' && business_id) {
+          // Check if current account is the correct business account
+          needSwitch = !currentAccount || 
+                      currentAccount.type !== 'business' || 
+                      currentAccount.business?.id !== business_id;
+                      
+          if (needSwitch) {
+            console.log('[PushNotificationService] Switching to business account:', business_id);
+            // Find and switch to the business account
+            const accounts = await accountService.getAccounts();
+            const businessAccount = accounts.find(acc => 
+              acc.type === 'business' && acc.business?.id === business_id
+            );
+            
+            if (businessAccount) {
+              await accountService.setActiveAccount(businessAccount.id);
+              console.log('[PushNotificationService] Switched to business account successfully');
+            }
+          }
+        } else if (account_context === 'personal') {
+          // Check if current account is a personal account
+          needSwitch = !currentAccount || currentAccount.type === 'business';
+          
+          if (needSwitch) {
+            console.log('[PushNotificationService] Switching to personal account');
+            // Find and switch to personal account
+            const accounts = await accountService.getAccounts();
+            const personalAccount = accounts.find(acc => 
+              acc.type === 'personal' && 
+              acc.account_type === (account_type || 'personal') &&
+              acc.account_index === parseInt(account_index || '0')
+            );
+            
+            if (personalAccount) {
+              await accountService.setActiveAccount(personalAccount.id);
+              console.log('[PushNotificationService] Switched to personal account successfully');
+            }
+          }
+        }
+        
+        // Wait a bit for account switch to propagate
+        if (needSwitch) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } catch (error) {
+        console.error('[PushNotificationService] Error switching accounts:', error);
+        // Continue with navigation even if account switch fails
+      }
     }
     
     // Wait for navigation to be ready

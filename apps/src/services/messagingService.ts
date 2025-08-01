@@ -466,7 +466,7 @@ class MessagingService {
     }
   }
 
-  private handleNotificationData(data: any) {
+  private async handleNotificationData(data: any) {
     console.log('[MessagingService] handleNotificationData called with:', data);
     
     // LEGACY FORMAT DETECTION:
@@ -480,6 +480,87 @@ class MessagingService {
       data.action_url = `confio://p2p/trade/${data.params.tradeId}`;
       delete data.name;
       delete data.params;
+    }
+    
+    // Extract account context from notification data
+    const accountContext = data.account_context;
+    const businessId = data.business_id;
+    const accountType = data.account_type;
+    const accountIndex = data.account_index;
+    
+    console.log('[MessagingService] Account context from notification:', {
+      accountContext,
+      businessId,
+      accountType,
+      accountIndex
+    });
+    
+    // Check if we need to switch accounts
+    if (accountContext) {
+      try {
+        // Dynamically import AccountService to avoid circular dependencies
+        const { AccountService } = await import('../services/accountService');
+        const accountService = AccountService.getInstance();
+        
+        // Get current active account
+        const currentAccount = await accountService.getActiveAccount();
+        console.log('[MessagingService] Current active account:', {
+          id: currentAccount?.id,
+          type: currentAccount?.type,
+          businessId: currentAccount?.business?.id
+        });
+        
+        // Check if we need to switch
+        let needSwitch = false;
+        
+        if (accountContext === 'business' && businessId) {
+          // Check if current account is the correct business account
+          needSwitch = !currentAccount || 
+                      currentAccount.type !== 'business' || 
+                      currentAccount.business?.id !== businessId;
+                      
+          if (needSwitch) {
+            console.log('[MessagingService] Switching to business account:', businessId);
+            // Find and switch to the business account
+            const accounts = await accountService.getAccounts();
+            const businessAccount = accounts.find(acc => 
+              acc.type === 'business' && acc.business?.id === businessId
+            );
+            
+            if (businessAccount) {
+              await accountService.setActiveAccount(businessAccount.id);
+              console.log('[MessagingService] Switched to business account successfully');
+            }
+          }
+        } else if (accountContext === 'personal') {
+          // Check if current account is a personal account
+          needSwitch = !currentAccount || currentAccount.type === 'business';
+          
+          if (needSwitch) {
+            console.log('[MessagingService] Switching to personal account');
+            // Find and switch to personal account
+            const accounts = await accountService.getAccounts();
+            const personalAccount = accounts.find(acc => 
+              acc.type === 'personal' && 
+              acc.account_type === (accountType || 'personal') &&
+              acc.account_index === parseInt(accountIndex || '0')
+            );
+            
+            if (personalAccount) {
+              await accountService.setActiveAccount(personalAccount.id);
+              console.log('[MessagingService] Switched to personal account successfully');
+            }
+          }
+        }
+        
+        // Wait a bit for account switch to propagate
+        if (needSwitch) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } catch (error) {
+        console.error('[MessagingService] Error switching accounts:', error);
+        // Continue with navigation even if account switch fails
+      }
     }
     
     // Navigate based on notification data
