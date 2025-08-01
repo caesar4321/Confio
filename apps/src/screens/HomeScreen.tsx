@@ -546,7 +546,7 @@ export const HomeScreen = () => {
     }, [hasInitialLoad, refreshAccounts, navigation])
   );
 
-  const handleAccountSwitch = async (accountId: string) => {
+  const handleAccountSwitch = async (accountId: string): Promise<boolean> => {
     try {
       console.log('HomeScreen - handleAccountSwitch called with:', accountId);
       
@@ -566,8 +566,10 @@ export const HomeScreen = () => {
           refetchCUSD(),
           refetchConfio(),
         ]);
+        return true;
       } else {
         console.log('HomeScreen - Account switch failed');
+        return false;
       }
     } catch (error) {
       console.error('Error switching account:', error);
@@ -576,6 +578,7 @@ export const HomeScreen = () => {
         'No se pudo cambiar la cuenta. Por favor intenta nuevamente.',
         [{ text: 'OK' }]
       );
+      return false;
     }
   };
 
@@ -594,8 +597,22 @@ export const HomeScreen = () => {
         PushNotificationService.clearPendingAccountSwitch();
         
         // Use the existing handleAccountSwitch function with delay
-        setTimeout(() => {
-          handleAccountSwitch(pendingSwitch);
+        setTimeout(async () => {
+          const success = await handleAccountSwitch(pendingSwitch);
+          
+          // After successful account switch, execute pending navigation
+          if (success) {
+            const pendingNavigation = PushNotificationService.getPendingNavigation();
+            if (pendingNavigation) {
+              console.log('HomeScreen - Executing pending navigation after account switch');
+              PushNotificationService.clearPendingNavigation();
+              
+              // Wait a bit for the account switch to fully propagate
+              setTimeout(() => {
+                pendingNavigation();
+              }, 1000);
+            }
+          }
         }, 1000); // Delay to ensure UI is ready and avoid conflicts
       }
     }, [handleAccountSwitch])
