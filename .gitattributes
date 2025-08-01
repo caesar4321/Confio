@@ -37,4 +37,7 @@ deploy.sh filter=git-crypt diff=git-crypt
 
 # Credentials directory
 credentials/** filter=git-crypt diff=git-crypt
-\!credentials/README.md 
+\!credentials/README.md
+
+# Cloudflare Workers configuration
+workers/link-shortener/wrangler.toml filter=git-crypt diff=git-crypt 
