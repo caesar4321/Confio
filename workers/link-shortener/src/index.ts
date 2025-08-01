@@ -13,7 +13,7 @@ export interface Env {
 
 interface LinkData {
   payload: string;
-  type: 'referral' | 'influencer' | 'deeplink' | 'achievement';
+  type: 'referral' | 'influencer' | 'deeplink' | 'achievement' | 'testflight';
   createdAt: string;
   clicks: number;
   metadata?: Record<string, any>;
@@ -109,8 +109,8 @@ export default {
     // Extract slug from path
     const slug = url.pathname.slice(1).split('/')[0];
     
-    // Validate slug format (alphanumeric with hyphens, 4-20 chars)
-    if (!slug || !/^[a-zA-Z0-9-]{4,20}$/.test(slug)) {
+    // Validate slug format (alphanumeric with hyphens, 2-20 chars)
+    if (!slug || !/^[a-zA-Z0-9-]{2,20}$/.test(slug)) {
       return new Response('Invalid link', { status: 404 });
     }
     
@@ -134,7 +134,7 @@ export default {
       country: request.headers.get('cf-ipcountry') || 'unknown',
       platform,
       slug,
-      referer: request.headers.get('referer')
+      referer: request.headers.get('referer') || undefined
     }));
     
     // Increment click count
