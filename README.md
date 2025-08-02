@@ -141,6 +141,16 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── default_payment_methods.py # Country-specific payment methods
 │   └── migrations/    # Database migrations for P2P models
 
+├── blockchain/        # Sui blockchain integration
+│   ├── models.py      # Blockchain event and balance models
+│   ├── sui_client.py  # Sui RPC/WebSocket client
+│   ├── balance_service.py # Hybrid balance caching system
+│   ├── tasks.py       # Celery tasks for blockchain polling
+│   ├── graphql_integration.py # GraphQL resolvers for balances
+│   ├── management/    # Management commands (poll_blockchain, test_sui_connection)
+│   ├── migrations/    # Database migrations
+│   └── README.md      # Blockchain integration documentation
+
 ├── payments/          # Payment processing system
 │   ├── models.py      # Payment transaction models
 │   ├── schema.py      # Payment GraphQL schema
@@ -1878,6 +1888,102 @@ For detailed information about smart contract permissions and multi-signature se
 - Escrow protection for P2P trades
 - Time-based expiration for invitations and trades
 - No personal data stored on-chain
+
+## 🔒 Blockchain Integration
+
+The Django backend includes a comprehensive blockchain integration module for interacting with the Sui network, featuring hybrid balance caching for optimal performance.
+
+### Architecture Overview
+
+- **Hybrid Caching**: Database + Redis caching with blockchain verification
+- **Smart Invalidation**: Automatic cache invalidation after transactions
+- **Periodic Reconciliation**: Hourly sync to catch any drift
+- **Performance Optimized**: <10ms cached reads vs 100-500ms blockchain queries
+
+### Key Components
+
+#### Balance Service (`blockchain/balance_service.py`)
+Provides intelligent balance management with three modes:
+- **Fast Cached Reads**: For UI display (~10ms)
+- **Smart Refresh**: Auto-refresh stale or old balances
+- **Critical Verification**: Always query blockchain for sensitive operations
+
+```python
+# Fast cached read for display
+balance = BalanceService.get_balance(account, 'CUSD')
+
+# Critical operation - verify with blockchain
+balance = BalanceService.get_balance(
+    account, 'CUSD', 
+    verify_critical=True
+)
+```
+
+#### Blockchain Polling
+- **Management Command**: `python manage.py poll_blockchain`
+- **Celery Tasks**: Automated reconciliation and stale balance refresh
+- **Event Processing**: Monitors relevant contract events
+
+### When to Use Cache vs Blockchain
+
+**Use Cache (Fast ~10ms):**
+- Home screen balance display
+- Transaction history
+- Analytics/reporting
+- Non-critical UI updates
+
+**Force Blockchain Query (~200ms):**
+- Before sending transactions
+- During escrow creation
+- Large withdrawals
+- Conversion operations (USDC ↔ cUSD)
+
+### Setup Instructions
+
+1. **Run Migrations**:
+```bash
+myvenv/bin/python manage.py migrate blockchain
+```
+
+2. **Configure Celery Beat** (in `config/celery.py`):
+```python
+from blockchain.celery_schedules import BLOCKCHAIN_CELERY_BEAT_SCHEDULE
+app.conf.beat_schedule.update(BLOCKCHAIN_CELERY_BEAT_SCHEDULE)
+```
+
+3. **Start Services**:
+```bash
+# Terminal 1: Celery worker
+celery -A config worker -l info
+
+# Terminal 2: Celery beat
+celery -A config beat -l info
+
+# Terminal 3: Blockchain poller (optional)
+myvenv/bin/python manage.py poll_blockchain
+```
+
+### Testing & Monitoring
+
+```bash
+# Test balance service
+myvenv/bin/python manage.py test_balance_service --user-email user@example.com
+
+# Run performance benchmark
+myvenv/bin/python manage.py test_balance_service --benchmark
+
+# Check RPC connection
+myvenv/bin/python manage.py test_sui_connection
+```
+
+### Performance Benefits
+
+- **20x faster** balance reads for UI display
+- **Reduced RPC costs** with intelligent caching
+- **Better UX** with instant balance updates
+- **Safety guaranteed** for critical operations
+
+For more details, see [blockchain/README.md](blockchain/README.md).
 
 ### Country Code Management
 
