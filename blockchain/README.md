@@ -28,6 +28,29 @@ python manage.py poll_blockchain
 
 ## Architecture
 
+### Overview
+The blockchain integration uses a **two-part system**:
+1. **Polling Process**: Monitors blockchain for relevant transactions
+2. **Celery Workers**: Process transactions asynchronously
+
+### How Polling Works
+
+```
+Sui Blockchain → poll_blockchain → Celery Queue → process_transaction → Update Cache
+       ↑              (detect)         (queue)        (parse & route)      (invalidate)
+       |                                                    ↓
+   RPC calls                                         handle_*_transaction
+                                                     (token-specific logic)
+```
+
+The `poll_blockchain` management command:
+- Runs as a **separate long-running process**
+- Polls blockchain every 2 seconds
+- Detects transactions involving your contracts/users
+- Queues transactions to Celery for processing
+- Does NOT block the web server
+
+### Key Features
 - **Hybrid Caching**: Database + Redis caching with blockchain verification
 - **Smart Invalidation**: Automatic stale marking after transactions
 - **Periodic Reconciliation**: Hourly sync to catch any drift
@@ -116,6 +139,69 @@ MONITORED_CONTRACTS = [
     env('P2P_TRADE_ADDRESS'),
 ]
 ```
+
+## Production Deployment
+
+### Process Architecture
+You need to run **4 separate processes** in production:
+
+```bash
+# 1. Django Web Server
+gunicorn config.wsgi
+
+# 2. Celery Worker (processes blockchain transactions)
+celery -A config worker -l info
+
+# 3. Celery Beat (runs periodic tasks)
+celery -A config beat -l info
+
+# 4. Blockchain Poller (monitors blockchain)
+python manage.py poll_blockchain
+```
+
+### Docker Compose Example
+```yaml
+version: '3.8'
+services:
+  web:
+    command: gunicorn config.wsgi
+    
+  celery:
+    command: celery -A config worker -l info
+    
+  celery-beat:
+    command: celery -A config beat -l info
+    
+  blockchain-poller:
+    command: python manage.py poll_blockchain
+    restart: always  # Important: keep running
+```
+
+### Systemd Service Example
+```ini
+# /etc/systemd/system/confio-poller.service
+[Unit]
+Description=Confio Blockchain Poller
+After=network.target
+
+[Service]
+Type=simple
+User=confio
+WorkingDirectory=/opt/confio
+Environment="DJANGO_SETTINGS_MODULE=config.settings"
+ExecStart=/opt/confio/venv/bin/python manage.py poll_blockchain
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### Important Notes
+- The poller is **NOT a Celery task** - it's a standalone process
+- It must run continuously to detect transactions
+- Use supervisor, systemd, or Docker to ensure it restarts on failure
+- Monitor logs for polling errors
 
 ## Scaling
 
