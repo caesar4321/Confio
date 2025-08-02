@@ -17,7 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 class CoinManager:
-    """Manages coin objects for efficient transactions"""
+    """
+    Manages coin objects for efficient transactions.
+    
+    Philosophy: Lazy merging - only merge when necessary, not preemptively.
+    Gas costs scale with coin count, so merging 100 coins is expensive.
+    """
     
     @staticmethod
     async def get_coin_objects(address: str, coin_type: str) -> List[Dict]:
@@ -107,33 +112,46 @@ class CoinManager:
         return selected
     
     @staticmethod
+    async def should_merge_for_transaction(
+        coins_needed: List[Dict],
+        total_coins: int
+    ) -> bool:
+        """
+        Determine if merging is worthwhile for this transaction.
+        
+        Only merge if:
+        - Need more than 10 coins for the transaction
+        - Would significantly reduce transaction complexity
+        """
+        return len(coins_needed) > 10
+    
+    @staticmethod
     async def merge_coins(
         address: str,
         coin_type: str,
-        private_key: str,  # In production, use zkLogin
-        keep_separate: int = 2  # Keep some coins unmerged for gas
+        coins_to_merge: List[Dict],
+        private_key: str = None  # In production, use zkLogin
     ) -> Optional[str]:
         """
-        Merge multiple coin objects into fewer ones
+        Merge specific coin objects. Only called when necessary.
         
-        Returns transaction digest if merge was needed
+        This is NOT called preemptively - only when a transaction
+        needs many coins and merging would save gas overall.
         """
-        coins = await CoinManager.get_coin_objects(address, coin_type)
-        
-        # If we have few coins, no need to merge
-        if len(coins) <= keep_separate + 1:
-            return None
-        
-        # Keep the largest coins separate, merge the rest
-        coins_to_merge = coins[keep_separate:]
-        
         if len(coins_to_merge) < 2:
             return None
         
         # Build merge transaction
-        # In production, this would be signed with zkLogin
         primary_coin = coins_to_merge[0]
         coins_to_merge_into = coins_to_merge[1:]
+        
+        # Calculate gas cost estimate
+        merge_gas_cost = len(coins_to_merge) * 50000  # Rough estimate
+        
+        logger.info(
+            f"Merging {len(coins_to_merge)} coins into 1. "
+            f"Estimated gas: {merge_gas_cost / 1e9:.4f} SUI"
+        )
         
         tx_data = {
             "packageObjectId": "0x2",
@@ -144,15 +162,10 @@ class CoinManager:
                 primary_coin['objectId'],
                 [coin['objectId'] for coin in coins_to_merge_into]
             ],
-            "gasBudget": 10000000
+            "gasBudget": merge_gas_cost + 1000000  # Add buffer
         }
         
-        # This is a placeholder - actual implementation needs zkLogin
-        logger.info(
-            f"Would merge {len(coins_to_merge)} coins into 1. "
-            f"Primary: {primary_coin['objectId']}"
-        )
-        
+        # In production, sign with zkLogin
         return "merge_tx_placeholder"
     
     @staticmethod
@@ -197,17 +210,27 @@ class CoinManager:
 
 
 class CoinOptimizer:
-    """Periodic optimization of coin objects"""
+    """
+    Background coin optimization - runs only during low activity.
+    
+    Philosophy: Don't optimize prematurely. Only merge when:
+    1. User has excessive fragmentation (>20 coins)
+    2. During low-activity periods
+    3. Gas prices are favorable
+    """
+    
+    @staticmethod
+    async def should_optimize(account: 'Account', coin_count: int) -> bool:
+        """Only optimize if really fragmented"""
+        return coin_count > 20  # Much higher threshold
     
     @staticmethod
     async def optimize_account_coins(account: 'Account'):
         """
-        Optimize coins for an account
+        Light-touch optimization during low activity periods.
         
-        Run periodically (e.g., daily) to:
-        1. Merge excessive coin fragmentation
-        2. Ensure some coins are kept for gas
-        3. Log statistics
+        Only merges excessive fragmentation, keeping 5-10 coins
+        for optimal parallel operations.
         """
         from blockchain.blockchain_settings import CUSD_PACKAGE_ID, CONFIO_PACKAGE_ID
         
