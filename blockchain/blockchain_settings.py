@@ -1,5 +1,11 @@
 """
 Blockchain settings - Easy switch between testnet and mainnet
+
+Sui CLI Account Structure (deterministic with one passphrase):
+1. Admin (friendly-diamond): 0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256
+2. USDC Vault (friendly-crocidolite): 0x478abc5b847d726e5caad8e9b37d66890f61013b5fe5b5162adc586f99e3833d
+3. Sponsor (quizzical-dichroite): 0xed36f82d851c5b54ebc8b58a71ea6473823e073a01ce8b6a5c04a4bcebaf6aef
+4. Fee Collector (epic-epidote): 0xd1163e727e7590ade05bba7aaa8af755b21262a07d05fd20da0f1aa9ef6549d2
 """
 import os
 from django.conf import settings
@@ -23,12 +29,13 @@ if NETWORK == 'testnet':
     INVITE_SEND_PACKAGE_ID = "0xc360865f7f30324ade1d283ebfd5bfc385062588af3f389a755887fc5f99e45e"
     
     # Testnet object IDs
-    FEE_COLLECTOR_OBJECT_ID = "0xYOUR_TESTNET_FEE_COLLECTOR"
+    FEE_COLLECTOR_ADDRESS = "0xd1163e727e7590ade05bba7aaa8af755b21262a07d05fd20da0f1aa9ef6549d2"  # Fourth account
+    FEE_COLLECTOR_OBJECT_ID = "0xYOUR_TESTNET_FEE_COLLECTOR"  # Will be created by Pay contract
     TRADE_REGISTRY_OBJECT_ID = "0xYOUR_TESTNET_TRADE_REGISTRY"
     ESCROW_VAULT_OBJECT_ID = "0xYOUR_TESTNET_ESCROW_VAULT"
     
-    # Sponsor account for gas-free transactions
-    SPONSOR_ADDRESS = "0xYOUR_SPONSOR_ADDRESS"  # Must have SUI for gas sponsorship
+    # Sponsor account for gas-free transactions (third account - has 0.5 SUI)
+    SPONSOR_ADDRESS = "0xed36f82d851c5b54ebc8b58a71ea6473823e073a01ce8b6a5c04a4bcebaf6aef"
     
 else:  # mainnet
     # QuickNode mainnet (future)
