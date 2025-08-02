@@ -1,6 +1,9 @@
 from celery import shared_task
 from django.core.cache import cache
 from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
+from datetime import timedelta
 from decimal import Decimal
 import logging
 
@@ -210,6 +213,110 @@ def update_address_cache():
     logger.info(f"Updated {len(addresses)} user addresses in cache")
     
     return len(addresses)
+
+
+@shared_task
+def reconcile_all_balances():
+    """
+    Reconcile all user balances with blockchain
+    Run this periodically (e.g., every hour)
+    """
+    from .balance_service import BalanceService
+    
+    # Get all active accounts with stale or old balances
+    stale_threshold = timezone.now() - timedelta(hours=1)
+    accounts = Account.objects.filter(
+        is_active=True,
+        sui_address__isnull=False
+    ).filter(
+        Q(balances__is_stale=True) |
+        Q(balances__last_blockchain_check__lt=stale_threshold) |
+        Q(balances__last_blockchain_check__isnull=True)
+    ).distinct()
+    
+    success_count = 0
+    error_count = 0
+    
+    for account in accounts:
+        try:
+            results = BalanceService.reconcile_user_balances(account)
+            if all(results.values()):
+                success_count += 1
+            else:
+                error_count += 1
+                logger.warning(f"Partial reconciliation failure for {account}: {results}")
+        except Exception as e:
+            error_count += 1
+            logger.error(f"Failed to reconcile balances for {account}: {e}")
+    
+    logger.info(f"Balance reconciliation complete: {success_count} success, {error_count} errors")
+    
+    # Alert if too many errors
+    if error_count > accounts.count() * 0.1:  # More than 10% failure
+        logger.critical(f"High balance reconciliation failure rate: {error_count}/{accounts.count()}")
+        # TODO: Send alert to monitoring
+    
+    return {'success': success_count, 'errors': error_count}
+
+
+@shared_task
+def refresh_stale_balances():
+    """
+    Refresh balances marked as stale
+    Run this more frequently (e.g., every 5 minutes)
+    """
+    from .balance_service import BalanceService
+    
+    stale_balances = Balance.objects.filter(
+        is_stale=True,
+        account__is_active=True
+    ).select_related('account')[:100]  # Batch limit
+    
+    refreshed = 0
+    for balance in stale_balances:
+        try:
+            BalanceService.get_balance(
+                balance.account,
+                balance.token,
+                force_refresh=True
+            )
+            refreshed += 1
+        except Exception as e:
+            logger.error(f"Failed to refresh balance {balance}: {e}")
+            balance.sync_attempts += 1
+            balance.save(update_fields=['sync_attempts'])
+    
+    logger.info(f"Refreshed {refreshed} stale balances")
+    return refreshed
+
+
+@shared_task
+def mark_transaction_balances_stale(tx_hash, sender_address=None, recipient_addresses=None):
+    """
+    Mark balances as stale after detecting a transaction
+    Called by the polling service
+    """
+    from .balance_service import BalanceService
+    
+    marked = 0
+    
+    # Mark sender balance as stale
+    if sender_address:
+        accounts = Account.objects.filter(sui_address=sender_address)
+        for account in accounts:
+            BalanceService.mark_stale(account)
+            marked += 1
+    
+    # Mark recipient balances as stale
+    if recipient_addresses:
+        for address in recipient_addresses:
+            accounts = Account.objects.filter(sui_address=address)
+            for account in accounts:
+                BalanceService.mark_stale(account)
+                marked += 1
+    
+    logger.info(f"Marked {marked} balances as stale for transaction {tx_hash}")
+    return marked
 
 
 # Helper functions
