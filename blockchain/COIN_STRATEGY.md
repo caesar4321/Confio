@@ -64,27 +64,22 @@ Run daily background task to:
 - Manual merge/split controls
 - Gas optimization insights
 
-## Implementation Phases
+## Implementation Strategy: Lazy Merging
 
-### Phase 1: Basic Send (Current)
-- Use individual coins as-is
-- Manual splitting when needed
-- Basic balance aggregation
+### Core Philosophy
+- **Only merge when necessary**: Don't optimize prematurely
+- **Gas costs scale**: Merging 100 coins costs ~50x more than merging 2
+- **Keep some coins unmerged**: Enables parallel transactions and gas payments
 
-### Phase 2: Smart Selection (Next)
-- Implement `CoinManager.select_coins_for_amount()`
-- Automatic coin selection for payments
-- Better gas efficiency
+### When to Merge
+1. **Transaction needs >10 coins**: Merge to reduce complexity
+2. **Excessive fragmentation (>20 coins)**: Consider background optimization
+3. **User-initiated**: Explicit request for optimization
 
-### Phase 3: Auto-Merge (Future)
-- Background coin optimization
-- Automatic merging when fragmented
-- Predictive splitting for common amounts
-
-### Phase 4: Advanced Features
-- Multi-coin parallel transactions
-- Gas payment optimization
-- Coin statistics dashboard
+### When NOT to Merge
+1. **Few coins (<10)**: Gas cost not worth it
+2. **Regular operations**: Let coins accumulate naturally
+3. **Preemptive optimization**: Wastes gas for uncertain benefit
 
 ## Technical Considerations
 

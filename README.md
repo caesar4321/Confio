@@ -2010,28 +2010,30 @@ On Sui blockchain, tokens are represented as individual `Coin<T>` objects rather
 
 #### Smart Coin Management
 
-```python
-# Thresholds for automatic optimization
-MAX_COINS_PER_TYPE = 10  # Merge if more than this
-MIN_COINS_KEEP = 3       # Keep some unmerged for gas
-```
+**Lazy Merging Strategy**: Only merge coins when necessary, not preemptively.
 
-### Implementation Phases
+**Why Not Always Merge?**
+- Gas costs scale with number of coins (merging 100 coins costs 50x more than merging 2)
+- Multiple coins enable parallel transactions
+- Separate coins needed for gas payments
+- Merging takes time, delaying user transactions
 
-#### Phase 1: Basic Send (Current) ✅
-- Use individual coins as-is
-- Manual splitting when needed
-- Basic balance aggregation
+**When We Merge**:
+- User needs to send amount requiring many coins (>10)
+- Gas optimization during low-activity periods
+- Never merge everything - maintain 3-5 coins for flexibility
 
-#### Phase 2: Smart Selection (Next)
-- Automatic coin selection for payments
-- Minimize transaction costs
-- Better gas efficiency
+### Implementation Approach
 
-#### Phase 3: Auto-Merge (Future)
-- Background coin optimization
-- Automatic merging when fragmented
-- Predictive splitting for common amounts
+#### Current: Basic Operations ✅
+- Use coins as-is for simple sends
+- Show aggregated balance to users
+- Manual coin selection when needed
+
+#### Next: Smart Selection
+- `select_coins_for_amount()` - Pick optimal coins for each transaction
+- Minimize coins used while preserving parallel transaction capability
+- Lazy merge only when transaction requires it
 
 ### Technical Details
 
