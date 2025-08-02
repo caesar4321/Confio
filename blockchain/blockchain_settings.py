@@ -27,6 +27,9 @@ if NETWORK == 'testnet':
     TRADE_REGISTRY_OBJECT_ID = "0xYOUR_TESTNET_TRADE_REGISTRY"
     ESCROW_VAULT_OBJECT_ID = "0xYOUR_TESTNET_ESCROW_VAULT"
     
+    # Sponsor account for gas-free transactions
+    SPONSOR_ADDRESS = "0xYOUR_SPONSOR_ADDRESS"  # Must have SUI for gas sponsorship
+    
 else:  # mainnet
     # QuickNode mainnet (future)
     SUI_RPC_URL = f"https://{os.environ.get('QUICKNODE_ENDPOINT')}"

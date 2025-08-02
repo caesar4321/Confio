@@ -2041,6 +2041,71 @@ estimate = await TransactionManager.estimate_transaction_cost(
     Decimal('50')
 )
 print(f"Recommended: {estimate['recommendation']}")
+
+# Method 4: Send with sponsorship (gas-free for users)
+result = await TransactionManager.send_tokens(
+    account,
+    recipient_address,
+    Decimal('100'),
+    'CUSD',
+    user_signature  # zkLogin signature
+)
+```
+
+### Sponsored Transactions (Gas-Free)
+
+All user transactions are sponsored, meaning users don't need SUI tokens for gas:
+
+```python
+from blockchain.sponsor_service import SponsorService
+
+# Check sponsor health
+health = await SponsorService.check_sponsor_health()
+print(f"Can sponsor: {health['can_sponsor']}")
+print(f"Balance: {health['balance']} SUI")
+
+# Estimate sponsorship cost
+estimate = await SponsorService.estimate_sponsorship_cost(
+    'send',
+    {'coin_count': 5}
+)
+print(f"Estimated gas: {estimate['estimated_gas_sui']} SUI")
+```
+
+**GraphQL Mutations for Sending:**
+
+```graphql
+# Send tokens
+mutation SendTokens {
+  sendTokens(
+    recipient: "0x123...",
+    amount: "100.50",
+    tokenType: "CUSD"
+  ) {
+    success
+    transactionDigest
+    gasSaved
+    balances {
+      cusd
+      confio
+    }
+  }
+}
+
+# Estimate before sending
+mutation EstimateCost {
+  estimateSendCost(
+    amount: "100.50",
+    tokenType: "CUSD"
+  ) {
+    success
+    coinsNeeded
+    needsMerge
+    estimatedGas
+    recommendation
+    sponsorAvailable
+  }
+}
 ```
 
 ### Monitoring

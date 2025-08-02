@@ -2334,6 +2334,241 @@ class RefreshAccountBalance(graphene.Mutation):
 			return RefreshAccountBalance(success=False, errors=str(e))
 
 
+class SendTokens(graphene.Mutation):
+	"""Send tokens to another user with automatic coin management and gas sponsorship"""
+	class Arguments:
+		recipient = graphene.String(required=True, description="Recipient's Sui address")
+		amount = graphene.String(required=True, description="Amount to send")
+		token_type = graphene.String(required=True, description="Token type (CUSD, CONFIO)")
+		message = graphene.String(required=False, description="Optional message for the transaction")
+	
+	success = graphene.Boolean()
+	error = graphene.String()
+	transactionDigest = graphene.String()
+	gasSaved = graphene.String()
+	balances = graphene.Field(BalancesType)
+	
+	@classmethod
+	def mutate(cls, root, info, recipient, amount, token_type, message=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return SendTokens(success=False, error="Authentication required")
+		
+		# Get JWT context with validation - sending requires send_payment permission
+		from .jwt_context import get_jwt_business_context_with_validation
+		jwt_context = get_jwt_business_context_with_validation(info, required_permission='send_payment')
+		if not jwt_context:
+			return SendTokens(success=False, error="No permission to send payments")
+		
+		account_type = jwt_context['account_type']
+		account_index = jwt_context['account_index']
+		business_id_from_context = jwt_context.get('business_id')
+		
+		try:
+			# Get the specific account
+			if account_type == 'business' and business_id_from_context:
+				account = Account.objects.get(
+					business_id=business_id_from_context,
+					account_type='business',
+					account_index=account_index
+				)
+			else:
+				account = Account.objects.get(
+					user=user,
+					account_type=account_type,
+					account_index=account_index
+				)
+			
+			# Validate inputs
+			from decimal import Decimal
+			try:
+				amount_decimal = Decimal(amount)
+				if amount_decimal <= 0:
+					return SendTokens(success=False, error="Amount must be positive")
+			except:
+				return SendTokens(success=False, error="Invalid amount format")
+			
+			# Validate token type
+			token_type = token_type.upper()
+			if token_type not in ['CUSD', 'CONFIO']:
+				return SendTokens(success=False, error="Invalid token type. Use CUSD or CONFIO")
+			
+			# Validate recipient address
+			if not recipient.startswith('0x') or len(recipient) != 66:
+				return SendTokens(success=False, error="Invalid recipient address format")
+			
+			# Check if account has a Sui address
+			if not account.sui_address:
+				return SendTokens(
+					success=False, 
+					error="Your account has no blockchain address"
+				)
+			
+			# Execute the sponsored transaction
+			from blockchain import TransactionManager
+			import asyncio
+			
+			loop = asyncio.new_event_loop()
+			asyncio.set_event_loop(loop)
+			
+			try:
+				# Get zkLogin signature (in production, this would come from the client)
+				# For now, we'll use None and the sponsor service will handle it
+				user_signature = None
+				
+				result = loop.run_until_complete(
+					TransactionManager.send_tokens(
+						account,
+						recipient,
+						amount_decimal,
+						token_type,
+						user_signature
+					)
+				)
+				
+				if result['success']:
+					# Get updated balances
+					from blockchain.balance_service import BalanceService
+					all_balances = BalanceService.get_all_balances(account, force_refresh=True)
+					
+					balances = BalancesType(
+						cusd=f"{all_balances['cusd']['amount']:.2f}",
+						confio=f"{all_balances['confio']['amount']:.2f}",
+						usdc=f"{all_balances['usdc']['amount']:.2f}",
+						sui="0.00"
+					)
+					
+					# Log the transaction
+					print(f"Send successful: {amount} {token_type} to {recipient[:16]}...")
+					print(f"Transaction digest: {result.get('digest')}")
+					print(f"Gas saved: {result.get('gas_saved', 0)} SUI")
+					
+					return SendTokens(
+						success=True,
+						transactionDigest=result.get('digest'),
+						gasSaved=str(result.get('gas_saved', 0)),
+						balances=balances
+					)
+				else:
+					return SendTokens(
+						success=False,
+						error=result.get('error', 'Transaction failed')
+					)
+					
+			finally:
+				loop.close()
+			
+		except Account.DoesNotExist:
+			return SendTokens(success=False, error="Account not found")
+		except Exception as e:
+			print(f"SendTokens error: {e}")
+			return SendTokens(success=False, error=str(e))
+
+
+class EstimateSendCost(graphene.Mutation):
+	"""Estimate the cost and gas for sending tokens"""
+	class Arguments:
+		amount = graphene.String(required=True, description="Amount to send")
+		token_type = graphene.String(required=True, description="Token type (CUSD, CONFIO)")
+	
+	success = graphene.Boolean()
+	error = graphene.String()
+	coinsNeeded = graphene.Int()
+	needsMerge = graphene.Boolean()
+	estimatedGas = graphene.String()
+	recommendation = graphene.String()
+	sponsorAvailable = graphene.Boolean()
+	
+	@classmethod
+	def mutate(cls, root, info, amount, token_type):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return EstimateSendCost(success=False, error="Authentication required")
+		
+		# Get JWT context
+		from .jwt_context import get_jwt_business_context_with_validation
+		jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_balance')
+		if not jwt_context:
+			return EstimateSendCost(success=False, error="No permission")
+		
+		account_type = jwt_context['account_type']
+		account_index = jwt_context['account_index']
+		business_id_from_context = jwt_context.get('business_id')
+		
+		try:
+			# Get the specific account
+			if account_type == 'business' and business_id_from_context:
+				account = Account.objects.get(
+					business_id=business_id_from_context,
+					account_type='business',
+					account_index=account_index
+				)
+			else:
+				account = Account.objects.get(
+					user=user,
+					account_type=account_type,
+					account_index=account_index
+				)
+			
+			# Validate inputs
+			from decimal import Decimal
+			try:
+				amount_decimal = Decimal(amount)
+				if amount_decimal <= 0:
+					return EstimateSendCost(success=False, error="Amount must be positive")
+			except:
+				return EstimateSendCost(success=False, error="Invalid amount format")
+			
+			# Validate token type
+			token_type = token_type.upper()
+			if token_type not in ['CUSD', 'CONFIO']:
+				return EstimateSendCost(success=False, error="Invalid token type")
+			
+			# Get estimate
+			from blockchain import TransactionManager
+			from blockchain.sponsor_service import SponsorService
+			import asyncio
+			
+			loop = asyncio.new_event_loop()
+			asyncio.set_event_loop(loop)
+			
+			try:
+				# Get transaction estimate
+				estimate = loop.run_until_complete(
+					TransactionManager.estimate_transaction_cost(
+						account,
+						token_type,
+						amount_decimal
+					)
+				)
+				
+				# Get sponsor status
+				sponsor_estimate = loop.run_until_complete(
+					SponsorService.estimate_sponsorship_cost(
+						'send',
+						{'coin_count': estimate['coins_needed']}
+					)
+				)
+				
+				return EstimateSendCost(
+					success=True,
+					coinsNeeded=estimate['coins_needed'],
+					needsMerge=estimate['needs_merge'],
+					estimatedGas=f"{sponsor_estimate['estimated_gas_sui']:.4f} SUI",
+					recommendation=estimate['recommendation'],
+					sponsorAvailable=sponsor_estimate['sponsor_available']
+				)
+				
+			finally:
+				loop.close()
+			
+		except Account.DoesNotExist:
+			return EstimateSendCost(success=False, error="Account not found")
+		except Exception as e:
+			print(f"EstimateSendCost error: {e}")
+			return EstimateSendCost(success=False, error=str(e))
+
+
 class CreateTestUsers(graphene.Mutation):
 	"""Test mutation to create users based on phone numbers - FOR TESTING ONLY"""
 	class Arguments:
@@ -3043,6 +3278,8 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
 		lambda: RefreshAccountBalance,
 		description="Force refresh balance from blockchain"
 	)
+	send_tokens = SendTokens.Field()
+	estimate_send_cost = EstimateSendCost.Field()
 	
 	# Test mutations (only in DEBUG mode)
 	create_test_users = CreateTestUsers.Field()
