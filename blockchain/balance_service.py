@@ -201,6 +201,7 @@ class BalanceService:
                 amount = loop.run_until_complete(
                     sui_client.get_cusd_balance(account.sui_address)
                 )
+                logger.info(f"Blockchain balance for {account.sui_address} - {token}: {amount}")
             elif token == 'CONFIO':
                 amount = loop.run_until_complete(
                     sui_client.get_confio_balance(account.sui_address)

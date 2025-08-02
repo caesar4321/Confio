@@ -1,5 +1,21 @@
 import { gql } from '@apollo/client';
 
+export const REFRESH_ACCOUNT_BALANCE = gql`
+  mutation RefreshAccountBalance {
+    refreshAccountBalance {
+      balances {
+        cusd
+        confio
+        usdc
+        sui
+      }
+      lastSynced
+      success
+      errors
+    }
+  }
+`;
+
 export const CONVERT_USDC_TO_CUSD = gql`
   mutation ConvertUSDCToCUSD($amount: String!) {
     convertUsdcToCusd(amount: $amount) {
