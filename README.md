@@ -248,9 +248,17 @@ This is a **monolithic repository** containing the full Confío stack:
 │   │   │   └── pay.move               # Payment system with 0.9% fee
 │   │   ├── Move.toml # Package configuration
 │   │   └── Move.lock # Dependency lock file
-│   └── invite_send/  # Send funds to non-users with invitations
+│   ├── invite_send/  # Send funds to non-users with invitations
+│   │   ├── sources/  # Move source files
+│   │   │   └── invite_send.move       # Invitation system with 7-day reclaim
+│   │   ├── Move.toml # Package configuration
+│   │   └── Move.lock # Dependency lock file
+│   └── p2p_trade/    # P2P trading with escrow and dispute resolution
 │       ├── sources/  # Move source files
-│       │   └── invite_send.move       # Invitation system with 7-day reclaim
+│       │   └── p2p_trade.move         # Escrow-based P2P trading system
+│       ├── tests/    # Test files
+│       │   └── escrow_security_test.move  # Security test cases
+│       ├── README.md # Contract documentation
 │       ├── Move.toml # Package configuration
 │       └── Move.lock # Dependency lock file
 
@@ -1810,6 +1818,33 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
   - After 7 days, sender can reclaim unclaimed funds
   - Prevents permanent loss of funds if recipient never signs up
   - One-click reclaim by original sender only
+
+### P2P Trade
+- **File**: `contracts/p2p_trade/sources/p2p_trade.move`
+- **Purpose**: Secure escrow-based peer-to-peer trading system for crypto-to-fiat exchanges
+- **Key Features**:
+  - Escrow protection: Crypto funds locked until fiat payment confirmed
+  - 15-minute trade window with automatic expiry (900 seconds)
+  - Self-trading prevention (ESelfTrade error)
+  - Admin-mediated dispute resolution system
+  - Support for both cUSD and CONFIO tokens
+  - Privacy-preserving: No personal information on-chain
+- **Trade Flow**:
+  1. Seller creates trade offer with crypto amount and fiat details
+  2. Buyer accepts trade within 15-minute window
+  3. Buyer sends fiat payment off-chain (bank transfer, mobile money, etc.)
+  4. Seller confirms receipt, releasing crypto to buyer
+  5. Either party can open dispute if issues arise
+- **Security Features**:
+  - Separate escrow vaults for each token type
+  - Atomic fund transfers only on valid state transitions
+  - Authorization checks on all critical operations
+  - Trade statistics tracking for platform monitoring
+- **Perfect for Latin America**:
+  - Supports country-specific payment methods
+  - No KYC required on-chain (handled by Django)
+  - Designed for informal economy participants
+  - Dispute resolution for building trust
 
 ### Gasless Transactions
 - **Implementation**: Handled off-chain through Sui's native sponsored transaction system
