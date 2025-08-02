@@ -28,7 +28,9 @@ def process_transaction(self, tx_data):
                     'module': extract_module(tx_data),
                     'function': extract_function(tx_data),
                     'raw_data': tx_data,
-                    'block_time': tx_data.get('timestampMs', 0)
+                    'block_time': tx_data.get('timestampMs', 0),
+                    'epoch': tx_data.get('checkpoint', {}).get('epoch'),
+                    'checkpoint': tx_data.get('checkpoint', {}).get('sequenceNumber')
                 }
             )
             
@@ -337,3 +339,88 @@ def extract_function(tx_data):
             if 'MoveCall' in cmd:
                 return cmd['MoveCall'].get('function', 'unknown')
     return 'unknown'
+
+
+@shared_task
+def cleanup_old_events():
+    """Clean up old blockchain events"""
+    # Keep events for 90 days
+    cutoff = timezone.now() - timedelta(days=90)
+    deleted_count = RawBlockchainEvent.objects.filter(
+        created_at__lt=cutoff,
+        processed=True
+    ).delete()[0]
+    
+    logger.info(f"Cleaned up {deleted_count} old blockchain events")
+    return deleted_count
+
+
+@shared_task
+def track_epoch_change():
+    """
+    Monitor and track Sui epoch changes
+    Run this every 30 minutes
+    """
+    from .models import SuiEpoch
+    import asyncio
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        # Get current epoch info
+        epoch_info = loop.run_until_complete(sui_client.get_epoch_info())
+        
+        current_epoch_num = int(epoch_info['epoch'])
+        epoch_start_ms = int(epoch_info['epochStartTimestampMs'])
+        
+        # Check if this epoch is already tracked
+        current_epoch, created = SuiEpoch.objects.get_or_create(
+            epoch_number=current_epoch_num,
+            defaults={
+                'start_timestamp_ms': epoch_start_ms,
+                'first_checkpoint': 0,  # Will be updated later
+                'is_current': True
+            }
+        )
+        
+        if created:
+            logger.info(f"New epoch detected: {current_epoch_num}")
+            
+            # Mark previous epochs as not current
+            SuiEpoch.objects.filter(is_current=True).exclude(
+                epoch_number=current_epoch_num
+            ).update(is_current=False)
+            
+            # Try to finalize previous epoch
+            try:
+                previous_epoch = SuiEpoch.objects.filter(
+                    epoch_number=current_epoch_num - 1
+                ).first()
+                
+                if previous_epoch and not previous_epoch.end_timestamp_ms:
+                    previous_epoch.end_timestamp_ms = epoch_start_ms - 1
+                    previous_epoch.save()
+                    logger.info(f"Finalized epoch {previous_epoch.epoch_number}")
+            except Exception as e:
+                logger.error(f"Error finalizing previous epoch: {e}")
+        
+        # Update current epoch stats
+        if epoch_info.get('totalStake'):
+            current_epoch.total_stake = int(epoch_info['totalStake'])
+        if epoch_info.get('storageFundNonRefundableBalance'):
+            current_epoch.storage_fund_balance = int(epoch_info['storageFundNonRefundableBalance'])
+        
+        current_epoch.save()
+        
+        return {
+            'epoch': current_epoch_num,
+            'created': created,
+            'start_time': epoch_start_ms
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to track epoch: {e}")
+        raise
+    finally:
+        loop.close()

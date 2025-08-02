@@ -117,6 +117,37 @@ class SuiClient:
         balances = await self.get_balance(address, coin_type)
         return balances.get(coin_type, Decimal('0'))
     
+    # ===== Epoch Operations =====
+    
+    async def get_latest_sui_system_state(self):
+        """Get the latest SuiSystemState to extract epoch info"""
+        return await self._make_rpc_call("suix_getLatestSuiSystemState", [])
+    
+    async def get_epoch_info(self):
+        """Get current epoch information"""
+        system_state = await self.get_latest_sui_system_state()
+        return {
+            'epoch': system_state.get('epoch'),
+            'epochStartTimestampMs': system_state.get('epochStartTimestampMs'),
+            'epochDurationMs': system_state.get('epochDurationMs'),
+            'totalStake': system_state.get('totalStake'),
+            'storageRebate': system_state.get('storageRebate'),
+            'storageFundTotalObjectStorageRebates': system_state.get('storageFundTotalObjectStorageRebates'),
+            'storageFundNonRefundableBalance': system_state.get('storageFundNonRefundableBalance'),
+        }
+    
+    async def get_checkpoints_in_epoch(self, epoch: int):
+        """Get checkpoint range for a specific epoch"""
+        # Get epoch change events to find checkpoint boundaries
+        return await self._make_rpc_call(
+            "suix_getCheckpoints",
+            {
+                "cursor": None,
+                "limit": 1,
+                "descendingOrder": False
+            }
+        )
+    
     # ===== Transaction Operations =====
     
     async def transfer_cusd(

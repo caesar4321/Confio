@@ -702,8 +702,9 @@ confio_admin_site.register(NotificationPreference, NotificationPreferenceAdmin)
 confio_admin_site.register(FCMDeviceToken, FCMDeviceTokenAdmin)
 
 # Blockchain models
-from blockchain.models import RawBlockchainEvent, Balance, TransactionProcessingLog
-from blockchain.admin import RawBlockchainEventAdmin, BalanceAdmin, TransactionProcessingLogAdmin
+from blockchain.models import RawBlockchainEvent, Balance, TransactionProcessingLog, SuiEpoch
+from blockchain.admin import RawBlockchainEventAdmin, BalanceAdmin, TransactionProcessingLogAdmin, SuiEpochAdmin
 confio_admin_site.register(RawBlockchainEvent, RawBlockchainEventAdmin)
 confio_admin_site.register(Balance, BalanceAdmin)
 confio_admin_site.register(TransactionProcessingLog, TransactionProcessingLogAdmin)
+confio_admin_site.register(SuiEpoch, SuiEpochAdmin)
