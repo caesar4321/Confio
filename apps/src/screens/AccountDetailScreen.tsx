@@ -33,6 +33,7 @@ import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery, useMutation } from '@apollo/client';
 import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS, GET_ACCOUNT_BALANCE } from '../apollo/queries';
+import { REFRESH_ACCOUNT_BALANCE } from '../apollo/mutations';
 // import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations'; // Removed - handled in USDCConversion screen
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
 import moment from 'moment';
@@ -249,11 +250,25 @@ export const AccountDetailScreen = () => {
     }
   });
 
+  // Fetch USDC balance for cUSD accounts (not for employees)
+  const shouldFetchUSDC = route.params.accountType === 'cusd' && !activeAccount?.isEmployee;
+  const { data: usdcBalanceData, loading: usdcLoading, error: usdcError, refetch: refetchUSDC } = useQuery(GET_ACCOUNT_BALANCE, {
+    variables: { tokenType: 'USDC' },
+    fetchPolicy: 'no-cache',
+    skip: !shouldFetchUSDC,
+  });
+
+  // Parse USDC balance
+  const usdcBalance = React.useMemo(() => 
+    parseFloat(usdcBalanceData?.accountBalance || '0'), 
+    [usdcBalanceData?.accountBalance]
+  );
+
   // USDC balance data - HIDDEN for employees
-  const usdcAccount = (route.params.accountType === 'cusd' && !activeAccount?.isEmployee) ? {
+  const usdcAccount = shouldFetchUSDC ? {
     name: "USD Coin",
     symbol: "USDC",
-    balance: "458.22",
+    balance: usdcBalance.toFixed(2),
     balanceHidden: "•••••••",
     description: "Para usuarios avanzados - depósito directo vía Sui Blockchain"
   } : null;
@@ -293,6 +308,9 @@ export const AccountDetailScreen = () => {
   });
   const isPresaleActive = presaleStatusData?.isPresaleActive === true;
 
+  // Refresh balance mutation for force-refreshing from blockchain
+  const [refreshBalanceMutation] = useMutation(REFRESH_ACCOUNT_BALANCE);
+  
   // Conversion mutations
   // const [convertUsdcToCusd] = useMutation(CONVERT_USDC_TO_CUSD); // Removed - handled in USDCConversion screen
   // const [convertCusdToUsdc] = useMutation(CONVERT_CUSD_TO_USDC); // Removed - handled in USDCConversion screen
@@ -345,8 +363,15 @@ export const AccountDetailScreen = () => {
     }
     
     try {
-      // Refresh both balance and transactions
-      const [balanceResult, { data }] = await Promise.all([
+      // First force refresh from blockchain
+      const { data: refreshData } = await refreshBalanceMutation();
+      
+      if (refreshData?.refreshAccountBalance?.success) {
+        console.log('AccountDetailScreen - Balances refreshed from blockchain:', refreshData.refreshAccountBalance.balances);
+      }
+      
+      // Then refresh balance, USDC (if applicable), and transactions
+      const promises = [
         refetchBalance(),
         refetchUnified({
           accountType: activeAccount?.type || 'personal',
@@ -357,7 +382,14 @@ export const AccountDetailScreen = () => {
         (activeAccount?.isEmployee ? ['cUSD', 'CUSD'] : ['cUSD', 'CUSD', 'USDC']) : 
         ['CONFIO']
         })
-      ]);
+      ];
+      
+      // Add USDC refresh if applicable
+      if (shouldFetchUSDC) {
+        promises.push(refetchUSDC());
+      }
+      
+      const [balanceResult, { data }] = await Promise.all(promises);
       setAllTransactions(data?.currentAccountTransactions || []);
       setTransactionLimit(20);
       setTransactionOffset(0);

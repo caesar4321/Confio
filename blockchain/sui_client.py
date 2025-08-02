@@ -71,20 +71,30 @@ class SuiClient:
         cache_key = f"balance:{address}:{coin_type or 'all'}"
         cached = cache.get(cache_key)
         if cached:
+            logger.info(f"Returning cached balance for {address}, coin_type={coin_type}: {cached}")
             return cached
         
-        params = [address]
+        # For specific coin type, use suix_getBalance
         if coin_type:
-            params.append(coin_type)
-        
-        result = await self._make_rpc_call("suix_getBalance", params)
+            result = await self._make_rpc_call("suix_getBalance", [address, coin_type])
+        else:
+            # For all coins, use suix_getAllBalances
+            result = await self._make_rpc_call("suix_getAllBalances", [address])
+            
+        logger.info(f"RPC balance result for {address}, coin_type={coin_type}: {result}")
         
         # Parse balances
         balances = {}
         if coin_type:
             # Single coin balance
-            decimals = self._get_coin_decimals(coin_type)
-            balances[coin_type] = Decimal(result['totalBalance']) / Decimal(10 ** decimals)
+            if 'totalBalance' in result:
+                decimals = self._get_coin_decimals(coin_type)
+                total_balance = result['totalBalance']
+                logger.info(f"Parsing single coin balance: totalBalance={total_balance}, decimals={decimals}, coin_type={coin_type}")
+                balances[coin_type] = Decimal(total_balance) / Decimal(10 ** decimals)
+            else:
+                logger.warning(f"No totalBalance in result for {coin_type}: {result}")
+                balances[coin_type] = Decimal('0')
         else:
             # All balances
             for coin_data in result:
@@ -119,6 +129,27 @@ class SuiClient:
         coin_type = "0x2::sui::SUI"
         balances = await self.get_balance(address, coin_type)
         return balances.get(coin_type, Decimal('0'))
+    
+    async def get_usdc_balance(self, address: str) -> Decimal:
+        """Get USDC balance for address - checks multiple USDC deployments"""
+        # List of known USDC package IDs on testnet
+        usdc_packages = [
+            "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29",  # Faucet USDC
+            "0x92d332c82493dcb28f2a8288ca180c73e52f7bbd9eb691dbd63418f90530b686",  # Another USDC deployment
+        ]
+        
+        total_balance = Decimal('0')
+        
+        for package_id in usdc_packages:
+            coin_type = f"{package_id}::usdc::USDC"
+            balances = await self.get_balance(address, coin_type)
+            balance = balances.get(coin_type, Decimal('0'))
+            if balance > 0:
+                logger.info(f"Found {balance} USDC from package {package_id[:8]}...")
+            total_balance += balance
+        
+        logger.info(f"get_usdc_balance for {address}: {total_balance} USDC total")
+        return total_balance
     
     # ===== Epoch Operations =====
     
