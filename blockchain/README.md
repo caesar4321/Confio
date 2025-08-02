@@ -58,6 +58,12 @@ The `poll_blockchain` management command:
 
 ## Key Components
 
+### Transaction Manager (`transaction_manager.py`)
+- **Automatic Coin Management**: Prepares coins before any transaction
+- **Lazy Merging**: Only merges when >10 coins needed
+- **Gas Optimization**: Estimates and minimizes transaction costs
+- **Decorator Support**: `@prepare_transaction` for automatic handling
+
 ### Balance Service (`balance_service.py`)
 - **Fast Reads**: Cached balances for UI display
 - **Smart Refresh**: Auto-refresh stale or old balances
@@ -68,6 +74,7 @@ The `poll_blockchain` management command:
 - `poll_blockchain`: Long-running blockchain monitor
 - `test_sui_connection`: Test RPC connectivity
 - `test_balance_service`: Test hybrid caching system
+- `test_transaction_manager`: Test coin preparation and estimates
 
 ### Celery Tasks
 - `process_transaction`: Initial processing
@@ -112,6 +119,36 @@ balance = BalanceService.get_balance(
 )
 if balance['amount'] >= withdrawal_amount:
     # Proceed with withdrawal
+```
+
+### Transaction Management
+
+```python
+from blockchain import TransactionManager
+
+# Method 1: Using decorator
+@TransactionManager.prepare_transaction('CUSD')
+async def send_payment(account, recipient, amount):
+    # Coins automatically prepared and available in account._prepared_coins
+    prepared = account._prepared_coins
+    print(f"Using {len(prepared['coins'])} coins")
+    # Execute transaction...
+
+# Method 2: Manual preparation
+prepared = await TransactionManager.prepare_coins(
+    account,
+    'CONFIO',
+    Decimal('100'),
+    merge_if_needed=True
+)
+
+# Method 3: Estimate before sending
+estimate = await TransactionManager.estimate_transaction_cost(
+    account,
+    'CUSD',
+    Decimal('50')
+)
+print(f"Recommended: {estimate['recommendation']}")
 ```
 
 ## Monitoring

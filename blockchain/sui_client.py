@@ -216,6 +216,67 @@ class SuiClient:
         # For now, return mock digest
         return tx_data.get('digest', 'mock_digest')
     
+    async def transfer_cusd_with_coins(
+        self,
+        from_address: str,
+        to_address: str,
+        amount: Decimal,
+        prepared_coins: List[Dict],
+        gas_budget: int = 10000000
+    ) -> str:
+        """
+        Transfer cUSD using pre-selected and potentially merged coins.
+        
+        This method is called after TransactionManager has prepared the coins,
+        potentially merging them if needed.
+        """
+        # Convert amount to smallest unit (6 decimals for cUSD)
+        amount_mist = int(amount * Decimal(10 ** 6))
+        
+        # If we have exactly one coin with the right amount, use it directly
+        if len(prepared_coins) == 1:
+            primary_coin = prepared_coins[0]
+            
+            # Build transfer transaction
+            tx_data = {
+                "packageObjectId": "0x2",
+                "module": "pay",
+                "function": "split_and_transfer",
+                "typeArguments": [f"{settings.CUSD_PACKAGE_ID}::cusd::CUSD"],
+                "arguments": [
+                    primary_coin['objectId'],
+                    amount_mist,
+                    to_address
+                ],
+                "gasBudget": str(gas_budget)
+            }
+        else:
+            # Multiple coins - merge and transfer
+            # In production, this would be a single atomic transaction
+            coin_object_ids = [coin['objectId'] for coin in prepared_coins]
+            
+            tx_data = {
+                "packageObjectId": "0x2",
+                "module": "pay",
+                "function": "join_vec_and_transfer",
+                "typeArguments": [f"{settings.CUSD_PACKAGE_ID}::cusd::CUSD"],
+                "arguments": [
+                    coin_object_ids,
+                    to_address
+                ],
+                "gasBudget": str(gas_budget)
+            }
+        
+        # Log transaction details
+        logger.info(
+            f"Transferring {amount} cUSD from {from_address} to {to_address} "
+            f"using {len(prepared_coins)} prepared coins"
+        )
+        
+        # In production: sign with zkLogin and execute
+        # For now, return mock digest
+        return f"tx_{from_address[:8]}_{to_address[:8]}_{amount}"
+    
     async def execute_pay_transaction(
         self,
         payer_address: str,
