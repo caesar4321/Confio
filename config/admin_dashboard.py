@@ -37,6 +37,7 @@ class ConfioAdminSite(admin.AdminSite):
             path('p2p-analytics/', self.admin_view(self.p2p_analytics_view), name='p2p_analytics'),
             path('user-analytics/', self.admin_view(self.user_analytics_view), name='user_analytics'),
             path('transaction-analytics/', self.admin_view(self.transaction_analytics_view), name='transaction_analytics'),
+            path('blockchain-analytics/', self.admin_view(self.blockchain_analytics_view), name='blockchain_analytics'),
             path('achievements/', self.admin_view(self.achievement_dashboard_view), name='achievement_dashboard'),
         ]
         return custom_urls + urls
@@ -205,6 +206,40 @@ class ConfioAdminSite(admin.AdminSite):
         ).order_by('-count')[:5]
         
         context['top_countries'] = country_stats
+        
+        # Blockchain metrics
+        from blockchain.models import RawBlockchainEvent, Balance, TransactionProcessingLog
+        context['blockchain_events_today'] = RawBlockchainEvent.objects.filter(
+            created_at__gte=today_start
+        ).count()
+        context['blockchain_events_unprocessed'] = RawBlockchainEvent.objects.filter(
+            processed=False
+        ).count()
+        context['cached_balances'] = Balance.objects.count()
+        context['stale_balances'] = Balance.objects.filter(is_stale=True).count()
+        context['balance_cache_health'] = {
+            'total': context['cached_balances'],
+            'stale': context['stale_balances'],
+            'fresh': context['cached_balances'] - context['stale_balances'],
+            'stale_percentage': (context['stale_balances'] / context['cached_balances'] * 100) if context['cached_balances'] > 0 else 0
+        }
+        
+        # Recent blockchain sync status
+        last_sync = Balance.objects.filter(
+            last_blockchain_check__isnull=False
+        ).order_by('-last_blockchain_check').first()
+        context['last_blockchain_sync'] = last_sync.last_blockchain_check if last_sync else None
+        
+        # Processing success rate
+        processing_logs = TransactionProcessingLog.objects.filter(
+            created_at__gte=today_start
+        )
+        total_processed = processing_logs.count()
+        failed_processed = processing_logs.filter(status='failed').count()
+        context['blockchain_processing_success_rate'] = (
+            ((total_processed - failed_processed) / total_processed * 100) 
+            if total_processed > 0 else 100
+        )
         
         # Recent activities
         context['recent_trades'] = P2PTrade.objects.select_related(
@@ -436,6 +471,112 @@ class ConfioAdminSite(admin.AdminSite):
         """Achievement system dashboard - delegate to the dedicated view"""
         from achievements.admin_views import achievement_dashboard as dashboard_func
         return dashboard_func(request)
+    
+    def blockchain_analytics_view(self, request):
+        """Blockchain integration analytics"""
+        from blockchain.models import RawBlockchainEvent, Balance, TransactionProcessingLog
+        
+        context = dict(
+            self.each_context(request),
+            title="Blockchain Analytics",
+        )
+        
+        # Get date range from request
+        days = int(request.GET.get('days', 30))
+        start_date = timezone.now() - timedelta(days=days)
+        
+        # Event processing by day
+        daily_events = RawBlockchainEvent.objects.filter(
+            created_at__gte=start_date
+        ).extra(
+            select={'day': 'date(blockchain_rawblockchainevent.created_at)'}
+        ).values('day').annotate(
+            total=Count('id'),
+            processed=Count('id', filter=Q(processed=True)),
+            unprocessed=Count('id', filter=Q(processed=False))
+        ).order_by('day')
+        
+        context['daily_events'] = list(daily_events)
+        
+        # Event types breakdown
+        event_types = RawBlockchainEvent.objects.filter(
+            created_at__gte=start_date
+        ).values('module', 'function').annotate(
+            count=Count('id')
+        ).order_by('-count')[:20]
+        
+        context['event_types'] = event_types
+        
+        # Balance cache metrics
+        context['total_cached_balances'] = Balance.objects.count()
+        context['stale_balances'] = Balance.objects.filter(is_stale=True).count()
+        context['recently_synced'] = Balance.objects.filter(
+            last_synced__gte=timezone.now() - timedelta(hours=1)
+        ).count()
+        
+        # Token distribution
+        token_balances = Balance.objects.values('token').annotate(
+            count=Count('id'),
+            total_amount=Sum('amount'),
+            avg_amount=Avg('amount')
+        ).order_by('token')
+        
+        context['token_balances'] = token_balances
+        
+        # Processing performance
+        processing_stats = TransactionProcessingLog.objects.filter(
+            created_at__gte=start_date
+        ).values('status').annotate(
+            count=Count('id'),
+            avg_attempts=Avg('attempts')
+        ).order_by('status')
+        
+        context['processing_stats'] = processing_stats
+        
+        # Recent failed processing
+        context['recent_failures'] = TransactionProcessingLog.objects.filter(
+            status='failed'
+        ).select_related('raw_event').order_by('-updated_at')[:20]
+        
+        # Balance freshness distribution
+        now = timezone.now()
+        freshness_ranges = [
+            ('< 5 min', timedelta(minutes=5)),
+            ('< 30 min', timedelta(minutes=30)),
+            ('< 1 hour', timedelta(hours=1)),
+            ('< 6 hours', timedelta(hours=6)),
+            ('< 24 hours', timedelta(hours=24)),
+            ('> 24 hours', None),
+        ]
+        
+        freshness_stats = []
+        for label, delta in freshness_ranges:
+            if delta:
+                count = Balance.objects.filter(
+                    last_synced__gte=now - delta
+                ).count()
+            else:
+                count = Balance.objects.filter(
+                    last_synced__lt=now - timedelta(hours=24)
+                ).count()
+            
+            freshness_stats.append({
+                'label': label,
+                'count': count,
+                'percentage': (count / context['total_cached_balances'] * 100) if context['total_cached_balances'] > 0 else 0
+            })
+        
+        context['freshness_stats'] = freshness_stats
+        
+        # Network health check
+        from django.conf import settings
+        context['network'] = settings.NETWORK if hasattr(settings, 'NETWORK') else 'Unknown'
+        context['rpc_url'] = settings.SUI_RPC_URL if hasattr(settings, 'SUI_RPC_URL') else 'Not configured'
+        
+        # Recent blockchain events
+        context['recent_events'] = RawBlockchainEvent.objects.order_by('-block_time')[:20]
+        
+        return render(request, 'admin/blockchain_analytics.html', context)
 
 
 # Create custom admin site instance
@@ -559,3 +700,10 @@ from notifications.admin import NotificationAdmin, NotificationPreferenceAdmin, 
 confio_admin_site.register(Notification, NotificationAdmin)
 confio_admin_site.register(NotificationPreference, NotificationPreferenceAdmin)
 confio_admin_site.register(FCMDeviceToken, FCMDeviceTokenAdmin)
+
+# Blockchain models
+from blockchain.models import RawBlockchainEvent, Balance, TransactionProcessingLog
+from blockchain.admin import RawBlockchainEventAdmin, BalanceAdmin, TransactionProcessingLogAdmin
+confio_admin_site.register(RawBlockchainEvent, RawBlockchainEventAdmin)
+confio_admin_site.register(Balance, BalanceAdmin)
+confio_admin_site.register(TransactionProcessingLog, TransactionProcessingLogAdmin)
