@@ -211,8 +211,10 @@ class BalanceService:
                     sui_client.get_sui_balance(account.sui_address)
                 )
             elif token == 'USDC':
-                # For USDC, we'd need to add this to sui_client
-                amount = Decimal('0')
+                amount = loop.run_until_complete(
+                    sui_client.get_usdc_balance(account.sui_address)
+                )
+                logger.info(f"Blockchain balance for {account.sui_address} - {token}: {amount}")
             else:
                 amount = Decimal('0')
             

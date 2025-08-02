@@ -861,6 +861,8 @@ class Query(EmployeeQueries, graphene.ObjectType):
 				force_refresh=recently_refreshed  # Force refresh if we just did a pull-to-refresh
 			)
 			
+			print(f"AccountBalance resolver - Got balance data for {normalized_token_type}: {balance_data}")
+			
 			# Format balance as string with 2 decimal places
 			balance = f"{balance_data['amount']:.2f}"
 			
