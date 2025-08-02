@@ -3,6 +3,7 @@ Transaction Manager with automatic coin management
 
 Handles pre-transaction coin optimization for all Sui transactions.
 Implements lazy merging strategy - only merges when necessary.
+Integrates with SponsorService for gas-free transactions.
 """
 
 import asyncio
@@ -13,6 +14,7 @@ from django.conf import settings
 from blockchain.coin_management import CoinManager
 from blockchain.sui_client import sui_client
 from blockchain.blockchain_settings import CUSD_PACKAGE_ID, CONFIO_PACKAGE_ID
+from blockchain.sponsor_service import SponsorService
 import logging
 
 logger = logging.getLogger(__name__)
@@ -253,6 +255,108 @@ class TransactionManager:
             
             return wrapper
         return decorator
+    
+    @classmethod
+    async def execute_sponsored_transaction(
+        cls,
+        account: 'Account',
+        transaction_type: str,
+        token_type: str,
+        amount: Decimal,
+        params: Dict[str, Any],
+        user_signature: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute a sponsored transaction with automatic coin preparation.
+        
+        This is the main entry point for all user transactions.
+        
+        Args:
+            account: User's account
+            transaction_type: Type of transaction (send, pay, trade)
+            token_type: Token type (CUSD, CONFIO)
+            amount: Amount to transact
+            params: Transaction-specific parameters
+            user_signature: Optional zkLogin signature
+            
+        Returns:
+            Dict with transaction result
+        """
+        try:
+            # Step 1: Prepare coins
+            prepared = await cls.prepare_coins(
+                account,
+                token_type,
+                amount,
+                merge_if_needed=True
+            )
+            
+            logger.info(
+                f"Executing sponsored {transaction_type} for {amount} {token_type}. "
+                f"Coins prepared: {len(prepared['coins'])}, Merged: {prepared['merged']}"
+            )
+            
+            # Step 2: Check sponsor availability
+            sponsor_health = await SponsorService.check_sponsor_health()
+            if not sponsor_health['can_sponsor']:
+                return {
+                    'success': False,
+                    'error': 'Transaction sponsorship temporarily unavailable',
+                    'details': 'Please try again later or contact support'
+                }
+            
+            # Step 3: Execute sponsored transaction
+            result = await SponsorService.sponsor_transaction_with_coins(
+                account,
+                transaction_type,
+                prepared,
+                {
+                    **params,
+                    'amount': amount,
+                    'token_type': token_type,
+                    'user_signature': user_signature
+                }
+            )
+            
+            # Step 4: Mark balances as stale if successful
+            if result.get('success'):
+                from blockchain.tasks import mark_transaction_balances_stale
+                mark_transaction_balances_stale.delay(
+                    [account.sui_address],
+                    result.get('digest', 'unknown')
+                )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error executing sponsored transaction: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
+    @classmethod
+    async def send_tokens(
+        cls,
+        account: 'Account',
+        recipient: str,
+        amount: Decimal,
+        token_type: str,
+        user_signature: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Send tokens with automatic coin management and sponsorship.
+        
+        This is a convenience method for the most common use case.
+        """
+        return await cls.execute_sponsored_transaction(
+            account,
+            'send',
+            token_type,
+            amount,
+            {'recipient': recipient},
+            user_signature
+        )
     
     @classmethod
     async def estimate_transaction_cost(
