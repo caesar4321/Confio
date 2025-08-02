@@ -12,9 +12,9 @@ class BlockchainService:
     """Service layer for GraphQL to interact with blockchain"""
     
     @staticmethod
-    def get_balances(sui_address: str) -> Dict[str, Decimal]:
+    def get_balances(account: 'Account', verify_critical: bool = False) -> Dict[str, Decimal]:
         """
-        Get all token balances for an address
+        Get all token balances for an account using hybrid caching
         
         Used in GraphQL query:
         query {
@@ -27,38 +27,28 @@ class BlockchainService:
             }
         }
         """
-        # Use asyncio in sync context
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        from .balance_service import BalanceService
         
-        try:
-            balances = loop.run_until_complete(
-                BlockchainService._get_balances_async(sui_address)
-            )
-            return balances
-        finally:
-            loop.close()
-    
-    @staticmethod
-    async def _get_balances_async(sui_address: str) -> Dict[str, Decimal]:
-        """Async helper to get balances"""
-        # Check cache first
-        cache_key = f"balances:{sui_address}"
-        cached = cache.get(cache_key)
-        if cached:
-            return cached
+        # Use the hybrid balance service
+        all_balances = BalanceService.get_all_balances(
+            account,
+            verify_critical=verify_critical
+        )
         
-        # Fetch from blockchain
-        balances = {
-            'cusd': await sui_client.get_cusd_balance(sui_address),
-            'confio': await sui_client.get_confio_balance(sui_address),
-            'sui': await sui_client.get_sui_balance(sui_address),
+        # Return simplified format for GraphQL
+        return {
+            'cusd': all_balances['cusd']['amount'],
+            'confio': all_balances['confio']['amount'],
+            'sui': all_balances['sui']['amount'],
+            'usdc': all_balances['usdc']['amount'],
+            # Additional fields available:
+            'cusd_available': all_balances['cusd']['available'],
+            'cusd_pending': all_balances['cusd']['pending'],
+            'last_synced': max(
+                b['last_synced'] for b in all_balances.values() 
+                if b['last_synced']
+            ) if any(b['last_synced'] for b in all_balances.values()) else None
         }
-        
-        # Cache for 30 seconds
-        cache.set(cache_key, balances, 30)
-        
-        return balances
     
     @staticmethod
     def send_cusd(

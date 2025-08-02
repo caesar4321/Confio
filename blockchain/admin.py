@@ -16,10 +16,10 @@ class RawBlockchainEventAdmin(admin.ModelAdmin):
 
 @admin.register(Balance)
 class BalanceAdmin(admin.ModelAdmin):
-    list_display = ['account', 'token', 'amount', 'last_updated']
-    list_filter = ['token', 'last_updated']
+    list_display = ['account', 'token', 'amount', 'available_amount', 'pending_amount', 'is_stale', 'last_synced']
+    list_filter = ['token', 'is_stale', 'last_synced']
     search_fields = ['account__user__email', 'account__sui_address']
-    readonly_fields = ['last_updated']
+    readonly_fields = ['last_synced', 'last_blockchain_check', 'available_amount']
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('account', 'account__user')

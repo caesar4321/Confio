@@ -1,6 +1,6 @@
 # Blockchain Integration Module
 
-Simple blockchain polling for Confío using shared Django infrastructure.
+Django app for Sui blockchain integration with hybrid balance caching for optimal performance.
 
 ## Quick Start
 
@@ -28,37 +28,80 @@ python manage.py poll_blockchain
 
 ## Architecture
 
-- **Single Codebase**: Shares models with main app
-- **Celery Tasks**: Async processing of transactions
-- **Redis Cache**: User address lookups
-- **Same Database**: No sync issues
+- **Hybrid Caching**: Database + Redis caching with blockchain verification
+- **Smart Invalidation**: Automatic stale marking after transactions
+- **Periodic Reconciliation**: Hourly sync to catch any drift
+- **Performance Optimized**: <10ms cached reads vs 100-500ms blockchain queries
 
 ## Key Components
 
-### Management Command
-- `poll_blockchain`: Long-running gRPC stream
+### Balance Service (`balance_service.py`)
+- **Fast Reads**: Cached balances for UI display
+- **Smart Refresh**: Auto-refresh stale or old balances
+- **Critical Verification**: Always query blockchain for sensitive operations
+- **Pending Tracking**: Track in-flight transaction amounts
+
+### Management Commands
+- `poll_blockchain`: Long-running blockchain monitor
+- `test_sui_connection`: Test RPC connectivity
+- `test_balance_service`: Test hybrid caching system
 
 ### Celery Tasks
 - `process_transaction`: Initial processing
-- `handle_cusd_transaction`: cUSD transfers
-- `handle_payment_transaction`: Pay contract
-- `update_user_address_cache`: Address sync
+- `reconcile_all_balances`: Hourly full reconciliation
+- `refresh_stale_balances`: 5-minute stale balance refresh
+- `mark_transaction_balances_stale`: Invalidate after transactions
 
 ### Models
-- `RawBlockchainEvent`: Audit trail
-- Uses existing `Transaction` model
+- `RawBlockchainEvent`: Raw blockchain data storage
+- `Balance`: Cached token balances with staleness tracking
+- `TransactionProcessingLog`: Processing audit trail
+
+## Balance Caching Strategy
+
+### When to Use Cache vs Blockchain
+
+**Use Cache (Fast ~10ms):**
+- Home screen balance display
+- Transaction history
+- Analytics/reporting
+- Non-critical UI updates
+
+**Force Blockchain Query (~200ms):**
+- Before sending transactions
+- During escrow creation
+- Large withdrawals
+- Conversion operations (USDC ↔ cUSD)
+
+### Example Usage
+
+```python
+from blockchain.balance_service import BalanceService
+
+# Fast cached read for display
+balance = BalanceService.get_balance(account, 'CUSD')
+print(f"Balance: {balance['amount']} cUSD")
+
+# Critical operation - verify with blockchain
+balance = BalanceService.get_balance(
+    account, 'CUSD', 
+    verify_critical=True
+)
+if balance['amount'] >= withdrawal_amount:
+    # Proceed with withdrawal
+```
 
 ## Monitoring
 
 ```bash
-# Check polling status
-python manage.py check_polling_health
+# Test balance service
+python manage.py test_balance_service --user-email user@example.com
 
-# View recent transactions
-python manage.py list_recent_blockchain_events
+# Run performance benchmark
+python manage.py test_balance_service --benchmark
 
-# Cache status
-python manage.py show_address_cache_stats
+# Check RPC connection
+python manage.py test_sui_connection --address 0x123...
 ```
 
 ## Configuration
