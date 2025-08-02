@@ -83,7 +83,8 @@ class SuiClient:
         balances = {}
         if coin_type:
             # Single coin balance
-            balances[coin_type] = Decimal(result['totalBalance']) / Decimal(10 ** 9)  # Assuming 9 decimals
+            decimals = self._get_coin_decimals(coin_type)
+            balances[coin_type] = Decimal(result['totalBalance']) / Decimal(10 ** decimals)
         else:
             # All balances
             for coin_data in result:
@@ -103,7 +104,9 @@ class SuiClient:
         """Get cUSD balance for address"""
         coin_type = f"{settings.CUSD_PACKAGE_ID}::cusd::CUSD"
         balances = await self.get_balance(address, coin_type)
-        return balances.get(coin_type, Decimal('0'))
+        balance = balances.get(coin_type, Decimal('0'))
+        logger.info(f"get_cusd_balance for {address}: {balance} cUSD")
+        return balance
     
     async def get_confio_balance(self, address: str) -> Decimal:
         """Get CONFIO balance for address"""

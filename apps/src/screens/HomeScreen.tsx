@@ -34,8 +34,9 @@ import { PushNotificationService } from '../services/pushNotificationService';
 import { AccountSwitchOverlay } from '../components/AccountSwitchOverlay';
 import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
-import { useQuery } from '@apollo/client';
+import { useQuery, useMutation } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE, GET_PRESALE_STATUS } from '../apollo/queries';
+import { REFRESH_ACCOUNT_BALANCE } from '../apollo/mutations';
 import { useCountry } from '../contexts/CountryContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
@@ -318,6 +319,9 @@ export const HomeScreen = () => {
     userProfileName: userProfile?.firstName || userProfile?.username
   });
 
+  // Refresh balance mutation for force-refreshing from blockchain
+  const [refreshBalanceMutation] = useMutation(REFRESH_ACCOUNT_BALANCE);
+  
   // Pull to refresh handler
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -327,6 +331,14 @@ export const HomeScreen = () => {
     }
     
     try {
+      // Force refresh from blockchain using the mutation
+      const { data } = await refreshBalanceMutation();
+      
+      if (data?.refreshAccountBalance?.success) {
+        console.log('Balances refreshed from blockchain:', data.refreshAccountBalance.balances);
+      }
+      
+      // Then refetch the cached data and refresh accounts
       await Promise.all([
         refreshAccounts(),
         refetchCUSD(),
@@ -337,7 +349,7 @@ export const HomeScreen = () => {
     } finally {
       setRefreshing(false);
     }
-  }, [refreshAccounts, refetchCUSD, refetchConfio]);
+  }, [refreshAccounts, refetchCUSD, refetchConfio, refreshBalanceMutation]);
   
   // Quick actions configuration - filter based on permissions
   const quickActionsData: QuickAction[] = [

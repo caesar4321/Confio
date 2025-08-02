@@ -837,40 +837,62 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			# Already handled above
 			pass
 		
-		# Normalize token type
+		# Normalize token type - always use uppercase for consistency
 		normalized_token_type = token_type.upper()
-		if normalized_token_type == 'CUSD':
-			normalized_token_type = 'cUSD'
 		
-		# For now, return mock balances based on account type and token type
-		# In production, this would query the blockchain using account.sui_address
-		if account_type == 'personal':
-			mock_balances = {
-				'cUSD': '150.00',
-				'CONFIO': '50.00',
-				'USDC': '200.00'
-			}
-		else:
-			# Create deterministic balances per business ID for debugging
-			# This helps identify which business context is being used
-			# Use business_id from JWT context to ensure proper differentiation
-			business_id = int(business_id_from_context) if business_id_from_context else 0
-			base_multiplier = business_id * 1000  # Each business gets unique base amount
-			
-			print(f"AccountBalance resolver - DEBUG: JWT business_id={business_id_from_context}, account.business.id={account.business.id if account.business else None}")
-			print(f"AccountBalance resolver - Using business_id={business_id} for balance calculation")
-			
-			mock_balances = {
-				'cUSD': f'{10000 + base_multiplier}.00',     # Business 1: 11000, Business 2: 12000, etc.
-				'CONFIO': f'{5000 + base_multiplier}.00',    # Business 1: 6000, Business 2: 7000, etc. 
-				'USDC': f'{20000 + base_multiplier}.00'      # Business 1: 21000, Business 2: 22000, etc.
-			}
-			
-			print(f"AccountBalance resolver - Business ID {business_id} deterministic balances: {mock_balances}")
+		# Check if account has a Sui address
+		if not account.sui_address:
+			print(f"AccountBalance resolver - Account has no Sui address, returning 0")
+			return "0"
 		
-		balance = mock_balances.get(normalized_token_type, '0')
-		print(f"AccountBalance resolver - Returning {balance} for {normalized_token_type} on {account_type} account")
-		return balance
+		# Use the blockchain integration to get real balance
+		try:
+			from blockchain.balance_service import BalanceService
+			
+			# Get balance from hybrid caching system
+			# Check if we've recently refreshed (within last 5 seconds)
+			from django.core.cache import cache
+			refresh_key = f"balance_refreshed:{account.id}"
+			recently_refreshed = cache.get(refresh_key, False)
+			
+			balance_data = BalanceService.get_balance(
+				account,
+				normalized_token_type,
+				force_refresh=recently_refreshed  # Force refresh if we just did a pull-to-refresh
+			)
+			
+			# Format balance as string with 2 decimal places
+			balance = f"{balance_data['amount']:.2f}"
+			
+			print(f"AccountBalance resolver - Real blockchain balance: {balance} {normalized_token_type}")
+			print(f"AccountBalance resolver - Is stale: {balance_data['is_stale']}, Last synced: {balance_data['last_synced']}")
+			
+			return balance
+			
+		except Exception as e:
+			print(f"AccountBalance resolver - Error fetching blockchain balance: {e}")
+			
+			# Fallback to mock data if blockchain integration fails
+			if account_type == 'personal':
+				mock_balances = {
+					'cUSD': '150.00',
+					'CONFIO': '50.00',
+					'USDC': '200.00'
+				}
+			else:
+				# Create deterministic balances per business ID for debugging
+				business_id = int(business_id_from_context) if business_id_from_context else 0
+				base_multiplier = business_id * 1000
+				
+				mock_balances = {
+					'cUSD': f'{10000 + base_multiplier}.00',
+					'CONFIO': f'{5000 + base_multiplier}.00',
+					'USDC': f'{20000 + base_multiplier}.00'
+				}
+			
+			balance = mock_balances.get(normalized_token_type, '0')
+			print(f"AccountBalance resolver - Fallback to mock: {balance} for {normalized_token_type}")
+			return balance
 	
 	def resolve_current_account_permissions(self, info):
 		"""Get permissions for the current active account"""
@@ -2201,6 +2223,115 @@ class DeleteBankInfo(graphene.Mutation):
 			return DeleteBankInfo(success=False, error="Error interno del servidor")
 
 
+class BalancesType(graphene.ObjectType):
+	"""Token balances object"""
+	cusd = graphene.String()
+	confio = graphene.String()
+	usdc = graphene.String()
+	sui = graphene.String()  # Keep for compatibility but return "0.00"
+
+class RefreshAccountBalance(graphene.Mutation):
+	"""Force refresh balance from blockchain for the current account"""
+	class Arguments:
+		token_type = graphene.String(required=False, description="Specific token to refresh (optional)")
+	
+	success = graphene.Boolean()
+	errors = graphene.String()  # Changed from 'error' to 'errors'
+	balances = graphene.Field(BalancesType)
+	lastSynced = graphene.DateTime()  # Changed from 'last_synced' to 'lastSynced'
+	
+	@classmethod
+	def mutate(cls, root, info, token_type=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return RefreshAccountBalance(success=False, errors="Authentication required")
+		
+		# Get JWT context with validation
+		from .jwt_context import get_jwt_business_context_with_validation
+		jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_balance')
+		if not jwt_context:
+			return RefreshAccountBalance(success=False, errors="No permission to view balance")
+		
+		account_type = jwt_context['account_type']
+		account_index = jwt_context['account_index']
+		business_id_from_context = jwt_context.get('business_id')
+		
+		try:
+			# Get the specific account
+			if account_type == 'business' and business_id_from_context:
+				account = Account.objects.get(
+					business_id=business_id_from_context,
+					account_type='business',
+					account_index=account_index
+				)
+			else:
+				account = Account.objects.get(
+					user=user,
+					account_type=account_type,
+					account_index=account_index
+				)
+			
+			# Check if account has a Sui address
+			if not account.sui_address:
+				return RefreshAccountBalance(
+					success=False, 
+					errors="Account has no blockchain address"
+				)
+			
+			# Use the blockchain integration to refresh balance
+			from blockchain.balance_service import BalanceService
+			from django.core.cache import cache
+			
+			# Mark that we're doing a refresh so subsequent queries get fresh data
+			refresh_key = f"balance_refreshed:{account.id}"
+			cache.set(refresh_key, True, 5)  # Flag for 5 seconds
+			
+			# Force refresh from blockchain
+			if token_type:
+				# Refresh specific token
+				normalized_token = token_type.upper()
+				
+				balance_data = BalanceService.get_balance(
+					account,
+					normalized_token,
+					force_refresh=True
+				)
+				
+				# Get all balances for response (force refresh all since user is pulling to refresh)
+				all_balances = BalanceService.get_all_balances(account, force_refresh=True)
+			else:
+				# Refresh all tokens
+				all_balances = BalanceService.get_all_balances(
+					account,
+					force_refresh=True
+				)
+			
+			# Format balances for response
+			balances = BalancesType(
+				cusd=f"{all_balances['cusd']['amount']:.2f}",
+				confio=f"{all_balances['confio']['amount']:.2f}",
+				usdc=f"{all_balances['usdc']['amount']:.2f}",
+				sui=f"{all_balances['sui']['amount']:.2f}"
+			)
+			
+			last_synced = max(
+				b['last_synced'] for b in all_balances.values() 
+				if b['last_synced']
+			) if any(b['last_synced'] for b in all_balances.values()) else None
+			
+			return RefreshAccountBalance(
+				success=True,
+				balances=balances,
+				lastSynced=last_synced
+			)
+			
+		except Account.DoesNotExist:
+			return RefreshAccountBalance(success=False, errors="Account not found")
+		except Exception as e:
+			print(f"RefreshAccountBalance error: {e}")
+			return RefreshAccountBalance(success=False, errors=str(e))
+
+
 class CreateTestUsers(graphene.Mutation):
 	"""Test mutation to create users based on phone numbers - FOR TESTING ONLY"""
 	class Arguments:
@@ -2904,6 +3035,12 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
 	update_bank_info = UpdateBankInfo.Field()
 	delete_bank_info = DeleteBankInfo.Field()
 	set_default_bank_info = SetDefaultBankInfo.Field()
+	
+	# Blockchain mutations
+	refresh_account_balance = graphene.Field(
+		lambda: RefreshAccountBalance,
+		description="Force refresh balance from blockchain"
+	)
 	
 	# Test mutations (only in DEBUG mode)
 	create_test_users = CreateTestUsers.Field()
