@@ -214,3 +214,116 @@ WantedBy=multi-user.target
 ```bash
 python manage.py test blockchain
 ```
+
+## Sui Coin Management Strategy
+
+### Overview
+
+On Sui blockchain, tokens are represented as individual `Coin<T>` objects rather than account balances. This creates unique challenges that we handle transparently for users.
+
+### Key Concepts
+
+#### 1. Coin Fragmentation
+- Each payment creates a new coin object
+- Users accumulate multiple coin objects over time
+- Example: Receiving 5 payments of 1 USDC = 5 separate coin objects
+
+#### 2. Transaction Limits
+- Sui limits the number of objects per transaction (typically 512)
+- Gas optimization requires careful coin selection
+- Large numbers of small coins increase transaction costs
+
+### Current Implementation
+
+#### Balance Display
+- **Method**: `suix_getBalance` RPC call
+- **Behavior**: Automatically aggregates all coin objects
+- **User Experience**: Users see total balance, not individual coins
+
+#### Balance Caching
+- Database stores aggregated balances
+- Redis caches for performance
+- Blockchain verification on-demand
+
+### Coin Management Strategy
+
+#### 1. Automatic Coin Management
+
+```python
+# Thresholds
+MAX_COINS_PER_TYPE = 10  # Merge if more than this
+MIN_COINS_KEEP = 3       # Keep some unmerged for gas/parallel txs
+```
+
+#### 2. Smart Coin Selection
+
+When sending tokens:
+1. **Exact match**: Use single coin if amount matches
+2. **Minimal coins**: Select fewest coins to cover amount
+3. **Gas optimization**: Reserve some coins for gas payment
+
+#### 3. Periodic Optimization
+
+Run daily background task to:
+- Merge excessive fragmentation
+- Maintain optimal coin distribution
+- Log statistics for monitoring
+
+#### 4. User Experience
+
+**Transparent to users**:
+- Show total balance only
+- Handle merging automatically
+- No manual coin management needed
+
+### Implementation Phases
+
+#### Phase 1: Basic Send (Current) ✅
+- Use individual coins as-is
+- Manual splitting when needed
+- Basic balance aggregation
+
+#### Phase 2: Smart Selection (Next)
+- Implement `CoinManager.select_coins_for_amount()`
+- Automatic coin selection for payments
+- Better gas efficiency
+
+#### Phase 3: Auto-Merge (Future)
+- Background coin optimization
+- Automatic merging when fragmented
+- Predictive splitting for common amounts
+
+### Technical Implementation
+
+See `coin_management.py` for the `CoinManager` class that handles:
+- `get_coin_objects()` - List all coins of a type
+- `select_coins_for_amount()` - Smart selection algorithm
+- `merge_coins()` - Combine multiple coins
+- `prepare_exact_amount()` - Get exact amount needed
+
+### Example Scenarios
+
+#### Scenario 1: User receives many small payments
+- **Problem**: 50 coins of 0.1 CUSD each
+- **Solution**: Auto-merge into 5 coins of 1 CUSD
+- **Result**: Lower transaction costs, better UX
+
+#### Scenario 2: User wants to send exact amount
+- **Problem**: Need 5.5 CUSD, have coins of 3, 2, 1, 0.5
+- **Solution**: Select 3 + 2 + 1 coins, split 0.5 from change
+- **Result**: Exact payment without manual management
+
+### Monitoring and Metrics
+
+Track:
+- Average coins per user per token type
+- Merge transaction frequency
+- Gas costs saved through optimization
+- User transaction success rates
+
+### Security Considerations
+
+1. **Signature Management**: Secure handling of zkLogin for merges
+2. **Rate Limiting**: Prevent excessive merge operations
+3. **Audit Trail**: Log all coin operations
+4. **Error Recovery**: Handle partial merge failures
