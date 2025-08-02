@@ -10,6 +10,8 @@ class RawBlockchainEvent(models.Model):
     function = models.CharField(max_length=100)
     raw_data = models.JSONField()
     block_time = models.BigIntegerField()
+    epoch = models.BigIntegerField(null=True, blank=True, db_index=True)  # Sui epoch number
+    checkpoint = models.BigIntegerField(null=True, blank=True)  # Sui checkpoint sequence number
     created_at = models.DateTimeField(auto_now_add=True)
     processed = models.BooleanField(default=False)
     
@@ -80,3 +82,49 @@ class TransactionProcessingLog(models.Model):
         indexes = [
             models.Index(fields=['status', 'created_at']),
         ]
+    
+    def __str__(self):
+        return f"{self.raw_event} - {self.status}"
+
+
+class SuiEpoch(models.Model):
+    """Track Sui network epochs for monitoring"""
+    epoch_number = models.BigIntegerField(unique=True, db_index=True)
+    start_timestamp_ms = models.BigIntegerField()
+    end_timestamp_ms = models.BigIntegerField(null=True, blank=True)
+    first_checkpoint = models.BigIntegerField()
+    last_checkpoint = models.BigIntegerField(null=True, blank=True)
+    total_transactions = models.BigIntegerField(default=0)
+    total_gas_cost = models.BigIntegerField(default=0)
+    stake_subsidy_amount = models.BigIntegerField(default=0)
+    total_stake_rewards = models.BigIntegerField(default=0)
+    storage_fund_balance = models.BigIntegerField(default=0)
+    epoch_commitments = models.JSONField(default=list, blank=True)  # Validator commitments
+    is_current = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-epoch_number']
+        indexes = [
+            models.Index(fields=['is_current']),
+            models.Index(fields=['start_timestamp_ms', 'end_timestamp_ms']),
+        ]
+    
+    def __str__(self):
+        return f"Epoch {self.epoch_number} {'(current)' if self.is_current else ''}"
+    
+    @property
+    def duration_hours(self):
+        """Calculate epoch duration in hours"""
+        if self.end_timestamp_ms:
+            duration_ms = self.end_timestamp_ms - self.start_timestamp_ms
+            return duration_ms / (1000 * 60 * 60)  # Convert ms to hours
+        return None
+    
+    @property
+    def avg_gas_price(self):
+        """Calculate average gas price for the epoch"""
+        if self.total_transactions > 0:
+            return self.total_gas_cost / self.total_transactions
+        return 0

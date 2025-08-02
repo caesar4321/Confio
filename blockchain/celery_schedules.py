@@ -28,6 +28,12 @@ BLOCKCHAIN_CELERY_BEAT_SCHEDULE = {
         'task': 'blockchain.tasks.cleanup_old_events',
         'schedule': crontab(hour=2, minute=0),  # Daily at 2 AM
     },
+    
+    # Track Sui epoch changes every 30 minutes
+    'track-sui-epoch-changes': {
+        'task': 'blockchain.tasks.track_epoch_change',
+        'schedule': crontab(minute='*/30'),  # Every 30 minutes
+    },
 }
 
 # To use in your main celery.py:
