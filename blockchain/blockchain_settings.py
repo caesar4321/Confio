@@ -52,6 +52,7 @@ MONITOR_ADDRESSES = [
 ]
 
 # Add to Django settings
-for key, value in locals().items():
+local_vars = dict(locals())
+for key, value in local_vars.items():
     if key.isupper() and not key.startswith('_'):
         setattr(settings, key, value)

@@ -1,5 +1,4 @@
 from django.db import models
-from django.contrib.postgres.fields import JSONField
 from users.models import Account
 
 
@@ -9,7 +8,7 @@ class RawBlockchainEvent(models.Model):
     sender = models.CharField(max_length=66, db_index=True)
     module = models.CharField(max_length=66, db_index=True)
     function = models.CharField(max_length=100)
-    raw_data = JSONField()
+    raw_data = models.JSONField()
     block_time = models.BigIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
     processed = models.BooleanField(default=False)
