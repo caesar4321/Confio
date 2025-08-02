@@ -52,13 +52,13 @@ class BlockchainService:
     
     @staticmethod
     def send_cusd(
-        from_address: str,
+        account: 'Account',
         to_address: str,
         amount: Decimal,
         user_signature: str  # From zkLogin
     ) -> str:
         """
-        Send cUSD tokens
+        Send cUSD tokens with automatic coin management
         
         Used in GraphQL mutation:
         mutation {
@@ -71,24 +71,46 @@ class BlockchainService:
             }
         }
         """
+        from blockchain.transaction_manager import TransactionManager
+        
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
         try:
+            # Prepare coins with automatic merging if needed
+            prepared = loop.run_until_complete(
+                TransactionManager.prepare_coins(
+                    account,
+                    'CUSD',
+                    amount,
+                    merge_if_needed=True
+                )
+            )
+            
+            # Log coin preparation
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(
+                f"Prepared {len(prepared['coins'])} coins for {amount} CUSD transfer. "
+                f"Merged: {prepared['merged']}, Total coins: {prepared['total_coins']}"
+            )
+            
+            # Build transaction with prepared coins
             # In production, this would:
-            # 1. Build the transaction
+            # 1. Build the transaction using prepared coins
             # 2. Apply user's zkLogin signature
             # 3. Submit to blockchain
             tx_digest = loop.run_until_complete(
-                sui_client.transfer_cusd(
-                    from_address,
+                sui_client.transfer_cusd_with_coins(
+                    account.sui_address,
                     to_address,
-                    amount
+                    amount,
+                    prepared['coins']
                 )
             )
             
             # Clear balance cache
-            cache.delete(f"balances:{from_address}")
+            cache.delete(f"balances:{account.sui_address}")
             cache.delete(f"balances:{to_address}")
             
             return tx_digest
