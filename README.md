@@ -1985,6 +1985,76 @@ myvenv/bin/python manage.py test_sui_connection
 
 For more details, see [blockchain/README.md](blockchain/README.md).
 
+## 💰 Sui Coin Management Strategy
+
+On Sui blockchain, tokens are represented as individual `Coin<T>` objects rather than account balances. This creates unique challenges that Confío handles transparently for users.
+
+### Key Concepts
+
+#### Coin Fragmentation
+- Each payment creates a new coin object
+- Users accumulate multiple coin objects over time
+- Example: Receiving 5 payments of 1 USDC = 5 separate coin objects
+
+#### Transaction Limits
+- Sui limits objects per transaction (typically 512)
+- Gas optimization requires careful coin selection
+- Many small coins increase transaction costs
+
+### Current Implementation
+
+#### Balance Display
+- **Method**: `suix_getBalance` RPC call automatically aggregates all coin objects
+- **User Experience**: Users see total balance, not individual coins
+- **Caching**: Database stores aggregated balances with Redis cache
+
+#### Smart Coin Management
+
+```python
+# Thresholds for automatic optimization
+MAX_COINS_PER_TYPE = 10  # Merge if more than this
+MIN_COINS_KEEP = 3       # Keep some unmerged for gas
+```
+
+### Implementation Phases
+
+#### Phase 1: Basic Send (Current) ✅
+- Use individual coins as-is
+- Manual splitting when needed
+- Basic balance aggregation
+
+#### Phase 2: Smart Selection (Next)
+- Automatic coin selection for payments
+- Minimize transaction costs
+- Better gas efficiency
+
+#### Phase 3: Auto-Merge (Future)
+- Background coin optimization
+- Automatic merging when fragmented
+- Predictive splitting for common amounts
+
+### Technical Details
+
+The `CoinManager` class (`blockchain/coin_management.py`) handles:
+- `get_coin_objects()` - List all coins of a type
+- `select_coins_for_amount()` - Smart selection algorithm
+- `merge_coins()` - Combine multiple coins
+- `prepare_exact_amount()` - Get exact amount needed
+
+### Example Scenarios
+
+**Many Small Payments**: 50 coins of 0.1 CUSD → Auto-merge into 5 coins of 1 CUSD
+
+**Exact Amount Send**: Need 5.5 CUSD with coins of 3, 2, 1, 0.5 → Select 3+2+1, return 0.5 as change
+
+### User Experience
+
+Users enjoy a traditional wallet experience:
+- See total balance only
+- Send any amount seamlessly
+- No manual coin management
+- Automatic optimization in background
+
 ### Country Code Management
 
 The project maintains country code mappings in two locations:
