@@ -6,6 +6,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
 import { useMutation } from '@apollo/client';
 import { PAY_INVOICE, CREATE_SEND_TRANSACTION } from '../apollo/queries';
+import { SEND_TOKENS } from '../apollo/mutations';
 import { AccountManager } from '../utils/accountManager';
 import { EnhancedAuthService } from '../services/enhancedAuthService';
 
@@ -41,6 +42,7 @@ interface TransactionData {
   memo?: string;
   idempotencyKey?: string; // Pass idempotency key from calling screen
   transactionId?: string; // Store transaction ID after successful processing
+  tokenType?: string; // For blockchain transactions (CUSD, CONFIO)
 }
 
 export const TransactionProcessingScreen = () => {
@@ -73,6 +75,7 @@ export const TransactionProcessingScreen = () => {
   // GraphQL mutations
   const [payInvoice] = useMutation(PAY_INVOICE);
   const [createSendTransaction] = useMutation(CREATE_SEND_TRANSACTION);
+  const [sendTokens] = useMutation(SEND_TOKENS);
   
   // Ref to prevent duplicate transaction processing within this session
   const hasProcessedRef = useRef(false);
@@ -263,6 +266,79 @@ export const TransactionProcessingScreen = () => {
       try {
         console.log('TransactionProcessingScreen: Processing send transaction to:', transactionData.recipient);
         
+        // Check if this is a blockchain send (to Sui address) or Confío user send
+        const isBlockchainSend = transactionData.recipientAddress?.startsWith('0x') && 
+                                transactionData.recipientAddress.length === 66;
+        
+        if (isBlockchainSend) {
+          console.log('TransactionProcessingScreen: Processing blockchain send to:', transactionData.recipientAddress);
+          await processBlockchainSend();
+        } else {
+          console.log('TransactionProcessingScreen: Processing Confío user send');
+          await processConfioSend();
+        }
+      } catch (error) {
+        console.error('TransactionProcessingScreen: Error in processSend:', error);
+        Alert.alert(
+          'Error',
+          'Error al procesar la transacción. Por favor, inténtalo de nuevo.',
+          [{ text: 'OK', onPress: () => navigation.goBack() }]
+        );
+      }
+    };
+
+    const processBlockchainSend = async () => {
+      try {
+        // Step 1: Verifying transaction
+        setCurrentStep(0);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Step 2: Processing in blockchain
+        setCurrentStep(1);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Step 3: Execute blockchain transaction
+        setCurrentStep(2);
+        console.log('TransactionProcessingScreen: Executing blockchain send with SEND_TOKENS mutation');
+        
+        const result = await sendTokens({
+          variables: {
+            recipient: transactionData.recipientAddress,
+            amount: transactionData.amount,
+            tokenType: transactionData.tokenType || transactionData.currency.toUpperCase(),
+            message: transactionData.memo || ''
+          }
+        });
+        
+        console.log('TransactionProcessingScreen: Blockchain send result:', result);
+        
+        if (result.data?.sendTokens?.success) {
+          console.log('TransactionProcessingScreen: Blockchain send successful!');
+          console.log('Transaction digest:', result.data.sendTokens.transactionDigest);
+          console.log('Gas saved:', result.data.sendTokens.gasSaved);
+          
+          // Store transaction digest for success screen
+          if (transactionData) {
+            transactionData.transactionId = result.data.sendTokens.transactionDigest;
+          }
+        } else {
+          const errorMessage = result.data?.sendTokens?.error || 'Error al enviar tokens';
+          console.error('TransactionProcessingScreen: Blockchain send failed:', errorMessage);
+          Alert.alert(
+            'Error al enviar',
+            errorMessage,
+            [{ text: 'OK', onPress: () => navigation.goBack() }]
+          );
+          return;
+        }
+      } catch (error) {
+        console.error('TransactionProcessingScreen: Error in blockchain send:', error);
+        throw error;
+      }
+    };
+
+    const processConfioSend = async () => {
+      try {
         // Step 1: Verifying transaction
         setCurrentStep(0);
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -293,10 +369,6 @@ export const TransactionProcessingScreen = () => {
           // For any user with phone number (Confío or not)
           mutationInput.recipientPhone = transactionData.recipientPhone;
           console.log('TransactionProcessingScreen: Using recipient phone:', transactionData.recipientPhone);
-        } else if (transactionData.recipientAddress) {
-          // Fallback to address (legacy)
-          mutationInput.recipientAddress = transactionData.recipientAddress;
-          console.log('TransactionProcessingScreen: WARNING - Using legacy recipient address:', transactionData.recipientAddress);
         }
         
         console.log('TransactionProcessingScreen: Sending mutation with input:', JSON.stringify(mutationInput, null, 2));
@@ -383,7 +455,7 @@ export const TransactionProcessingScreen = () => {
           return;
         }
       } catch (error) {
-        console.error('TransactionProcessingScreen: Error processing send:', error);
+        console.error('TransactionProcessingScreen: Error processing Confío send:', error);
         console.error('TransactionProcessingScreen: Error details:', {
           message: error.message,
           networkError: error.networkError,
@@ -397,6 +469,7 @@ export const TransactionProcessingScreen = () => {
           'No se pudo conectar con el servidor. Por favor, verifica tu conexión e inténtalo de nuevo.',
           [{ text: 'OK', onPress: () => navigation.goBack() }]
         );
+        throw error;
       }
     };
 
