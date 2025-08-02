@@ -231,6 +231,8 @@ This is a **monolithic repository** containing the full Confío stack:
 │   └── package.json       # Node.js dependencies
 
 ├── contracts/    # Sui Move smart contracts
+│   ├── README.md     # Contracts overview and deployment guide
+│   ├── PERMISSIONS.md # Comprehensive permissions and multi-sig guide
 │   ├── cusd/     # CUSD stablecoin implementation
 │   │   ├── sources/  # Move source files
 │   │   │   ├── cusd.move              # CUSD stablecoin implementation
@@ -1856,6 +1858,26 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
   - Zero gas fees for end users
   - Native Sui protocol support
   - Simplified implementation without additional smart contracts
+
+### Smart Contract Security & Permissions
+
+For detailed information about smart contract permissions and multi-signature setup:
+
+- **📋 [contracts/PERMISSIONS.md](contracts/PERMISSIONS.md)** - Comprehensive guide covering:
+  - All admin capabilities and their risk levels
+  - Multi-signature wallet recommendations
+  - Time-lock suggestions for critical operations
+  - Migration checklist for production deployment
+  - Security best practices
+
+- **📖 [contracts/README.md](contracts/README.md)** - Overview of all smart contracts
+
+**Key Security Features:**
+- Critical operations (minting, freezing) require admin capabilities
+- Fixed supply for CONFIO token (no inflation risk)
+- Escrow protection for P2P trades
+- Time-based expiration for invitations and trades
+- No personal data stored on-chain
 
 ### Country Code Management
 
