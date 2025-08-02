@@ -2405,7 +2405,7 @@ class SendTokens(graphene.Mutation):
 				)
 			
 			# Execute the sponsored transaction
-			from blockchain import TransactionManager
+			from blockchain.transaction_manager import TransactionManager
 			import asyncio
 			
 			loop = asyncio.new_event_loop()
@@ -2525,7 +2525,7 @@ class EstimateSendCost(graphene.Mutation):
 				return EstimateSendCost(success=False, error="Invalid token type")
 			
 			# Get estimate
-			from blockchain import TransactionManager
+			from blockchain.transaction_manager import TransactionManager
 			from blockchain.sponsor_service import SponsorService
 			import asyncio
 			
