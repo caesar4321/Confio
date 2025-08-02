@@ -238,9 +238,14 @@ This is a **monolithic repository** containing the full Confío stack:
 │   │   │   └── cusd_vault_treasury.move # Treasury vault for CUSD operations
 │   │   ├── Move.toml # Package configuration
 │   │   └── Move.lock # Dependency lock file
-│   └── confio/   # CONFIO governance token
+│   ├── confio/   # CONFIO governance token
+│   │   ├── sources/  # Move source files
+│   │   │   └── confio.move            # CONFIO governance token implementation
+│   │   ├── Move.toml # Package configuration
+│   │   └── Move.lock # Dependency lock file
+│   └── pay/      # Payment processing with fee collection
 │       ├── sources/  # Move source files
-│       │   └── confio.move            # CONFIO governance token implementation
+│       │   └── pay.move               # Payment system with 0.9% fee
 │       ├── Move.toml # Package configuration
 │       └── Move.lock # Dependency lock file
 
@@ -1740,21 +1745,46 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
 - **Purpose**: Implementation of the $cUSD stablecoin, a gasless stablecoin designed for everyday transactions in Latin America
 - **Key Features**:
   - 6 decimal places precision for micro-transactions
-  - USD-pegged stablecoin backed by USDC
-  - Gasless transactions enabled through Sui's native sponsored transaction system
-  - Vault system for USDC backing and treasury operations
+  - USD-pegged stablecoin backed 1:1 by USDC reserves
+  - Admin controls for minting, freezing addresses, and pausing system
+  - Two-step burn process requiring user confirmation
+  - Vault registry for managing multiple reserve addresses
+- **Security Features**:
+  - Freeze registry to block malicious addresses
+  - System pause/unpause for emergency situations
+  - Event emission for all critical operations
+  - Admin-only functions protected by capability objects
 
 ### Confío ($CONFIO)
 - **File**: `contracts/confio/sources/confio.move`
 - **Purpose**: Governance and utility token for the Confío platform
 - **Key Features**:
   - Fixed supply of 1 billion tokens
-  - 6 decimal places precision
-  - UTF-8 support for Spanish characters
-  - Custom icon URL
+  - 9 decimal places precision
+  - UTF-8 support for Spanish characters (ñ, í)
+  - Custom icon URL for wallet display
 - **Distribution**:
   - Initial supply minted to contract deployer
-  - Metadata and treasury cap frozen after initialization
+  - Treasury cap frozen preventing future minting
+  - No burn functionality to maintain fixed supply
+
+### Confío Pay
+- **File**: `contracts/pay/sources/pay.move`
+- **Purpose**: Payment processing system with automatic fee collection
+- **Key Features**:
+  - Automatic 0.9% fee deduction on all payments
+  - Support for both cUSD and CONFIO tokens
+  - Permissionless payments - no registration required
+  - Django integration via payment_id tracking
+  - Real-time fee collection in shared FeeCollector
+- **Fee Distribution**:
+  - 0.9% automatically collected as platform fee
+  - 99.1% sent directly to recipient
+  - Fees accumulate in contract until admin withdrawal
+- **Perfect for Latin America**:
+  - No barriers for informal economy businesses
+  - Any address can receive payments instantly
+  - Business validation handled off-chain in Django
 
 ### Gasless Transactions
 - **Implementation**: Handled off-chain through Sui's native sponsored transaction system
