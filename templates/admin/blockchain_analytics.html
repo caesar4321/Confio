@@ -1,0 +1,330 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static admin_urls %}
+
+{% block title %}Blockchain Analytics | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+    .dashboard-module {
+        background: #fff;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        margin-bottom: 20px;
+        padding: 20px;
+    }
+    .dashboard-module h2 {
+        font-size: 18px;
+        margin: 0 0 15px 0;
+        color: #333;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 10px;
+    }
+    .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+    }
+    .metric-card {
+        background: #f8f9fa;
+        border: 1px solid #e9ecef;
+        border-radius: 4px;
+        padding: 15px;
+        text-align: center;
+    }
+    .metric-value {
+        font-size: 28px;
+        font-weight: bold;
+        color: #333;
+        margin: 10px 0;
+    }
+    .metric-label {
+        color: #666;
+        font-size: 14px;
+    }
+    .metric-card.warning { background: #fff3cd; border-color: #ffeaa7; }
+    .metric-card.success { background: #d4edda; border-color: #c3e6cb; }
+    .metric-card.danger { background: #f8d7da; border-color: #f5c6cb; }
+    
+    .chart-container {
+        margin: 20px 0;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 4px;
+    }
+    
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 15px;
+    }
+    .data-table th {
+        background: #f0f0f0;
+        padding: 10px;
+        text-align: left;
+        font-weight: bold;
+        border-bottom: 2px solid #ddd;
+    }
+    .data-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid #eee;
+    }
+    .data-table tr:hover {
+        background: #f8f9fa;
+    }
+    
+    .progress-bar {
+        background: #e9ecef;
+        border-radius: 4px;
+        height: 20px;
+        overflow: hidden;
+        margin: 5px 0;
+    }
+    .progress-bar-fill {
+        background: #28a745;
+        height: 100%;
+        transition: width 0.3s ease;
+    }
+    .progress-bar-fill.warning { background: #ffc107; }
+    .progress-bar-fill.danger { background: #dc3545; }
+    
+    .status-badge {
+        display: inline-block;
+        padding: 3px 8px;
+        border-radius: 3px;
+        font-size: 12px;
+        font-weight: bold;
+    }
+    .status-badge.processed { background: #28a745; color: white; }
+    .status-badge.unprocessed { background: #dc3545; color: white; }
+    .status-badge.completed { background: #28a745; color: white; }
+    .status-badge.failed { background: #dc3545; color: white; }
+    .status-badge.processing { background: #ffc107; color: #333; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <h1>Blockchain Analytics</h1>
+    
+    <div class="date-filter" style="margin-bottom: 20px;">
+        <form method="get" style="display: inline;">
+            <label for="days">Show data for last:</label>
+            <select name="days" id="days" onchange="this.form.submit()">
+                <option value="7" {% if request.GET.days == '7' %}selected{% endif %}>7 days</option>
+                <option value="30" {% if request.GET.days == '30' or not request.GET.days %}selected{% endif %}>30 days</option>
+                <option value="90" {% if request.GET.days == '90' %}selected{% endif %}>90 days</option>
+            </select>
+        </form>
+    </div>
+
+    <!-- Network Status -->
+    <div class="dashboard-module">
+        <h2>Network Configuration</h2>
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-label">Network</div>
+                <div class="metric-value" style="font-size: 20px;">{{ network|upper }}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">RPC Endpoint</div>
+                <div class="metric-value" style="font-size: 14px; word-break: break-all;">{{ rpc_url }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Balance Cache Health -->
+    <div class="dashboard-module">
+        <h2>Balance Cache Health</h2>
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-label">Total Cached Balances</div>
+                <div class="metric-value">{{ total_cached_balances|floatformat:0 }}</div>
+            </div>
+            <div class="metric-card {% if balance_cache_health.stale_percentage > 20 %}warning{% else %}success{% endif %}">
+                <div class="metric-label">Fresh Balances</div>
+                <div class="metric-value">{{ balance_cache_health.fresh|floatformat:0 }}</div>
+                <small>{{ balance_cache_health.fresh|floatformat:0 }} / {{ balance_cache_health.total|floatformat:0 }}</small>
+            </div>
+            <div class="metric-card {% if stale_balances > 0 %}warning{% else %}success{% endif %}">
+                <div class="metric-label">Stale Balances</div>
+                <div class="metric-value">{{ stale_balances|floatformat:0 }}</div>
+                <small>{{ balance_cache_health.stale_percentage|floatformat:1 }}%</small>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Recently Synced (1h)</div>
+                <div class="metric-value">{{ recently_synced|floatformat:0 }}</div>
+            </div>
+        </div>
+
+        <!-- Balance Freshness Distribution -->
+        <h3>Balance Freshness Distribution</h3>
+        <div class="freshness-distribution">
+            {% for stat in freshness_stats %}
+            <div style="margin: 10px 0;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                    <span>{{ stat.label }}</span>
+                    <span>{{ stat.count }} ({{ stat.percentage|floatformat:1 }}%)</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-bar-fill {% if forloop.counter > 3 %}warning{% endif %} {% if forloop.counter > 4 %}danger{% endif %}" 
+                         style="width: {{ stat.percentage }}%"></div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Token Distribution -->
+    <div class="dashboard-module">
+        <h2>Token Balance Distribution</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Token</th>
+                    <th>Cached Accounts</th>
+                    <th>Total Amount</th>
+                    <th>Average Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for token in token_balances %}
+                <tr>
+                    <td><strong>{{ token.token }}</strong></td>
+                    <td>{{ token.count|floatformat:0 }}</td>
+                    <td>{{ token.total_amount|floatformat:2 }}</td>
+                    <td>{{ token.avg_amount|floatformat:2 }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="4" style="text-align: center; color: #999;">No balance data available</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Event Processing Stats -->
+    <div class="dashboard-module">
+        <h2>Event Processing Statistics</h2>
+        <div class="metrics-grid">
+            {% for stat in processing_stats %}
+            <div class="metric-card {% if stat.status == 'completed' %}success{% elif stat.status == 'failed' %}danger{% else %}warning{% endif %}">
+                <div class="metric-label">{{ stat.status|title }}</div>
+                <div class="metric-value">{{ stat.count|floatformat:0 }}</div>
+                <small>Avg {{ stat.avg_attempts|floatformat:1 }} attempts</small>
+            </div>
+            {% endfor %}
+        </div>
+
+        <!-- Event Types Breakdown -->
+        <h3>Event Types (Last {{ request.GET.days|default:'30' }} days)</h3>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Module</th>
+                    <th>Function</th>
+                    <th>Count</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for event in event_types %}
+                <tr>
+                    <td>{{ event.module }}</td>
+                    <td>{{ event.function }}</td>
+                    <td>{{ event.count|floatformat:0 }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="3" style="text-align: center; color: #999;">No events in selected period</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Recent Blockchain Events -->
+    <div class="dashboard-module">
+        <h2>Recent Blockchain Events</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>TX Hash</th>
+                    <th>Module</th>
+                    <th>Function</th>
+                    <th>Sender</th>
+                    <th>Block Time</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for event in recent_events %}
+                <tr>
+                    <td style="font-family: monospace; font-size: 12px;">
+                        {{ event.tx_hash|truncatechars:20 }}
+                    </td>
+                    <td>{{ event.module }}</td>
+                    <td>{{ event.function }}</td>
+                    <td style="font-family: monospace; font-size: 12px;">
+                        {{ event.sender|truncatechars:20 }}
+                    </td>
+                    <td>{{ event.block_time|date:"Y-m-d H:i:s" }}</td>
+                    <td>
+                        <span class="status-badge {% if event.processed %}processed{% else %}unprocessed{% endif %}">
+                            {% if event.processed %}Processed{% else %}Pending{% endif %}
+                        </span>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" style="text-align: center; color: #999;">No blockchain events recorded</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Recent Failed Processing -->
+    {% if recent_failures %}
+    <div class="dashboard-module">
+        <h2>Recent Failed Processing</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>TX Hash</th>
+                    <th>Status</th>
+                    <th>Attempts</th>
+                    <th>Error Message</th>
+                    <th>Last Updated</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in recent_failures %}
+                <tr>
+                    <td style="font-family: monospace; font-size: 12px;">
+                        {{ log.raw_event.tx_hash|truncatechars:20 }}
+                    </td>
+                    <td>
+                        <span class="status-badge failed">{{ log.status }}</span>
+                    </td>
+                    <td>{{ log.attempts }}</td>
+                    <td style="color: #dc3545; font-size: 12px;">
+                        {{ log.error_message|truncatechars:50 }}
+                    </td>
+                    <td>{{ log.updated_at|date:"Y-m-d H:i:s" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Daily Events Chart (placeholder for future chart integration) -->
+<script>
+    // Daily events data for future chart implementation
+    const dailyEventsData = {{ daily_events|safe }};
+    console.log('Daily events data available:', dailyEventsData);
+</script>
+{% endblock %}
