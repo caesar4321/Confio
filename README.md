@@ -2023,17 +2023,14 @@ On Sui blockchain, tokens are represented as individual `Coin<T>` objects rather
 - Gas optimization during low-activity periods
 - Never merge everything - maintain 3-5 coins for flexibility
 
-### Implementation Approach
+### Implementation Details
 
-#### Current: Basic Operations ✅
-- Use coins as-is for simple sends
-- Show aggregated balance to users
-- Manual coin selection when needed
+Our coin management follows the lazy merging philosophy:
 
-#### Next: Smart Selection
-- `select_coins_for_amount()` - Pick optimal coins for each transaction
-- Minimize coins used while preserving parallel transaction capability
-- Lazy merge only when transaction requires it
+1. **Smart Coin Selection**: When sending tokens, we pick the minimum coins needed
+2. **Threshold-based Merging**: Only merge when >10 coins needed for a transaction
+3. **Background Optimization**: Light-touch cleanup only when >20 coins accumulate
+4. **User Transparency**: All coin management happens automatically behind the scenes
 
 ### Technical Details
 
