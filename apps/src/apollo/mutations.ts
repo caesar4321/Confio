@@ -16,6 +16,36 @@ export const REFRESH_ACCOUNT_BALANCE = gql`
   }
 `;
 
+export const SEND_TOKENS = gql`
+  mutation SendTokens($recipient: String!, $amount: String!, $tokenType: String!, $message: String) {
+    sendTokens(recipient: $recipient, amount: $amount, tokenType: $tokenType, message: $message) {
+      success
+      error
+      transactionDigest
+      gasSaved
+      balances {
+        cusd
+        confio
+        usdc
+      }
+    }
+  }
+`;
+
+export const ESTIMATE_SEND_COST = gql`
+  mutation EstimateSendCost($amount: String!, $tokenType: String!) {
+    estimateSendCost(amount: $amount, tokenType: $tokenType) {
+      success
+      error
+      coinsNeeded
+      needsMerge
+      estimatedGas
+      recommendation
+      sponsorAvailable
+    }
+  }
+`;
+
 export const CONVERT_USDC_TO_CUSD = gql`
   mutation ConvertUSDCToCUSD($amount: String!) {
     convertUsdcToCusd(amount: $amount) {

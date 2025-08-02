@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, ActivityIndicator } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
-// Removed Apollo imports as mutations are now handled in TransactionProcessingScreen
+import { useQuery } from '@apollo/client';
+import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,19 +36,17 @@ const tokenConfig = {
     logo: cUSDLogo,
     color: colors.primary,
     minSend: 1,
-    available: '2,850.35',
-    fee: 0.02,
+    fee: 0,  // Sponsored transactions
     description: 'Envía cUSD a cualquier dirección Sui',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
   confio: {
     name: 'CONFIO',
-            fullName: 'Confío',
+    fullName: 'Confío',
     logo: CONFIOLogo,
     color: colors.secondary,
     minSend: 1,
-    available: '1,000.00',
-    fee: 0.02,
+    fee: 0,  // Sponsored transactions
     description: 'Envía CONFIO a cualquier dirección Sui',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
@@ -69,7 +68,17 @@ export const SendWithAddressScreen = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  // Mutations are now handled in TransactionProcessingScreen
+  // Get real balance from GraphQL
+  const { data: balanceData, loading: balanceLoading } = useQuery(GET_ACCOUNT_BALANCE, {
+    variables: { tokenType: tokenType.toUpperCase() },
+    fetchPolicy: 'cache-and-network',
+  });
+
+  // Get real balance or fallback to 0
+  const availableBalance = React.useMemo(() => {
+    const balance = parseFloat(balanceData?.accountBalance || '0');
+    return balance;
+  }, [balanceData]);
 
   const handleQuickAmount = (val: string) => setAmount(val);
 
@@ -98,7 +107,7 @@ export const SendWithAddressScreen = () => {
       if (destination.length < 66) {
         setErrorMessage('La dirección Sui debe tener 64 caracteres hexadecimales después de 0x');
       } else {
-        setErrorMessage('La dirección contiene caracteres inválidos. Solo se permiten números y letras a-f');
+        setErrorMessage('La dirección contiene caracteres inválidos. Use solo 0-9 y a-f');
       }
       setShowError(true);
       return;
@@ -125,7 +134,8 @@ export const SendWithAddressScreen = () => {
           action: 'Enviando',
           recipientAddress: destination,
           memo: '', // Empty memo - user can add notes in a future feature
-          idempotencyKey: idempotencyKey
+          idempotencyKey: idempotencyKey,
+          tokenType: tokenType.toUpperCase(), // Add token type for blockchain transaction
         }
       });
     } catch (error) {
@@ -161,7 +171,13 @@ export const SendWithAddressScreen = () => {
         {/* Available Balance */}
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Saldo disponible</Text>
-          <Text style={styles.balanceAmount}>{config.available} {config.name}</Text>
+          {balanceLoading ? (
+            <ActivityIndicator size="small" color={config.color} style={{ marginVertical: 8 }} />
+          ) : (
+            <Text style={styles.balanceAmount}>
+              {formatNumber(availableBalance)} {config.name}
+            </Text>
+          )}
           <Text style={styles.balanceMin}>Mínimo para enviar: {config.minSend} {config.name}</Text>
         </View>
 
@@ -183,135 +199,112 @@ export const SendWithAddressScreen = () => {
                 <Text style={styles.currencyBadgeText}>{config.name}</Text>
               </View>
             </View>
-            <View style={styles.quickAmounts}>
-              {config.quickAmounts.map((val) => (
-                <TouchableOpacity 
-                  key={val}
-                  onPress={() => handleQuickAmount(val)}
-                  style={styles.quickAmountButton}
-                >
-                  <Text style={styles.quickAmountText}>${val}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
           </View>
 
-          {/* Destination Address */}
+          {/* Quick Amount Buttons */}
+          <View style={styles.quickAmounts}>
+            {config.quickAmounts.map((val) => (
+              <TouchableOpacity
+                key={val}
+                style={styles.quickAmountButton}
+                onPress={() => handleQuickAmount(val)}
+              >
+                <Text style={styles.quickAmountText}>{val}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Address Input */}
           <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Dirección de destino</Text>
-            <View style={[
-              styles.addressInput,
-              destination.length > 2 && destination.match(/^0x[0-9a-f]{64}$/) && { borderColor: colors.primary },
-              destination.length > 2 && !destination.match(/^0x[0-9a-f]*$/) && { borderColor: '#EF4444' }
-            ]}>
-              <TextInput
-                value={destination}
-                onChangeText={(text) => {
-                  // Only allow 0x prefix followed by hex characters (0-9, a-f, A-F)
-                  if (text === '' || text === '0' || text === '0x') {
-                    setDestination(text);
-                  } else if (text.match(/^0x[0-9a-fA-F]*$/)) {
-                    // Limit to 66 characters total (0x + 64 hex chars)
-                    if (text.length <= 66) {
-                      setDestination(text.toLowerCase());
-                    }
-                  }
-                }}
-                placeholder="0x... (dirección en red Sui)"
-                style={styles.addressInputField}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <TouchableOpacity style={styles.walletButton}>
-                <Icon name="credit-card" size={20} color={config.color} />
-              </TouchableOpacity>
-            </View>
-            <Text style={[
-              styles.inputHelper,
-              destination.length > 2 && destination.match(/^0x[0-9a-f]{64}$/) && { color: colors.primary },
-              destination.length > 2 && !destination.match(/^0x[0-9a-f]{64}$/) && { color: '#EF4444' }
-            ]}>
-              {destination.length === 0 && 'Solo direcciones válidas en red Sui'}
-              {destination.length > 0 && destination.length < 66 && `${66 - destination.length} caracteres restantes`}
-              {destination.length === 66 && destination.match(/^0x[0-9a-f]{64}$/) && '✓ Dirección válida'}
-              {destination.length === 66 && !destination.match(/^0x[0-9a-f]{64}$/) && 'Dirección inválida'}
-              {destination.length > 66 && 'Dirección demasiado larga'}
+            <Text style={styles.inputLabel}>Dirección Sui</Text>
+            <TextInput
+              style={styles.addressField}
+              value={destination}
+              onChangeText={setDestination}
+              placeholder="0x..."
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Text style={styles.addressHelp}>
+              Ingresa la dirección Sui del destinatario (comienza con 0x)
             </Text>
           </View>
 
-          {/* Fee Breakdown */}
-          <View style={styles.feeBreakdown}>
-            <View style={styles.feeRow}>
-              <Text style={styles.feeLabel}>Comisión de red</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Text style={styles.feeValueFree}>Gratis</Text>
-                <Text style={styles.feeValueNote}>• Cubierto por Confío</Text>
-              </View>
-            </View>
-            <View style={styles.feeRow}>
-              <Text style={styles.feeLabel}>Tiempo estimado</Text>
-              <View style={styles.timeContainer}>
-                <Icon name="clock" size={12} color={config.color} style={styles.timeIcon} />
-                <Text style={styles.timeText}>3-5 segundos</Text>
-              </View>
-            </View>
-            <View style={styles.feeDivider} />
-            <View style={styles.feeRow}>
-              <Text style={styles.feeTotalLabel}>Total a enviar</Text>
-              <Text style={styles.feeTotalValue}>
-                {amount ? formatNumber(parseFloat(amount)) : formatNumber(0)} {config.name}
-              </Text>
+          {/* Fee Info - Now shows sponsored */}
+          <View style={styles.feeInfo}>
+            <Text style={styles.feeLabel}>Comisión de red</Text>
+            <View style={styles.feeAmountContainer}>
+              <Text style={styles.feeAmount}>Gratis</Text>
+              <Text style={styles.sponsoredBadge}>Patrocinado</Text>
             </View>
           </View>
-
-          {/* Confío Value Proposition */}
-          <View style={styles.valuePropositionOuter}>
-            <View style={styles.valueRow}>
-              <Icon name="check-circle" size={20} color={colors.primary} style={styles.valueIcon} />
-              <Text style={styles.valueTitle}>Transferencias 100% gratuitas</Text>
-            </View>
-            <Text style={styles.valueDescription}>
-              Enviarás este dinero sin pagar comisiones
-            </Text>
-            <View style={styles.valueHighlightBox}>
-              <Text style={styles.valueHighlightText}>
-                💡 <Text style={styles.bold}>Confío: 0% comisión</Text>{'\n'}
-                vs. remesadoras tradicionales <Text style={styles.bold}>(5%-20%)</Text>{'\n'}
-                Apoyamos a los venezolanos 🇻🇪 con transferencias gratuitas
-              </Text>
-            </View>
-          </View>
-
-          <TouchableOpacity 
-            style={[
-              styles.confirmButton,
-              (!amount || !destination || parseFloat(amount) < config.minSend || isProcessing) && styles.confirmButtonDisabled
-            ]}
-            disabled={!amount || !destination || parseFloat(amount) < config.minSend || isProcessing}
-            onPress={handleSend}
-          >
-            <Text style={styles.confirmButtonText}>
-              {isProcessing ? 'Procesando...' : 'Confirmar Envío'}
-            </Text>
-          </TouchableOpacity>
-
-          {showSuccess && (
-            <View style={styles.successBox}>
-              <Icon name="check-circle" size={32} color={config.color} />
-              <Text style={styles.successText}>¡Envío realizado!</Text>
-            </View>
-          )}
-          {showError && (
-            <View style={styles.errorBox}>
-              <Icon name="alert-triangle" size={28} color={colors.warning.icon} />
-              <Text style={styles.errorText}>{errorMessage}</Text>
-              <TouchableOpacity onPress={() => setShowError(false)}>
-                <Text style={styles.errorDismiss}>Cerrar</Text>
-              </TouchableOpacity>
-            </View>
-          )}
         </View>
       </ScrollView>
+
+      {/* Send Button */}
+      <View style={[styles.footer, { paddingBottom: insets.bottom + 20 }]}>
+        <TouchableOpacity
+          style={[
+            styles.sendButton,
+            { backgroundColor: config.color },
+            (isProcessing || !amount || !destination || parseFloat(amount || '0') > availableBalance) && 
+            styles.sendButtonDisabled
+          ]}
+          onPress={handleSend}
+          disabled={isProcessing || !amount || !destination || parseFloat(amount || '0') > availableBalance}
+        >
+          {isProcessing ? (
+            <ActivityIndicator color="white" />
+          ) : (
+            <>
+              <Icon name="send" size={20} color="#ffffff" style={{ marginRight: 8 }} />
+              <Text style={styles.sendButtonText}>
+                {parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' : 'Enviar'}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Success Modal */}
+      {showSuccess && (
+        <View style={styles.overlay}>
+          <View style={styles.modal}>
+            <View style={[styles.iconContainer, { backgroundColor: config.color + '20' }]}>
+              <Icon name="check-circle" size={48} color={config.color} />
+            </View>
+            <Text style={styles.modalTitle}>¡Enviado!</Text>
+            <Text style={styles.modalMessage}>
+              Se enviaron {amount} {config.name} exitosamente
+            </Text>
+            <TouchableOpacity
+              style={[styles.modalButton, { backgroundColor: config.color }]}
+              onPress={() => navigation.navigate('Home' as any)}
+            >
+              <Text style={styles.modalButtonText}>Listo</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Error Modal */}
+      {showError && (
+        <View style={styles.overlay}>
+          <View style={styles.modal}>
+            <View style={[styles.iconContainer, { backgroundColor: '#FEE2E2' }]}>
+              <Icon name="alert-circle" size={48} color="#EF4444" />
+            </View>
+            <Text style={styles.modalTitle}>Error</Text>
+            <Text style={styles.modalMessage}>{errorMessage}</Text>
+            <TouchableOpacity
+              style={[styles.modalButton, { backgroundColor: '#EF4444' }]}
+              onPress={() => setShowError(false)}
+            >
+              <Text style={styles.modalButtonText}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 };
@@ -321,15 +314,22 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  content: {
+    flex: 1,
+  },
+  contentContainer: {
+    paddingBottom: 100,
+  },
   header: {
     paddingBottom: 32,
-    paddingHorizontal: 16,
-    marginBottom: 16,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingHorizontal: 16,
     marginBottom: 24,
   },
   backButton: {
@@ -337,7 +337,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '600',
     color: '#ffffff',
   },
   placeholder: {
@@ -350,308 +350,251 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#ffffff',
-    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
-    marginBottom: 16,
-    padding: 8,
+    justifyContent: 'center',
+    marginBottom: 12,
   },
   logo: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'contain',
+    width: 48,
+    height: 48,
   },
   headerSubtitle: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: '600',
     color: '#ffffff',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   headerDescription: {
     fontSize: 14,
-    color: '#ffffff',
-    opacity: 0.8,
-  },
-  content: {
-    flex: 1,
-  },
-  contentContainer: {
-    flexGrow: 1,
-    paddingBottom: 32,
+    color: 'rgba(255, 255, 255, 0.8)',
   },
   balanceCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 16,
     marginHorizontal: 16,
-    marginBottom: 16,
+    marginTop: -16,
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
-        shadowRadius: 4,
+        shadowRadius: 8,
       },
       android: {
-        elevation: 2,
+        elevation: 4,
       },
     }),
   },
   balanceLabel: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#1F2937',
+    fontSize: 14,
+    color: colors.text.secondary,
+    marginBottom: 4,
   },
   balanceAmount: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#1F2937',
+    fontSize: 32,
+    fontWeight: '700',
+    color: colors.text.primary,
+    marginBottom: 8,
   },
   balanceMin: {
-    fontSize: 14,
-    color: '#6B7280',
+    fontSize: 12,
+    color: colors.text.secondary,
   },
   formCard: {
     backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 24,
     marginHorizontal: 16,
-    marginBottom: 16,
+    marginTop: 16,
+    borderRadius: 16,
+    padding: 20,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
       },
       android: {
         elevation: 2,
       },
     }),
   },
-  formTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1F2937',
-    marginBottom: 16,
-  },
   inputContainer: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   inputLabel: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#374151',
+    color: colors.text.primary,
     marginBottom: 8,
   },
   amountContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F0F6FF', // or your blue-50
-    borderRadius: 16,
+    backgroundColor: colors.neutralDark,
+    borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginBottom: 8,
+    height: 56,
   },
   amountField: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1F2937',
-    backgroundColor: 'transparent',
-    borderWidth: 0,
+    fontWeight: '600',
+    color: colors.text.primary,
+    flex: 1,
   },
   currencyBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 8,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginLeft: 12,
   },
   currencyBadgeLogo: {
-    width: 32,
-    height: 32,
-    resizeMode: 'contain',
+    width: 20,
+    height: 20,
     marginRight: 6,
   },
   currencyBadgeText: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#2563eb',
+    color: colors.text.primary,
   },
   quickAmounts: {
     flexDirection: 'row',
-    marginTop: 12,
-    gap: 8,
+    justifyContent: 'space-between',
+    marginBottom: 20,
   },
   quickAmountButton: {
-    backgroundColor: colors.accent + '20',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 16,
+    flex: 1,
+    backgroundColor: colors.neutralDark,
+    paddingVertical: 10,
+    marginHorizontal: 4,
+    borderRadius: 8,
+    alignItems: 'center',
   },
   quickAmountText: {
-    fontSize: 12,
-    color: colors.accent,
+    fontSize: 14,
+    fontWeight: '500',
+    color: colors.text.primary,
   },
-  addressInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  addressField: {
     backgroundColor: colors.neutralDark,
     borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  addressInputField: {
-    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
     fontSize: 14,
-    color: '#1F2937',
+    color: colors.text.primary,
   },
-  walletButton: {
-    padding: 4,
-  },
-  inputHelper: {
+  addressHelp: {
     fontSize: 12,
-    color: '#6B7280',
-    marginTop: 4,
+    color: colors.text.secondary,
+    marginTop: 6,
   },
-  feeBreakdown: {
-    marginBottom: 24,
-  },
-  feeRow: {
+  feeInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.neutralDark,
   },
   feeLabel: {
     fontSize: 14,
-    color: '#6B7280',
+    color: colors.text.secondary,
   },
-  feeValue: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1F2937',
-  },
-  timeContainer: {
+  feeAmountContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  timeIcon: {
-    marginRight: 4,
-  },
-  timeText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1F2937',
-  },
-  feeDivider: {
-    height: 1,
-    backgroundColor: '#E5E7EB',
-    marginVertical: 12,
-  },
-  feeTotalLabel: {
+  feeAmount: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1F2937',
-  },
-  feeTotalValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.accent,
-  },
-  confirmButton: {
-    backgroundColor: colors.accent,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  confirmButtonDisabled: {
-    opacity: 0.5,
-  },
-  confirmButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  successBox: {
-    alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  successText: {
     color: colors.primary,
-    fontSize: 16,
-    fontWeight: '600',
-    marginTop: 8,
-  },
-  errorBox: {
-    alignItems: 'center',
-    marginTop: 16,
-    marginBottom: 8,
-    backgroundColor: colors.warning.background,
-    borderRadius: 8,
-    padding: 12,
-  },
-  errorText: {
-    color: colors.warning.text,
-    fontSize: 15,
-    fontWeight: '500',
-    marginTop: 8,
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  errorDismiss: {
-    color: colors.warning.icon,
-    fontWeight: 'bold',
-    marginTop: 8,
-    fontSize: 14,
-  },
-  feeValueFree: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#10b981',
-  },
-  feeValueNote: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginLeft: 4,
-  },
-  valuePropositionOuter: {
-    backgroundColor: '#A7F3D0', // emerald-200
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 24,
-    marginHorizontal: 0,
-  },
-  valueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  valueIcon: {
     marginRight: 8,
   },
-  valueTitle: {
-    fontWeight: 'bold',
-    fontSize: 16,
-    color: '#059669',
-  },
-  valueDescription: {
-    fontSize: 14,
-    color: '#059669',
-    marginBottom: 12,
-  },
-  valueHighlightBox: {
-    backgroundColor: '#D1FAE5', // emerald-100
+  sponsoredBadge: {
+    fontSize: 12,
+    color: colors.primary,
+    backgroundColor: colors.primary + '20',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
     borderRadius: 12,
-    padding: 14,
   },
-  valueHighlightText: {
+  footer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.neutralDark,
+  },
+  sendButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 12,
+  },
+  sendButtonDisabled: {
+    opacity: 0.5,
+  },
+  sendButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modal: {
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 32,
+    width: '85%',
+    alignItems: 'center',
+  },
+  iconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: colors.text.primary,
+    marginBottom: 8,
+  },
+  modalMessage: {
     fontSize: 14,
-    color: '#065F46',
-    lineHeight: 20,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: 24,
   },
-  bold: {
-    fontWeight: 'bold',
+  modalButton: {
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    borderRadius: 8,
   },
-}); 
+  modalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+});
