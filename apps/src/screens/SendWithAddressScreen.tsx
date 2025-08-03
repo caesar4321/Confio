@@ -235,7 +235,7 @@ export const SendWithAddressScreen = () => {
             <Text style={styles.feeLabel}>Comisión de red</Text>
             <View style={styles.feeAmountContainer}>
               <Text style={styles.feeAmount}>Gratis</Text>
-              <Text style={styles.sponsoredBadge}>Patrocinado</Text>
+              <Text style={styles.sponsoredBadge}>Cubierto por Confío</Text>
             </View>
           </View>
         </View>

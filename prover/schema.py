@@ -2,7 +2,7 @@ import graphene
 from graphene_django import DjangoObjectType
 from graphene_django.converter import convert_django_field
 from django.db import models
-from .models import ZkLoginProof
+# ZkLoginProof model removed - proofs remain client-side
 from users.models import Account, User
 from firebase_admin import auth
 from firebase_admin.auth import InvalidIdTokenError
@@ -117,10 +117,7 @@ class AccountType(DjangoObjectType):
     class Meta:
         model = Account
 
-class ZkLoginProofType(DjangoObjectType):
-    class Meta:
-        model = ZkLoginProof
-        fields = ('proof_id', 'account', 'max_epoch', 'proof_data', 'created_at')
+# ZkLoginProofType removed - proofs remain client-side
 
 class ProofPointsType(graphene.ObjectType):
     a = graphene.List(graphene.String)
@@ -472,16 +469,8 @@ def resolve_finalize_zk_login(self, info, input):
                     error="Invalid prover service response"
                 )
 
-            # Create ZkLoginProof record
-            proof = ZkLoginProof.objects.create(
-                account=account,
-                max_epoch=int(input.maxEpoch),
-                randomness=base64.b64decode(input.randomness),
-                extended_ephemeral_public_key=base64.b64decode(input.extendedEphemeralPublicKey),
-                user_signature=base64.b64decode(input.userSignature),
-                proof_data=result['proof']
-            )
-            logger.info("Created ZkLoginProof record: %s", proof.id)
+            # No longer storing ZkLoginProof - proofs remain client-side
+            logger.info("zkLogin proof generated successfully - storing address only")
 
             # Update user's Sui address
             account.sui_address = result['suiAddress']
@@ -728,16 +717,9 @@ class Mutation(graphene.ObjectType):
     initiate_telegram_verification = InitiateTelegramVerification.Field()
 
 class Query(graphene.ObjectType):
-    zk_login_proof = graphene.Field(ZkLoginProofType, id=graphene.ID())
-    zk_login_proofs = graphene.List(ZkLoginProofType)
+    # ZkLoginProof queries removed - proofs remain client-side
     ping = graphene.String()
     currentEpoch = graphene.Int()
-
-    def resolve_zk_login_proof(self, info, id):
-        return ZkLoginProof.objects.get(id=id)
-
-    def resolve_zk_login_proofs(self, info):
-        return ZkLoginProof.objects.all()
 
     def resolve_ping(self, info):
         return "pong"
@@ -753,7 +735,7 @@ class Query(graphene.ObjectType):
 schema = graphene.Schema(
     query=Query,
     mutation=Mutation,
-    types=[AccountType, ZkLoginProofType]
+    types=[AccountType]  # ZkLoginProofType removed
 )
 
 # Add JWT middleware

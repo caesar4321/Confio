@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, Modal, ActivityIndicator } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
-// Removed Apollo imports as mutations are now handled in TransactionProcessingScreen
+import { useQuery } from '@apollo/client';
+import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -35,19 +36,17 @@ const tokenConfig = {
     logo: cUSDLogo,
     color: colors.primary,
     minSend: 1,
-    available: '2,850.35',
-    fee: 0.02,
+    fee: 0,  // Sponsored transactions
     description: 'Envía cUSD a cualquier dirección Sui',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
   confio: {
     name: 'CONFIO',
-            fullName: 'Confío',
+    fullName: 'Confío',
     logo: CONFIOLogo,
     color: colors.secondary,
     minSend: 1,
-    available: '1,000.00',
-    fee: 0.02,
+    fee: 0,  // Sponsored transactions
     description: 'Envía CONFIO a cualquier dirección Sui',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
@@ -85,6 +84,18 @@ export const SendToFriendScreen = () => {
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Get real balance from GraphQL
+  const { data: balanceData, loading: balanceLoading } = useQuery(GET_ACCOUNT_BALANCE, {
+    variables: { tokenType: tokenType.toUpperCase() },
+    fetchPolicy: 'cache-and-network',
+  });
+
+  // Get real balance or fallback to 0
+  const availableBalance = React.useMemo(() => {
+    const balance = parseFloat(balanceData?.accountBalance || '0');
+    return balance;
+  }, [balanceData]);
 
   // Mutations are now handled in TransactionProcessingScreen
 
@@ -181,7 +192,13 @@ export const SendToFriendScreen = () => {
         {/* Available Balance */}
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Saldo disponible</Text>
-          <Text style={styles.balanceAmount}>{config.available} {config.name}</Text>
+          {balanceLoading ? (
+            <ActivityIndicator size="small" color={config.color} style={{ marginVertical: 8 }} />
+          ) : (
+            <Text style={styles.balanceAmount}>
+              {formatNumber(availableBalance)} {config.name}
+            </Text>
+          )}
           <Text style={styles.balanceMin}>Mínimo para enviar: {config.minSend} {config.name}</Text>
         </View>
 
@@ -262,19 +279,22 @@ export const SendToFriendScreen = () => {
           <TouchableOpacity 
             style={[
               styles.confirmButton,
-              (!amount || parseFloat(amount) < config.minSend || isProcessing) && styles.confirmButtonDisabled
+              (!amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance || isProcessing) && styles.confirmButtonDisabled
             ]}
-            disabled={!amount || parseFloat(amount) < config.minSend || isProcessing}
+            disabled={!amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance || isProcessing}
             onPress={() => {
               console.log('SendToFriendScreen: Button pressed');
               console.log('SendToFriendScreen: amount:', amount);
               console.log('SendToFriendScreen: config.minSend:', config.minSend);
-              console.log('SendToFriendScreen: button disabled:', !amount || parseFloat(amount) < config.minSend || isProcessing);
+              console.log('SendToFriendScreen: availableBalance:', availableBalance);
+              console.log('SendToFriendScreen: button disabled:', !amount || parseFloat(amount) < config.minSend || parseFloat(amount || '0') > availableBalance || isProcessing);
               handleSend();
             }}
           >
             <Text style={styles.confirmButtonText}>
-              {isProcessing ? 'Procesando...' : `Enviar a ${friend.name}`}
+              {isProcessing ? 'Procesando...' : 
+               parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' : 
+               `Enviar a ${friend.name}`}
             </Text>
           </TouchableOpacity>
 

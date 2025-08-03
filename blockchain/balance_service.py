@@ -12,7 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import Balance
-from .sui_client import sui_client
+from .pysui_client import get_pysui_client
 from users.models import Account
 
 logger = logging.getLogger(__name__)
@@ -196,27 +196,23 @@ class BalanceService:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
+        async def get_balance():
+            async with await get_pysui_client() as client:
+                if token == 'CUSD':
+                    return await client.get_cusd_balance(account.sui_address)
+                elif token == 'CONFIO':
+                    return await client.get_confio_balance(account.sui_address)
+                elif token == 'SUI':
+                    return await client.get_sui_balance(account.sui_address)
+                elif token == 'USDC':
+                    # USDC not implemented in pysui_client yet, return 0
+                    return Decimal('0')
+                else:
+                    return Decimal('0')
+        
         try:
-            if token == 'CUSD':
-                amount = loop.run_until_complete(
-                    sui_client.get_cusd_balance(account.sui_address)
-                )
-                logger.info(f"Blockchain balance for {account.sui_address} - {token}: {amount}")
-            elif token == 'CONFIO':
-                amount = loop.run_until_complete(
-                    sui_client.get_confio_balance(account.sui_address)
-                )
-            elif token == 'SUI':
-                amount = loop.run_until_complete(
-                    sui_client.get_sui_balance(account.sui_address)
-                )
-            elif token == 'USDC':
-                amount = loop.run_until_complete(
-                    sui_client.get_usdc_balance(account.sui_address)
-                )
-                logger.info(f"Blockchain balance for {account.sui_address} - {token}: {amount}")
-            else:
-                amount = Decimal('0')
+            amount = loop.run_until_complete(get_balance())
+            logger.info(f"Blockchain balance for {account.sui_address} - {token}: {amount}")
             
             return {
                 'amount': amount,

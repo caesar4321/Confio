@@ -1,0 +1,836 @@
+[
+  {
+    "data": {
+      "objectId": "0x061b6abd4348ebd5a74a7360ca8c9c9c4d8bce498fa73705329b392861048550",
+      "version": "521674096",
+      "digest": "DTKoAwDEKwsvG9F1jfjv3eaSNkVwLvPkcEVRNtsiy8px",
+      "type": "0x2::coin::Coin<0x2::sui::SUI>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "6BUw1bmdDGtiX2o7sEsSX3u9iMUBHLC6zXZ9beuzBMbn",
+      "storageRebate": "988000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::Coin<0x2::sui::SUI>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "balance": "267288764",
+          "id": {
+            "id": "0x061b6abd4348ebd5a74a7360ca8c9c9c4d8bce498fa73705329b392861048550"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x11e606698d10881e7011706e35b5e8196d3adcaccf6514faf44a6fabdcdc543d",
+      "version": "349180309",
+      "digest": "GR9HbeTSGzJvkQLkZ3MY2T5eJJ246Ey6ZjCrk7S3Q6Tx",
+      "type": "0x2::package::UpgradeCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "DupxJg1Di3QTteRqDSgjiheBVfBSUNRdykag64aR6C6r",
+      "storageRebate": "1634000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::package::UpgradeCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x11e606698d10881e7011706e35b5e8196d3adcaccf6514faf44a6fabdcdc543d"
+          },
+          "package": "0xa603f73f43d4facd9bdcd25815326254f84c741989b64fb88cf464897418a080",
+          "policy": 0,
+          "version": "1"
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x171398e232ac58777cda07671222220c536878e680b2f62ee7e989065b4821bb",
+      "version": "521674094",
+      "digest": "HCu4u9JRrSPuHkSS5GEkztDw9BrzGUygZ4hE3k7TCgna",
+      "type": "0x1eaf40cd86c66cf6da72202ee2f11b2922be0270cd5ce248057ed48f106f8233::cusd::AdminCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "HpnRD5pU5pN1HcQnhHjCWz7cR8iPsTtbaYAyn3i23xp2",
+      "storageRebate": "1284400",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x1eaf40cd86c66cf6da72202ee2f11b2922be0270cd5ce248057ed48f106f8233::cusd::AdminCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x171398e232ac58777cda07671222220c536878e680b2f62ee7e989065b4821bb"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x1a2bcb58fa54dddaafa7dc789b07d90133bd4a08f8e2bfa883f2d1390b983a4a",
+      "version": "349178931",
+      "digest": "H2fMbne6NcXSfF11n5cFRZHmx2zjtXKV33G2ZV4BtuGY",
+      "type": "0x2::coin::Coin<0x2::sui::SUI>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "8mbk2C5CvWEtCadBQxC3ntoTT6uftsAXKHKQpKMAPVDb",
+      "storageRebate": "988000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::Coin<0x2::sui::SUI>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "balance": "1000000",
+          "id": {
+            "id": "0x1a2bcb58fa54dddaafa7dc789b07d90133bd4a08f8e2bfa883f2d1390b983a4a"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x205c6c4da1bbf616ba83f911af060de0d57972ebcbd92c78fe2b5fad825f1946",
+      "version": "349180315",
+      "digest": "BaSfoS2UwYYubQRjWrqi5EwcQuLhuyc9xxnQDbz76R55",
+      "type": "0x2::package::UpgradeCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "Epj9Y1ocrxT6c5c5W4erVjstCV2WdVRmDDk8efERmDFi",
+      "storageRebate": "1634000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::package::UpgradeCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x205c6c4da1bbf616ba83f911af060de0d57972ebcbd92c78fe2b5fad825f1946"
+          },
+          "package": "0xc360865f7f30324ade1d283ebfd5bfc385062588af3f389a755887fc5f99e45e",
+          "policy": 0,
+          "version": "1"
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x2a02e958f993c83b4b89b4fdf168228c464892d58b64335460cd2f8738f72412",
+      "version": "521674094",
+      "digest": "EipQyanHAGwvfDLizK3K8fSgqH8f3nepYuUSLWYJcomj",
+      "type": "0x2::package::UpgradeCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "HpnRD5pU5pN1HcQnhHjCWz7cR8iPsTtbaYAyn3i23xp2",
+      "storageRebate": "1634000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::package::UpgradeCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x2a02e958f993c83b4b89b4fdf168228c464892d58b64335460cd2f8738f72412"
+          },
+          "package": "0x1eaf40cd86c66cf6da72202ee2f11b2922be0270cd5ce248057ed48f106f8233",
+          "policy": 0,
+          "version": "1"
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x2dba12e8a3c92ce824861814fb9fab482abc175a8952de293f4eb10469b2501b",
+      "version": "521674096",
+      "digest": "DaVWgyy3AC58kDKWR5gqat8EbygEFW2ohk7e4Gx5EKug",
+      "type": "0x2::coin::TreasuryCap<0x1eaf40cd86c66cf6da72202ee2f11b2922be0270cd5ce248057ed48f106f8233::cusd::CUSD>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "6BUw1bmdDGtiX2o7sEsSX3u9iMUBHLC6zXZ9beuzBMbn",
+      "storageRebate": "1702400",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::TreasuryCap<0x1eaf40cd86c66cf6da72202ee2f11b2922be0270cd5ce248057ed48f106f8233::cusd::CUSD>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x2dba12e8a3c92ce824861814fb9fab482abc175a8952de293f4eb10469b2501b"
+          },
+          "total_supply": {
+            "type": "0x2::balance::Supply<0x1eaf40cd86c66cf6da72202ee2f11b2922be0270cd5ce248057ed48f106f8233::cusd::CUSD>",
+            "fields": {
+              "value": "1500000000"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x3563990c6fb675bc7410aa7f9f6cc20d0e6097cfcbcc1e7183536d71bba29b2a",
+      "version": "349178932",
+      "digest": "3NdnzxQW7vHCxrTsNhF42mPdt3ZKHMjkW4afp6TohXfR",
+      "type": "0x2::package::UpgradeCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "4pRjgCzuX8JnaV4W8wiR9saF7iSQVqYxp3cuxa5JdVBy",
+      "storageRebate": "1634000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::package::UpgradeCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x3563990c6fb675bc7410aa7f9f6cc20d0e6097cfcbcc1e7183536d71bba29b2a"
+          },
+          "package": "0xe16075534d6e801fc6d46345a0194e91962805aee27105831ee238839159330b",
+          "policy": 0,
+          "version": "1"
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x3a1bea713d1de031d734acefabbd4d7d085079131913b7a429eeb597d5e99db2",
+      "version": "521664032",
+      "digest": "AedhHaqcsdQ7MTR79cULPgCNvm8JzTgKt8cjoKm6j7Ga",
+      "type": "0xfa39d9b961930750646148de35923d789561a4d47571bd7ff17eda9d6f9ec17c::p2p_trade::AdminCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "C6pXraVqR85bKpWozQL8BxHLLb3n6uoMLH3cSkbspYuF",
+      "storageRebate": "1322400",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0xfa39d9b961930750646148de35923d789561a4d47571bd7ff17eda9d6f9ec17c::p2p_trade::AdminCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x3a1bea713d1de031d734acefabbd4d7d085079131913b7a429eeb597d5e99db2"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x40bff04a420ec25ba15adb93205a860df98fd29ed32be37ba20ef658c51f44a5",
+      "version": "349180304",
+      "digest": "7B22WrVxZ6CPidEoAoiUe7zQPjsLa2MRJzdKreZnxwTA",
+      "type": "0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf::cusd::AdminCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "JjXUaq3BanCtTvwYP5zTVi7LTJB3scFkFBEgSgtMhYC",
+      "storageRebate": "1284400",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf::cusd::AdminCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x40bff04a420ec25ba15adb93205a860df98fd29ed32be37ba20ef658c51f44a5"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x66dda760f654f2b363df1d8f4bac770a6fa9f6e3affd1ef9e605ba98d77b1e98",
+      "version": "521664031",
+      "digest": "9mDBbAnu2SEeJBFndBrttGf4jkZGFGJhMMHY9xk7VR1r",
+      "type": "0xc360865f7f30324ade1d283ebfd5bfc385062588af3f389a755887fc5f99e45e::invite_send::AdminCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "6QE3FNDFy49ZuKK4B1jHvjawTMjxBHseRfXibxa9o3Dy",
+      "storageRebate": "1337600",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0xc360865f7f30324ade1d283ebfd5bfc385062588af3f389a755887fc5f99e45e::invite_send::AdminCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x66dda760f654f2b363df1d8f4bac770a6fa9f6e3affd1ef9e605ba98d77b1e98"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x6e727846b576c2d6e2017e32766c30482a060805c52c99caaac37ef37adb32ba",
+      "version": "349178932",
+      "digest": "uax6gtZ69ecEBhWXq38NKHQAwWmw4z558ZAAjkwZQUg",
+      "type": "0x2::coin::Coin<0x2::sui::SUI>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "4pRjgCzuX8JnaV4W8wiR9saF7iSQVqYxp3cuxa5JdVBy",
+      "storageRebate": "988000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::Coin<0x2::sui::SUI>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "balance": "6133216",
+          "id": {
+            "id": "0x6e727846b576c2d6e2017e32766c30482a060805c52c99caaac37ef37adb32ba"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x6ede7c0b692a022e429e08ebf55ce74d9b814e839714ed0b511094ddfda23955",
+      "version": "521664032",
+      "digest": "3hbX4f3hFJrjEDfzbAk4BmEs9c46e6R4rYojtJPxwh7x",
+      "type": "0x2::package::UpgradeCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "C6pXraVqR85bKpWozQL8BxHLLb3n6uoMLH3cSkbspYuF",
+      "storageRebate": "1634000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::package::UpgradeCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x6ede7c0b692a022e429e08ebf55ce74d9b814e839714ed0b511094ddfda23955"
+          },
+          "package": "0xfa39d9b961930750646148de35923d789561a4d47571bd7ff17eda9d6f9ec17c",
+          "policy": 0,
+          "version": "1"
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x77d43f16087289c27f138f2392fda9d33972745215442663eaef223a0d11a4a0",
+      "version": "349178932",
+      "digest": "4aJbn3NxR4Xw9hH4yHgHqJny7eSKPgUS5RpDY9P3WqjF",
+      "type": "0xe16075534d6e801fc6d46345a0194e91962805aee27105831ee238839159330b::cusd::VaultRegistry",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "4pRjgCzuX8JnaV4W8wiR9saF7iSQVqYxp3cuxa5JdVBy",
+      "storageRebate": "1330000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0xe16075534d6e801fc6d46345a0194e91962805aee27105831ee238839159330b::cusd::VaultRegistry",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x77d43f16087289c27f138f2392fda9d33972745215442663eaef223a0d11a4a0"
+          },
+          "vaults": {
+            "type": "0x2::vec_set::VecSet<address>",
+            "fields": {
+              "contents": []
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x7ebec5eb107625e781d95672fd191ce7ee14800785701468a630459dbd6b918c",
+      "version": "349178948",
+      "digest": "BQ6nqbwd4sMNh5KtxAwpeehGMk35PLKkSYKVD3ZMTEi3",
+      "type": "0x2::coin::CoinMetadata<0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf::cusd::CUSD>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "3dFHYZxVY7cEiH7xJQ4q4oAC6urQpvDYzVKiN1DstNAK",
+      "storageRebate": "2705600",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::CoinMetadata<0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf::cusd::CUSD>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "decimals": 6,
+          "description": "A USD-pegged stablecoin for Confío",
+          "icon_url": "https://raw.githubusercontent.com/caesar4321/Confio/main/web/src/images/cUSD.png",
+          "id": {
+            "id": "0x7ebec5eb107625e781d95672fd191ce7ee14800785701468a630459dbd6b918c"
+          },
+          "name": "Confío Dollar",
+          "symbol": "CUSD"
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x852bb89518edd67287dc13a20f5dcb417603a2639478d3bb3f246e28309aca6a",
+      "version": "349178927",
+      "digest": "ABpFMsJN6apSKxKTAoGiv6hJchpEh7QbaKwy9WAY4ghh",
+      "type": "0x2::coin::TreasuryCap<0x707a652b6080e8ec1410e59688243377392989d93f0b6a8ce24ab10ef112ccc0::cusd::CUSD>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "DLxLnQuMRhqWoxdnFTrGvdUwZg8JazjURa7KyVCvu47b",
+      "storageRebate": "1702400",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::TreasuryCap<0x707a652b6080e8ec1410e59688243377392989d93f0b6a8ce24ab10ef112ccc0::cusd::CUSD>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x852bb89518edd67287dc13a20f5dcb417603a2639478d3bb3f246e28309aca6a"
+          },
+          "total_supply": {
+            "type": "0x2::balance::Supply<0x707a652b6080e8ec1410e59688243377392989d93f0b6a8ce24ab10ef112ccc0::cusd::CUSD>",
+            "fields": {
+              "value": "0"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x8807134515c7eff18c71726adddd1863368a93887d920f0abc5b5f68cdab2537",
+      "version": "349178973",
+      "digest": "9eKwjnNcDW77SnMsPvcZ69hT5LrHcAZaH43FypQuokyr",
+      "type": "0x2::coin::Coin<0x2::sui::SUI>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "FcnZ6UT9FzGcAdYupqat4DoBSwHSUuLKkDoTonBJFuid",
+      "storageRebate": "988000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::Coin<0x2::sui::SUI>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "balance": "35563692",
+          "id": {
+            "id": "0x8807134515c7eff18c71726adddd1863368a93887d920f0abc5b5f68cdab2537"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x91d204b20f73253c698eb4d8a6c05bc44d5a6591b8ff95ce124d04bdab5d3b2d",
+      "version": "349178932",
+      "digest": "WiKRESXCqR2LqNvSRk9hsdE7n9pdtQ1WX2qjyMXMi1a",
+      "type": "0x2::coin::CoinMetadata<0xe16075534d6e801fc6d46345a0194e91962805aee27105831ee238839159330b::cusd::CUSD>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "4pRjgCzuX8JnaV4W8wiR9saF7iSQVqYxp3cuxa5JdVBy",
+      "storageRebate": "2705600",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::CoinMetadata<0xe16075534d6e801fc6d46345a0194e91962805aee27105831ee238839159330b::cusd::CUSD>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "decimals": 6,
+          "description": "A USD-pegged stablecoin for Confío",
+          "icon_url": "https://raw.githubusercontent.com/caesar4321/Confio/main/web/src/images/cUSD.png",
+          "id": {
+            "id": "0x91d204b20f73253c698eb4d8a6c05bc44d5a6591b8ff95ce124d04bdab5d3b2d"
+          },
+          "name": "Confío Dollar",
+          "symbol": "CUSD"
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x91f4dccb4324ace79500ea2c4b568d2a9669227df3b65687ec250b4ccd2960c4",
+      "version": "349178927",
+      "digest": "4D3FQaiboaUgqXzxRk5e4FXso4bohNRjEKsLVzo3VGrK",
+      "type": "0x707a652b6080e8ec1410e59688243377392989d93f0b6a8ce24ab10ef112ccc0::cusd::VaultRegistry",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "DLxLnQuMRhqWoxdnFTrGvdUwZg8JazjURa7KyVCvu47b",
+      "storageRebate": "1330000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x707a652b6080e8ec1410e59688243377392989d93f0b6a8ce24ab10ef112ccc0::cusd::VaultRegistry",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x91f4dccb4324ace79500ea2c4b568d2a9669227df3b65687ec250b4ccd2960c4"
+          },
+          "vaults": {
+            "type": "0x2::vec_set::VecSet<address>",
+            "fields": {
+              "contents": []
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0x979aea456dee2c4e023a44e49f2ac9c619f0a4016caafa396f508205f18d7c56",
+      "version": "349178932",
+      "digest": "ArpSKSJMY1ez6yvSomfbewgZJSC7tBvgYJi7F1GmJSL5",
+      "type": "0x2::coin::TreasuryCap<0xe16075534d6e801fc6d46345a0194e91962805aee27105831ee238839159330b::cusd::CUSD>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "4pRjgCzuX8JnaV4W8wiR9saF7iSQVqYxp3cuxa5JdVBy",
+      "storageRebate": "1702400",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::TreasuryCap<0xe16075534d6e801fc6d46345a0194e91962805aee27105831ee238839159330b::cusd::CUSD>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0x979aea456dee2c4e023a44e49f2ac9c619f0a4016caafa396f508205f18d7c56"
+          },
+          "total_supply": {
+            "type": "0x2::balance::Supply<0xe16075534d6e801fc6d46345a0194e91962805aee27105831ee238839159330b::cusd::CUSD>",
+            "fields": {
+              "value": "0"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0xa2ef8b7a748c2cd801ab86a3cfc912fb89ab7907dcf19e18e6efa1f6d7e58fbf",
+      "version": "349180314",
+      "digest": "Z62RpdVZiWqs2Hf9CTLhqbzCR24FRHdW4vx1g1b4gCj",
+      "type": "0xa603f73f43d4facd9bdcd25815326254f84c741989b64fb88cf464897418a080::pay::AdminCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "29eVAjfyJLvHnH7vbyukbiw8ofNgTPiLTqr5kYtdWVdV",
+      "storageRebate": "1276800",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0xa603f73f43d4facd9bdcd25815326254f84c741989b64fb88cf464897418a080::pay::AdminCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0xa2ef8b7a748c2cd801ab86a3cfc912fb89ab7907dcf19e18e6efa1f6d7e58fbf"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0xadbc39527efb7cfc63a5e9102aba7aa0c20f7957d851630a52f98547bc9ab68c",
+      "version": "349180310",
+      "digest": "4Lf4GwSW3VAhc8gLsnEjrzJ2yt8zdrqqmvctYF6AvKiS",
+      "type": "0x2::coin::TreasuryCap<0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf::cusd::CUSD>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "EWVQ2wDmRx1t9mQ4s4gFfsRYR6krd4mttHpzCga3Gcdo",
+      "storageRebate": "1702400",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::TreasuryCap<0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf::cusd::CUSD>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0xadbc39527efb7cfc63a5e9102aba7aa0c20f7957d851630a52f98547bc9ab68c"
+          },
+          "total_supply": {
+            "type": "0x2::balance::Supply<0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf::cusd::CUSD>",
+            "fields": {
+              "value": "110500000"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0xb29ab0923974bb5b39ce77f658bd357a991865910d59aef993a3ec2c794e6644",
+      "version": "349178927",
+      "digest": "7mHi3KfkfxYCz4paj2BgyeiHCnhW9AjA6yK5tEFB64Ah",
+      "type": "0x707a652b6080e8ec1410e59688243377392989d93f0b6a8ce24ab10ef112ccc0::cusd::AdminCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "DLxLnQuMRhqWoxdnFTrGvdUwZg8JazjURa7KyVCvu47b",
+      "storageRebate": "1284400",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x707a652b6080e8ec1410e59688243377392989d93f0b6a8ce24ab10ef112ccc0::cusd::AdminCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0xb29ab0923974bb5b39ce77f658bd357a991865910d59aef993a3ec2c794e6644"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0xb8d5a2cca7b70f64889855c3149c46ee0e73e8b4c9ddab1eafe3231fb08d0901",
+      "version": "349180306",
+      "digest": "41y9wVWzB7zmtR8kMV7Q6LJXf4Bo42S8vmzRhtdnPrNL",
+      "type": "0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf::cusd::VaultRegistry",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "CsHc7ACqCqHwBmGxwMrKJz1eKQWfWsCXVVD6UgZpHvL7",
+      "storageRebate": "1816400",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf::cusd::VaultRegistry",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0xb8d5a2cca7b70f64889855c3149c46ee0e73e8b4c9ddab1eafe3231fb08d0901"
+          },
+          "vaults": {
+            "type": "0x2::vec_set::VecSet<address>",
+            "fields": {
+              "contents": [
+                "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256",
+                "0x478abc5b847d726e5caad8e9b37d66890f61013b5fe5b5162adc586f99e3833d"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0xbd55f2324acde09f5623aab12f6597d27db876ce0438129af197c0ee32734a19",
+      "version": "349178948",
+      "digest": "CvuAHALEsenWqZyar4iBJuj6fqEDKUidd7TJhCfmQVWp",
+      "type": "0x2::package::UpgradeCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "3dFHYZxVY7cEiH7xJQ4q4oAC6urQpvDYzVKiN1DstNAK",
+      "storageRebate": "1634000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::package::UpgradeCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0xbd55f2324acde09f5623aab12f6597d27db876ce0438129af197c0ee32734a19"
+          },
+          "package": "0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf",
+          "policy": 0,
+          "version": "1"
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0xd02d505f7630f228802091c30201422019a2640d3f5c627f9abe359c349b1961",
+      "version": "349178932",
+      "digest": "2J87WTia11Pz4sCa1xxuRhE3XgdwoC8GijHLPG2bSWe2",
+      "type": "0xe16075534d6e801fc6d46345a0194e91962805aee27105831ee238839159330b::cusd::AdminCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "4pRjgCzuX8JnaV4W8wiR9saF7iSQVqYxp3cuxa5JdVBy",
+      "storageRebate": "1284400",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0xe16075534d6e801fc6d46345a0194e91962805aee27105831ee238839159330b::cusd::AdminCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0xd02d505f7630f228802091c30201422019a2640d3f5c627f9abe359c349b1961"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0xdd07f6aa1ccf3b605d689271ca3eb48e1e3e1da045201f80f1cb362dc56d78b7",
+      "version": "349178927",
+      "digest": "GGrEGXd4ucf1u81RJnWPQZ9iVrjxVVwvPxJPGYE8WfNL",
+      "type": "0x2::package::UpgradeCap",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "DLxLnQuMRhqWoxdnFTrGvdUwZg8JazjURa7KyVCvu47b",
+      "storageRebate": "1634000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::package::UpgradeCap",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0xdd07f6aa1ccf3b605d689271ca3eb48e1e3e1da045201f80f1cb362dc56d78b7"
+          },
+          "package": "0x707a652b6080e8ec1410e59688243377392989d93f0b6a8ce24ab10ef112ccc0",
+          "policy": 0,
+          "version": "1"
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0xdfe466f06eb77807f6947ef90bd6ddce03ba758d18faed0922be17e8bcf20cfd",
+      "version": "521664032",
+      "digest": "2JraFVGt7JyZCrYEAj6LDJxkzNAXEGhimmhqCsZqEeBv",
+      "type": "0x2::coin::Coin<0xfa39d9b961930750646148de35923d789561a4d47571bd7ff17eda9d6f9ec17c::confio::CONFIO>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "C6pXraVqR85bKpWozQL8BxHLLb3n6uoMLH3cSkbspYuF",
+      "storageRebate": "1352800",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::Coin<0xfa39d9b961930750646148de35923d789561a4d47571bd7ff17eda9d6f9ec17c::confio::CONFIO>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "balance": "1000000000",
+          "id": {
+            "id": "0xdfe466f06eb77807f6947ef90bd6ddce03ba758d18faed0922be17e8bcf20cfd"
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0xeca2e803f2cd5bc9fd509ff93c0facd415f67ea19607f4346b68d11ef439e2db",
+      "version": "521674094",
+      "digest": "FMV9krugnReuL14shNRgaq4TRzh92TjUJXMYfe6bm7zf",
+      "type": "0x2::coin::CoinMetadata<0x1eaf40cd86c66cf6da72202ee2f11b2922be0270cd5ce248057ed48f106f8233::cusd::CUSD>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "HpnRD5pU5pN1HcQnhHjCWz7cR8iPsTtbaYAyn3i23xp2",
+      "storageRebate": "2705600",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::CoinMetadata<0x1eaf40cd86c66cf6da72202ee2f11b2922be0270cd5ce248057ed48f106f8233::cusd::CUSD>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "decimals": 6,
+          "description": "A USD-pegged stablecoin for Confío",
+          "icon_url": "https://raw.githubusercontent.com/caesar4321/Confio/main/web/src/images/cUSD.png",
+          "id": {
+            "id": "0xeca2e803f2cd5bc9fd509ff93c0facd415f67ea19607f4346b68d11ef439e2db"
+          },
+          "name": "Confío Dollar",
+          "symbol": "CUSD"
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0xf1992d658f12ae705f7d29d597595fa4d46cf992a9985dc4a3f2eded29a38ad7",
+      "version": "349178927",
+      "digest": "HVTmvPWN8iEDjq75HY4Ee97GrctEfrzXW5QoGVobVJ26",
+      "type": "0x2::coin::CoinMetadata<0x707a652b6080e8ec1410e59688243377392989d93f0b6a8ce24ab10ef112ccc0::cusd::CUSD>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "DLxLnQuMRhqWoxdnFTrGvdUwZg8JazjURa7KyVCvu47b",
+      "storageRebate": "2705600",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::CoinMetadata<0x707a652b6080e8ec1410e59688243377392989d93f0b6a8ce24ab10ef112ccc0::cusd::CUSD>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "decimals": 6,
+          "description": "A USD-pegged stablecoin for Confío",
+          "icon_url": "https://raw.githubusercontent.com/caesar4321/Confio/main/web/src/images/cUSD.png",
+          "id": {
+            "id": "0xf1992d658f12ae705f7d29d597595fa4d46cf992a9985dc4a3f2eded29a38ad7"
+          },
+          "name": "Confío Dollar",
+          "symbol": "CUSD"
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0xf71e634798789204a849cc5918b3a79f5cd9a3c1bc949b58ad2f35c626f0d8d5",
+      "version": "521674094",
+      "digest": "GpcX82gdxFJfRumJGgdCrrY97xs3t7TLRVKPdJWjVVZb",
+      "type": "0x1eaf40cd86c66cf6da72202ee2f11b2922be0270cd5ce248057ed48f106f8233::cusd::VaultRegistry",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "HpnRD5pU5pN1HcQnhHjCWz7cR8iPsTtbaYAyn3i23xp2",
+      "storageRebate": "1330000",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x1eaf40cd86c66cf6da72202ee2f11b2922be0270cd5ce248057ed48f106f8233::cusd::VaultRegistry",
+        "hasPublicTransfer": true,
+        "fields": {
+          "id": {
+            "id": "0xf71e634798789204a849cc5918b3a79f5cd9a3c1bc949b58ad2f35c626f0d8d5"
+          },
+          "vaults": {
+            "type": "0x2::vec_set::VecSet<address>",
+            "fields": {
+              "contents": []
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "data": {
+      "objectId": "0xfff7a7a6e15c486b165ed955e63fa5c8b968ce682a3b65ecb5728df50ae4406c",
+      "version": "349178927",
+      "digest": "9Beaj4t3K1yNMZUdLxikmuh33UxM1o35J5X5LaZFx3Pp",
+      "type": "0x2::coin::Coin<0x707a652b6080e8ec1410e59688243377392989d93f0b6a8ce24ab10ef112ccc0::confio::CONFIO>",
+      "owner": {
+        "AddressOwner": "0x0c1589253999177f7ea3eda6aa412cbaa3238c005ba918e724c0a051fe6d1256"
+      },
+      "previousTransaction": "DLxLnQuMRhqWoxdnFTrGvdUwZg8JazjURa7KyVCvu47b",
+      "storageRebate": "1352800",
+      "content": {
+        "dataType": "moveObject",
+        "type": "0x2::coin::Coin<0x707a652b6080e8ec1410e59688243377392989d93f0b6a8ce24ab10ef112ccc0::confio::CONFIO>",
+        "hasPublicTransfer": true,
+        "fields": {
+          "balance": "1000000000",
+          "id": {
+            "id": "0xfff7a7a6e15c486b165ed955e63fa5c8b968ce682a3b65ecb5728df50ae4406c"
+          }
+        }
+      }
+    }
+  }
+]

@@ -1291,6 +1291,120 @@ export class AuthService {
     return generateZkLoginSaltUtil(iss, sub, clientId, accountContext.type, accountContext.businessId || '', accountContext.index);
   }
 
+  /**
+   * Create a zkLogin signature for a transaction
+   * This method signs transaction bytes with the user's zkLogin credentials
+   * 
+   * @param transactionBytes - The transaction bytes to sign (base64 encoded)
+   * @returns Base64 encoded zkLogin signature
+   */
+  public async createZkLoginSignatureForTransaction(transactionBytes: string): Promise<string | null> {
+    try {
+      console.log('AuthService - createZkLoginSignatureForTransaction called');
+      
+      // Check if we have all required zkLogin data
+      if (!this.zkProof || !this.suiKeypair || !this.maxEpoch) {
+        console.error('Missing zkLogin data for transaction signing');
+        console.error('zkProof:', this.zkProof);
+        console.error('suiKeypair:', this.suiKeypair ? 'present' : 'missing');
+        console.error('maxEpoch:', this.maxEpoch);
+        return null;
+      }
+      
+      // Log zkProof structure for debugging
+      console.log('zkProof structure:', JSON.stringify(this.zkProof, null, 2));
+
+      // Decode transaction bytes
+      const txBytes = base64ToBytes(transactionBytes);
+      
+      // Sign the transaction with ephemeral key
+      const ephemeralSignature = await this.suiKeypair.sign(txBytes);
+      const ephemeralSigBase64 = bytesToBase64(ephemeralSignature);
+      
+      // Get the stored zkLogin data
+      const storedData = await this.getStoredZkLoginData();
+      if (!storedData) {
+        console.error('No stored zkLogin data found');
+        return null;
+      }
+
+      // Create the zkLogin signature structure
+      // This combines the zkProof with the ephemeral signature
+      const zkLoginSignature = {
+        signature: ephemeralSigBase64,
+        publicKey: this.suiKeypair.getPublicKey().toBase64(),
+        zkProof: this.zkProof,
+        maxEpoch: this.maxEpoch,
+        userSignature: ephemeralSigBase64
+      };
+
+      // For now, we'll use the Sui SDK's getZkLoginSignature if available
+      // In production, this would properly format the zkLogin signature
+      // Check if zkProof has nested zkProof property (from backend response)
+      let zkProofData = this.zkProof.zkProof || this.zkProof;
+      
+      // Remove __typename field if present (GraphQL artifact)
+      if (zkProofData.__typename) {
+        zkProofData = {
+          a: zkProofData.a,
+          b: zkProofData.b,
+          c: zkProofData.c
+        };
+      }
+      
+      // Validate zkProof structure
+      if (!zkProofData || typeof zkProofData !== 'object') {
+        console.error('Invalid zkProof structure:', zkProofData);
+        return null;
+      }
+      
+      // Ensure we have all required proof fields
+      if (!zkProofData.a || !zkProofData.b || !zkProofData.c) {
+        console.error('zkProof missing required fields. Keys:', Object.keys(zkProofData));
+        return null;
+      }
+      
+      // Log all parameters before calling getZkLoginSignature
+      console.log('getZkLoginSignature parameters:');
+      console.log('- signature type:', typeof ephemeralSignature, 'value:', ephemeralSignature);
+      console.log('- publicKey:', this.suiKeypair.getPublicKey());
+      console.log('- zkProof keys:', Object.keys(zkProofData));
+      console.log('- maxEpoch type:', typeof this.maxEpoch, 'value:', this.maxEpoch);
+      
+      // For transaction signing with zkLogin, we need to send complete data
+      // Since the zkProof is kept client-side, we need to send it along
+      
+      try {
+        // Create a complete zkLogin signature package
+        const zkLoginData = {
+          ephemeralSignature: ephemeralSigBase64,
+          ephemeralPublicKey: this.extendedEphemeralPublicKey || this.suiKeypair.getPublicKey().toBase64(),
+          zkProof: zkProofData,
+          maxEpoch: this.maxEpoch,
+          subject: storedData.subject || this.zkProof.subject,
+          audience: storedData.clientId || this.zkProof.clientId || 'apple',
+          userSalt: storedData.userSalt || this.userSalt,
+          randomness: storedData.initRandomness || this.randomness,
+          jwt: storedData.initJwt  // Include the JWT for server-side zkProof regeneration
+        };
+        
+        // Return the complete zkLogin data as base64
+        const dataBytes = new TextEncoder().encode(JSON.stringify(zkLoginData));
+        console.log('Returning complete zkLogin data for transaction');
+        return bytesToBase64(dataBytes);
+      } catch (signatureError) {
+        console.error('Error in getZkLoginSignature:', signatureError);
+        console.error('zkProofData:', JSON.stringify(zkProofData, null, 2));
+        console.error('maxEpoch:', this.maxEpoch);
+        throw signatureError;
+      }
+      
+    } catch (error) {
+      console.error('Error creating zkLogin signature:', error);
+      return null;
+    }
+  }
+
   private async storeTokens(tokens: TokenStorage): Promise<void> {
     try {
       console.log('Storing tokens:', {

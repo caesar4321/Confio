@@ -34,8 +34,8 @@ class SponsorService:
     SPONSOR_STATS_KEY = "sponsor:stats"
     
     # Thresholds
-    MIN_SPONSOR_BALANCE = Decimal('10')  # Minimum 10 SUI to operate
-    WARNING_THRESHOLD = Decimal('50')     # Warn when below 50 SUI
+    MIN_SPONSOR_BALANCE = Decimal('0.1')  # Minimum 0.1 SUI to operate (lowered for testing)
+    WARNING_THRESHOLD = Decimal('0.5')    # Warn when below 0.5 SUI
     MAX_GAS_PER_TX = 100000000           # Max 0.1 SUI per transaction
     
     @classmethod
@@ -117,7 +117,8 @@ class SponsorService:
         cls,
         user_address: str,
         transaction_data: Dict[str, Any],
-        user_signature: Optional[str] = None
+        user_signature: Optional[str] = None,
+        zklogin_info: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Create a sponsored transaction.
@@ -131,6 +132,14 @@ class SponsorService:
             Dict with transaction result or error
         """
         try:
+            # Log zkLogin info if available
+            if zklogin_info:
+                logger.info(
+                    f"Creating sponsored transaction with zkLogin. "
+                    f"Account: {zklogin_info.get('account_id')}, "
+                    f"Proof: {zklogin_info.get('proof_id')}"
+                )
+            
             # Check sponsor health
             health = await cls.check_sponsor_health()
             if not health['can_sponsor']:
@@ -169,24 +178,92 @@ class SponsorService:
                 f"Gas: {gas_budget}"
             )
             
-            # In production, this would:
-            # 1. Sign with sponsor's private key
-            # 2. Combine with user's zkLogin signature
-            # 3. Submit to blockchain
+            # Build the transaction block
+            from blockchain.sui_client import SuiClient
+            client = SuiClient()
             
-            # For now, return mock result
-            tx_digest = f"sponsored_{user_address[:8]}_{transaction_data.get('function', 'tx')}"
-            
-            # Update stats
-            await cls._update_sponsor_stats(gas_budget)
-            
-            return {
-                'success': True,
-                'digest': tx_digest,
-                'sponsored': True,
-                'gas_saved': gas_budget / 1e9,  # Convert to SUI
-                'sponsor': sponsor_address
+            # Create transaction block for sponsored transaction
+            tx_block = {
+                "sender": user_address,
+                "expiration": None,  # No expiration
+                "gasData": {
+                    "payment": [],  # Sponsor will pay
+                    "owner": sponsor_address,
+                    "price": "1000",
+                    "budget": str(gas_budget)
+                },
+                "transactions": [transaction_data]
             }
+            
+            # Implementation for actual blockchain submission
+            # NOTE: This requires sponsor private key to be configured
+            
+            sponsor_private_key = getattr(settings, 'SPONSOR_PRIVATE_KEY', None)
+            
+            if sponsor_private_key:
+                # PRODUCTION PATH: Real blockchain submission
+                try:
+                    # Use simplified transaction execution
+                    from blockchain.simple_transaction import SimpleTransaction
+                    
+                    logger.info(f"Executing sponsored transaction via simplified method")
+                    
+                    result = await SimpleTransaction.execute_with_sponsor(
+                        user_address,
+                        transaction_data,
+                        sponsor_address,
+                        sponsor_private_key,
+                        None,  # prepared_coins - not used in simplified approach
+                        zklogin_info  # Pass zkLogin info if available
+                    )
+                    
+                    if result['success']:
+                        logger.info(f"Transaction executed: {result.get('digest')}")
+                        
+                        # Update stats
+                        await cls._update_sponsor_stats(gas_budget)
+                        
+                        return {
+                            'success': True,
+                            'digest': result.get('digest'),
+                            'sponsored': True,
+                            'gas_saved': gas_budget / 1e9,
+                            'sponsor': sponsor_address,
+                            'warning': result.get('warning')
+                        }
+                    else:
+                        raise Exception(result.get('error', 'Unknown error'))
+                    
+                except Exception as e:
+                    logger.error(f"Failed to submit transaction: {e}")
+                    logger.exception("Full error trace:")
+                    return {
+                        'success': False,
+                        'error': f'Transaction submission failed: {str(e)}'
+                    }
+            else:
+                # DEVELOPMENT PATH: Mock transaction
+                import hashlib
+                import time
+                tx_content = f"{user_address}_{transaction_data.get('function', 'tx')}_{time.time()}"
+                tx_digest = f"mock_{hashlib.sha256(tx_content.encode()).hexdigest()[:32]}"
+                
+                logger.warning(
+                    f"MOCK TRANSACTION: SPONSOR_PRIVATE_KEY not configured. "
+                    f"Mock digest: {tx_digest}"
+                )
+                
+                # Update stats
+                await cls._update_sponsor_stats(gas_budget)
+                
+                return {
+                    'success': True,
+                    'digest': tx_digest,
+                    'sponsored': True,
+                    'gas_saved': gas_budget / 1e9,  # Convert to SUI
+                    'sponsor': sponsor_address,
+                    'warning': 'Transaction not submitted to blockchain (SPONSOR_PRIVATE_KEY not configured)'
+                }
             
         except Exception as e:
             logger.error(f"Error creating sponsored transaction: {e}")
@@ -257,11 +334,25 @@ class SponsorService:
             else:
                 raise ValueError(f"Unknown transaction type: {transaction_type}")
             
+            # Check for zkLogin availability
+            zklogin_info = None
+            if transaction_params.get('zklogin_available'):
+                zklogin_info = {
+                    'available': True,
+                    'proof_id': transaction_params.get('proof_id'),
+                    'account_id': str(account.id)
+                }
+                logger.info(
+                    f"zkLogin available for {transaction_type} transaction. "
+                    f"Proof ID: {zklogin_info['proof_id']}"
+                )
+            
             # Create sponsored transaction
             result = await cls.create_sponsored_transaction(
                 account.sui_address,
                 tx_data,
-                transaction_params.get('user_signature')
+                transaction_params.get('user_signature'),
+                zklogin_info
             )
             
             if result['success']:
@@ -302,6 +393,7 @@ class SponsorService:
             raise ValueError(f"Unsupported token type: {token_type}")
         
         amount_units = int(amount * Decimal(10 ** decimals))
+        
         
         # If single coin, use split_and_transfer
         if len(prepared_coins['coins']) == 1:

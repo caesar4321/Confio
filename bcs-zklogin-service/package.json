@@ -1,0 +1,27 @@
+{
+  "name": "bcs-zklogin-service",
+  "version": "1.0.0",
+  "description": "BCS serialization service for zkLogin signatures for Sui blockchain",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "watch": "tsc --watch"
+  },
+  "dependencies": {
+    "@mysten/sui": "^1.14.2",
+    "express": "^4.19.2",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.4",
+    "ts-node": "^10.9.2"
+  },
+  "keywords": ["sui", "zklogin", "bcs", "blockchain", "signature"],
+  "author": "Confio Team",
+  "license": "MIT"
+}
