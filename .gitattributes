@@ -42,3 +42,11 @@ credentials/** filter=git-crypt diff=git-crypt
 # Cloudflare Workers configuration
 workers/link-shortener/wrangler.toml filter=git-crypt diff=git-crypt
 workers/link-shortener/setup-default-links.js filter=git-crypt diff=git-crypt
+
+# EC2 SSH Keys
+*.pem filter=git-crypt diff=git-crypt
+"Sui custom prover.pem" filter=git-crypt diff=git-crypt
+
+# AWS Credentials
+Julian_accessKeys.csv filter=git-crypt diff=git-crypt
+Julian_credentials.csv filter=git-crypt diff=git-crypt

@@ -164,12 +164,18 @@ export const AuthScreen = () => {
 
         <Text style={styles.subtitle}>La manera más fácil y segura de enviar, pagar, y ahorrar en dólares digitales</Text>
         <View style={styles.buttonGroup}>
-          <TouchableOpacity style={styles.googleButton} onPress={handleGoogleSignIn}>
+          <TouchableOpacity 
+            style={styles.googleButton} 
+            onPress={handleGoogleSignIn}
+          >
             <GoogleLogo width={24} height={24} style={{ marginRight: 8 }} />
             <Text style={styles.googleButtonText}>Continuar con Google</Text>
           </TouchableOpacity>
           {appleAuth.isSupported && (
-            <TouchableOpacity style={styles.appleButton} onPress={handleAppleSignIn}>
+            <TouchableOpacity 
+              style={styles.appleButton} 
+              onPress={handleAppleSignIn}
+            >
               <AppleLogo width={24} height={24} style={{ marginRight: 8 }} fill="#fff" />
               <Text style={styles.appleButtonText}>Continuar con Apple</Text>
             </TouchableOpacity>
@@ -184,6 +190,7 @@ export const AuthScreen = () => {
           </Text>
         </View>
       </View>
+      
     </View>
   );
 };
@@ -389,5 +396,8 @@ const styles = StyleSheet.create({
   termsLink: {
     color: colors.confioGreen,
     fontWeight: '500',
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
 }); 

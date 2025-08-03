@@ -4,6 +4,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 import json
 import logging
+from .schema import get_jwks
 
 logger = logging.getLogger(__name__)
 
@@ -43,3 +44,14 @@ def generate_proof(request):
     except Exception as e:
         logger.error(f"Proof generation error: {str(e)}")
         return JsonResponse({"error": str(e)}, status=400)
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def jwks_view(request):
+    """Return the JWKS (JSON Web Key Set) for JWT verification."""
+    try:
+        jwks = get_jwks()
+        return JsonResponse(jwks)
+    except Exception as e:
+        logger.error(f"JWKS generation error: {str(e)}")
+        return JsonResponse({"error": str(e)}, status=500)

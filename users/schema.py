@@ -850,15 +850,11 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			from blockchain.balance_service import BalanceService
 			
 			# Get balance from hybrid caching system
-			# Check if we've recently refreshed (within last 5 seconds)
-			from django.core.cache import cache
-			refresh_key = f"balance_refreshed:{account.id}"
-			recently_refreshed = cache.get(refresh_key, False)
-			
+			# Don't force refresh for regular queries - let the balance service handle caching
 			balance_data = BalanceService.get_balance(
 				account,
 				normalized_token_type,
-				force_refresh=recently_refreshed  # Force refresh if we just did a pull-to-refresh
+				force_refresh=False  # Regular queries use cache, pull-to-refresh uses force_refresh=True
 			)
 			
 			print(f"AccountBalance resolver - Got balance data for {normalized_token_type}: {balance_data}")

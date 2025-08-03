@@ -570,9 +570,50 @@ class SponsorServicePySui:
                         jwt = zklogin_data.get('jwt')
                         randomness = zklogin_data.get('randomness')
                         
-                        # If we have all the necessary data, regenerate zkProof using prover
-                        if all([ephemeral_sig, max_epoch, subject, audience, user_salt]):
-                            logger.info("Regenerating zkProof using custom prover...")
+                        # Check if client provided a valid zkProof to avoid regeneration
+                        if client_zkproof and isinstance(client_zkproof, dict) and all(k in client_zkproof for k in ['a', 'b', 'c']):
+                            logger.info("Using zkProof provided by client (no regeneration needed)")
+                            
+                            # Use the client's zkProof directly with BCS serialization
+                            try:
+                                import requests
+                                
+                                bcs_payload = {
+                                    "ephemeralSignature": ephemeral_sig,
+                                    "ephemeralPublicKey": ephemeral_pubkey,
+                                    "zkProof": client_zkproof,
+                                    "maxEpoch": max_epoch,
+                                    "subject": subject,
+                                    "audience": audience,
+                                    "userSalt": user_salt
+                                }
+                                
+                                logger.info("Calling BCS microservice for zkLogin signature...")
+                                
+                                bcs_response = requests.post(
+                                    "http://localhost:3002/bcs-signature",
+                                    json=bcs_payload,
+                                    timeout=10
+                                )
+                                
+                                if bcs_response.status_code == 200:
+                                    bcs_result = bcs_response.json()
+                                    if bcs_result.get('success'):
+                                        zklogin_signature = bcs_result['zkLoginSignature']
+                                        logger.info("Successfully created BCS zkLogin signature using client zkProof")
+                                    else:
+                                        raise ValueError(f"BCS service failed: {bcs_result}")
+                                else:
+                                    raise ValueError(f"BCS service error: {bcs_response.status_code}")
+                                    
+                            except Exception as e:
+                                logger.error(f"Error using client zkProof: {e}")
+                                # Fall back to regeneration if needed
+                                zklogin_signature = None
+                        
+                        # If no valid client zkProof, regenerate it
+                        if not zklogin_signature and all([jwt, randomness, ephemeral_pubkey]):
+                            logger.info("Client zkProof not available, regenerating...")
                             
                             # Build the full zkLogin signature
                             zklogin_signature = await cls._build_zklogin_signature(
@@ -586,10 +627,15 @@ class SponsorServicePySui:
                                 jwt=jwt,
                                 randomness=randomness
                             )
-                        else:
-                            # Fall back to ephemeral signature
-                            logger.warning("Missing zkLogin data, using ephemeral signature only")
-                            zklogin_signature = ephemeral_sig or user_signature
+                        
+                        if not zklogin_signature:
+                            # No valid zkProof and can't regenerate
+                            logger.error("No valid zkLogin data available")
+                            return {
+                                'success': False,
+                                'error': 'Invalid zkLogin session. Please login again.',
+                                'code': 'INVALID_ZKLOGIN'
+                            }
                         
                     except Exception as e:
                         logger.error(f"Error handling zkLogin data: {e}")

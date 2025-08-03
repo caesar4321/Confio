@@ -1,5 +1,10 @@
 import express from 'express';
 import cors from 'cors';
+import dotenv from 'dotenv';
+import { generateZkLoginProof, initializeProver } from './zklogin-prover.js';
+
+// Load environment variables
+dotenv.config();
 
 const app = express();
 const port = 3001;
@@ -7,6 +12,16 @@ const port = 3001;
 // Enable CORS for all routes
 app.use(cors());
 app.use(express.json());
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    mode: process.env.USE_MOCK_PROVER === 'true' ? 'mock' : 'external',
+    proverUrl: process.env.EXTERNAL_ZKLOGIN_PROVER_URL || 'none',
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Helper: decode base64 → Uint8Array with length validation
 function b64ToBuf(s, fieldName) {
@@ -92,28 +107,75 @@ app.post('/generate-proof', async (req, res) => {
       throw new Error(`Invalid base64 format for ${error.message}`);
     }
 
-    // Generate a mock Groth16 proof
-    // In a real implementation, this would call your actual prover
-    const proof = {
-      a: [
-        "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2",
-        "0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"
-      ],
-      b: [
-        [
-          "0x3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c",
-          "0x4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d"
+    // Check if we should use mock mode or real prover
+    const USE_MOCK_PROVER = process.env.USE_MOCK_PROVER === 'true';
+    const PROVER_URL = process.env.ZKLOGIN_PROVER_URL || 'http://localhost:8081/v1';
+    
+    let proof;
+    
+    if (USE_MOCK_PROVER) {
+      console.warn('⚠️  Using MOCK zkLogin proof - transactions will fail!');
+      // Return mock proof for development/testing
+      proof = {
+        a: [
+          "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2",
+          "0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"
         ],
-        [
-          "0x5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e",
-          "0x6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f"
+        b: [
+          [
+            "0x3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c",
+            "0x4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d"
+          ],
+          [
+            "0x5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e",
+            "0x6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f"
+          ]
+        ],
+        c: [
+          "0x7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a",
+          "0x8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b"
         ]
-      ],
-      c: [
-        "0x7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a",
-        "0x8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b"
-      ]
-    };
+      };
+    } else {
+      // Use our Node.js zkLogin prover implementation
+      console.log('Using Node.js zkLogin prover...');
+      
+      try {
+        const result = await generateZkLoginProof({
+          jwt,
+          extendedEphemeralPublicKey,
+          maxEpoch,
+          randomness,
+          salt,
+          keyClaimName,
+          audience
+        });
+        
+        proof = result.proof;
+        console.log('✅ Generated real zkLogin proof with Node.js');
+        
+      } catch (error) {
+        console.error('❌ Node.js prover error:', error);
+        
+        // If it's a configuration error, provide helpful instructions
+        if (error.message.includes('Cannot generate zkLogin proofs')) {
+          throw new Error(
+            'zkLogin prover not configured.\n\n' +
+            '⚠️  To generate zkLogin proofs, you need to:\n\n' +
+            '1. **Use Docker Compose (Recommended):**\n' +
+            '   - Run: docker-compose up -d\n' +
+            '   - This starts Mysten\'s zkLogin prover with custom audience support\n\n' +
+            '2. **Or use Shinami API:**\n' +
+            '   - Sign up at https://app.shinami.com/\n' +
+            '   - Set EXTERNAL_ZKLOGIN_PROVER_URL and API key\n\n' +
+            '3. **Or use mock proofs for testing:**\n' +
+            '   - Set USE_MOCK_PROVER=true\n'
+          );
+        }
+        
+        throw error;
+      }
+    }
 
     // Return the proof and Sui address
     res.json({
@@ -146,6 +208,18 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Initialize the prover on startup
+const USE_MOCK_PROVER = process.env.USE_MOCK_PROVER === 'true';
+if (!USE_MOCK_PROVER) {
+  initializeProver().catch(err => {
+    console.error('Failed to initialize prover:', err);
+    console.log('ℹ️  You can set USE_MOCK_PROVER=true to use mock proofs for testing');
+  });
+}
+
 app.listen(port, () => {
   console.log(`Prover service listening at http://localhost:${port}`);
+  if (USE_MOCK_PROVER) {
+    console.log('⚠️  Running in MOCK mode - proofs will not be valid!');
+  }
 }); 
