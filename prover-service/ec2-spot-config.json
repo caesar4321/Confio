@@ -1,0 +1,57 @@
+{
+  "SpotFleetRequestConfig": {
+    "IamFleetRole": "arn:aws:iam::YOUR_ACCOUNT_ID:role/aws-ec2-spot-fleet-tagging-role",
+    "AllocationStrategy": "lowestPrice",
+    "TargetCapacity": 1,
+    "SpotPrice": "0.0104",
+    "TerminateInstancesWithExpiration": true,
+    "LaunchSpecifications": [
+      {
+        "ImageId": "ami-0c02fb55956c7d316",
+        "InstanceType": "t3.small",
+        "KeyName": "your-key-pair",
+        "SecurityGroups": [
+          {
+            "GroupId": "sg-xxxxxxxxx"
+          }
+        ],
+        "IamInstanceProfile": {
+          "Arn": "arn:aws:iam::YOUR_ACCOUNT_ID:instance-profile/EC2-CloudWatch-Role"
+        },
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/xvda",
+            "Ebs": {
+              "VolumeSize": 20,
+              "VolumeType": "gp3",
+              "DeleteOnTermination": true
+            }
+          }
+        ],
+        "UserData": "IyEvYmluL2Jhc2gKY3VybCAtbyAvdG1wL2VjMi1zZXR1cC5zaCBodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20veW91ci1yZXBvL2VjMi1zZXR1cC5zaApjaG1vZCAreCAL3RtcC9lYzItc2V0dXAuc2gKL3RtcC9lYzItc2V0dXAuc2g=",
+        "TagSpecifications": [
+          {
+            "ResourceType": "instance",
+            "Tags": [
+              {
+                "Key": "Name",
+                "Value": "zkLogin-Prover-Spot"
+              },
+              {
+                "Key": "Environment",
+                "Value": "production"
+              },
+              {
+                "Key": "Service",
+                "Value": "zklogin-prover"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "Type": "maintain",
+    "ReplaceUnhealthyInstances": true,
+    "InstanceInterruptionBehavior": "terminate"
+  }
+}

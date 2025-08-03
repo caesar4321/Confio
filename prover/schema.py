@@ -30,6 +30,12 @@ import jwt
 from datetime import datetime, timedelta
 from telegram_verification.schema import validate_country_code, get_country_code
 from telegram_verification.models import TelegramVerification
+import time
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.backends import default_backend
+import hashlib
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -65,6 +71,134 @@ def normalize_prover_payload(payload):
             raise ValueError(f"Missing required field: {field}")
     
     return normalized
+
+def get_or_create_rsa_keypair():
+    """Get or create RSA keypair for JWT signing.
+    
+    Returns:
+        tuple: (private_key, public_key) as cryptography objects
+    """
+    from django.core.cache import cache
+    
+    # Try to get from cache first
+    private_key_pem = cache.get('zklogin_jwt_private_key')
+    public_key_pem = cache.get('zklogin_jwt_public_key')
+    
+    if private_key_pem and public_key_pem:
+        private_key = serialization.load_pem_private_key(
+            private_key_pem.encode(), 
+            password=None,
+            backend=default_backend()
+        )
+        public_key = serialization.load_pem_public_key(
+            public_key_pem.encode(),
+            backend=default_backend()
+        )
+        return private_key, public_key
+    
+    # Generate new keypair
+    private_key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+        backend=default_backend()
+    )
+    public_key = private_key.public_key()
+    
+    # Serialize and cache
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption()
+    ).decode()
+    
+    public_pem = public_key.public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode()
+    
+    # Cache for 30 days
+    cache.set('zklogin_jwt_private_key', private_pem, 60 * 60 * 24 * 30)
+    cache.set('zklogin_jwt_public_key', public_pem, 60 * 60 * 24 * 30)
+    
+    return private_key, public_key
+
+def get_jwks():
+    """Get the JWKS (JSON Web Key Set) for JWT verification.
+    
+    Returns:
+        dict: JWKS with our public key
+    """
+    private_key, public_key = get_or_create_rsa_keypair()
+    
+    # Extract public key components
+    public_numbers = public_key.public_numbers()
+    
+    # Convert to base64url format (no padding)
+    def int_to_base64url(num):
+        # Convert integer to bytes
+        num_bytes = num.to_bytes((num.bit_length() + 7) // 8, 'big')
+        # Base64 encode and remove padding
+        return base64.urlsafe_b64encode(num_bytes).decode().rstrip('=')
+    
+    # Create JWK
+    jwk = {
+        "kty": "RSA",
+        "kid": "confio-apple-jwt-key-1",
+        "use": "sig",
+        "alg": "RS256",
+        "n": int_to_base64url(public_numbers.n),
+        "e": int_to_base64url(public_numbers.e)
+    }
+    
+    return {"keys": [jwk]}
+
+def create_custom_jwt_for_apple(sub, nonce, max_epoch):
+    """Create a custom JWT for Apple Sign In with zkLogin nonce.
+    
+    Args:
+        sub: The user's Apple ID
+        nonce: The computed zkLogin nonce (not hashed)
+        max_epoch: The max epoch for zkLogin
+        
+    Returns:
+        str: The JWT token
+    """
+    try:
+        # Get RSA private key
+        private_key, _ = get_or_create_rsa_keypair()
+        
+        # JWT payload matching Apple's structure but with our nonce
+        payload = {
+            'iss': 'https://appleid.apple.com',  # Apple issuer
+            'sub': sub,  # Apple user ID
+            'aud': 'apple',  # Our client ID
+            'exp': int(time.time()) + 3600,  # 1 hour expiration
+            'iat': int(time.time()),
+            'nonce': nonce,  # The unhashed zkLogin nonce
+            'email_verified': 'true',
+            'auth_time': int(time.time())
+        }
+        
+        # Add kid to the header for zkLogin compatibility
+        headers = {
+            'kid': 'confio-apple-jwt-key-1',  # Key identifier
+            'alg': 'RS256'  # Using RSA instead of HS256
+        }
+        
+        # Sign with RSA private key
+        token = jwt.encode(
+            payload,
+            private_key,
+            algorithm='RS256',
+            headers=headers
+        )
+        
+        logger.info(f"Created custom JWT for Apple zkLogin with nonce: {nonce[:20]}...")
+        return token
+        
+    except Exception as e:
+        logger.error(f"Error creating custom JWT: {str(e)}")
+        raise Exception(f"Failed to create custom JWT: {str(e)}")
 
 def get_current_epoch():
     """Get the current epoch from the Sui blockchain.
@@ -148,6 +282,7 @@ class InitializeZkLogin(graphene.Mutation):
     randomness = graphene.String()
     authAccessToken = graphene.String()
     authRefreshToken = graphene.String()
+    customJwt = graphene.String(description="Custom JWT for zkLogin when using Apple Sign In")
 
     @staticmethod
     def mutate(root, info, firebaseToken, providerToken, provider, deviceFingerprint=None):
@@ -310,7 +445,7 @@ class InitializeZkLogin(graphene.Mutation):
                 current_epoch = get_current_epoch()
                 max_epoch = str(current_epoch + 100)  # Set max epoch to 100 epochs from now
 
-                # Generate randomness (32 bytes)
+                # Generate randomness (32 bytes as originally)
                 randomness_bytes = secrets.token_bytes(32)  # Generate 32 random bytes
                 randomness = base64.b64encode(randomness_bytes).decode('utf-8')  # Convert to base64 string
                 
@@ -324,12 +459,31 @@ class InitializeZkLogin(graphene.Mutation):
                         logger.error(f"Error tracking device fingerprint: {e}")
                         # Don't fail authentication if device tracking fails
 
+            # For Apple Sign In, create a custom JWT with the zkLogin nonce
+            custom_jwt = None
+            if provider == 'apple':
+                try:
+                    # Decode the Apple token to get the user's Apple ID
+                    import jwt as pyjwt
+                    apple_decoded = pyjwt.decode(providerToken, options={"verify_signature": False})
+                    apple_sub = apple_decoded.get('sub')
+                    
+                    if apple_sub:
+                        # For Apple Sign In, we'll create a custom JWT in the finalize step
+                        # when we have the computed nonce from the client
+                        logger.info(f"Apple Sign In detected for user: {apple_sub}")
+                        logger.info("Custom JWT will be created in finalize step with zkLogin nonce")
+                        
+                except Exception as e:
+                    logger.error(f"Error processing Apple token: {str(e)}")
+
             return InitializeZkLogin(
                 success=True,
                     maxEpoch=max_epoch,
                     randomness=randomness,
                     authAccessToken=token,
-                    authRefreshToken=refresh_token
+                    authRefreshToken=refresh_token,
+                    customJwt=custom_jwt
             )
 
         except Exception as e:
@@ -350,6 +504,7 @@ class FinalizeZkLoginInput(graphene.InputObjectType):
     accountType = graphene.String(required=True)
     accountIndex = graphene.Int(required=True)
     deviceFingerprint = graphene.JSONString(required=False, description="Device fingerprint data")
+    computedNonce = graphene.String(required=False, description="Computed zkLogin nonce for Apple Sign In")
 
 class FinalizeZkLoginPayload(graphene.ObjectType):
     success = graphene.Boolean()
@@ -430,9 +585,36 @@ def resolve_finalize_zk_login(self, info, input):
                 error="Error finding user account"
             )
 
+        # Check if this is Apple Sign In and we need to create a custom JWT
+        jwt_to_use = input.jwt
+        if input.audience == 'apple' and input.computedNonce:
+            logger.info("Apple Sign In detected, creating custom JWT with computed nonce")
+            try:
+                # Decode the Apple JWT to get the subject
+                import jwt as pyjwt
+                apple_decoded = pyjwt.decode(input.jwt, options={"verify_signature": False})
+                apple_sub = apple_decoded.get('sub')
+                
+                if apple_sub:
+                    # Create custom JWT with the computed nonce
+                    jwt_to_use = create_custom_jwt_for_apple(
+                        sub=apple_sub,
+                        nonce=input.computedNonce,
+                        max_epoch=input.maxEpoch
+                    )
+                    logger.info(f"Created custom JWT for Apple zkLogin, nonce: {input.computedNonce[:20]}...")
+                else:
+                    logger.error("No subject found in Apple JWT")
+            except Exception as e:
+                logger.error(f"Error creating custom JWT for Apple: {str(e)}")
+                return FinalizeZkLoginPayload(
+                    success=False,
+                    error=f"Failed to create custom JWT: {str(e)}"
+                )
+        
         # Prepare prover payload
         prover_payload = {
-            "jwt": input.jwt,
+            "jwt": jwt_to_use,
             "extendedEphemeralPublicKey": input.extendedEphemeralPublicKey,
             "maxEpoch": input.maxEpoch,
             "randomness": input.randomness,

@@ -53,7 +53,7 @@ export function generateZkLoginSalt(
   offset += businessIdBytes.length;
   combined.set(accountIndexBytes, offset);
 
-  // Generate SHA-256 hash
+  // Generate SHA-256 hash (32 bytes)
   const salt = sha256(combined);
 
   // Convert to base64

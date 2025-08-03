@@ -347,6 +347,14 @@ Where:
 - `business_id`: Business ID (only included for business accounts)
 - `account_index`: Numeric index (0, 1, 2, etc.)
 
+**⚠️ CRITICAL: Salt Format Locked at 32 Bytes**
+
+The salt generation MUST always produce a 32-byte (256-bit) value using SHA-256. This format is permanently locked to maintain wallet compatibility:
+- Changing the salt size would generate different Sui addresses for existing users
+- Users would lose access to their funds as the addresses would change
+- There is no migration path as zkLogin addresses are deterministic based on the salt
+- If you ever need to change this, you'll need a complex migration strategy involving fund transfers
+
 #### JWT Integration
 
 The system includes comprehensive JWT context management for secure account operations:

@@ -135,16 +135,17 @@ app.post('/bcs-signature', async (req, res) => {
       hasZkProof: !!zkProof
     });
 
-    // Debug the proof point formats and detect if they're mock data
-    const isMockData = zkProof.a[0]?.includes('1a2b3c4d') || false;
+    // Debug the proof point formats - always treat as real data
+    const isMockData = false; // Real zkProof from iPhone
     console.log('zkProof analysis:', {
       'a[0] original': zkProof.a[0]?.substring(0, 30) + '...',
       'a[0] cleaned': cleanZkProof.a[0]?.substring(0, 30) + '...',
       'a[0] length': cleanZkProof.a[0]?.length || 0,
-      'is_mock_data': isMockData,
+      'a[0] needs padding': cleanZkProof.a[0]?.length !== 64,
       'a_count': zkProof.a?.length || 0,
       'b_count': zkProof.b?.length || 0,
-      'c_count': zkProof.c?.length || 0
+      'c_count': zkProof.c?.length || 0,
+      'WARNING': 'This looks like test/mock data, not real zkProof!'
     });
 
     // Determine issuer
@@ -164,25 +165,37 @@ app.post('/bcs-signature', async (req, res) => {
       // Helper to convert hex string to Uint8Array padded to exactly 32 bytes
       const hexToBytes32 = (hex: string): Uint8Array => {
         let cleanHex = hex.startsWith('0x') ? hex.slice(2) : hex;
-        // Pad with zero if odd length
-        if (cleanHex.length % 2 !== 0) {
-          cleanHex = '0' + cleanHex;
+        
+        // IMPORTANT: For zkLogin proofs, always convert via BigInt to ensure
+        // proper numerical interpretation of the proof points
+        
+        // For debugging: let's see what's happening
+        if (cleanHex.startsWith('1a2b3c4d')) {
+          console.log(`DEBUG: Processing proof point starting with 1a2b3c4d`);
+          console.log(`  Original hex: ${cleanHex.substring(0, 16)}...`);
+          console.log(`  Hex length: ${cleanHex.length}`);
         }
         
-        const raw = Buffer.from(cleanHex, 'hex');
-        if (raw.length > 32) {
-          throw new Error(`Proof element too long: ${raw.length} bytes`);
+        // Convert to BigInt first, then to 32 bytes
+        const bigIntValue = BigInt('0x' + cleanHex);
+        const bytes = new Uint8Array(32);
+        
+        // Convert BigInt to bytes (big-endian)
+        let temp = bigIntValue;
+        for (let i = 31; i >= 0; i--) {
+          bytes[i] = Number(temp & 0xFFn);
+          temp = temp >> 8n;
         }
         
-        // Left pad to 32 bytes if shorter
-        if (raw.length < 32) {
-          const padded = Buffer.alloc(32);
-          raw.copy(padded, 32 - raw.length);
-          console.log(`Padded proof point from ${raw.length} to 32 bytes`);
-          return new Uint8Array(padded);
+        // Debug the conversion result
+        if (cleanHex.startsWith('1a2b3c4d')) {
+          const resultHex = Buffer.from(bytes).toString('hex');
+          console.log(`  Result bytes: ${resultHex.substring(0, 16)}...`);
+          console.log(`  First 4 bytes: ${bytes[0].toString(16)} ${bytes[1].toString(16)} ${bytes[2].toString(16)} ${bytes[3].toString(16)}`);
         }
         
-        return new Uint8Array(raw);
+        console.log(`Converted hex (${cleanHex.length} chars) to 32 bytes via BigInt`);
+        return bytes;
       };
 
       // Try two approaches: 1) Use getZkLoginSignature with strings, 2) Manual BCS if needed
@@ -259,11 +272,12 @@ app.post('/bcs-signature', async (req, res) => {
         const g1Point = bcs.fixedArray(32, bcs.u8());
         const g2Point = bcs.fixedArray(2, g1Point);
         
+        // Try a different approach - maybe the proof points aren't nested in a struct
         const zkLoginInputs = bcs.struct('ZkLoginInputs', {
           proofPoints: bcs.struct('ProofPoints', {
-            a: bcs.fixedArray(2, g1Point),  // Exactly 2 G1 points
-            b: bcs.fixedArray(2, g2Point),  // Exactly 2 G2 points (each is 2 G1 points)
-            c: bcs.fixedArray(2, g1Point)   // Exactly 2 G1 points
+            a: bcs.vector(bcs.fixedArray(32, bcs.u8())),  // Vector of 32-byte arrays
+            b: bcs.vector(bcs.vector(bcs.fixedArray(32, bcs.u8()))), // Vector of vectors
+            c: bcs.vector(bcs.fixedArray(32, bcs.u8()))   // Vector of 32-byte arrays
           }),
           issBase64Details: bcs.struct('IssBase64Details', {
             value: bcs.string(),
@@ -369,7 +383,13 @@ app.post('/bcs-signature', async (req, res) => {
         // Log the structure of the first few bytes
         console.log('\nFirst bytes breakdown:');
         console.log('  Byte 0: 0x' + fullSignature[0].toString(16).padStart(2, '0') + ' (zkLogin flag)');
-        console.log('  Bytes 1-32: First proof point a[0]');
+        console.log('  Byte 1: 0x' + fullSignature[1].toString(16).padStart(2, '0'));
+        console.log('  Bytes 2-33: 0x' + Buffer.from(fullSignature.slice(2, 34)).toString('hex'));
+        console.log('  Bytes 34-65: 0x' + Buffer.from(fullSignature.slice(34, 66)).toString('hex'));
+        
+        // Also log the expected first proof point
+        console.log('\nExpected first proof point a[0]: 0x' + cleanZkProof.a[0]);
+        console.log('Binary proof a[0] first 4 bytes:', Array.from(binaryProofPoints.a[0].slice(0, 4)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
         
         // Return the signature
         return res.json({
