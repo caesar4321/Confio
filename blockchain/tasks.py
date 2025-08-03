@@ -8,7 +8,6 @@ from decimal import Decimal
 import logging
 
 from users.models import Account
-from transactions.models import Transaction
 from .models import RawBlockchainEvent, Balance, TransactionProcessingLog
 from .sui_client import sui_client
 

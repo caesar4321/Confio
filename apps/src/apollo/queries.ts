@@ -420,6 +420,36 @@ export const CREATE_SEND_TRANSACTION = gql`
   }
 `;
 
+// Two-phase transaction mutations
+export const PREPARE_TRANSACTION = gql`
+  mutation PrepareTransaction($input: PrepareTransactionInput!) {
+    prepareTransaction(input: $input) {
+      success
+      txBytes
+      sponsorSignature
+      transactionMetadata
+      errors
+    }
+  }
+`;
+
+export const EXECUTE_TRANSACTION = gql`
+  mutation ExecuteTransaction($input: ExecuteTransactionInput!) {
+    executeTransaction(input: $input) {
+      sendTransaction {
+        id
+        status
+        transactionHash
+        amount
+        tokenType
+        createdAt
+      }
+      success
+      errors
+    }
+  }
+`;
+
 // Queries for send transactions and invoices
 export const GET_SEND_TRANSACTIONS = gql`
   query GetSendTransactions {

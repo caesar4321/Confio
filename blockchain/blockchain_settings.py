@@ -20,10 +20,10 @@ if NETWORK == 'testnet':
     SUI_WS_URL = "wss://fullnode.testnet.sui.io:443"
     
     # Testnet contract addresses (from your deployments)
+    # Using the original cUSD package where users have tokens
     CUSD_PACKAGE_ID = "0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf"
-    # NOTE: CONFIO was deployed as a dependency within the Pay package deployment
-    # For mainnet, consider deploying CONFIO as a standalone package first
-    CONFIO_PACKAGE_ID = "0xa603f73f43d4facd9bdcd25815326254f84c741989b64fb88cf464897418a080"
+    # NEW cUSD package deployed on 2025-08-02 (not used yet): 0x1eaf40cd86c66cf6da72202ee2f11b2922be0270cd5ce248057ed48f106f8233
+    # CONFIO_PACKAGE_ID is now defined in main Django settings.py as single source of truth
     PAY_PACKAGE_ID = "0xa603f73f43d4facd9bdcd25815326254f84c741989b64fb88cf464897418a080"
     P2P_TRADE_PACKAGE_ID = "0xfa39d9b961930750646148de35923d789561a4d47571bd7ff17eda9d6f9ec17c"
     INVITE_SEND_PACKAGE_ID = "0xc360865f7f30324ade1d283ebfd5bfc385062588af3f389a755887fc5f99e45e"
@@ -35,7 +35,8 @@ if NETWORK == 'testnet':
     ESCROW_VAULT_OBJECT_ID = "0xYOUR_TESTNET_ESCROW_VAULT"
     
     # Sponsor account for gas-free transactions (third account - has 0.5 SUI)
-    SPONSOR_ADDRESS = "0xed36f82d851c5b54ebc8b58a71ea6473823e073a01ce8b6a5c04a4bcebaf6aef"
+    SPONSOR_ADDRESS = os.environ.get('SUI_SPONSOR_ADDRESS', "0xed36f82d851c5b54ebc8b58a71ea6473823e073a01ce8b6a5c04a4bcebaf6aef")
+    SPONSOR_PRIVATE_KEY = os.environ.get('SUI_SPONSOR_PRIVATE_KEY', None)
     
 else:  # mainnet
     # QuickNode mainnet (future)

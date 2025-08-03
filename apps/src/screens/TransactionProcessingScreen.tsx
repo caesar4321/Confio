@@ -5,8 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
 import { useMutation } from '@apollo/client';
-import { PAY_INVOICE, CREATE_SEND_TRANSACTION } from '../apollo/queries';
-import { SEND_TOKENS } from '../apollo/mutations';
+import { PAY_INVOICE, CREATE_SEND_TRANSACTION, PREPARE_TRANSACTION, EXECUTE_TRANSACTION } from '../apollo/queries';
 import { AccountManager } from '../utils/accountManager';
 import { EnhancedAuthService } from '../services/enhancedAuthService';
 
@@ -62,6 +61,8 @@ export const TransactionProcessingScreen = () => {
 
   const [currentStep, setCurrentStep] = useState(0);
   const [isComplete, setIsComplete] = useState(false);
+  const [transactionSuccess, setTransactionSuccess] = useState(false);
+  const [transactionError, setTransactionError] = useState<string | null>(null);
   const [pulseAnim] = useState(new Animated.Value(1));
   const [bounceAnims] = useState([
     new Animated.Value(0),
@@ -75,7 +76,8 @@ export const TransactionProcessingScreen = () => {
   // GraphQL mutations
   const [payInvoice] = useMutation(PAY_INVOICE);
   const [createSendTransaction] = useMutation(CREATE_SEND_TRANSACTION);
-  const [sendTokens] = useMutation(SEND_TOKENS);
+  const [prepareTransaction] = useMutation(PREPARE_TRANSACTION);
+  const [executeTransaction] = useMutation(EXECUTE_TRANSACTION);
   
   // Ref to prevent duplicate transaction processing within this session
   const hasProcessedRef = useRef(false);
@@ -143,28 +145,24 @@ export const TransactionProcessingScreen = () => {
     }, [])
   );
 
-  // Auto-advance through steps
+  // Handle navigation after transaction completes
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentStep((prev) => {
-        if (prev < processingSteps.length - 1) {
-          return prev + 1;
-        } else {
-          setIsComplete(true);
-          clearInterval(timer);
-          // Navigate to success screen after completion
-          setTimeout(() => {
-            console.log('TransactionProcessingScreen: Navigating to TransactionSuccess with data:', transactionData);
-            console.log('TransactionProcessingScreen: isOnConfio value:', transactionData.isOnConfio);
-            (navigation as any).replace('TransactionSuccess', { transactionData });
-          }, 2000);
-          return prev;
-        }
-      });
-    }, 1500); // 1.5 seconds per step
-
-    return () => clearInterval(timer);
-  }, []);
+    if (isComplete && transactionSuccess) {
+      // Navigate to success screen after successful transaction
+      setTimeout(() => {
+        console.log('TransactionProcessingScreen: Navigating to TransactionSuccess with data:', transactionData);
+        console.log('TransactionProcessingScreen: isOnConfio value:', transactionData.isOnConfio);
+        (navigation as any).replace('TransactionSuccess', { transactionData });
+      }, 2000);
+    } else if (isComplete && transactionError) {
+      // Show error and go back
+      Alert.alert(
+        'Error al enviar',
+        transactionError,
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
+    }
+  }, [isComplete, transactionSuccess, transactionError]);
 
   // Process transaction when screen loads
   useEffect(() => {
@@ -250,15 +248,17 @@ export const TransactionProcessingScreen = () => {
         
         if (data?.payInvoice?.success) {
           console.log('TransactionProcessingScreen: Payment successful');
-          // The transaction is already marked as confirmed in the backend
-          // Just wait for the UI to complete
+          setTransactionSuccess(true);
+          setIsComplete(true);
         } else {
           console.error('TransactionProcessingScreen: Payment failed:', data?.payInvoice?.errors);
-          // Handle payment failure
+          setTransactionError(data?.payInvoice?.errors?.join('\n') || 'Error al procesar el pago');
+          setIsComplete(true);
         }
       } catch (error) {
         console.error('TransactionProcessingScreen: Error processing payment:', error);
-        // Handle error
+        setTransactionError('Error al procesar el pago. Por favor, inténtalo de nuevo.');
+        setIsComplete(true);
       }
     };
 
@@ -266,192 +266,147 @@ export const TransactionProcessingScreen = () => {
       try {
         console.log('TransactionProcessingScreen: Processing send transaction to:', transactionData.recipient);
         
-        // Check if this is a blockchain send (to Sui address) or Confío user send
-        const isBlockchainSend = transactionData.recipientAddress?.startsWith('0x') && 
-                                transactionData.recipientAddress.length === 66;
-        
-        if (isBlockchainSend) {
-          console.log('TransactionProcessingScreen: Processing blockchain send to:', transactionData.recipientAddress);
-          await processBlockchainSend();
-        } else {
-          console.log('TransactionProcessingScreen: Processing Confío user send');
-          await processConfioSend();
-        }
+        // All sends now go through the same mutation
+        console.log('TransactionProcessingScreen: Processing unified send');
+        await processUnifiedSend();
       } catch (error) {
         console.error('TransactionProcessingScreen: Error in processSend:', error);
-        Alert.alert(
-          'Error',
-          'Error al procesar la transacción. Por favor, inténtalo de nuevo.',
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
-        );
+        setTransactionError('Error al procesar la transacción. Por favor, inténtalo de nuevo.');
+        setIsComplete(true);
       }
     };
 
-    const processBlockchainSend = async () => {
+    const processUnifiedSend = async () => {
       try {
         // Step 1: Verifying transaction
         setCurrentStep(0);
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Step 2: Processing in blockchain
+        // Step 2: Prepare transaction
         setCurrentStep(1);
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('TransactionProcessingScreen: Preparing transaction...');
         
-        // Step 3: Execute blockchain transaction
-        setCurrentStep(2);
-        console.log('TransactionProcessingScreen: Executing blockchain send with SEND_TOKENS mutation');
-        
-        const result = await sendTokens({
-          variables: {
-            recipient: transactionData.recipientAddress,
-            amount: transactionData.amount,
-            tokenType: transactionData.tokenType || transactionData.currency.toUpperCase(),
-            message: transactionData.memo || ''
-          }
-        });
-        
-        console.log('TransactionProcessingScreen: Blockchain send result:', result);
-        
-        if (result.data?.sendTokens?.success) {
-          console.log('TransactionProcessingScreen: Blockchain send successful!');
-          console.log('Transaction digest:', result.data.sendTokens.transactionDigest);
-          console.log('Gas saved:', result.data.sendTokens.gasSaved);
-          
-          // Store transaction digest for success screen
-          if (transactionData) {
-            transactionData.transactionId = result.data.sendTokens.transactionDigest;
-          }
-        } else {
-          const errorMessage = result.data?.sendTokens?.error || 'Error al enviar tokens';
-          console.error('TransactionProcessingScreen: Blockchain send failed:', errorMessage);
-          Alert.alert(
-            'Error al enviar',
-            errorMessage,
-            [{ text: 'OK', onPress: () => navigation.goBack() }]
-          );
-          return;
-        }
-      } catch (error) {
-        console.error('TransactionProcessingScreen: Error in blockchain send:', error);
-        throw error;
-      }
-    };
-
-    const processConfioSend = async () => {
-      try {
-        // Step 1: Verifying transaction
-        setCurrentStep(0);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Step 2: Processing in blockchain
-        setCurrentStep(1);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Step 3: Call the actual send mutation
-        setCurrentStep(2);
-        console.log('TransactionProcessingScreen: Calling createSendTransaction mutation with idempotency key:', idempotencyKey);
-        
-        // Prepare input based on available recipient data - IMPORTANT: The GraphQL schema expects camelCase
-        const mutationInput: any = {
+        // Prepare input for prepare mutation
+        const prepareInput: any = {
           amount: transactionData.amount,
           tokenType: transactionData.currency,
-          memo: transactionData.memo || '', // Use provided memo or empty string
-          idempotencyKey: idempotencyKey,
           recipientDisplayName: transactionData.recipient
         };
         
-        // Use the appropriate recipient identifier
+        // Add recipient identifier
         if (transactionData.recipientUserId && transactionData.isOnConfio) {
-          // For Confío users, prefer user ID
-          mutationInput.recipientUserId = transactionData.recipientUserId;
-          console.log('TransactionProcessingScreen: Using recipient user ID:', transactionData.recipientUserId);
+          prepareInput.recipientUserId = transactionData.recipientUserId;
         } else if (transactionData.recipientPhone) {
-          // For any user with phone number (Confío or not)
-          mutationInput.recipientPhone = transactionData.recipientPhone;
-          console.log('TransactionProcessingScreen: Using recipient phone:', transactionData.recipientPhone);
+          prepareInput.recipientPhone = transactionData.recipientPhone;
+        } else if (transactionData.recipientAddress?.startsWith('0x')) {
+          prepareInput.recipientAddress = transactionData.recipientAddress;
         }
         
-        console.log('TransactionProcessingScreen: Sending mutation with input:', JSON.stringify(mutationInput, null, 2));
+        console.log('TransactionProcessingScreen: Calling prepareTransaction with:', prepareInput);
         
-        const mutationVariables = {
-          input: mutationInput
+        // Phase 1: Prepare transaction
+        const prepareResult = await prepareTransaction({
+          variables: { input: prepareInput }
+        });
+        
+        if (prepareResult.errors || !prepareResult.data?.prepareTransaction?.success) {
+          const errorMessage = prepareResult.errors?.map(e => e.message).join('\n') || 
+                             prepareResult.data?.prepareTransaction?.errors?.join('\n') ||
+                             'Error al preparar la transacción';
+          setTransactionError(errorMessage);
+          setIsComplete(true);
+          return;
+        }
+        
+        const { txBytes, sponsorSignature, transactionMetadata } = prepareResult.data.prepareTransaction;
+        console.log('TransactionProcessingScreen: Transaction prepared, signing with zkLogin...');
+        
+        // Phase 2: Sign transaction with zkLogin
+        const authService = enhancedAuthService.authService;
+        const zkLoginSignature = await authService.createZkLoginSignatureForTransaction(txBytes);
+        
+        if (!zkLoginSignature) {
+          setTransactionError('Error al firmar la transacción. Por favor, inténtalo de nuevo.');
+          setIsComplete(true);
+          return;
+        }
+        
+        console.log('TransactionProcessingScreen: Transaction signed, executing...');
+        
+        // Step 3: Execute transaction
+        setCurrentStep(2);
+        
+        const executeInput = {
+          txBytes,
+          zkLoginSignature,
+          sponsorSignature,
+          transactionMetadata
         };
-        console.log('TransactionProcessingScreen: Full mutation variables:', JSON.stringify(mutationVariables, null, 2));
         
-        // Perform secure send operation with device fingerprinting and security checks
-        const secureResult = await enhancedAuthService.performSecureOperation(
+        // Phase 3: Execute transaction with signatures
+        const executeResult = await enhancedAuthService.performSecureOperation(
           async () => {
-            return await createSendTransaction({
-              variables: mutationVariables
+            return await executeTransaction({
+              variables: { input: executeInput }
             });
           },
           'send_money',
           parseFloat(transactionData.amount)
         );
-
-        const { data, errors } = secureResult.result;
-        console.log('TransactionProcessingScreen: Send mutation raw response:', { data, errors });
-        console.log('TransactionProcessingScreen: Response data structure:', JSON.stringify(data, null, 2));
-        console.log('TransactionProcessingScreen: Security checks:', secureResult.securityChecks);
         
-        // Check for GraphQL errors first
+        const { data, errors } = executeResult.result;
+        console.log('TransactionProcessingScreen: Execute mutation response:', { data, errors });
+        
+        // Check for errors
         if (errors && errors.length > 0) {
           console.error('TransactionProcessingScreen: GraphQL errors:', errors);
           const errorMessage = errors.map(e => e.message).join('\n');
-          Alert.alert(
-            'Error al enviar',
-            errorMessage || 'Error al procesar la transacción',
-            [{ text: 'OK', onPress: () => navigation.goBack() }]
-          );
+          setTransactionError(errorMessage || 'Error al procesar la transacción');
+          setIsComplete(true);
           return;
         }
         
         // Check the mutation response
-        if (data?.createSendTransaction?.sendTransaction) {
+        if (data?.executeTransaction?.sendTransaction) {
           console.log('TransactionProcessingScreen: Send successful!');
-          console.log('TransactionProcessingScreen: Transaction object:', data.createSendTransaction.sendTransaction);
-          console.log('TransactionProcessingScreen: Transaction ID:', data.createSendTransaction.sendTransaction.id);
+          console.log('TransactionProcessingScreen: Transaction object:', data.executeTransaction.sendTransaction);
+          console.log('TransactionProcessingScreen: Transaction ID:', data.executeTransaction.sendTransaction.id);
+          console.log('TransactionProcessingScreen: Transaction hash:', data.executeTransaction.sendTransaction.transactionHash);
           
           // Store the transaction ID for success screen
           if (transactionData) {
-            transactionData.transactionId = data.createSendTransaction.sendTransaction.id;
+            transactionData.transactionId = data.executeTransaction.sendTransaction.id;
+            transactionData.transactionHash = data.executeTransaction.sendTransaction.transactionHash;
           }
           
           // Log success metrics
-          console.log('TransactionProcessingScreen: Transaction created successfully:', {
-            id: data.createSendTransaction.sendTransaction.id,
+          console.log('TransactionProcessingScreen: Transaction executed successfully:', {
+            id: data.executeTransaction.sendTransaction.id,
+            hash: data.executeTransaction.sendTransaction.transactionHash,
             amount: transactionData.amount,
-            recipient: transactionData.recipient,
-            recipientUserId: transactionData.recipientUserId,
-            recipientPhone: transactionData.recipientPhone
+            recipient: transactionData.recipient
           });
-        } else if (data?.createSendTransaction?.errors && data.createSendTransaction.errors.length > 0) {
-          console.error('TransactionProcessingScreen: Send failed with mutation errors:', data.createSendTransaction.errors);
-          // Show error to user
-          Alert.alert(
-            'Error al enviar',
-            data.createSendTransaction.errors.join('\n'),
-            [{ text: 'OK', onPress: () => navigation.goBack() }]
-          );
-          return;
-        } else if (data?.createSendTransaction) {
-          // The mutation returned but with unexpected structure
-          console.error('TransactionProcessingScreen: Unexpected mutation response structure:', data.createSendTransaction);
-          console.error('TransactionProcessingScreen: Keys in response:', Object.keys(data.createSendTransaction));
           
-          Alert.alert(
-            'Error',
-            'La transacción no se pudo completar correctamente. Por favor, inténtalo de nuevo.',
-            [{ text: 'OK', onPress: () => navigation.goBack() }]
-          );
+          // Mark transaction as successful
+          setTransactionSuccess(true);
+          setIsComplete(true);
+        } else if (data?.executeTransaction?.errors && data.executeTransaction.errors.length > 0) {
+          console.error('TransactionProcessingScreen: Execute failed with errors:', data.executeTransaction.errors);
+          setTransactionError(data.executeTransaction.errors.join('\n'));
+          setIsComplete(true);
+          return;
+        } else if (data?.executeTransaction) {
+          // The mutation returned but with unexpected structure
+          console.error('TransactionProcessingScreen: Unexpected mutation response structure:', data.executeTransaction);
+          console.error('TransactionProcessingScreen: Keys in response:', Object.keys(data.executeTransaction));
+          
+          setTransactionError('La transacción no se pudo completar correctamente. Por favor, inténtalo de nuevo.');
+          setIsComplete(true);
           return;
         } else {
-          console.error('TransactionProcessingScreen: No createSendTransaction in response:', data);
-          Alert.alert(
-            'Error',
-            'Error inesperado al procesar la transacción.',
-            [{ text: 'OK', onPress: () => navigation.goBack() }]
-          );
+          console.error('TransactionProcessingScreen: No executeTransaction in response:', data);
+          setTransactionError('Error inesperado al procesar la transacción.');
+          setIsComplete(true);
           return;
         }
       } catch (error) {
@@ -463,13 +418,8 @@ export const TransactionProcessingScreen = () => {
           stack: error.stack
         });
         
-        // Show error to user
-        Alert.alert(
-          'Error de conexión',
-          'No se pudo conectar con el servidor. Por favor, verifica tu conexión e inténtalo de nuevo.',
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
-        );
-        throw error;
+        setTransactionError('No se pudo conectar con el servidor. Por favor, verifica tu conexión e inténtalo de nuevo.');
+        setIsComplete(true);
       }
     };
 

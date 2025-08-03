@@ -48,9 +48,10 @@ Confío helps people access stable dollars, send remittances, and pay each other
 
 ## 🔒 What Confío Is Not
 
-- ❌ Not a custodial wallet — we never store user funds
+- ❌ Not a custodial wallet — we never store user funds or signing keys
 - ❌ No backend "tricks" — money logic lives entirely on-chain
 - ❌ No crypto knowledge required — users sign in with Google or Apple
+- ❌ No server-side zkLogin proofs — all signing happens on the client
 
 ## 💬 Join the Community
 
@@ -143,10 +144,13 @@ This is a **monolithic repository** containing the full Confío stack:
 
 ├── blockchain/        # Sui blockchain integration
 │   ├── models.py      # Blockchain event and balance models
-│   ├── sui_client.py  # Sui RPC/WebSocket client
 │   ├── balance_service.py # Hybrid balance caching system
+│   ├── pysui_client.py    # pysui SDK client for Sui blockchain
+│   ├── transaction_manager_pysui.py # Transaction management with pysui
+│   ├── sponsor_service_pysui.py # Gas sponsorship service
+│   ├── zklogin_pysui.py   # zkLogin helper functions (client-side only)
+│   ├── zklogin_client_helper.py # zkLogin utilities for client-side proofs
 │   ├── tasks.py       # Celery tasks for blockchain polling
-│   ├── graphql_integration.py # GraphQL resolvers for balances
 │   ├── management/    # Management commands (poll_blockchain, test_sui_connection)
 │   ├── migrations/    # Database migrations
 │   └── README.md      # Blockchain integration documentation
@@ -156,9 +160,9 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── schema.py      # Payment GraphQL schema
 │   └── management/    # Payment management commands
 
-├── send/              # Send transaction system
+├── send/              # Send transaction system (two-phase flow)
 │   ├── models.py      # Send transaction models
-│   ├── schema.py      # Send GraphQL schema
+│   ├── schema.py      # Send GraphQL schema with prepare/execute mutations
 │   └── validators.py  # Transaction validation
 
 ├── security/          # Security and fraud prevention system
@@ -168,11 +172,11 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── admin.py       # Enhanced admin interface for security monitoring
 │   └── migrations/    # Database migrations for security models
 
-├── prover/            # Server-side proof verification
-│   ├── models.py      # Database models for storing proof verification results
-│   ├── schema.py      # GraphQL schema and resolvers for proof verification endpoints
-│   ├── serializers.py # Data serialization for proof verification
-│   └── tests/         # Test cases for proof verification
+├── prover/            # zkLogin initialization and coordination
+│   ├── models.py      # Empty - zkLogin proofs remain client-side
+│   ├── schema.py      # GraphQL schema for zkLogin initialization
+│   ├── admin.py       # Empty - no server-side proof storage
+│   └── migrations/    # Database migrations
 
 ├── prover-service/    # Standalone service for proof generation and verification
 │   ├── index.js      # Main entry point for the prover service
@@ -224,7 +228,8 @@ This is a **monolithic repository** containing the full Confío stack:
 │   │   │   ├── HomeScreen.tsx        # Main app screen
 │   │   │   └── CreateBusinessScreen.tsx     # Business account creation
 │   │   ├── services/      # API and business logic services
-│   │   │   ├── authService.ts    # Authentication service with multi-account support
+│   │   │   ├── authService.ts    # Authentication service with zkLogin signing
+│   │   │   ├── enhancedAuthService.ts # Enhanced auth with device fingerprinting
 │   │   │   └── ...        # Other services
 │   │   ├── types/         # TypeScript type definitions
 │   │   ├── utils/         # Utility functions
@@ -304,10 +309,14 @@ This is a **monolithic repository** containing the full Confío stack:
    - Telegram-based verification system
    - Country code support for LATAM
 
-3. **zkLogin Integration**
+3. **zkLogin Integration (Client-Side)**
    - Zero-knowledge proof authentication
-   - Secure key derivation and storage
-   - Automatic proof refresh before expiration
+   - All proofs and ephemeral keys remain client-side
+   - Server only stores the resulting Sui address
+   - Two-phase transaction flow:
+     - Server prepares transaction → returns unsigned bytes
+     - Client signs with zkLogin → sends signature back
+     - Server executes with dual signatures (user + sponsor)
 
 ### Multi-Account System
 

@@ -15,6 +15,7 @@ from blockchain.coin_management import CoinManager
 from blockchain.sui_client import sui_client
 from blockchain.blockchain_settings import CUSD_PACKAGE_ID, CONFIO_PACKAGE_ID
 from blockchain.sponsor_service import SponsorService
+from blockchain.zklogin_signer import ZkLoginSigner
 import logging
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ class TransactionManager:
             )
             
             if not all_coins:
-                raise ValueError(f"No {token_type} coins found for account {account.id}")
+                raise ValueError(f"No blockchain {token_type} coins found for account {account.id}")
             
             # Select coins for the amount
             selected_coins = await CoinManager.select_coins_for_amount(
@@ -166,8 +167,21 @@ class TransactionManager:
                 "gasBudget": str(100000000)  # 0.1 SUI
             }
             
-            # In production, this would use zkLogin to sign
-            # For now, log the transaction that would be executed
+            # Check if zkLogin is available for this account
+            proof = ZkLoginSigner.get_latest_proof(account)
+            if proof:
+                logger.info(
+                    f"zkLogin proof available for coin merge. "
+                    f"Account: {account.id}, Proof max_epoch: {proof.max_epoch}"
+                )
+                # In production, this would execute the merge with zkLogin
+                # For now, we'll proceed with sponsor-based execution
+            else:
+                logger.warning(
+                    f"No zkLogin proof for account {account.id}. "
+                    f"Using sponsor for merge transaction."
+                )
+            
             logger.info(
                 f"Would execute merge transaction: "
                 f"Merging {len(coins_to_merge)} coins into {primary_coin['objectId']}"
@@ -320,11 +334,13 @@ class TransactionManager:
             
             # Step 4: Mark balances as stale if successful
             if result.get('success'):
-                from blockchain.tasks import mark_transaction_balances_stale
-                mark_transaction_balances_stale.delay(
-                    [account.sui_address],
-                    result.get('digest', 'unknown')
-                )
+                # TODO: Re-enable when Celery is running
+                # from blockchain.tasks import mark_transaction_balances_stale
+                # mark_transaction_balances_stale.delay(
+                #     [account.sui_address],
+                #     result.get('digest', 'unknown')
+                # )
+                logger.info(f"Would mark balance stale for {account.sui_address}")
             
             return result
             
@@ -348,15 +364,42 @@ class TransactionManager:
         Send tokens with automatic coin management and sponsorship.
         
         This is a convenience method for the most common use case.
+        Supports zkLogin for user authentication if available.
         """
-        return await cls.execute_sponsored_transaction(
-            account,
-            'send',
-            token_type,
-            amount,
-            {'recipient': recipient},
-            user_signature
-        )
+        # Check for zkLogin availability
+        proof = ZkLoginSigner.get_latest_proof(account)
+        if proof:
+            logger.info(
+                f"zkLogin available for send transaction. "
+                f"Account: {account.id}, Max epoch: {proof.max_epoch}"
+            )
+            # In production, zkLogin would be used for signing
+            # For now, we'll add a flag to indicate zkLogin is ready
+            return await cls.execute_sponsored_transaction(
+                account,
+                'send',
+                token_type,
+                amount,
+                {
+                    'recipient': recipient,
+                    'zklogin_available': True,
+                    'proof_id': str(proof.proof_id)
+                },
+                user_signature
+            )
+        else:
+            logger.info(
+                f"No zkLogin proof for account {account.id}. "
+                f"Using sponsor-only transaction."
+            )
+            return await cls.execute_sponsored_transaction(
+                account,
+                'send',
+                token_type,
+                amount,
+                {'recipient': recipient},
+                user_signature
+            )
     
     @classmethod
     async def estimate_transaction_cost(

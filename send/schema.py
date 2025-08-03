@@ -12,18 +12,42 @@ from security.utils import graphql_require_kyc, graphql_require_aml
 
 User = get_user_model()
 
+class PrepareTransactionInput(graphene.InputObjectType):
+    """Input type for preparing a transaction (returns unsigned txBytes)"""
+    # Recipient identification - use ONE of these
+    recipient_user_id = graphene.ID(description="User ID of the recipient (for Confío users)")
+    recipient_phone = graphene.String(description="Phone number of the recipient (for any user)")
+    recipient_address = graphene.String(description="Sui address for external wallet recipients (0x...)")
+    
+    # Transaction details
+    amount = graphene.String(required=True, description="Amount to send (e.g., '10.50')")
+    token_type = graphene.String(required=True, description="Type of token to send (e.g., 'cUSD', 'CONFIO')")
+    
+    # Display info (for UI purposes only)
+    recipient_display_name = graphene.String(description="Display name for the recipient (for UI)")
+
+class ExecuteTransactionInput(graphene.InputObjectType):
+    """Input type for executing a prepared transaction with signature"""
+    tx_bytes = graphene.String(required=True, description="Base64 encoded transaction bytes from prepare step")
+    zk_login_signature = graphene.String(required=True, description="zkLogin signature from client")
+    sponsor_signature = graphene.String(required=True, description="Sponsor signature from prepare step")
+    transaction_metadata = graphene.JSONString(description="Metadata from prepare step for record keeping")
+
 class SendTransactionInput(graphene.InputObjectType):
     """Input type for creating a send transaction"""
     # Recipient identification - use ONE of these
     recipient_user_id = graphene.ID(description="User ID of the recipient (for Confío users)")
     recipient_phone = graphene.String(description="Phone number of the recipient (for any user)")
-    recipient_address = graphene.String(description="Sui address of the recipient (DEPRECATED - use phone or user ID)")
+    recipient_address = graphene.String(description="Sui address for external wallet recipients (0x...)")
     
     # Transaction details
     amount = graphene.String(required=True, description="Amount to send (e.g., '10.50')")
     token_type = graphene.String(required=True, description="Type of token to send (e.g., 'cUSD', 'CONFIO')")
     memo = graphene.String(description="Optional memo for the transaction")
     idempotency_key = graphene.String(description="Optional idempotency key to prevent duplicate sends")
+    
+    # zkLogin signature from client
+    zk_login_signature = graphene.String(description="zkLogin signature from client for transaction authorization")
     
     # Display info (for UI purposes only)
     recipient_display_name = graphene.String(description="Display name for the recipient (for UI)")
@@ -240,17 +264,20 @@ class CreateSendTransaction(graphene.Mutation):
                         recipient_address = f"0x{phone_hash[:64]}"
                         # recipient_user remains None for invitation transactions
                 
-                # Priority 3: Legacy - direct Sui address (DEPRECATED)
+                # Priority 3: External wallet address
                 elif hasattr(input, 'recipient_address') and input.recipient_address:
-                    print(f"CreateSendTransaction: WARNING - Using deprecated recipient_address field")
+                    print(f"CreateSendTransaction: Using external wallet address: {input.recipient_address}")
                     recipient_address = input.recipient_address
                     validate_recipient(recipient_address)
-                    # Try to find recipient user by their Sui address
+                    # Try to find if this is actually a Confío user's address
                     try:
                         recipient_account = Account.objects.get(sui_address=recipient_address)
                         recipient_user = recipient_account.user
+                        print(f"CreateSendTransaction: Found Confío user for external address")
                     except Account.DoesNotExist:
+                        # External wallet - not a Confío user
                         recipient_user = None
+                        print(f"CreateSendTransaction: External wallet - not a Confío user")
                 else:
                     return CreateSendTransaction(
                         send_transaction=None,
@@ -344,15 +371,59 @@ class CreateSendTransaction(graphene.Mutation):
                 import time
                 import uuid
                 
-                # Generate unique components for transaction hash
-                microsecond_timestamp = int(time.time() * 1000000)
-                unique_id = str(uuid.uuid4())[:8]
+                # Execute blockchain transaction using pysui
+                from blockchain.transaction_manager_pysui import TransactionManagerPySui
+                import asyncio
                 
-                # All non-blocked transactions proceed immediately
-                send_transaction.status = 'CONFIRMED'
-                send_transaction.transaction_hash = f"test_send_tx_{microsecond_timestamp}_{unique_id}"
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 
-                # Save the transaction
+                try:
+                    # Get zkLogin signature from client input
+                    user_signature = getattr(input, 'zk_login_signature', None)
+                    if not user_signature:
+                        # For backward compatibility, log warning but continue
+                        print("WARNING: No zkLogin signature provided by client - transaction will use sponsor key only")
+                    
+                    # Execute the sponsored transaction using pysui
+                    result = loop.run_until_complete(
+                        TransactionManagerPySui.send_tokens(
+                            sender_account,
+                            recipient_address,
+                            amount_decimal,
+                            input.token_type.upper(),
+                            user_signature
+                        )
+                    )
+                    
+                    if result['success']:
+                        # Update transaction with blockchain result
+                        send_transaction.status = 'CONFIRMED'
+                        send_transaction.transaction_hash = result.get('digest', '')
+                        
+                        # Log the blockchain transaction
+                        print(f"Blockchain send successful: {amount_decimal} {input.token_type} to {recipient_address[:16]}...")
+                        print(f"Transaction digest: {result.get('digest')}")
+                        print(f"Gas saved: {result.get('gas_saved', 0)} SUI")
+                        
+                        if result.get('warning'):
+                            print(f"WARNING: {result['warning']}")
+                    else:
+                        # Blockchain transaction failed
+                        send_transaction.status = 'FAILED'
+                        send_transaction.transaction_hash = ''
+                        send_transaction.save()
+                        
+                        return CreateSendTransaction(
+                            send_transaction=None,
+                            success=False,
+                            errors=[result.get('error', 'Blockchain transaction failed')]
+                        )
+                        
+                finally:
+                    loop.close()
+                
+                # Save the transaction with blockchain result
                 send_transaction.save()
 
                 # Create notifications
@@ -660,6 +731,333 @@ class Query(graphene.ObjectType):
             queryset = queryset[:limit]
         return queryset
 
+class PrepareTransaction(graphene.Mutation):
+    """Prepare a transaction and return unsigned txBytes for client signing"""
+    class Arguments:
+        input = PrepareTransactionInput(required=True)
+
+    # Outputs
+    success = graphene.Boolean()
+    tx_bytes = graphene.String(description="Base64 encoded transaction bytes to sign")
+    sponsor_signature = graphene.String(description="Sponsor signature")
+    transaction_metadata = graphene.JSONString(description="Metadata for execute step")
+    errors = graphene.List(graphene.String)
+
+    @classmethod
+    @graphql_require_aml()
+    @graphql_require_kyc('send_money')
+    def mutate(cls, root, info, input):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return PrepareTransaction(
+                success=False,
+                errors=["Authentication required"]
+            )
+
+        try:
+            from decimal import Decimal
+            from users.jwt_context import get_jwt_business_context_with_validation
+            from blockchain.transaction_manager_pysui import TransactionManagerPySui
+            import asyncio
+            
+            # Get account context from JWT
+            jwt_context = get_jwt_business_context_with_validation(info, 'send_funds')
+            if not jwt_context:
+                return PrepareTransaction(
+                    success=False,
+                    errors=["Account context not found"]
+                )
+            
+            # Get the active account
+            from users.models import Account
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            
+            if account_type == 'business' and jwt_context.get('business_id'):
+                active_account = Account.objects.get(
+                    account_type='business',
+                    account_index=account_index,
+                    business_id=jwt_context['business_id']
+                )
+            else:
+                active_account = Account.objects.get(
+                    user=user,
+                    account_type=account_type,
+                    account_index=account_index
+                )
+            
+            # Validate amount
+            amount_decimal = Decimal(input.amount)
+            if amount_decimal <= 0:
+                return PrepareTransaction(
+                    success=False,
+                    errors=["Amount must be positive"]
+                )
+            
+            # Determine recipient address
+            recipient_address = None
+            recipient_user = None
+            
+            if hasattr(input, 'recipient_user_id') and input.recipient_user_id:
+                try:
+                    recipient_user = User.objects.get(id=input.recipient_user_id)
+                    recipient_account = recipient_user.accounts.filter(
+                        account_type='personal',
+                        account_index=0
+                    ).first()
+                    if recipient_account and recipient_account.sui_address:
+                        recipient_address = recipient_account.sui_address
+                    else:
+                        return PrepareTransaction(
+                            success=False,
+                            errors=["Recipient's Sui address not found"]
+                        )
+                except User.DoesNotExist:
+                    return PrepareTransaction(
+                        success=False,
+                        errors=["Recipient user not found"]
+                    )
+            elif hasattr(input, 'recipient_phone') and input.recipient_phone:
+                # For phone numbers, try to find the user
+                cleaned_phone = ''.join(filter(str.isdigit, input.recipient_phone))
+                try:
+                    recipient_user = User.objects.get(phone_number=cleaned_phone)
+                    recipient_account = recipient_user.accounts.filter(
+                        account_type='personal',
+                        account_index=0
+                    ).first()
+                    if recipient_account and recipient_account.sui_address:
+                        recipient_address = recipient_account.sui_address
+                except User.DoesNotExist:
+                    # Non-Confío user - create invitation address
+                    import hashlib
+                    phone_hash = hashlib.sha256(cleaned_phone.encode()).hexdigest()
+                    recipient_address = f"0x{phone_hash[:64]}"
+            elif hasattr(input, 'recipient_address') and input.recipient_address:
+                recipient_address = input.recipient_address
+            else:
+                return PrepareTransaction(
+                    success=False,
+                    errors=["Recipient identification required"]
+                )
+            
+            # Prepare transaction using the blockchain service
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # Prepare the transaction (but don't execute)
+                from blockchain.sponsor_service_pysui import SponsorServicePySui
+                
+                result = loop.run_until_complete(
+                    SponsorServicePySui.prepare_send_transaction(
+                        account=active_account,
+                        recipient=recipient_address,
+                        amount=amount_decimal,
+                        token_type=input.token_type.upper()
+                    )
+                )
+                
+                if result.get('success') and result.get('requiresUserSignature'):
+                    # Transaction prepared successfully
+                    transaction_metadata = {
+                        'sender_address': active_account.sui_address,
+                        'recipient_address': recipient_address,
+                        'amount': str(amount_decimal),
+                        'token_type': input.token_type,
+                        'recipient_display_name': getattr(input, 'recipient_display_name', ''),
+                        'timestamp': timezone.now().isoformat()
+                    }
+                    
+                    return PrepareTransaction(
+                        success=True,
+                        tx_bytes=result['txBytes'],
+                        sponsor_signature=result['sponsorSignature'],
+                        transaction_metadata=transaction_metadata,
+                        errors=None
+                    )
+                else:
+                    return PrepareTransaction(
+                        success=False,
+                        errors=[result.get('error', 'Failed to prepare transaction')]
+                    )
+                    
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return PrepareTransaction(
+                success=False,
+                errors=[str(e)]
+            )
+
+
+class ExecuteTransaction(graphene.Mutation):
+    """Execute a prepared transaction with zkLogin signature"""
+    class Arguments:
+        input = ExecuteTransactionInput(required=True)
+
+    send_transaction = graphene.Field(SendTransactionType)
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+
+    @classmethod
+    @graphql_require_aml()
+    @graphql_require_kyc('send_money')
+    def mutate(cls, root, info, input):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return ExecuteTransaction(
+                send_transaction=None,
+                success=False,
+                errors=["Authentication required"]
+            )
+
+        try:
+            from users.jwt_context import get_jwt_business_context_with_validation
+            from blockchain.sponsor_service_pysui import SponsorServicePySui
+            import asyncio
+            import json
+            
+            # Get account context from JWT
+            jwt_context = get_jwt_business_context_with_validation(info, 'send_funds')
+            if not jwt_context:
+                return ExecuteTransaction(
+                    send_transaction=None,
+                    success=False,
+                    errors=["Account context not found"]
+                )
+            
+            # Parse transaction metadata
+            if input.transaction_metadata:
+                if isinstance(input.transaction_metadata, dict):
+                    # Already a dict, use as-is
+                    metadata = input.transaction_metadata
+                else:
+                    # String, parse it
+                    metadata = json.loads(input.transaction_metadata)
+            else:
+                metadata = {}
+            
+            # Create transaction record
+            from decimal import Decimal
+            amount_decimal = Decimal(metadata.get('amount', '0'))
+            
+            # Determine account details
+            from users.models import Account
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            sender_business = None
+            
+            if account_type == 'business' and jwt_context.get('business_id'):
+                from users.models import Business
+                sender_business = Business.objects.get(id=jwt_context['business_id'])
+            
+            # Create the transaction record
+            send_transaction = SendTransaction.objects.create(
+                sender_user=user,
+                sender_business=sender_business,
+                sender_type='business' if sender_business else 'user',
+                sender_display_name=sender_business.name if sender_business else f"{user.first_name} {user.last_name}".strip(),
+                sender_phone=f"{user.phone_country}{user.phone_number}" if user.phone_country and user.phone_number else "",
+                sender_address=metadata.get('sender_address', ''),
+                recipient_address=metadata.get('recipient_address', ''),
+                recipient_display_name=metadata.get('recipient_display_name', 'External Address'),
+                amount=amount_decimal,
+                token_type=metadata.get('token_type', 'CUSD'),
+                status='PENDING'
+            )
+            
+            # Execute the transaction with signatures
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # Get the active account for zkProof retrieval
+                active_account = None
+                if account_type == 'business' and jwt_context.get('business_id'):
+                    from users.models import Account
+                    active_account = Account.objects.get(
+                        account_type='business',
+                        account_index=account_index,
+                        business_id=jwt_context['business_id']
+                    )
+                else:
+                    from users.models import Account
+                    active_account = Account.objects.get(
+                        user=user,
+                        account_type=account_type,
+                        account_index=account_index
+                    )
+                
+                result = loop.run_until_complete(
+                    SponsorServicePySui.execute_transaction_with_signatures(
+                        tx_bytes=input.tx_bytes,
+                        sponsor_signature=input.sponsor_signature,
+                        user_signature=input.zk_login_signature,
+                        account_id=active_account.id if active_account else None
+                    )
+                )
+                
+                if result.get('success'):
+                    # Update transaction with success
+                    send_transaction.status = 'CONFIRMED'
+                    send_transaction.transaction_hash = result.get('digest', '')
+                    send_transaction.save()
+                    
+                    # Create notifications
+                    from notifications.utils import create_notification
+                    from notifications.models import NotificationType
+                    
+                    create_notification(
+                        user=user,
+                        account=None,  # TODO: Get account
+                        business=sender_business,
+                        notification_type=NotificationType.SEND_SENT,
+                        title="Envío completado",
+                        message=f"Enviaste {str(amount_decimal)} {metadata.get('token_type', 'CUSD')}",
+                        data={
+                            'transaction_type': 'send',
+                            'amount': f'-{str(amount_decimal)}',
+                            'token_type': metadata.get('token_type', 'CUSD'),
+                            'transaction_id': str(send_transaction.id),
+                            'transaction_hash': send_transaction.transaction_hash
+                        }
+                    )
+                    
+                    return ExecuteTransaction(
+                        send_transaction=send_transaction,
+                        success=True,
+                        errors=None
+                    )
+                else:
+                    # Update transaction with failure
+                    send_transaction.status = 'FAILED'
+                    send_transaction.save()
+                    
+                    return ExecuteTransaction(
+                        send_transaction=None,
+                        success=False,
+                        errors=[result.get('error', 'Transaction execution failed')]
+                    )
+                    
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return ExecuteTransaction(
+                send_transaction=None,
+                success=False,
+                errors=[str(e)]
+            )
+
+
 class Mutation(graphene.ObjectType):
     """GraphQL mutations for send transactions"""
-    create_send_transaction = CreateSendTransaction.Field() 
+    create_send_transaction = CreateSendTransaction.Field()
+    prepare_transaction = PrepareTransaction.Field()
+    execute_transaction = ExecuteTransaction.Field() 
