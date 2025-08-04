@@ -1,8 +1,8 @@
 import React from 'react';
-import LegalDocument from './LegalDocument';
+import FriendlyLegalDocument from './FriendlyLegalDocument';
 
 const DeletionPage = () => {
-  return <LegalDocument type="deletion" />;
+  return <FriendlyLegalDocument type="deletion" />;
 };
 
 export default DeletionPage; 

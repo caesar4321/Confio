@@ -1,8 +1,8 @@
 import React from 'react';
-import LegalDocument from './LegalDocument';
+import FriendlyLegalDocument from './FriendlyLegalDocument';
 
 const PrivacyPage = () => {
-  return <LegalDocument type="privacy" />;
+  return <FriendlyLegalDocument type="privacy" />;
 };
 
 export default PrivacyPage; 

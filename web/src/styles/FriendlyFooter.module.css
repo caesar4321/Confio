@@ -1,0 +1,122 @@
+.footer {
+  background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+  color: white;
+  padding: 3rem 0 1.5rem;
+  margin-top: 5rem;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+.content {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 3rem;
+  margin-bottom: 2rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.brand {
+  max-width: 300px;
+}
+
+.logo {
+  font-size: 2rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #34d399, #10b981);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 0.5rem;
+}
+
+.tagline {
+  color: #94a3b8;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.links,
+.contact {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.linksTitle,
+.contactTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  color: white;
+  margin-bottom: 0.5rem;
+}
+
+.link {
+  color: #94a3b8;
+  text-decoration: none;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+  display: inline-block;
+}
+
+.link:hover {
+  color: #34d399;
+  transform: translateX(2px);
+}
+
+.email {
+  color: #34d399;
+  text-decoration: none;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+}
+
+.email:hover {
+  color: #10b981;
+  text-decoration: underline;
+}
+
+.bottom {
+  text-align: center;
+  padding-top: 1rem;
+}
+
+.copyright {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .footer {
+    padding: 2rem 0 1rem;
+    margin-top: 3rem;
+  }
+
+  .container {
+    padding: 0 1rem;
+  }
+
+  .content {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+    text-align: center;
+  }
+
+  .brand {
+    max-width: none;
+  }
+
+  .links,
+  .contact {
+    align-items: center;
+  }
+
+  .copyright {
+    font-size: 0.85rem;
+  }
+}

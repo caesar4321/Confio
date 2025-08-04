@@ -1,8 +1,8 @@
 import React from 'react';
-import LegalDocument from './LegalDocument';
+import FriendlyLegalDocument from './FriendlyLegalDocument';
 
 const TermsPage = () => {
-  return <LegalDocument type="terms" />;
+  return <FriendlyLegalDocument type="terms" />;
 };
 
 export default TermsPage; 
