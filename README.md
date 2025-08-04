@@ -45,6 +45,14 @@ Confío helps people access stable dollars, send remittances, and pay each other
 | ASGI Server     | Daphne                        |
 | CI/CD           | Cloudflare Pages              |
 | Link Shortener  | Cloudflare Workers + KV       |
+| Infrastructure  | AWS (eu-central-2 - Zurich)   |
+
+### 🇨🇭 Why Zurich?
+
+We host all infrastructure in **AWS eu-central-2 (Zurich)** region for optimal data protection:
+- **Swiss Privacy Laws**: Switzerland has some of the world's strongest data protection regulations, ensuring LATAM users' financial data is secure
+- **AWS over Exoscale**: While Swiss providers like Exoscale exist, AWS provides the scalability needed for Confío's projected growth across Latin America
+- **Compliance**: Swiss hosting helps meet international compliance requirements for financial services
 
 ## 🔒 What Confío Is Not
 

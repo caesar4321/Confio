@@ -4,13 +4,13 @@
 # Prerequisites: AWS CLI configured with proper credentials
 
 # Configuration
-INSTANCE_TYPE="t3.small"
+INSTANCE_TYPE="t3.xlarge"  # 4 vCPUs, 16GB RAM for compilation
 AMI_ID="ami-006b3a0f02bfbc190"  # Amazon Linux 2023 in eu-central-2 (Zurich)
 KEY_NAME="Sui custom prover"  # Your key pair name
 SECURITY_GROUP="sg-05c61dc980a18f39d"  # Your security group ID
 VPC_ID="vpc-0cbdcac70bc0d4434"  # Your VPC ID
 REGION="eu-central-2"            # Zurich region
-MAX_PRICE="0.0104"              # Maximum spot price (t3.small on-demand is ~$0.0416/hr)
+MAX_PRICE="0.08"                # Minimum spot price for t3.xlarge is 0.0767
 
 echo "🚀 Launching EC2 spot instance for zkLogin prover..."
 
