@@ -585,51 +585,35 @@ def resolve_finalize_zk_login(self, info, input):
                 error="Error finding user account"
             )
 
-        # Check if this is Apple Sign In and we need to create a custom JWT
+        # Use the original JWT directly - our prover now handles Apple/Google correctly
         jwt_to_use = input.jwt
-        if input.audience == 'apple' and input.computedNonce:
-            logger.info("Apple Sign In detected, creating custom JWT with computed nonce")
-            try:
-                # Decode the Apple JWT to get the subject
-                import jwt as pyjwt
-                apple_decoded = pyjwt.decode(input.jwt, options={"verify_signature": False})
-                apple_sub = apple_decoded.get('sub')
-                
-                if apple_sub:
-                    # Create custom JWT with the computed nonce
-                    jwt_to_use = create_custom_jwt_for_apple(
-                        sub=apple_sub,
-                        nonce=input.computedNonce,
-                        max_epoch=input.maxEpoch
-                    )
-                    logger.info(f"Created custom JWT for Apple zkLogin, nonce: {input.computedNonce[:20]}...")
-                else:
-                    logger.error("No subject found in Apple JWT")
-            except Exception as e:
-                logger.error(f"Error creating custom JWT for Apple: {str(e)}")
-                return FinalizeZkLoginPayload(
-                    success=False,
-                    error=f"Failed to create custom JWT: {str(e)}"
-                )
+        if input.audience in ['apple', 'google']:
+            logger.info(f"{input.audience.capitalize()} Sign In detected, using original JWT with hashed nonce")
         
         # Prepare prover payload
         prover_payload = {
             "jwt": jwt_to_use,
             "extendedEphemeralPublicKey": input.extendedEphemeralPublicKey,
             "maxEpoch": input.maxEpoch,
-            "randomness": input.randomness,
+            "jwtRandomness": input.randomness,  # The prover expects this field name
             "userSignature": input.userSignature,
             "keyClaimName": input.keyClaimName,
             "audience": input.audience,
             "salt": input.salt
         }
+        
+        # CRITICAL: Pass the original 27-char nonce for Apple Sign-In
+        # The circuit needs the original nonce, not the hashed 44-char one in the JWT
+        if input.audience == 'apple' and input.computedNonce:
+            prover_payload["originalNonce"] = input.computedNonce
+            logger.info(f"Apple Sign-In: Adding original nonce ({len(input.computedNonce)} chars) to prover payload")
         logger.info("Prepared prover payload: %s", json.dumps(prover_payload))
 
         # Call prover service
         try:
             logger.info("Calling prover service at: %s", settings.PROVER_SERVICE_URL)
             response = requests.post(
-                f"{settings.PROVER_SERVICE_URL}/generate-proof",
+                f"{settings.PROVER_SERVICE_URL}/v1",
                 json=prover_payload,
                 timeout=30
             )

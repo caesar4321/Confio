@@ -1863,4 +1863,8 @@ export class AuthService {
       throw error;
     }
   }
-} 
+}
+
+// Export a singleton instance
+const authService = AuthService.getInstance();
+export default authService; 

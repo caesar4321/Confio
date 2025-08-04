@@ -32,6 +32,11 @@
 - Multi-account system (personal/business accounts)
 - Payment method validation and filtering
 
+### Infrastructure & Region
+- **AWS Region**: ALWAYS use `eu-central-2` (Zurich) for ALL infrastructure
+- **Reason**: Swiss data protection laws provide best privacy for LATAM users
+- **Provider Choice**: AWS over Exoscale for scalability and future growth
+
 ### Development Guidelines
 1. **Always check README.md** for project structure and conventions
 2. **Follow existing patterns** in the codebase
@@ -39,6 +44,7 @@
 4. **Maintain security** with soft-delete system
 5. **Consider Latin American context** for financial features
 6. **Test with Venezuelan payment methods** as primary use case
+7. **AWS Region**: Use `eu-central-2` (Zurich) for all deployments
 7. **FlatList Implementation Rule**: When implementing a FlatList in React Native, ALWAYS include proper pagination mechanisms to ensure all items load. FlatList has built-in virtualization that may not render all items without proper configuration.
 8. **Use react-native-svg instead of react-native-linear-gradient**: For all gradient needs, use react-native-svg which is already installed. All gradient effects (linear, radial, etc.) can be achieved with SVG.
 9. **Use react-native-keychain instead of AsyncStorage**: For secure storage needs, use the existing react-native-keychain implementation. Do not add AsyncStorage as a dependency.
@@ -47,6 +53,7 @@
 12. **GraphQL Field Types**: Use proper GraphQL object types for complex fields, not JSONString.
 13. **Custom Admin Site**: This project uses a custom admin site `confio_admin_site` defined in `/config/admin_dashboard.py`. All models must be registered with this custom admin site, NOT the default Django admin. When adding new models, import their admin classes and register them in `admin_dashboard.py`.
 14. **Standardized Hashtags**: Always use exactly these 5 hashtags for all social media sharing throughout the app: #Confio #RetoConfio #LogroConfio #AppDeDolares #DolarDigital. Never suggest additional hashtags to avoid user confusion.
+15. **zkLogin Circuit Requirements**: BOTH Google AND Apple Sign-In are failing with nonce length errors. DO NOT suggest alternatives, hybrid approaches, or custodial solutions. FIX THE CIRCUIT to accept variable-length nonces (27-64 chars). Circuit compilation takes only 10 minutes on t3.2xlarge.
 
 ### Development Environment
 - **Python Virtual Environment**: Always use `myvenv/bin/python` for Python commands

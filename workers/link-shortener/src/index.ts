@@ -101,9 +101,10 @@ export default {
       });
     }
     
-    // Handle root domain
+    // Handle root domain - pass through to origin server
     if (url.pathname === '/' || url.pathname === '') {
-      return Response.redirect(env.LANDING_PAGE_URL, 302);
+      // Pass through to the origin Django server
+      return fetch(request);
     }
     
     // Extract slug from path
@@ -111,13 +112,15 @@ export default {
     
     // Validate slug format (alphanumeric with hyphens, 2-20 chars)
     if (!slug || !/^[a-zA-Z0-9-]{2,20}$/.test(slug)) {
-      return new Response('Invalid link', { status: 404 });
+      // Pass through to origin for non-shortlink paths
+      return fetch(request);
     }
     
     // Get link data from KV
     const linkDataStr = await env.LINKS.get(slug);
     if (!linkDataStr) {
-      return new Response('Link not found', { status: 404 });
+      // Pass through to origin if link not found - let Django handle it
+      return fetch(request);
     }
     
     const linkData: LinkData = JSON.parse(linkDataStr);

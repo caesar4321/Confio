@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { generateZkLoginProof, initializeProver } from './zklogin-prover.js';
+import { zkLoginProver } from './custom-zklogin-prover.js';
 
 // Load environment variables
 dotenv.config();
@@ -18,8 +18,10 @@ app.get('/health', (req, res) => {
   res.json({ 
     status: 'ok', 
     mode: process.env.USE_MOCK_PROVER === 'true' ? 'mock' : 'external',
-    proverUrl: process.env.EXTERNAL_ZKLOGIN_PROVER_URL || 'none',
-    timestamp: new Date().toISOString()
+    proverUrl: process.env.EC2_PROVER_URL || 'none',
+    timestamp: new Date().toISOString(),
+    saltSupport: '32-byte',
+    customProver: true
   });
 });
 
@@ -97,97 +99,57 @@ app.post('/generate-proof', async (req, res) => {
     const sub = payloadObj.sub;
     console.log('Extracted sub claim:', sub);
 
-    // Convert base64 fields to Uint8Array with validation
-    let ephemeralPublicKey, randBytes, saltBytes;
+    // Use custom zkLogin prover with 32-byte salt support
     try {
-      ephemeralPublicKey = b64ToBuf(extendedEphemeralPublicKey, 'ephemeralPublicKey');
-      randBytes = b64ToBuf(randomness, 'randomness');
-      saltBytes = b64ToBuf(salt, 'salt');
-    } catch (error) {
-      throw new Error(`Invalid base64 format for ${error.message}`);
-    }
-
-    // Check if we should use mock mode or real prover
-    const USE_MOCK_PROVER = process.env.USE_MOCK_PROVER === 'true';
-    const PROVER_URL = process.env.ZKLOGIN_PROVER_URL || 'http://localhost:8081/v1';
-    
-    let proof;
-    
-    if (USE_MOCK_PROVER) {
-      console.warn('⚠️  Using MOCK zkLogin proof - transactions will fail!');
-      // Return mock proof for development/testing
-      proof = {
-        a: [
-          "0x1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2",
-          "0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b"
-        ],
-        b: [
-          [
-            "0x3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c",
-            "0x4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d"
-          ],
-          [
-            "0x5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e",
-            "0x6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f"
-          ]
-        ],
-        c: [
-          "0x7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a",
-          "0x8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b"
-        ]
-      };
-    } else {
-      // Use our Node.js zkLogin prover implementation
-      console.log('Using Node.js zkLogin prover...');
+      console.log('🔐 Using custom zkLogin prover with 32-byte salt support...');
       
-      try {
-        const result = await generateZkLoginProof({
-          jwt,
-          extendedEphemeralPublicKey,
-          maxEpoch,
-          randomness,
-          salt,
-          keyClaimName,
-          audience
-        });
-        
-        proof = result.proof;
-        console.log('✅ Generated real zkLogin proof with Node.js');
-        
-      } catch (error) {
-        console.error('❌ Node.js prover error:', error);
-        
-        // If it's a configuration error, provide helpful instructions
-        if (error.message.includes('Cannot generate zkLogin proofs')) {
-          throw new Error(
-            'zkLogin prover not configured.\n\n' +
-            '⚠️  To generate zkLogin proofs, you need to:\n\n' +
-            '1. **Use Docker Compose (Recommended):**\n' +
-            '   - Run: docker-compose up -d\n' +
-            '   - This starts Mysten\'s zkLogin prover with custom audience support\n\n' +
-            '2. **Or use Shinami API:**\n' +
-            '   - Sign up at https://app.shinami.com/\n' +
-            '   - Set EXTERNAL_ZKLOGIN_PROVER_URL and API key\n\n' +
-            '3. **Or use mock proofs for testing:**\n' +
-            '   - Set USE_MOCK_PROVER=true\n'
-          );
-        }
-        
-        throw error;
+      const result = await zkLoginProver.generateProof({
+        jwt,
+        extendedEphemeralPublicKey,
+        maxEpoch,
+        randomness,
+        salt,
+        keyClaimName,
+        audience
+      });
+      
+      // Return the proof and Sui address
+      res.json({
+        proof: result.proof,
+        suiAddress: result.suiAddress,
+        headerBase64: header,
+        issBase64Details: Buffer.from(JSON.stringify({
+          iss: payloadObj.iss,
+          aud: payloadObj.aud,
+          sub: payloadObj.sub
+        })).toString('base64'),
+        warning: result.warning,
+        note: result.note
+      });
+      
+    } catch (error) {
+      console.error('❌ Custom prover error:', error);
+      
+      // If it's a configuration error, provide helpful instructions
+      if (error.message.includes('not yet implemented')) {
+        throw new Error(
+          'zkLogin prover configuration needed.\n\n' +
+          '⚠️  Options to enable zkLogin proofs:\n\n' +
+          '1. **Use mock proofs for testing:**\n' +
+          '   - Set USE_MOCK_PROVER=true in .env\n' +
+          '   - This allows testing the flow without real proofs\n\n' +
+          '2. **Use EC2 Docker prover when available:**\n' +
+          '   - Start the EC2 instance with Docker prover\n' +
+          '   - Update EC2_PROVER_URL in .env\n' +
+          '   - Set USE_MOCK_PROVER=false\n\n' +
+          '3. **Build custom prover (future):**\n' +
+          '   - Requires zkLogin circuit files from Sui\n' +
+          '   - Will support full 32-byte salt natively\n'
+        );
       }
+      
+      throw error;
     }
-
-    // Return the proof and Sui address
-    res.json({
-      proof,
-      suiAddress: "0x" + Buffer.from(ephemeralPublicKey).toString('hex'),
-      headerBase64: header,
-      issBase64Details: Buffer.from(JSON.stringify({
-        iss: payloadObj.iss,
-        aud: payloadObj.aud,
-        sub: payloadObj.sub
-      })).toString('base64')
-    });
   } catch (error) {
     console.error('Error generating proof:', error);
     res.status(400).json({
@@ -208,18 +170,22 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Initialize the prover on startup
-const USE_MOCK_PROVER = process.env.USE_MOCK_PROVER === 'true';
-if (!USE_MOCK_PROVER) {
-  initializeProver().catch(err => {
-    console.error('Failed to initialize prover:', err);
-    console.log('ℹ️  You can set USE_MOCK_PROVER=true to use mock proofs for testing');
-  });
-}
-
+// Start the server
 app.listen(port, () => {
-  console.log(`Prover service listening at http://localhost:${port}`);
-  if (USE_MOCK_PROVER) {
-    console.log('⚠️  Running in MOCK mode - proofs will not be valid!');
+  const mode = process.env.USE_MOCK_PROVER === 'true' ? 'MOCK' : 'EXTERNAL';
+  console.log(`\n🚀 Custom zkLogin Prover Service listening at http://localhost:${port}`);
+  console.log(`🔐 Mode: ${mode}`);
+  console.log(`🧱 Salt support: 32-byte (maintains wallet compatibility)`);
+  
+  if (process.env.USE_MOCK_PROVER === 'true') {
+    console.log('\n⚠️  Running in MOCK mode - proofs will not validate on-chain!');
+    console.log('   This is suitable for development and testing.');
+  } else if (process.env.EC2_PROVER_URL) {
+    console.log(`\n🌐 Using external prover: ${process.env.EC2_PROVER_URL}`);
+    console.log('   32-byte values will be adapted for compatibility.');
+  } else {
+    console.log('\n⚠️  No prover configured! Set either:');
+    console.log('   - USE_MOCK_PROVER=true for development');
+    console.log('   - EC2_PROVER_URL for external prover');
   }
 }); 
