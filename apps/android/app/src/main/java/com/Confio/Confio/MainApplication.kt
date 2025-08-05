@@ -28,7 +28,7 @@ import org.linusu.RNGetRandomValuesPackage
 import com.oblador.keychain.KeychainPackage
 import com.oblador.vectoricons.VectorIconsPackage
 import com.horcrux.svg.SvgPackage
-import com.margelo.worklets.WorkletsPackage
+import com.worklets.WorkletsPackage
 
 class MainApplication : Application(), ReactApplication {
 
