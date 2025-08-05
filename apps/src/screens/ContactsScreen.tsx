@@ -48,7 +48,7 @@ const CREATE_TEST_USERS = gql`
         lastName
         isOnConfio
         activeAccountId
-        activeAccountSuiAddress
+        activeAccountAptosAddress
       }
     }
   }
@@ -465,7 +465,7 @@ export const ContactsScreen = () => {
       phone: contact.phoneNumbers && contact.phoneNumbers[0] ? contact.phoneNumbers[0] : '',
       isOnConfio: contact.isOnConfio || false,
       userId: contact.confioUserId || null,
-      aptosAddress: contact.confioSuiAddress || null
+      aptosAddress: contact.confioAptosAddress || null
     }));
     
     console.log(`[PERF] Formatting took ${Date.now() - formatStart}ms`);

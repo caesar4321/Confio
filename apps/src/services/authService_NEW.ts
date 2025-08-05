@@ -206,7 +206,7 @@
         },
         zkLoginData: {
           zkProof: finalizeData.finalizeZkLoginWithNonce.zkProof,
-          suiAddress: finalizeData.finalizeZkLoginWithNonce.suiAddress,
+          aptosAddress: finalizeData.finalizeZkLoginWithNonce.aptosAddress,
           isPhoneVerified: finalizeData.finalizeZkLoginWithNonce.isPhoneVerified
         }
       };

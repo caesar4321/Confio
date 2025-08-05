@@ -36,7 +36,7 @@ interface BlockchainAuthContextValue {
 const BlockchainAuthContext = createContext<BlockchainAuthContextValue | undefined>(undefined);
 
 export const BlockchainAuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [currentNetwork, setCurrentNetwork] = useState<BlockchainNetwork>('sui'); // Default to Sui for now
+  const [currentNetwork, setCurrentNetwork] = useState<BlockchainNetwork>('aptos'); // Default to Aptos
   
   // Sui zkLogin hook
   const {

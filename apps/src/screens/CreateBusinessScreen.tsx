@@ -160,7 +160,7 @@ export const CreateBusinessScreen = () => {
           category: createdBusiness?.category
         });
         
-        // Generate Sui address using the server's account type and index
+        // Generate Aptos address using the server's account type and index
         try {
           const authService = AuthService.getInstance();
           

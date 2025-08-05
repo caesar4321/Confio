@@ -175,7 +175,7 @@ public async signInWithApple() {
     return {
       success: true,
       zkProof: finalizeData.finalizeZkLoginWithNonce.zkProof,
-      suiAddress: finalizeData.finalizeZkLoginWithNonce.suiAddress,
+      aptosAddress: finalizeData.finalizeZkLoginWithNonce.aptosAddress,
       user: finalizeData.finalizeZkLoginWithNonce,
       isPhoneVerified: finalizeData.finalizeZkLoginWithNonce.isPhoneVerified || false
     };

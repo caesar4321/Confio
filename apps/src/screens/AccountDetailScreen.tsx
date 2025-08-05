@@ -1652,7 +1652,7 @@ export const AccountDetailScreen = () => {
                   <Icon name="download" size={16} color="#3b82f6" style={styles.actionIcon} />
                   <View style={styles.actionTextContainer}>
                     <Text style={styles.usdcActionButtonText}>Depositar</Text>
-                    <Text style={styles.usdcActionSubtext}>Recibe desde Sui</Text>
+                    <Text style={styles.usdcActionSubtext}>Recibe desde Aptos</Text>
                   </View>
                 </TouchableOpacity>
                 
@@ -1824,10 +1824,10 @@ export const AccountDetailScreen = () => {
               <View style={styles.helpSection}>
                 <Icon name="info" size={20} color="#3b82f6" style={styles.helpIcon} />
                 <View style={styles.helpTextContainer}>
-                  <Text style={styles.helpSectionTitle}>USDC en Sui Network</Text>
+                  <Text style={styles.helpSectionTitle}>USDC en Aptos Network</Text>
                   <Text style={styles.helpSectionText}>
                     USDC es una moneda estable respaldada 1:1 por dólares estadounidenses. 
-                    Puedes depositar USDC desde la red Sui y convertirlo a cUSD sin comisiones.
+                    Puedes depositar USDC desde la red Aptos (APT) y convertirlo a cUSD sin comisiones.
                   </Text>
                 </View>
               </View>

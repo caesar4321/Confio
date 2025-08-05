@@ -56,17 +56,17 @@ const tokenConfig: Record<TokenType, TokenConfig> = {
     color: colors.accent,
     description: 'Recibe USDC desde cualquier wallet',
     subtitle: 'Envía USDC desde tu wallet externo a esta dirección',
-            warning: 'Solo envía USDC en la red Sui. Otras monedas o redes resultarán en pérdida permanente de fondos.',
+            warning: 'Solo envía USDC en la red Aptos (APT). Otras monedas o redes resultarán en pérdida permanente de fondos.',
     instructions: [
       {
         step: '1',
         title: 'Abre tu wallet externo',
-        description: 'Sui Wallet, Binance, KuCoin, etc.'
+        description: 'Aptos Wallet, Binance, KuCoin, etc.'
       },
       {
         step: '2',
         title: 'Selecciona enviar USDC',
-        description: 'Asegúrate de estar en la red Sui'
+        description: 'Asegúrate de estar en la red Aptos'
       },
       {
         step: '3',
@@ -87,17 +87,17 @@ const tokenConfig: Record<TokenType, TokenConfig> = {
     color: colors.primary,
     description: 'Recibe cUSD desde cualquier wallet',
     subtitle: 'Envía cUSD desde tu wallet externo a esta dirección',
-            warning: 'Solo envía cUSD en la red Sui. Otras monedas o redes resultarán en pérdida permanente de fondos.',
+            warning: 'Solo envía cUSD en la red Aptos (APT). Otras monedas o redes resultarán en pérdida permanente de fondos.',
     instructions: [
       {
         step: '1',
         title: 'Abre tu wallet externo',
-        description: 'Sui Wallet, Binance, KuCoin, etc.'
+        description: 'Aptos Wallet, Binance, KuCoin, etc.'
       },
       {
         step: '2',
         title: 'Selecciona enviar cUSD',
-        description: 'Asegúrate de estar en la red Sui'
+        description: 'Asegúrate de estar en la red Aptos'
       },
       {
         step: '3',
@@ -118,17 +118,17 @@ const tokenConfig: Record<TokenType, TokenConfig> = {
     color: colors.secondary,
     description: 'Recibe CONFIO desde cualquier wallet',
     subtitle: 'Envía CONFIO desde tu wallet externo a esta dirección',
-            warning: 'Solo envía CONFIO en la red Sui. Otras monedas o redes resultarán en pérdida permanente de fondos.',
+            warning: 'Solo envía CONFIO en la red Aptos (APT). Otras monedas o redes resultarán en pérdida permanente de fondos.',
     instructions: [
       {
         step: '1',
         title: 'Abre tu wallet externo',
-        description: 'Sui Wallet, Binance, KuCoin, etc.'
+        description: 'Aptos Wallet, Binance, KuCoin, etc.'
       },
       {
         step: '2',
         title: 'Selecciona enviar CONFIO',
-        description: 'Asegúrate de estar en la red Sui'
+        description: 'Asegúrate de estar en la red Aptos'
       },
       {
         step: '3',

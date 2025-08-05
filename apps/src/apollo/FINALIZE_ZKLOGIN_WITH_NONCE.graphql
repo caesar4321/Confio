@@ -32,7 +32,7 @@ mutation FinalizeZkLoginWithNonce(
       b
       c
     }
-    suiAddress
+    aptosAddress
     authAccessToken
     authRefreshToken
     isPhoneVerified

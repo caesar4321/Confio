@@ -37,7 +37,7 @@ const tokenConfig = {
     color: colors.primary,
     minSend: 1,
     fee: 0,  // Sponsored transactions
-    description: 'Envía cUSD a cualquier dirección Sui',
+    description: 'Envía cUSD a cualquier dirección Aptos',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
   confio: {
@@ -47,7 +47,7 @@ const tokenConfig = {
     color: colors.secondary,
     minSend: 1,
     fee: 0,  // Sponsored transactions
-    description: 'Envía CONFIO a cualquier dirección Sui',
+    description: 'Envía CONFIO a cualquier dirección Aptos',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
 };
