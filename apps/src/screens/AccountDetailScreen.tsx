@@ -221,7 +221,8 @@ export const AccountDetailScreen = () => {
   const currentBalance = balanceData?.accountBalance || route.params.accountBalance;
   
   // Account data from navigation params
-  const accountAddress = route.params.accountAddress || '';
+  // Use address from params or fallback to activeAccount's address
+  const accountAddress = route.params.accountAddress || activeAccount?.aptosAddress || '';
   const account = {
     name: route.params.accountName,
     symbol: route.params.accountSymbol,
