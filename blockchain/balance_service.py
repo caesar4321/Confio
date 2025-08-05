@@ -194,9 +194,9 @@ class BalanceService:
         """Fetch balance directly from blockchain"""
         # Check if this is an Aptos address (starts with 0x and 66 chars total)
         is_aptos_address = (
-            account.sui_address and 
-            account.sui_address.startswith('0x') and 
-            len(account.sui_address) == 66
+            account.aptos_address and 
+            account.aptos_address.startswith('0x') and 
+            len(account.aptos_address) == 66
         )
         
         if is_aptos_address:
@@ -217,10 +217,10 @@ class BalanceService:
             balance_data = token_map.get(token.upper(), {'amount': Decimal('0')})
             amount = balance_data['amount']
             
-            logger.info(f"Aptos balance for {account.sui_address} - {token}: {amount}")
+            logger.info(f"Aptos balance for {account.aptos_address} - {token}: {amount}")
         else:
             # Legacy Sui address - fetch from Sui network
-            logger.info(f"Detected Sui address format for {account.sui_address}, using Sui network")
+            logger.info(f"Detected Sui address format for {account.aptos_address}, using Sui network")
             
             # Run async code in sync context
             loop = asyncio.new_event_loop()
@@ -234,7 +234,7 @@ class BalanceService:
             
             try:
                 amount = loop.run_until_complete(get_balance())
-                logger.info(f"Sui balance for {account.sui_address} - {token}: {amount}")
+                logger.info(f"Sui balance for {account.aptos_address} - {token}: {amount}")
             finally:
                 loop.close()
         

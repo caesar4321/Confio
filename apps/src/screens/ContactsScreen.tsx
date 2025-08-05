@@ -465,7 +465,7 @@ export const ContactsScreen = () => {
       phone: contact.phoneNumbers && contact.phoneNumbers[0] ? contact.phoneNumbers[0] : '',
       isOnConfio: contact.isOnConfio || false,
       userId: contact.confioUserId || null,
-      suiAddress: contact.confioSuiAddress || null
+      aptosAddress: contact.confioSuiAddress || null
     }));
     
     console.log(`[PERF] Formatting took ${Date.now() - formatStart}ms`);
@@ -695,7 +695,7 @@ export const ContactsScreen = () => {
     // Include Sui address if available
     const friendWithAddress = {
       ...friend,
-      suiAddress: friend.suiAddress || null
+      aptosAddress: friend.aptosAddress || null
     };
     setSelectedFriend(friendWithAddress);
     setShowFriendTokenSelection(true);

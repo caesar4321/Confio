@@ -156,7 +156,7 @@ const DepositScreen = () => {
   const config = tokenConfig[tokenType];
   
   // Use the real Sui address from the active account
-  const depositAddress = activeAccount?.suiAddress || "0x0000000000000000000000000000000000000000";
+  const depositAddress = activeAccount?.aptosAddress || "0x0000000000000000000000000000000000000000";
 
   const handleCopy = async () => {
     await Clipboard.setString(depositAddress);

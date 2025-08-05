@@ -10,6 +10,8 @@ from django.views import View
 from django.shortcuts import render
 from django.urls import reverse
 from django.conf import settings
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 from urllib.parse import urlencode, quote
 import uuid
 import jwt as pyjwt
@@ -24,6 +26,7 @@ from .utils.keyless_pepper import generate_keyless_pepper
 # Get logger
 logger = logging.getLogger(__name__)
 
+@method_decorator(csrf_exempt, name='dispatch')
 class AptosOAuthStartView(View):
     """Start the OAuth flow for Aptos Keyless"""
     
@@ -34,20 +37,24 @@ class AptosOAuthStartView(View):
             data = json.loads(request.body)
             provider = data.get('provider', 'google')
             ephemeral_key = data.get('ephemeralKeyPair')
+            device_fingerprint = data.get('deviceFingerprint')
             
             if ephemeral_key:
                 logger.info(f"Using client-generated ephemeral key with nonce: {ephemeral_key.get('nonce')}")
             
-            return self._handle_oauth_start(request, provider, ephemeral_key)
+            if device_fingerprint:
+                logger.info(f"Received device fingerprint data")
+            
+            return self._handle_oauth_start(request, provider, ephemeral_key, device_fingerprint)
         except json.JSONDecodeError:
             return JsonResponse({'error': 'Invalid JSON in request body'}, status=400)
     
     def get(self, request):
         """Handle GET request (legacy, server-generated ephemeral key)"""
         provider = request.GET.get('provider', 'google')
-        return self._handle_oauth_start(request, provider, None)
+        return self._handle_oauth_start(request, provider, None, None)
     
-    def _handle_oauth_start(self, request, provider, ephemeral_key=None):
+    def _handle_oauth_start(self, request, provider, ephemeral_key=None, device_fingerprint=None):
         
         # Use configurable base URL for OAuth callbacks (for ngrok in development)
         oauth_base_url = getattr(settings, 'OAUTH_BASE_URL', None)
@@ -93,6 +100,7 @@ class AptosOAuthStartView(View):
         state_data = {
             'ephemeral_key': ephemeral_key,
             'provider': provider,
+            'device_fingerprint': device_fingerprint,
             'timestamp': datetime.utcnow().isoformat()
         }
         
@@ -181,6 +189,7 @@ class AptosOAuthStartView(View):
             return request.build_absolute_uri(reverse('aptos_oauth_callback'))
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class AptosOAuthCallbackView(View):
     """Handle OAuth callback and derive Keyless account"""
     
@@ -301,6 +310,7 @@ class AptosOAuthCallbackView(View):
         
         ephemeral_key = state_data['ephemeral_key']
         provider = state_data['provider']
+        device_fingerprint = state_data.get('device_fingerprint')
         
         try:
             # Exchange code for tokens
@@ -515,8 +525,8 @@ class AptosOAuthCallbackView(View):
                     account_index=0
                 )
                 # Update the address
-                old_address = account.sui_address
-                account.sui_address = keyless_account['address']
+                old_address = account.aptos_address
+                account.aptos_address = keyless_account['address']
                 account.save()
                 logger.info(f"Updated existing personal account - Old address: {old_address}, New address: {keyless_account['address']}")
                 if old_address and old_address != keyless_account['address']:
@@ -525,31 +535,61 @@ class AptosOAuthCallbackView(View):
                 
                 # Verify the update
                 account.refresh_from_db()
-                logger.info(f"Verified address after save: {account.sui_address}")
+                logger.info(f"Verified address after save: {account.aptos_address}")
             except Account.DoesNotExist:
                 # Create new account
                 account = Account.objects.create(
                     user=user,
                     account_type='personal',
                     account_index=0,
-                    sui_address=keyless_account['address']  # Store Aptos address in sui_address field
+                    aptos_address=keyless_account['address']  # Store Aptos address in aptos_address field
                 )
                 logger.info(f"Created default personal account with Aptos address: {keyless_account['address']}")
             
-            # Generate backend JWT
-            token_payload = {
+            # Store device fingerprint if provided
+            if device_fingerprint:
+                logger.info(f"Storing device fingerprint for user {user.id}")
+                # You can store this in a UserDevice model or similar
+                # For now, we'll include it in the JWT payload
+            
+            # Generate backend JWT tokens (access and refresh)
+            # Access token - short lived (1 hour)
+            access_token_payload = {
                 'user_id': user.id,
                 'username': user.username,
                 'type': 'access',  # Required by Apollo client
                 'auth_token_version': user.auth_token_version,  # Required for token validation
-                'exp': datetime.utcnow() + timedelta(days=7),
+                'exp': datetime.utcnow() + timedelta(hours=1),
                 'iat': datetime.utcnow(),
                 'account_type': 'personal',
                 'account_index': 0
             }
             
-            backend_token = pyjwt.encode(
-                token_payload,
+            # Include device fingerprint hash if available
+            if device_fingerprint:
+                import hashlib
+                import json as json_lib
+                device_hash = hashlib.sha256(json_lib.dumps(device_fingerprint, sort_keys=True).encode()).hexdigest()[:16]
+                access_token_payload['device_id'] = device_hash
+            
+            access_token = pyjwt.encode(
+                access_token_payload,
+                settings.SECRET_KEY,
+                algorithm='HS256'
+            )
+            
+            # Refresh token - long lived (30 days)
+            refresh_token_payload = {
+                'user_id': user.id,
+                'username': user.username,
+                'type': 'refresh',  # Required by Apollo client
+                'auth_token_version': user.auth_token_version,
+                'exp': datetime.utcnow() + timedelta(days=30),
+                'iat': datetime.utcnow()
+            }
+            
+            refresh_token = pyjwt.encode(
+                refresh_token_payload,
                 settings.SECRET_KEY,
                 algorithm='HS256'
             )
@@ -570,7 +610,9 @@ class AptosOAuthCallbackView(View):
                     'ephemeralKeyPair': ephemeral_key,
                     'pepper': keyless_account.get('pepper')
                 }),
-                'backend_token': backend_token,
+                'backend_token': access_token,  # Keep for backward compatibility
+                'access_token': access_token,
+                'refresh_token': refresh_token,
                 'user_id': user.id,
                 'is_phone_verified': 'true' if is_phone_verified else 'false'
             }
@@ -681,6 +723,7 @@ class AptosOAuthCallbackView(View):
                 return data.get('id_token')
 
 
+@method_decorator(csrf_exempt, name='dispatch')
 class AptosOAuthCloseView(View):
     """Force close the OAuth window by redirecting to the app"""
     

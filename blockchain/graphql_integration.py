@@ -95,7 +95,7 @@ class BlockchainService:
             # 3. Submit to blockchain
             tx_digest = loop.run_until_complete(
                 sui_client.transfer_cusd_with_coins(
-                    account.sui_address,
+                    account.aptos_address,
                     to_address,
                     amount,
                     prepared['coins']
@@ -103,7 +103,7 @@ class BlockchainService:
             )
             
             # Clear balance cache
-            cache.delete(f"balances:{account.sui_address}")
+            cache.delete(f"balances:{account.aptos_address}")
             cache.delete(f"balances:{to_address}")
             
             return tx_digest
@@ -113,7 +113,7 @@ class BlockchainService:
     
     @staticmethod
     def get_transaction_history(
-        sui_address: str,
+        aptos_address: str,
         limit: int = 20
     ) -> List[Dict]:
         """
@@ -136,7 +136,7 @@ class BlockchainService:
         
         try:
             result = loop.run_until_complete(
-                sui_client.get_transactions(sui_address, limit=limit)
+                sui_client.get_transactions(aptos_address, limit=limit)
             )
             
             # Transform to GraphQL-friendly format
@@ -204,11 +204,11 @@ type Transaction {
 # In your resolvers:
 
 def resolve_balances(account, info):
-    return BlockchainService.get_balances(account.sui_address)
+    return BlockchainService.get_balances(account.aptos_address)
 
 def resolve_transactions(account, info, limit=20):
     return BlockchainService.get_transaction_history(
-        account.sui_address,
+        account.aptos_address,
         limit=limit
     )
 """

@@ -241,7 +241,7 @@ export const AccountDetailScreen = () => {
   console.log('AccountDetailScreen - Account info:', {
     activeAccountType: activeAccount?.type,
     activeAccountIndex: activeAccount?.index,
-    activeAccountAddress: activeAccount?.suiAddress,
+    activeAccountAddress: activeAccount?.aptosAddress,
     paramAddress: accountAddress,
     accountName: account.name,
     routeParams: {

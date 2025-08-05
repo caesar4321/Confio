@@ -190,14 +190,14 @@ class CreateSendTransaction(graphene.Mutation):
                         account_index=account_index
                     ).first()
                 
-                if not active_account or not active_account.sui_address:
+                if not active_account or not active_account.aptos_address:
                     return CreateSendTransaction(
                         send_transaction=None,
                         success=False,
                         errors=["Sender's Aptos address not found"]
                     )
                 
-                sender_address = active_account.sui_address
+                sender_address = active_account.aptos_address
                 sender_account = active_account  # Store for later use in notifications
 
                 # Find recipient and their Sui address
@@ -215,8 +215,8 @@ class CreateSendTransaction(graphene.Mutation):
                             account_type='personal',
                             account_index=0
                         ).first()
-                        if recipient_account and recipient_account.sui_address:
-                            recipient_address = recipient_account.sui_address
+                        if recipient_account and recipient_account.aptos_address:
+                            recipient_address = recipient_account.aptos_address
                             print(f"CreateSendTransaction: Found recipient address by user ID: {recipient_address}")
                         else:
                             return CreateSendTransaction(
@@ -245,8 +245,8 @@ class CreateSendTransaction(graphene.Mutation):
                             account_type='personal',
                             account_index=0
                         ).first()
-                        if recipient_account and recipient_account.sui_address:
-                            recipient_address = recipient_account.sui_address
+                        if recipient_account and recipient_account.aptos_address:
+                            recipient_address = recipient_account.aptos_address
                             print(f"CreateSendTransaction: Found recipient address by phone: {recipient_address}")
                         else:
                             # Confío user without address - shouldn't happen
@@ -271,7 +271,7 @@ class CreateSendTransaction(graphene.Mutation):
                     validate_recipient(recipient_address)
                     # Try to find if this is actually a Confío user's address
                     try:
-                        recipient_account = Account.objects.get(sui_address=recipient_address)
+                        recipient_account = Account.objects.get(aptos_address=recipient_address)
                         recipient_user = recipient_account.user
                         print(f"CreateSendTransaction: Found Confío user for external address")
                     except Account.DoesNotExist:
@@ -628,10 +628,10 @@ class Query(graphene.ObjectType):
                 )
             
             # Filter by account's Sui address
-            if account.sui_address:
+            if account.aptos_address:
                 return SendTransaction.objects.filter(
-                    models.Q(sender_address=account.sui_address) | 
-                    models.Q(recipient_address=account.sui_address)
+                    models.Q(sender_address=account.aptos_address) | 
+                    models.Q(recipient_address=account.aptos_address)
                 ).order_by('-created_at')
         except Account.DoesNotExist:
             pass
@@ -689,7 +689,7 @@ class Query(graphene.ObjectType):
                     account_index=account_index
                 )
             
-            if not user_account.sui_address:
+            if not user_account.aptos_address:
                 return []
                 
         except Account.DoesNotExist:
@@ -699,13 +699,13 @@ class Query(graphene.ObjectType):
         if friend_user_id and not friend_user_id.startswith('contact_'):
             # Regular Confío user - search by user ID and account addresses
             # Get all accounts for the friend user
-            friend_accounts = Account.objects.filter(user_id=friend_user_id).values_list('sui_address', flat=True)
+            friend_accounts = Account.objects.filter(user_id=friend_user_id).values_list('aptos_address', flat=True)
             friend_addresses = list(friend_accounts)
             
             if friend_addresses:
                 queryset = SendTransaction.objects.filter(
-                    (models.Q(sender_address=user_account.sui_address) & models.Q(recipient_address__in=friend_addresses)) |
-                    (models.Q(sender_address__in=friend_addresses) & models.Q(recipient_address=user_account.sui_address))
+                    (models.Q(sender_address=user_account.aptos_address) & models.Q(recipient_address__in=friend_addresses)) |
+                    (models.Q(sender_address__in=friend_addresses) & models.Q(recipient_address=user_account.aptos_address))
                 ).order_by('-created_at')
             else:
                 # Friend has no accounts with addresses yet
@@ -713,7 +713,7 @@ class Query(graphene.ObjectType):
         elif friend_phone:
             # Non-Confío friend - search by phone number from user's account
             queryset = SendTransaction.objects.filter(
-                models.Q(sender_address=user_account.sui_address) & models.Q(recipient_phone=friend_phone)
+                models.Q(sender_address=user_account.aptos_address) & models.Q(recipient_phone=friend_phone)
             ).order_by('-created_at')
         else:
             # No valid identifier provided
@@ -805,8 +805,8 @@ class PrepareTransaction(graphene.Mutation):
                         account_type='personal',
                         account_index=0
                     ).first()
-                    if recipient_account and recipient_account.sui_address:
-                        recipient_address = recipient_account.sui_address
+                    if recipient_account and recipient_account.aptos_address:
+                        recipient_address = recipient_account.aptos_address
                     else:
                         return PrepareTransaction(
                             success=False,
@@ -826,8 +826,8 @@ class PrepareTransaction(graphene.Mutation):
                         account_type='personal',
                         account_index=0
                     ).first()
-                    if recipient_account and recipient_account.sui_address:
-                        recipient_address = recipient_account.sui_address
+                    if recipient_account and recipient_account.aptos_address:
+                        recipient_address = recipient_account.aptos_address
                 except User.DoesNotExist:
                     # Non-Confío user - create invitation address
                     import hashlib
@@ -861,7 +861,7 @@ class PrepareTransaction(graphene.Mutation):
                 if result.get('success') and result.get('requiresUserSignature'):
                     # Transaction prepared successfully
                     transaction_metadata = {
-                        'sender_address': active_account.sui_address,
+                        'sender_address': active_account.aptos_address,
                         'recipient_address': recipient_address,
                         'amount': str(amount_decimal),
                         'token_type': input.token_type,

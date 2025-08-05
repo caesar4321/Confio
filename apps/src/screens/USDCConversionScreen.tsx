@@ -135,7 +135,7 @@ export const USDCConversionScreen = () => {
                   accountName: 'Confío Dollar',
                   accountSymbol: '$cUSD',
                   accountBalance: '0', // AccountDetailScreen will fetch real balance
-                  accountAddress: activeAccount?.suiAddress || '',
+                  accountAddress: activeAccount?.aptosAddress || '',
                   refreshTimestamp: Date.now()
                 } as never);
               },

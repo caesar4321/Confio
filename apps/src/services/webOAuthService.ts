@@ -15,6 +15,8 @@ interface WebOAuthResult {
     pepper?: string;
   };
   backendToken: string;
+  accessToken?: string;
+  refreshToken?: string;
   userId: number;
   firebaseToken?: string;
   firebaseUid?: string;
@@ -59,10 +61,33 @@ export class WebOAuthService {
         console.log('[WebOAuth] No existing browser to close');
       }
 
+      // Collect device fingerprint
+      let deviceFingerprint = null;
+      try {
+        const { DeviceFingerprint } = await import('../utils/deviceFingerprint');
+        deviceFingerprint = await DeviceFingerprint.generateFingerprint();
+        console.log('[WebOAuth] Device fingerprint collected successfully');
+      } catch (error) {
+        console.error('[WebOAuth] Error collecting device fingerprint:', error);
+        // Continue without fingerprint rather than failing authentication
+      }
+
       // Start OAuth flow by getting the OAuth URL from backend
-      const startUrl = `${API_URL.replace('/graphql/', '')}/prover/oauth/aptos/start/?provider=${provider}`;
+      const startUrl = `${API_URL.replace('/graphql/', '')}/prover/oauth/aptos/start/`;
       console.log(`[WebOAuth] Fetching OAuth URL from: ${startUrl}`);
-      const response = await fetch(startUrl);
+      
+      const requestBody = {
+        provider,
+        deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null
+      };
+      
+      const response = await fetch(startUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
       
       if (!response.ok) {
         const text = await response.text();
@@ -118,11 +143,10 @@ export class WebOAuthService {
             // Store the keyless account data
             await this.storeKeylessData(callbackData.data);
             
-            // Store the backend auth token
-            // Use the access token as refresh token temporarily since OAuth doesn't provide one
+            // Store the backend auth tokens
             await this.storeAuthTokens({
-              accessToken: callbackData.data.backendToken,
-              refreshToken: callbackData.data.backendToken // Use same token as refresh token
+              accessToken: callbackData.data.accessToken || callbackData.data.backendToken,
+              refreshToken: callbackData.data.refreshToken || callbackData.data.backendToken
             });
 
             // Store Firebase credentials if available
@@ -196,6 +220,8 @@ export class WebOAuthService {
       if (success) {
         const keylessAccountStr = params.keyless_account;
         const backendToken = params.backend_token;
+        const accessToken = params.access_token || backendToken; // Use access_token if available
+        const refreshToken = params.refresh_token || backendToken; // Fallback to backend_token
         const userId = params.user_id;
         const firebaseToken = params.firebase_token;
         const firebaseUid = params.firebase_uid;
@@ -207,12 +233,15 @@ export class WebOAuthService {
           console.log('[WebOAuth] Successfully parsed authentication data');
           console.log('[WebOAuth] Firebase data:', { hasFirebaseToken: !!firebaseToken, firebaseUid });
           console.log('[WebOAuth] Phone verified:', isPhoneVerified);
+          console.log('[WebOAuth] Tokens:', { hasAccessToken: !!accessToken, hasRefreshToken: !!refreshToken });
           
           return {
             success: true,
             data: {
               keylessAccount,
               backendToken,
+              accessToken,
+              refreshToken,
               userId: parseInt(userId, 10),
               firebaseToken,
               firebaseUid,

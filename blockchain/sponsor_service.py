@@ -315,19 +315,19 @@ class SponsorService:
             # Build transaction based on type
             if transaction_type == 'send':
                 tx_data = cls._build_send_transaction(
-                    account.sui_address,
+                    account.aptos_address,
                     prepared_coins,
                     transaction_params
                 )
             elif transaction_type == 'pay':
                 tx_data = cls._build_pay_transaction(
-                    account.sui_address,
+                    account.aptos_address,
                     prepared_coins,
                     transaction_params
                 )
             elif transaction_type == 'trade':
                 tx_data = cls._build_trade_transaction(
-                    account.sui_address,
+                    account.aptos_address,
                     prepared_coins,
                     transaction_params
                 )
@@ -349,7 +349,7 @@ class SponsorService:
             
             # Create sponsored transaction
             result = await cls.create_sponsored_transaction(
-                account.sui_address,
+                account.aptos_address,
                 tx_data,
                 transaction_params.get('user_signature'),
                 zklogin_info

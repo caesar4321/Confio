@@ -70,7 +70,7 @@ export const NetworkSwitchScreen: React.FC = () => {
     const account = currentNetwork === 'sui' ? suiAccount : aptosAccount;
     const balance = currentNetwork === 'sui' ? suiBalance : aptosBalance;
     const address = currentNetwork === 'sui' 
-      ? suiAccount?.suiAddress 
+      ? suiAccount?.aptosAddress 
       : aptosAccount?.address;
 
     return (
