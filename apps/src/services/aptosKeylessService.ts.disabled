@@ -1,0 +1,365 @@
+import * as Keychain from 'react-native-keychain';
+import { jwtDecode } from 'jwt-decode';
+import { Platform } from 'react-native';
+import { GOOGLE_CLIENT_IDS, API_URL, BLOCKCHAIN_CONFIG } from '../config/env';
+import auth from '@react-native-firebase/auth';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+
+// Constants
+const APTOS_KEYLESS_BRIDGE_URL = BLOCKCHAIN_CONFIG.aptos.keylessBridgeUrl;
+const KEYLESS_KEYCHAIN_SERVICE = 'com.confio.keyless';
+const KEYLESS_KEYCHAIN_USERNAME = 'keylessData';
+
+// Types
+export interface EphemeralKeyPair {
+  privateKey: string;
+  publicKey: string;
+  expiryDate: string;
+  nonce?: string;
+  blinder?: string;
+}
+
+export interface KeylessAccount {
+  address: string;
+  publicKey: string;
+  jwt: string;
+  ephemeralKeyPair: EphemeralKeyPair;
+  pepper?: string;
+}
+
+interface StoredKeylessData {
+  account: KeylessAccount;
+  provider: 'google' | 'apple';
+  timestamp: string;
+}
+
+export class AptosKeylessService {
+  private static instance: AptosKeylessService;
+  private currentAccount: KeylessAccount | null = null;
+  private ephemeralKeyPair: EphemeralKeyPair | null = null;
+  private firebaseIsInitialized = false;
+
+  private constructor() {}
+
+  public static getInstance(): AptosKeylessService {
+    if (!AptosKeylessService.instance) {
+      AptosKeylessService.instance = new AptosKeylessService();
+    }
+    return AptosKeylessService.instance;
+  }
+
+  // Initialize service and rehydrate stored data
+  public async initialize(): Promise<void> {
+    try {
+      console.log('[AptosKeyless] Initializing service...');
+      
+      // Initialize Firebase if needed
+      if (!this.firebaseIsInitialized) {
+        await this.initializeFirebase();
+        this.firebaseIsInitialized = true;
+      }
+
+      // Try to restore stored keyless data
+      await this.rehydrateKeylessData();
+      
+      console.log('[AptosKeyless] Service initialized successfully');
+    } catch (error) {
+      console.error('[AptosKeyless] Initialization error:', error);
+    }
+  }
+
+  private async initializeFirebase(): Promise<void> {
+    // Firebase is already initialized by the main auth service
+    console.log('[AptosKeyless] Firebase already initialized by main auth service');
+  }
+
+  // Generate ephemeral key pair
+  private async generateEphemeralKeyPair(): Promise<EphemeralKeyPair> {
+    try {
+      const response = await fetch(`${APTOS_KEYLESS_BRIDGE_URL}/api/keyless/ephemeral-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expiryHours: 24 })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to generate ephemeral key: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      return result.data;
+    } catch (error) {
+      console.error('[AptosKeyless] Error generating ephemeral key:', error);
+      throw error;
+    }
+  }
+
+  // Generate OAuth URL
+  private async generateOAuthUrl(
+    provider: 'google' | 'apple',
+    ephemeralKeyPair: EphemeralKeyPair
+  ): Promise<string> {
+    try {
+      const clientId = provider === 'google' 
+        ? GOOGLE_CLIENT_IDS.android // or iOS based on Platform
+        : 'your-apple-client-id';
+
+      const response = await fetch(`${APTOS_KEYLESS_BRIDGE_URL}/api/keyless/oauth-url`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          clientId,
+          redirectUri: 'com.confio://oauth/callback',
+          ephemeralPublicKey: ephemeralKeyPair.publicKey,
+          expiryDate: ephemeralKeyPair.expiryDate,
+          blinder: ephemeralKeyPair.blinder
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to generate OAuth URL: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      return result.data.url;
+    } catch (error) {
+      console.error('[AptosKeyless] Error generating OAuth URL:', error);
+      throw error;
+    }
+  }
+
+  // Derive Keyless account from JWT
+  private async deriveKeylessAccount(
+    jwt: string,
+    ephemeralKeyPair: EphemeralKeyPair
+  ): Promise<KeylessAccount> {
+    try {
+      const response = await fetch(`${APTOS_KEYLESS_BRIDGE_URL}/api/keyless/derive-account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jwt,
+          ephemeralKeyPair
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to derive account: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      return result.data;
+    } catch (error) {
+      console.error('[AptosKeyless] Error deriving account:', error);
+      throw error;
+    }
+  }
+
+  // Sign in with Google
+  public async signInWithGoogle(): Promise<KeylessAccount> {
+    try {
+      console.log('[AptosKeyless] Starting Google sign in...');
+
+      // Generate ephemeral key pair first
+      this.ephemeralKeyPair = await this.generateEphemeralKeyPair();
+      console.log('[AptosKeyless] Generated ephemeral key pair');
+
+      // Configure Google Sign In
+      GoogleSignin.configure({
+        webClientId: GOOGLE_CLIENT_IDS.web,
+        iosClientId: GOOGLE_CLIENT_IDS.ios,
+        offlineAccess: true,
+      });
+
+      // Sign in with Google
+      const userInfo = await GoogleSignin.signIn();
+      const tokens = await GoogleSignin.getTokens();
+      
+      if (!tokens.idToken) {
+        throw new Error('No ID token received from Google');
+      }
+
+      console.log('[AptosKeyless] Got JWT from Google');
+
+      // Derive Keyless account
+      const keylessAccount = await this.deriveKeylessAccount(
+        tokens.idToken,
+        this.ephemeralKeyPair
+      );
+
+      // Store the account
+      this.currentAccount = keylessAccount;
+      await this.storeKeylessData(keylessAccount, 'google');
+
+      console.log('[AptosKeyless] Successfully derived Keyless account:', keylessAccount.address);
+      return keylessAccount;
+    } catch (error) {
+      console.error('[AptosKeyless] Google sign in error:', error);
+      throw error;
+    }
+  }
+
+  // Sign in with Apple
+  public async signInWithApple(): Promise<KeylessAccount> {
+    try {
+      console.log('[AptosKeyless] Starting Apple sign in...');
+
+      // Generate ephemeral key pair first
+      this.ephemeralKeyPair = await this.generateEphemeralKeyPair();
+      console.log('[AptosKeyless] Generated ephemeral key pair');
+
+      // Use Firebase Auth for Apple Sign In
+      const appleAuthRequestResponse = await auth().signInWithCredential(
+        auth.AppleAuthProvider.credential()
+      );
+
+      const idToken = await appleAuthRequestResponse.user.getIdToken();
+      console.log('[AptosKeyless] Got JWT from Apple');
+
+      // Derive Keyless account
+      const keylessAccount = await this.deriveKeylessAccount(
+        idToken,
+        this.ephemeralKeyPair
+      );
+
+      // Store the account
+      this.currentAccount = keylessAccount;
+      await this.storeKeylessData(keylessAccount, 'apple');
+
+      console.log('[AptosKeyless] Successfully derived Keyless account:', keylessAccount.address);
+      return keylessAccount;
+    } catch (error) {
+      console.error('[AptosKeyless] Apple sign in error:', error);
+      throw error;
+    }
+  }
+
+  // Sign and submit transaction
+  public async signAndSubmitTransaction(transaction: any): Promise<any> {
+    try {
+      if (!this.currentAccount) {
+        throw new Error('No Keyless account available');
+      }
+
+      const response = await fetch(`${APTOS_KEYLESS_BRIDGE_URL}/api/keyless/sign-and-submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jwt: this.currentAccount.jwt,
+          ephemeralKeyPair: this.currentAccount.ephemeralKeyPair,
+          transaction,
+          pepper: this.currentAccount.pepper
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to submit transaction: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      return result.data;
+    } catch (error) {
+      console.error('[AptosKeyless] Transaction error:', error);
+      throw error;
+    }
+  }
+
+  // Get account balance
+  public async getBalance(address?: string): Promise<{ apt: string }> {
+    try {
+      const targetAddress = address || this.currentAccount?.address;
+      if (!targetAddress) {
+        throw new Error('No address available');
+      }
+
+      const response = await fetch(`${APTOS_KEYLESS_BRIDGE_URL}/api/keyless/balance/${targetAddress}`);
+      
+      if (!response.ok) {
+        throw new Error(`Failed to get balance: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      return result.data;
+    } catch (error) {
+      console.error('[AptosKeyless] Balance error:', error);
+      throw error;
+    }
+  }
+
+  // Store Keyless data securely
+  private async storeKeylessData(account: KeylessAccount, provider: 'google' | 'apple'): Promise<void> {
+    try {
+      const dataToStore: StoredKeylessData = {
+        account,
+        provider,
+        timestamp: new Date().toISOString()
+      };
+
+      // Store in Keychain for security
+      await Keychain.setInternetCredentials(
+        KEYLESS_KEYCHAIN_SERVICE,
+        KEYLESS_KEYCHAIN_USERNAME,
+        JSON.stringify(dataToStore)
+      );
+
+
+      console.log('[AptosKeyless] Stored Keyless data successfully');
+    } catch (error) {
+      console.error('[AptosKeyless] Error storing Keyless data:', error);
+    }
+  }
+
+  // Restore Keyless data
+  private async rehydrateKeylessData(): Promise<void> {
+    try {
+      // Try Keychain first
+      const keychainData = await Keychain.getInternetCredentials(KEYLESS_KEYCHAIN_SERVICE);
+      
+      if (keychainData && keychainData.password) {
+        const storedData: StoredKeylessData = JSON.parse(keychainData.password);
+        
+        // Check if ephemeral key is still valid
+        const expiryDate = new Date(storedData.account.ephemeralKeyPair.expiryDate);
+        if (expiryDate > new Date()) {
+          this.currentAccount = storedData.account;
+          this.ephemeralKeyPair = storedData.account.ephemeralKeyPair;
+          console.log('[AptosKeyless] Restored Keyless data from Keychain');
+        } else {
+          console.log('[AptosKeyless] Stored ephemeral key has expired');
+          await this.clearKeylessData();
+        }
+      }
+    } catch (error) {
+      console.error('[AptosKeyless] Error rehydrating Keyless data:', error);
+    }
+  }
+
+  // Clear stored data
+  private async clearKeylessData(): Promise<void> {
+    try {
+      await Keychain.resetInternetCredentials(KEYLESS_KEYCHAIN_SERVICE);
+      this.currentAccount = null;
+      this.ephemeralKeyPair = null;
+      console.log('[AptosKeyless] Cleared Keyless data');
+    } catch (error) {
+      console.error('[AptosKeyless] Error clearing Keyless data:', error);
+    }
+  }
+
+  // Sign out
+  public async signOut(): Promise<void> {
+    await this.clearKeylessData();
+    console.log('[AptosKeyless] Signed out successfully');
+  }
+
+  // Get current account
+  public getCurrentAccount(): KeylessAccount | null {
+    return this.currentAccount;
+  }
+
+  // Check if user is signed in
+  public isSignedIn(): boolean {
+    return !!this.currentAccount;
+  }
+}

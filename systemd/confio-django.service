@@ -1,0 +1,58 @@
+[Unit]
+Description=Confio Django Application
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=notify
+User=confio
+Group=confio
+WorkingDirectory=/opt/confio
+Environment="PATH=/opt/confio/venv/bin"
+Environment="PYTHONPATH=/opt/confio"
+Environment="DJANGO_SETTINGS_MODULE=config.settings"
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/confio/media /opt/confio/staticfiles /var/log/confio
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Process management
+ExecStart=/opt/confio/venv/bin/gunicorn \
+    --workers 4 \
+    --worker-class sync \
+    --bind unix:/run/confio/gunicorn.sock \
+    --error-logfile /var/log/confio/gunicorn-error.log \
+    --access-logfile /var/log/confio/gunicorn-access.log \
+    --log-level info \
+    --timeout 120 \
+    --graceful-timeout 30 \
+    config.wsgi:application
+
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s TERM $MAINPID
+
+# Restart policy
+Restart=always
+RestartSec=10
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

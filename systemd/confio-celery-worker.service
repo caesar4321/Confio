@@ -1,0 +1,61 @@
+[Unit]
+Description=Confio Celery Worker
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=forking
+User=confio
+Group=confio
+WorkingDirectory=/opt/confio
+Environment="PATH=/opt/confio/venv/bin"
+Environment="PYTHONPATH=/opt/confio"
+Environment="DJANGO_SETTINGS_MODULE=config.settings"
+Environment="CELERY_APP=config"
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/confio/media /opt/confio/staticfiles /var/log/confio /var/run/celery
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# Process management
+ExecStart=/opt/confio/venv/bin/celery multi start worker \
+    -A config \
+    --pidfile=/var/run/celery/%n.pid \
+    --logfile=/var/log/confio/celery-%n%I.log \
+    --loglevel=INFO \
+    --time-limit=300 \
+    --concurrency=4 \
+    --queues=default,high_priority,low_priority
+
+ExecStop=/opt/confio/venv/bin/celery multi stopwait worker \
+    --pidfile=/var/run/celery/%n.pid
+
+ExecReload=/opt/confio/venv/bin/celery multi restart worker \
+    -A config \
+    --pidfile=/var/run/celery/%n.pid \
+    --logfile=/var/log/confio/celery-%n%I.log \
+    --loglevel=INFO
+
+# Restart policy
+Restart=always
+RestartSec=10
+KillMode=control-group
+KillSignal=SIGTERM
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

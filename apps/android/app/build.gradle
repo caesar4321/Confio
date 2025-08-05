@@ -9,13 +9,42 @@ apply from: "../../node_modules/react-native-vector-icons/fonts.gradle"
 def jsRoot = file("$projectDir/../..")
 
 // 3) configure the built-in `react { … }` block
+// Load node binary path from local.properties if available
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
+def nodeBinary = localProperties.getProperty('node.binary') ?: 'node'
+
 react {
   root                   = jsRoot
   reactNativeDir         = file("$jsRoot/node_modules/react-native")
   codegenDir             = file("$jsRoot/node_modules/@react-native/codegen")
   cliFile                = file("$jsRoot/node_modules/react-native/cli.js")
-  nodeExecutableAndArgs  = ["node"]
+  nodeExecutableAndArgs  = [nodeBinary]
   newArchEnabled         = false  // Disable New Architecture
+}
+
+// Skip autolinking tasks since we're using manual linking
+afterEvaluate {
+    tasks.all { task ->
+        if (task.name.contains("generateAutolinkingPackageList") || 
+            task.name.contains("generatePackageList") ||
+            task.name.contains("autolink")) {
+            task.enabled = false
+        }
+    }
+}
+
+tasks.whenTaskAdded { task ->
+    if (task.name.contains("generateAutolinkingPackageList") || 
+        task.name.contains("generatePackageList") ||
+        task.name.contains("autolink")) {
+        task.enabled = false
+    }
 }
 
 // 4) any other scripts (fonts, etc)
@@ -59,7 +88,7 @@ println "Final properties: $envProperties"
 
 android {
     ndkVersion "27.1.12297006"
-    buildToolsVersion "35.0.0"  // Update to match AGP requirement
+    buildToolsVersion "35.0.0"
     compileSdkVersion rootProject.ext.compileSdkVersion
 
     namespace "com.Confio.Confio"
@@ -167,6 +196,7 @@ dependencies {
     implementation project(':react-native-worklets-core')
     implementation project(':react-native-device-info')
     implementation project(':notifee_react-native')
+    implementation project(':react-native-inappbrowser-reborn')
 
     // Add Google Sign-In dependencies
     implementation 'com.google.android.gms:play-services-auth:20.7.0'

@@ -192,35 +192,64 @@ class BalanceService:
     @classmethod
     def _fetch_from_blockchain(cls, account: Account, token: str) -> Dict[str, Decimal]:
         """Fetch balance directly from blockchain"""
-        # Run async code in sync context
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Check if this is an Aptos address (starts with 0x and 66 chars total)
+        is_aptos_address = (
+            account.sui_address and 
+            account.sui_address.startswith('0x') and 
+            len(account.sui_address) == 66
+        )
         
-        async def get_balance():
-            async with await get_pysui_client() as client:
-                if token == 'CUSD':
-                    return await client.get_cusd_balance(account.sui_address)
-                elif token == 'CONFIO':
-                    return await client.get_confio_balance(account.sui_address)
-                elif token == 'SUI':
-                    return await client.get_sui_balance(account.sui_address)
-                elif token == 'USDC':
-                    # USDC not implemented in pysui_client yet, return 0
-                    return Decimal('0')
-                else:
-                    return Decimal('0')
-        
-        try:
-            amount = loop.run_until_complete(get_balance())
-            logger.info(f"Blockchain balance for {account.sui_address} - {token}: {amount}")
+        if is_aptos_address:
+            # Use Aptos for token balances
+            from .aptos_balance_service import AptosBalanceService
             
-            return {
-                'amount': amount,
-                'timestamp': timezone.now()
+            # Get all balances from Aptos
+            all_balances = AptosBalanceService.get_all_balances(account, use_cache=False)
+            
+            # Map token name to balance data
+            token_map = {
+                'CUSD': all_balances['cusd'],
+                'CONFIO': all_balances['confio'],
+                'USDC': all_balances['usdc'],
+                'SUI': all_balances['sui']  # Always 0 now
             }
             
-        finally:
-            loop.close()
+            balance_data = token_map.get(token.upper(), {'amount': Decimal('0')})
+            amount = balance_data['amount']
+            
+            logger.info(f"Aptos balance for {account.sui_address} - {token}: {amount}")
+        else:
+            # Legacy Sui address - fetch from Sui network
+            logger.info(f"Detected Sui address format for {account.sui_address}, using Sui network")
+            
+            # Run async code in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            async def get_balance():
+                async with await get_pysui_client() as client:
+                    if token == 'CUSD':
+                        return await client.get_cusd_balance(account.sui_address)
+                    elif token == 'CONFIO':
+                        return await client.get_confio_balance(account.sui_address)
+                    elif token == 'SUI':
+                        return await client.get_sui_balance(account.sui_address)
+                    elif token == 'USDC':
+                        # USDC not on Sui
+                        return Decimal('0')
+                    else:
+                        return Decimal('0')
+            
+            try:
+                amount = loop.run_until_complete(get_balance())
+                logger.info(f"Sui balance for {account.sui_address} - {token}: {amount}")
+            finally:
+                loop.close()
+        
+        return {
+            'amount': amount,
+            'timestamp': timezone.now()
+        }
     
     @classmethod
     def _update_balance_cache(

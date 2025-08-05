@@ -38,6 +38,15 @@ if NETWORK == 'testnet':
     SPONSOR_ADDRESS = os.environ.get('SUI_SPONSOR_ADDRESS', "0xed36f82d851c5b54ebc8b58a71ea6473823e073a01ce8b6a5c04a4bcebaf6aef")
     SPONSOR_PRIVATE_KEY = os.environ.get('SUI_SPONSOR_PRIVATE_KEY', None)
     
+    # Aptos sponsor account for gas-free transactions  
+    APTOS_SPONSOR_ADDRESS = os.environ.get('APTOS_SPONSOR_ADDRESS', "0x75f38ae0c198dcedf766e0d2a39847f9b269052024e943c58970854b9cb70e2c")  # Use contract deployer as sponsor
+    APTOS_SPONSOR_PRIVATE_KEY = os.environ.get('APTOS_SPONSOR_PRIVATE_KEY', None)
+    
+    # Aptos network settings
+    APTOS_NETWORK = 'testnet'
+    APTOS_RPC_URL = "https://fullnode.testnet.aptoslabs.com/v1"
+    APTOS_INDEXER_URL = "https://indexer-testnet.staging.gcp.aptosdev.com/v1/graphql"
+    
 else:  # mainnet
     # QuickNode mainnet (future)
     SUI_RPC_URL = f"https://{os.environ.get('QUICKNODE_ENDPOINT')}"

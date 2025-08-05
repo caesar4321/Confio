@@ -1,158 +1,214 @@
-#[allow(unused_use, duplicate_alias, unused_variable)]
 module cusd::cusd {
-    use sui::object::{Self, UID};
-    use sui::tx_context::{Self, sender, TxContext};
-    use sui::transfer::{Self, public_transfer, share_object};
-    use sui::coin::{Self, Coin, TreasuryCap};
-    use sui::balance::{Self, Balance};
-    use sui::url::{Self};
-    use sui::event::{Self};
-    use sui::vec_set::{Self, VecSet};
-    use std::option::{Self};
+    use aptos_framework::fungible_asset::{Self, MintRef, TransferRef, BurnRef, Metadata, FungibleAsset};
+    use aptos_framework::object::{Self, Object};
+    use aptos_framework::primary_fungible_store;
+    use aptos_framework::signer;
+    use aptos_framework::event;
+    use std::error;
+    use std::signer::address_of;
+    use std::string::utf8;
+    use std::option;
+    use std::vector;
 
-    #[allow(unused_const)]
-    const ENotAuthorized: u64 = 1;
-    const EInvalidVaultAddress: u64 = 2;
-    const EAddressFrozen: u64 = 3;
-    const ESystemPaused: u64 = 4;
+    // Error codes
+    const E_NOT_ADMIN: u64 = 1;
+    const E_SYSTEM_PAUSED: u64 = 2;
+    const E_ADDRESS_FROZEN: u64 = 3;
+    const E_NOT_VAULT: u64 = 4;
 
-    public struct CUSD has drop {}
-    public struct AdminCap has key, store { id: UID }
-    public struct VaultRegistry has key, store { id: UID, vaults: VecSet<address> }
-    public struct FreezeRegistry has key, store { id: UID, frozen_addresses: VecSet<address> }
-    public struct PauseState has key, store { id: UID, is_paused: bool }
-    public struct BurnRequest has key, store { id: UID, cusd: Balance<CUSD>, requester: address }
-    public struct CUSDMinted has copy, drop { amount: u64, recipient: address, deposit_address: address }
-    public struct CUSDBurned has copy, drop { amount: u64, deposit_address: address }
-    public struct AddressFrozen has copy, drop { address: address }
-    public struct AddressUnfrozen has copy, drop { address: address }
-    public struct Paused has copy, drop {}
-    public struct Unpaused has copy, drop {}
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+    struct AdminConfig has key {
+        admin: address,
+        is_paused: bool,
+        frozen_addresses: vector<address>,
+        vault_addresses: vector<address>,
+    }
 
-    fun init(witness: CUSD, ctx: &mut TxContext) {
-        let (treasury_cap, metadata) = coin::create_currency(
-            witness,
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+    struct ManagedFungibleAsset has key {
+        mint_ref: MintRef,
+        transfer_ref: TransferRef,
+        burn_ref: BurnRef,
+    }
+
+    #[event]
+    struct CUSDMinted has drop, store {
+        amount: u64,
+        recipient: address,
+        deposit_address: address,
+    }
+
+    #[event]
+    struct CUSDBurned has drop, store {
+        amount: u64,
+        deposit_address: address,
+    }
+
+    #[event]
+    struct AddressFrozen has drop, store {
+        address: address,
+    }
+
+    #[event]
+    struct AddressUnfrozen has drop, store {
+        address: address,
+    }
+
+    #[event]
+    struct SystemPaused has drop, store {}
+
+    #[event]
+    struct SystemUnpaused has drop, store {}
+
+    /// Initialize the cUSD fungible asset
+    fun init_module(admin: &signer) {
+        let constructor_ref = object::create_named_object(admin, b"CUSD");
+        
+        primary_fungible_store::create_primary_store_enabled_fungible_asset(
+            &constructor_ref,
+            option::none(),
+            utf8(b"Conf\xc3\xado Dollar"),
+            utf8(b"CUSD"),
             6,
-            b"CUSD",
-            b"Confío Dollar",
-            b"A USD-pegged stablecoin for Confío",
-            option::some(url::new_unsafe_from_bytes(b"https://raw.githubusercontent.com/caesar4321/Confio/main/web/src/images/cUSD.png")),
-            ctx
+            utf8(b"https://raw.githubusercontent.com/caesar4321/Confio/main/web/src/images/cUSD.png"),
+            utf8(b"https://confio.lat"),
         );
-        public_transfer(metadata, sender(ctx));
-        public_transfer(treasury_cap, sender(ctx));
-        transfer::transfer(AdminCap { id: object::new(ctx) }, sender(ctx));
-        transfer::transfer(VaultRegistry { id: object::new(ctx), vaults: vec_set::empty() }, sender(ctx));
-        share_object(FreezeRegistry { id: object::new(ctx), frozen_addresses: vec_set::empty() });
-        share_object(PauseState { id: object::new(ctx), is_paused: false });
+
+        // Create mint, burn, and transfer refs
+        let mint_ref = fungible_asset::generate_mint_ref(&constructor_ref);
+        let burn_ref = fungible_asset::generate_burn_ref(&constructor_ref);
+        let transfer_ref = fungible_asset::generate_transfer_ref(&constructor_ref);
+        let metadata_object_signer = object::generate_signer(&constructor_ref);
+
+        move_to(
+            &metadata_object_signer,
+            ManagedFungibleAsset { mint_ref, transfer_ref, burn_ref }
+        );
+
+        // Initialize admin config
+        move_to(admin, AdminConfig {
+            admin: address_of(admin),
+            is_paused: false,
+            frozen_addresses: vector::empty(),
+            vault_addresses: vector::empty(),
+        });
     }
 
-    // Note: make_objects_shared removed due to persistent share_object_impl errors
-    // (code 0) in testnet. Sharing is handled in init to ensure PauseState and
-    // FreezeRegistry are globally accessible.
-
-    public entry fun pause(_admin: &AdminCap, pause_state: &mut PauseState, _ctx: &mut TxContext) {
-        assert!(!pause_state.is_paused, ESystemPaused);
-        pause_state.is_paused = true;
-        event::emit(Paused {});
+    #[view]
+    public fun get_metadata(): Object<Metadata> {
+        let asset_address = object::create_object_address(&@cusd, b"CUSD");
+        object::address_to_object<Metadata>(asset_address)
     }
 
-    public entry fun unpause(_admin: &AdminCap, pause_state: &mut PauseState, _ctx: &mut TxContext) {
-        assert!(pause_state.is_paused, ESystemPaused);
-        pause_state.is_paused = false;
-        event::emit(Unpaused {});
-    }
-
-    public entry fun add_vault(_admin: &AdminCap, registry: &mut VaultRegistry, vault: address, _ctx: &mut TxContext) {
-        vec_set::insert(&mut registry.vaults, vault);
-    }
-
-    public entry fun remove_vault(_admin: &AdminCap, registry: &mut VaultRegistry, vault: address, _ctx: &mut TxContext) {
-        vec_set::remove(&mut registry.vaults, &vault);
-    }
-
-    public entry fun freeze_address(_admin: &AdminCap, registry: &mut FreezeRegistry, address: address, _ctx: &mut TxContext) {
-        vec_set::insert(&mut registry.frozen_addresses, address);
-        event::emit(AddressFrozen { address });
-    }
-
-    public entry fun unfreeze_address(_admin: &AdminCap, registry: &mut FreezeRegistry, address: address, _ctx: &mut TxContext) {
-        vec_set::remove(&mut registry.frozen_addresses, &address);
-        event::emit(AddressUnfrozen { address });
-    }
-
-    public fun mint(
-        treasury_cap: &mut TreasuryCap<CUSD>,
-        pause_state: &PauseState,
-        freeze_registry: &FreezeRegistry,
-        amount: u64,
-        deposit_address: address,
-        recipient: address,
-        ctx: &mut TxContext
-    ): Coin<CUSD> {
-        assert!(!pause_state.is_paused, ESystemPaused);
-        assert!(!vec_set::contains(&freeze_registry.frozen_addresses, &recipient), EAddressFrozen);
-        let coin = coin::mint(treasury_cap, amount, ctx);
-        event::emit(CUSDMinted { amount, recipient, deposit_address });
-        coin
-    }
-
-    public entry fun request_burn(
-        cusd: Coin<CUSD>,
-        pause_state: &PauseState,
-        freeze_registry: &FreezeRegistry,
-        ctx: &mut TxContext
-    ) {
-        assert!(!pause_state.is_paused, ESystemPaused);
-        let requester = sender(ctx);
-        assert!(!vec_set::contains(&freeze_registry.frozen_addresses, &requester), EAddressFrozen);
-        let balance = coin::into_balance(cusd);
-        share_object(BurnRequest { id: object::new(ctx), cusd: balance, requester });
-    }
-
-    public entry fun execute_burn(
-        registry: &VaultRegistry,
-        treasury_cap: &mut TreasuryCap<CUSD>,
-        pause_state: &PauseState,
-        freeze_registry: &FreezeRegistry,
-        request: BurnRequest,
-        vault_address: address,
-        ctx: &mut TxContext
-    ) {
-        assert!(!pause_state.is_paused, ESystemPaused);
-        assert!(vec_set::contains(&registry.vaults, &vault_address), EInvalidVaultAddress);
-        let BurnRequest { id, cusd, requester } = request;
-        assert!(!vec_set::contains(&freeze_registry.frozen_addresses, &requester), EAddressFrozen);
-        let coin = coin::from_balance(cusd, ctx);
-        let amount = coin::burn(treasury_cap, coin);
-        event::emit(CUSDBurned { amount, deposit_address: vault_address });
-        object::delete(id);
-    }
-
+    /// Mint new cUSD tokens
     public entry fun mint_and_transfer(
-        treasury_cap: &mut TreasuryCap<CUSD>,
-        pause_state: &PauseState,
-        freeze_registry: &FreezeRegistry,
+        admin: &signer,
         amount: u64,
         deposit_address: address,
         recipient: address,
-        ctx: &mut TxContext
-    ) {
-        let coin = mint(treasury_cap, pause_state, freeze_registry, amount, deposit_address, recipient, ctx);
-        public_transfer(coin, recipient);
+    ) acquires AdminConfig, ManagedFungibleAsset {
+        let admin_config = borrow_global<AdminConfig>(@cusd);
+        assert!(address_of(admin) == admin_config.admin, error::permission_denied(E_NOT_ADMIN));
+        assert!(!admin_config.is_paused, error::invalid_state(E_SYSTEM_PAUSED));
+        assert!(!vector::contains(&admin_config.frozen_addresses, &recipient), error::invalid_state(E_ADDRESS_FROZEN));
+
+        let asset = get_metadata();
+        let managed_fungible_asset = borrow_global<ManagedFungibleAsset>(object::object_address(&asset));
+        let fa = fungible_asset::mint(&managed_fungible_asset.mint_ref, amount);
+        primary_fungible_store::deposit(recipient, fa);
+
+        event::emit(CUSDMinted {
+            amount,
+            recipient,
+            deposit_address,
+        });
     }
 
+    /// Burn cUSD tokens
+    public entry fun burn(
+        user: &signer,
+        amount: u64,
+        vault_address: address,
+    ) acquires AdminConfig, ManagedFungibleAsset {
+        let admin_config = borrow_global<AdminConfig>(@cusd);
+        assert!(!admin_config.is_paused, error::invalid_state(E_SYSTEM_PAUSED));
+        assert!(vector::contains(&admin_config.vault_addresses, &vault_address), error::invalid_argument(E_NOT_VAULT));
+        
+        let user_address = address_of(user);
+        assert!(!vector::contains(&admin_config.frozen_addresses, &user_address), error::invalid_state(E_ADDRESS_FROZEN));
+
+        let asset = get_metadata();
+        let managed_fungible_asset = borrow_global<ManagedFungibleAsset>(object::object_address(&asset));
+        let fa = primary_fungible_store::withdraw(user, asset, amount);
+        fungible_asset::burn(&managed_fungible_asset.burn_ref, fa);
+
+        event::emit(CUSDBurned {
+            amount,
+            deposit_address: vault_address,
+        });
+    }
+
+    /// Transfer cUSD tokens with freeze checks
     public entry fun transfer_cusd(
-        cusd: Coin<CUSD>,
-        pause_state: &PauseState,
-        freeze_registry: &FreezeRegistry,
+        sender: &signer,
         recipient: address,
-        ctx: &mut TxContext
-    ) {
-        assert!(!pause_state.is_paused, ESystemPaused);
-        let sender_addr = sender(ctx);
-        assert!(!vec_set::contains(&freeze_registry.frozen_addresses, &sender_addr), EAddressFrozen);
-        assert!(!vec_set::contains(&freeze_registry.frozen_addresses, &recipient), EAddressFrozen);
-        public_transfer(cusd, recipient);
+        amount: u64,
+    ) acquires AdminConfig {
+        let admin_config = borrow_global<AdminConfig>(@cusd);
+        assert!(!admin_config.is_paused, error::invalid_state(E_SYSTEM_PAUSED));
+        
+        let sender_address = address_of(sender);
+        assert!(!vector::contains(&admin_config.frozen_addresses, &sender_address), error::invalid_state(E_ADDRESS_FROZEN));
+        assert!(!vector::contains(&admin_config.frozen_addresses, &recipient), error::invalid_state(E_ADDRESS_FROZEN));
+
+        let asset = get_metadata();
+        primary_fungible_store::transfer(sender, asset, recipient, amount);
+    }
+
+    /// Admin functions
+    public entry fun pause(admin: &signer) acquires AdminConfig {
+        let admin_config = borrow_global_mut<AdminConfig>(@cusd);
+        assert!(address_of(admin) == admin_config.admin, error::permission_denied(E_NOT_ADMIN));
+        admin_config.is_paused = true;
+        event::emit(SystemPaused {});
+    }
+
+    public entry fun unpause(admin: &signer) acquires AdminConfig {
+        let admin_config = borrow_global_mut<AdminConfig>(@cusd);
+        assert!(address_of(admin) == admin_config.admin, error::permission_denied(E_NOT_ADMIN));
+        admin_config.is_paused = false;
+        event::emit(SystemUnpaused {});
+    }
+
+    public entry fun add_vault(admin: &signer, vault: address) acquires AdminConfig {
+        let admin_config = borrow_global_mut<AdminConfig>(@cusd);
+        assert!(address_of(admin) == admin_config.admin, error::permission_denied(E_NOT_ADMIN));
+        vector::push_back(&mut admin_config.vault_addresses, vault);
+    }
+
+    public entry fun remove_vault(admin: &signer, vault: address) acquires AdminConfig {
+        let admin_config = borrow_global_mut<AdminConfig>(@cusd);
+        assert!(address_of(admin) == admin_config.admin, error::permission_denied(E_NOT_ADMIN));
+        let (found, index) = vector::index_of(&admin_config.vault_addresses, &vault);
+        if (found) {
+            vector::remove(&mut admin_config.vault_addresses, index);
+        };
+    }
+
+    public entry fun freeze_address(admin: &signer, address_to_freeze: address) acquires AdminConfig {
+        let admin_config = borrow_global_mut<AdminConfig>(@cusd);
+        assert!(address_of(admin) == admin_config.admin, error::permission_denied(E_NOT_ADMIN));
+        vector::push_back(&mut admin_config.frozen_addresses, address_to_freeze);
+        event::emit(AddressFrozen { address: address_to_freeze });
+    }
+
+    public entry fun unfreeze_address(admin: &signer, address_to_unfreeze: address) acquires AdminConfig {
+        let admin_config = borrow_global_mut<AdminConfig>(@cusd);
+        assert!(address_of(admin) == admin_config.admin, error::permission_denied(E_NOT_ADMIN));
+        let (found, index) = vector::index_of(&admin_config.frozen_addresses, &address_to_unfreeze);
+        if (found) {
+            vector::remove(&mut admin_config.frozen_addresses, index);
+        };
+        event::emit(AddressUnfrozen { address: address_to_unfreeze });
     }
 }

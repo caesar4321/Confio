@@ -1,0 +1,16 @@
+{
+  "name": "confio-graphql",
+  "version": "1.0.0",
+  "description": "GraphQL server for Confio legal documents",
+  "main": "src/index.ts",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "test": "echo \"No tests yet\""
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240806.0",
+    "typescript": "^5.5.4",
+    "wrangler": "^3.67.1"
+  }
+}

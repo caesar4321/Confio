@@ -36,6 +36,13 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
 import hashlib
+from .keyless_mutations import (
+    GenerateEphemeralKey, 
+    DeriveKeylessAccount, 
+    SignAndSubmitTransaction,
+    KeylessQuery,
+    KeylessMutations
+)
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -877,12 +884,146 @@ class InitiateTelegramVerification(graphene.Mutation):
                 error=str(e)
             )
 
+class InitializeAuth(graphene.Mutation):
+    """Initialize authentication with Aptos Keyless Account"""
+    class Arguments:
+        firebaseToken = graphene.String(required=True)
+        providerToken = graphene.String(required=True)
+        provider = graphene.String(required=True)
+        deviceFingerprint = graphene.String(required=False)
+        keylessAddress = graphene.String(required=True)
+    
+    authAccessToken = graphene.String()
+    authRefreshToken = graphene.String()
+    isPhoneVerified = graphene.Boolean()
+    success = graphene.Boolean()
+    error = graphene.String()
+    
+    def mutate(self, info, firebaseToken, providerToken, provider, keylessAddress, deviceFingerprint=None):
+        try:
+            # Verify Firebase token
+            decoded_token = auth.verify_id_token(firebaseToken)
+            firebase_uid = decoded_token['uid']
+            email = decoded_token.get('email', '')
+            name = decoded_token.get('name', '')
+            
+            # Get or create User
+            User = get_user_model()
+            
+            # Split name into first and last name
+            first_name = ''
+            last_name = ''
+            if name:
+                name_parts = name.strip().split()
+                if name_parts:
+                    first_name = name_parts[0]
+                    if len(name_parts) > 1:
+                        last_name = ' '.join(name_parts[1:])
+            
+            with transaction.atomic():
+                # Try to get existing user
+                try:
+                    user = User.objects.get(firebase_uid=firebase_uid)
+                    
+                    # Check if user is banned
+                    from security.utils import check_user_banned
+                    is_banned, ban_reason = check_user_banned(user)
+                    
+                    if is_banned:
+                        return InitializeAuth(
+                            success=False,
+                            error="Your account has been suspended. Please contact support."
+                        )
+                    
+                    # Update user's address (reusing sui_address field for Aptos)
+                    user.sui_address = keylessAddress
+                    user.save()
+                    
+                except User.DoesNotExist:
+                    # Create new user
+                    # Generate unique username
+                    random_username = f"user_{uuid.uuid4().hex[:8]}"
+                    for _ in range(10):
+                        if not User.objects.filter(username=random_username).exists():
+                            break
+                        random_username = f"user_{uuid.uuid4().hex[:8]}"
+                    
+                    user = User.objects.create(
+                        username=random_username,
+                        email=email,
+                        firebase_uid=firebase_uid,
+                        first_name=first_name,
+                        last_name=last_name,
+                        sui_address=keylessAddress,  # Reusing field for Aptos
+                        auth_token_version=0
+                    )
+                    
+                    # Create default personal account
+                    from users.models import Account
+                    Account.objects.create(
+                        user=user,
+                        account_type='personal',
+                        account_index=0
+                    )
+                
+                # Check if phone is verified
+                is_phone_verified = bool(user.phone_number and user.phone_country)
+                
+                # Generate JWT tokens
+                token_payload = {
+                    'user_id': user.id,
+                    'username': user.username,
+                    'token_version': user.auth_token_version,
+                    'exp': datetime.utcnow() + timedelta(days=7),
+                    'iat': datetime.utcnow(),
+                    'account_type': 'personal',
+                    'account_index': 0
+                }
+                
+                token = jwt.encode(
+                    token_payload,
+                    settings.SECRET_KEY,
+                    algorithm='HS256'
+                )
+                
+                # Generate refresh token
+                refresh_payload = {
+                    'user_id': user.id,
+                    'token_version': user.auth_token_version,
+                    'exp': datetime.utcnow() + timedelta(days=30),
+                    'iat': datetime.utcnow(),
+                    'type': 'refresh'
+                }
+                
+                refresh_token = jwt.encode(
+                    refresh_payload,
+                    settings.SECRET_KEY,
+                    algorithm='HS256'
+                )
+                
+                return InitializeAuth(
+                    authAccessToken=token,
+                    authRefreshToken=refresh_token,
+                    isPhoneVerified=is_phone_verified,
+                    success=True
+                )
+                
+        except Exception as e:
+            logger.error(f"Error in InitializeAuth: {str(e)}")
+            return InitializeAuth(success=False, error=str(e))
+
 class Mutation(graphene.ObjectType):
     initialize_zk_login = InitializeZkLogin.Field()
     finalize_zk_login = FinalizeZkLogin.Field()
     initiate_telegram_verification = InitiateTelegramVerification.Field()
+    
+    # Aptos Keyless mutations
+    initialize_auth = InitializeAuth.Field()
+    generate_ephemeral_key = GenerateEphemeralKey.Field()
+    derive_keyless_account = DeriveKeylessAccount.Field()
+    sign_and_submit_transaction = SignAndSubmitTransaction.Field()
 
-class Query(graphene.ObjectType):
+class Query(KeylessQuery, graphene.ObjectType):
     # ZkLoginProof queries removed - proofs remain client-side
     ping = graphene.String()
     currentEpoch = graphene.Int()

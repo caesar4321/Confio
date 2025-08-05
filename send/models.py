@@ -100,8 +100,8 @@ class SendTransaction(SoftDeleteModel):
     )
 
     # Blockchain addresses
-    sender_address = models.CharField(max_length=66)  # Sui addresses are 0x + 32 bytes (66 chars total)
-    recipient_address = models.CharField(max_length=66)  # Sui addresses are 0x + 32 bytes (66 chars total)
+    sender_address = models.CharField(max_length=70)  # Aptos addresses can be longer than Sui (0x + up to 32 bytes)
+    recipient_address = models.CharField(max_length=70)  # Aptos addresses can be longer than Sui (0x + up to 32 bytes)
 
     # Transaction details
     amount = models.DecimalField(max_digits=19, decimal_places=6)  # Support up to 9,999,999,999,999.999999
@@ -109,12 +109,12 @@ class SendTransaction(SoftDeleteModel):
     memo = models.TextField(blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
     transaction_hash = models.CharField(
-        max_length=66, 
+        max_length=200, 
         blank=True,
         null=True,
         unique=True,
-        help_text="Sui transaction digest (0x + 32 bytes, 66 hex characters total)"
-    )  # Sui transaction hash
+        help_text="Transaction hash (Aptos transaction hashes can be longer than Sui)"
+    )  # Aptos/Sui transaction hash
     error_message = models.TextField(blank=True)
     
     # Idempotency key for preventing duplicate transactions

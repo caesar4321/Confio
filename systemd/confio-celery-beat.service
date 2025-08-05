@@ -1,0 +1,51 @@
+[Unit]
+Description=Confio Celery Beat Scheduler
+After=network.target postgresql.service redis.service confio-celery-worker.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=confio
+Group=confio
+WorkingDirectory=/opt/confio
+Environment="PATH=/opt/confio/venv/bin"
+Environment="PYTHONPATH=/opt/confio"
+Environment="DJANGO_SETTINGS_MODULE=config.settings"
+Environment="CELERY_APP=config"
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/confio /var/log/confio
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# Process management
+ExecStart=/opt/confio/venv/bin/celery -A config beat \
+    --loglevel=INFO \
+    --logfile=/var/log/confio/celery-beat.log \
+    --schedule=/opt/confio/celerybeat-schedule.db \
+    --pidfile=/var/run/celery/celerybeat.pid
+
+ExecStop=/bin/kill -s TERM $MAINPID
+
+# Restart policy
+Restart=always
+RestartSec=10
+KillMode=process
+KillSignal=SIGTERM
+
+# Resource limits
+LimitNOFILE=4096
+LimitNPROC=512
+
+[Install]
+WantedBy=multi-user.target

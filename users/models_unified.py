@@ -78,7 +78,7 @@ class UnifiedTransactionTable(models.Model):
     amount = models.CharField(max_length=32)
     token_type = models.CharField(max_length=10, choices=TOKEN_TYPES)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES)
-    transaction_hash = models.CharField(max_length=66, blank=True, default='')
+    transaction_hash = models.CharField(max_length=200, blank=True, default='')
     error_message = models.TextField(blank=True, default='')
     
     # Sender info
@@ -99,7 +99,7 @@ class UnifiedTransactionTable(models.Model):
     sender_type = models.CharField(max_length=10, choices=ACCOUNT_TYPE_CHOICES)
     sender_display_name = models.CharField(max_length=255, blank=True)
     sender_phone = models.CharField(max_length=30, blank=True)
-    sender_address = models.CharField(max_length=66, blank=True, default='')
+    sender_address = models.CharField(max_length=70, blank=True, default='')
     
     # Counterparty info (recipient for sends, merchant for payments)
     counterparty_user = models.ForeignKey(
@@ -119,7 +119,7 @@ class UnifiedTransactionTable(models.Model):
     counterparty_type = models.CharField(max_length=10, choices=ACCOUNT_TYPE_CHOICES)
     counterparty_display_name = models.CharField(max_length=255, blank=True)
     counterparty_phone = models.CharField(max_length=30, blank=True, null=True)
-    counterparty_address = models.CharField(max_length=66, blank=True, default='')
+    counterparty_address = models.CharField(max_length=70, blank=True, default='')
     
     # Additional fields
     description = models.TextField(blank=True)
@@ -127,8 +127,8 @@ class UnifiedTransactionTable(models.Model):
     payment_reference_id = models.CharField(max_length=32, blank=True, null=True)
     
     # Address fields for easy filtering
-    from_address = models.CharField(max_length=66, blank=True, default='')
-    to_address = models.CharField(max_length=66, blank=True, default='')
+    from_address = models.CharField(max_length=70, blank=True, default='')
+    to_address = models.CharField(max_length=70, blank=True, default='')
     
     # Invitation tracking fields
     is_invitation = models.BooleanField(default=False)

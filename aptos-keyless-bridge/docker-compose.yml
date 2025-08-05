@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  aptos-keyless-bridge:
+    build: .
+    container_name: aptos-keyless-bridge
+    restart: unless-stopped
+    ports:
+      - "3333:3333"
+    environment:
+      - PORT=3333
+      - NODE_ENV=production
+      - APTOS_NETWORK=devnet
+      - LOG_LEVEL=info
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8000
+      # Add your production values here or use .env file
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3333/api/keyless/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - aptos-network
+
+networks:
+  aptos-network:
+    driver: bridge

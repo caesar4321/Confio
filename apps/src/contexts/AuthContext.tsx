@@ -111,18 +111,20 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           fetchPolicy: 'network-only',
         });
         
-        // Validate phone verification status and sync with zkLogin data
+        // Validate phone verification status and sync with Keyless data
         const serverPhoneVerified = data?.me?.phoneNumber && data?.me?.phoneCountry;
         console.log('Profile refresh - Server phone verification status:', serverPhoneVerified);
         
         try {
           const authService = AuthService.getInstance();
-          const zkLoginData = await authService.getStoredZkLoginData();
+          const keylessData = await authService.getStoredKeylessData();
           
-          if (zkLoginData && zkLoginData.isPhoneVerified !== serverPhoneVerified) {
-            console.log(`Profile refresh - Syncing zkLogin phone verification: ${zkLoginData.isPhoneVerified} -> ${serverPhoneVerified}`);
-            zkLoginData.isPhoneVerified = serverPhoneVerified;
-            await authService.storeZkLoginData(zkLoginData);
+          if (keylessData) {
+            // Store phone verification status in the stored data
+            const updatedData = {
+              ...keylessData,
+              isPhoneVerified: serverPhoneVerified
+            };
             
             // If phone verification was lost on server but user is authenticated, require re-verification
             if (!serverPhoneVerified && isAuthenticated) {
@@ -208,6 +210,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const handleSuccessfulLogin = async (isPhoneVerified: boolean) => {
     try {
       console.log('Handling successful login...');
+      console.log('Phone verified status:', isPhoneVerified);
+      
       if (isPhoneVerified) {
         console.log('User has verified phone number');
         setIsAuthenticated(true);
@@ -253,48 +257,61 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     try {
       console.log('Checking auth state...');
       const authService = AuthService.getInstance();
-      const zkLoginData = await authService.getStoredZkLoginData();
-      console.log('Auth state zkLogin data:', JSON.stringify(zkLoginData, null, 2));
       
-      if (zkLoginData) {
-        const hasRequiredFields = zkLoginData.zkProof && 
-                                zkLoginData.salt && 
-                                zkLoginData.subject && 
-                                zkLoginData.clientId;
+      // Initialize auth service
+      await authService.initialize();
+      
+      // Check if there's a stored Keyless account
+      const keylessData = await authService.getStoredKeylessData();
+      
+      if (keylessData) {
+        // Check if we have a valid token
+        const token = await authService.getToken();
         
-        console.log('Has required fields:', hasRequiredFields);
-        console.log('Is phone verified (from zkLogin):', zkLoginData.isPhoneVerified);
-        
-        if (hasRequiredFields) {
-          if (zkLoginData.isPhoneVerified) {
-            console.log('Valid zkLogin data found with verified phone');
-            setIsAuthenticated(true);
-            navigateToScreen('Main');
-          } else {
-            console.log('Valid zkLogin data found but phone not verified');
-            // Keep user in Auth flow for phone verification
-            setIsAuthenticated(false);
-            if (isNavigationReady && navigationRef.current) {
-              navigationRef.current.reset({
-                index: 0,
-                routes: [
-                  {
-                    name: 'Auth',
-                    params: {
-                      screen: 'PhoneVerification',
-                    },
-                  },
-                ],
-              });
+        if (token) {
+          console.log('Found valid authentication token');
+          
+          // Validate token with server and get user profile
+          try {
+            const { data } = await apolloClient.query({
+              query: GET_ME,
+              fetchPolicy: 'network-only',
+            });
+            
+            if (data?.me) {
+              const hasVerifiedPhone = data.me.phoneNumber && data.me.phoneCountry;
+              console.log('User profile loaded, phone verified:', hasVerifiedPhone);
+              
+              if (hasVerifiedPhone) {
+                setIsAuthenticated(true);
+                setProfileData({
+                  userProfile: data.me,
+                  businessProfile: undefined,
+                  currentAccountType: 'personal'
+                });
+                navigateToScreen('Main');
+              } else {
+                console.log('User needs phone verification');
+                setIsAuthenticated(false);
+                navigateToScreen('Auth');
+              }
+            } else {
+              console.log('No user profile found');
+              setIsAuthenticated(false);
+              navigateToScreen('Auth');
             }
+          } catch (error) {
+            console.error('Error validating token:', error);
+            setIsAuthenticated(false);
+            navigateToScreen('Auth');
           }
         } else {
-          console.log('Invalid zkLogin data, missing required fields');
+          console.log('No valid token found');
           setIsAuthenticated(false);
           navigateToScreen('Auth');
         }
       } else {
-        console.log('No zkLogin data found, setting isAuthenticated to false');
+        console.log('No Keyless data found');
         setIsAuthenticated(false);
         navigateToScreen('Auth');
       }
@@ -310,88 +327,100 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const checkLocalAuthState = async (): Promise<boolean> => {
     try {
       const authService = AuthService.getInstance();
-      const hasZkLoginData = await authService.getStoredZkLoginData();
-      setIsAuthenticated(!!hasZkLoginData);
-      return !!hasZkLoginData;
+      const keylessData = await authService.getStoredKeylessData();
+      const token = await authService.getToken();
+      
+      return !!(keylessData && token);
     } catch (error) {
-      console.error('Error checking auth state:', error);
-      setIsAuthenticated(false);
+      console.error('Error checking local auth state:', error);
       return false;
     }
   };
 
   const signOut = async () => {
     try {
-      console.log('Starting sign out process...');
+      setIsLoading(true);
+      console.log('Signing out...');
+      
+      // Unregister FCM token before signing out
+      console.log('[AuthContext] Unregistering FCM token before sign out...');
+      try {
+        const { default: messagingService } = await import('../services/messagingService');
+        await messagingService.unregisterTokenOnSignOut();
+      } catch (fcmError) {
+        console.error('[AuthContext] Failed to unregister FCM token:', fcmError);
+        // Don't block sign out if FCM unregistration fails
+      }
+      
       const authService = AuthService.getInstance();
       await authService.signOut();
+      
+      // Clear Apollo cache
+      await apolloClient.clearStore();
+      
+      // Clear all state
       setIsAuthenticated(false);
       setProfileData(null);
+      
+      console.log('Sign out complete, navigating to Auth screen');
       navigateToScreen('Auth');
     } catch (error) {
       console.error('Error signing out:', error);
+      // Force navigation to Auth even if sign out fails
       setIsAuthenticated(false);
       setProfileData(null);
+      navigateToScreen('Auth');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const completePhoneVerification = async () => {
     try {
-      console.log('Completing phone verification...');
-      
-      // Update the stored zkLoginData to mark phone as verified
-      const authService = AuthService.getInstance();
-      const zkLoginData = await authService.getStoredZkLoginData();
-      
-      if (zkLoginData) {
-        // Update the phone verification status
-        zkLoginData.isPhoneVerified = true;
-        await authService.storeZkLoginData(zkLoginData);
-        console.log('Updated zkLogin data with phone verification status');
-      }
-      
+      console.log('Phone verification completed');
       setIsAuthenticated(true);
-      await refreshProfile('personal');
+      await refreshProfile('personal'); // Refresh profile after phone verification
       
-      // Ensure FCM token is registered after phone verification
+      // Register FCM token after phone verification
       console.log('[AuthContext] Registering FCM token after phone verification...');
       try {
         const { default: messagingService } = await import('../services/messagingService');
         await messagingService.ensureTokenRegisteredForCurrentUser();
       } catch (fcmError) {
-        console.error('[AuthContext] Failed to register FCM token:', fcmError);
-        // Don't block navigation if FCM registration fails
+        console.error('[AuthContext] Failed to register FCM token after phone verification:', fcmError);
+        // Don't block the flow if FCM registration fails
       }
       
       navigateToScreen('Main');
     } catch (error) {
       console.error('Error completing phone verification:', error);
+      setIsAuthenticated(false);
+      navigateToScreen('Auth');
     }
   };
 
-  return (
-    <AuthContext.Provider value={{ 
-      isAuthenticated, 
-      isLoading, 
-      signOut, 
-      checkLocalAuthState, 
-      handleSuccessfulLogin, 
-      completePhoneVerification,
-      profileData, 
-      isProfileLoading, 
-      refreshProfile,
-      userProfile: profileData?.userProfile,
-      isUserProfileLoading: isProfileLoading && profileData?.currentAccountType === 'personal'
-    }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  const value: AuthContextType = {
+    isAuthenticated,
+    isLoading,
+    signOut,
+    checkLocalAuthState,
+    handleSuccessfulLogin,
+    completePhoneVerification,
+    profileData,
+    isProfileLoading,
+    refreshProfile,
+    // Backward compatibility - expose user profile directly
+    userProfile: profileData?.userProfile,
+    isUserProfileLoading: isProfileLoading && profileData?.currentAccountType === 'personal',
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
-}; 
+};

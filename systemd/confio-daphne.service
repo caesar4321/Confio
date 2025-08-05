@@ -1,0 +1,52 @@
+[Unit]
+Description=Confio Daphne WebSocket Server
+After=network.target postgresql.service redis.service confio-django.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=confio
+Group=confio
+WorkingDirectory=/opt/confio
+Environment="PATH=/opt/confio/venv/bin"
+Environment="PYTHONPATH=/opt/confio"
+Environment="DJANGO_SETTINGS_MODULE=config.settings"
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/confio/media /opt/confio/staticfiles /var/log/confio
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# Process management
+ExecStart=/opt/confio/venv/bin/daphne \
+    -b 127.0.0.1 \
+    -p 8001 \
+    --access-log /var/log/confio/daphne-access.log \
+    --proxy-headers \
+    config.asgi:application
+
+ExecReload=/bin/kill -s HUP $MAINPID
+ExecStop=/bin/kill -s TERM $MAINPID
+
+# Restart policy
+Restart=always
+RestartSec=10
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+[Install]
+WantedBy=multi-user.target

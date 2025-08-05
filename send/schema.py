@@ -17,7 +17,7 @@ class PrepareTransactionInput(graphene.InputObjectType):
     # Recipient identification - use ONE of these
     recipient_user_id = graphene.ID(description="User ID of the recipient (for Confío users)")
     recipient_phone = graphene.String(description="Phone number of the recipient (for any user)")
-    recipient_address = graphene.String(description="Sui address for external wallet recipients (0x...)")
+    recipient_address = graphene.String(description="Aptos address for external wallet recipients (0x...)")
     
     # Transaction details
     amount = graphene.String(required=True, description="Amount to send (e.g., '10.50')")
@@ -29,7 +29,7 @@ class PrepareTransactionInput(graphene.InputObjectType):
 class ExecuteTransactionInput(graphene.InputObjectType):
     """Input type for executing a prepared transaction with signature"""
     tx_bytes = graphene.String(required=True, description="Base64 encoded transaction bytes from prepare step")
-    zk_login_signature = graphene.String(required=True, description="zkLogin signature from client")
+    zk_login_signature = graphene.String(required=True, description="Keyless signature from client (formerly zkLogin)")
     sponsor_signature = graphene.String(required=True, description="Sponsor signature from prepare step")
     transaction_metadata = graphene.JSONString(description="Metadata from prepare step for record keeping")
 
@@ -38,7 +38,7 @@ class SendTransactionInput(graphene.InputObjectType):
     # Recipient identification - use ONE of these
     recipient_user_id = graphene.ID(description="User ID of the recipient (for Confío users)")
     recipient_phone = graphene.String(description="Phone number of the recipient (for any user)")
-    recipient_address = graphene.String(description="Sui address for external wallet recipients (0x...)")
+    recipient_address = graphene.String(description="Aptos address for external wallet recipients (0x...)")
     
     # Transaction details
     amount = graphene.String(required=True, description="Amount to send (e.g., '10.50')")
@@ -194,7 +194,7 @@ class CreateSendTransaction(graphene.Mutation):
                     return CreateSendTransaction(
                         send_transaction=None,
                         success=False,
-                        errors=["Sender's Sui address not found"]
+                        errors=["Sender's Aptos address not found"]
                     )
                 
                 sender_address = active_account.sui_address
@@ -222,7 +222,7 @@ class CreateSendTransaction(graphene.Mutation):
                             return CreateSendTransaction(
                                 send_transaction=None,
                                 success=False,
-                                errors=["Recipient's Sui address not found"]
+                                errors=["Recipient's Aptos address not found"]
                             )
                     except User.DoesNotExist:
                         return CreateSendTransaction(
@@ -253,7 +253,7 @@ class CreateSendTransaction(graphene.Mutation):
                             return CreateSendTransaction(
                                 send_transaction=None,
                                 success=False,
-                                errors=["Recipient's Sui address not found"]
+                                errors=["Recipient's Aptos address not found"]
                             )
                     except User.DoesNotExist:
                         # Non-Confío user - create invitation transaction
@@ -371,23 +371,23 @@ class CreateSendTransaction(graphene.Mutation):
                 import time
                 import uuid
                 
-                # Execute blockchain transaction using pysui
-                from blockchain.transaction_manager_pysui import TransactionManagerPySui
+                # Execute blockchain transaction using Aptos
+                from blockchain.aptos_transaction_manager import AptosTransactionManager
                 import asyncio
                 
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 
                 try:
-                    # Get zkLogin signature from client input
+                    # Get keyless signature from client input
                     user_signature = getattr(input, 'zk_login_signature', None)
                     if not user_signature:
                         # For backward compatibility, log warning but continue
-                        print("WARNING: No zkLogin signature provided by client - transaction will use sponsor key only")
+                        print("WARNING: No keyless signature provided by client - transaction will use mock mode")
                     
-                    # Execute the sponsored transaction using pysui
+                    # Execute the sponsored transaction using Aptos
                     result = loop.run_until_complete(
-                        TransactionManagerPySui.send_tokens(
+                        AptosTransactionManager.send_tokens(
                             sender_account,
                             recipient_address,
                             amount_decimal,
@@ -402,9 +402,9 @@ class CreateSendTransaction(graphene.Mutation):
                         send_transaction.transaction_hash = result.get('digest', '')
                         
                         # Log the blockchain transaction
-                        print(f"Blockchain send successful: {amount_decimal} {input.token_type} to {recipient_address[:16]}...")
+                        print(f"Aptos send successful: {amount_decimal} {input.token_type} to {recipient_address[:16]}...")
                         print(f"Transaction digest: {result.get('digest')}")
-                        print(f"Gas saved: {result.get('gas_saved', 0)} SUI")
+                        print(f"Gas saved: {result.get('gas_saved', 0)} APT")
                         
                         if result.get('warning'):
                             print(f"WARNING: {result['warning']}")
@@ -810,7 +810,7 @@ class PrepareTransaction(graphene.Mutation):
                     else:
                         return PrepareTransaction(
                             success=False,
-                            errors=["Recipient's Sui address not found"]
+                            errors=["Recipient's Aptos address not found"]
                         )
                 except User.DoesNotExist:
                     return PrepareTransaction(
@@ -841,16 +841,16 @@ class PrepareTransaction(graphene.Mutation):
                     errors=["Recipient identification required"]
                 )
             
-            # Prepare transaction using the blockchain service
+            # Prepare transaction using the Aptos blockchain service
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
             try:
                 # Prepare the transaction (but don't execute)
-                from blockchain.sponsor_service_pysui import SponsorServicePySui
+                from blockchain.aptos_transaction_manager import AptosTransactionManager
                 
                 result = loop.run_until_complete(
-                    SponsorServicePySui.prepare_send_transaction(
+                    AptosTransactionManager.prepare_send_transaction(
                         account=active_account,
                         recipient=recipient_address,
                         amount=amount_decimal,
@@ -895,7 +895,7 @@ class PrepareTransaction(graphene.Mutation):
 
 
 class ExecuteTransaction(graphene.Mutation):
-    """Execute a prepared transaction with zkLogin signature"""
+    """Execute a prepared transaction with keyless signature"""
     class Arguments:
         input = ExecuteTransactionInput(required=True)
 
@@ -917,7 +917,7 @@ class ExecuteTransaction(graphene.Mutation):
 
         try:
             from users.jwt_context import get_jwt_business_context_with_validation
-            from blockchain.sponsor_service_pysui import SponsorServicePySui
+            from blockchain.aptos_transaction_manager import AptosTransactionManager
             import asyncio
             import json
             
@@ -993,7 +993,7 @@ class ExecuteTransaction(graphene.Mutation):
                     )
                 
                 result = loop.run_until_complete(
-                    SponsorServicePySui.execute_transaction_with_signatures(
+                    AptosTransactionManager.execute_transaction_with_signatures(
                         tx_bytes=input.tx_bytes,
                         sponsor_signature=input.sponsor_signature,
                         user_signature=input.zk_login_signature,

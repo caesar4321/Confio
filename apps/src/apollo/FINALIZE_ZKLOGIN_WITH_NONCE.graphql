@@ -1,0 +1,41 @@
+mutation FinalizeZkLoginWithNonce(
+  $firebaseToken: String!
+  $providerToken: String!
+  $provider: String!
+  $extendedEphemeralPublicKey: String!
+  $maxEpoch: String!
+  $randomness: String!
+  $salt: String!
+  $userSignature: String!
+  $keyClaimName: String!
+  $accountType: String
+  $accountIndex: Int
+  $deviceFingerprint: JSONString
+) {
+  finalizeZkLoginWithNonce(
+    firebaseToken: $firebaseToken
+    providerToken: $providerToken
+    provider: $provider
+    extendedEphemeralPublicKey: $extendedEphemeralPublicKey
+    maxEpoch: $maxEpoch
+    randomness: $randomness
+    salt: $salt
+    userSignature: $userSignature
+    keyClaimName: $keyClaimName
+    accountType: $accountType
+    accountIndex: $accountIndex
+    deviceFingerprint: $deviceFingerprint
+  ) {
+    success
+    zkProof {
+      a
+      b
+      c
+    }
+    suiAddress
+    authAccessToken
+    authRefreshToken
+    isPhoneVerified
+    error
+  }
+}

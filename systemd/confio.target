@@ -1,0 +1,7 @@
+[Unit]
+Description=Confio Application Stack
+After=network.target postgresql.service redis.service
+Wants=confio-django.service confio-daphne.service confio-celery-worker.service confio-celery-beat.service
+
+[Install]
+WantedBy=multi-user.target

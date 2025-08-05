@@ -5,6 +5,7 @@ import asyncio
 from decimal import Decimal
 from typing import Dict, List
 from blockchain.sui_client import sui_client
+from blockchain.aptos_balance_service import AptosBalanceService
 from django.core.cache import cache
 
 
@@ -14,7 +15,8 @@ class BlockchainService:
     @staticmethod
     def get_balances(account: 'Account', verify_critical: bool = False) -> Dict[str, Decimal]:
         """
-        Get all token balances for an account using hybrid caching
+        Get all token balances for an account
+        Now using Aptos for custom tokens (USDC deployed, cUSD/CONFIO coming)
         
         Used in GraphQL query:
         query {
@@ -22,32 +24,23 @@ class BlockchainService:
                 balances {
                     cusd
                     confio
-                    sui
+                    usdc
                 }
             }
         }
         """
-        from .balance_service import BalanceService
-        
-        # Use the hybrid balance service
-        all_balances = BalanceService.get_all_balances(
+        # Use Aptos balance service
+        all_balances = AptosBalanceService.get_all_balances(
             account,
-            verify_critical=verify_critical
+            use_cache=not verify_critical
         )
         
         # Return simplified format for GraphQL
         return {
             'cusd': all_balances['cusd']['amount'],
             'confio': all_balances['confio']['amount'],
-            'sui': all_balances['sui']['amount'],
             'usdc': all_balances['usdc']['amount'],
-            # Additional fields available:
-            'cusd_available': all_balances['cusd']['available'],
-            'cusd_pending': all_balances['cusd']['pending'],
-            'last_synced': max(
-                b['last_synced'] for b in all_balances.values() 
-                if b['last_synced']
-            ) if any(b['last_synced'] for b in all_balances.values()) else None
+            'sui': all_balances['sui']['amount']  # Legacy, always 0
         }
     
     @staticmethod

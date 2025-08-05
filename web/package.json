@@ -16,6 +16,7 @@
     "react": "^18.2.0",
     "react-accessible-accordion": "^5.0.0",
     "react-dom": "^18.2.0",
+    "react-intersection-observer": "^9.16.0",
     "react-linkify": "^1.0.0-alpha",
     "react-modal": "^3.16.3",
     "react-otp-input": "^3.1.1",
@@ -38,8 +39,12 @@
     "sass": "^1.70.0"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
+    "start": "REACT_APP_VERSION=friendly react-scripts start",
+    "start:classic": "REACT_APP_VERSION=classic react-scripts start",
+    "start:modern": "REACT_APP_VERSION=modern react-scripts start",
+    "start:friendly": "REACT_APP_VERSION=friendly react-scripts start",
+    "build": "REACT_APP_VERSION=friendly react-scripts build",
+    "build:modern": "REACT_APP_VERSION=modern react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "lint": "eslint src --ext .js,.jsx,.ts,.tsx",

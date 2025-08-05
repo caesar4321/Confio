@@ -1,7 +1,9 @@
-from django.urls import path
+from django.urls import path, include
 from . import views
 
 urlpatterns = [
     path('v1/', views.generate_proof, name='generate_proof'),
     path('jwks.json', views.jwks_view, name='jwks'),
+    # Include OAuth URLs
+    path('', include('prover.oauth_urls')),
 ] 
