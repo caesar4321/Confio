@@ -225,11 +225,18 @@ class AptosOAuthCallbackView(View):
 <html>
 <head>
     <meta charset="utf-8">
-    <meta http-equiv="refresh" content="0; url={error_url}">
-    <script>window.location.href = '{error_url}';</script>
+    <title>Authentication Error</title>
+    <script>
+        function redirectToApp() {{
+            try {{ window.location.href = '{error_url}'; }} catch (e) {{}}
+            setTimeout(function() {{ try {{ window.location.replace('{error_url}'); }} catch (e) {{}} }}, 100);
+        }}
+        redirectToApp();
+    </script>
 </head>
-<body>
-    <p>Redirecting...</p>
+<body onload="redirectToApp()">
+    <p>Authentication error. Redirecting to app...</p>
+    <p><a href="{error_url}">Click here if not redirected</a></p>
 </body>
 </html>
             """, content_type='text/html')
@@ -249,11 +256,18 @@ class AptosOAuthCallbackView(View):
 <html>
 <head>
     <meta charset="utf-8">
-    <meta http-equiv="refresh" content="0; url={error_url}">
-    <script>window.location.href = '{error_url}';</script>
+    <title>Authentication Error</title>
+    <script>
+        function redirectToApp() {{
+            try {{ window.location.href = '{error_url}'; }} catch (e) {{}}
+            setTimeout(function() {{ try {{ window.location.replace('{error_url}'); }} catch (e) {{}} }}, 100);
+        }}
+        redirectToApp();
+    </script>
 </head>
-<body>
-    <p>Redirecting...</p>
+<body onload="redirectToApp()">
+    <p>Authentication error. Redirecting to app...</p>
+    <p><a href="{error_url}">Click here if not redirected</a></p>
 </body>
 </html>
             """, content_type='text/html')
@@ -269,11 +283,18 @@ class AptosOAuthCallbackView(View):
 <html>
 <head>
     <meta charset="utf-8">
-    <meta http-equiv="refresh" content="0; url={error_url}">
-    <script>window.location.href = '{error_url}';</script>
+    <title>Authentication Error</title>
+    <script>
+        function redirectToApp() {{
+            try {{ window.location.href = '{error_url}'; }} catch (e) {{}}
+            setTimeout(function() {{ try {{ window.location.replace('{error_url}'); }} catch (e) {{}} }}, 100);
+        }}
+        redirectToApp();
+    </script>
 </head>
-<body>
-    <p>Redirecting...</p>
+<body onload="redirectToApp()">
+    <p>Authentication error. Redirecting to app...</p>
+    <p><a href="{error_url}">Click here if not redirected</a></p>
 </body>
 </html>
             """, content_type='text/html')
@@ -592,11 +613,18 @@ class AptosOAuthCallbackView(View):
 <html>
 <head>
     <meta charset="utf-8">
-    <meta http-equiv="refresh" content="0; url={error_url}">
-    <script>window.location.href = '{error_url}';</script>
+    <title>Authentication Error</title>
+    <script>
+        function redirectToApp() {{
+            try {{ window.location.href = '{error_url}'; }} catch (e) {{}}
+            setTimeout(function() {{ try {{ window.location.replace('{error_url}'); }} catch (e) {{}} }}, 100);
+        }}
+        redirectToApp();
+    </script>
 </head>
-<body>
-    <p>Redirecting...</p>
+<body onload="redirectToApp()">
+    <p>Authentication error. Redirecting to app...</p>
+    <p><a href="{error_url}">Click here if not redirected</a></p>
 </body>
 </html>
             """, content_type='text/html')

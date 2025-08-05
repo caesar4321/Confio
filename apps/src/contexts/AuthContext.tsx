@@ -81,15 +81,38 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       return;
     }
     
-    console.log(`Navigating to ${screenName}`);
-    navigationRef.current.reset({
-      index: 0,
-      routes: [{ 
-        name: screenName,
-        params: undefined,
-        state: undefined
-      }],
-    });
+    console.log(`[navigateToScreen] Navigating to ${screenName}`);
+    
+    // Properly set up params for nested navigators
+    const route: any = { name: screenName };
+    
+    if (screenName === 'Auth') {
+      // Auth navigator expects params for its nested screens
+      route.params = {
+        screen: 'Login'
+      };
+    } else if (screenName === 'Main') {
+      // Main navigator expects params for its nested screens
+      route.params = {
+        screen: 'BottomTabs',
+        params: {
+          screen: 'Home'
+        }
+      };
+    }
+    
+    console.log('[navigateToScreen] Route object:', JSON.stringify(route));
+    
+    try {
+      navigationRef.current.reset({
+        index: 0,
+        routes: [route],
+      });
+      console.log('[navigateToScreen] Navigation reset completed successfully');
+    } catch (navError) {
+      console.error('[navigateToScreen] Navigation reset error:', navError);
+      console.error('[navigateToScreen] Error stack:', navError.stack);
+    }
     
     // After navigating to Main, process any pending push notifications
     if (screenName === 'Main') {
@@ -340,7 +363,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const signOut = async () => {
     try {
       setIsLoading(true);
-      console.log('Signing out...');
+      console.log('[AuthContext] Starting signOut process...');
       
       // Unregister FCM token before signing out
       console.log('[AuthContext] Unregistering FCM token before sign out...');
@@ -352,20 +375,36 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         // Don't block sign out if FCM unregistration fails
       }
       
+      console.log('[AuthContext] Calling authService.signOut()...');
       const authService = AuthService.getInstance();
-      await authService.signOut();
+      
+      // Call signOut but don't let it fail the whole process
+      try {
+        await authService.signOut();
+        console.log('[AuthContext] authService.signOut() completed');
+      } catch (signOutError) {
+        console.error('[AuthContext] authService.signOut() error:', signOutError);
+        // Continue with logout even if signOut fails
+      }
       
       // Clear Apollo cache
+      console.log('[AuthContext] Clearing Apollo cache...');
       await apolloClient.clearStore();
+      console.log('[AuthContext] Apollo cache cleared');
       
       // Clear all state
+      console.log('[AuthContext] Clearing state...');
       setIsAuthenticated(false);
       setProfileData(null);
       
-      console.log('Sign out complete, navigating to Auth screen');
+      console.log('[AuthContext] Sign out complete, about to navigate to Auth screen');
+      console.log('[AuthContext] navigationRef.current exists:', !!navigationRef.current);
+      console.log('[AuthContext] isNavigationReady:', isNavigationReady);
       navigateToScreen('Auth');
+      console.log('[AuthContext] navigateToScreen completed');
     } catch (error) {
-      console.error('Error signing out:', error);
+      console.error('[AuthContext] Error signing out:', error);
+      console.error('[AuthContext] Error stack:', error.stack);
       // Force navigation to Auth even if sign out fails
       setIsAuthenticated(false);
       setProfileData(null);

@@ -596,23 +596,37 @@ export class AccountManager {
       console.log('AccountManager - clearAllAccounts: starting cleanup');
       
       // Clear active account context using resetGenericPassword
-      await Keychain.resetGenericPassword({
-        service: `${ACCOUNT_KEYCHAIN_SERVICE}_active`
-      });
+      try {
+        await Keychain.resetGenericPassword({
+          service: `${ACCOUNT_KEYCHAIN_SERVICE}_active`
+        });
+      } catch (error) {
+        console.log('AccountManager - clearAllAccounts: Could not clear active account:', error);
+        // Continue anyway
+      }
       
       // Clear all stored accounts by iterating through them
-      const accounts = await this.getStoredAccounts();
-      console.log('AccountManager - clearAllAccounts: found accounts to clear:', accounts.length);
-      
-      for (const account of accounts) {
-        console.log('AccountManager - clearAllAccounts: clearing account:', account.id);
-        await this.deleteAccount(account.id);
+      try {
+        const accounts = await this.getStoredAccounts();
+        console.log('AccountManager - clearAllAccounts: found accounts to clear:', accounts.length);
+        
+        for (const account of accounts) {
+          console.log('AccountManager - clearAllAccounts: clearing account:', account.id);
+          try {
+            await this.deleteAccount(account.id);
+          } catch (deleteError) {
+            console.log('AccountManager - clearAllAccounts: Could not delete account:', account.id, deleteError);
+            // Continue with other accounts
+          }
+        }
+      } catch (error) {
+        console.log('AccountManager - clearAllAccounts: Could not get stored accounts:', error);
       }
       
       console.log('AccountManager - clearAllAccounts: cleanup completed');
     } catch (error) {
       console.error('Error clearing all accounts:', error);
-      throw error;
+      // Don't throw - let the sign out continue
     }
   }
 

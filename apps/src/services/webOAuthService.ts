@@ -94,6 +94,9 @@ export class WebOAuthService {
           modalTransitionStyle: 'coverVertical',
           modalEnabled: true,
           enableBarCollapsing: false,
+          // iOS specific - ensure it stays in app
+          dismissButtonStyle: 'close',
+          preferredModalPresentationStyle: 'overFullScreen',
           // Android options
           showTitle: true,
           toolbarColor: '#72D9BC',
