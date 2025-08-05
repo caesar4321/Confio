@@ -62,6 +62,13 @@ const config = {
           type: 'sourceFile',
         };
       }
+      // Redirect react-native-fast-base64 to base64-js to avoid JSI binding issues
+      if (moduleName === 'react-native-fast-base64') {
+        return {
+          filePath: require.resolve('base64-js'),
+          type: 'sourceFile',
+        };
+      }
       if (moduleName.includes('DebuggingOverlayNativeComponent')) {
         return {
           filePath: require.resolve('./stubs/DebuggingOverlayNativeComponent.js'),

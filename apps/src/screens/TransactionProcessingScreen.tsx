@@ -319,13 +319,13 @@ export const TransactionProcessingScreen = () => {
         }
         
         const { txBytes, sponsorSignature, transactionMetadata } = prepareResult.data.prepareTransaction;
-        console.log('TransactionProcessingScreen: Transaction prepared, signing with zkLogin...');
+        console.log('TransactionProcessingScreen: Transaction prepared, signing with Aptos keyless...');
         
-        // Phase 2: Sign transaction with zkLogin
+        // Phase 2: Sign transaction with Aptos keyless
         const authService = enhancedAuthService.authService;
-        const zkLoginSignature = await authService.createZkLoginSignatureForTransaction(txBytes);
+        const aptosKeylessSignature = await authService.createZkLoginSignatureForTransaction(txBytes);
         
-        if (!zkLoginSignature) {
+        if (!aptosKeylessSignature) {
           setTransactionError('Error al firmar la transacción. Por favor, inténtalo de nuevo.');
           setIsComplete(true);
           return;
@@ -338,7 +338,7 @@ export const TransactionProcessingScreen = () => {
         
         const executeInput = {
           txBytes,
-          zkLoginSignature,
+          aptosKeylessSignature,
           sponsorSignature,
           transactionMetadata
         };

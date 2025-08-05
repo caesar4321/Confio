@@ -53,12 +53,12 @@ class AptosTransactionManager:
                     'error': 'Sender address not found'
                 }
             
-            # Prepare keyless info if signature provided
+            # Prepare Aptos keyless info if signature provided
             keyless_info = None
             if user_signature:
                 keyless_info = {
                     'available': True,
-                    'signature': user_signature,
+                    'keyless_authenticator': user_signature,
                     'account_id': str(sender_account.id)
                 }
             
@@ -157,27 +157,45 @@ class AptosTransactionManager:
                 'arguments': [recipient, str(amount_units)]
             }
             
-            # For MVP, return a simplified response
-            # In production, this would build the actual Aptos transaction
+            # Build the actual Aptos transaction for signing
             import json
             import base64
+            from blockchain.aptos_transaction_builder import AptosTransactionBuilder
             
+            # Get sponsor address from settings
+            sponsor_address = getattr(settings, 'APTOS_SPONSOR_ADDRESS', 
+                                    '0x75f38ae0c198dcedf766e0d2a39847f9b269052024e943c58970854b9cb70e2c')
+            
+            # Build sponsored transaction with exact bytes for signing
+            txn_data = AptosTransactionBuilder.prepare_for_frontend(
+                transaction_type='sponsored',
+                sender_address=account.aptos_address,
+                recipient_address=recipient,
+                amount=amount,
+                token_type=token_type.upper(),
+                sponsor_address=sponsor_address
+            )
+            
+            # Create tx_data for frontend signing (no sponsor signature needed here anymore)
             tx_data = {
                 'sender': account.aptos_address,
                 'payload': transaction_payload,
                 'amount': str(amount),
                 'token_type': token_type,
-                'recipient': recipient
+                'recipient': recipient,
+                'signing_message': txn_data['signing_message'],  # CRITICAL: Include exact bytes to sign
+                'raw_txn_bcs_base64': txn_data['metadata']['transaction_bytes'],  # CRITICAL: Raw FeePayerRawTransaction BCS bytes
+                'transaction_metadata': txn_data['metadata']
             }
             
-            # Encode as base64 for consistency with Sui approach
+            # Encode as base64
             tx_bytes = base64.b64encode(json.dumps(tx_data).encode()).decode()
             
             return {
                 'success': True,
                 'requiresUserSignature': True,
                 'txBytes': tx_bytes,
-                'sponsorSignature': 'sponsor_ready',  # Placeholder
+                'sponsorSignature': 'bridge_ready',  # BRIDGE will handle sponsor signing
                 'estimatedGas': await cls._estimate_gas_cost(token_type)
             }
             
@@ -214,7 +232,27 @@ class AptosTransactionManager:
             import base64
             from blockchain.aptos_sponsor_service import AptosSponsorService
             
-            # Decode transaction data
+            # Check if user_signature contains complete signed transaction from frontend
+            if isinstance(user_signature, str):
+                try:
+                    # Try to decode as complete signed transaction
+                    signed_tx_data = json.loads(base64.b64decode(user_signature).decode())
+                    
+                    if signed_tx_data.get('complete_signed_transaction_bcs'):
+                        # NEW PATH: Frontend provides complete signed transaction
+                        logger.info("Received complete signed transaction from frontend")
+                        
+                        result = await AptosSponsorService.submit_complete_signed_transaction(
+                            signed_transaction_bcs=signed_tx_data['complete_signed_transaction_bcs'],
+                            transaction_metadata=signed_tx_data.get('transaction_metadata', {})
+                        )
+                        
+                        return result
+                except:
+                    # Fall through to legacy path if decoding fails
+                    pass
+            
+            # LEGACY PATH: Decode transaction data and process as before
             tx_data = json.loads(base64.b64decode(tx_bytes).decode())
             
             sender_address = tx_data['sender']
@@ -222,11 +260,13 @@ class AptosTransactionManager:
             amount = Decimal(tx_data['amount'])
             token_type = tx_data['token_type']
             
-            # Prepare keyless info
+            # Prepare Aptos keyless info with transaction metadata
             keyless_info = {
                 'available': True,
-                'signature': user_signature,
-                'account_id': str(account_id) if account_id else None
+                'keyless_authenticator': user_signature,
+                'account_id': str(account_id) if account_id else None,
+                'transaction_metadata': tx_data.get('transaction_metadata'),  # Pass the exact transaction params
+                'raw_txn_bcs_base64': tx_data.get('raw_txn_bcs_base64')  # CRITICAL: Pass the exact FeePayerRawTransaction bytes
             }
             
             # Execute the sponsored transaction

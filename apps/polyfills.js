@@ -79,4 +79,7 @@ if (typeof btoa === 'undefined') {
   };
 }
 
+// Import Aptos polyfills
+import './src/services/aptosPolyfills';
+
 console.log("[polyfills] running padEnd/crypto shims…");

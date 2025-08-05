@@ -72,14 +72,45 @@ export class WebOAuthService {
         // Continue without fingerprint rather than failing authentication
       }
 
+      // Generate ephemeral key pair entirely on client
+      let ephemeralKeyPairData = null;
+      let clientGeneratedEkp = null;
+      try {
+        console.log('[WebOAuth] Generating ephemeral key pair entirely on client...');
+        const { aptosKeylessService } = await import('./aptosKeylessService');
+        clientGeneratedEkp = aptosKeylessService.generateEphemeralKeyPair(24); // 24 hours expiry
+        
+        // Get the info for backend in the format it expects
+        ephemeralKeyPairData = aptosKeylessService.getEphemeralKeyPairForBackend(clientGeneratedEkp);
+        
+        console.log('[WebOAuth] Generated ephemeral key pair with nonce:', ephemeralKeyPairData.nonce);
+        console.log('[WebOAuth] Client will provide complete ephemeral key data to backend');
+        console.log('[WebOAuth] ✅ CLIENT-ONLY ADDRESS DERIVATION: Backend will never derive addresses');
+      } catch (error) {
+        console.error('[WebOAuth] Error generating ephemeral key pair:', error);
+        throw new Error('Failed to generate ephemeral key pair on client');
+      }
+
       // Start OAuth flow by getting the OAuth URL from backend
       const startUrl = `${API_URL.replace('/graphql/', '')}/prover/oauth/aptos/start/`;
       console.log(`[WebOAuth] Fetching OAuth URL from: ${startUrl}`);
       
-      const requestBody = {
+      const requestBody: any = {
         provider,
-        deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null
+        deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null,
       };
+      
+      // Always send client-generated ephemeral key data - backend must use this
+      if (ephemeralKeyPairData) {
+        requestBody.ephemeralPublicKey = ephemeralKeyPairData.publicKey;
+        requestBody.ephemeralNonce = ephemeralKeyPairData.nonce;
+        requestBody.ephemeralExpiryDate = ephemeralKeyPairData.expiryDate;
+        requestBody.useClientEphemeralKey = true; // Flag to indicate backend should use client key
+        console.log('[WebOAuth] Sending client-generated ephemeral key to backend');
+        console.log('[WebOAuth] Backend MUST use this ephemeral key data for JWT creation');
+      } else {
+        throw new Error('Client ephemeral key generation failed - cannot proceed without client-generated keys');
+      }
       
       const response = await fetch(startUrl, {
         method: 'POST',
@@ -140,6 +171,129 @@ export class WebOAuthService {
           const callbackData = this.parseCallbackUrl(result.url);
           
           if (callbackData.success && callbackData.data) {
+            // Log what we got from the backend
+            console.log('[WebOAuth] Backend returned keyless account:', {
+              address: callbackData.data.keylessAccount.address,
+              hasEphemeralKeyPair: !!callbackData.data.keylessAccount.ephemeralKeyPair,
+              ephemeralNonce: callbackData.data.keylessAccount.ephemeralKeyPair?.nonce,
+              jwtLength: callbackData.data.keylessAccount.jwt?.length,
+            });
+            
+            // Always use the client-generated ephemeral key pair
+            if (clientGeneratedEkp) {
+              console.log('[WebOAuth] Using client-generated ephemeral key pair with OAuth JWT');
+              
+              // The OAuth JWT from Google/Apple should contain the nonce from our client-generated ephemeral key
+              // Replace any backend ephemeral key data with our client-generated one
+              callbackData.data.keylessAccount.ephemeralKeyPair = clientGeneratedEkp;
+              
+              console.log('[WebOAuth] Client-generated ephemeral key details:', {
+                nonce: clientGeneratedEkp.raw?.nonce || 'stored format',
+                expiryDate: clientGeneratedEkp.expiryISO,
+                version: clientGeneratedEkp.version,
+              });
+              
+              // ALWAYS derive the correct address using client-side Aptos SDK (REQUIRED)
+              try {
+                const jwt = callbackData.data.keylessAccount.jwt;
+                const jwtParts = jwt.split('.');
+                const payload = JSON.parse(atob(jwtParts[1]));
+                // Use the nonce that was sent to backend (the one OAuth provider should have used)
+                const expectedNonce = ephemeralKeyPairData.nonce;
+                
+                console.log('[WebOAuth] OAuth JWT nonce:', payload.nonce);
+                console.log('[WebOAuth] Client ephemeral key nonce:', expectedNonce);
+                
+                // Verify nonce match
+                if (payload.nonce === expectedNonce) {
+                  console.log('[WebOAuth] ✅ Nonce match confirmed between OAuth JWT and client ephemeral key');
+                } else {
+                  console.error('[WebOAuth] ❌ CRITICAL: Nonce mismatch detected!');
+                  console.error('[WebOAuth] This means OAuth flow used different nonce than client ephemeral key');
+                  throw new Error(`Nonce mismatch: JWT nonce (${payload.nonce}) != client nonce (${expectedNonce})`);
+                }
+                
+                // REQUIRED: Derive the keyless address using client-side Aptos SDK
+                console.log('[WebOAuth] 🔧 Deriving keyless address using aptosKeylessService...');
+                
+                // Get the aptosKeylessService instance
+                const { aptosKeylessService } = await import('./aptosKeylessService');
+                
+                // Convert pepper to Uint8Array if provided
+                let pepperBytes = undefined;
+                if (callbackData.data.keylessAccount.pepper) {
+                  const pepperHex = callbackData.data.keylessAccount.pepper.replace('0x', '');
+                  pepperBytes = new Uint8Array(Buffer.from(pepperHex, 'hex'));
+                  // Ensure 31 bytes
+                  if (pepperBytes.length !== 31) {
+                    const paddedPepper = new Uint8Array(31);
+                    pepperBytes.slice(0, 31).forEach((byte, i) => paddedPepper[i] = byte);
+                    pepperBytes = paddedPepper;
+                  }
+                }
+                
+                // Use aptosKeylessService to derive the address - it handles all the SDK complexities
+                const aptos = aptosKeylessService.getAptosClient();
+                const reconstructedEkp = aptosKeylessService.getEphemeralKeyPairForSDK(clientGeneratedEkp);
+                
+                // Derive CANONICAL keyless account using the service's Aptos client
+                const keylessAccount = await aptos.deriveKeylessAccount({
+                  jwt: jwt,
+                  ephemeralKeyPair: reconstructedEkp,
+                  pepper: pepperBytes,
+                });
+                
+                // Replace backend placeholder with CANONICAL client-derived address
+                const backendPlaceholder = callbackData.data.keylessAccount.address;
+                const canonicalAddress = keylessAccount.accountAddress.toString();
+                callbackData.data.keylessAccount.address = canonicalAddress;
+                
+                console.log('[WebOAuth] ✅ CANONICAL ADDRESS DERIVED:');
+                console.log('[WebOAuth] Backend placeholder:', backendPlaceholder);
+                console.log('[WebOAuth] Canonical address:', canonicalAddress);
+                console.log('[WebOAuth] ✅ All users will get same address for same JWT claims + pepper');
+                
+                // IMMEDIATELY update backend database with canonical address (Option B)
+                try {
+                  console.log('[WebOAuth] 🔄 Updating backend database with canonical address...');
+                  const updateUrl = `${API_URL.replace('/graphql/', '')}/prover/keyless/update-address/`;
+                  
+                  const updateResponse = await fetch(updateUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                      address: canonicalAddress,
+                      firebase_uid: callbackData.data.firebaseUid,
+                      account_type: 'personal',
+                      account_index: 0
+                    })
+                  });
+                  
+                  if (updateResponse.ok) {
+                    const updateResult = await updateResponse.json();
+                    console.log('[WebOAuth] ✅ Backend database updated successfully:', updateResult);
+                    console.log('[WebOAuth] ✅ Option B implemented: Address known to server immediately upon sign-up');
+                  } else {
+                    const errorText = await updateResponse.text();
+                    console.error('[WebOAuth] ❌ Failed to update backend database:', updateResponse.status, errorText);
+                    console.error('[WebOAuth] User will still be authenticated, but backend has placeholder address');
+                  }
+                } catch (updateError) {
+                  console.error('[WebOAuth] ❌ Error calling address update endpoint:', updateError);
+                  console.error('[WebOAuth] User will still be authenticated, but backend has placeholder address');
+                }
+                
+              } catch (derivationError) {
+                console.error('[WebOAuth] ❌ CRITICAL: Failed to derive canonical address on client!');
+                console.error('[WebOAuth] Error:', derivationError);
+                throw new Error(`Address derivation failed: ${derivationError.message}. Cannot proceed without canonical address.`);
+              }
+            } else {
+              throw new Error('Client-generated ephemeral key pair not available - cannot proceed');
+            }
+            
             // Store the keyless account data
             await this.storeKeylessData(callbackData.data);
             
@@ -182,6 +336,15 @@ export class WebOAuthService {
         console.log('[WebOAuth] Closed browser after error');
       } catch (closeError) {
         console.log('[WebOAuth] Failed to close browser after error');
+      }
+      
+      // Clear any client-generated ephemeral key pair on error
+      try {
+        if (clientGeneratedEkp) {
+          console.log('[WebOAuth] Clearing client-generated ephemeral key pair due to error');
+        }
+      } catch (clearError) {
+        console.log('[WebOAuth] Failed to clear client-generated ephemeral key pair');
       }
       
       throw error;

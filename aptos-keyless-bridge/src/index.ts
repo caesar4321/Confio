@@ -43,6 +43,7 @@ app.get('/', (_req, res) => {
       generateOAuthUrl: 'POST /api/keyless/oauth-url',
       deriveAccount: 'POST /api/keyless/derive-account',
       signAndSubmit: 'POST /api/keyless/sign-and-submit',
+      feePayerSubmit: 'POST /api/keyless/fee-payer-submit',
       getBalance: 'GET /api/keyless/balance/:address',
     },
   });

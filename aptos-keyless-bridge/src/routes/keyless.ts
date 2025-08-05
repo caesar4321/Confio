@@ -5,6 +5,8 @@ import {
   DeriveAccountRequest,
   GetOAuthUrlRequest,
   SignAndSubmitRequest,
+  GenerateAuthenticatorRequest,
+  FeePayerSubmitRequest,
   ErrorResponse,
 } from '../types';
 import logger from '../logger';
@@ -113,6 +115,42 @@ router.post('/derive-account', async (req: Request<{}, {}, DeriveAccountRequest>
 });
 
 /**
+ * Generate authenticator for a transaction (for sponsored transactions)
+ */
+router.post('/generate-authenticator', async (req: Request<{}, {}, GenerateAuthenticatorRequest>, res: Response) => {
+  try {
+    const { jwt, ephemeralKeyPair, signingMessage, pepper } = req.body;
+    
+    if (!jwt || !ephemeralKeyPair || !signingMessage) {
+      res.status(400).json({
+        error: 'MISSING_PARAMETERS',
+        message: 'Missing required parameters',
+      });
+      return;
+    }
+
+    const result = await keylessService.generateAuthenticator(
+      jwt,
+      ephemeralKeyPair,
+      signingMessage,
+      pepper
+    );
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    logger.error('Error in /generate-authenticator:', error);
+    const errorResponse: ErrorResponse = {
+      error: 'AUTHENTICATOR_ERROR',
+      message: error instanceof Error ? error.message : 'Failed to generate authenticator',
+    };
+    res.status(500).json(errorResponse);
+  }
+});
+
+/**
  * Sign and submit transaction
  */
 router.post('/sign-and-submit', async (req: Request<{}, {}, SignAndSubmitRequest>, res: Response) => {
@@ -189,6 +227,42 @@ router.get('/health', (_req: Request, res: Response) => {
     version: '1.0.0',
     network: process.env.APTOS_NETWORK || 'devnet',
   });
+});
+
+/**
+ * Submit fee-payer transaction with keyless authenticator
+ */
+router.post('/fee-payer-submit', async (req: Request<{}, {}, FeePayerSubmitRequest>, res: Response) => {
+  try {
+    const { rawTxnBcsBase64, senderAuthenticatorBcsBase64, sponsorAddressHex, policyMetadata } = req.body;
+    
+    if (!rawTxnBcsBase64 || !senderAuthenticatorBcsBase64 || !sponsorAddressHex) {
+      res.status(400).json({
+        error: 'MISSING_PARAMETERS',
+        message: 'Missing required parameters: rawTxnBcsBase64, senderAuthenticatorBcsBase64, sponsorAddressHex',
+      });
+      return;
+    }
+
+    const result = await keylessService.submitFeePayerTransaction(
+      rawTxnBcsBase64,
+      senderAuthenticatorBcsBase64,
+      sponsorAddressHex,
+      policyMetadata
+    );
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    logger.error('Error in /fee-payer-submit:', error);
+    const errorResponse: ErrorResponse = {
+      error: 'FEE_PAYER_SUBMIT_ERROR',
+      message: error instanceof Error ? error.message : 'Failed to submit fee-payer transaction',
+    };
+    res.status(500).json(errorResponse);
+  }
 });
 
 export default router;

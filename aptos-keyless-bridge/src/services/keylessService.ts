@@ -3,6 +3,8 @@ import {
   AptosConfig,
   EphemeralKeyPair,
   Ed25519PrivateKey,
+  Serializer,
+  Account,
 } from '@aptos-labs/ts-sdk';
 import * as jose from 'jose';
 import crypto from 'crypto';
@@ -12,15 +14,34 @@ import {
   EphemeralKeyPairData,
   KeylessAccountData,
   DeriveAccountRequest,
+  GenerateAuthenticatorResponse,
+  FeePayerSubmitResponse,
 } from '../types';
 import { ephemeralKeyStore } from './ephemeralKeyStore';
 
 export class KeylessService {
   private aptos: Aptos;
+  private sponsorAccount: Account;
 
   constructor() {
     const aptosConfig = new AptosConfig({ network: config.aptos.network });
     this.aptos = new Aptos(aptosConfig);
+    
+    // Initialize sponsor account from environment
+    const sponsorPrivateKey = process.env.APTOS_SPONSOR_PRIVATE_KEY;
+    if (!sponsorPrivateKey) {
+      throw new Error('APTOS_SPONSOR_PRIVATE_KEY environment variable not set');
+    }
+    
+    // Handle hex-encoded private key (remove 0x prefix if present)
+    const hexKey = sponsorPrivateKey.replace(/^0x/, '');
+    const privateKeyBytes = Buffer.from(hexKey, 'hex');
+    
+    // Create Ed25519 private key from bytes
+    const sponsorPrivateKeyEd25519 = new Ed25519PrivateKey(privateKeyBytes);
+    
+    this.sponsorAccount = Account.fromPrivateKey({ privateKey: sponsorPrivateKeyEd25519 });
+    logger.info('Sponsor account initialized:', this.sponsorAccount.accountAddress.toString());
   }
 
   /**
@@ -221,6 +242,76 @@ export class KeylessService {
   }
 
   /**
+   * Generate authenticator for a transaction without submitting
+   * This is used for sponsored transactions where the backend needs the authenticator
+   */
+  async generateAuthenticator(
+    jwt: string,
+    ephemeralKeyPairData: EphemeralKeyPairData,
+    signingMessageBase64: string,
+    pepper?: string
+  ): Promise<GenerateAuthenticatorResponse> {
+    try {
+      // Decode JWT to get claims
+      const decodedJwt = jose.decodeJwt(jwt);
+      
+      // Reconstruct the ephemeral key pair
+      const ephemeralKeyPair = this.reconstructEphemeralKeyPair(ephemeralKeyPairData);
+      
+      // Derive the keyless account
+      const keylessAccount = await this.aptos.deriveKeylessAccount({
+        jwt,
+        ephemeralKeyPair,
+        pepper,
+      });
+
+      // Wait for the proof to be fetched
+      await keylessAccount.waitForProofFetch();
+      
+      // Decode the signing message
+      const signingMessageBytes = Buffer.from(signingMessageBase64, 'base64');
+      
+      // Sign the message to get the authenticator
+      const authenticator = keylessAccount.signWithAuthenticator(signingMessageBytes);
+      
+      // Serialize the authenticator to BCS
+      const serializer = new Serializer();
+      authenticator.serialize(serializer);
+      const authenticatorBytes = serializer.toUint8Array();
+      const senderAuthenticatorBcsBase64 = Buffer.from(authenticatorBytes).toString('base64');
+      
+      // Get the auth key/address
+      const authKeyHex = keylessAccount.accountAddress.toString();
+      
+      // Get ephemeral public key as hex (64 chars, no 0x)
+      // Access the public key from the data structure
+      const publicKeyStr = ephemeralKeyPairData.publicKey;
+      const ephemeralPublicKeyHex = publicKeyStr.replace(/^0x/, '');
+      
+      // Extract JWT header to get kid
+      const jwtParts = jwt.split('.');
+      const header = JSON.parse(Buffer.from(jwtParts[0], 'base64').toString());
+      
+      return {
+        senderAuthenticatorBcsBase64,
+        authKeyHex,
+        ephemeralPublicKeyHex,
+        claims: {
+          iss: String(decodedJwt.iss),
+          aud: String(decodedJwt.aud),
+          sub: String(decodedJwt.sub),
+          exp: Number(decodedJwt.exp),
+          iat: Number(decodedJwt.iat),
+        },
+        kid: header.kid,
+      };
+    } catch (error) {
+      logger.error('Error generating authenticator:', error);
+      throw new Error(`Failed to generate authenticator: ${error}`);
+    }
+  }
+
+  /**
    * Sign and submit a transaction using Keyless account
    */
   async signAndSubmitTransaction(
@@ -320,6 +411,205 @@ export class KeylessService {
   /**
    * Reconstruct EphemeralKeyPair from data
    */
+  /**
+   * Submit fee-payer transaction with keyless authenticator
+   */
+  async submitFeePayerTransaction(
+    rawTxnBcsBase64: string,
+    senderAuthenticatorBcsBase64: string,
+    sponsorAddressHex: string,
+    _policyMetadata: { [key: string]: any }
+  ): Promise<FeePayerSubmitResponse> {
+    try {
+      logger.info('Processing fee-payer transaction submission');
+      logger.info('Raw transaction bytes:', rawTxnBcsBase64.length);
+      logger.info('Sender authenticator bytes:', senderAuthenticatorBcsBase64.length);
+      logger.info('Sponsor address:', sponsorAddressHex);
+      
+      // Use the expected sponsor address from environment
+      const expectedSponsorAddress = process.env.APTOS_SPONSOR_ADDRESS;
+      if (expectedSponsorAddress && sponsorAddressHex !== expectedSponsorAddress) {
+        throw new Error(`Sponsor address mismatch: expected ${expectedSponsorAddress}, got ${sponsorAddressHex}`);
+      }
+      
+      // Log the addresses for debugging
+      logger.info('Expected sponsor address:', expectedSponsorAddress);
+      logger.info('Provided sponsor address:', sponsorAddressHex);
+      logger.info('BRIDGE account address:', this.sponsorAccount.accountAddress.toString());
+      
+      // Decode BCS data
+      const rawTxnBytes = Buffer.from(rawTxnBcsBase64, 'base64');
+      const senderAuthBytes = Buffer.from(senderAuthenticatorBcsBase64, 'base64');
+      
+      logger.info('Raw transaction BCS length:', rawTxnBytes.length);
+      logger.info('Sender authenticator BCS length:', senderAuthBytes.length);
+      
+      // Check raw transaction format
+      logger.info('Raw txn first byte:', `0x${rawTxnBytes[0].toString(16)}`);
+      
+      // Based on ChatGPT's feedback, we need to:
+      // 1. Convert MultiAgent (0x01) to FeePayer (0x02) format
+      // 2. Convert the AccountAuthenticator to TransactionAuthenticator
+      // 3. Use proper SDK types instead of manual byte concatenation
+      
+      // For now, let's use the manual approach that was working before
+      // but fix the authenticator issue
+      
+      // Convert MultiAgent to FeePayer if needed
+      let feePayerRawTxnBytes: Buffer;
+      if (rawTxnBytes[0] === 0x01) {
+        logger.info('Converting MultiAgent (0x01) to FeePayer (0x02) format');
+        
+        // Extract sponsor address for the raw transaction
+        const sponsorAddrForRaw = Buffer.from(sponsorAddressHex.replace(/^0x/, ''), 'hex');
+        
+        // Build FeePayer RawTransactionWithData:
+        // - tag: 0x02 (FeePayer)
+        // - inner raw transaction (everything after the 0x01 tag)
+        // - fee payer address (32 bytes)
+        feePayerRawTxnBytes = Buffer.concat([
+          Buffer.from([0x02]), // FeePayer tag
+          rawTxnBytes.slice(1), // Skip MultiAgent tag, keep the rest
+          sponsorAddrForRaw     // Append fee-payer address
+        ]);
+        
+        logger.info('Created FeePayer RawTransactionWithData, length:', feePayerRawTxnBytes.length);
+        logger.info('Expected: 1 (tag) + 198 (inner) + 32 (address) = 231 bytes');
+      } else if (rawTxnBytes[0] === 0x02) {
+        // Already FeePayer format
+        feePayerRawTxnBytes = rawTxnBytes;
+        logger.info('Raw transaction already in FeePayer format');
+      } else {
+        throw new Error(`Unexpected raw transaction tag: 0x${rawTxnBytes[0].toString(16)}`);
+      }
+      
+      // Create domain separator for sponsor signing
+      const domainSeparator = 'APTOS::RawTransactionWithData';
+      const hasher = crypto.createHash('sha3-256');
+      hasher.update(domainSeparator);
+      const domainHash = hasher.digest();
+      
+      // Create signing message for sponsor using FeePayer format
+      const sponsorSigningMessage = Buffer.concat([domainHash, feePayerRawTxnBytes]);
+      logger.info('Sponsor signing message length:', sponsorSigningMessage.length);
+      logger.info('Expected: 32 (hash) + 231 (feepayer raw) = 263 bytes');
+      
+      // Sign with sponsor account
+      const sponsorSignature = this.sponsorAccount.sign(sponsorSigningMessage);
+      
+      // Create sponsor authenticator (97 bytes: 0x00 + 32-byte pubkey + 64-byte signature)
+      const sponsorPubKeyBytes = this.sponsorAccount.publicKey.toUint8Array();
+      const sponsorSigBytes = sponsorSignature.toUint8Array();
+      
+      const sponsorAuthenticator = new Uint8Array(97);
+      sponsorAuthenticator[0] = 0x00; // Ed25519 discriminant
+      sponsorAuthenticator.set(sponsorPubKeyBytes, 1);
+      sponsorAuthenticator.set(sponsorSigBytes, 33);
+      
+      // Tags for TransactionAuthenticator variants
+      const TA = {
+        ED25519: 0x00,
+        MULTI_ED25519: 0x01,
+        MULTI_AGENT: 0x02,
+        FEE_PAYER: 0x03,
+        SINGLE_SENDER: 0x04,
+      } as const;
+      
+      // Tags for AccountAuthenticator variants
+      const AA = {
+        ED25519: 0x00,
+        MULTI_ED25519: 0x01,
+        KEYLESS: 0x02,
+      } as const;
+      
+      // Ensure the provided sender authenticator is account-level KEYLESS
+      if (senderAuthBytes[0] !== AA.KEYLESS) {
+        throw new Error(
+          `Expected AccountAuthenticator::Keyless (0x02) for sender, got 0x${senderAuthBytes[0].toString(16)}`
+        );
+      }
+      
+      // Convert AccountAuthenticator to TransactionAuthenticator
+      // The sender sent us an AccountAuthenticator (starts with 0x02 for keyless)
+      // We need to wrap it as TransactionAuthenticator::SingleSender (tag 0x04)
+      logger.info('Wrapping sender AccountAuthenticator as TransactionAuthenticator::SingleSender');
+      const wrappedSenderAuth = Buffer.concat([
+        Buffer.from([TA.SINGLE_SENDER]), // SingleSender tag = 0x04
+        senderAuthBytes                  // The account authenticator
+      ]);
+      
+      // Build the complete SignedTransaction with FeePayer authenticator
+      // Structure per ChatGPT:
+      // - Raw transaction (231 bytes for FeePayer format)
+      // - TransactionAuthenticator::FeePayer (tag 0x03)
+      //   - sender: TransactionAuthenticator (wrapped sender auth)
+      //   - secondary_signer_addresses: empty vec
+      //   - fee_payer_address: 32 bytes
+      //   - fee_payer_signer: AccountAuthenticator (97 bytes)
+      //   - secondary_signers: empty vec
+      
+      const TAG_FEEPAYER = Buffer.from([TA.FEE_PAYER]); // 0x03
+      const VEC_EMPTY = Buffer.from([0x00]); // ULEB128 length 0
+      const sponsorAddr = Buffer.from(sponsorAddressHex.replace(/^0x/, ''), 'hex');
+      
+      // Build the authenticator
+      const signedTxnBytes = Buffer.concat([
+        feePayerRawTxnBytes,          // 231 bytes (FeePayer RawTransactionWithData)
+        TAG_FEEPAYER,                 // 1 byte (TransactionAuthenticator::FeePayer = 0x03)
+        wrappedSenderAuth,            // 457 bytes (0x04 + 456-byte keyless account auth)
+        VEC_EMPTY,                    // 1 byte (secondary_signer_addresses)
+        sponsorAddr,                  // 32 bytes (fee_payer_address)
+        Buffer.from(sponsorAuthenticator), // 97 bytes (fee_payer_signer)
+        VEC_EMPTY                     // 1 byte (secondary_signers)
+      ]);
+      
+      // Optional assertions to help catch mis-tags early
+      if (signedTxnBytes[feePayerRawTxnBytes.length] !== TA.FEE_PAYER) {
+        throw new Error('Missing TA::FeePayer tag');
+      }
+      if (signedTxnBytes[feePayerRawTxnBytes.length + 1] !== TA.SINGLE_SENDER) {
+        throw new Error('Sender must be TA::SingleSender (0x04)');
+      }
+      if (signedTxnBytes[feePayerRawTxnBytes.length + 2] !== AA.KEYLESS) {
+        throw new Error('Inner account auth must be KEYLESS (0x02)');
+      }
+      
+      // Expected total: 231 + 1 + 457 + 1 + 32 + 97 + 1 = 820 bytes
+      logger.info(`Submitting ${signedTxnBytes.length}-byte signed transaction`);
+      logger.info(`Structure: feepayer_raw(231) + tag(1) + wrapped_sender(457) + empty(1) + addr(32) + sponsor(97) + empty(1)`);
+      
+      // Submit to Aptos network
+      const fullnodeUrl = config.aptos.network === 'mainnet' 
+        ? 'https://fullnode.mainnet.aptoslabs.com/v1'
+        : 'https://fullnode.testnet.aptoslabs.com/v1';
+      const url = `${fullnodeUrl}/transactions`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x.aptos.signed_transaction+bcs',
+        },
+        body: signedTxnBytes,
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Transaction submission failed: ${response.status} ${errorText}`);
+      }
+      
+      const result = await response.json() as { hash: string };
+      
+      logger.info('Transaction submitted successfully:', result.hash);
+      
+      return {
+        transactionHash: result.hash,
+        success: true,
+      };
+    } catch (error) {
+      logger.error('Error submitting fee-payer transaction:', error);
+      throw error;
+    }
+  }
+
   private reconstructEphemeralKeyPair(data: EphemeralKeyPairData): EphemeralKeyPair {
     try {
       // The data contains the private key in hex format

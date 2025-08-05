@@ -29,7 +29,7 @@ class PrepareTransactionInput(graphene.InputObjectType):
 class ExecuteTransactionInput(graphene.InputObjectType):
     """Input type for executing a prepared transaction with signature"""
     tx_bytes = graphene.String(required=True, description="Base64 encoded transaction bytes from prepare step")
-    zk_login_signature = graphene.String(required=True, description="Keyless signature from client (formerly zkLogin)")
+    aptos_keyless_signature = graphene.String(required=True, description="Aptos keyless account signature from client")
     sponsor_signature = graphene.String(required=True, description="Sponsor signature from prepare step")
     transaction_metadata = graphene.JSONString(description="Metadata from prepare step for record keeping")
 
@@ -46,8 +46,8 @@ class SendTransactionInput(graphene.InputObjectType):
     memo = graphene.String(description="Optional memo for the transaction")
     idempotency_key = graphene.String(description="Optional idempotency key to prevent duplicate sends")
     
-    # zkLogin signature from client
-    zk_login_signature = graphene.String(description="zkLogin signature from client for transaction authorization")
+    # Aptos keyless signature from client
+    aptos_keyless_signature = graphene.String(description="Aptos keyless account signature from client for transaction authorization")
     
     # Display info (for UI purposes only)
     recipient_display_name = graphene.String(description="Display name for the recipient (for UI)")
@@ -379,11 +379,11 @@ class CreateSendTransaction(graphene.Mutation):
                 asyncio.set_event_loop(loop)
                 
                 try:
-                    # Get keyless signature from client input
-                    user_signature = getattr(input, 'zk_login_signature', None)
+                    # Get Aptos keyless signature from client input
+                    user_signature = getattr(input, 'aptos_keyless_signature', None)
                     if not user_signature:
                         # For backward compatibility, log warning but continue
-                        print("WARNING: No keyless signature provided by client - transaction will use mock mode")
+                        print("WARNING: No Aptos keyless signature provided by client - transaction will use mock mode")
                     
                     # Execute the sponsored transaction using Aptos
                     result = loop.run_until_complete(
@@ -996,7 +996,7 @@ class ExecuteTransaction(graphene.Mutation):
                     AptosTransactionManager.execute_transaction_with_signatures(
                         tx_bytes=input.tx_bytes,
                         sponsor_signature=input.sponsor_signature,
-                        user_signature=input.zk_login_signature,
+                        user_signature=input.aptos_keyless_signature,
                         account_id=active_account.id if active_account else None
                     )
                 )

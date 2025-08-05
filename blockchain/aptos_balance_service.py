@@ -17,10 +17,10 @@ class AptosBalanceService:
     CACHE_TIMEOUT = 60  # 1 minute cache for balances
     CACHE_PREFIX = "aptos_balance"
     
-    # Token addresses on Aptos testnet
+    # Token addresses on Aptos testnet - Updated to match deployed contracts
     USDC_ADDRESS = "0x69091fbab5f7d635ee7ac5098cf0c1efbe31d68fec0f2cd565e8d168daf52832"
-    CUSD_ADDRESS = "0xe0ff8b1b72b21692bc125b2ad3087578aac8aea8803879bdc67adb92eeaa9a08"
-    CONFIO_ADDRESS = "0x4ee337bec5c9bafe1d9b65265de67c08b29a0b5ed6f4c2da9f3abb3eab9251be"
+    CUSD_ADDRESS = "0xe0ff8b1b72b21692bc125b2ad3087578aac8aea8803879bdc67adb92eeaa9a08"  # cUSD metadata address
+    CONFIO_ADDRESS = "0x4ee337bec5c9bafe1d9b65265de67c08b29a0b5ed6f4c2da9f3abb3eab9251be"  # CONFIO metadata address from successful tx
     
     @classmethod
     def get_cache_key(cls, address: str) -> str:

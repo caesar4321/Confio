@@ -36,11 +36,43 @@ class AptosOAuthStartView(View):
         try:
             data = json.loads(request.body)
             provider = data.get('provider', 'google')
-            ephemeral_key = data.get('ephemeralKeyPair')
             device_fingerprint = data.get('deviceFingerprint')
             
-            if ephemeral_key:
-                logger.info(f"Using client-generated ephemeral key with nonce: {ephemeral_key.get('nonce')}")
+            # Handle client-generated ephemeral key data
+            ephemeral_key = None
+            use_client_key = data.get('useClientEphemeralKey', False)
+            
+            if use_client_key:
+                # Client is providing ephemeral key data - reconstruct it
+                ephemeral_public_key = data.get('ephemeralPublicKey')
+                ephemeral_nonce = data.get('ephemeralNonce')
+                ephemeral_expiry_date = data.get('ephemeralExpiryDate')
+                client_address = data.get('clientAddress')  # Client-derived address
+                
+                if ephemeral_public_key and ephemeral_nonce and ephemeral_expiry_date:
+                    ephemeral_key = {
+                        'publicKey': ephemeral_public_key,
+                        'nonce': ephemeral_nonce,
+                        'expiryDate': ephemeral_expiry_date,
+                        'clientGenerated': True,  # Mark as client-generated
+                        'clientAddress': client_address  # Store client-derived address
+                    }
+                    logger.info(f"Using client-generated ephemeral key with nonce: {ephemeral_nonce}")
+                    logger.info(f"Client ephemeral key - publicKey: {ephemeral_public_key}, expiryDate: {ephemeral_expiry_date}")
+                    if client_address:
+                        logger.info(f"Client provided keyless address: {client_address}")
+                else:
+                    logger.error("Client requested ephemeral key usage but missing required fields")
+                    return JsonResponse({
+                        'error': 'Missing ephemeral key data',
+                        'required': ['ephemeralPublicKey', 'ephemeralNonce', 'ephemeralExpiryDate'],
+                        'received': list(data.keys())
+                    }, status=400)
+            else:
+                # Legacy approach - check for direct ephemeralKeyPair
+                ephemeral_key = data.get('ephemeralKeyPair')
+                if ephemeral_key:
+                    logger.info(f"Using legacy ephemeral key format with nonce: {ephemeral_key.get('nonce')}")
             
             if device_fingerprint:
                 logger.info(f"Received device fingerprint data")
@@ -50,9 +82,17 @@ class AptosOAuthStartView(View):
             return JsonResponse({'error': 'Invalid JSON in request body'}, status=400)
     
     def get(self, request):
-        """Handle GET request (legacy, server-generated ephemeral key)"""
-        provider = request.GET.get('provider', 'google')
-        return self._handle_oauth_start(request, provider, None, None)
+        """Handle GET request - DISABLED for non-custodial approach"""
+        logger.error("GET endpoint disabled - non-custodial mode requires POST with client ephemeral key")
+        return JsonResponse({
+            'error': 'GET endpoint disabled',
+            'details': {
+                'reason': 'Non-custodial security policy',
+                'requirement': 'Use POST with client-generated ephemeral key',
+                'endpoint': 'POST /prover/oauth/aptos/start/',
+                'required_fields': ['provider', 'ephemeralPublicKey', 'ephemeralNonce', 'ephemeralExpiryDate', 'useClientEphemeralKey']
+            }
+        }, status=405)  # Method Not Allowed
     
     def _handle_oauth_start(self, request, provider, ephemeral_key=None, device_fingerprint=None):
         
@@ -80,18 +120,28 @@ class AptosOAuthStartView(View):
                 'suggestion': 'Run: ngrok http 8000'
             }, status=400)
         
-        # Generate ephemeral key pair if not provided by client
+        # ENFORCE NON-CUSTODIAL APPROACH: Client MUST provide ephemeral key
         if not ephemeral_key:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                # Server-side generation (not recommended for non-custodial)
-                logger.warning("Generating ephemeral key on server - consider client-side generation for non-custodial approach")
-                ephemeral_key = loop.run_until_complete(keyless_service.generate_ephemeral_key(24))
-            finally:
-                loop.close()
+            logger.error("CRITICAL: No ephemeral key provided by client")
+            logger.error("Backend is configured for NON-CUSTODIAL mode - client must generate ephemeral keys")
+            logger.error("Server will NEVER generate ephemeral keys for security reasons")
+            return JsonResponse({
+                'error': 'Client ephemeral key required',
+                'details': {
+                    'reason': 'Non-custodial security policy',
+                    'requirement': 'Client must generate ephemeral key pair',
+                    'provided_fields': list(data.keys()) if 'data' in locals() else [],
+                    'required_fields': ['ephemeralPublicKey', 'ephemeralNonce', 'ephemeralExpiryDate', 'useClientEphemeralKey']
+                }
+            }, status=400)
+        
+        # Validate client-generated key
+        if ephemeral_key.get('clientGenerated'):
+            logger.info("✅ Using client-generated ephemeral key (non-custodial approach)")
+            logger.info("✅ Backend will NEVER generate ephemeral keys - client-only generation enforced")
         else:
-            logger.info("Using client-provided ephemeral key (non-custodial approach)")
+            logger.warning("Client provided ephemeral key but not marked as client-generated")
+            logger.warning("Ensure client is using the latest non-custodial implementation")
         
         # Create a signed state token containing the ephemeral key
         import base64
@@ -358,6 +408,49 @@ class AptosOAuthCallbackView(View):
                 logger.info(f"Ephemeral key nonce: {ephemeral_nonce}")
                 logger.info(f"Nonces match: {jwt_nonce == ephemeral_nonce}")
                 
+                # Convert to strings for comparison
+                jwt_nonce_str = str(jwt_nonce) if jwt_nonce is not None else 'None'
+                eph_nonce_str = str(ephemeral_nonce) if ephemeral_nonce is not None else 'None'
+                nonces_match = jwt_nonce_str == eph_nonce_str
+                
+                if not nonces_match:
+                    logger.error("CRITICAL: JWT nonce does not match ephemeral key nonce!")
+                    logger.error(f"This means the OAuth provider used a different nonce than the client-generated one")
+                    logger.error(f"Expected JWT nonce: {ephemeral_nonce}")
+                    logger.error(f"Actual JWT nonce: {jwt_nonce}")
+                    if ephemeral_key.get('clientGenerated'):
+                        logger.error("Client-generated ephemeral key was not used in OAuth flow!")
+                        
+                        # FAIL COMPLETELY - nonce mismatch breaks keyless authentication
+                        error_params = urlencode({
+                            'success': 'false',
+                            'error': 'Nonce mismatch: OAuth JWT nonce does not match client ephemeral key nonce',
+                            'details': f'Expected: {ephemeral_nonce}, Got: {jwt_nonce}'
+                        })
+                        error_url = f'confio://oauth-callback?{error_params}'
+                        return HttpResponse(f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Authentication Error</title>
+    <script>
+        function redirectToApp() {{
+            try {{ window.location.href = '{error_url}'; }} catch (e) {{}}
+            setTimeout(function() {{ try {{ window.location.replace('{error_url}'); }} catch (e) {{}} }}, 100);
+        }}
+        redirectToApp();
+    </script>
+</head>
+<body onload="redirectToApp()">
+    <p>Authentication error: Nonce mismatch. Redirecting to app...</p>
+    <p><a href="{error_url}">Click here if not redirected</a></p>
+</body>
+</html>
+                        """, content_type='text/html')
+                else:
+                    logger.info("✅ SUCCESS: JWT nonce matches client-generated ephemeral key nonce")
+                
                 # Generate deterministic pepper for personal account index 0
                 pepper = generate_keyless_pepper(
                     iss=decoded_jwt.get('iss'),
@@ -369,13 +462,18 @@ class AptosOAuthCallbackView(View):
                 )
                 logger.info(f"Generated deterministic pepper for user: {pepper}")
                 
-                # Derive Keyless account
-                logger.info(f"Deriving Keyless account for sub={decoded_jwt.get('sub')}, aud={decoded_jwt.get('aud')}, iss={decoded_jwt.get('iss')}")
-                keyless_account = loop.run_until_complete(
-                    keyless_service.derive_keyless_account(jwt_token, ephemeral_key, pepper)
-                )
-                logger.info(f"Derived Keyless address: {keyless_account.get('address')}")
-                logger.info(f"Pepper received: {keyless_account.get('pepper', 'Not provided - using pepper service')}")
+                # Skip address derivation in backend - client will provide the correct address
+                logger.info(f"Skipping backend address derivation for sub={decoded_jwt.get('sub')}, aud={decoded_jwt.get('aud')}, iss={decoded_jwt.get('iss')}")
+                logger.info(f"✅ CLIENT-ONLY ADDRESS DERIVATION: Client will derive address using official Aptos SDK")
+                
+                # Create a placeholder keyless account - client will replace the address
+                keyless_account = {
+                    'address': 'CLIENT_WILL_DERIVE',  # Placeholder - client must replace this
+                    'publicKey': ephemeral_key['publicKey'],
+                    'pepper': pepper
+                }
+                logger.info(f"Created placeholder keyless account - client must provide real address")
+                logger.info(f"Pepper provided: {pepper}")
             finally:
                 loop.close()
             
@@ -514,37 +612,10 @@ class AptosOAuthCallbackView(View):
                 logger.info(f"Created new user for Firebase account: {email}, firebase_uid: {firebase_uid}")
                 created = True
             
-            # Create or update default personal account with Aptos address
-            from users.models import Account
-            
-            # Check if the user already has a personal account
-            try:
-                account = Account.objects.get(
-                    user=user,
-                    account_type='personal',
-                    account_index=0
-                )
-                # Update the address
-                old_address = account.aptos_address
-                account.aptos_address = keyless_account['address']
-                account.save()
-                logger.info(f"Updated existing personal account - Old address: {old_address}, New address: {keyless_account['address']}")
-                if old_address and old_address != keyless_account['address']:
-                    logger.warning(f"ADDRESS CHANGED for user {user.email} (firebase_uid: {firebase_uid})!")
-                    logger.warning(f"This suggests non-deterministic address generation - investigate JWT claims and pepper service")
-                
-                # Verify the update
-                account.refresh_from_db()
-                logger.info(f"Verified address after save: {account.aptos_address}")
-            except Account.DoesNotExist:
-                # Create new account
-                account = Account.objects.create(
-                    user=user,
-                    account_type='personal',
-                    account_index=0,
-                    aptos_address=keyless_account['address']  # Store Aptos address in aptos_address field
-                )
-                logger.info(f"Created default personal account with Aptos address: {keyless_account['address']}")
+            # Skip database address save during OAuth - client will provide real address later
+            logger.info(f"OAuth callback complete for user {user.email} (firebase_uid: {firebase_uid})")
+            logger.info(f"Client will derive canonical address and provide it in subsequent requests")
+            logger.info(f"Keyless account placeholder: {keyless_account['address']}")
             
             # Store device fingerprint if provided
             if device_fingerprint:
@@ -721,6 +792,99 @@ class AptosOAuthCallbackView(View):
             }) as response:
                 data = await response.json()
                 return data.get('id_token')
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class AptosKeylessAddressUpdateView(View):
+    """Update the keyless address in the database with client-derived address"""
+    
+    def post(self, request):
+        """Handle POST request to update keyless address"""
+        try:
+            data = json.loads(request.body)
+            canonical_address = data.get('address')
+            firebase_uid = data.get('firebase_uid')  # For user identification
+            account_type = data.get('account_type', 'personal')
+            account_index = data.get('account_index', 0)
+            
+            logger.info(f"Address update request received - firebase_uid: {firebase_uid}, address: {canonical_address}")
+            
+            if not canonical_address or not firebase_uid:
+                return JsonResponse({
+                    'error': 'Missing required fields',
+                    'required': ['address', 'firebase_uid'],
+                    'received': list(data.keys())
+                }, status=400)
+            
+            # Find the user by firebase_uid
+            try:
+                user = User.objects.get(firebase_uid=firebase_uid)
+                logger.info(f"Found user for firebase_uid {firebase_uid}: {user.email}")
+            except User.DoesNotExist:
+                logger.error(f"No user found with firebase_uid: {firebase_uid}")
+                return JsonResponse({
+                    'error': 'User not found',
+                    'firebase_uid': firebase_uid
+                }, status=404)
+            
+            # Find or create the account
+            try:
+                account = Account.objects.get(
+                    user=user,
+                    account_type=account_type,
+                    account_index=account_index
+                )
+                logger.info(f"Found existing account for user {user.email}: {account.account_type}_{account.account_index}")
+            except Account.DoesNotExist:
+                # Create the account if it doesn't exist
+                account = Account.objects.create(
+                    user=user,
+                    account_type=account_type,
+                    account_index=account_index,
+                    aptos_address=canonical_address
+                )
+                logger.info(f"Created new account for user {user.email}: {account.account_type}_{account.account_index}")
+                
+                return JsonResponse({
+                    'success': True,
+                    'message': 'Account created with canonical address',
+                    'account': {
+                        'type': account.account_type,
+                        'index': account.account_index,
+                        'address': account.aptos_address
+                    }
+                })
+            
+            # Update the existing account's address
+            old_address = account.aptos_address
+            account.aptos_address = canonical_address
+            account.save(update_fields=['aptos_address'])
+            
+            logger.info(f"✅ Updated keyless address for user {user.email}")
+            logger.info(f"Old address: {old_address}")
+            logger.info(f"New address: {canonical_address}")
+            logger.info(f"Account: {account.account_type}_{account.account_index}")
+            
+            return JsonResponse({
+                'success': True,
+                'message': 'Address updated successfully',
+                'account': {
+                    'type': account.account_type,
+                    'index': account.account_index,
+                    'address': account.aptos_address
+                },
+                'previous_address': old_address
+            })
+            
+        except json.JSONDecodeError:
+            logger.error("Invalid JSON in address update request")
+            return JsonResponse({'error': 'Invalid JSON in request body'}, status=400)
+        except Exception as e:
+            logger.error(f"Error updating keyless address: {str(e)}")
+            return JsonResponse({
+                'error': 'Internal server error',
+                'details': str(e)
+            }, status=500)
 
 
 @method_decorator(csrf_exempt, name='dispatch')

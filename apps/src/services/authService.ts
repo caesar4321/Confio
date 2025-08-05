@@ -7,6 +7,13 @@ import { Platform } from 'react-native';
 import { apolloClient } from '../apollo/client';
 import { AccountManager, AccountContext } from '../utils/accountManager';
 import { generateKeylessPepper } from '../utils/aptosKeyless';
+import { sha256 } from '@noble/hashes/sha256';
+import { sha512 } from '@noble/hashes/sha512';
+import { randomBytes } from 'react-native-randombytes';
+import * as ed25519 from '@noble/ed25519';
+
+// Configure @noble/ed25519 for React Native
+ed25519.etc.sha512Sync = (...m) => sha512(ed25519.etc.concatBytes(...m));
 
 // Debug logging for environment variables
 console.log('Environment variables loaded:');
@@ -390,11 +397,24 @@ export class AuthService {
   // Rehydrate Keyless data from storage
   private async rehydrateKeylessData(): Promise<void> {
     try {
+      // If we already have a valid current account, don't clear it
+      if (this.currentAccount && this.ephemeralKeyPair) {
+        console.log('[AuthService] Current account already exists, skipping rehydration');
+        return;
+      }
+      
       // Try Keychain first
       const keychainData = await Keychain.getInternetCredentials(KEYLESS_KEYCHAIN_SERVICE);
       
       if (keychainData && keychainData.password) {
         const storedData: StoredKeylessData = JSON.parse(keychainData.password);
+        
+        // Validate the stored data structure
+        if (!storedData.account || !storedData.account.ephemeralKeyPair) {
+          console.log('[AuthService] Invalid stored keyless data structure, clearing');
+          await this.clearKeylessData();
+          return;
+        }
         
         // Check if ephemeral key is still valid
         const expiryDate = new Date(storedData.account.ephemeralKeyPair.expiryDate);
@@ -402,6 +422,8 @@ export class AuthService {
           this.currentAccount = storedData.account;
           this.ephemeralKeyPair = storedData.account.ephemeralKeyPair;
           console.log('[AuthService] Restored Keyless data from Keychain');
+          console.log('[AuthService] Restored ephemeral key nonce:', this.ephemeralKeyPair?.nonce);
+          console.log('[AuthService] Restored account address:', this.currentAccount?.address);
         } else {
           console.log('[AuthService] Stored ephemeral key has expired');
           await this.clearKeylessData();
@@ -418,9 +440,22 @@ export class AuthService {
     this.currentAccount = null;
     this.ephemeralKeyPair = null;
     
-    // Note: We cannot use resetInternetCredentials on Android as it causes casting errors
-    // The local state is cleared which is the important part
-    console.log('[AuthService] Cleared Keyless data (local state only)');
+    // Try to clear keychain data
+    try {
+      // Instead of resetInternetCredentials, we'll overwrite with empty data
+      // This works on both iOS and Android
+      await Keychain.setInternetCredentials(
+        KEYLESS_KEYCHAIN_SERVICE,
+        KEYLESS_KEYCHAIN_USERNAME,
+        JSON.stringify({})
+      );
+      console.log('[AuthService] Cleared Keyless data from keychain');
+    } catch (error) {
+      console.log('[AuthService] Error clearing keychain data:', error);
+      // Continue anyway - local state is cleared
+    }
+    
+    console.log('[AuthService] Cleared Keyless data');
   }
 
   // Get stored Keyless data
@@ -428,7 +463,12 @@ export class AuthService {
     try {
       const credentials = await Keychain.getInternetCredentials(KEYLESS_KEYCHAIN_SERVICE);
       if (credentials && credentials.password) {
-        return JSON.parse(credentials.password);
+        const parsed = JSON.parse(credentials.password);
+        // Validate the structure - return null if it's just an empty object
+        if (!parsed.account || !parsed.account.address) {
+          return null;
+        }
+        return parsed;
       }
       return null;
     } catch (error) {
@@ -460,7 +500,7 @@ export class AuthService {
   public async getKeylessAddress(): Promise<string> {
     if (!this.currentAccount) {
       const storedData = await this.getStoredKeylessData();
-      if (!storedData) {
+      if (!storedData || !storedData.account || !storedData.account.address) {
         throw new Error('No Keyless account available');
       }
       this.currentAccount = storedData.account;
@@ -506,10 +546,8 @@ export class AuthService {
       // Test 4: Clear Keyless data from keychain
       try {
         console.log('Clearing keyless data from keychain...');
-        // Note: We store keyless data with setInternetCredentials, but we should NOT use
-        // resetInternetCredentials as it has issues on Android. Just skip this operation
-        // since the important part is clearing the local state
-        console.log('Skipping keychain clear for keyless data (Android compatibility)');
+        await this.clearKeylessData();
+        console.log('Keyless data cleared from keychain');
       } catch (error) {
         console.log('Keyless keychain clear error:', error);
       }
@@ -587,12 +625,7 @@ export class AuthService {
       // 4. Clear Keyless data using try-catch for each operation
       try {
         console.log('About to clear Keyless data...');
-        // Clear the keyless credentials without throwing errors
-        this.currentAccount = null;
-        this.ephemeralKeyPair = null;
-        
-        // Note: We cannot use resetInternetCredentials on Android as it causes casting errors
-        // The local state is already cleared which is the important part
+        await this.clearKeylessData();
         console.log('Keyless data cleared');
       } catch (error) {
         console.error('Error clearing Keyless data:', error);
@@ -693,7 +726,7 @@ export class AuthService {
     }
   }
 
-  // Create keyless signature for transaction (compatibility with old zkLogin flow)
+  // Create keyless signature for transaction (using Aptos Keyless accounts)
   public async createZkLoginSignatureForTransaction(transactionBytes: string): Promise<string | null> {
     try {
       console.log('AuthService - createZkLoginSignatureForTransaction called (using Aptos Keyless)');
@@ -703,13 +736,127 @@ export class AuthService {
         return null;
       }
 
-      // For now, return a mock signature since the backend will handle the actual signing
-      // The backend uses the JWT and ephemeral keypair to create the real signature
-      const keylessSignature = `keyless_signature_${Date.now()}_${this.currentAccount.address.slice(0, 10)}`;
+      if (!this.ephemeralKeyPair) {
+        console.error('No ephemeral keypair available for transaction signing');
+        return null;
+      }
+
+      if (!this.currentAccount.jwt) {
+        console.error('No JWT available for keyless signing');
+        return null;
+      }
+
+      // Decode the transaction bytes from base64
+      const txBytesString = atob(transactionBytes);
+      const txData = JSON.parse(txBytesString);
       
-      console.log('AuthService - Generated keyless signature placeholder:', keylessSignature.substring(0, 50) + '...');
-      return keylessSignature;
-      
+      console.log('AuthService - Signing transaction with Aptos Keyless account:', this.currentAccount.address);
+      console.log('AuthService - Transaction data:', txData);
+
+      // Use the Aptos Keyless Service to generate proper authenticator
+      try {
+        console.log('AuthService - Using Aptos Keyless Service for authentication');
+        console.log('AuthService - Current ephemeral key pair:', {
+          hasPrivateKey: !!this.ephemeralKeyPair?.privateKey,
+          hasPublicKey: !!this.ephemeralKeyPair?.publicKey,
+          nonce: this.ephemeralKeyPair?.nonce,
+          expiryDate: this.ephemeralKeyPair?.expiryDate,
+          hasBlinder: !!this.ephemeralKeyPair?.blinder,
+        });
+        console.log('AuthService - JWT length:', this.currentAccount.jwt?.length);
+        
+        // Check if this is a sponsored transaction
+        if (!txData.signing_message) {
+          console.error('AuthService - No signing_message provided in transaction data');
+          return null;
+        }
+        
+        // Import the keyless service with error handling
+        let aptosKeylessService;
+        try {
+          const module = await import('./aptosKeylessService');
+          aptosKeylessService = module.aptosKeylessService;
+          
+          if (!aptosKeylessService) {
+            console.error('AuthService - aptosKeylessService is undefined after import');
+            return null;
+          }
+        } catch (importError) {
+          console.error('AuthService - Failed to import aptosKeylessService:', importError);
+          return null;
+        }
+        
+        // Generate the authenticator
+        console.log('AuthService - Generating keyless authenticator...');
+        
+        // Handle pepper conversion
+        let pepperBytes: Uint8Array | undefined;
+        if (this.currentAccount.pepper) {
+          console.log('AuthService - Original pepper:', this.currentAccount.pepper);
+          console.log('AuthService - Pepper type:', typeof this.currentAccount.pepper);
+          
+          // Remove 0x prefix if present
+          const pepperHex = this.currentAccount.pepper.replace(/^0x/, '');
+          console.log('AuthService - Pepper hex (no 0x):', pepperHex);
+          console.log('AuthService - Pepper hex length:', pepperHex.length);
+          
+          const pepperBuffer = Buffer.from(pepperHex, 'hex');
+          console.log('AuthService - Pepper buffer length:', pepperBuffer.length);
+          
+          // Ensure pepper is exactly 31 bytes
+          if (pepperBuffer.length !== 31) {
+            console.warn(`AuthService - Pepper length is ${pepperBuffer.length}, expected 31. Padding/truncating...`);
+            // Create a 31-byte buffer
+            const paddedPepper = Buffer.alloc(31);
+            // Copy the pepper, truncating if too long or padding with zeros if too short
+            pepperBuffer.copy(paddedPepper, 0, 0, Math.min(31, pepperBuffer.length));
+            pepperBytes = new Uint8Array(paddedPepper);
+          } else {
+            pepperBytes = new Uint8Array(pepperBuffer);
+          }
+          
+          console.log('AuthService - Final pepper bytes length:', pepperBytes.length);
+          console.log('AuthService - Final pepper bytes (first 10):', Array.from(pepperBytes.slice(0, 10)));
+        }
+        
+        const authenticatorResponse = await aptosKeylessService.generateAuthenticator({
+          jwt: this.currentAccount.jwt,
+          ephemeralKeyPair: this.ephemeralKeyPair,
+          signingMessage: txData.signing_message,
+          pepper: pepperBytes,
+        });
+        
+        console.log('AuthService - Generated keyless authenticator:', {
+          addressHex: authenticatorResponse.addressHex,
+          ephemeralPublicKeyHex: authenticatorResponse.ephemeralPublicKeyHex,
+          authenticatorLength: authenticatorResponse.senderAuthenticatorBcsBase64.length,
+        });
+        
+        // Create the response structure that the backend expects
+        const keylessSignatureData = {
+          // For compatibility with existing backend
+          transaction_hash: txData.signing_message,
+          ephemeral_public_key: authenticatorResponse.ephemeralPublicKeyHex,
+          account_address: this.currentAccount.address,
+          jwt: this.currentAccount.jwt,
+          keyless_signature_type: 'aptos_keyless_authenticator',
+          
+          // New fields with the actual authenticator
+          sender_authenticator_bcs_base64: authenticatorResponse.senderAuthenticatorBcsBase64,
+          auth_key_hex: authenticatorResponse.authKeyHex,
+          address_hex: authenticatorResponse.addressHex,
+          signing_message_base64: txData.signing_message,
+        };
+
+        const signatureJson = JSON.stringify(keylessSignatureData);
+        const signatureBase64 = btoa(signatureJson);
+        
+        console.log('AuthService - Created keyless authenticator response');
+        return signatureBase64;
+      } catch (error) {
+        console.error('AuthService - Error creating keyless signature:', error);
+        return null;
+      }
     } catch (error) {
       console.error('AuthService - Error creating keyless signature:', error);
       return null;

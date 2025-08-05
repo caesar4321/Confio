@@ -42,6 +42,27 @@ export interface SignAndSubmitRequest {
   pepper?: string;
 }
 
+export interface GenerateAuthenticatorRequest {
+  jwt: string;
+  ephemeralKeyPair: EphemeralKeyPairData;
+  signingMessage: string; // Base64 encoded signing message
+  pepper?: string;
+}
+
+export interface GenerateAuthenticatorResponse {
+  senderAuthenticatorBcsBase64: string;
+  authKeyHex: string;
+  ephemeralPublicKeyHex: string;
+  claims: {
+    iss: string;
+    aud: string;
+    sub: string;
+    exp: number;
+    iat: number;
+  };
+  kid?: string;
+}
+
 export interface GetOAuthUrlRequest {
   provider: 'google' | 'apple';
   clientId: string;
@@ -49,6 +70,20 @@ export interface GetOAuthUrlRequest {
   ephemeralPublicKey: string;
   expiryDate: string;
   blinder?: string;
+}
+
+export interface FeePayerSubmitRequest {
+  rawTxnBcsBase64: string;
+  senderAuthenticatorBcsBase64: string;
+  sponsorAddressHex: string;
+  policyMetadata: {
+    [key: string]: any;
+  };
+}
+
+export interface FeePayerSubmitResponse {
+  transactionHash: string;
+  success: boolean;
 }
 
 export interface ErrorResponse {

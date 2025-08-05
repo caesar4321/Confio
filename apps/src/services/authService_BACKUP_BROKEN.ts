@@ -44,7 +44,7 @@ interface StoredZkLogin {
     zkProof: any;        // the full proof object (points a/b/c etc)
     subject: string;     // sub
     clientId: string;    // oauth clientId
-    suiAddress: string;  // the user's Sui address
+    aptosAddress: string;  // the user's Sui address
   };
   secretKey: string;     // base64-encoded 32-byte seed
   initRandomness: string; // randomness from initializeZkLogin
@@ -363,7 +363,7 @@ export class AuthService {
         },
         zkLoginData: { 
           zkProof: fin.zkProof, 
-          suiAddress: fin.suiAddress,
+          aptosAddress: fin.aptosAddress,
           isPhoneVerified: fin.isPhoneVerified 
         }
       };
@@ -658,7 +658,7 @@ export class AuthService {
       );
       
       console.log('===== Apple Sign-In with zkLogin SUCCESS! =====');
-      console.log('Sui Address:', finalizeData.finalizeZkLogin.suiAddress);
+      console.log('Sui Address:', finalizeData.finalizeZkLogin.aptosAddress);
 
       // Automatically create default personal account after successful zkLogin
       console.log('Creating default personal account (Apple)...');
@@ -696,7 +696,7 @@ export class AuthService {
         },
         zkLoginData: {
           zkProof: finalizeData.finalizeZkLogin.zkProof,
-          suiAddress: finalizeData.finalizeZkLogin.suiAddress,
+          aptosAddress: finalizeData.finalizeZkLogin.aptosAddress,
           isPhoneVerified: finalizeData.finalizeZkLogin.isPhoneVerified
         }
       };
@@ -744,7 +744,7 @@ export class AuthService {
           mutation ZkLogin($input: ZkLoginInput!) {
             zkLogin(input: $input) {
               zkProof
-              suiAddress
+              aptosAddress
               error
               details
             }
@@ -796,7 +796,7 @@ export class AuthService {
         hasSecretKey: !!data.secretKey,
         hasInitRandomness: !!data.initRandomness,
         hasInitJwt: !!data.initJwt,
-        hasSuiAddress: !!data.zkProof?.suiAddress,
+        hasSuiAddress: !!data.zkProof?.aptosAddress,
         secretKeyLength: data.secretKey?.length
       });
 
@@ -831,12 +831,12 @@ export class AuthService {
       this.userSalt = data.salt;
       this.maxEpoch = data.maxEpoch;
 
-      // Store the full proof object with all required fields including suiAddress
+      // Store the full proof object with all required fields including aptosAddress
       this.zkProof = {
         zkProof: data.zkProof.zkProof,
         subject: data.subject,
         clientId: data.clientId,
-        suiAddress: data.zkProof.suiAddress
+        aptosAddress: data.zkProof.aptosAddress
       };
 
       // Check if we need to refresh the proof
@@ -874,7 +874,7 @@ export class AuthService {
           hasZkProof: !!this.zkProof?.zkProof,
           hasSubject: !!this.zkProof?.subject,
           hasClientId: !!this.zkProof?.clientId,
-          hasSuiAddress: !!this.zkProof?.suiAddress
+          hasSuiAddress: !!this.zkProof?.aptosAddress
         }
       });
     } catch (error) {
@@ -906,7 +906,7 @@ export class AuthService {
     // Log the incoming proof structure
     console.log('Incoming proof structure:', {
       hasZkProof: !!proof.zkProof,
-      hasSuiAddress: !!proof.suiAddress,
+      hasSuiAddress: !!proof.aptosAddress,
       success: proof.success,
       error: proof.error,
       proof: proof
@@ -922,7 +922,7 @@ export class AuthService {
     const secretKeyB64 = btoa(String.fromCharCode.apply(null, Array.from(secretKey).map(Number)));
 
     // Ensure we have a valid Sui address
-    if (!proof.suiAddress) {
+    if (!proof.aptosAddress) {
       throw new Error('No Sui address provided in proof');
     }
 
@@ -931,7 +931,7 @@ export class AuthService {
       zkProof: proof.zkProof,
       subject,
       clientId,
-      suiAddress: proof.suiAddress,  // Store the Sui address at the top level
+      aptosAddress: proof.aptosAddress,  // Store the Sui address at the top level
       extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
       userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0)))
     };
@@ -1032,7 +1032,7 @@ export class AuthService {
       accountType: accountContext.type,
       accountIndex: accountContext.index,
       accountId: accountId,
-      suiAddress: currentSuiAddress,
+      aptosAddress: currentSuiAddress,
       note: 'Address derived from deterministic salt for current account context'
     });
 
@@ -1840,7 +1840,7 @@ export class AuthService {
         accountId: accountId,
         accountType: accountContext.type,
         accountIndex: accountContext.index,
-        suiAddress: newSuiAddress,
+        aptosAddress: newSuiAddress,
         note: accountContext.type === 'personal' ? 'Personal account (index 0)' : `Business account (index ${accountContext.index})`
       });
     } catch (error) {
