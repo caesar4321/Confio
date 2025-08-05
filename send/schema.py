@@ -757,7 +757,7 @@ class PrepareTransaction(graphene.Mutation):
         try:
             from decimal import Decimal
             from users.jwt_context import get_jwt_business_context_with_validation
-            from blockchain.transaction_manager_pysui import TransactionManagerPySui
+            # Legacy import removed - using Aptos transaction manager
             import asyncio
             
             # Get account context from JWT

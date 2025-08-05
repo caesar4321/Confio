@@ -12,7 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import Balance
-from .pysui_client import get_pysui_client
+# Legacy pysui import removed - using Aptos services
 from users.models import Account
 
 logger = logging.getLogger(__name__)
@@ -227,18 +227,10 @@ class BalanceService:
             asyncio.set_event_loop(loop)
             
             async def get_balance():
-                async with await get_pysui_client() as client:
-                    if token == 'CUSD':
-                        return await client.get_cusd_balance(account.sui_address)
-                    elif token == 'CONFIO':
-                        return await client.get_confio_balance(account.sui_address)
-                    elif token == 'SUI':
-                        return await client.get_sui_balance(account.sui_address)
-                    elif token == 'USDC':
-                        # USDC not on Sui
-                        return Decimal('0')
-                    else:
-                        return Decimal('0')
+                # TODO: Replace with Aptos client when implementing blockchain verification
+                # This method needs to be reimplemented with Aptos SDK
+                logger.warning("Blockchain balance verification not implemented for Aptos yet")
+                return Decimal('0')
             
             try:
                 amount = loop.run_until_complete(get_balance())
