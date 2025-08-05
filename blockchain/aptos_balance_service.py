@@ -191,12 +191,12 @@ class AptosBalanceService:
             }
         """
         # Log the address we're querying
-        logger.info(f"[AptosBalanceService] Querying balances for address: {account.sui_address}")
+        logger.info(f"[AptosBalanceService] Querying balances for address: {account.aptos_address}")
         
         # Validate Aptos address format (should start with 0x and be 64 chars + 2 for 0x)
-        if not account.sui_address or not account.sui_address.startswith('0x') or len(account.sui_address) != 66:
-            logger.warning(f"[AptosBalanceService] Invalid Aptos address format: {account.sui_address}")
-            # This might be a Sui address, return 0 balances
+        if not account.aptos_address or not account.aptos_address.startswith('0x') or len(account.aptos_address) != 66:
+            logger.warning(f"[AptosBalanceService] Invalid Aptos address format: {account.aptos_address}")
+            # This might be a Aptos address, return 0 balances
             return {
                 'cusd': {'amount': Decimal('0'), 'available': Decimal('0'), 'pending': Decimal('0'), 'last_synced': datetime.now(timezone.utc)},
                 'confio': {'amount': Decimal('0'), 'available': Decimal('0'), 'pending': Decimal('0'), 'last_synced': datetime.now(timezone.utc)},
@@ -206,7 +206,7 @@ class AptosBalanceService:
         
         # Get token balances from Aptos
         usdc_balance = cls.get_token_balance(
-            account.sui_address,  # This will be the Aptos address
+            account.aptos_address,  # This will be the Aptos address
             cls.USDC_ADDRESS,
             'usdc',
             decimals=6,
@@ -214,7 +214,7 @@ class AptosBalanceService:
         )
         
         cusd_balance = cls.get_token_balance(
-            account.sui_address,
+            account.aptos_address,
             cls.CUSD_ADDRESS,
             'cusd',
             decimals=6,
@@ -222,7 +222,7 @@ class AptosBalanceService:
         )
         
         confio_balance = cls.get_token_balance(
-            account.sui_address,
+            account.aptos_address,
             cls.CONFIO_ADDRESS,
             'confio',
             decimals=6,

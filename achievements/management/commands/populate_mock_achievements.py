@@ -10,12 +10,12 @@ class Command(BaseCommand):
     help = 'Populate mock achievements for zkLogin users'
 
     def handle(self, *args, **options):
-        # Get all zkLogin users (users with accounts that have sui_address set)
+        # Get all zkLogin users (users with accounts that have aptos_address set)
         from users.models import Account
         
         zklogin_accounts = Account.objects.filter(
-            sui_address__isnull=False
-        ).exclude(sui_address='').select_related('user')
+            aptos_address__isnull=False
+        ).exclude(aptos_address='').select_related('user')
         
         zklogin_users = User.objects.filter(
             id__in=zklogin_accounts.values_list('user_id', flat=True)
@@ -84,8 +84,8 @@ class Command(BaseCommand):
             for user in zklogin_users:
                 # Get user's sui address
                 user_account = zklogin_accounts.filter(user=user).first()
-                sui_address = user_account.sui_address if user_account else 'N/A'
-                self.stdout.write(f'\nProcessing user: {user.username} (sui_address: {sui_address[:20] if sui_address != "N/A" else "N/A"}...)')
+                aptos_address = user_account.aptos_address if user_account else 'N/A'
+                self.stdout.write(f'\nProcessing user: {user.username} (aptos_address: {aptos_address[:20] if aptos_address != "N/A" else "N/A"}...)')
                 user_earned = 0
                 user_claimed = 0
                 user_confio = 0

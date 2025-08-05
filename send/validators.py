@@ -30,7 +30,7 @@ def validate_transaction_amount(amount) -> None:
         raise ValidationError("Amount must be a valid number")
 
 def validate_recipient(address: str) -> None:
-    """Validate the recipient's Sui address"""
-    # Sui addresses are 32 bytes (64 hex characters)
+    """Validate the recipient's Aptos address"""
+    # Aptos addresses are 32 bytes (64 hex characters)
     if not re.match(r'^0x[0-9a-fA-F]{64}$', address):
-        raise ValidationError("Invalid Sui address format") 
+        raise ValidationError("Invalid Aptos address format") 

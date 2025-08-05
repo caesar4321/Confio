@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """
-Migration script to update Sui addresses for existing accounts after salt formula change.
+Migration script to update Aptos addresses for existing accounts after salt formula change.
 
 This script will:
 1. Iterate through all existing accounts
-2. Regenerate the Sui address using the new salt formula (with business_id)
-3. Update the account's Sui address in the database
+2. Regenerate the Aptos address using the new salt formula (with business_id)
+3. Update the account's Aptos address in the database
 
 Run this script after deploying the new salt formula.
 """
@@ -36,7 +36,7 @@ def migrate_account_addresses():
     """
     Migrate existing accounts to use new salt formula with business_id.
     
-    For existing accounts, we'll need to recalculate the Sui addresses
+    For existing accounts, we'll need to recalculate the Aptos addresses
     based on the new salt formula that includes business_id.
     """
     
@@ -60,18 +60,18 @@ def migrate_account_addresses():
                 if account.account_type == 'business' and account.business:
                     logger.info(f"  Business: {account.business.name} (ID: {account.business.id})")
                 
-                # Note: The actual Sui address generation happens on the client side
+                # Note: The actual Aptos address generation happens on the client side
                 # This script is a placeholder for the migration strategy
                 # In production, you would need to:
                 # 1. Have users re-authenticate to generate new addresses
                 # 2. Or implement a server-side address generation mechanism
                 
                 # For now, we'll just log what needs to be done
-                if account.sui_address:
-                    logger.warning(f"  Current Sui address: {account.sui_address}")
+                if account.aptos_address:
+                    logger.warning(f"  Current Aptos address: {account.aptos_address}")
                     logger.warning(f"  This address needs to be regenerated with the new salt formula")
                 else:
-                    logger.info(f"  No Sui address set yet")
+                    logger.info(f"  No Aptos address set yet")
                 
                 migrated_count += 1
                 
@@ -89,7 +89,7 @@ def migrate_account_addresses():
     print(f"Successfully processed: {migrated_count}")
     print(f"Errors: {error_count}")
     print("\nIMPORTANT NOTES:")
-    print("1. Sui addresses are generated client-side using zkLogin")
+    print("1. Aptos addresses are generated client-side using zkLogin")
     print("2. Users will need to re-authenticate to generate new addresses")
     print("3. The new salt formula includes business_id for business accounts")
     print("4. Personal accounts are not affected (business_id is empty string)")

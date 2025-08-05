@@ -200,7 +200,7 @@ class CreateSendTransaction(graphene.Mutation):
                 sender_address = active_account.aptos_address
                 sender_account = active_account  # Store for later use in notifications
 
-                # Find recipient and their Sui address
+                # Find recipient and their Aptos address
                 recipient_user = None
                 recipient_account = None
                 recipient_address = None
@@ -627,7 +627,7 @@ class Query(graphene.ObjectType):
                     account_index=account_index
                 )
             
-            # Filter by account's Sui address
+            # Filter by account's Aptos address
             if account.aptos_address:
                 return SendTransaction.objects.filter(
                     models.Q(sender_address=account.aptos_address) | 

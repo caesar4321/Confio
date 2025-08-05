@@ -27,14 +27,14 @@ class CreateSendTransactionTestCase(TestCase):
             user=self.sender_user,
             account_type='personal',
             account_index=0,
-            sui_address='0x1234567890123456789012345678901234567890123456789012345678901234'
+            aptos_address='0x1234567890123456789012345678901234567890123456789012345678901234'
         )
         
         self.recipient_account = Account.objects.create(
             user=self.recipient_user,
             account_type='personal',
             account_index=0,
-            sui_address='0x9876543210987654321098765432109876543210987654321098765432109876'
+            aptos_address='0x9876543210987654321098765432109876543210987654321098765432109876'
         )
 
     def test_create_send_transaction_updates_status(self):
@@ -64,7 +64,7 @@ class CreateSendTransactionTestCase(TestCase):
                 self.memo = memo
         
         input_data = MockInput(
-            recipient_address=self.recipient_account.sui_address,
+            recipient_address=self.recipient_account.aptos_address,
             amount='25.00',
             token_type='cUSD',
             memo='Test send transaction'

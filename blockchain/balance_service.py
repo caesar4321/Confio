@@ -219,8 +219,8 @@ class BalanceService:
             
             logger.info(f"Aptos balance for {account.aptos_address} - {token}: {amount}")
         else:
-            # Legacy Sui address - fetch from Sui network
-            logger.info(f"Detected Sui address format for {account.aptos_address}, using Sui network")
+            # Legacy Aptos address - fetch from Sui network
+            logger.info(f"Detected Aptos address format for {account.aptos_address}, using Sui network")
             
             # Run async code in sync context
             loop = asyncio.new_event_loop()

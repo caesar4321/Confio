@@ -23,7 +23,7 @@ def generate_proof(request):
         # TODO: Implement actual proof generation logic here
         # For now, return a mock response
         response = {
-            "suiAddress": "0x" + "0" * 40,  # Mock Sui address
+            "suiAddress": "0x" + "0" * 40,  # Mock Aptos address
             "proof": {
                 "proofPoints": {
                     "a": ["0", "0"],

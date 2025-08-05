@@ -26,8 +26,8 @@ def get_test_accounts():
     accounts_with_balance = []
     for account in Account.objects.filter(
         deleted_at__isnull=True,
-        sui_address__isnull=False
-    ).exclude(sui_address='').select_related('user'):
+        aptos_address__isnull=False
+    ).exclude(aptos_address='').select_related('user'):
         balance = Balance.objects.filter(
             account=account,
             token='CUSD'
@@ -79,10 +79,10 @@ async def test_cusd_send():
     print(f"Test cUSD Send")
     print(f"==============")
     print(f"Sender: {sender.account_id} ({sender.user.username})")
-    print(f"  Sui Address: {sender.sui_address}")
+    print(f"  Sui Address: {sender.aptos_address}")
     print(f"  cUSD Balance: {sender_balance.amount}")
     print(f"\nRecipient: {recipient.account_id} ({recipient.user.username})")
-    print(f"  Sui Address: {recipient.sui_address}")
+    print(f"  Sui Address: {recipient.aptos_address}")
     
     # Get recipient's initial balance
     recipient_balance = await get_balance(recipient, 'CUSD')
@@ -97,7 +97,7 @@ async def test_cusd_send():
         # Use TransactionManager to send tokens
         result = await TransactionManager.send_tokens(
             sender,
-            recipient.sui_address,
+            recipient.aptos_address,
             amount,
             'CUSD'
         )

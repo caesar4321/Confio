@@ -33,8 +33,8 @@ class SuiTransactionBuilder:
         Build a transfer transaction
         
         Args:
-            sender: Sender's Sui address
-            recipient: Recipient's Sui address
+            sender: Sender's Aptos address
+            recipient: Recipient's Aptos address
             amount: Amount in smallest units
             coin_object_ids: List of coin object IDs to use
             coin_type: Full coin type (e.g., "0x2::sui::SUI")

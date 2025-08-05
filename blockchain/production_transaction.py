@@ -74,8 +74,8 @@ class ProductionTransaction:
         Build a transfer transaction with proper encoding
         
         Args:
-            sender: Sender's Sui address
-            recipient: Recipient's Sui address  
+            sender: Sender's Aptos address
+            recipient: Recipient's Aptos address  
             amount: Amount to send (with decimals)
             coin_type: Full coin type string
             coin_objects: List of coin objects to use

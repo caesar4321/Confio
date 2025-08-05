@@ -48,13 +48,13 @@ def distribute_cusd():
     )['total'] or 0
     print(f"Total cUSD in database: {total_cusd}")
     
-    # Show accounts with Sui addresses
-    accounts_with_sui = accounts.exclude(sui_address__isnull=True).exclude(sui_address='')
-    print(f"\nAccounts with Sui addresses: {accounts_with_sui.count()}")
+    # Show accounts with Aptos addresses
+    accounts_with_sui = accounts.exclude(aptos_address__isnull=True).exclude(aptos_address='')
+    print(f"\nAccounts with Aptos addresses: {accounts_with_sui.count()}")
     for account in accounts_with_sui:
         cusd_balance = Balance.objects.filter(account=account, token='CUSD').first()
         balance = cusd_balance.amount if cusd_balance else 0
-        print(f"  - {account.account_id}: {account.sui_address[:16]}... (Balance: {balance} cUSD)")
+        print(f"  - {account.account_id}: {account.aptos_address[:16]}... (Balance: {balance} cUSD)")
 
 if __name__ == "__main__":
     distribute_cusd()

@@ -58,7 +58,7 @@ class Command(BaseCommand):
                 return
             
             self.stdout.write(f"\n🔍 Testing transaction manager for {email}")
-            self.stdout.write(f"   Account: {account.name} ({account.sui_address[:16]}...)")
+            self.stdout.write(f"   Account: {account.name} ({account.aptos_address[:16]}...)")
             self.stdout.write(f"   Token: {token}")
             self.stdout.write(f"   Amount: {amount}")
             

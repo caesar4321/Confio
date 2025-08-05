@@ -39,7 +39,7 @@ class ZkLoginClientHelper:
             user_salt: User-specific salt
             
         Returns:
-            Sui address (0x prefixed)
+            Aptos address (0x prefixed)
         """
         try:
             # Normalize issuer

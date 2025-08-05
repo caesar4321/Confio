@@ -47,7 +47,7 @@ class AptosTransactionManager:
             from blockchain.aptos_sponsor_service import AptosSponsorService
             
             # Validate sender address
-            if not sender_account.sui_address:  # Note: using sui_address field for Aptos addresses
+            if not sender_account.aptos_address:  # Note: using aptos_address field for Aptos addresses
                 return {
                     'success': False,
                     'error': 'Sender address not found'
@@ -65,14 +65,14 @@ class AptosTransactionManager:
             # Send tokens based on token type
             if token_type.upper() == 'CUSD':
                 result = await AptosSponsorService.sponsor_cusd_transfer(
-                    sender_account.sui_address,  # Note: using sui_address field for Aptos addresses
+                    sender_account.aptos_address,  # Note: using aptos_address field for Aptos addresses
                     recipient_address,
                     amount,
                     keyless_info
                 )
             elif token_type.upper() == 'CONFIO':
                 result = await AptosSponsorService.sponsor_confio_transfer(
-                    sender_account.sui_address,
+                    sender_account.aptos_address,
                     recipient_address,
                     amount,
                     keyless_info
@@ -86,7 +86,7 @@ class AptosTransactionManager:
             # Log the transaction attempt
             logger.info(
                 f"Aptos transaction: {amount} {token_type} "
-                f"from {sender_account.sui_address[:16]}... "
+                f"from {sender_account.aptos_address[:16]}... "
                 f"to {recipient_address[:16]}... "
                 f"Result: {'SUCCESS' if result.get('success') else 'FAILED'}"
             )
@@ -163,7 +163,7 @@ class AptosTransactionManager:
             import base64
             
             tx_data = {
-                'sender': account.sui_address,
+                'sender': account.aptos_address,
                 'payload': transaction_payload,
                 'amount': str(amount),
                 'token_type': token_type,

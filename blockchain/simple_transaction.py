@@ -98,9 +98,9 @@ class SimpleTransaction:
         Real sponsorship requires transaction wrapper support
         
         Args:
-            user_address: User's Sui address
+            user_address: User's Aptos address
             transaction_data: Transaction data to execute
-            sponsor_address: Sponsor's Sui address
+            sponsor_address: Sponsor's Aptos address
             sponsor_key: Sponsor's private key
             prepared_coins: Pre-selected coins (optional)
             zklogin_info: zkLogin information if available (optional)

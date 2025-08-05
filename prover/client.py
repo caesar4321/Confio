@@ -27,7 +27,7 @@ class ZkLoginInput(graphene.InputObjectType):
 
 class ZkLoginResult(graphene.ObjectType):
     zk_proof = graphene.JSONString()
-    sui_address = graphene.String()
+    aptos_address = graphene.String()
     error = graphene.String()
     details = graphene.String()
 
@@ -55,12 +55,12 @@ class ZkLoginMutation(graphene.Mutation):
             response.raise_for_status()
             zk_proof = response.json()
 
-            # The prover service should return the Sui address
-            sui_address = zk_proof.get('suiAddress')
+            # The prover service should return the Aptos address
+            aptos_address = zk_proof.get('suiAddress')
 
             return ZkLoginResult(
                 zk_proof=zk_proof,
-                sui_address=sui_address
+                aptos_address=aptos_address
             )
 
         except Exception as e:

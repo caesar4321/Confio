@@ -123,8 +123,8 @@ class PaymentTransaction(SoftDeleteModel):
     )
 
     # Blockchain addresses
-    payer_address = models.CharField(max_length=66)  # Sui addresses are 0x + 32 bytes (66 chars total)
-    merchant_address = models.CharField(max_length=66)  # Sui addresses are 0x + 32 bytes (66 chars total)
+    payer_address = models.CharField(max_length=66)  # Aptos addresses are 0x + 32 bytes (66 chars total)
+    merchant_address = models.CharField(max_length=66)  # Aptos addresses are 0x + 32 bytes (66 chars total)
 
     # Transaction details
     amount = models.DecimalField(max_digits=19, decimal_places=6)  # Support up to 9,999,999,999,999.999999

@@ -12,7 +12,7 @@ class ProverProofType(graphene.ObjectType):
     address_seed = graphene.String()
 
 class ProverResultType(graphene.ObjectType):
-    sui_address = graphene.String()
+    aptos_address = graphene.String()
     proof = graphene.Field(ProverProofType)
     error = graphene.String()
     details = graphene.String()
@@ -48,7 +48,7 @@ class ProverMutation(graphene.Mutation):
             result = response.json()
 
             return ProverResultType(
-                sui_address=result.get("suiAddress"),
+                aptos_address=result.get("suiAddress"),
                 proof=ProverProofType(
                     proof_points=result.get("proof", {}).get("proofPoints"),
                     iss_base64_details=result.get("proof", {}).get("issBase64Details"),

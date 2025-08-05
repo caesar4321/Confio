@@ -645,18 +645,18 @@ def resolve_finalize_zk_login(self, info, input):
             # No longer storing ZkLoginProof - proofs remain client-side
             logger.info("zkLogin proof generated successfully - storing address only")
 
-            # Update user's Sui address
-            account.sui_address = result['suiAddress']
+            # Update user's Aptos address
+            account.aptos_address = result['suiAddress']
             account.save()
-            logger.info("Updated user account with Sui address: %s", result['suiAddress'])
+            logger.info("Updated user account with Aptos address: %s", result['suiAddress'])
 
-            # Verify the Sui address was saved
+            # Verify the Aptos address was saved
             account.refresh_from_db()
-            if not account.sui_address:
-                logger.error("Failed to save Sui address to account")
+            if not account.aptos_address:
+                logger.error("Failed to save Aptos address to account")
                 return FinalizeZkLoginPayload(
                     success=False,
-                    error="Failed to save Sui address"
+                    error="Failed to save Aptos address"
                 )
 
             # Track device fingerprint if provided
@@ -935,8 +935,8 @@ class InitializeAuth(graphene.Mutation):
                             error="Your account has been suspended. Please contact support."
                         )
                     
-                    # Update user's address (reusing sui_address field for Aptos)
-                    user.sui_address = keylessAddress
+                    # Update user's address (reusing aptos_address field for Aptos)
+                    user.aptos_address = keylessAddress
                     user.save()
                     
                 except User.DoesNotExist:
@@ -954,7 +954,7 @@ class InitializeAuth(graphene.Mutation):
                         firebase_uid=firebase_uid,
                         first_name=first_name,
                         last_name=last_name,
-                        sui_address=keylessAddress,  # Reusing field for Aptos
+                        aptos_address=keylessAddress,  # Reusing field for Aptos
                         auth_token_version=0
                     )
                     

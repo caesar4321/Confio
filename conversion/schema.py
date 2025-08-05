@@ -124,12 +124,12 @@ class ConvertUSDCToCUSD(graphene.Mutation):
                     errors=["Active account not found"]
                 )
             
-            # Check if account has Sui address
-            if not active_account.sui_address:
+            # Check if account has Aptos address
+            if not active_account.aptos_address:
                 return ConvertUSDCToCUSD(
                     conversion=None,
                     success=False,
-                    errors=["Account not initialized with Sui address"]
+                    errors=["Account not initialized with Aptos address"]
                 )
             
             # Determine actor fields
@@ -162,7 +162,7 @@ class ConvertUSDCToCUSD(graphene.Mutation):
                     actor_user=actor_user,
                     actor_business=actor_business,
                     actor_display_name=actor_display_name,
-                    actor_address=active_account.sui_address,
+                    actor_address=active_account.aptos_address,
                     # Conversion details
                     conversion_type='usdc_to_cusd',
                     from_amount=amount_decimal,
@@ -311,12 +311,12 @@ class ConvertCUSDToUSDC(graphene.Mutation):
                     errors=["Active account not found"]
                 )
             
-            # Check if account has Sui address
-            if not active_account.sui_address:
+            # Check if account has Aptos address
+            if not active_account.aptos_address:
                 return ConvertCUSDToUSDC(
                     conversion=None,
                     success=False,
-                    errors=["Account not initialized with Sui address"]
+                    errors=["Account not initialized with Aptos address"]
                 )
             
             # Determine actor fields
@@ -349,7 +349,7 @@ class ConvertCUSDToUSDC(graphene.Mutation):
                     actor_user=actor_user,
                     actor_business=actor_business,
                     actor_display_name=actor_display_name,
-                    actor_address=active_account.sui_address,
+                    actor_address=active_account.aptos_address,
                     # Conversion details
                     conversion_type='cusd_to_usdc',
                     from_amount=amount_decimal,

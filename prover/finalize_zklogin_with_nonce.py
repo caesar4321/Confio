@@ -54,7 +54,7 @@ class FinalizeZkLoginWithNonce(graphene.Mutation):
     
     success = graphene.Boolean()
     zk_proof = graphene.Field(ZkProofType)
-    sui_address = graphene.String()
+    aptos_address = graphene.String()
     auth_access_token = graphene.String()
     auth_refresh_token = graphene.String()
     is_phone_verified = graphene.Boolean()
@@ -148,7 +148,7 @@ class FinalizeZkLoginWithNonce(graphene.Mutation):
                 b=prover_result['zkProof']['b'],
                 c=prover_result['zkProof']['c']
             )
-            sui_address = prover_result['suiAddress']
+            aptos_address = prover_result['suiAddress']
             
             # Get or create account
             account_type = account_type or 'personal'
@@ -161,22 +161,22 @@ class FinalizeZkLoginWithNonce(graphene.Mutation):
                 defaults={
                     'account_type': account_type,
                     'account_index': account_index,
-                    'sui_address': sui_address,
+                    'aptos_address': aptos_address,
                     'is_active': True
                 }
             )
             
-            # Update Sui address if changed
-            if account.sui_address != sui_address:
-                account.sui_address = sui_address
+            # Update Aptos address if changed
+            if account.aptos_address != aptos_address:
+                account.aptos_address = aptos_address
                 account.save()
             
-            logger.info(f"Account {account_id} ready with Sui address: {sui_address}")
+            logger.info(f"Account {account_id} ready with Aptos address: {aptos_address}")
             
             return FinalizeZkLoginWithNonce(
                 success=True,
                 zk_proof=zk_proof,
-                sui_address=sui_address,
+                aptos_address=aptos_address,
                 auth_access_token=access_token,
                 auth_refresh_token=refresh_token,
                 is_phone_verified=is_phone_verified

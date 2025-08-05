@@ -242,7 +242,7 @@ class CoinOptimizer:
         for coin_type, name, decimals in coin_types:
             try:
                 coins = await CoinManager.get_coin_objects(
-                    account.sui_address, 
+                    account.aptos_address, 
                     coin_type
                 )
                 
