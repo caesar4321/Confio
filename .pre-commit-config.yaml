@@ -1,0 +1,43 @@
+repos:
+  # Detect secrets in commits
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: package-lock.json|yarn.lock|.*.lock|.*.sum
+
+  # Gitleaks secret scanning
+  - repo: https://github.com/zricethezav/gitleaks
+    rev: v8.18.0
+    hooks:
+      - id: gitleaks
+
+  # Check for files that should be encrypted
+  - repo: local
+    hooks:
+      - id: check-git-crypt
+        name: Check git-crypt encryption
+        entry: bash -c 'git-crypt status | grep -q "NOT ENCRYPTED" && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
+        always_run: true
+
+  # Prevent direct .env commits
+  - repo: local
+    hooks:
+      - id: block-env-files
+        name: Block .env files
+        entry: bash -c 'git diff --staged --name-only | grep -E "^\.env$|/\.env$" | grep -v ".env.example" && echo "Error: .env files must be encrypted with git-crypt" && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
+
+  # Standard file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+        args: ['--maxkb=1000']

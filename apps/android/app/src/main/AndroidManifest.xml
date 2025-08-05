@@ -56,8 +56,15 @@
             <category android:name="android.intent.category.DEFAULT" />
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="com.Confio.Confio" android:host="oauth2redirect" />
-            <data android:scheme="confio" />
-            <data android:scheme="Confio" />
+        </intent-filter>
+        <!-- OAuth callback intent filter for Android 12+ -->
+        <intent-filter>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data 
+                android:scheme="confio" 
+                android:host="oauth-callback" />
         </intent-filter>
         <intent-filter>
             <action android:name="android.intent.action.VIEW" />

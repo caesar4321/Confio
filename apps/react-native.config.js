@@ -3,8 +3,6 @@ module.exports = {
     android: {
       sourceDir: './android',
       packageName: 'com.Confio.Confio',
-      mainFilePath: './index.js',
-      appName: 'Confio',
     },
     ios: {
       sourceDir: './ios',
