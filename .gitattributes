@@ -1,2 +1,13 @@
 *.move linguist-language=Move
 *.toml linguist-language=TOML
+
+# Git-crypt encryption rules
+.env filter=git-crypt diff=git-crypt
+apps/.env filter=git-crypt diff=git-crypt
+apps/android/.env filter=git-crypt diff=git-crypt
+*.pem filter=git-crypt diff=git-crypt
+*.keystore filter=git-crypt diff=git-crypt
+*_credentials.csv filter=git-crypt diff=git-crypt
+*_accessKeys.csv filter=git-crypt diff=git-crypt
+google-services.json filter=git-crypt diff=git-crypt
+GoogleService-Info.plist filter=git-crypt diff=git-crypt
