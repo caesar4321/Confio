@@ -1,6 +1,6 @@
 # Confío Smart Contracts
 
-This directory contains all Move smart contracts for the Confío platform on the Sui blockchain.
+This directory contains all Move smart contracts for the Confío platform on the Aptos blockchain.
 
 ## Contracts Overview
 
@@ -38,11 +38,11 @@ After deployment, admin capabilities should be transferred to appropriate multi-
 
 Run tests for all contracts:
 ```bash
-cd contracts/cusd && sui move test
-cd contracts/confio && sui move test
-cd contracts/pay && sui move test
-cd contracts/invite_send && sui move test
-cd contracts/p2p_trade && sui move test
+cd contracts/cusd && aptos move test
+cd contracts/confio && aptos move test
+cd contracts/pay && aptos move test
+cd contracts/invite_send && aptos move test
+cd contracts/p2p_trade && aptos move test
 ```
 
 ## Audit Status

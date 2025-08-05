@@ -191,13 +191,13 @@ The app supports multiple accounts per user:
 - **Personal Accounts**: Individual wallets for personal transactions
 - **Business Accounts**: Dedicated wallets for business operations
 - **Account Switching**: Seamless switching between accounts
-- **Deterministic Addresses**: Same OAuth identity + account context = same Sui address
+- **Deterministic Addresses**: Same OAuth identity + account context = same Aptos address
 
 ## 🔒 Security Features
 
 - **Non-custodial**: Private keys never stored on servers
 - **Secure Storage**: Uses React Native Keychain for sensitive data
-- **zkLogin Integration**: Zero-knowledge proof authentication
+- **Keyless Integration**: Zero-knowledge proof authentication
 - **Token Management**: Automatic refresh and secure storage
 
 ## 🧪 Testing
@@ -210,7 +210,7 @@ yarn test
 yarn test --coverage
 
 # Run specific test file
-yarn test zkLogin.test.ts
+yarn test keyless.test.ts
 ```
 
 ## 📦 Building for Production
