@@ -183,14 +183,21 @@ export class WebOAuthService {
             if (clientGeneratedEkp) {
               console.log('[WebOAuth] Using client-generated ephemeral key pair with OAuth JWT');
               
+              // CRITICAL: The backend only returns public ephemeral key data for security (non-custodial)
+              // We MUST use our locally generated ephemeral key pair which has the private key and raw instance
               // The OAuth JWT from Google/Apple should contain the nonce from our client-generated ephemeral key
-              // Replace any backend ephemeral key data with our client-generated one
+              console.log('[WebOAuth] Backend returned ephemeral key (public only):', callbackData.data.keylessAccount.ephemeralKeyPair);
+              console.log('[WebOAuth] Replacing with client-generated ephemeral key pair (has private key and raw instance)');
+              
+              // Replace backend's public-only ephemeral key with our complete client-generated one
               callbackData.data.keylessAccount.ephemeralKeyPair = clientGeneratedEkp;
               
               console.log('[WebOAuth] Client-generated ephemeral key details:', {
+                hasRaw: !!clientGeneratedEkp.raw,
                 nonce: clientGeneratedEkp.raw?.nonce || 'stored format',
                 expiryDate: clientGeneratedEkp.expiryISO,
                 version: clientGeneratedEkp.version,
+                hasPrivateKey: !!clientGeneratedEkp.privateKey_b64,
               });
               
               // ALWAYS derive the correct address using client-side Aptos SDK (REQUIRED)
@@ -436,9 +443,17 @@ export class WebOAuthService {
 
   private async storeKeylessData(data: WebOAuthResult): Promise<void> {
     try {
+      // Match the StoredKeylessData structure expected by authService
       const keylessData = {
-        account: data.keylessAccount,
-        provider: 'web',
+        account: {
+          address: data.keylessAccount.address,
+          publicKey: data.keylessAccount.publicKey,
+          exists: true
+        },
+        jwt: data.keylessAccount.jwt,
+        ephemeralKeyPair: data.keylessAccount.ephemeralKeyPair, // This should have the raw field preserved
+        pepper: data.keylessAccount.pepper || '',
+        provider: 'google' as const, // Always 'google' for compatibility
         timestamp: new Date().toISOString()
       };
 
@@ -449,6 +464,7 @@ export class WebOAuthService {
       );
 
       console.log('[WebOAuth] Stored Keyless data successfully');
+      console.log('[WebOAuth] Stored ephemeral key pair has raw field?:', !!(data.keylessAccount.ephemeralKeyPair as any)?.raw);
     } catch (error) {
       console.error('[WebOAuth] Error storing Keyless data:', error);
       throw error;

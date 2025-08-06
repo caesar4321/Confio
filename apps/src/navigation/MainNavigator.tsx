@@ -42,7 +42,7 @@ import { ConfioPresaleParticipateScreen } from '../screens/ConfioPresaleParticip
 import { ConfioTokenomicsScreen } from '../screens/ConfioTokenomicsScreen';
 import { MiProgresoViralScreen } from '../screens/MiProgresoViralScreen';
 import { ViralTemplatesScreen } from '../screens/ViralTemplatesScreen';
-import { TestRegularTransactionScreen } from '../screens/TestRegularTransactionScreen';
+import TestRegularTransactionScreen from '../screens/TestRegularTransactionScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen'; // Hidden: Notifications mandatory
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);

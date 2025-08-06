@@ -50,7 +50,14 @@ interface KeylessAccount {
 }
 
 interface StoredKeylessData {
-  account: KeylessAccount;
+  account: {
+    address: string;
+    publicKey: string;
+    exists: boolean;
+  };
+  jwt: string;
+  ephemeralKeyPair: any;
+  pepper: string;
   provider: 'google' | 'apple';
   timestamp: string;
   firebaseToken?: string;
@@ -213,6 +220,9 @@ export class AuthService {
         this.currentAccount = result.keylessAccount;
         this.ephemeralKeyPair = result.keylessAccount.ephemeralKeyPair;
         
+        // Store the complete keyless data including JWT, ephemeralKeyPair, and pepper
+        await this.storeKeylessData(result.keylessAccount, 'google');
+        
         // The backend token is already stored by WebOAuthService
         console.log('Web OAuth sign-in successful:', result.keylessAccount.address);
         
@@ -300,6 +310,9 @@ export class AuthService {
         this.currentAccount = result.keylessAccount;
         this.ephemeralKeyPair = result.keylessAccount.ephemeralKeyPair;
         
+        // Store the complete keyless data including JWT, ephemeralKeyPair, and pepper
+        await this.storeKeylessData(result.keylessAccount, 'google');
+        
         // The backend token is already stored by WebOAuthService
         console.log('Web OAuth sign-in successful:', result.keylessAccount.address);
         
@@ -366,31 +379,56 @@ export class AuthService {
     }
   }
 
-  // Store Keyless data securely
+  // Store Keyless data securely (similar to zkLogin pattern)
   private async storeKeylessData(
     account: KeylessAccount, 
     provider: 'google' | 'apple',
     firebaseToken?: string
   ): Promise<void> {
     try {
+      // Extract and store all necessary keyless components
       const dataToStore: StoredKeylessData = {
-        account,
+        account: {
+          address: account.address,
+          publicKey: account.publicKey,
+          exists: true
+        },
+        jwt: account.jwt || '',
+        ephemeralKeyPair: account.ephemeralKeyPair || null,
+        pepper: account.pepper || '',
         provider,
         timestamp: new Date().toISOString(),
         firebaseToken
       };
 
-      // Store in Keychain for security
+      // Validate required fields
+      if (!dataToStore.jwt) {
+        console.error('[AuthService] Warning: JWT is missing in keyless account data');
+      }
+      if (!dataToStore.ephemeralKeyPair) {
+        console.error('[AuthService] Warning: Ephemeral key pair is missing in keyless account data');
+      }
+      if (!dataToStore.pepper) {
+        console.error('[AuthService] Warning: Pepper is missing in keyless account data');
+      }
+
+      // Store in Keychain for security (following zkLogin pattern)
       await Keychain.setInternetCredentials(
         KEYLESS_KEYCHAIN_SERVICE,
         KEYLESS_KEYCHAIN_USERNAME,
         JSON.stringify(dataToStore)
       );
 
-
       console.log('[AuthService] Stored Keyless data successfully');
+      console.log('[AuthService] Stored data includes:', {
+        hasJWT: !!dataToStore.jwt,
+        hasEphemeralKeyPair: !!dataToStore.ephemeralKeyPair,
+        hasPepper: !!dataToStore.pepper,
+        address: dataToStore.account.address
+      });
     } catch (error) {
       console.error('[AuthService] Error storing Keyless data:', error);
+      throw error;
     }
   }
 
@@ -409,20 +447,34 @@ export class AuthService {
       if (keychainData && keychainData.password) {
         const storedData: StoredKeylessData = JSON.parse(keychainData.password);
         
-        // Validate the stored data structure
-        if (!storedData.account || !storedData.account.ephemeralKeyPair) {
+        // Validate the stored data structure - ephemeralKeyPair is at root level, not in account
+        if (!storedData.account || !storedData.ephemeralKeyPair) {
           console.log('[AuthService] Invalid stored keyless data structure, clearing');
           await this.clearKeylessData();
           return;
         }
         
         // Check if ephemeral key is still valid
-        const expiryDate = new Date(storedData.account.ephemeralKeyPair.expiryDate);
+        const expiryDate = storedData.ephemeralKeyPair.expiryISO 
+          ? new Date(storedData.ephemeralKeyPair.expiryISO)
+          : storedData.ephemeralKeyPair.expiryDate 
+            ? new Date(storedData.ephemeralKeyPair.expiryDate)
+            : new Date(0); // Invalid date if neither exists
+            
         if (expiryDate > new Date()) {
-          this.currentAccount = storedData.account;
-          this.ephemeralKeyPair = storedData.account.ephemeralKeyPair;
+          // Reconstruct the current account from stored data
+          this.currentAccount = {
+            address: storedData.account.address,
+            publicKey: storedData.account.publicKey,
+            jwt: storedData.jwt,
+            ephemeralKeyPair: storedData.ephemeralKeyPair,
+            pepper: storedData.pepper
+          };
+          this.ephemeralKeyPair = storedData.ephemeralKeyPair;
+          
           console.log('[AuthService] Restored Keyless data from Keychain');
-          console.log('[AuthService] Restored ephemeral key nonce:', this.ephemeralKeyPair?.nonce);
+          console.log('[AuthService] Restored ephemeral key type:', typeof this.ephemeralKeyPair);
+          console.log('[AuthService] Restored ephemeral key has raw?:', !!(this.ephemeralKeyPair as any)?.raw);
           console.log('[AuthService] Restored account address:', this.currentAccount?.address);
         } else {
           console.log('[AuthService] Stored ephemeral key has expired');

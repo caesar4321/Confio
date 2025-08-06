@@ -214,3 +214,14 @@ export const UPDATE_NOTIFICATION_PREFERENCES = gql`
     }
   }
 `;
+
+export const TEST_REGULAR_TRANSFER = gql`
+  mutation TestRegularTransfer($input: TestRegularTransferInput!) {
+    testRegularTransfer(input: $input) {
+      success
+      transactionHash
+      error
+      debugInfo
+    }
+  }
+`;
