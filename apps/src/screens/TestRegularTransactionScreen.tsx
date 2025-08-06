@@ -7,10 +7,10 @@ import {
   Alert,
   ScrollView,
   ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
 import { useMutation, gql } from '@apollo/client';
 import { enhancedAuthService } from '../services/authService';
-import { styles } from '../styles/SendFundsStyles';
 
 // Test mutation for regular (non-sponsored) transactions
 const TEST_REGULAR_TRANSFER = gql`
@@ -218,7 +218,57 @@ export const TestRegularTransactionScreen: React.FC = () => {
   );
 };
 
-const testStyles = {
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  content: {
+    padding: 20,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 30,
+  },
+  inputContainer: {
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#333',
+  },
+  button: {
+    backgroundColor: '#4F46E5',
+    borderRadius: 8,
+    padding: 16,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
   resultContainer: {
     marginTop: 20,
     padding: 15,
@@ -261,7 +311,4 @@ const testStyles = {
     color: '#666',
     fontFamily: 'monospace',
   },
-};
-
-// Merge styles
-Object.assign(styles, testStyles);
+});
