@@ -1382,29 +1382,21 @@ class TestRegularTransfer(graphene.Mutation):
             import asyncio
             import json
             
-            # Get account context from JWT
-            jwt_context = get_jwt_business_context_with_validation(info, 'send_funds')
-            if not jwt_context:
-                return TestRegularTransfer(
-                    success=False,
-                    error="Account context not found"
-                )
-            
-            active_account = jwt_context.get('activeAccount')
-            if not active_account:
-                return TestRegularTransfer(
-                    success=False,
-                    error="No active account found"
-                )
+            # For testing, we'll extract sender address from the transaction itself
+            # since the keyless account is managed client-side
+            import base64
             
             # Log debug info
             debug_info = {
-                "sender_address": active_account.aptos_address,
+                "test_mode": True,
                 "recipient_address": input.recipient_address,
                 "amount": input.amount,
                 "raw_transaction_length": len(input.raw_transaction) if input.raw_transaction else 0,
                 "authenticator_length": len(input.sender_authenticator) if input.sender_authenticator else 0
             }
+            
+            # Note: For testing regular keyless transactions, we don't need the Django account
+            # The sender address is embedded in the transaction itself
             
             print(f"TestRegularTransfer debug: {json.dumps(debug_info, indent=2)}")
             
@@ -1414,11 +1406,12 @@ class TestRegularTransfer(graphene.Mutation):
             
             try:
                 # Call a new test method in AptosSponsorService
+                # For testing, we don't need sender_address as it's in the transaction
                 result = loop.run_until_complete(
                     AptosSponsorService.test_regular_keyless_transfer(
                         raw_transaction=input.raw_transaction,
                         sender_authenticator=input.sender_authenticator,
-                        sender_address=active_account.aptos_address
+                        sender_address="test_keyless_account"  # Just for logging
                     )
                 )
                 
