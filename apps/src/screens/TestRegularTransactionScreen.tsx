@@ -103,13 +103,49 @@ export const TestRegularTransactionScreen: React.FC = () => {
       // Sign the transaction using keyless account
       console.log('Keyless account pepper:', keylessAccount.pepper);
       
-      // Parse pepper - it might be a string or already an array
+      // Parse pepper - it might be hex string, comma-separated, or array
       let pepperBytes: Uint8Array;
       if (keylessAccount.pepper) {
         if (typeof keylessAccount.pepper === 'string') {
-          pepperBytes = new Uint8Array(keylessAccount.pepper.split(',').map((p: string) => parseInt(p)));
+          // Check if it's a hex string
+          if (keylessAccount.pepper.startsWith('0x')) {
+            const hexStr = keylessAccount.pepper.slice(2);
+            const bytes = [];
+            for (let i = 0; i < hexStr.length; i += 2) {
+              bytes.push(parseInt(hexStr.substr(i, 2), 16));
+            }
+            pepperBytes = new Uint8Array(bytes);
+            
+            // Pad to 31 bytes if needed
+            if (pepperBytes.length === 30) {
+              console.log('Padding pepper from 30 to 31 bytes');
+              const paddedPepper = new Uint8Array(31);
+              paddedPepper.set([0]); // Add leading zero
+              paddedPepper.set(pepperBytes, 1);
+              pepperBytes = paddedPepper;
+            }
+          } else if (keylessAccount.pepper.includes(',')) {
+            // Comma-separated values
+            pepperBytes = new Uint8Array(keylessAccount.pepper.split(',').map((p: string) => parseInt(p)));
+          } else {
+            // Try parsing as hex without 0x prefix
+            const bytes = [];
+            for (let i = 0; i < keylessAccount.pepper.length; i += 2) {
+              bytes.push(parseInt(keylessAccount.pepper.substr(i, 2), 16));
+            }
+            pepperBytes = new Uint8Array(bytes);
+          }
         } else {
           pepperBytes = new Uint8Array(keylessAccount.pepper);
+        }
+        
+        console.log('Pepper bytes length:', pepperBytes.length);
+        
+        // Ensure pepper is exactly 31 bytes
+        if (pepperBytes.length !== 31) {
+          console.error('Invalid pepper length:', pepperBytes.length);
+          Alert.alert('Error', `Invalid pepper length: ${pepperBytes.length} bytes (needs 31)`);
+          return;
         }
       } else {
         // If no pepper stored, we might need to get it from elsewhere
