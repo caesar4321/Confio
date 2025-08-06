@@ -863,6 +863,92 @@ export class AuthService {
     }
   }
 
+  /**
+   * Sign a sponsored transaction (V2 flow)
+   * This method signs the raw transaction bytes for a fee payer transaction
+   * @param rawTransaction - Base64 encoded raw transaction from prepare phase
+   * @returns Base64 encoded sender authenticator
+   */
+  public async signSponsoredTransaction(rawTransaction: string): Promise<string | null> {
+    try {
+      console.log('AuthService - signSponsoredTransaction called');
+      
+      if (!this.currentAccount) {
+        console.error('AuthService - No active account available for signing');
+        return null;
+      }
+
+      if (!this.ephemeralKeyPair) {
+        console.error('AuthService - No ephemeral key pair available');
+        return null;
+      }
+
+      // Import Aptos keyless service
+      const { AptosKeylessService } = await import('./aptosKeylessService');
+      const aptosKeylessService = new AptosKeylessService();
+
+      // Ensure rawTransaction is a string
+      let rawTxString: string;
+      if (typeof rawTransaction === 'string') {
+        rawTxString = rawTransaction;
+      } else if (rawTransaction && typeof rawTransaction === 'object') {
+        // If it's an object, try to convert it
+        rawTxString = JSON.stringify(rawTransaction);
+        console.log('AuthService - Raw transaction was an object, converted to JSON string');
+      } else {
+        console.error('AuthService - Invalid raw transaction type:', typeof rawTransaction);
+        return null;
+      }
+
+      // Decode the raw transaction from base64 to get signing message
+      const rawTxBytes = Buffer.from(rawTxString, 'base64');
+      const signingMessage = Buffer.from(rawTxBytes).toString('hex');
+      
+      console.log('AuthService - Signing sponsored transaction');
+      console.log('AuthService - Raw transaction length:', rawTxBytes.length);
+      console.log('AuthService - Signing message (hex):', signingMessage.substring(0, 100) + '...');
+
+      // Get pepper from account proof
+      let pepperBytes: Uint8Array | undefined;
+      if (this.currentAccount.proof?.pepper) {
+        const pepperHex = this.currentAccount.proof.pepper.startsWith('0x') 
+          ? this.currentAccount.proof.pepper.slice(2) 
+          : this.currentAccount.proof.pepper;
+        
+        const pepperBuffer = Buffer.from(pepperHex, 'hex');
+        
+        // Ensure pepper is exactly 31 bytes
+        if (pepperBuffer.length !== 31) {
+          console.warn(`AuthService - Pepper length is ${pepperBuffer.length}, expected 31. Padding/truncating...`);
+          const paddedPepper = Buffer.alloc(31);
+          pepperBuffer.copy(paddedPepper, 0, 0, Math.min(31, pepperBuffer.length));
+          pepperBytes = new Uint8Array(paddedPepper);
+        } else {
+          pepperBytes = new Uint8Array(pepperBuffer);
+        }
+      }
+
+      // Generate the authenticator for the sponsored transaction
+      const authenticatorResponse = await aptosKeylessService.generateAuthenticator({
+        jwt: this.currentAccount.jwt,
+        ephemeralKeyPair: this.ephemeralKeyPair,
+        signingMessage: signingMessage,
+        pepper: pepperBytes,
+      });
+
+      console.log('AuthService - Generated sponsored transaction authenticator');
+      console.log('AuthService - Authenticator length:', authenticatorResponse.senderAuthenticatorBcsBase64.length);
+
+      // Return the base64 encoded authenticator directly
+      // This is what the backend expects for V2 sponsored transactions
+      return authenticatorResponse.senderAuthenticatorBcsBase64;
+      
+    } catch (error) {
+      console.error('AuthService - Error signing sponsored transaction:', error);
+      return null;
+    }
+  }
+
   // Get account balance through Django GraphQL
   public async getBalance(address?: string): Promise<{ apt: string }> {
     try {

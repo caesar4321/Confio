@@ -189,12 +189,6 @@ class AptosSponsorService:
             }
     
     @classmethod
-    def _get_bridge_url(cls) -> str:
-        """Get the TypeScript bridge URL from environment or use default"""
-        import os
-        return os.getenv('TYPESCRIPT_BRIDGE_URL', 'http://localhost:3333')
-    
-    @classmethod
     async def prepare_sponsored_confio_transfer(
         cls,
         sender_address: str,
@@ -2163,3 +2157,295 @@ class AptosSponsorService:
                 transaction_payload,
                 keyless_info=keyless_info
             )
+    
+    @classmethod
+    async def prepare_sponsored_confio_transfer(
+        cls,
+        sender_address: str,
+        recipient_address: str,
+        amount: Decimal
+    ) -> Dict[str, Any]:
+        """
+        PHASE 1: Prepare a sponsored CONFIO transfer transaction for React Native to sign.
+        
+        This method:
+        1. Calls TypeScript bridge to build the transaction with fee payer
+        2. Gets the sponsor's signature
+        3. Returns the transaction data for React Native to sign using Aptos SDK
+        
+        Args:
+            sender_address: Sender's Aptos address
+            recipient_address: Recipient's Aptos address  
+            amount: Amount to transfer (in CONFIO tokens)
+            
+        Returns:
+            Dict with transaction data for React Native to sign:
+            - rawTransaction: The raw transaction bytes (hex) to sign
+            - feePayerAddress: The sponsor address
+            - Instructions for React Native on how to sign
+        """
+        # Convert amount to units (6 decimals for CONFIO)
+        amount_units = int(amount * Decimal(10**6))
+        
+        # Build transaction via V2 bridge
+        result = await cls.build_sponsored_transaction_v2(
+            sender_address=sender_address,
+            recipient_address=recipient_address,
+            amount=amount_units,
+            token_type='CONFIO'
+        )
+        
+        if result.get('success'):
+            # Store transaction data in cache for phase 2
+            import hashlib
+            import json
+            
+            # Create a unique transaction ID
+            tx_data = f"{sender_address}{recipient_address}{amount_units}{amount}"
+            tx_id = hashlib.sha256(tx_data.encode()).hexdigest()[:16]
+            
+            # Store transaction details in cache for 5 minutes
+            cache_key = f"sponsored_tx:{tx_id}"
+            cache_data = {
+                'transaction': result.get('transaction'),
+                'sponsorAuthenticator': result.get('sponsorAuthenticator'),
+                'sponsorAddress': result.get('sponsorAddress'),
+                'sender_address': sender_address,
+                'recipient_address': recipient_address,
+                'amount_units': amount_units,
+                'token_type': 'CONFIO'
+            }
+            cache.set(cache_key, json.dumps(cache_data), timeout=300)  # 5 minutes
+            
+            # Return data for React Native
+            return {
+                'success': True,
+                'transactionId': tx_id,
+                'rawTransaction': result.get('transaction'),  # Raw transaction to sign
+                'feePayerAddress': result.get('sponsorAddress'),
+                'transaction_type': 'confio_transfer',
+                'amount_display': f"{amount} CONFIO",
+                'phase': 'prepare',
+                'instructions': {
+                    'react_native': (
+                        "Use Aptos SDK to sign this transaction:\n"
+                        "1. const transaction = /* use rawTransaction */;\n"
+                        "2. const senderAuth = aptos.transaction.sign({ signer, transaction });\n"
+                        "3. Send back senderAuth as base64 or hex"
+                    )
+                }
+            }
+        
+        return result
+    
+    @classmethod
+    async def submit_sponsored_confio_transfer_v2(
+        cls,
+        transaction_id: str,
+        sender_authenticator: str
+    ) -> Dict[str, Any]:
+        """
+        PHASE 2: Submit a signed sponsored CONFIO transfer transaction from React Native.
+        
+        This method:
+        1. Retrieves the cached transaction from phase 1
+        2. Combines the sender's signature with sponsor's signature
+        3. Submits the complete transaction to blockchain
+        
+        Args:
+            transaction_id: The transaction ID from phase 1
+            sender_authenticator: The sender's signature from React Native (base64 or hex)
+            
+        Returns:
+            Dict with transaction result
+        """
+        import json
+        
+        # Retrieve cached transaction data
+        cache_key = f"sponsored_tx:{transaction_id}"
+        cached_data = cache.get(cache_key)
+        
+        if not cached_data:
+            return {
+                'success': False,
+                'error': 'Transaction expired or not found. Please start over.',
+                'phase': 'submit'
+            }
+        
+        try:
+            tx_data = json.loads(cached_data)
+            
+            # Submit via V2 bridge with both authenticators
+            result = await cls.submit_via_typescript_bridge_v2(
+                sender_address=tx_data['sender_address'],
+                recipient_address=tx_data['recipient_address'],
+                amount=tx_data['amount_units'],
+                token_type=tx_data['token_type'],
+                sender_authenticator_base64=sender_authenticator
+            )
+            
+            if result.get('success'):
+                result['phase'] = 'submit'
+                logger.info(f"✅ Submitted sponsored CONFIO transfer: {result.get('digest')}")
+                
+                # Clear the cache
+                cache.delete(cache_key)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error submitting sponsored transaction: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'phase': 'submit'
+            }
+    
+    @classmethod
+    async def submit_sponsored_confio_transfer(
+        cls,
+        sender_address: str,
+        recipient_address: str,
+        amount: Decimal,
+        sender_authenticator_base64: str
+    ) -> Dict[str, Any]:
+        """
+        PHASE 2: Submit a signed sponsored CONFIO transfer transaction (legacy method).
+        
+        Args:
+            sender_address: Sender's Aptos address
+            recipient_address: Recipient's Aptos address  
+            amount: Amount to transfer (in CONFIO tokens)
+            sender_authenticator_base64: Base64 encoded authenticator from frontend
+            
+        Returns:
+            Dict with transaction result
+        """
+        # Convert amount to units (6 decimals for CONFIO)
+        amount_units = int(amount * Decimal(10**6))
+        
+        # Submit via V2 bridge with signed authenticator
+        result = await cls.submit_via_typescript_bridge_v2(
+            sender_address=sender_address,
+            recipient_address=recipient_address,
+            amount=amount_units,
+            token_type='CONFIO',
+            sender_authenticator_base64=sender_authenticator_base64
+        )
+        
+        if result.get('success'):
+            result['phase'] = 'submit'
+            logger.info(f"✅ Submitted sponsored CONFIO transfer: {result.get('digest')}")
+        
+        return result
+    
+    @classmethod
+    async def sponsor_confio_transfer(
+        cls,
+        sender_address: str,
+        recipient_address: str,
+        amount: Decimal,
+        keyless_info: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Sponsor a CONFIO transfer transaction (legacy single-phase method).
+        
+        Args:
+            sender_address: Sender's Aptos address
+            recipient_address: Recipient's Aptos address  
+            amount: Amount to transfer (in CONFIO tokens)
+            keyless_info: Keyless authentication information
+            
+        Returns:
+            Dict with transaction result
+        """
+        # If we have an authenticator, use the new two-phase flow
+        if keyless_info and keyless_info.get('keyless_authenticator'):
+            authenticator_data = keyless_info.get('keyless_authenticator')
+            
+            # Submit directly (assumes frontend already has the right signature)
+            return await cls.submit_sponsored_confio_transfer(
+                sender_address=sender_address,
+                recipient_address=recipient_address,
+                amount=amount,
+                sender_authenticator_base64=authenticator_data
+            )
+        else:
+            # Fallback to legacy path
+            amount_units = int(amount * Decimal(10**6))
+            transaction_payload = {
+                'function': '0x75f38ae0c198dcedf766e0d2a39847f9b269052024e943c58970854b9cb70e2c::confio::transfer_confio',
+                'type_arguments': [],
+                'arguments': [recipient_address, str(amount_units)]
+            }
+            
+            return await cls.create_sponsored_transaction(
+                sender_address,
+                transaction_payload,
+                keyless_info=keyless_info
+            )
+    
+    @classmethod
+    async def estimate_sponsorship_cost(
+        cls,
+        transaction_type: str,
+        params: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Estimate the gas cost for sponsoring an Aptos transaction.
+        
+        Returns estimated gas cost and sponsor availability.
+        """
+        # Base gas costs by transaction type (in gas units)
+        base_costs = {
+            'transfer': 1500,      # Token transfers
+            'mint': 2000,          # Minting operations
+            'burn': 1800,          # Burn operations
+            'custom': 2000         # Default for unknown operations
+        }
+        
+        base_cost = base_costs.get(transaction_type, base_costs['custom'])
+        
+        # Convert to APT (gas_units * gas_price / 10^8)
+        gas_price = 100  # Standard gas price
+        estimated_cost_apt = Decimal(base_cost * gas_price) / Decimal(10**8)
+        
+        # Check sponsor availability
+        health = await cls.check_sponsor_health()
+        
+        return {
+            'estimated_gas_units': base_cost,
+            'estimated_cost_apt': estimated_cost_apt,
+            'sponsor_available': health['can_sponsor'],
+            'sponsor_balance': health['balance'],
+            'can_afford': health['balance'] > estimated_cost_apt,
+            'transaction_type': transaction_type
+        }
+
+
+# Test function for development
+async def test_aptos_sponsor_service():
+    """Test Aptos sponsor service functionality"""
+    # Check health
+    health = await AptosSponsorService.check_sponsor_health()
+    print(f"Aptos Sponsor Health: {json.dumps(health, indent=2, default=str)}")
+    
+    # Estimate costs
+    estimates = {}
+    for tx_type in ['transfer', 'mint', 'burn']:
+        estimate = await AptosSponsorService.estimate_sponsorship_cost(
+            tx_type,
+            {}
+        )
+        estimates[tx_type] = estimate
+    
+    print(f"\nGas Estimates: {json.dumps(estimates, indent=2, default=str)}")
+    
+    # Test sponsored CUSD transfer
+    result = await AptosSponsorService.sponsor_cusd_transfer(
+        "0x2a2549df49ec0e820b6c580c3af95b502ca7e2d956729860872fbc5de570795b",
+        "0xda4fb7201e9abb2304c3367939914524842e0a41b61b2c305bd64656f3f25792",
+        Decimal('100.50')
+    )
+    
+    print(f"\nTest CUSD Transfer Result: {json.dumps(result, indent=2, default=str)}")

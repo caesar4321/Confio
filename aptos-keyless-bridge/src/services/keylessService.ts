@@ -413,6 +413,7 @@ export class KeylessService {
    */
   /**
    * Submit fee-payer transaction with keyless authenticator
+   * Updated to use official SDK pattern from aptos-ts-sdk examples
    */
   async submitFeePayerTransaction(
     rawTxnBcsBase64: string,
@@ -421,7 +422,7 @@ export class KeylessService {
     _policyMetadata: { [key: string]: any }
   ): Promise<FeePayerSubmitResponse> {
     try {
-      logger.info('Processing fee-payer transaction submission');
+      logger.info('Processing fee-payer transaction submission using SDK pattern');
       logger.info('Raw transaction bytes:', rawTxnBcsBase64.length);
       logger.info('Sender authenticator bytes:', senderAuthenticatorBcsBase64.length);
       logger.info('Sponsor address:', sponsorAddressHex);

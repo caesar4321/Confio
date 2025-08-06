@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { config } from './config';
 import logger from './logger';
 import keylessRoutes from './routes/keyless';
+import keylessV2Routes from './routes/keylessV2';
 
 // Load environment variables
 dotenv.config();
@@ -31,6 +32,7 @@ app.use((req, _res, next) => {
 
 // Routes
 app.use('/api/keyless', keylessRoutes);
+app.use('/api/keyless/v2', keylessV2Routes);
 
 // Base route
 app.get('/', (_req, res) => {
@@ -45,6 +47,10 @@ app.get('/', (_req, res) => {
       signAndSubmit: 'POST /api/keyless/sign-and-submit',
       feePayerSubmit: 'POST /api/keyless/fee-payer-submit',
       getBalance: 'GET /api/keyless/balance/:address',
+      v2: {
+        submitSponsored: 'POST /api/keyless/v2/submit-sponsored',
+        buildSponsored: 'POST /api/keyless/v2/build-sponsored',
+      },
     },
   });
 });

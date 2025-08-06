@@ -5,7 +5,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
 import { useMutation } from '@apollo/client';
-import { PAY_INVOICE, CREATE_SEND_TRANSACTION, PREPARE_TRANSACTION, EXECUTE_TRANSACTION } from '../apollo/queries';
+import { 
+  PAY_INVOICE, 
+  CREATE_SEND_TRANSACTION, 
+  PREPARE_TRANSACTION, 
+  EXECUTE_TRANSACTION,
+  PREPARE_SPONSORED_TRANSFER,
+  SUBMIT_SPONSORED_TRANSFER 
+} from '../apollo/queries';
 import { AccountManager } from '../utils/accountManager';
 import { EnhancedAuthService } from '../services/enhancedAuthService';
 
@@ -78,6 +85,9 @@ export const TransactionProcessingScreen = () => {
   const [createSendTransaction] = useMutation(CREATE_SEND_TRANSACTION);
   const [prepareTransaction] = useMutation(PREPARE_TRANSACTION);
   const [executeTransaction] = useMutation(EXECUTE_TRANSACTION);
+  // V2 mutations for sponsored transactions
+  const [prepareSponsoredTransfer] = useMutation(PREPARE_SPONSORED_TRANSFER);
+  const [submitSponsoredTransfer] = useMutation(SUBMIT_SPONSORED_TRANSFER);
   
   // Ref to prevent duplicate transaction processing within this session
   const hasProcessedRef = useRef(false);
@@ -282,14 +292,14 @@ export const TransactionProcessingScreen = () => {
         setCurrentStep(0);
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Step 2: Prepare transaction
+        // Step 2: Prepare transaction using V2 flow
         setCurrentStep(1);
-        console.log('TransactionProcessingScreen: Preparing transaction...');
+        console.log('TransactionProcessingScreen: Preparing V2 sponsored transaction...');
         
-        // Prepare input for prepare mutation
+        // Prepare input for V2 prepare mutation
         const prepareInput: any = {
           amount: transactionData.amount,
-          tokenType: transactionData.currency,
+          tokenType: transactionData.currency || 'CONFIO',
           recipientDisplayName: transactionData.recipient
         };
         
@@ -302,59 +312,78 @@ export const TransactionProcessingScreen = () => {
           prepareInput.recipientAddress = transactionData.recipientAddress;
         }
         
-        console.log('TransactionProcessingScreen: Calling prepareTransaction with:', prepareInput);
+        console.log('TransactionProcessingScreen: Calling prepareSponsoredTransfer with:', prepareInput);
         
-        // Phase 1: Prepare transaction
-        const prepareResult = await prepareTransaction({
+        // Phase 1: Prepare sponsored transaction (V2)
+        const prepareResult = await prepareSponsoredTransfer({
           variables: { input: prepareInput }
         });
         
-        if (prepareResult.errors || !prepareResult.data?.prepareTransaction?.success) {
+        if (prepareResult.errors || !prepareResult.data?.prepareSponsoredTransfer?.success) {
           const errorMessage = prepareResult.errors?.map(e => e.message).join('\n') || 
-                             prepareResult.data?.prepareTransaction?.errors?.join('\n') ||
+                             prepareResult.data?.prepareSponsoredTransfer?.errors?.join('\n') ||
                              'Error al preparar la transacción';
           setTransactionError(errorMessage);
           setIsComplete(true);
           return;
         }
         
-        const { txBytes, sponsorSignature, transactionMetadata } = prepareResult.data.prepareTransaction;
-        console.log('TransactionProcessingScreen: Transaction prepared, signing with Aptos keyless...');
+        const { transactionId, rawTransaction, feePayerAddress } = prepareResult.data.prepareSponsoredTransfer;
+        console.log('TransactionProcessingScreen: V2 Transaction prepared');
+        console.log('TransactionProcessingScreen: Transaction ID:', transactionId);
+        console.log('TransactionProcessingScreen: Raw transaction:', rawTransaction);
+        console.log('TransactionProcessingScreen: Fee payer:', feePayerAddress);
         
-        // Phase 2: Sign transaction with Aptos keyless
+        // Check if rawTransaction exists
+        if (!rawTransaction) {
+          console.error('TransactionProcessingScreen: No raw transaction received from prepare phase');
+          setTransactionError('Error al preparar la transacción. Por favor, inténtalo de nuevo.');
+          setIsComplete(true);
+          return;
+        }
+        
+        // Phase 2: Sign transaction with Aptos SDK in React Native
         const authService = enhancedAuthService.authService;
-        const aptosKeylessSignature = await authService.createZkLoginSignatureForTransaction(txBytes);
         
-        if (!aptosKeylessSignature) {
+        // For V2, we need to sign the raw transaction directly
+        // The rawTransaction is already the proper fee payer transaction
+        console.log('TransactionProcessingScreen: Signing transaction with Aptos SDK...');
+        console.log('TransactionProcessingScreen: Raw transaction type:', typeof rawTransaction);
+        
+        // Use the Aptos SDK to sign the transaction
+        // This should use aptos.transaction.sign({ signer, transaction })
+        const senderAuthenticator = await authService.signSponsoredTransaction(rawTransaction);
+        
+        if (!senderAuthenticator) {
           setTransactionError('Error al firmar la transacción. Por favor, inténtalo de nuevo.');
           setIsComplete(true);
           return;
         }
         
-        console.log('TransactionProcessingScreen: Transaction signed, executing...');
+        console.log('TransactionProcessingScreen: Transaction signed, submitting...');
         
-        // Step 3: Execute transaction
+        // Step 3: Submit signed transaction
         setCurrentStep(2);
         
-        const executeInput = {
-          txBytes,
-          aptosKeylessSignature,
-          sponsorSignature,
-          transactionMetadata
+        const submitInput = {
+          transactionId,
+          senderAuthenticator // This should be base64 or hex encoded
         };
         
-        // Phase 3: Execute transaction with signatures
-        const executeResult = await enhancedAuthService.performSecureOperation(
+        console.log('TransactionProcessingScreen: Calling submitSponsoredTransfer with transaction ID:', transactionId);
+        
+        // Phase 3: Submit transaction with signature (V2)
+        const submitResult = await enhancedAuthService.performSecureOperation(
           async () => {
-            return await executeTransaction({
-              variables: { input: executeInput }
+            return await submitSponsoredTransfer({
+              variables: { input: submitInput }
             });
           },
           'send_money',
           parseFloat(transactionData.amount)
         );
         
-        const { data, errors } = executeResult.result;
+        const { data, errors } = submitResult.result;
         console.log('TransactionProcessingScreen: Execute mutation response:', { data, errors });
         
         // Check for errors
@@ -366,23 +395,24 @@ export const TransactionProcessingScreen = () => {
           return;
         }
         
-        // Check the mutation response
-        if (data?.executeTransaction?.sendTransaction) {
-          console.log('TransactionProcessingScreen: Send successful!');
-          console.log('TransactionProcessingScreen: Transaction object:', data.executeTransaction.sendTransaction);
-          console.log('TransactionProcessingScreen: Transaction ID:', data.executeTransaction.sendTransaction.id);
-          console.log('TransactionProcessingScreen: Transaction hash:', data.executeTransaction.sendTransaction.transactionHash);
+        // Check the mutation response (V2 flow)
+        if (data?.submitSponsoredTransfer?.success && data?.submitSponsoredTransfer?.sendTransaction) {
+          console.log('TransactionProcessingScreen: V2 Send successful!');
+          console.log('TransactionProcessingScreen: Transaction object:', data.submitSponsoredTransfer.sendTransaction);
+          console.log('TransactionProcessingScreen: Transaction ID:', data.submitSponsoredTransfer.sendTransaction.id);
+          console.log('TransactionProcessingScreen: Transaction hash:', data.submitSponsoredTransfer.transactionHash || data.submitSponsoredTransfer.digest);
           
           // Store the transaction ID for success screen
           if (transactionData) {
-            transactionData.transactionId = data.executeTransaction.sendTransaction.id;
-            transactionData.transactionHash = data.executeTransaction.sendTransaction.transactionHash;
+            transactionData.transactionId = data.submitSponsoredTransfer.sendTransaction.id;
+            transactionData.transactionHash = data.submitSponsoredTransfer.transactionHash || data.submitSponsoredTransfer.digest;
           }
           
           // Log success metrics
-          console.log('TransactionProcessingScreen: Transaction executed successfully:', {
-            id: data.executeTransaction.sendTransaction.id,
-            hash: data.executeTransaction.sendTransaction.transactionHash,
+          console.log('TransactionProcessingScreen: V2 Transaction executed successfully:', {
+            id: data.submitSponsoredTransfer.sendTransaction.id,
+            hash: data.submitSponsoredTransfer.transactionHash || data.submitSponsoredTransfer.digest,
+            gasUsed: data.submitSponsoredTransfer.gasUsed,
             amount: transactionData.amount,
             recipient: transactionData.recipient
           });
@@ -390,21 +420,20 @@ export const TransactionProcessingScreen = () => {
           // Mark transaction as successful
           setTransactionSuccess(true);
           setIsComplete(true);
-        } else if (data?.executeTransaction?.errors && data.executeTransaction.errors.length > 0) {
-          console.error('TransactionProcessingScreen: Execute failed with errors:', data.executeTransaction.errors);
-          setTransactionError(data.executeTransaction.errors.join('\n'));
+        } else if (data?.submitSponsoredTransfer?.errors && data.submitSponsoredTransfer.errors.length > 0) {
+          console.error('TransactionProcessingScreen: V2 Submit failed with errors:', data.submitSponsoredTransfer.errors);
+          setTransactionError(data.submitSponsoredTransfer.errors.join('\n'));
           setIsComplete(true);
           return;
-        } else if (data?.executeTransaction) {
-          // The mutation returned but with unexpected structure
-          console.error('TransactionProcessingScreen: Unexpected mutation response structure:', data.executeTransaction);
-          console.error('TransactionProcessingScreen: Keys in response:', Object.keys(data.executeTransaction));
-          
-          setTransactionError('La transacción no se pudo completar correctamente. Por favor, inténtalo de nuevo.');
+        } else if (data?.submitSponsoredTransfer) {
+          // The mutation returned but failed
+          console.error('TransactionProcessingScreen: V2 submission failed:', data.submitSponsoredTransfer);
+          const errorMsg = data.submitSponsoredTransfer.error || 'La transacción no se pudo completar';
+          setTransactionError(errorMsg);
           setIsComplete(true);
           return;
         } else {
-          console.error('TransactionProcessingScreen: No executeTransaction in response:', data);
+          console.error('TransactionProcessingScreen: No submitSponsoredTransfer in response:', data);
           setTransactionError('Error inesperado al procesar la transacción.');
           setIsComplete(true);
           return;

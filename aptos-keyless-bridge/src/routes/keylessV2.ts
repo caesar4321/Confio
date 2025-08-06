@@ -1,0 +1,312 @@
+import { Router, Request, Response } from 'express';
+import { keylessServiceV2 } from '../services/keylessServiceV2';
+import logger from '../logger';
+const router = Router();
+
+// Store pending transactions temporarily (in production, use Redis or similar)
+const pendingTransactions = new Map<string, any>();
+
+/**
+ * Submit a sponsored transaction using SDK pattern
+ */
+router.post('/submit-sponsored', async (req: Request, res: Response) => {
+  try {
+    const {
+      senderAddress,
+      recipientAddress,
+      amount,
+      tokenType,
+      senderAuthenticator
+    } = req.body;
+
+    // Validate required fields
+    if (!senderAddress || !recipientAddress || !amount || !tokenType || !senderAuthenticator) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields'
+      });
+    }
+
+    logger.info('Processing sponsored transaction request');
+    logger.info('Sender:', senderAddress);
+    logger.info('Recipient:', recipientAddress);
+    logger.info('Amount:', amount);
+    logger.info('Token:', tokenType);
+
+    const result = await keylessServiceV2.submitSponsoredTransaction({
+      senderAddress,
+      recipientAddress,
+      amount,
+      tokenType,
+      senderAuthenticator
+    });
+
+    if (result.success) {
+      logger.info('Sponsored transaction successful:', result.transactionHash);
+      return res.json({
+        success: true,
+        transactionHash: result.transactionHash
+      });
+    } else {
+      logger.error('Sponsored transaction failed:', result.error);
+      return res.status(400).json({
+        success: false,
+        error: result.error
+      });
+    }
+
+  } catch (error) {
+    logger.error('Error in submit-sponsored endpoint:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Build a sponsored transaction (returns transaction and sponsor signature)
+ */
+router.post('/build-sponsored', async (req: Request, res: Response) => {
+  try {
+    const {
+      senderAddress,
+      recipientAddress,
+      amount,
+      tokenType
+    } = req.body;
+
+    // Validate required fields
+    if (!senderAddress || !recipientAddress || !amount || !tokenType) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields'
+      });
+    }
+
+    logger.info('Building sponsored transaction');
+    logger.info('Sender:', senderAddress);
+    logger.info('Recipient:', recipientAddress);
+    logger.info('Amount:', amount);
+    logger.info('Token:', tokenType);
+
+    const result = await keylessServiceV2.buildSponsoredTransaction({
+      senderAddress,
+      recipientAddress,
+      amount,
+      tokenType,
+      senderAuthenticator: '' // Not needed for building
+    });
+
+    if (result.success) {
+      logger.info('Sponsored transaction built successfully');
+      return res.json(result);
+    } else {
+      logger.error('Failed to build sponsored transaction:', result.error);
+      return res.status(400).json({
+        success: false,
+        error: result.error
+      });
+    }
+
+  } catch (error) {
+    logger.error('Error in build-sponsored endpoint:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Prepare a sponsored CONFIO transfer
+ */
+router.post('/prepare-sponsored-confio-transfer', async (req: Request, res: Response) => {
+  try {
+    const { senderAddress, recipientAddress, amount } = req.body;
+
+    if (!senderAddress || !recipientAddress || amount === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: senderAddress, recipientAddress, amount'
+      });
+    }
+
+    logger.info('Preparing sponsored CONFIO transfer');
+    
+    // Build the transaction using the V2 service
+    const result = await keylessServiceV2.buildSponsoredTransaction({
+      senderAddress,
+      recipientAddress,
+      amount,
+      tokenType: 'CONFIO',
+      senderAuthenticator: ''
+    });
+
+    if (result.success) {
+      // Store transaction for later submission
+      const transactionId = result.transactionId || Date.now().toString();
+      
+      // Store the transaction ID for later retrieval
+      // The actual transaction and sponsor authenticator are stored in keylessServiceV2
+      pendingTransactions.set(transactionId, {
+        transactionId: result.transactionId,  // Store the ID for reference
+        senderAddress,
+        recipientAddress,
+        amount,
+        tokenType: 'CONFIO',
+        rawTransaction: result.rawTransaction || result.signingMessage,
+        timestamp: Date.now()
+      });
+
+      // Clean up old transactions (older than 5 minutes)
+      const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+      for (const [id, data] of pendingTransactions.entries()) {
+        if (data.timestamp < fiveMinutesAgo) {
+          pendingTransactions.delete(id);
+        }
+      }
+
+      return res.json({
+        success: true,
+        transactionId,
+        rawTransaction: result.rawTransaction || result.signingMessage,
+        feePayerAddress: result.sponsorAddress
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    logger.error('Error preparing sponsored CONFIO transfer:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Prepare a sponsored CUSD transfer
+ */
+router.post('/prepare-sponsored-cusd-transfer', async (req: Request, res: Response) => {
+  try {
+    const { senderAddress, recipientAddress, amount } = req.body;
+
+    if (!senderAddress || !recipientAddress || amount === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: senderAddress, recipientAddress, amount'
+      });
+    }
+
+    logger.info('Preparing sponsored CUSD transfer');
+    
+    // Build the transaction using the V2 service
+    const result = await keylessServiceV2.buildSponsoredTransaction({
+      senderAddress,
+      recipientAddress,
+      amount,
+      tokenType: 'CUSD',
+      senderAuthenticator: ''
+    });
+
+    if (result.success) {
+      // Store transaction for later submission
+      const transactionId = result.transactionId || Date.now().toString();
+      pendingTransactions.set(transactionId, {
+        ...result,
+        senderAddress,
+        recipientAddress,
+        amount,
+        tokenType: 'CUSD',
+        timestamp: Date.now()
+      });
+
+      // Clean up old transactions
+      const fiveMinutesAgo = Date.now() - 5 * 60 * 1000;
+      for (const [id, data] of pendingTransactions.entries()) {
+        if (data.timestamp < fiveMinutesAgo) {
+          pendingTransactions.delete(id);
+        }
+      }
+
+      return res.json({
+        success: true,
+        transactionId,
+        rawTransaction: result.rawTransaction || result.signingMessage,
+        feePayerAddress: result.sponsorAddress
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: result.error
+      });
+    }
+  } catch (error) {
+    logger.error('Error preparing sponsored CUSD transfer:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Submit a sponsored transfer (V2)
+ */
+router.post('/submit-sponsored-confio-transfer', async (req: Request, res: Response) => {
+  try {
+    const { transactionId, senderAuthenticator } = req.body;
+
+    if (!transactionId || !senderAuthenticator) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: transactionId, senderAuthenticator'
+      });
+    }
+
+    // Retrieve the pending transaction
+    const pendingTx = pendingTransactions.get(transactionId);
+    if (!pendingTx) {
+      return res.status(404).json({
+        success: false,
+        error: 'Transaction not found or expired'
+      });
+    }
+
+    logger.info('Submitting sponsored transaction:', transactionId);
+    logger.info('Using cached transaction from prepare phase');
+
+    // Submit using the cached transaction with both authenticators
+    const result = await keylessServiceV2.submitCachedTransaction(
+      transactionId,
+      senderAuthenticator
+    );
+
+    if (result.success) {
+      // Clean up the pending transaction
+      pendingTransactions.delete(transactionId);
+      
+      return res.json({
+        success: true,
+        transactionHash: result.transactionHash
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Failed to submit transaction'
+      });
+    }
+  } catch (error) {
+    logger.error('Error submitting sponsored transfer:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Internal server error'
+    });
+  }
+});
+
+export default router;

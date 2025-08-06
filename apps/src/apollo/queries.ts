@@ -421,6 +421,7 @@ export const CREATE_SEND_TRANSACTION = gql`
 `;
 
 // Two-phase transaction mutations
+// Legacy mutations (deprecated - use V2 versions below)
 export const PREPARE_TRANSACTION = gql`
   mutation PrepareTransaction($input: PrepareTransactionInput!) {
     prepareTransaction(input: $input) {
@@ -445,6 +446,39 @@ export const EXECUTE_TRANSACTION = gql`
         createdAt
       }
       success
+      errors
+    }
+  }
+`;
+
+// V2 mutations - New two-phase flow for sponsored transactions
+export const PREPARE_SPONSORED_TRANSFER = gql`
+  mutation PrepareSponsoredTransfer($input: PrepareSponsoredTransferInput!) {
+    prepareSponsoredTransfer(input: $input) {
+      success
+      transactionId
+      rawTransaction
+      feePayerAddress
+      errors
+    }
+  }
+`;
+
+export const SUBMIT_SPONSORED_TRANSFER = gql`
+  mutation SubmitSponsoredTransfer($input: SubmitSponsoredTransferInput!) {
+    submitSponsoredTransfer(input: $input) {
+      success
+      digest
+      transactionHash
+      gasUsed
+      sendTransaction {
+        id
+        status
+        transactionHash
+        amount
+        tokenType
+        createdAt
+      }
       errors
     }
   }
