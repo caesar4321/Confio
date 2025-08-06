@@ -4,7 +4,7 @@ version = "1.0.0"
 upgrade_policy = "compatible"
 
 [addresses]
-confio = "_"
+confio = "75f38ae0c198dcedf766e0d2a39847f9b269052024e943c58970854b9cb70e2c"
 
 [dependencies]
 AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-framework", rev = "mainnet" }
@@ -12,3 +12,6 @@ AptosStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "
 MoveStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/move-stdlib", rev = "mainnet" }
 
 [dev-dependencies]
+
+[dev-addresses]
+confio = "75f38ae0c198dcedf766e0d2a39847f9b269052024e943c58970854b9cb70e2c"

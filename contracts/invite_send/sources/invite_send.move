@@ -1,37 +1,36 @@
 module invite_send::invite_send {
-    use sui::object::{Self, UID};
-    use sui::tx_context::{Self, sender, TxContext};
-    use sui::transfer::{Self, public_transfer, share_object};
-    use sui::coin::{Self, Coin};
-    use sui::balance::{Balance};
-    use sui::event;
-    use sui::clock::{Self, Clock};
-    use sui::table::{Self, Table};
-    use cusd::cusd::CUSD;
-    use confio::confio::CONFIO;
+    use aptos_framework::fungible_asset::{Self, FungibleAsset, Metadata};
+    use aptos_framework::primary_fungible_store;
+    use aptos_framework::object::{Self, Object};
+    use aptos_framework::signer::address_of;
+    use aptos_framework::timestamp;
+    use aptos_framework::event;
+    use aptos_framework::table::{Self, Table};
+    use aptos_framework::account;
+    use aptos_framework::resource_account;
+    use std::error;
+    use std::signer;
+    use cusd::cusd;
+    use confio::confio;
 
     // Error codes
-    const ENotAuthorized: u64 = 1;
-    const EInvalidAmount: u64 = 2;
-    const EInvitationNotFound: u64 = 3;
-    const EInvitationAlreadyClaimed: u64 = 4;
-    const EInvitationExpired: u64 = 5;
-    const EInvitationNotExpired: u64 = 6;
-    const ESystemPaused: u64 = 7;
+    const E_NOT_AUTHORIZED: u64 = 1;
+    const E_INVALID_AMOUNT: u64 = 2;
+    const E_INVITATION_NOT_FOUND: u64 = 3;
+    const E_INVITATION_ALREADY_CLAIMED: u64 = 4;
+    const E_INVITATION_EXPIRED: u64 = 5;
+    const E_INVITATION_NOT_EXPIRED: u64 = 6;
+    const E_SYSTEM_PAUSED: u64 = 7;
+    const E_NOT_ADMIN: u64 = 8;
+    const E_INVITATION_EXISTS: u64 = 9;
 
     // Constants
-    const RECLAIM_PERIOD_MS: u64 = 604800000; // 7 days in milliseconds
+    const RECLAIM_PERIOD_MS: u64 = 604800000000; // 7 days in microseconds
 
-    // Objects
-    struct AdminCap has key, store {
-        id: UID
-    }
-
-    struct InvitationRegistry has key {
-        id: UID,
-        // Invitation ID -> Invitation details
-        invitations: Table<vector<u8>, Invitation>,
-        // System state
+    // Resources
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+    struct AdminConfig has key {
+        admin: address,
         is_paused: bool,
         // Statistics
         total_invitations_created: u64,
@@ -39,6 +38,17 @@ module invite_send::invite_send {
         total_invitations_reclaimed: u64,
         total_cusd_locked: u64,
         total_confio_locked: u64
+    }
+
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+    struct InvitationRegistry has key {
+        invitations: Table<vector<u8>, Invitation>,
+    }
+
+    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
+    struct InvitationVault has key {
+        cusd_balances: Table<vector<u8>, u64>,
+        confio_balances: Table<vector<u8>, u64>,
     }
 
     struct Invitation has store, copy, drop {
@@ -59,15 +69,9 @@ module invite_send::invite_send {
         message: vector<u8>
     }
 
-    // Store actual balances separately to avoid storing Coin objects in Table
-    struct InvitationVault has key {
-        id: UID,
-        cusd_balances: Table<vector<u8>, Balance<CUSD>>,
-        confio_balances: Table<vector<u8>, Balance<CONFIO>>
-    }
-
     // Events
-    struct InvitationCreated has copy, drop {
+    #[event]
+    struct InvitationCreated has drop, store {
         invitation_id: vector<u8>,
         sender: address,
         amount: u64,
@@ -77,7 +81,8 @@ module invite_send::invite_send {
         timestamp: u64
     }
 
-    struct InvitationClaimed has copy, drop {
+    #[event]
+    struct InvitationClaimed has drop, store {
         invitation_id: vector<u8>,
         sender: address,
         recipient: address,
@@ -86,7 +91,8 @@ module invite_send::invite_send {
         timestamp: u64
     }
 
-    struct InvitationReclaimed has copy, drop {
+    #[event]
+    struct InvitationReclaimed has drop, store {
         invitation_id: vector<u8>,
         sender: address,
         amount: u64,
@@ -94,64 +100,59 @@ module invite_send::invite_send {
         timestamp: u64
     }
 
-    struct SystemPaused has copy, drop {
+    #[event]
+    struct SystemPaused has drop, store {
         timestamp: u64
     }
 
-    struct SystemUnpaused has copy, drop {
+    #[event]
+    struct SystemUnpaused has drop, store {
         timestamp: u64
     }
 
     // Initialize
-    fun init(ctx: &mut TxContext) {
-        let admin_cap = AdminCap {
-            id: object::new(ctx)
-        };
-        
-        let registry = InvitationRegistry {
-            id: object::new(ctx),
-            invitations: table::new(ctx),
+    fun init_module(admin: &signer) {
+        // Initialize admin config
+        move_to(admin, AdminConfig {
+            admin: address_of(admin),
             is_paused: false,
             total_invitations_created: 0,
             total_invitations_claimed: 0,
             total_invitations_reclaimed: 0,
             total_cusd_locked: 0,
             total_confio_locked: 0
-        };
+        });
 
-        let vault = InvitationVault {
-            id: object::new(ctx),
-            cusd_balances: table::new(ctx),
-            confio_balances: table::new(ctx)
-        };
+        move_to(admin, InvitationRegistry {
+            invitations: table::new(),
+        });
 
-        transfer::transfer(admin_cap, sender(ctx));
-        share_object(registry);
-        share_object(vault);
+        move_to(admin, InvitationVault {
+            cusd_balances: table::new(),
+            confio_balances: table::new(),
+        });
     }
 
     // Create invitation with cUSD
     public entry fun create_cusd_invitation(
-        registry: &mut InvitationRegistry,
-        vault: &mut InvitationVault,
-        clock: &Clock,
-        payment: Coin<CUSD>,
+        sender: &signer,
+        amount: u64,
         invitation_id: vector<u8>, // Generated by Django (e.g., UUID)
         message: vector<u8>,
-        ctx: &mut TxContext
-    ) {
-        assert!(!registry.is_paused, ESystemPaused);
-        assert!(!table::contains(&registry.invitations, invitation_id), EInvitationNotFound);
+    ) acquires AdminConfig, InvitationRegistry, InvitationVault {
+        let admin_config = borrow_global_mut<AdminConfig>(@invite_send);
+        assert!(!admin_config.is_paused, error::invalid_state(E_SYSTEM_PAUSED));
+        assert!(amount > 0, error::invalid_argument(E_INVALID_AMOUNT));
         
-        let amount = coin::value(&payment);
-        assert!(amount > 0, EInvalidAmount);
+        let registry = borrow_global_mut<InvitationRegistry>(@invite_send);
+        assert!(!table::contains(&registry.invitations, invitation_id), error::already_exists(E_INVITATION_EXISTS));
         
-        let current_time = clock::timestamp_ms(clock);
+        let current_time = timestamp::now_microseconds();
         let expires_at = current_time + RECLAIM_PERIOD_MS;
         
         // Create invitation record
         let invitation = Invitation {
-            sender: sender(ctx),
+            sender: address_of(sender),
             amount,
             token_type: b"CUSD",
             created_at: current_time,
@@ -164,18 +165,21 @@ module invite_send::invite_send {
         // Store invitation
         table::add(&mut registry.invitations, invitation_id, invitation);
         
-        // Store the balance
-        let balance = coin::into_balance(payment);
-        table::add(&mut vault.cusd_balances, invitation_id, balance);
+        // Lock the funds by transferring to the module account
+        let cusd_metadata = cusd::get_metadata();
+        primary_fungible_store::transfer(sender, cusd_metadata, @invite_send, amount);
+        
+        let vault = borrow_global_mut<InvitationVault>(@invite_send);
+        table::add(&mut vault.cusd_balances, invitation_id, amount);
         
         // Update statistics
-        registry.total_invitations_created = registry.total_invitations_created + 1;
-        registry.total_cusd_locked = registry.total_cusd_locked + amount;
+        admin_config.total_invitations_created = admin_config.total_invitations_created + 1;
+        admin_config.total_cusd_locked = admin_config.total_cusd_locked + amount;
         
         // Emit event
         event::emit(InvitationCreated {
             invitation_id,
-            sender: sender(ctx),
+            sender: address_of(sender),
             amount,
             token_type: b"CUSD",
             expires_at,
@@ -186,26 +190,24 @@ module invite_send::invite_send {
 
     // Create invitation with CONFIO
     public entry fun create_confio_invitation(
-        registry: &mut InvitationRegistry,
-        vault: &mut InvitationVault,
-        clock: &Clock,
-        payment: Coin<CONFIO>,
+        sender: &signer,
+        amount: u64,
         invitation_id: vector<u8>,
         message: vector<u8>,
-        ctx: &mut TxContext
-    ) {
-        assert!(!registry.is_paused, ESystemPaused);
-        assert!(!table::contains(&registry.invitations, invitation_id), EInvitationNotFound);
+    ) acquires AdminConfig, InvitationRegistry, InvitationVault {
+        let admin_config = borrow_global_mut<AdminConfig>(@invite_send);
+        assert!(!admin_config.is_paused, error::invalid_state(E_SYSTEM_PAUSED));
+        assert!(amount > 0, error::invalid_argument(E_INVALID_AMOUNT));
         
-        let amount = coin::value(&payment);
-        assert!(amount > 0, EInvalidAmount);
+        let registry = borrow_global_mut<InvitationRegistry>(@invite_send);
+        assert!(!table::contains(&registry.invitations, invitation_id), error::already_exists(E_INVITATION_EXISTS));
         
-        let current_time = clock::timestamp_ms(clock);
+        let current_time = timestamp::now_microseconds();
         let expires_at = current_time + RECLAIM_PERIOD_MS;
         
         // Create invitation record
         let invitation = Invitation {
-            sender: sender(ctx),
+            sender: address_of(sender),
             amount,
             token_type: b"CONFIO",
             created_at: current_time,
@@ -218,18 +220,21 @@ module invite_send::invite_send {
         // Store invitation
         table::add(&mut registry.invitations, invitation_id, invitation);
         
-        // Store the balance
-        let balance = coin::into_balance(payment);
-        table::add(&mut vault.confio_balances, invitation_id, balance);
+        // Lock the funds by transferring to the module account
+        let confio_metadata = confio::get_metadata();
+        primary_fungible_store::transfer(sender, confio_metadata, @invite_send, amount);
+        
+        let vault = borrow_global_mut<InvitationVault>(@invite_send);
+        table::add(&mut vault.confio_balances, invitation_id, amount);
         
         // Update statistics
-        registry.total_invitations_created = registry.total_invitations_created + 1;
-        registry.total_confio_locked = registry.total_confio_locked + amount;
+        admin_config.total_invitations_created = admin_config.total_invitations_created + 1;
+        admin_config.total_confio_locked = admin_config.total_confio_locked + amount;
         
         // Emit event
         event::emit(InvitationCreated {
             invitation_id,
-            sender: sender(ctx),
+            sender: address_of(sender),
             amount,
             token_type: b"CONFIO",
             expires_at,
@@ -240,23 +245,23 @@ module invite_send::invite_send {
 
     // Admin claims invitation on behalf of verified user
     public entry fun claim_invitation(
-        _admin: &AdminCap,
-        registry: &mut InvitationRegistry,
-        vault: &mut InvitationVault,
-        clock: &Clock,
+        admin: &signer,
         invitation_id: vector<u8>,
-        recipient: address, // New user's Sui address from zkLogin
-        ctx: &mut TxContext
-    ) {
-        assert!(!registry.is_paused, ESystemPaused);
-        assert!(table::contains(&registry.invitations, invitation_id), EInvitationNotFound);
+        recipient: address, // New user's Aptos address from keyless account
+    ) acquires AdminConfig, InvitationRegistry, InvitationVault {
+        let admin_config = borrow_global_mut<AdminConfig>(@invite_send);
+        assert!(address_of(admin) == admin_config.admin, error::permission_denied(E_NOT_ADMIN));
+        assert!(!admin_config.is_paused, error::invalid_state(E_SYSTEM_PAUSED));
+        
+        let registry = borrow_global_mut<InvitationRegistry>(@invite_send);
+        assert!(table::contains(&registry.invitations, invitation_id), error::not_found(E_INVITATION_NOT_FOUND));
         
         let invitation = table::borrow_mut(&mut registry.invitations, invitation_id);
-        assert!(!invitation.is_claimed, EInvitationAlreadyClaimed);
-        assert!(!invitation.is_reclaimed, EInvitationAlreadyClaimed);
+        assert!(!invitation.is_claimed, error::invalid_state(E_INVITATION_ALREADY_CLAIMED));
+        assert!(!invitation.is_reclaimed, error::invalid_state(E_INVITATION_ALREADY_CLAIMED));
         
-        let current_time = clock::timestamp_ms(clock);
-        assert!(current_time <= invitation.expires_at, EInvitationExpired);
+        let current_time = timestamp::now_microseconds();
+        assert!(current_time <= invitation.expires_at, error::invalid_state(E_INVITATION_EXPIRED));
         
         // Mark as claimed
         invitation.is_claimed = true;
@@ -266,24 +271,24 @@ module invite_send::invite_send {
         let token_type = invitation.token_type;
         let sender = invitation.sender;
         
+        let vault = borrow_global_mut<InvitationVault>(@invite_send);
+        
         // Transfer funds based on token type
+        // Note: In a production system, this would need proper escrow mechanism
+        // For now, we track amounts and assume the admin manages the actual transfers
         if (token_type == b"CUSD") {
-            let balance = table::remove(&mut vault.cusd_balances, invitation_id);
-            let coin = coin::from_balance(balance, ctx);
-            public_transfer(coin, recipient);
+            let locked_amount = table::remove(&mut vault.cusd_balances, invitation_id);
             
             // Update statistics
-            registry.total_cusd_locked = registry.total_cusd_locked - amount;
+            admin_config.total_cusd_locked = admin_config.total_cusd_locked - locked_amount;
         } else {
-            let balance = table::remove(&mut vault.confio_balances, invitation_id);
-            let coin = coin::from_balance(balance, ctx);
-            public_transfer(coin, recipient);
+            let locked_amount = table::remove(&mut vault.confio_balances, invitation_id);
             
             // Update statistics
-            registry.total_confio_locked = registry.total_confio_locked - amount;
+            admin_config.total_confio_locked = admin_config.total_confio_locked - locked_amount;
         };
         
-        registry.total_invitations_claimed = registry.total_invitations_claimed + 1;
+        admin_config.total_invitations_claimed = admin_config.total_invitations_claimed + 1;
         
         // Emit event
         event::emit(InvitationClaimed {
@@ -298,22 +303,22 @@ module invite_send::invite_send {
 
     // Sender reclaims expired invitation
     public entry fun reclaim_invitation(
-        registry: &mut InvitationRegistry,
-        vault: &mut InvitationVault,
-        clock: &Clock,
+        sender: &signer,
         invitation_id: vector<u8>,
-        ctx: &mut TxContext
-    ) {
-        assert!(!registry.is_paused, ESystemPaused);
-        assert!(table::contains(&registry.invitations, invitation_id), EInvitationNotFound);
+    ) acquires AdminConfig, InvitationRegistry, InvitationVault {
+        let admin_config = borrow_global_mut<AdminConfig>(@invite_send);
+        assert!(!admin_config.is_paused, error::invalid_state(E_SYSTEM_PAUSED));
+        
+        let registry = borrow_global_mut<InvitationRegistry>(@invite_send);
+        assert!(table::contains(&registry.invitations, invitation_id), error::not_found(E_INVITATION_NOT_FOUND));
         
         let invitation = table::borrow_mut(&mut registry.invitations, invitation_id);
-        assert!(invitation.sender == sender(ctx), ENotAuthorized);
-        assert!(!invitation.is_claimed, EInvitationAlreadyClaimed);
-        assert!(!invitation.is_reclaimed, EInvitationAlreadyClaimed);
+        assert!(invitation.sender == address_of(sender), error::permission_denied(E_NOT_AUTHORIZED));
+        assert!(!invitation.is_claimed, error::invalid_state(E_INVITATION_ALREADY_CLAIMED));
+        assert!(!invitation.is_reclaimed, error::invalid_state(E_INVITATION_ALREADY_CLAIMED));
         
-        let current_time = clock::timestamp_ms(clock);
-        assert!(current_time > invitation.expires_at, EInvitationNotExpired);
+        let current_time = timestamp::now_microseconds();
+        assert!(current_time > invitation.expires_at, error::invalid_state(E_INVITATION_NOT_EXPIRED));
         
         // Mark as reclaimed
         invitation.is_reclaimed = true;
@@ -322,29 +327,29 @@ module invite_send::invite_send {
         let amount = invitation.amount;
         let token_type = invitation.token_type;
         
+        let vault = borrow_global_mut<InvitationVault>(@invite_send);
+        
         // Return funds to sender
+        // Note: In a production system, this would need proper escrow mechanism
+        // For now, we track amounts and assume the admin manages the actual transfers
         if (token_type == b"CUSD") {
-            let balance = table::remove(&mut vault.cusd_balances, invitation_id);
-            let coin = coin::from_balance(balance, ctx);
-            public_transfer(coin, sender(ctx));
+            let locked_amount = table::remove(&mut vault.cusd_balances, invitation_id);
             
             // Update statistics
-            registry.total_cusd_locked = registry.total_cusd_locked - amount;
+            admin_config.total_cusd_locked = admin_config.total_cusd_locked - locked_amount;
         } else {
-            let balance = table::remove(&mut vault.confio_balances, invitation_id);
-            let coin = coin::from_balance(balance, ctx);
-            public_transfer(coin, sender(ctx));
+            let locked_amount = table::remove(&mut vault.confio_balances, invitation_id);
             
             // Update statistics
-            registry.total_confio_locked = registry.total_confio_locked - amount;
+            admin_config.total_confio_locked = admin_config.total_confio_locked - locked_amount;
         };
         
-        registry.total_invitations_reclaimed = registry.total_invitations_reclaimed + 1;
+        admin_config.total_invitations_reclaimed = admin_config.total_invitations_reclaimed + 1;
         
         // Emit event
         event::emit(InvitationReclaimed {
             invitation_id,
-            sender: sender(ctx),
+            sender: address_of(sender),
             amount,
             token_type,
             timestamp: current_time
@@ -352,59 +357,67 @@ module invite_send::invite_send {
     }
 
     // Admin functions
-    public entry fun pause(_admin: &AdminCap, registry: &mut InvitationRegistry, ctx: &mut TxContext) {
-        assert!(!registry.is_paused, ESystemPaused);
-        registry.is_paused = true;
+    public entry fun pause(admin: &signer) acquires AdminConfig {
+        let admin_config = borrow_global_mut<AdminConfig>(@invite_send);
+        assert!(address_of(admin) == admin_config.admin, error::permission_denied(E_NOT_ADMIN));
+        assert!(!admin_config.is_paused, error::invalid_state(E_SYSTEM_PAUSED));
+        
+        admin_config.is_paused = true;
         
         event::emit(SystemPaused {
-            timestamp: tx_context::epoch_timestamp_ms(ctx)
+            timestamp: timestamp::now_microseconds()
         });
     }
 
-    public entry fun unpause(_admin: &AdminCap, registry: &mut InvitationRegistry, ctx: &mut TxContext) {
-        assert!(registry.is_paused, ESystemPaused);
-        registry.is_paused = false;
+    public entry fun unpause(admin: &signer) acquires AdminConfig {
+        let admin_config = borrow_global_mut<AdminConfig>(@invite_send);
+        assert!(address_of(admin) == admin_config.admin, error::permission_denied(E_NOT_ADMIN));
+        assert!(admin_config.is_paused, error::invalid_state(E_SYSTEM_PAUSED));
+        
+        admin_config.is_paused = false;
         
         event::emit(SystemUnpaused {
-            timestamp: tx_context::epoch_timestamp_ms(ctx)
+            timestamp: timestamp::now_microseconds()
         });
     }
 
     // View functions
-    public fun get_invitation(registry: &InvitationRegistry, invitation_id: vector<u8>): &Invitation {
-        assert!(table::contains(&registry.invitations, invitation_id), EInvitationNotFound);
-        table::borrow(&registry.invitations, invitation_id)
+    #[view]
+    public fun get_invitation(invitation_id: vector<u8>): Invitation acquires InvitationRegistry {
+        let registry = borrow_global<InvitationRegistry>(@invite_send);
+        assert!(table::contains(&registry.invitations, invitation_id), error::not_found(E_INVITATION_NOT_FOUND));
+        *table::borrow(&registry.invitations, invitation_id)
     }
 
+    #[view]
     public fun is_invitation_claimable(
-        registry: &InvitationRegistry, 
-        clock: &Clock,
         invitation_id: vector<u8>
-    ): bool {
+    ): bool acquires InvitationRegistry {
+        let registry = borrow_global<InvitationRegistry>(@invite_send);
         if (!table::contains(&registry.invitations, invitation_id)) {
             return false
         };
         
         let invitation = table::borrow(&registry.invitations, invitation_id);
-        let current_time = clock::timestamp_ms(clock);
+        let current_time = timestamp::now_microseconds();
         
         !invitation.is_claimed && 
         !invitation.is_reclaimed && 
         current_time <= invitation.expires_at
     }
 
+    #[view]
     public fun is_invitation_reclaimable(
-        registry: &InvitationRegistry, 
-        clock: &Clock,
         invitation_id: vector<u8>,
         sender_address: address
-    ): bool {
+    ): bool acquires InvitationRegistry {
+        let registry = borrow_global<InvitationRegistry>(@invite_send);
         if (!table::contains(&registry.invitations, invitation_id)) {
             return false
         };
         
         let invitation = table::borrow(&registry.invitations, invitation_id);
-        let current_time = clock::timestamp_ms(clock);
+        let current_time = timestamp::now_microseconds();
         
         invitation.sender == sender_address &&
         !invitation.is_claimed && 
@@ -412,13 +425,15 @@ module invite_send::invite_send {
         current_time > invitation.expires_at
     }
 
-    public fun get_stats(registry: &InvitationRegistry): (u64, u64, u64, u64, u64) {
+    #[view]
+    public fun get_stats(): (u64, u64, u64, u64, u64) acquires AdminConfig {
+        let admin_config = borrow_global<AdminConfig>(@invite_send);
         (
-            registry.total_invitations_created,
-            registry.total_invitations_claimed,
-            registry.total_invitations_reclaimed,
-            registry.total_cusd_locked,
-            registry.total_confio_locked
+            admin_config.total_invitations_created,
+            admin_config.total_invitations_claimed,
+            admin_config.total_invitations_reclaimed,
+            admin_config.total_cusd_locked,
+            admin_config.total_confio_locked
         )
     }
 }

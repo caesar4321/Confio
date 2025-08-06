@@ -1,11 +1,21 @@
 [package]
 name = "p2p_trade"
 version = "1.0.0"
+upgrade_policy = "compatible"
+
+[addresses]
+p2p_trade = "75f38ae0c198dcedf766e0d2a39847f9b269052024e943c58970854b9cb70e2c"
 
 [dependencies]
-Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/mainnet" }
+AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-framework", rev = "mainnet" }
+AptosStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-stdlib", rev = "mainnet" }
+MoveStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/move-stdlib", rev = "mainnet" }
 cusd = { local = "../cusd" }
 confio = { local = "../confio" }
 
-[addresses]
-p2p_trade = "0x0"
+[dev-dependencies]
+
+[dev-addresses]
+p2p_trade = "75f38ae0c198dcedf766e0d2a39847f9b269052024e943c58970854b9cb70e2c"
+cusd = "75f38ae0c198dcedf766e0d2a39847f9b269052024e943c58970854b9cb70e2c"
+confio = "75f38ae0c198dcedf766e0d2a39847f9b269052024e943c58970854b9cb70e2c"
