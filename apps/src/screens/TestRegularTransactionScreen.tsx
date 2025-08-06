@@ -10,7 +10,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useMutation, gql } from '@apollo/client';
-import { enhancedAuthService } from '../services/authService';
+import { EnhancedAuthService } from '../services/enhancedAuthService';
 
 // Test mutation for regular (non-sponsored) transactions
 const TEST_REGULAR_TRANSFER = gql`
@@ -50,6 +50,7 @@ export const TestRegularTransactionScreen: React.FC = () => {
       }
 
       // Get the auth service instance
+      const enhancedAuthService = EnhancedAuthService.getInstance();
       const authService = enhancedAuthService.authService;
       if (!authService.currentAccount) {
         Alert.alert('Error', 'No account found. Please sign in first.');
