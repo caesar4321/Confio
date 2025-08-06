@@ -4,6 +4,7 @@ import './aptosPolyfills';
 import {
   Aptos,
   AptosConfig,
+  Network,
   EphemeralKeyPair,
   Ed25519PrivateKey,
   KeylessAccount,
@@ -53,8 +54,10 @@ export class AptosKeylessService {
   
   constructor(network: 'testnet' | 'mainnet' = 'testnet') {
     const aptosConfig = new AptosConfig({ 
-      network: network === 'mainnet' ? AptosConfig.MAINNET : AptosConfig.TESTNET 
+      network: network === 'mainnet' ? Network.MAINNET : Network.TESTNET 
     });
+    console.log('AptosKeylessService initialized with network:', network);
+    console.log('AptosConfig network:', aptosConfig.network);
     this.aptos = new Aptos(aptosConfig);
   }
 

@@ -26,7 +26,7 @@ const TEST_REGULAR_TRANSFER = gql`
 
 export const TestRegularTransactionScreen: React.FC = () => {
   const [recipientAddress, setRecipientAddress] = useState('');
-  const [amount, setAmount] = useState('1');
+  const [amount, setAmount] = useState('0.001');  // Small amount of APT for testing
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
 
@@ -52,13 +52,25 @@ export const TestRegularTransactionScreen: React.FC = () => {
       // Get the auth service instance
       const enhancedAuthService = EnhancedAuthService.getInstance();
       const authService = enhancedAuthService.authService;
-      if (!authService.currentAccount) {
-        Alert.alert('Error', 'No account found. Please sign in first.');
+      
+      // Get the current account data from authService
+      const keylessAccount = authService.getCurrentAccount();
+      console.log('Keyless account from authService:', JSON.stringify({
+        exists: !!keylessAccount,
+        address: keylessAccount?.address,
+        hasJwt: !!keylessAccount?.jwt,
+        hasEphemeralKeyPair: !!keylessAccount?.ephemeralKeyPair,
+        hasPepper: !!keylessAccount?.pepper,
+        keys: keylessAccount ? Object.keys(keylessAccount) : []
+      }, null, 2));
+      
+      if (!keylessAccount || !keylessAccount.address) {
+        Alert.alert('Error', 'No keyless account found. Please sign in first.');
         return;
       }
 
       console.log('Starting test regular transaction...');
-      console.log('Sender:', authService.currentAccount.aptos_address);
+      console.log('Sender address:', keylessAccount.address);
       console.log('Recipient:', recipientAddress);
       console.log('Amount:', amountNum);
 
@@ -67,13 +79,14 @@ export const TestRegularTransactionScreen: React.FC = () => {
       const aptosKeylessService = new AptosKeylessService();
       const aptos = aptosKeylessService.getAptosClient();
 
-      // Build the transaction
-      const amountUnits = Math.floor(amountNum * 1e8); // Convert to smallest units (8 decimals for CONFIO)
+      // Build the transaction - use APT transfer for testing (simpler, always available)
+      const amountUnits = Math.floor(amountNum * 1e8); // Convert to smallest units (8 decimals for APT)
       
+      console.log('Building transaction for APT transfer...');
       const transaction = await aptos.transaction.build.simple({
-        sender: authService.currentAccount.aptos_address,
+        sender: keylessAccount.address,
         data: {
-          function: '0x75f38ae0c198dcedf766e0d2a39847f9b269052024e943c58970854b9cb70e2c::confio::transfer_confio',
+          function: '0x1::aptos_account::transfer',  // Use native APT transfer for testing
           functionArguments: [recipientAddress, amountUnits.toString()]
         }
       });
@@ -88,11 +101,35 @@ export const TestRegularTransactionScreen: React.FC = () => {
       const rawTransactionBase64 = Buffer.from(rawTxBytes).toString('base64');
 
       // Sign the transaction using keyless account
-      const pepperBytes = new Uint8Array(authService.currentAccount.pepper.split(',').map((p: string) => parseInt(p)));
+      console.log('Keyless account pepper:', keylessAccount.pepper);
+      
+      // Parse pepper - it might be a string or already an array
+      let pepperBytes: Uint8Array;
+      if (keylessAccount.pepper) {
+        if (typeof keylessAccount.pepper === 'string') {
+          pepperBytes = new Uint8Array(keylessAccount.pepper.split(',').map((p: string) => parseInt(p)));
+        } else {
+          pepperBytes = new Uint8Array(keylessAccount.pepper);
+        }
+      } else {
+        // If no pepper stored, we might need to get it from elsewhere
+        console.error('No pepper found in keyless account');
+        Alert.alert('Error', 'Account pepper not found. Please sign in again.');
+        return;
+      }
+      
+      // Get ephemeral key pair - it should be in the keyless account
+      const ephemeralKeyPair = keylessAccount.ephemeralKeyPair || authService.getEphemeralKeyPair();
+      console.log('Ephemeral key pair exists:', !!ephemeralKeyPair);
+      
+      if (!ephemeralKeyPair) {
+        Alert.alert('Error', 'Ephemeral key pair not found. Please sign in again.');
+        return;
+      }
       
       const authenticatorResponse = await aptosKeylessService.generateAuthenticator({
-        jwt: authService.currentAccount.jwt,
-        ephemeralKeyPair: authService.ephemeralKeyPair,
+        jwt: keylessAccount.jwt,
+        ephemeralKeyPair: ephemeralKeyPair,
         signingMessage: rawTransactionBase64,
         pepper: pepperBytes,
       });
@@ -154,7 +191,7 @@ export const TestRegularTransactionScreen: React.FC = () => {
       <View style={styles.content}>
         <Text style={styles.title}>Test Regular Transaction</Text>
         <Text style={styles.subtitle}>
-          Test a non-sponsored keyless transaction to verify account setup
+          Test a non-sponsored APT transfer to verify keyless account setup
         </Text>
 
         <View style={styles.inputContainer}>
@@ -169,7 +206,7 @@ export const TestRegularTransactionScreen: React.FC = () => {
         </View>
 
         <View style={styles.inputContainer}>
-          <Text style={styles.label}>Amount (CONFIO)</Text>
+          <Text style={styles.label}>Amount (APT)</Text>
           <TextInput
             style={styles.input}
             value={amount}
