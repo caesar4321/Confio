@@ -13,6 +13,7 @@ from django.core.cache import cache
 import logging
 import json
 import httpx
+import os
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -2163,3 +2164,122 @@ class AptosSponsorService:
                 transaction_payload,
                 keyless_info=keyless_info
             )
+    
+    @classmethod
+    async def test_regular_keyless_transfer(
+        cls,
+        raw_transaction: str,
+        sender_authenticator: str,
+        sender_address: str
+    ) -> Dict[str, Any]:
+        """
+        Test method for regular (non-sponsored) keyless transactions.
+        This submits a fully signed transaction directly to Aptos.
+        
+        Args:
+            raw_transaction: Base64 encoded raw transaction built by client
+            sender_authenticator: Base64 encoded sender authenticator  
+            sender_address: Sender's Aptos address (for logging)
+            
+        Returns:
+            Dict with transaction result
+        """
+        try:
+            import httpx
+            import base64
+            
+            logger.info(f"Testing regular keyless transfer from {sender_address}")
+            logger.info(f"Raw transaction length: {len(raw_transaction)}")
+            logger.info(f"Authenticator length: {len(sender_authenticator)}")
+            
+            # Decode from base64
+            raw_tx_bytes = base64.b64decode(raw_transaction)
+            auth_bytes = base64.b64decode(sender_authenticator)
+            
+            # Construct signed transaction (UserTransaction variant = 0)
+            from io import BytesIO
+            signed_tx = BytesIO()
+            
+            # Write variant tag for UserTransaction (0)
+            signed_tx.write(bytes([0]))
+            
+            # Write raw transaction bytes
+            signed_tx.write(raw_tx_bytes)
+            
+            # Write authenticator bytes
+            signed_tx.write(auth_bytes)
+            
+            signed_tx_bytes = signed_tx.getvalue()
+            
+            logger.info(f"Signed transaction length: {len(signed_tx_bytes)}")
+            
+            # Submit to Aptos
+            nodit_api_key = os.getenv('NODIT_API_KEY')
+            network = os.getenv('APTOS_NETWORK', 'testnet')
+            
+            if network == 'mainnet':
+                base_url = 'https://aptos-mainnet.nodit.io/v1'
+            else:
+                base_url = 'https://aptos-testnet.nodit.io/v1'
+            
+            headers = {
+                'Content-Type': 'application/x.aptos.signed_transaction+bcs'
+            }
+            
+            if nodit_api_key:
+                headers['X-API-KEY'] = nodit_api_key
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{base_url}/transactions",
+                    content=signed_tx_bytes,
+                    headers=headers
+                )
+                
+                if response.status_code == 202:
+                    result = response.json()
+                    logger.info(f"Transaction submitted successfully: {result.get('hash')}")
+                    
+                    # Wait for confirmation
+                    await asyncio.sleep(2)
+                    
+                    # Check transaction status
+                    tx_response = await client.get(
+                        f"{base_url}/transactions/by_hash/{result.get('hash')}",
+                        headers={'X-API-KEY': nodit_api_key} if nodit_api_key else {}
+                    )
+                    
+                    if tx_response.status_code == 200:
+                        tx_data = tx_response.json()
+                        if tx_data.get('success'):
+                            return {
+                                'success': True,
+                                'transactionHash': result.get('hash')
+                            }
+                        else:
+                            return {
+                                'success': False,
+                                'error': f"Transaction failed: {tx_data.get('vm_status')}"
+                            }
+                    else:
+                        # Transaction might still be pending
+                        return {
+                            'success': True,
+                            'transactionHash': result.get('hash')
+                        }
+                else:
+                    error_text = response.text
+                    logger.error(f"Transaction submission failed: {error_text}")
+                    return {
+                        'success': False,
+                        'error': f"Submission failed: {error_text}"
+                    }
+                    
+        except Exception as e:
+            logger.error(f"Error in test_regular_keyless_transfer: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'success': False,
+                'error': str(e)
+            }

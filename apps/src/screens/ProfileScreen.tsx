@@ -437,6 +437,27 @@ export const ProfileScreen = () => {
         </TouchableOpacity>
       </View>
 
+      {/* Developer Menu - Only show in development */}
+      {__DEV__ && (
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleRow}>
+              <Icon name="code" size={20} color="#9333EA" />
+              <Text style={styles.cardTitle}>Developer Menu</Text>
+            </View>
+          </View>
+          <View style={styles.cardOptions}>
+            <TouchableOpacity 
+              style={styles.cardOption}
+              onPress={() => navigation.navigate('TestRegularTransaction')}
+            >
+              <Text style={styles.cardOptionText}>Test Regular Transaction</Text>
+              <Icon name="chevron-right" size={16} color="#9CA3AF" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* Sign Out Button */}
       <TouchableOpacity style={styles.signOutButton} onPress={signOut}>
         <Text style={styles.signOutText}>Cerrar Sesión</Text>

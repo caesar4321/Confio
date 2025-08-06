@@ -345,6 +345,7 @@ export type MainStackParamList = {
   ConfioTokenomics: undefined;
   MiProgresoViral: undefined;
   ViralTemplates: undefined;
+  TestRegularTransaction: undefined;
   // NotificationSettings: undefined; // Hidden: Notifications mandatory
 };
 

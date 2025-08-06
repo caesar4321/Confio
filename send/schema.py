@@ -1343,6 +1343,111 @@ class SubmitSponsoredTransfer(graphene.Mutation):
                 errors=[str(e)]
             )
 
+class TestRegularTransferInput(graphene.InputObjectType):
+    """Input for testing regular (non-sponsored) keyless transaction"""
+    recipient_address = graphene.String(required=True, description="Recipient Aptos address")
+    amount = graphene.String(required=True, description="Amount to send in CONFIO units")
+    raw_transaction = graphene.String(required=True, description="Base64 encoded raw transaction built by client")
+    sender_authenticator = graphene.String(required=True, description="Base64 encoded sender authenticator")
+
+class TestRegularTransfer(graphene.Mutation):
+    """Test mutation for regular (non-sponsored) keyless transactions"""
+    class Arguments:
+        input = TestRegularTransferInput(required=True)
+    
+    # Outputs
+    success = graphene.Boolean()
+    transaction_hash = graphene.String()
+    error = graphene.String()
+    debug_info = graphene.String()
+    
+    @classmethod
+    @graphql_require_aml()
+    @graphql_require_kyc('send_money')
+    def mutate(cls, root, info, input):
+        """
+        Test regular keyless transaction submission
+        This bypasses sponsored flow to test basic keyless account functionality
+        """
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return TestRegularTransfer(
+                success=False,
+                error="Authentication required"
+            )
+        
+        try:
+            from blockchain.aptos_sponsor_service import AptosSponsorService
+            from users.jwt_context import get_jwt_business_context_with_validation
+            import asyncio
+            import json
+            
+            # Get account context from JWT
+            jwt_context = get_jwt_business_context_with_validation(info, 'send_funds')
+            if not jwt_context:
+                return TestRegularTransfer(
+                    success=False,
+                    error="Account context not found"
+                )
+            
+            active_account = jwt_context.get('activeAccount')
+            if not active_account:
+                return TestRegularTransfer(
+                    success=False,
+                    error="No active account found"
+                )
+            
+            # Log debug info
+            debug_info = {
+                "sender_address": active_account.aptos_address,
+                "recipient_address": input.recipient_address,
+                "amount": input.amount,
+                "raw_transaction_length": len(input.raw_transaction) if input.raw_transaction else 0,
+                "authenticator_length": len(input.sender_authenticator) if input.sender_authenticator else 0
+            }
+            
+            print(f"TestRegularTransfer debug: {json.dumps(debug_info, indent=2)}")
+            
+            # Submit directly to Aptos (non-sponsored)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # Call a new test method in AptosSponsorService
+                result = loop.run_until_complete(
+                    AptosSponsorService.test_regular_keyless_transfer(
+                        raw_transaction=input.raw_transaction,
+                        sender_authenticator=input.sender_authenticator,
+                        sender_address=active_account.aptos_address
+                    )
+                )
+                
+                if result.get('success'):
+                    return TestRegularTransfer(
+                        success=True,
+                        transaction_hash=result.get('transactionHash'),
+                        debug_info=json.dumps(debug_info)
+                    )
+                else:
+                    return TestRegularTransfer(
+                        success=False,
+                        error=result.get('error', 'Failed to submit test transaction'),
+                        debug_info=json.dumps({**debug_info, "error_details": result})
+                    )
+                    
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            print(f"TestRegularTransfer error: {error_trace}")
+            return TestRegularTransfer(
+                success=False,
+                error=str(e),
+                debug_info=json.dumps({"exception": str(e), "type": type(e).__name__})
+            )
+
 class Mutation(graphene.ObjectType):
     """GraphQL mutations for send transactions"""
     create_send_transaction = CreateSendTransaction.Field()
@@ -1350,4 +1455,6 @@ class Mutation(graphene.ObjectType):
     execute_transaction = ExecuteTransaction.Field()
     # V2 sponsored transaction mutations
     prepare_sponsored_transfer = PrepareSponsoredTransfer.Field()
-    submit_sponsored_transfer = SubmitSponsoredTransfer.Field() 
+    submit_sponsored_transfer = SubmitSponsoredTransfer.Field()
+    # Test mutation for regular keyless transactions
+    test_regular_transfer = TestRegularTransfer.Field() 

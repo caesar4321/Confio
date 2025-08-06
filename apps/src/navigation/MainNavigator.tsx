@@ -42,6 +42,7 @@ import { ConfioPresaleParticipateScreen } from '../screens/ConfioPresaleParticip
 import { ConfioTokenomicsScreen } from '../screens/ConfioTokenomicsScreen';
 import { MiProgresoViralScreen } from '../screens/MiProgresoViralScreen';
 import { ViralTemplatesScreen } from '../screens/ViralTemplatesScreen';
+import { TestRegularTransactionScreen } from '../screens/TestRegularTransactionScreen';
 // import NotificationSettingsScreen from '../screens/NotificationSettingsScreen'; // Hidden: Notifications mandatory
 
 console.log('MainNavigator: TransactionProcessingScreen imported:', !!TransactionProcessingScreen);
@@ -320,6 +321,14 @@ export const MainNavigator = () => {
         name="ViralTemplates"
         component={ViralTemplatesScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="TestRegularTransaction"
+        component={TestRegularTransactionScreen}
+        options={{ 
+          headerShown: false,
+          animation: 'slide_from_right'
+        }}
       />
       {/* Hidden: Notifications are mandatory for financial apps
       <Stack.Screen
