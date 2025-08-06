@@ -5,6 +5,7 @@ import { config } from './config';
 import logger from './logger';
 import keylessRoutes from './routes/keyless';
 import keylessV2Routes from './routes/keylessV2';
+import testKeylessRoutes from './routes/testKeyless';
 
 // Load environment variables
 dotenv.config();
@@ -33,6 +34,7 @@ app.use((req, _res, next) => {
 // Routes
 app.use('/api/keyless', keylessRoutes);
 app.use('/api/keyless/v2', keylessV2Routes);
+app.use('/api/keyless', testKeylessRoutes); // Add test routes
 
 // Base route
 app.get('/', (_req, res) => {
