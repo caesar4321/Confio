@@ -458,6 +458,7 @@ export const PREPARE_SPONSORED_TRANSFER = gql`
       success
       transactionId
       rawTransaction
+      rawBcs
       feePayerAddress
       errors
     }

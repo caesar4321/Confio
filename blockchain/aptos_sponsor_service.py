@@ -238,6 +238,7 @@ class AptosSponsorService:
                             'success': True,
                             'transactionId': result.get('transactionId'),
                             'rawTransaction': result.get('rawTransaction'),
+                            'rawBcs': result.get('rawBcs'),  # A/B Test: Include raw BCS bytes
                             'feePayerAddress': result.get('feePayerAddress')
                         }
                     else:
@@ -302,6 +303,7 @@ class AptosSponsorService:
                             'success': True,
                             'transactionId': result.get('transactionId'),
                             'rawTransaction': result.get('rawTransaction'),
+                            'rawBcs': result.get('rawBcs'),  # A/B Test: Include raw BCS bytes
                             'feePayerAddress': result.get('feePayerAddress')
                         }
                     else:
@@ -327,10 +329,14 @@ class AptosSponsorService:
     async def submit_sponsored_confio_transfer_v2(
         cls,
         transaction_id: str,
-        sender_authenticator: str
+        sender_authenticator: str,
+        sender_authenticator_bcs: str = None,  # A/B Test: BCS authenticator
+        jwt: str = None,
+        ephemeral_key_pair: dict = None
     ) -> Dict[str, Any]:
         """
         Phase 2: Submit a sponsored transfer with sender authenticator
+        EXPERIMENTAL: Now accepts JWT and ephemeral key pair for bridge-side signing
         """
         try:
             import httpx
@@ -341,6 +347,34 @@ class AptosSponsorService:
                 'transactionId': transaction_id,
                 'senderAuthenticator': sender_authenticator
             }
+            
+            # A/B Test: Add BCS authenticator if provided
+            if sender_authenticator_bcs:
+                bridge_request['senderAuthenticatorBcs'] = sender_authenticator_bcs
+                logger.info("A/B Test: Including BCS authenticator for testing")
+            
+            # EXPERIMENTAL: Add keyless data if provided
+            if jwt:
+                bridge_request['jwt'] = jwt
+                logger.info(f"Including JWT for experimental bridge-side signing (length: {len(jwt)})")
+            else:
+                logger.info("No JWT provided for experimental bridge-side signing")
+                
+            if ephemeral_key_pair:
+                # If it's a string (JSONString from GraphQL), parse it
+                if isinstance(ephemeral_key_pair, str):
+                    import json
+                    try:
+                        ephemeral_key_pair = json.loads(ephemeral_key_pair)
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse ephemeral_key_pair JSON: {ephemeral_key_pair}")
+                        ephemeral_key_pair = None
+                
+                if ephemeral_key_pair:
+                    bridge_request['ephemeralKeyPair'] = ephemeral_key_pair
+                    logger.info(f"Including ephemeral key pair for experimental bridge-side signing: {ephemeral_key_pair.get('nonce', 'no nonce')}")
+            else:
+                logger.info("No ephemeral key pair provided for experimental bridge-side signing")
             
             logger.info(f"Calling TypeScript bridge V2 submit-sponsored-confio-transfer")
             

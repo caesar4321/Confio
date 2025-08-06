@@ -171,6 +171,7 @@ router.post('/prepare-sponsored-confio-transfer', async (req: Request, res: Resp
         success: true,
         transactionId,
         rawTransaction: result.rawTransaction || result.signingMessage,
+        rawBcs: result.rawBcs,  // A/B Test: Include raw BCS bytes
         feePayerAddress: result.sponsorAddress
       });
     } else {
@@ -237,6 +238,7 @@ router.post('/prepare-sponsored-cusd-transfer', async (req: Request, res: Respon
         success: true,
         transactionId,
         rawTransaction: result.rawTransaction || result.signingMessage,
+        rawBcs: result.rawBcs,  // A/B Test: Include raw BCS bytes
         feePayerAddress: result.sponsorAddress
       });
     } else {
@@ -259,12 +261,21 @@ router.post('/prepare-sponsored-cusd-transfer', async (req: Request, res: Respon
  */
 router.post('/submit-sponsored-confio-transfer', async (req: Request, res: Response) => {
   try {
-    const { transactionId, senderAuthenticator } = req.body;
+    const { transactionId, senderAuthenticator, senderAuthenticatorBcs, jwt, ephemeralKeyPair } = req.body;
 
-    if (!transactionId || !senderAuthenticator) {
+    // Check if we have either an authenticator OR ephemeral key pair data for direct signing
+    if (!transactionId) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: transactionId, senderAuthenticator'
+        error: 'Missing required field: transactionId'
+      });
+    }
+    
+    // If we don't have an authenticator, check if we have ephemeral key pair data for direct signing
+    if (!senderAuthenticator && (!jwt || !ephemeralKeyPair)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: either senderAuthenticator OR (jwt and ephemeralKeyPair)'
       });
     }
 
@@ -280,10 +291,50 @@ router.post('/submit-sponsored-confio-transfer', async (req: Request, res: Respo
     logger.info('Submitting sponsored transaction:', transactionId);
     logger.info('Using cached transaction from prepare phase');
 
-    // Submit using the cached transaction with both authenticators
+    // Check if we need to use direct keyless signing on the bridge
+    if (jwt && ephemeralKeyPair && !senderAuthenticator) {
+      logger.info('EXPERIMENTAL: Using direct keyless signing on bridge');
+      logger.info('Ephemeral key pair provided:', {
+        hasPrivateKey: !!ephemeralKeyPair.privateKey,
+        hasPublicKey: !!ephemeralKeyPair.publicKey,
+        hasNonce: !!ephemeralKeyPair.nonce,
+        hasBlinder: !!ephemeralKeyPair.blinder,
+        expiryDateSecs: ephemeralKeyPair.expiryDateSecs
+      });
+      
+      // Use the new method that handles direct keyless signing
+      const result = await keylessServiceV2.submitSponsoredTransaction({
+        senderAddress: pendingTx.senderAddress,
+        recipientAddress: pendingTx.recipientAddress,
+        amount: pendingTx.amount,
+        tokenType: pendingTx.tokenType || 'CONFIO',
+        senderAuthenticator: '',  // Empty since we'll sign on the bridge
+        jwt,
+        ephemeralKeyPair
+      });
+      
+      if (result.success) {
+        pendingTransactions.delete(transactionId);
+        return res.json({
+          success: true,
+          transactionHash: result.transactionHash
+        });
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: result.error
+        });
+      }
+    }
+
+    // Otherwise use the cached transaction with pre-generated authenticator
+    logger.info('Using submitCachedTransaction with specific transactionId');
+    logger.info('A/B Test: Has BCS authenticator:', !!senderAuthenticatorBcs);
+    
     const result = await keylessServiceV2.submitCachedTransaction(
       transactionId,
-      senderAuthenticator
+      senderAuthenticator,
+      senderAuthenticatorBcs  // A/B Test: Pass BCS authenticator if available
     );
 
     if (result.success) {

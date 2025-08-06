@@ -154,9 +154,46 @@ export class AptosKeylessService {
       
       // Decode JWT to check nonce
       try {
+        console.log('AptosKeylessService - JWT value:', jwt?.substring(0, 100) + '...');
         const jwtParts = jwt.split('.');
+        console.log('AptosKeylessService - JWT parts length:', jwtParts.length);
+        console.log('AptosKeylessService - JWT payload part:', jwtParts[1]?.substring(0, 50) + '...');
+        
         // Use atob for base64 decoding which is available in React Native
-        const payload = JSON.parse(atob(jwtParts[1]));
+        const payloadBase64 = jwtParts[1];
+        console.log('AptosKeylessService - About to decode payload:', payloadBase64?.substring(0, 20) + '...');
+        
+        // Fix base64 padding if needed
+        const padded = payloadBase64 + '='.repeat((4 - payloadBase64.length % 4) % 4);
+        
+        let payload: any;
+        try {
+          // In React Native, we might need to use a different approach
+          let decodedPayload: string;
+          try {
+            decodedPayload = atob(padded);
+          } catch (atobError) {
+            // Fallback: try without padding
+            console.log('AptosKeylessService - atob failed with padding, trying without');
+            decodedPayload = atob(payloadBase64);
+          }
+          
+          console.log('AptosKeylessService - Decoded payload string:', decodedPayload?.substring(0, 100) + '...');
+          console.log('AptosKeylessService - First char code:', decodedPayload?.charCodeAt(0));
+          
+          // Check if the decoded string starts with valid JSON
+          if (!decodedPayload || (!decodedPayload.startsWith('{') && !decodedPayload.startsWith('['))) {
+            throw new Error(`Invalid decoded payload: starts with '${decodedPayload?.charAt(0)}'`);
+          }
+          
+          payload = JSON.parse(decodedPayload);
+        } catch (decodeError) {
+          console.error('AptosKeylessService - Error decoding JWT:', decodeError);
+          console.error('AptosKeylessService - JWT parts:', jwtParts.length);
+          console.error('AptosKeylessService - Payload base64 length:', payloadBase64?.length);
+          console.error('AptosKeylessService - Padded length:', padded?.length);
+          throw new Error(`Failed to decode JWT: ${decodeError.message}`);
+        }
         console.log('AptosKeylessService - JWT nonce:', payload.nonce);
         console.log('AptosKeylessService - JWT aud:', payload.aud);
         console.log('AptosKeylessService - JWT sub:', payload.sub);
@@ -188,11 +225,32 @@ export class AptosKeylessService {
       console.log('AptosKeylessService - Using ephemeralKeyPair with nonce:', ephKeyPair.nonce);
       
       // Derive the keyless account
-      const keylessAccount = await this.aptos.deriveKeylessAccount({
-        jwt,
-        ephemeralKeyPair: ephKeyPair,
-        pepper,
-      });
+      let keylessAccount;
+      try {
+        keylessAccount = await this.aptos.deriveKeylessAccount({
+          jwt,
+          ephemeralKeyPair: ephKeyPair,
+          pepper,
+        });
+      } catch (deriveError: any) {
+        console.error('AptosKeylessService - Error deriving keyless account:', deriveError);
+        
+        // Check if it's a JSON parse error (likely from JWKS fetch)
+        if (deriveError.message?.includes('JSON Parse error') || deriveError.message?.includes('Unexpected character')) {
+          console.error('AptosKeylessService - JWKS/proof service returned HTML instead of JSON');
+          console.error('AptosKeylessService - This is a known issue in React Native environments');
+          
+          // For sponsored transactions, we can skip the proof since the bridge will handle it
+          console.warn('AptosKeylessService - Attempting to continue without deriving keyless account');
+          console.warn('AptosKeylessService - Will return a simplified authenticator for bridge-side processing');
+          
+          // Return a simplified response that the bridge can use
+          // The bridge will recreate the keyless account with the ephemeral key pair data
+          throw new Error('Cannot derive keyless account in React Native - bridge will handle direct signing');
+        }
+        
+        throw deriveError;
+      }
 
       // Wait for the proof to be fetched
       console.log('AptosKeylessService - Waiting for proof...');
@@ -379,7 +437,13 @@ export class AptosKeylessService {
         
         // The data contains the private key in hex format
         // Handle different private key formats
-        let privateKeyHex = data.privateKey;
+        let privateKeyHex = data.privateKey || '';
+        
+        if (!privateKeyHex) {
+          console.error('AptosKeylessService - No private key found in data');
+          console.error('AptosKeylessService - Available keys:', Object.keys(data));
+          throw new Error('Private key is missing from ephemeral key pair data');
+        }
         
         // Remove any prefixes
         if (privateKeyHex.startsWith('ed25519-priv-0x')) {
@@ -391,8 +455,13 @@ export class AptosKeylessService {
         console.log('AptosKeylessService - Private key hex (cleaned):', privateKeyHex);
         console.log('AptosKeylessService - Private key hex length:', privateKeyHex.length);
         
+        const matches = privateKeyHex.match(/.{1,2}/g);
+        if (!matches) {
+          throw new Error('Invalid private key hex format');
+        }
+        
         privateKeyBytes = new Uint8Array(
-          privateKeyHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
+          matches.map(byte => parseInt(byte, 16))
         );
         
         // Convert expiry date to seconds
@@ -579,14 +648,23 @@ export class AptosKeylessService {
     
     // Otherwise, we need to reconstruct it
     console.log('AptosKeylessService - Reconstructing EphemeralKeyPair from stored data');
+    console.log('AptosKeylessService - Data structure:', {
+      hasVersion: 'version' in data,
+      version: data.version,
+      hasPrivateKey_b64: 'privateKey_b64' in data,
+      hasPrivateKey: 'privateKey' in data,
+      dataKeys: Object.keys(data)
+    });
     
     try {
-      // If it's the stored format
-      if (data.version === 'ekp-v1' || data.version === 'ekp-v2') {
+      // If it's the stored format (base64 encoded fields)
+      if (data.version === 'ekp-v1' || data.version === 'ekp-v2' || data.privateKey_b64) {
+        console.log('AptosKeylessService - Using reconstructEphemeralKeyPairFromStored for v1/v2 format');
         return this.reconstructEphemeralKeyPairFromStored(data);
       }
       
       // Otherwise try to reconstruct from the plain object
+      console.log('AptosKeylessService - Using reconstructEphemeralKeyPair for legacy format');
       return this.reconstructEphemeralKeyPair(data);
     } catch (error) {
       console.error('AptosKeylessService - Failed to reconstruct EphemeralKeyPair:', error);

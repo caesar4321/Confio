@@ -219,7 +219,13 @@ const TestRegularTransactionScreen: React.FC = () => {
         
         // The SDK has compatibility issues with React Native
         // Let's use a simpler approach - just show that we can sign transactions
-        console.log('SDK not compatible with React Native, testing signature generation instead...');
+        // The real issue: Keyless accounts store APT in FungibleStore format
+        // The SDK expects CoinStore format for gas payments
+        console.log('Known Issue: Keyless account APT is in FungibleStore, not CoinStore');
+        console.log('The account has 0.14 APT but SDK cannot use it for gas');
+        console.log('Solution: Use sponsored transactions where sponsor pays gas');
+        console.log('');
+        console.log('Testing signature generation to verify authentication works...');
         
         const transaction = await aptos.transaction.build.simple({
           sender: keylessAccount.address,
@@ -271,9 +277,11 @@ const TestRegularTransactionScreen: React.FC = () => {
         Alert.alert(
           'Keyless Authentication Working!',
           `✅ Successfully generated authenticator for address:\n${authenticatorResponse.addressHex}\n\n` +
-          `The keyless account can sign transactions. The Aptos SDK has React Native compatibility issues ` +
-          `preventing actual submission, but the authentication is working correctly.\n\n` +
-          `For production, transactions should be submitted through the Django backend.`
+          `⚠️ Known Issue: APT is stored in FungibleStore format\n` +
+          `Balance: 0.14 APT (at object address)\n` +
+          `SDK expects: CoinStore format (at account address)\n\n` +
+          `This prevents the account from paying its own gas fees.\n\n` +
+          `✅ Solution: Use sponsored transactions where the sponsor account pays for gas.`
         );
       }
 

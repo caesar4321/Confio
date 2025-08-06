@@ -44,6 +44,10 @@ class SubmitSponsoredTransferInput(graphene.InputObjectType):
     """Input type for submitting a V2 sponsored transaction with signature"""
     transaction_id = graphene.String(required=True, description="Transaction ID from prepare step")
     sender_authenticator = graphene.String(required=True, description="Base64 encoded sender authenticator")
+    sender_authenticator_bcs = graphene.String(description="A/B Test: Base64 encoded BCS authenticator")
+    # EXPERIMENTAL: Add keyless data for bridge-side signing
+    jwt = graphene.String(description="JWT token for keyless account recreation")
+    ephemeral_key_pair = graphene.JSONString(description="Ephemeral key pair data for keyless account recreation")
 
 class ExecuteTransactionInput(graphene.InputObjectType):
     """Input type for executing a prepared transaction with signature"""
@@ -1084,6 +1088,7 @@ class PrepareSponsoredTransfer(graphene.Mutation):
     success = graphene.Boolean()
     transaction_id = graphene.String(description="Transaction ID for tracking")
     raw_transaction = graphene.String(description="Base64 encoded raw transaction to sign")
+    raw_bcs = graphene.String(description="A/B Test: Base64 encoded raw BCS bytes as alternative to signing message")
     fee_payer_address = graphene.String(description="Address of the fee payer (sponsor)")
     errors = graphene.List(graphene.String)
     
@@ -1224,6 +1229,7 @@ class PrepareSponsoredTransfer(graphene.Mutation):
                         success=True,
                         transaction_id=result['transactionId'],
                         raw_transaction=result['rawTransaction'],
+                        raw_bcs=result.get('rawBcs'),  # A/B Test: Include raw BCS if available
                         fee_payer_address=result['feePayerAddress'],
                         errors=None
                     )
@@ -1286,11 +1292,24 @@ class SubmitSponsoredTransfer(graphene.Mutation):
             asyncio.set_event_loop(loop)
             
             try:
+                # EXPERIMENTAL: Pass keyless data if provided
+                kwargs = {
+                    'transaction_id': input.transaction_id,
+                    'sender_authenticator': input.sender_authenticator
+                }
+                
+                # A/B Test: Add BCS authenticator if provided
+                if hasattr(input, 'sender_authenticator_bcs') and input.sender_authenticator_bcs:
+                    kwargs['sender_authenticator_bcs'] = input.sender_authenticator_bcs
+                
+                # Add optional keyless data for bridge-side signing
+                if hasattr(input, 'jwt') and input.jwt:
+                    kwargs['jwt'] = input.jwt
+                if hasattr(input, 'ephemeral_key_pair') and input.ephemeral_key_pair:
+                    kwargs['ephemeral_key_pair'] = input.ephemeral_key_pair
+                
                 result = loop.run_until_complete(
-                    AptosSponsorService.submit_sponsored_confio_transfer_v2(
-                        transaction_id=input.transaction_id,
-                        sender_authenticator=input.sender_authenticator
-                    )
+                    AptosSponsorService.submit_sponsored_confio_transfer_v2(**kwargs)
                 )
                 
                 if result.get('success'):

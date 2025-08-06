@@ -316,7 +316,8 @@ export const TransactionProcessingScreen = () => {
         
         // Phase 1: Prepare sponsored transaction (V2)
         const prepareResult = await prepareSponsoredTransfer({
-          variables: { input: prepareInput }
+          variables: { input: prepareInput },
+          fetchPolicy: 'network-only' // Force fresh data, bypass cache
         });
         
         if (prepareResult.errors || !prepareResult.data?.prepareSponsoredTransfer?.success) {
@@ -328,10 +329,14 @@ export const TransactionProcessingScreen = () => {
           return;
         }
         
-        const { transactionId, rawTransaction, feePayerAddress } = prepareResult.data.prepareSponsoredTransfer;
+        // Debug: Log the entire response to see what we're getting
+        console.log('TransactionProcessingScreen: Full prepare response:', JSON.stringify(prepareResult.data.prepareSponsoredTransfer, null, 2));
+        
+        const { transactionId, rawTransaction, rawBcs, feePayerAddress } = prepareResult.data.prepareSponsoredTransfer;
         console.log('TransactionProcessingScreen: V2 Transaction prepared');
         console.log('TransactionProcessingScreen: Transaction ID:', transactionId);
-        console.log('TransactionProcessingScreen: Raw transaction:', rawTransaction);
+        console.log('TransactionProcessingScreen: Raw transaction (signing message):', rawTransaction ? `${rawTransaction.substring(0, 50)}...` : 'undefined');
+        console.log('TransactionProcessingScreen: A/B Test - Raw BCS:', rawBcs ? `${rawBcs.substring(0, 50)}...` : 'undefined');
         console.log('TransactionProcessingScreen: Fee payer:', feePayerAddress);
         
         // Check if rawTransaction exists
@@ -350,14 +355,28 @@ export const TransactionProcessingScreen = () => {
         console.log('TransactionProcessingScreen: Signing transaction with Aptos SDK...');
         console.log('TransactionProcessingScreen: Raw transaction type:', typeof rawTransaction);
         
-        // Use the Aptos SDK to sign the transaction
-        // This should use aptos.transaction.sign({ signer, transaction })
-        const senderAuthenticator = await authService.signSponsoredTransaction(rawTransaction);
+        // EXPERIMENTAL: Use the new method that returns keyless data for bridge-side signing
+        console.log('TransactionProcessingScreen: EXPERIMENTAL - Using keyless data for bridge signing');
+        console.log('TransactionProcessingScreen: A/B Test - Passing both signing message and raw BCS');
+        const signingResult = await authService.signSponsoredTransactionWithKeylessData(rawTransaction, rawBcs);
         
-        if (!senderAuthenticator) {
+        if (!signingResult) {
           setTransactionError('Error al firmar la transacción. Por favor, inténtalo de nuevo.');
           setIsComplete(true);
           return;
+        }
+
+        const senderAuthenticator = signingResult.senderAuthenticator;
+        
+        // Check if we have either an authenticator or ephemeral key pair data for bridge-side signing
+        if (!senderAuthenticator && !signingResult.ephemeralKeyPair) {
+          setTransactionError('Error al firmar la transacción. Por favor, inténtalo de nuevo.');
+          setIsComplete(true);
+          return;
+        }
+        
+        if (!senderAuthenticator && signingResult.ephemeralKeyPair) {
+          console.log('TransactionProcessingScreen: No authenticator, but have ephemeral key pair for bridge-side signing');
         }
         
         console.log('TransactionProcessingScreen: Transaction signed, submitting...');
@@ -365,12 +384,37 @@ export const TransactionProcessingScreen = () => {
         // Step 3: Submit signed transaction
         setCurrentStep(2);
         
-        const submitInput = {
+        const submitInput: any = {
           transactionId,
-          senderAuthenticator // This should be base64 or hex encoded
         };
         
+        // Only include authenticator if we have one
+        if (senderAuthenticator) {
+          submitInput.senderAuthenticator = senderAuthenticator;
+        }
+        
+        // A/B Test: Include BCS authenticator if available
+        if (signingResult.senderAuthenticatorBcs) {
+          submitInput.senderAuthenticatorBcs = signingResult.senderAuthenticatorBcs;
+          console.log('TransactionProcessingScreen: A/B Test - Including BCS authenticator');
+        }
+        
+        // EXPERIMENTAL: Only include keyless data if it exists and is valid
+        if (signingResult.jwt) {
+          submitInput.jwt = signingResult.jwt;
+        }
+        if (signingResult.ephemeralKeyPair) {
+          // Django expects JSONString, not an object - serialize it
+          submitInput.ephemeralKeyPair = JSON.stringify(signingResult.ephemeralKeyPair);
+          console.log('TransactionProcessingScreen: Ephemeral key pair being sent:', signingResult.ephemeralKeyPair);
+        }
+        
         console.log('TransactionProcessingScreen: Calling submitSponsoredTransfer with transaction ID:', transactionId);
+        console.log('TransactionProcessingScreen: EXPERIMENTAL - Including JWT:', !!signingResult.jwt);
+        console.log('TransactionProcessingScreen: EXPERIMENTAL - Including ephemeralKeyPair:', !!signingResult.ephemeralKeyPair);
+        if (signingResult.ephemeralKeyPair) {
+          console.log('TransactionProcessingScreen: EphemeralKeyPair nonce:', signingResult.ephemeralKeyPair.nonce);
+        }
         
         // Phase 3: Submit transaction with signature (V2)
         const submitResult = await enhancedAuthService.performSecureOperation(

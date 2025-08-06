@@ -386,19 +386,100 @@ export class AuthService {
     firebaseToken?: string
   ): Promise<void> {
     try {
-      // Extract and store all necessary keyless components
+      // Helper to convert bytes to hex
+      const toHex = (bytes: Uint8Array): string =>
+        Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+
+      // Get previously stored data to avoid overwriting with empty values
+      let prevData: any = {};
+      try {
+        const credentials = await Keychain.getInternetCredentials(KEYLESS_KEYCHAIN_SERVICE);
+        if (credentials && credentials.password) {
+          prevData = JSON.parse(credentials.password);
+        }
+      } catch (error) {
+        console.log('[AuthService] No previous keyless data found');
+      }
+
+      // Properly serialize ephemeral key pair data
+      let ekpData = prevData?.ephemeralKeyPair || {};
+      
+      if (account.ephemeralKeyPair) {
+        const ekp = account.ephemeralKeyPair;
+        
+        // Extract private key
+        const privateKeyHex = 
+          (ekp?.privateKey?.toUint8Array && toHex(ekp.privateKey.toUint8Array())) ||
+          (typeof ekp?.privateKey?.toString === 'function' && ekp.privateKey.toString()) ||
+          '';
+        
+        // Extract public key
+        const publicKeyHex = 
+          (ekp?.publicKey?.toUint8Array && toHex(ekp.publicKey.toUint8Array())) ||
+          (typeof ekp?.publicKey?.toString === 'function' && ekp.publicKey.toString()) ||
+          '';
+        
+        // Extract nonce
+        const nonceStr = typeof ekp?.nonce === 'bigint' ? ekp.nonce.toString() : `${ekp?.nonce ?? ''}`;
+        
+        // Extract blinder
+        const blinderStr = ekp?.blinder != null
+          ? (typeof ekp.blinder === 'bigint' ? ekp.blinder.toString() : `${ekp.blinder}`)
+          : '';
+        
+        // Extract expiry date
+        const expiryDateSecs = 
+          (ekp as any).expiryDateSecs ??
+          Math.floor(new Date((ekp as any).expiryDate || Date.now() + 3600000).getTime() / 1000);
+        
+        // Only update fields that have truthy values
+        ekpData = {
+          privateKey: privateKeyHex || ekpData.privateKey || '',
+          publicKey: publicKeyHex || ekpData.publicKey || '',
+          nonce: nonceStr || ekpData.nonce || '',
+          blinder: blinderStr || ekpData.blinder || '',
+          expiryDateSecs: expiryDateSecs || ekpData.expiryDateSecs || 0,
+        };
+        
+        // Guard against overwriting with empty values
+        if (!ekpData.privateKey || !ekpData.nonce) {
+          console.warn('[AuthService] Not overwriting ephemeral key pair with empty values, keeping previous');
+          ekpData = prevData?.ephemeralKeyPair || ekpData;
+        }
+        
+        console.log('[AuthService] Serialized ephemeral key pair:', {
+          hasPrivateKey: !!ekpData.privateKey,
+          privateKeyLength: ekpData.privateKey?.length,
+          hasPublicKey: !!ekpData.publicKey,
+          publicKeyLength: ekpData.publicKey?.length,
+          nonce: ekpData.nonce,
+          blinder: ekpData.blinder,
+          expiryDateSecs: ekpData.expiryDateSecs
+        });
+      }
+      
+      // Serialize pepper if it's bytes
+      let pepperStr = account.pepper || '';
+      if (pepperStr && typeof pepperStr !== 'string') {
+        if (pepperStr instanceof Uint8Array) {
+          pepperStr = '0x' + toHex(pepperStr);
+        }
+      }
+      
+      // Merge with previous data, only replacing fields that have values
       const dataToStore: StoredKeylessData = {
+        ...(prevData || {}),
         account: {
           address: account.address,
           publicKey: account.publicKey,
           exists: true
         },
-        jwt: account.jwt || '',
-        ephemeralKeyPair: account.ephemeralKeyPair || null,
-        pepper: account.pepper || '',
+        jwt: account.jwt || prevData?.jwt || '',
+        ephemeralKeyPair: ekpData,
+        pepper: pepperStr || prevData?.pepper || '',
         provider,
         timestamp: new Date().toISOString(),
-        firebaseToken
+        firebaseToken: firebaseToken || prevData?.firebaseToken
       };
 
       // Validate required fields
@@ -935,68 +1016,250 @@ export class AuthService {
         return null;
       }
 
+      // Get stored keyless data using the SAME method as regular transactions
+      const storedKeylessData = await this.getStoredKeylessData();
+      
+      if (!storedKeylessData) {
+        console.error('AuthService - No stored keyless data found');
+        return null;
+      }
+
+      console.log('AuthService - Found stored keyless data:', {
+        hasJwt: !!storedKeylessData.jwt,
+        hasEphemeralKeyPair: !!storedKeylessData.ephemeralKeyPair,
+        ephemeralKeyPairVersion: storedKeylessData.ephemeralKeyPair?.version,
+        hasPepper: !!storedKeylessData.pepper
+      });
+
       // Import Aptos keyless service
       const { AptosKeylessService } = await import('./aptosKeylessService');
       const aptosKeylessService = new AptosKeylessService();
 
-      // Ensure rawTransaction is a string
-      let rawTxString: string;
-      if (typeof rawTransaction === 'string') {
-        rawTxString = rawTransaction;
-      } else if (rawTransaction && typeof rawTransaction === 'object') {
-        // If it's an object, try to convert it
-        rawTxString = JSON.stringify(rawTransaction);
-        console.log('AuthService - Raw transaction was an object, converted to JSON string');
+      // FIX: The bridge now sends the SDK's signing message, not raw BCS
+      // The SDK's signing message already includes proper domain separation for fee-payer transactions
+      // We should NOT add our own domain separator - just sign what the SDK computed
+      console.log('AuthService - Signing SDK-computed signing message for sponsored transaction');
+      
+      // The rawTransaction parameter is actually the SDK's signing message now
+      const signingMessageBase64 = rawTransaction; // It's already the signing message from SDK
+      const signingMessageBytes = Buffer.from(signingMessageBase64, 'base64');
+      
+      console.log('AuthService - Signing message length:', signingMessageBytes.length);
+      console.log('AuthService - Signing message (first 50 bytes):', Array.from(signingMessageBytes.slice(0, 50)).map(b => b.toString(16).padStart(2, '0')).join(''));
+
+      // Parse pepper (same logic as regular transactions)
+      let pepperBytes: Uint8Array;
+      if (storedKeylessData.pepper) {
+        if (typeof storedKeylessData.pepper === 'string') {
+          // Check if it's a hex string
+          if (storedKeylessData.pepper.startsWith('0x')) {
+            const hexStr = storedKeylessData.pepper.slice(2);
+            const bytes = [];
+            for (let i = 0; i < hexStr.length; i += 2) {
+              bytes.push(parseInt(hexStr.substr(i, 2), 16));
+            }
+            pepperBytes = new Uint8Array(bytes);
+            
+            // Pad to 31 bytes if needed
+            if (pepperBytes.length === 30) {
+              console.log('AuthService - Padding pepper from 30 to 31 bytes');
+              const paddedPepper = new Uint8Array(31);
+              paddedPepper.set([0]); // Add leading zero
+              paddedPepper.set(pepperBytes, 1);
+              pepperBytes = paddedPepper;
+            }
+          } else if (storedKeylessData.pepper.includes(',')) {
+            // Comma-separated values
+            pepperBytes = new Uint8Array(storedKeylessData.pepper.split(',').map((p: string) => parseInt(p)));
+          } else {
+            // Try parsing as hex without 0x prefix
+            const bytes = [];
+            for (let i = 0; i < storedKeylessData.pepper.length; i += 2) {
+              bytes.push(parseInt(storedKeylessData.pepper.substr(i, 2), 16));
+            }
+            pepperBytes = new Uint8Array(bytes);
+          }
+        } else {
+          pepperBytes = new Uint8Array(storedKeylessData.pepper);
+        }
+        
+        console.log('AuthService - Pepper bytes length:', pepperBytes.length);
+        
+        // Ensure pepper is exactly 31 bytes
+        if (pepperBytes.length !== 31) {
+          console.error('AuthService - Invalid pepper length:', pepperBytes.length);
+          return null;
+        }
       } else {
-        console.error('AuthService - Invalid raw transaction type:', typeof rawTransaction);
+        console.error('AuthService - No pepper found in stored keyless data');
         return null;
       }
 
-      // Decode the raw transaction from base64 to get signing message
-      const rawTxBytes = Buffer.from(rawTxString, 'base64');
-      const signingMessage = Buffer.from(rawTxBytes).toString('hex');
-      
-      console.log('AuthService - Signing sponsored transaction');
-      console.log('AuthService - Raw transaction length:', rawTxBytes.length);
-      console.log('AuthService - Signing message (hex):', signingMessage.substring(0, 100) + '...');
-
-      // Get pepper from account proof
-      let pepperBytes: Uint8Array | undefined;
-      if (this.currentAccount.proof?.pepper) {
-        const pepperHex = this.currentAccount.proof.pepper.startsWith('0x') 
-          ? this.currentAccount.proof.pepper.slice(2) 
-          : this.currentAccount.proof.pepper;
-        
-        const pepperBuffer = Buffer.from(pepperHex, 'hex');
-        
-        // Ensure pepper is exactly 31 bytes
-        if (pepperBuffer.length !== 31) {
-          console.warn(`AuthService - Pepper length is ${pepperBuffer.length}, expected 31. Padding/truncating...`);
-          const paddedPepper = Buffer.alloc(31);
-          pepperBuffer.copy(paddedPepper, 0, 0, Math.min(31, pepperBuffer.length));
-          pepperBytes = new Uint8Array(paddedPepper);
-        } else {
-          pepperBytes = new Uint8Array(pepperBuffer);
-        }
-      }
-
-      // Generate the authenticator for the sponsored transaction
+      // Use the FIXED authenticator generation with SDK's signing message
       const authenticatorResponse = await aptosKeylessService.generateAuthenticator({
-        jwt: this.currentAccount.jwt,
-        ephemeralKeyPair: this.ephemeralKeyPair,
-        signingMessage: signingMessage,
+        jwt: storedKeylessData.jwt,
+        ephemeralKeyPair: storedKeylessData.ephemeralKeyPair,  // This has the correct nonce!
+        signingMessage: signingMessageBase64,  // SDK's signing message - no manual domain separator!
         pepper: pepperBytes,
       });
 
-      console.log('AuthService - Generated sponsored transaction authenticator');
+      console.log('AuthService - Generated sponsored transaction authenticator with SDK signing message');
       console.log('AuthService - Authenticator length:', authenticatorResponse.senderAuthenticatorBcsBase64.length);
 
-      // Return the base64 encoded authenticator directly
-      // This is what the backend expects for V2 sponsored transactions
       return authenticatorResponse.senderAuthenticatorBcsBase64;
       
     } catch (error) {
       console.error('AuthService - Error signing sponsored transaction:', error);
+      return null;
+    }
+  }
+
+  /**
+   * EXPERIMENTAL: Sign a sponsored transaction and return both authenticator and keyless data
+   * This enables bridge-side keyless account reconstruction for direct signing
+   * A/B Test: Also accepts rawBcs to test signing alternative
+   */
+  public async signSponsoredTransactionWithKeylessData(
+    rawTransaction: string, 
+    rawBcs?: string
+  ): Promise<{
+    senderAuthenticator: string;
+    senderAuthenticatorBcs?: string;  // A/B Test: Authenticator from signing raw BCS
+    jwt?: string;
+    ephemeralKeyPair?: {
+      privateKey: string;
+      publicKey: string;
+      nonce: string;
+    };
+  } | null> {
+    try {
+      console.log('AuthService - signSponsoredTransactionWithKeylessData called (EXPERIMENTAL)');
+      console.log('AuthService - A/B Test: Has rawBcs:', !!rawBcs);
+      
+      // First try to get the normal authenticator (signing SDK signing message)
+      let senderAuthenticator: string | null = null;
+      let senderAuthenticatorBcs: string | undefined;
+      
+      try {
+        senderAuthenticator = await this.signSponsoredTransaction(rawTransaction);
+        
+        // A/B Test: If we have rawBcs and got first authenticator, also sign that as an alternative
+        if (rawBcs && senderAuthenticator) {
+          console.log('AuthService - A/B Test: Also signing raw BCS bytes');
+          senderAuthenticatorBcs = await this.signSponsoredTransaction(rawBcs);
+          console.log('AuthService - A/B Test: Generated BCS authenticator:', !!senderAuthenticatorBcs);
+        }
+      } catch (signError) {
+        console.log('AuthService - Could not generate authenticator, will send ephemeral key pair data only');
+        // Continue without authenticator - bridge will handle signing
+      }
+      
+      if (!senderAuthenticator) {
+        console.log('AuthService - No authenticator generated, proceeding with ephemeral key pair data only');
+      }
+
+      // Get stored keyless data for bridge-side reconstruction
+      const storedKeylessData = await this.getStoredKeylessData();
+      if (!storedKeylessData) {
+        console.error('AuthService - No stored keyless data found');
+        return { senderAuthenticator };
+      }
+
+      // Extract ephemeral key pair data if available
+      let ephemeralKeyPairData = undefined;
+      if (storedKeylessData.ephemeralKeyPair) {
+        try {
+          // The stored ephemeral key pair might be an object with complex types
+          // We need to extract the raw values
+          const ekp = storedKeylessData.ephemeralKeyPair;
+          
+          console.log('AuthService - Stored ephemeral key pair keys:', Object.keys(ekp));
+          console.log('AuthService - Stored ephemeral key pair structure:', ekp);
+          
+          // Extract ephemeral key pair data for bridge
+          // Check if it's the v2 format with base64 encoded fields
+          if (ekp.version === 'ekp-v2' || ekp.privateKey_b64) {
+            console.log('AuthService - Using v2 format for ephemeral key pair extraction');
+            
+            // Decode base64 fields to hex for bridge
+            const b64ToHex = (b64: string): string => {
+              const bytes = atob(b64);
+              let hex = '';
+              for (let i = 0; i < bytes.length; i++) {
+                hex += bytes.charCodeAt(i).toString(16).padStart(2, '0');
+              }
+              return hex;
+            };
+            
+            // Convert nonce from hex to decimal string for compatibility
+            const nonceHex = b64ToHex(ekp.nonce_b64);
+            let nonceDecimal = '';
+            if (nonceHex) {
+              // Convert hex string to BigInt, then to decimal string
+              const nonceBigInt = BigInt('0x' + nonceHex);
+              nonceDecimal = nonceBigInt.toString();
+            }
+            
+            ephemeralKeyPairData = {
+              privateKey: b64ToHex(ekp.privateKey_b64),
+              publicKey: b64ToHex(ekp.publicKey_b64),
+              nonce: nonceDecimal,  // Use decimal string for nonce
+              blinder: b64ToHex(ekp.blinder_b64),
+              expiryDateSecs: ekp.expiryDateSecs || Math.floor(new Date(ekp.expiryISO).getTime() / 1000)
+            };
+          } else {
+            // Legacy format
+            ephemeralKeyPairData = {
+              privateKey: ekp.privateKey || '',
+              publicKey: ekp.publicKey || '',
+              nonce: ekp.nonce || '',
+              blinder: ekp.blinder || '',
+              expiryDateSecs: ekp.expiryDateSecs || 0
+            };
+          }
+          
+          // Remove 0x prefix if present
+          if (ephemeralKeyPairData.privateKey.startsWith('0x')) {
+            ephemeralKeyPairData.privateKey = ephemeralKeyPairData.privateKey.slice(2);
+          }
+          if (ephemeralKeyPairData.publicKey.startsWith('0x')) {
+            ephemeralKeyPairData.publicKey = ephemeralKeyPairData.publicKey.slice(2);
+          }
+
+          console.log('AuthService - Extracted ephemeral key pair data:', {
+            hasPrivateKey: !!ephemeralKeyPairData.privateKey,
+            privateKeyLength: ephemeralKeyPairData.privateKey?.length,
+            hasPublicKey: !!ephemeralKeyPairData.publicKey,
+            publicKeyLength: ephemeralKeyPairData.publicKey?.length,
+            nonce: ephemeralKeyPairData.nonce
+          });
+        } catch (keyPairError) {
+          console.error('AuthService - Error extracting ephemeral key pair:', keyPairError);
+          console.error('AuthService - Stored ephemeral key pair structure:', storedKeylessData.ephemeralKeyPair);
+        }
+      }
+
+      // If we don't have an authenticator but have ephemeral key pair data,
+      // return it for bridge-side signing
+      if (!senderAuthenticator && ephemeralKeyPairData) {
+        console.log('AuthService - Returning ephemeral key pair data for bridge-side signing');
+        return {
+          senderAuthenticator: '',  // Empty string to indicate no authenticator
+          senderAuthenticatorBcs: undefined,
+          jwt: storedKeylessData.jwt,
+          ephemeralKeyPair: ephemeralKeyPairData
+        };
+      }
+      
+      return {
+        senderAuthenticator: senderAuthenticator || '',
+        senderAuthenticatorBcs,  // A/B Test: Include BCS authenticator if available
+        jwt: storedKeylessData.jwt,
+        ephemeralKeyPair: ephemeralKeyPairData
+      };
+      
+    } catch (error) {
+      console.error('AuthService - Error in signSponsoredTransactionWithKeylessData:', error);
       return null;
     }
   }
