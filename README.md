@@ -747,6 +747,183 @@ Major security overhaul replacing client-controlled account parameters with JWT-
 - Fixed business accounts showing same data regardless of accessor
 - Fixed payment attribution errors in multi-account scenarios
 - Removed deprecated header-based context middleware
+
+## 🔐 Algorand Integration & Web3Auth Implementation
+
+### Web3Auth Login Resolution (August 2025)
+
+Successfully implemented Web3Auth Single Factor Auth (SFA) for Algorand wallet generation, resolving multiple technical challenges:
+
+#### Key Challenges & Solutions
+
+1. **Dynamic Import Issues in React Native**
+   - **Problem**: Web3Auth libraries use dynamic imports which React Native doesn't support
+   - **Solution**: Pre-import all required modules at app initialization, before Web3Auth needs them
+   
+2. **WebCrypto Polyfill Requirements**
+   - **Problem**: Web3Auth requires WebCrypto API (subtle.digest, subtle.importKey) not available in React Native
+   - **Solution**: Implemented polyfill using react-native-quick-crypto and isomorphic-webcrypto
+   
+3. **Private Key Format Conversion**
+   - **Problem**: Web3Auth provides Ethereum-style private keys, Algorand needs Ed25519 keys
+   - **Solution**: Convert Web3Auth hex private key to 32-byte seed for Algorand key derivation
+
+#### Implementation Details
+
+```javascript
+// authService.ts - Successful Web3Auth integration
+async function initializeAlgorandWallet(firebaseIdToken, firebaseUid) {
+  // 1. Initialize Web3Auth with custom storage adapter
+  const web3auth = new Web3Auth({
+    clientId: WEB3AUTH_CLIENT_ID,
+    web3AuthNetwork: WEB3AUTH_NETWORK.TESTNET,
+    chainConfig: {
+      chainNamespace: 'other',  // Algorand uses 'other' namespace
+      chainId: 'algorand-testnet'
+    },
+    storage: customStorageAdapter  // React Native Keychain adapter
+  });
+
+  // 2. Connect using Firebase verifier
+  const provider = await web3auth.connect({
+    verifier: 'firebase-confio-test',
+    verifierId: firebaseUid,  // Consistent wallet per Firebase user
+    idToken: firebaseIdToken
+  });
+
+  // 3. Get private key and convert to Algorand format
+  const hexPrivateKey = await provider.request({ method: 'private_key' });
+  const seed = Buffer.from(hexPrivateKey.replace('0x', ''), 'hex').slice(0, 32);
+  
+  // 4. Generate Algorand account
+  const account = algosdk.mnemonicToSecretKey(
+    algosdk.secretKeyToMnemonic(seed)
+  );
+}
+```
+
+## 💰 Sponsored Transactions with Atomic Groups
+
+### Architecture Overview
+
+Implemented gasless transactions using Algorand's atomic transaction groups, where a sponsor account pays all fees:
+
+```
+User Transaction (0 fee) + Sponsor Fee Payment (covers both) = Atomic Group
+```
+
+### Server-Side Implementation
+
+```python
+# algorand_sponsor_service.py
+async def create_sponsored_transfer(
+    self, sender, recipient, amount, asset_id, note
+):
+    # 1. Create user transaction with 0 fee
+    user_txn = AssetTransferTxn(
+        sender=sender,
+        receiver=recipient,
+        amt=amount,
+        index=asset_id,
+        sp=params
+    )
+    user_txn.fee = 0  # User pays nothing
+    
+    # 2. Create sponsor fee payment
+    fee_payment_txn = PaymentTxn(
+        sender=self.sponsor_address,
+        receiver=sender,
+        amt=0,  # Just paying fees
+        sp=params
+    )
+    fee_payment_txn.fee = params.min_fee * 2  # Sponsor pays for both
+    
+    # 3. Create atomic group
+    gid = calculate_group_id([user_txn, fee_payment_txn])
+    user_txn.group = gid
+    fee_payment_txn.group = gid
+    
+    # 4. Sign sponsor transaction
+    signed_sponsor = fee_payment_txn.sign(sponsor_key)
+    
+    # 5. Return unsigned user txn + signed sponsor txn
+    return {
+        'user_transaction': base64_encode(user_txn),
+        'sponsor_transaction': base64_encode(signed_sponsor),
+        'group_id': gid
+    }
+```
+
+### Client-Side Signing
+
+```javascript
+// TransactionProcessingScreen.tsx - Raw nacl signing approach
+async function signSponsoredTransaction(userTransaction, currentAccount) {
+  // 1. Decode the unsigned transaction
+  const userTxnBytes = Uint8Array.from(atob(userTransaction));
+  const txnToSign = msgpack.decode(userTxnBytes);
+  
+  // 2. Sign using raw nacl (critical for React Native)
+  const txTypeBytes = new Uint8Array(Buffer.from('TX'));
+  const bytesToSign = new Uint8Array(
+    txTypeBytes.length + userTxnBytes.length
+  );
+  bytesToSign.set(txTypeBytes);
+  bytesToSign.set(userTxnBytes, txTypeBytes.length);
+  
+  const signature = nacl.sign.detached(bytesToSign, currentAccount.sk);
+  
+  // 3. Create signed transaction structure
+  const signedTxn = {
+    sig: signature,
+    txn: txnToSign
+  };
+  
+  // 4. Encode and return
+  return base64_encode(msgpack.encode(signedTxn));
+}
+```
+
+### Key Implementation Challenges Resolved
+
+1. **Wallet Storage & Recovery**
+   - **Problem**: currentAccount was null when trying to sign transactions
+   - **Solution**: Implemented `loadStoredWallet()` to restore wallet from Keychain before signing
+   - **Key Format**: Private key stored as hex, loaded and converted to 64-byte buffer
+
+2. **Module Import Errors**
+   - **Problem**: Dynamic imports of tweetnacl and msgpack failed in React Native
+   - **Solution**: Static imports at top of file using `algorand-msgpack` package
+
+3. **Signature Verification**
+   - **Problem**: "bad secret key size" error with nacl
+   - **Solution**: Correct conversion from hex storage format to 64-byte buffer for nacl
+
+4. **Transaction Submission**
+   - **Problem**: "msgpack decode error" when submitting to network
+   - **Solution**: Proper base64 encoding of combined transaction bytes
+
+### Verification Results
+
+Successfully tested end-to-end sponsored transfers:
+- **Sponsor → Test Account**: 10 CONFIO (sponsored)
+- **Test Account → Final Recipient**: 5 CONFIO (sponsored)
+- **User ALGO balance**: Unchanged at 0.502 ALGO (paid 0 fees)
+- **Sponsor cost**: 0.002 ALGO per atomic group (covers both transactions)
+
+### Cost Analysis
+
+- **Per sponsored operation**: 0.002 ALGO (~$0.0004 USD)
+- **User cost**: 0 ALGO (completely gasless)
+- **Compared to Ethereum**: 10,000x cheaper
+- **Compared to Polygon**: 25x cheaper
+
+### Security Considerations
+
+1. **Atomic Execution**: Both transactions succeed or both fail
+2. **No Trust Required**: User signs their own transaction
+3. **Sponsor Protection**: Sponsor only pays fees, not transfer amounts
+4. **Replay Protection**: Group IDs prevent transaction replay
 - Added permission checks to all financial mutations
 - Implemented role-based UI feature blocking
 
