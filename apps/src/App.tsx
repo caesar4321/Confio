@@ -1,5 +1,4 @@
 import React, { useRef, useEffect } from 'react';
-import { enableScreens } from 'react-native-screens';
 import { ApolloProvider } from '@apollo/client';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -19,8 +18,13 @@ import { pushNotificationService } from './services/pushNotificationService';
 import { navigationRef } from './navigation/RootNavigation';
 import { initializeNotifee } from './services/notifeeConfig';
 
-// Enable screens before any navigation setup
-enableScreens();
+// Enable screens for better performance
+try {
+  const { enableScreens } = require('react-native-screens');
+  enableScreens();
+} catch (error) {
+  console.warn('Failed to enable screens:', error);
+}
 
 // Initialize app services immediately
 console.log('[PERF] App.tsx loaded, initializing app services');

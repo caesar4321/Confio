@@ -24,8 +24,8 @@ async def test_prepare_send():
         # Get a test account
         print("Getting test account...")
         account = await sync_to_async(lambda: Account.objects.filter(
-            sui_address__isnull=False,
-            sui_address__gt=''
+            aptos_address__isnull=False,
+            aptos_address__gt=''
         ).first())()
         
         if not account:
@@ -33,7 +33,7 @@ async def test_prepare_send():
             return
             
         print(f"Using account: {account.id}")
-        print(f"Sui address: {account.sui_address}")
+        print(f"Sui address: {account.aptos_address}")
         
         # Test getting coins first
         from blockchain.pysui_client import get_pysui_client
@@ -43,7 +43,7 @@ async def test_prepare_send():
             print("\nGetting CUSD coins...")
             cusd_type = f"{settings.CUSD_PACKAGE_ID}::cusd::CUSD"
             coins = await client.get_coins(
-                address=account.sui_address,
+                address=account.aptos_address,
                 coin_type=cusd_type,
                 limit=10
             )

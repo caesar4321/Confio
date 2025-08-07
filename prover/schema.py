@@ -260,7 +260,7 @@ class ProofPointsType(graphene.ObjectType):
 
 class ZkLoginDataType(graphene.ObjectType):
     zkProof = graphene.Field(ProofPointsType)
-    suiAddress = graphene.String()
+    aptosAddress = graphene.String()
     ephemeralPublicKey = graphene.String()
     maxEpoch = graphene.String()
     randomness = graphene.String()
@@ -509,7 +509,7 @@ class FinalizeZkLoginInput(graphene.InputObjectType):
 class FinalizeZkLoginPayload(graphene.ObjectType):
     success = graphene.Boolean()
     zkProof = graphene.Field(ProofPointsType)
-    suiAddress = graphene.String()
+    aptosAddress = graphene.String()
     error = graphene.String()
     isPhoneVerified = graphene.Boolean()
 
@@ -609,47 +609,50 @@ def resolve_finalize_zk_login(self, info, input):
             logger.info(f"Apple Sign-In: Adding original nonce ({len(input.computedNonce)} chars) to prover payload")
         logger.info("Prepared prover payload: %s", json.dumps(prover_payload))
 
-        # Call prover service
+        # Skip prover service - we're using Algorand with Web3Auth now
+        # Generate a placeholder address for now (will be replaced by Algorand address from client)
         try:
-            logger.info("Calling prover service at: %s", settings.PROVER_SERVICE_URL)
-            response = requests.post(
-                f"{settings.PROVER_SERVICE_URL}/v1",
-                json=prover_payload,
-                timeout=30
-            )
-            logger.info("Prover service response status: %s", response.status_code)
-            logger.info("Prover service response body: %s", response.text)
-
-            if response.status_code != 200:
-                logger.error("Prover service error: %s", response.text)
-                return FinalizeZkLoginPayload(
-                    success=False,
-                    error=f"Prover service error: {response.text}"
-                )
-
-            result = response.json()
-            if not result.get('proof') or not result.get('suiAddress'):
-                logger.error("Invalid prover service response: %s", result)
-                return FinalizeZkLoginPayload(
-                    success=False,
-                    error="Invalid prover service response"
-                )
+            logger.info("Skipping prover service - using Algorand with Web3Auth")
+            
+            # Create a deterministic address based on the user's salt and JWT sub
+            import hashlib
+            import jwt as pyjwt
+            
+            # Decode JWT to get the sub claim
+            decoded_jwt = pyjwt.decode(jwt_to_use, options={"verify_signature": False})
+            sub = decoded_jwt.get('sub', '')
+            
+            # Create a deterministic but temporary address
+            # This will be replaced by the actual Algorand address from Web3Auth
+            address_hash = hashlib.sha256(f"{sub}:{input.salt}".encode()).hexdigest()
+            placeholder_address = f"0x{address_hash[:64]}"
+            
+            result = {
+                'proof': {
+                    'a': ['0', '0', '0'],
+                    'b': [['0', '0'], ['0', '0'], ['0', '0']],
+                    'c': ['0', '0', '0']
+                },
+                'suiAddress': placeholder_address
+            }
+            
+            logger.info("Generated placeholder address: %s", placeholder_address)
 
             # No longer storing ZkLoginProof - proofs remain client-side
             logger.info("zkLogin proof generated successfully - storing address only")
 
-            # Update user's Sui address
-            account.sui_address = result['suiAddress']
+            # Update user's Aptos address (temporarily storing Algorand)
+            account.aptos_address = result['suiAddress']
             account.save()
-            logger.info("Updated user account with Sui address: %s", result['suiAddress'])
+            logger.info("Updated user account with Aptos address: %s", result['suiAddress'])
 
-            # Verify the Sui address was saved
+            # Verify the Aptos address was saved
             account.refresh_from_db()
-            if not account.sui_address:
-                logger.error("Failed to save Sui address to account")
+            if not account.aptos_address:
+                logger.error("Failed to save Aptos address to account")
                 return FinalizeZkLoginPayload(
                     success=False,
-                    error="Failed to save Sui address"
+                    error="Failed to save Aptos address"
                 )
 
             # Track device fingerprint if provided
@@ -669,7 +672,7 @@ def resolve_finalize_zk_login(self, info, input):
             return FinalizeZkLoginPayload(
                 success=True,
                 zkProof=result['proof'],
-                suiAddress=result['suiAddress'],
+                aptosAddress=result['suiAddress'],
                 isPhoneVerified=is_phone_verified
             )
 

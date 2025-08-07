@@ -154,7 +154,7 @@ export const ContactsScreenV2 = () => {
       phone: contact.phoneNumbers && contact.phoneNumbers[0] ? contact.phoneNumbers[0] : '',
       isOnConfio: contact.isOnConfio || false,
       userId: contact.confioUserId || null,
-      suiAddress: contact.confioSuiAddress || null
+      aptosAddress: contact.confioSuiAddress || null
     }));
     
     const confioUsers = formattedContacts.filter(contact => contact.isOnConfio);

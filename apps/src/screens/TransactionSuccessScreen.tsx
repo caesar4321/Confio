@@ -106,7 +106,7 @@ export const TransactionSuccessScreen = () => {
           phone: transactionData.recipientPhone || '', // Use actual phone number from transaction
           isOnConfio: Boolean(transactionData.isOnConfio), // Ensure proper boolean conversion
           userId: transactionData.recipientUserId, // Pass user ID if available
-          // suiAddress removed - server will determine this
+          // aptosAddress removed - server will determine this
         };
         
         console.log('TransactionSuccessScreen: handleSendAgain - friend data:', friendData);

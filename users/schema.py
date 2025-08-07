@@ -121,7 +121,7 @@ class AccountType(DjangoObjectType):
 	
 	class Meta:
 		model = Account
-		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'sui_address', 'created_at', 'last_login_at')
+		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'aptos_address', 'created_at', 'last_login_at')
 	
 	@classmethod
 	def get_queryset(cls, queryset, info):
@@ -159,8 +159,8 @@ class AccountType(DjangoObjectType):
 	def resolve_employee_role(self, info):
 		return getattr(self, 'employee_role', None)
 	
-	def resolve_sui_address(self, info):
-		"""Custom resolver for sui_address to check permissions"""
+	def resolve_aptos_address(self, info):
+		"""Custom resolver for aptos_address to check permissions"""
 		# If this is an employee accessing business account
 		if self.account_type == 'business':
 			# Get JWT context to check if user is accessing as employee
@@ -192,7 +192,7 @@ class AccountType(DjangoObjectType):
 							return None
 		
 		# Return the actual address for owners or employees with permission
-		return self.sui_address
+		return self.aptos_address
 	
 	def resolve_employee_permissions(self, info):
 		permissions = getattr(self, 'employee_permissions', None)
@@ -507,7 +507,7 @@ class UserByPhoneType(graphene.ObjectType):
 	last_name = graphene.String()
 	is_on_confio = graphene.Boolean()
 	active_account_id = graphene.ID()
-	active_account_sui_address = graphene.String()
+	active_account_aptos_address = graphene.String()
 
 class Query(EmployeeQueries, graphene.ObjectType):
 	me = graphene.Field(UserType)
@@ -829,7 +829,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					account_index=account_index
 				)
 				
-			print(f"AccountBalance resolver - Found account with Sui address: {account.sui_address}")
+			print(f"AccountBalance resolver - Found account with Sui address: {account.aptos_address}")
 		except (Account.DoesNotExist, Business.DoesNotExist) as e:
 			print(f"AccountBalance resolver - Account not found: {account_type}_{account_index}")
 			return "0"
@@ -841,7 +841,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		normalized_token_type = token_type.upper()
 		
 		# Check if account has a Sui address
-		if not account.sui_address:
+		if not account.aptos_address:
 			print(f"AccountBalance resolver - Account has no Sui address, returning 0")
 			return "0"
 		
@@ -1084,7 +1084,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					last_name=found_user.last_name,
 					is_on_confio=True,
 					active_account_id=active_account.id if active_account else None,
-					active_account_sui_address=active_account.sui_address if active_account else None
+					active_account_aptos_address=active_account.aptos_address if active_account else None
 				))
 			else:
 				# User not found on Confío
@@ -1096,7 +1096,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					last_name=None,
 					is_on_confio=False,
 					active_account_id=None,
-					active_account_sui_address=None
+					active_account_aptos_address=None
 				))
 		
 		return results
@@ -1688,26 +1688,26 @@ class UpdateBusiness(graphene.Mutation):
 			logger.error(f"Error updating business: {str(e)}")
 			return UpdateBusiness(success=False, error="Error interno del servidor")
 
-class UpdateAccountSuiAddress(graphene.Mutation):
+class UpdateAccountAptosAddress(graphene.Mutation):
 	class Arguments:
-		sui_address = graphene.String(required=True)
+		aptos_address = graphene.String(required=True)
 
 	success = graphene.Boolean()
 	error = graphene.String()
 	account = graphene.Field(AccountType)
 
 	@classmethod
-	def mutate(cls, root, info, sui_address):
+	def mutate(cls, root, info, aptos_address):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
-			return UpdateAccountSuiAddress(success=False, error="Authentication required")
+			return UpdateAccountAptosAddress(success=False, error="Authentication required")
 
 		try:
 			# Get JWT context with validation and permission check
 			from .jwt_context import get_jwt_business_context_with_validation
 			jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
 			if not jwt_context:
-				return UpdateAccountSuiAddress(success=False, error="Invalid account context")
+				return UpdateAccountAptosAddress(success=False, error="Invalid account context")
 			
 			account_type = jwt_context['account_type']
 			account_index = jwt_context['account_index']
@@ -1735,7 +1735,7 @@ class UpdateAccountSuiAddress(graphene.Mutation):
 					).first()
 					
 					if not employee_record:
-						return UpdateAccountSuiAddress(success=False, error="No tienes acceso a esta cuenta de negocio")
+						return UpdateAccountAptosAddress(success=False, error="No tienes acceso a esta cuenta de negocio")
 			else:
 				# For personal accounts
 				account = Account.objects.get(
@@ -1745,20 +1745,20 @@ class UpdateAccountSuiAddress(graphene.Mutation):
 				)
 			
 			# Update the Sui address
-			account.sui_address = sui_address
+			account.aptos_address = aptos_address
 			account.save()
 			
-			return UpdateAccountSuiAddress(
+			return UpdateAccountAptosAddress(
 				success=True,
 				error=None,
 				account=account
 			)
 
 		except Account.DoesNotExist:
-			return UpdateAccountSuiAddress(success=False, error="Cuenta no encontrada")
+			return UpdateAccountAptosAddress(success=False, error="Cuenta no encontrada")
 		except Exception as e:
 			logger.error(f"Error updating account Sui address: {str(e)}")
-			return UpdateAccountSuiAddress(success=False, error="Error interno del servidor")
+			return UpdateAccountAptosAddress(success=False, error="Error interno del servidor")
 
 class SwitchAccountToken(graphene.Mutation):
 	"""Generate a new JWT token with updated account context"""
@@ -2255,7 +2255,7 @@ class RefreshAccountBalance(graphene.Mutation):
 				)
 			
 			# Check if account has a Sui address
-			if not account.sui_address:
+			if not account.aptos_address:
 				return RefreshAccountBalance(
 					success=False, 
 					errors="Account has no blockchain address"
@@ -2426,13 +2426,13 @@ class CreateTestUsers(graphene.Mutation):
 				# Generate a valid Sui address using hash of phone number
 				# Sui addresses are 0x + 64 hex characters (32 bytes)
 				phone_hash = hashlib.sha256(cleaned_phone.encode()).hexdigest()
-				test_sui_address = f"0x{phone_hash}"
+				test_aptos_address = f"0x{phone_hash}"
 				
 				personal_account = Account.objects.create(
 					user=new_user,
 					account_type='personal',
 					account_index=0,
-					sui_address=test_sui_address  # Valid Sui address format
+					aptos_address=test_aptos_address  # Valid Sui address format
 				)
 				
 				created_users.append(UserByPhoneType(
@@ -2443,7 +2443,7 @@ class CreateTestUsers(graphene.Mutation):
 					last_name=new_user.last_name,
 					is_on_confio=True,
 					active_account_id=personal_account.id,
-					active_account_sui_address=personal_account.sui_address
+					active_account_aptos_address=personal_account.aptos_address
 				))
 				
 				logger.info(f"Created test user: {username} for phone: {cleaned_phone}")
@@ -3014,7 +3014,7 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
 	reject_identity_verification = RejectIdentityVerification.Field()
 	create_business = CreateBusiness.Field()
 	update_business = UpdateBusiness.Field()
-	update_account_sui_address = UpdateAccountSuiAddress.Field()
+	update_account_aptos_address = UpdateAccountAptosAddress.Field()
 	
 	# Bank info mutations
 	create_bank_info = CreateBankInfo.Field()

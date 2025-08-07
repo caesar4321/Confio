@@ -268,10 +268,10 @@ class Account(SoftDeleteModel):
     # —————————————————————————————
     # persistent per‑user state
     # —————————————————————————————
-    sui_address = models.CharField(
+    aptos_address = models.CharField(
         max_length=66,
         blank=True, null=True,
-        help_text="Last‑computed Sui address for this account"
+        help_text="Last‑computed Aptos address for this account (temporarily storing Algorand)"
     )
 
     # —————————————————————————————

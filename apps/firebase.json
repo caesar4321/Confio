@@ -1,9 +1,1 @@
-{
-  "react-native": {
-    "app_data_collection_default_enabled": true,
-    "analytics_auto_collection_enabled": true,
-    "messaging_auto_init_enabled": true,
-    "in_app_messaging_auto_collection_enabled": true,
-    "perf_auto_collection_enabled": true
-  }
-} 
+{}

@@ -220,7 +220,7 @@ export type MainStackParamList = {
         id: string;
         accountType: string;
         accountIndex: number;
-        suiAddress: string;
+        aptosAddress: string;
         business?: {
           id: string;
           name: string;
@@ -270,7 +270,7 @@ export type MainStackParamList = {
         id: string;
         accountType: string;
         accountIndex: number;
-        suiAddress: string;
+        aptosAddress: string;
         business?: {
           id: string;
           name: string;
@@ -289,7 +289,7 @@ export type MainStackParamList = {
         id: string;
         accountType: string;
         accountIndex: number;
-        suiAddress: string;
+        aptosAddress: string;
         business?: {
           id: string;
           name: string;

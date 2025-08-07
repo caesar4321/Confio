@@ -72,14 +72,14 @@ class PySuiClient:
             logger.info(f"Returning cached balance for {address}, coin_type={coin_type}: {cached}")
             return cached
         
-        sui_address = SuiAddress(address)
+        aptos_address = SuiAddress(address)
         balances = {}
         
         try:
             if coin_type:
                 # Get coins of specific type and sum their balances
                 from pysui.sui.sui_types.scalars import SuiString
-                result = await self.client.get_coin(coin_type=SuiString(coin_type), address=sui_address, fetch_all=True)
+                result = await self.client.get_coin(coin_type=SuiString(coin_type), address=aptos_address, fetch_all=True)
                 total_balance = 0
                 if result and hasattr(result, 'result_data') and result.result_data:
                     # result.result_data.data contains the list of SuiCoinObject instances
@@ -146,13 +146,13 @@ class PySuiClient:
         Returns:
             List of coin objects with objectId, version, digest, balance
         """
-        sui_address = SuiAddress(address)
+        aptos_address = SuiAddress(address)
         
         try:
             from pysui.sui.sui_types.scalars import SuiString
             result = await self.client.get_coin(
                 coin_type=SuiString(coin_type),
-                address=sui_address,
+                address=aptos_address,
                 fetch_all=True  # Get all coins, not just first page
             )
             

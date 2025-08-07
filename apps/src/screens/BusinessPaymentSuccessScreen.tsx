@@ -36,7 +36,7 @@ type BusinessPaymentSuccessRouteProp = RouteProp<{
         id: string;
         accountType: string;
         accountIndex: number;
-        suiAddress: string;
+        aptosAddress: string;
         business?: {
           id: string;
           name: string;
@@ -55,7 +55,7 @@ type BusinessPaymentSuccessRouteProp = RouteProp<{
         id: string;
         accountType: string;
         accountIndex: number;
-        suiAddress: string;
+        aptosAddress: string;
         business?: {
           id: string;
           name: string;

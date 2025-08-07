@@ -18,6 +18,11 @@ react {
   newArchEnabled         = false  // Disable New Architecture
 }
 
+// Disable autolinking tasks
+project.afterEvaluate {
+    tasks.findByName('generateAutolinkingPackageList')?.enabled = false
+}
+
 // 4) any other scripts (fonts, etc)
 apply from: file("fonts.gradle")
 
@@ -124,6 +129,8 @@ android {
         pickFirst '**/libfbjni.so'
         pickFirst '**/libreact_nativemodule_core.so'
         pickFirst '**/libturbomodulejsijni.so'
+        pickFirst '**/libcrypto.so'
+        pickFirst '**/libssl.so'
         pickFirst '**/libfolly_json.so'
         pickFirst '**/libfolly_runtime.so'
         pickFirst '**/libglog.so'
@@ -157,6 +164,7 @@ dependencies {
     implementation project(':react-native-google-signin_google-signin')
     implementation project(':react-native-get-random-values')
     implementation project(':react-native-keychain')
+    implementation project(':react-native-reanimated')
     implementation project(':react-native-svg')
     implementation project(':react-native-vector-icons')
     implementation project(':react-native-screens')
@@ -167,6 +175,8 @@ dependencies {
     implementation project(':react-native-worklets-core')
     implementation project(':react-native-device-info')
     implementation project(':notifee_react-native')
+    implementation project(':react-native-webcrypto')
+    implementation project(':react-native-quick-crypto')
 
     // Add Google Sign-In dependencies
     implementation 'com.google.android.gms:play-services-auth:20.7.0'

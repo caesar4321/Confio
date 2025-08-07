@@ -367,7 +367,7 @@ class PayInvoice(graphene.Mutation):
                 # Debug: Log the JWT account context being used
                 print(f"PayInvoice - JWT account context: {account_type}_{account_index}, business_id={business_id}")
                 print(f"PayInvoice - User ID: {user.id}")
-                print(f"PayInvoice - Available accounts for user: {list(user.accounts.values_list('account_type', 'account_index', 'sui_address'))}")
+                print(f"PayInvoice - Available accounts for user: {list(user.accounts.values_list('account_type', 'account_index', 'aptos_address'))}")
                 
                 # Get the payer's active account using JWT context
                 if account_type == 'business' and business_id:
@@ -388,7 +388,7 @@ class PayInvoice(graphene.Mutation):
                 
                 print(f"PayInvoice - Found payer account: {payer_account}")
                 
-                if not payer_account or not payer_account.sui_address:
+                if not payer_account or not payer_account.aptos_address:
                     return PayInvoice(
                         invoice=None,
                         payment_transaction=None,
@@ -397,7 +397,7 @@ class PayInvoice(graphene.Mutation):
                     )
 
                 # Check if merchant has Sui address
-                if not invoice.merchant_account.sui_address:
+                if not invoice.merchant_account.aptos_address:
                     return PayInvoice(
                         invoice=None,
                         payment_transaction=None,
@@ -438,8 +438,8 @@ class PayInvoice(graphene.Mutation):
                     payer_display_name=payer_display_name,
                     merchant_display_name=merchant_display_name,
                     payer_phone=payer_phone,
-                    payer_address=payer_account.sui_address,
-                    merchant_address=invoice.merchant_account.sui_address,
+                    payer_address=payer_account.aptos_address,
+                    merchant_address=invoice.merchant_account.aptos_address,
                     amount=invoice.amount,
                     token_type=invoice.token_type,
                     description=invoice.description,
@@ -730,14 +730,14 @@ class Query(graphene.ObjectType):
                     account_index=account_index
                 )
             
-            if not user_account.sui_address:
+            if not user_account.aptos_address:
                 return []
                 
         except Account.DoesNotExist:
             return []
         
         # Get all accounts for the friend user
-        friend_accounts = Account.objects.filter(user_id=friend_user_id).values_list('sui_address', flat=True)
+        friend_accounts = Account.objects.filter(user_id=friend_user_id).values_list('aptos_address', flat=True)
         friend_addresses = list(friend_accounts)
         
         if not friend_addresses:
@@ -747,8 +747,8 @@ class Query(graphene.ObjectType):
         # 1. Current user's account paid friend's business account
         # 2. Friend's account paid current user's business account
         queryset = PaymentTransaction.objects.filter(
-            (models.Q(payer_address=user_account.sui_address) & models.Q(merchant_address__in=friend_addresses)) |
-            (models.Q(payer_address__in=friend_addresses) & models.Q(merchant_address=user_account.sui_address))
+            (models.Q(payer_address=user_account.aptos_address) & models.Q(merchant_address__in=friend_addresses)) |
+            (models.Q(payer_address__in=friend_addresses) & models.Q(merchant_address=user_account.aptos_address))
         ).order_by('-created_at')
         
         if limit:

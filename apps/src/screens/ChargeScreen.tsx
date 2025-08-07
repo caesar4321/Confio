@@ -114,7 +114,7 @@ const ChargeScreen = () => {
                 lastName: undefined
               },
               merchantAccount: currentInvoice.merchantAccount,
-              merchantAddress: activeAccount?.suiAddress || '0x...',
+              merchantAddress: activeAccount?.aptosAddress || '0x...',
               status: currentInvoice.status,
               transactionHash: currentInvoice.paymentTransactions?.[0]?.transactionHash || 'pending',
               createdAt: currentInvoice.paidAt || new Date().toISOString()

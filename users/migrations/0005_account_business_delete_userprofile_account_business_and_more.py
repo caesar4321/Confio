@@ -19,7 +19,7 @@ class Migration(migrations.Migration):
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('account_type', models.CharField(choices=[('personal', 'Personal'), ('business', 'Business')], default='personal', help_text='Type of account (personal or business)', max_length=10)),
                 ('account_index', models.PositiveIntegerField(default=0, help_text='Index of the account within its type (0, 1, 2, etc.)')),
-                ('sui_address', models.CharField(blank=True, help_text='Last‑computed Sui address for this account', max_length=66, null=True)),
+                ('aptos_address', models.CharField(blank=True, help_text='Last‑computed Sui address for this account', max_length=66, null=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('last_login_at', models.DateTimeField(blank=True, null=True)),
             ],

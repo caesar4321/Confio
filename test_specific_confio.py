@@ -32,8 +32,8 @@ async def test_specific_confio():
         from pysui.sui.sui_types.scalars import SuiString
         from pysui.sui.sui_types import SuiAddress
         
-        sui_address = SuiAddress(test_address)
-        result = await client.client.get_coin(coin_type=SuiString(coin_type), address=sui_address, fetch_all=True)
+        aptos_address = SuiAddress(test_address)
+        result = await client.client.get_coin(coin_type=SuiString(coin_type), address=aptos_address, fetch_all=True)
         
         print(f"Raw result type: {type(result)}")
         print(f"Has result_data: {hasattr(result, 'result_data')}")

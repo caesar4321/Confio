@@ -1,7 +1,6 @@
 package com.Confio.Confio
 
 import android.app.Application
-import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeHost
@@ -11,33 +10,63 @@ import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
-import com.swmansion.rnscreens.RNScreensPackage
-import com.th3rdwave.safeareacontext.SafeAreaContextPackage
-import com.mrousavy.camera.react.CameraPackage
-import fr.greweb.reactnativeviewshot.RNViewShotPackage
-import com.reactnativecommunity.cameraroll.CameraRollPackage
-import com.rt2zz.reactnativecontacts.ReactNativeContacts
-import io.invertase.firebase.messaging.ReactNativeFirebaseMessagingPackage
-import com.learnium.RNDeviceInfo.RNDeviceInfo
+
+// Manual imports for all packages
+import com.RNAppleAuthentication.AppleAuthenticationAndroidPackage
 import io.invertase.notifee.NotifeePackage
+import com.reactnativecommunity.cameraroll.CameraRollPackage
+import io.invertase.firebase.app.ReactNativeFirebaseAppPackage
+import io.invertase.firebase.auth.ReactNativeFirebaseAuthPackage
+import io.invertase.firebase.messaging.ReactNativeFirebaseMessagingPackage
+import com.reactnativegooglesignin.RNGoogleSigninPackage
+import org.linusu.RNGetRandomValuesPackage
+import com.oblador.keychain.KeychainPackage
+import com.swmansion.reanimated.ReanimatedPackage
+import com.th3rdwave.safeareacontext.SafeAreaContextPackage
+import com.swmansion.rnscreens.RNScreensPackage
+import com.horcrux.svg.SvgPackage
+import com.oblador.vectoricons.VectorIconsPackage
+import fr.greweb.reactnativeviewshot.RNViewShotPackage
+import com.mrousavy.camera.react.CameraPackage
+import com.worklets.WorkletsPackage
+import com.rt2zz.reactnativecontacts.ReactNativeContacts
+import com.learnium.RNDeviceInfo.RNDeviceInfo
+import com.linusu.RNWebcryptoPackage
+import com.margelo.quickcrypto.QuickCryptoPackage
 
 class MainApplication : Application(), ReactApplication {
 
   override val reactNativeHost: ReactNativeHost =
       object : DefaultReactNativeHost(this) {
-        override fun getPackages(): List<ReactPackage> =
-            PackageList(this).packages.apply {
-              // Add required packages manually
-              add(RNScreensPackage())
-              add(SafeAreaContextPackage())
-              add(CameraPackage())
-              add(RNViewShotPackage())
-              add(CameraRollPackage())
-              add(ReactNativeContacts())
-              add(ReactNativeFirebaseMessagingPackage())
-              add(RNDeviceInfo())
-              add(NotifeePackage())
-            }
+        override fun getPackages(): List<ReactPackage> {
+          return listOf(
+            // Core React Native packages
+            com.facebook.react.shell.MainReactPackage(),
+            
+            // Manual package list
+            AppleAuthenticationAndroidPackage(),
+            NotifeePackage(),
+            CameraRollPackage(),
+            ReactNativeFirebaseAppPackage(),
+            ReactNativeFirebaseAuthPackage(),
+            ReactNativeFirebaseMessagingPackage(),
+            RNGoogleSigninPackage(),
+            RNGetRandomValuesPackage(),
+            KeychainPackage(),
+            ReanimatedPackage(),
+            SafeAreaContextPackage(),
+            RNScreensPackage(),
+            SvgPackage(),
+            VectorIconsPackage(),
+            RNViewShotPackage(),
+            CameraPackage(),
+            WorkletsPackage(),
+            ReactNativeContacts(),
+            RNDeviceInfo(),
+            RNWebcryptoPackage(),
+            QuickCryptoPackage()
+          )
+        }
 
         override fun getJSMainModuleName(): String = "index"
 

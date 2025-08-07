@@ -37,7 +37,7 @@ const ENHANCED_FINALIZE_ZKLOGIN = gql`
       success
       error
       zkProof
-      suiAddress
+      aptosAddress
       isPhoneVerified
       requiresDeviceTrust
       securityFlags {

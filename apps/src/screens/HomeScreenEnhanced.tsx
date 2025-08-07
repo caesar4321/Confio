@@ -91,7 +91,7 @@ export const HomeScreenEnhanced = () => {
           accountName: 'Confío Dollar',
           accountSymbol: '$cUSD',
           accountBalance: cUSDBalance?.accountBalance || '0',
-          accountAddress: activeAccount?.suiAddress || '',
+          accountAddress: activeAccount?.aptosAddress || '',
         });
       } else if (shouldNavigateToAccount === 'confio') {
         navigation.navigate('AccountDetail', {
@@ -99,7 +99,7 @@ export const HomeScreenEnhanced = () => {
           accountName: 'Confío',
           accountSymbol: '$CONFIO',
           accountBalance: confioBalance?.accountBalance || '0',
-          accountAddress: activeAccount?.suiAddress || '',
+          accountAddress: activeAccount?.aptosAddress || '',
         });
       }
     }
@@ -269,7 +269,7 @@ export const HomeScreenEnhanced = () => {
               accountName: 'Confío Dollar',
               accountSymbol: '$cUSD',
               accountBalance: cUSDBalance?.accountBalance || '0',
-              accountAddress: activeAccount?.suiAddress || '',
+              accountAddress: activeAccount?.aptosAddress || '',
             })}
             activeOpacity={0.7}
           >
@@ -297,7 +297,7 @@ export const HomeScreenEnhanced = () => {
               accountName: 'Confío',
               accountSymbol: '$CONFIO',
               accountBalance: confioBalance?.accountBalance || '0',
-              accountAddress: activeAccount?.suiAddress || '',
+              accountAddress: activeAccount?.aptosAddress || '',
             })}
             activeOpacity={0.7}
           >

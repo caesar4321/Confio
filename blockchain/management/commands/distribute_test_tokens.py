@@ -95,7 +95,7 @@ class Command(BaseCommand):
             if dry_run:
                 self.stdout.write("\n👤 Accounts that would receive tokens:")
                 for account in accounts:
-                    self.stdout.write(f"   - {account.user.email}: {account.sui_address[:16]}...")
+                    self.stdout.write(f"   - {account.user.email}: {account.aptos_address[:16]}...")
                 return
             
             # Confirm distribution
@@ -204,7 +204,7 @@ class Command(BaseCommand):
             # In production, this would actually send tokens from a treasury account
             
             # Mock successful distribution
-            self.stdout.write(f"      📤 Sending {amount} {token_type} to {account.sui_address[:16]}...")
+            self.stdout.write(f"      📤 Sending {amount} {token_type} to {account.aptos_address[:16]}...")
             
             # Simulate some delay
             await asyncio.sleep(0.5)
@@ -230,7 +230,7 @@ class Command(BaseCommand):
             }
             
         except Exception as e:
-            logger.exception(f"Failed to distribute {token_type} to {account.sui_address}")
+            logger.exception(f"Failed to distribute {token_type} to {account.aptos_address}")
             return {
                 'success': False,
                 'error': str(e)

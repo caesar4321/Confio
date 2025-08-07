@@ -18,8 +18,21 @@ target 'Confio' do
     :new_arch_enabled => false
   )
 
-  # (You do NOT need to manually pod RNFBApp & RNFBAuth here;
-  #  react-native-firebase will auto-link for you.)
+  # Some pods need explicit inclusion due to use_frameworks!
+  # GoogleSignIn
+  pod 'GoogleSignIn', '~> 7.1'
+  pod 'RNGoogleSignin', :path => '../node_modules/@react-native-google-signin/google-signin'
+  
+  # Firebase
+  pod 'Firebase/Core'
+  pod 'Firebase/Auth'
+  pod 'Firebase/Messaging'
+  pod 'RNFBApp', :path => '../node_modules/@react-native-firebase/app'
+  pod 'RNFBAuth', :path => '../node_modules/@react-native-firebase/auth'
+  pod 'RNFBMessaging', :path => '../node_modules/@react-native-firebase/messaging'
+  
+  # Notifee
+  pod 'RNNotifee', :path => '../node_modules/@notifee/react-native'
 end
 
 post_install do |installer|
@@ -35,6 +48,20 @@ post_install do |installer|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']          = '16.0'
       # ensure Swift pods compile with Swift 5+
       config.build_settings['SWIFT_VERSION'] = '5.0'
+      
+      # Build performance optimizations
+      config.build_settings['COMPILER_INDEX_STORE_ENABLE'] = 'NO'
+      config.build_settings['SWIFT_COMPILATION_MODE'] = 'wholemodule'
+      config.build_settings['SWIFT_OPTIMIZATION_LEVEL'] = '-O'
+      config.build_settings['GCC_OPTIMIZATION_LEVEL'] = 's'
+      
+      # Disable bitcode for faster builds
+      config.build_settings['ENABLE_BITCODE'] = 'NO'
+      
+      # Only build active architecture in debug
+      if config.name == 'Debug'
+        config.build_settings['ONLY_ACTIVE_ARCH'] = 'YES'
+      end
     end
   end
 end 

@@ -17,6 +17,7 @@ import { ApolloClient } from '@apollo/client';
 import { AccountManager, AccountContext } from '../utils/accountManager';
 import { generateZkLoginSalt as generateZkLoginSaltUtil } from '../utils/zkLogin';
 import { DeviceFingerprint } from '../utils/deviceFingerprint';
+import algorandService from './algorandService';
 
 // Debug logging for environment variables
 console.log('Environment variables loaded:');
@@ -44,7 +45,7 @@ interface StoredZkLogin {
     zkProof: any;        // the full proof object (points a/b/c etc)
     subject: string;     // sub
     clientId: string;    // oauth clientId
-    suiAddress: string;  // the user's Sui address
+    aptosAddress: string;  // the user's Sui address
   };
   secretKey: string;     // base64-encoded 32-byte seed
   initRandomness: string; // randomness from initializeZkLogin
@@ -137,6 +138,9 @@ export class AuthService {
   async signInWithGoogle() {
     try {
       console.log('Starting Google Sign-In process...');
+      
+      // Ensure Google Sign-In is configured before attempting to sign in
+      await this.configureGoogleSignIn();
       
       // Sign out first to force account selection
       try {
@@ -353,7 +357,31 @@ export class AuthService {
       const [firstName, ...lastNameParts] = user.displayName?.split(' ') || [];
       const lastName = lastNameParts.join(' ');
 
-      // 10) Return user info and zkLogin data
+      // 10) Create Algorand wallet using Web3Auth SFA with Firebase
+      let algorandAddress = '';
+      try {
+        console.log('Creating Algorand wallet with Web3Auth SFA using Firebase (Google)...');
+        // Get fresh Firebase ID token for Web3Auth
+        const freshFirebaseToken = await user.getIdToken(true);
+        const firebaseUid = user.uid;
+        algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, firebaseUid);
+        console.log('Algorand wallet created (Google):', algorandAddress);
+        
+        // Update the sui_address field with Algorand address
+        // (temporarily storing in sui_address field as discussed)
+        const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
+        await apolloClient.mutate({
+          mutation: UPDATE_ACCOUNT_APTOS_ADDRESS,
+          variables: { aptosAddress: algorandAddress }
+        });
+        console.log('Updated account with Algorand address');
+      } catch (algorandError) {
+        console.error('Error creating Algorand wallet:', algorandError);
+        // Don't fail the sign-in if Algorand wallet creation fails
+        // We can retry later
+      }
+
+      // 11) Return user info and zkLogin data (with Algorand address in aptosAddress field)
       const result = {
         userInfo: { 
           email: user.email, 
@@ -363,7 +391,7 @@ export class AuthService {
         },
         zkLoginData: { 
           zkProof: fin.zkProof, 
-          suiAddress: fin.suiAddress,
+          aptosAddress: algorandAddress || fin.aptosAddress, // Use Algorand address if available
           isPhoneVerified: fin.isPhoneVerified 
         }
       };
@@ -644,6 +672,30 @@ export class AuthService {
       const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
       const lastName = lastNameParts.join(' ');
 
+      // Create Algorand wallet using Web3Auth SFA with Firebase
+      let algorandAddress = '';
+      try {
+        console.log('Creating Algorand wallet with Web3Auth SFA using Firebase (Apple)...');
+        // Get fresh Firebase ID token for Web3Auth
+        const freshFirebaseToken = await userCredential.user.getIdToken(true);
+        const firebaseUid = userCredential.user.uid;
+        algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, firebaseUid);
+        console.log('Algorand wallet created (Apple):', algorandAddress);
+        
+        // Update the sui_address field with Algorand address
+        // (temporarily storing in sui_address field as discussed)
+        const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
+        await apolloClient.mutate({
+          mutation: UPDATE_ACCOUNT_APTOS_ADDRESS,
+          variables: { aptosAddress: algorandAddress }
+        });
+        console.log('Updated account with Algorand address (Apple)');
+      } catch (algorandError) {
+        console.error('Error creating Algorand wallet (Apple):', algorandError);
+        // Don't fail the sign-in if Algorand wallet creation fails
+        // We can retry later
+      }
+
       return {
         userInfo: {
           email: userCredential.user.email,
@@ -653,7 +705,7 @@ export class AuthService {
         },
         zkLoginData: {
           zkProof: finalizeData.finalizeZkLogin.zkProof,
-          suiAddress: finalizeData.finalizeZkLogin.suiAddress,
+          aptosAddress: algorandAddress || finalizeData.finalizeZkLogin.aptosAddress, // Use Algorand address if available
           isPhoneVerified: finalizeData.finalizeZkLogin.isPhoneVerified
         }
       };
@@ -701,7 +753,7 @@ export class AuthService {
           mutation ZkLogin($input: ZkLoginInput!) {
             zkLogin(input: $input) {
               zkProof
-              suiAddress
+              aptosAddress
               error
               details
             }
@@ -753,7 +805,7 @@ export class AuthService {
         hasSecretKey: !!data.secretKey,
         hasInitRandomness: !!data.initRandomness,
         hasInitJwt: !!data.initJwt,
-        hasSuiAddress: !!data.zkProof?.suiAddress,
+        hasSuiAddress: !!data.zkProof?.aptosAddress,
         secretKeyLength: data.secretKey?.length
       });
 
@@ -788,12 +840,12 @@ export class AuthService {
       this.userSalt = data.salt;
       this.maxEpoch = data.maxEpoch;
 
-      // Store the full proof object with all required fields including suiAddress
+      // Store the full proof object with all required fields including aptosAddress
       this.zkProof = {
         zkProof: data.zkProof.zkProof,
         subject: data.subject,
         clientId: data.clientId,
-        suiAddress: data.zkProof.suiAddress
+        aptosAddress: data.zkProof.aptosAddress
       };
 
       // Check if we need to refresh the proof
@@ -831,7 +883,7 @@ export class AuthService {
           hasZkProof: !!this.zkProof?.zkProof,
           hasSubject: !!this.zkProof?.subject,
           hasClientId: !!this.zkProof?.clientId,
-          hasSuiAddress: !!this.zkProof?.suiAddress
+          hasSuiAddress: !!this.zkProof?.aptosAddress
         }
       });
     } catch (error) {
@@ -863,7 +915,7 @@ export class AuthService {
     // Log the incoming proof structure
     console.log('Incoming proof structure:', {
       hasZkProof: !!proof.zkProof,
-      hasSuiAddress: !!proof.suiAddress,
+      hasSuiAddress: !!proof.aptosAddress,
       success: proof.success,
       error: proof.error,
       proof: proof
@@ -879,7 +931,7 @@ export class AuthService {
     const secretKeyB64 = btoa(String.fromCharCode.apply(null, Array.from(secretKey).map(Number)));
 
     // Ensure we have a valid Sui address
-    if (!proof.suiAddress) {
+    if (!proof.aptosAddress) {
       throw new Error('No Sui address provided in proof');
     }
 
@@ -888,7 +940,7 @@ export class AuthService {
       zkProof: proof.zkProof,
       subject,
       clientId,
-      suiAddress: proof.suiAddress,  // Store the Sui address at the top level
+      aptosAddress: proof.aptosAddress,  // Store the Sui address at the top level
       extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
       userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0)))
     };
@@ -989,7 +1041,7 @@ export class AuthService {
       accountType: accountContext.type,
       accountIndex: accountContext.index,
       accountId: accountId,
-      suiAddress: currentSuiAddress,
+      aptosAddress: currentSuiAddress,
       note: 'Address derived from deterministic salt for current account context'
     });
 
@@ -1783,7 +1835,7 @@ export class AuthService {
         accountId: accountId,
         accountType: accountContext.type,
         accountIndex: accountContext.index,
-        suiAddress: newSuiAddress,
+        aptosAddress: newSuiAddress,
         note: accountContext.type === 'personal' ? 'Personal account (index 0)' : `Business account (index ${accountContext.index})`
       });
     } catch (error) {
@@ -1865,6 +1917,7 @@ export class AuthService {
   }
 }
 
-// Export a singleton instance
+// Export both the class and singleton instance
+export { AuthService };
 const authService = AuthService.getInstance();
 export default authService; 

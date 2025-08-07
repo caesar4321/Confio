@@ -199,11 +199,11 @@ class BalanceService:
         async def get_balance():
             async with await get_pysui_client() as client:
                 if token == 'CUSD':
-                    return await client.get_cusd_balance(account.sui_address)
+                    return await client.get_cusd_balance(account.aptos_address)
                 elif token == 'CONFIO':
-                    return await client.get_confio_balance(account.sui_address)
+                    return await client.get_confio_balance(account.aptos_address)
                 elif token == 'SUI':
-                    return await client.get_sui_balance(account.sui_address)
+                    return await client.get_sui_balance(account.aptos_address)
                 elif token == 'USDC':
                     # USDC not implemented in pysui_client yet, return 0
                     return Decimal('0')
@@ -212,7 +212,7 @@ class BalanceService:
         
         try:
             amount = loop.run_until_complete(get_balance())
-            logger.info(f"Blockchain balance for {account.sui_address} - {token}: {amount}")
+            logger.info(f"Blockchain balance for {account.aptos_address} - {token}: {amount}")
             
             return {
                 'amount': amount,

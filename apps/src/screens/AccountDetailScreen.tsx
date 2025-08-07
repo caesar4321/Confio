@@ -241,7 +241,7 @@ export const AccountDetailScreen = () => {
   console.log('AccountDetailScreen - Account info:', {
     activeAccountType: activeAccount?.type,
     activeAccountIndex: activeAccount?.index,
-    activeAccountAddress: activeAccount?.suiAddress,
+    activeAccountAddress: activeAccount?.aptosAddress,
     paramAddress: accountAddress,
     accountName: account.name,
     routeParams: {
@@ -1849,7 +1849,7 @@ export const AccountDetailScreen = () => {
                   <Text style={styles.helpSectionTitle}>¿Para quién es?</Text>
                   <Text style={styles.helpSectionText}>
                     Esta función es para usuarios avanzados que ya tienen USDC en wallets 
-                    de Sui como Sui Wallet, Binance o exchanges compatibles.
+                    de Algorand como Pera Wallet, Binance o exchanges compatibles.
                   </Text>
                 </View>
               </View>
