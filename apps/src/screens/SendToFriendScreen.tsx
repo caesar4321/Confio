@@ -57,7 +57,7 @@ type Friend = {
   avatar: string;
   isOnConfio: boolean;
   phone: string;
-  suiAddress?: string;
+  aptosAddress?: string;
   userId?: string;
   id?: string; // Some screens pass 'id' instead of 'userId'
 };
@@ -74,8 +74,8 @@ export const SendToFriendScreen = () => {
   console.log('SendToFriendScreen: route.params:', route.params);
   console.log('SendToFriendScreen: friend data:', friend);
   console.log('SendToFriendScreen: friend.isOnConfio:', friend.isOnConfio);
-  console.log('SendToFriendScreen: friend.suiAddress:', friend.suiAddress);
-  console.log('SendToFriendScreen: friend.suiAddress length:', friend.suiAddress?.length);
+  console.log('SendToFriendScreen: friend.aptosAddress:', friend.aptosAddress);
+  console.log('SendToFriendScreen: friend.aptosAddress length:', friend.aptosAddress?.length);
   const [tokenType, setTokenType] = useState<TokenType>((route.params as any)?.tokenType || 'cusd');
   const config = tokenConfig[tokenType];
 

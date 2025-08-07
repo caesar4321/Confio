@@ -1,4 +1,10 @@
 {
   "name": "Confio",
-  "displayName": "Confío"
+  "displayName": "Confío",
+  "android": {
+    "package": "com.Confio.Confio"
+  },
+  "ios": {
+    "bundleIdentifier": "com.Confio.Confio"
+  }
 }

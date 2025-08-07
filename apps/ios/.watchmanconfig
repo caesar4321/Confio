@@ -1,0 +1,11 @@
+{
+  "ignore_dirs": [
+    "node_modules/.cache",
+    "ios/build",
+    "ios/Pods",
+    "android/build",
+    "android/.gradle",
+    ".git"
+  ]
+}
+EOF < /dev/null

@@ -80,9 +80,9 @@ class UserAdmin(admin.ModelAdmin):
 
 @admin.register(Account)
 class AccountAdmin(admin.ModelAdmin):
-    list_display = ('display_name', 'user', 'account_type', 'account_index', 'sui_address_short', 'bank_accounts_count', 'created_at')
+    list_display = ('display_name', 'user', 'account_type', 'account_index', 'aptos_address_short', 'bank_accounts_count', 'created_at')
     list_filter = ('account_type', 'created_at')
-    search_fields = ('user__username', 'user__email', 'business__name', 'sui_address')
+    search_fields = ('user__username', 'user__email', 'business__name', 'aptos_address')
     readonly_fields = ('account_id', 'created_at', 'updated_at')
     
     fieldsets = (
@@ -90,7 +90,7 @@ class AccountAdmin(admin.ModelAdmin):
             'fields': ('user', 'account_type', 'account_index', 'account_id', 'business')
         }),
         ('Blockchain', {
-            'fields': ('sui_address',)
+            'fields': ('aptos_address',)
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at', 'last_login_at'),
@@ -98,11 +98,11 @@ class AccountAdmin(admin.ModelAdmin):
         }),
     )
     
-    def sui_address_short(self, obj):
-        if obj.sui_address:
-            return f"{obj.sui_address[:10]}...{obj.sui_address[-6:]}"
+    def aptos_address_short(self, obj):
+        if obj.aptos_address:
+            return f"{obj.aptos_address[:10]}...{obj.aptos_address[-6:]}"
         return "No address"
-    sui_address_short.short_description = "Sui Address"
+    aptos_address_short.short_description = "Sui Address"
     
     def bank_accounts_count(self, obj):
         count = obj.bank_accounts.count()

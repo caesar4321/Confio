@@ -75,7 +75,7 @@ export const GET_USER_ACCOUNTS = gql`
       id
       accountType
       accountIndex
-      suiAddress
+      aptosAddress
       lastLoginAt
       displayName
       avatarLetter
@@ -166,7 +166,7 @@ export const FINALIZE_ZKLOGIN = gql`
         b
         c
       }
-      suiAddress
+      aptosAddress
       error
       isPhoneVerified
     }
@@ -239,7 +239,7 @@ export const CREATE_BUSINESS = gql`
         accountId
         accountType
         accountIndex
-        suiAddress
+        aptosAddress
         business {
           id
           name
@@ -252,15 +252,15 @@ export const CREATE_BUSINESS = gql`
   }
 `;
 
-export const UPDATE_ACCOUNT_SUI_ADDRESS = gql`
-  mutation UpdateAccountSuiAddress($suiAddress: String!) {
-    updateAccountSuiAddress(suiAddress: $suiAddress) {
+export const UPDATE_ACCOUNT_APTOS_ADDRESS = gql`
+  mutation UpdateAccountAptosAddress($aptosAddress: String!) {
+    updateAccountAptosAddress(aptosAddress: $aptosAddress) {
       account {
         id
         accountId
         accountType
         accountIndex
-        suiAddress
+        aptosAddress
       }
       success
       error
@@ -325,7 +325,7 @@ export const GET_INVOICE = gql`
           id
           accountType
           accountIndex
-          suiAddress
+          aptosAddress
           business {
             id
             name
@@ -619,7 +619,7 @@ export const GET_INVOICES = gql`
         id
         accountType
         accountIndex
-        suiAddress
+        aptosAddress
         business {
           id
           name
@@ -640,7 +640,7 @@ export const GET_INVOICES = gql`
           id
           accountType
           accountIndex
-          suiAddress
+          aptosAddress
           business {
             id
             name
@@ -658,7 +658,7 @@ export const GET_INVOICES = gql`
           id
           accountType
           accountIndex
-          suiAddress
+          aptosAddress
           business {
             id
             name
@@ -2267,7 +2267,7 @@ export const GET_USER_BY_ID = gql`
         id
         accountType
         accountIndex
-        suiAddress
+        aptosAddress
         displayName
       }
     }

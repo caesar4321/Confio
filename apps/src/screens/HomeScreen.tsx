@@ -108,7 +108,7 @@ export const HomeScreen = () => {
   const { userCountry, selectedCountry } = useCountry();
   const { currency, formatAmount, exchangeRate } = useCurrency();
   const { rate: marketRate, loading: rateLoading } = useSelectedCountryRate();
-  const [suiAddress, setSuiAddress] = React.useState<string>('');
+  const [aptosAddress, setSuiAddress] = React.useState<string>('');
   // Show local currency by default if not in US and rate is available
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -528,9 +528,9 @@ export const HomeScreen = () => {
       accountName: 'Confío Dollar',
       accountSymbol: '$cUSD',
       accountBalance: cUSDBalance.toFixed(2),
-      accountAddress: activeAccount?.suiAddress || ''
+      accountAddress: activeAccount?.aptosAddress || ''
     });
-  }, [navigation, cUSDBalance, activeAccount?.suiAddress]);
+  }, [navigation, cUSDBalance, activeAccount?.aptosAddress]);
 
   const navigateToConfioAccount = useCallback(() => {
     navigation.navigate('AccountDetail', { 
@@ -538,9 +538,9 @@ export const HomeScreen = () => {
       accountName: 'Confío',
       accountSymbol: '$CONFIO',
       accountBalance: confioBalance.toFixed(2),
-      accountAddress: activeAccount?.suiAddress || ''
+      accountAddress: activeAccount?.aptosAddress || ''
     });
-  }, [navigation, confioBalance, activeAccount?.suiAddress]);
+  }, [navigation, confioBalance, activeAccount?.aptosAddress]);
   
   useFocusEffect(
     React.useCallback(() => {

@@ -119,7 +119,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           phone: normalizedType === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
           category: serverAcc.business?.category,
           avatar: avatar,
-          suiAddress: serverAcc.suiAddress,
+          aptosAddress: serverAcc.aptosAddress,
           createdAt: serverAcc.createdAt,
           isActive: true,
           isEmployee: serverAcc.isEmployee || false,
@@ -184,7 +184,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           phone: profileData?.userProfile?.phoneNumber || undefined,
           category: undefined,
           avatar: avatar,
-          suiAddress: '', // Will be set during zkLogin finalization
+          aptosAddress: '', // Will be set during zkLogin finalization
           createdAt: new Date().toISOString(),
           isActive: true,
         };
@@ -340,7 +340,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           phone: normalizedType === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
           category: serverAcc.business?.category,
           avatar: avatar,
-          suiAddress: serverAcc.suiAddress || '',
+          aptosAddress: serverAcc.aptosAddress || '',
           createdAt: serverAcc.createdAt || new Date().toISOString(),
           isActive: true,
           isEmployee: serverAcc.isEmployee || false,

@@ -91,7 +91,7 @@ def handle_cusd_transaction(raw_event_id):
                 amount = Decimal(change['amount']) / Decimal(10 ** 6)  # cUSD has 6 decimals
                 
                 # Find user account
-                account = Account.objects.filter(sui_address=owner).first()
+                account = Account.objects.filter(aptos_address=owner).first()
                 if account:
                     # Update balance cache
                     update_user_balances.delay(account.id)
@@ -156,13 +156,13 @@ def update_user_balances(self, account_id):
         try:
             # Get balances from blockchain
             cusd_balance = loop.run_until_complete(
-                sui_client.get_cusd_balance(account.sui_address)
+                sui_client.get_cusd_balance(account.aptos_address)
             )
             confio_balance = loop.run_until_complete(
-                sui_client.get_confio_balance(account.sui_address)
+                sui_client.get_confio_balance(account.aptos_address)
             )
             sui_balance = loop.run_until_complete(
-                sui_client.get_sui_balance(account.sui_address)
+                sui_client.get_sui_balance(account.aptos_address)
             )
             
             # Update database
@@ -183,7 +183,7 @@ def update_user_balances(self, account_id):
             )
             
             # Update cache
-            cache_key = f"balances:{account.sui_address}"
+            cache_key = f"balances:{account.aptos_address}"
             cache.set(cache_key, {
                 'cusd': float(cusd_balance),
                 'confio': float(confio_balance),
@@ -206,8 +206,8 @@ def update_address_cache():
     addresses = set(
         Account.objects.filter(
             is_active=True,
-            sui_address__isnull=False
-        ).values_list('sui_address', flat=True)
+            aptos_address__isnull=False
+        ).values_list('aptos_address', flat=True)
     )
     
     cache.set('user_addresses', addresses, timeout=300)  # 5 minutes
@@ -228,7 +228,7 @@ def reconcile_all_balances():
     stale_threshold = timezone.now() - timedelta(hours=1)
     accounts = Account.objects.filter(
         is_active=True,
-        sui_address__isnull=False
+        aptos_address__isnull=False
     ).filter(
         Q(balances__is_stale=True) |
         Q(balances__last_blockchain_check__lt=stale_threshold) |
@@ -303,7 +303,7 @@ def mark_transaction_balances_stale(tx_hash, sender_address=None, recipient_addr
     
     # Mark sender balance as stale
     if sender_address:
-        accounts = Account.objects.filter(sui_address=sender_address)
+        accounts = Account.objects.filter(aptos_address=sender_address)
         for account in accounts:
             BalanceService.mark_stale(account)
             marked += 1
@@ -311,7 +311,7 @@ def mark_transaction_balances_stale(tx_hash, sender_address=None, recipient_addr
     # Mark recipient balances as stale
     if recipient_addresses:
         for address in recipient_addresses:
-            accounts = Account.objects.filter(sui_address=address)
+            accounts = Account.objects.filter(aptos_address=address)
             for account in accounts:
                 BalanceService.mark_stale(account)
                 marked += 1

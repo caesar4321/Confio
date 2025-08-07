@@ -428,11 +428,11 @@ export function FriendDetailScreen() {
     setShowTokenSelection(false);
     
     // Get the active account's Sui address from the user data
-    let suiAddress = undefined;
+    let aptosAddress = undefined;
     if (userData?.me?.accounts && userData.me.accounts.length > 0) {
       // Get the personal account (accountIndex 0) by default
       const personalAccount = userData.me.accounts.find((acc: any) => acc.accountType === 'personal' && acc.accountIndex === 0);
-      suiAddress = personalAccount?.suiAddress;
+      aptosAddress = personalAccount?.aptosAddress;
     }
     
     // Navigate to SendToFriend screen with selected token
