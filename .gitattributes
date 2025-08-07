@@ -50,3 +50,4 @@ workers/link-shortener/setup-default-links.js filter=git-crypt diff=git-crypt
 # AWS Credentials
 Julian_accessKeys.csv filter=git-crypt diff=git-crypt
 Julian_credentials.csv filter=git-crypt diff=git-crypt
+apps/android/app/google-services.json filter=git-crypt diff=git-crypt

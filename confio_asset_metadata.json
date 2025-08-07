@@ -1,0 +1,24 @@
+{
+  "asset_id": 743890784,
+  "name": "Confío",
+  "unit_name": "CONFIO",
+  "url": "https://confio.lat",
+  "decimals": 6,
+  "total_supply": 1000000000000000,
+  "logo": {
+    "png": "https://raw.githubusercontent.com/caesar4321/Confio/main/web/src/images/CONFIO.png",
+    "svg": ""
+  },
+  "description": "Utility and governance coin for the Confío app - The LATAM Web3 wallet for stablecoins",
+  "social_media": {
+    "website": "https://confio.lat",
+    "github": "https://github.com/caesar4321/Confio"
+  },
+  "verification": {
+    "status": "unverified",
+    "team": "Confío Team"
+  },
+  "categories": ["governance", "utility", "defi"],
+  "tags": ["latam", "stablecoin", "wallet", "p2p"],
+  "explorer_link": "https://testnet.algoexplorer.io/asset/743890784"
+}

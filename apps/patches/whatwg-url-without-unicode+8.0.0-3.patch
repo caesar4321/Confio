@@ -1,0 +1,20 @@
+diff --git a/node_modules/whatwg-url-without-unicode/lib/url-state-machine.js b/node_modules/whatwg-url-without-unicode/lib/url-state-machine.js
+index 26b7596..2774ae6 100644
+--- a/node_modules/whatwg-url-without-unicode/lib/url-state-machine.js
++++ b/node_modules/whatwg-url-without-unicode/lib/url-state-machine.js
+@@ -2,6 +2,15 @@
+ const { Buffer } = require("buffer/");
+ const punycode = require("punycode");
+ 
++// Patch punycode if it's missing ucs2 methods (React Native stub case)
++if (!punycode.ucs2) punycode.ucs2 = {};
++if (typeof punycode.ucs2.decode !== 'function') {
++  punycode.ucs2.decode = str => Array.from(str).map(c => c.codePointAt(0));
++}
++if (typeof punycode.ucs2.encode !== 'function') {
++  punycode.ucs2.encode = cps => String.fromCodePoint(...cps);
++}
++
+ const infra = require("./infra");
+ const { percentEncode, percentDecode } = require("./urlencoded");
+ 

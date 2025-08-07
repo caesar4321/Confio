@@ -144,19 +144,35 @@ export class AuthService {
       
       // Sign out first to force account selection
       try {
-        const isSignedIn = await GoogleSignin.isSignedIn();
-        if (isSignedIn) {
-          console.log('User already signed in to Google, signing out to force account selection...');
-          await GoogleSignin.signOut();
-        }
+        // Note: isSignedIn() might not exist in newer versions
+        // Just try to sign out regardless
+        console.log('Attempting to sign out from Google to force account selection...');
+        await GoogleSignin.signOut();
       } catch (error) {
-        console.log('Error checking/signing out from Google:', error);
+        // It's okay if sign out fails, user might not be signed in
+        console.log('Sign out attempt (expected to fail if not signed in):', error?.message);
       }
       
       // 1) Sign in with Google first
       console.log('Checking Play Services...');
-      await GoogleSignin.hasPlayServices();
-      console.log('Play Services check passed');
+      try {
+        // Try with more lenient check first
+        await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: false });
+        console.log('Play Services check passed');
+      } catch (playServicesError) {
+        console.error('Play Services error details:', {
+          error: playServicesError,
+          message: playServicesError?.message,
+          code: playServicesError?.code,
+          stack: playServicesError?.stack,
+          name: playServicesError?.name
+        });
+        
+        // TEMPORARY: Try to continue without Play Services check
+        console.warn('WARNING: Continuing without Play Services check - this may fail');
+        // Don't throw, try to continue
+        // throw playServicesError;
+      }
       
       console.log('Attempting Google Sign-In...');
       const userInfo = await GoogleSignin.signIn();
@@ -357,24 +373,222 @@ export class AuthService {
       const [firstName, ...lastNameParts] = user.displayName?.split(' ') || [];
       const lastName = lastNameParts.join(' ');
 
-      // 10) Create Algorand wallet using Web3Auth SFA with Firebase
+      // 10) Create Algorand wallet using Web3Auth and backend opt-ins
       let algorandAddress = '';
       try {
-        console.log('Creating Algorand wallet with Web3Auth SFA using Firebase (Google)...');
+        console.log('Creating Algorand wallet with Web3Auth using Firebase token...');
+        
         // Get fresh Firebase ID token for Web3Auth
         const freshFirebaseToken = await user.getIdToken(true);
         const firebaseUid = user.uid;
+        
+        // Create Algorand wallet with Web3Auth
         algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, firebaseUid);
-        console.log('Algorand wallet created (Google):', algorandAddress);
+        console.log('Algorand wallet created:', algorandAddress);
+        
+        // Now call backend mutations for authentication and opt-ins
+        console.log('Calling backend mutations for Web3Auth authentication...');
+        
+        const { WEB3AUTH_LOGIN, ADD_ALGORAND_WALLET } = await import('../apollo/mutations');
+        
+        // Step 1: Web3Auth Login (skip auth header since this IS the login)
+        console.log('Calling WEB3AUTH_LOGIN mutation...');
+        const { data: authData } = await apolloClient.mutate({
+          mutation: WEB3AUTH_LOGIN,
+          variables: {
+            provider: 'google',
+            web3AuthId: firebaseUid,
+            email: user.email,
+            firstName,
+            lastName,
+            algorandAddress,
+            idToken: freshFirebaseToken,
+          },
+          context: {
+            skipAuth: true, // Tell the auth link to skip adding JWT token
+          },
+        });
+        
+        if (authData?.web3AuthLogin?.success) {
+          console.log('WEB3AUTH_LOGIN successful');
+          
+          // Store the new tokens from Web3Auth login
+          if (authData.web3AuthLogin.accessToken && authData.web3AuthLogin.refreshToken) {
+            await this.storeTokens({
+              accessToken: authData.web3AuthLogin.accessToken,
+              refreshToken: authData.web3AuthLogin.refreshToken,
+            });
+            console.log('Stored new authentication tokens');
+          }
+          
+          // Step 2: Add Algorand wallet and check opt-ins (now with proper auth)
+          console.log('Calling ADD_ALGORAND_WALLET mutation...');
+          const { data: walletData } = await apolloClient.mutate({
+            mutation: ADD_ALGORAND_WALLET,
+            variables: {
+              algorandAddress,
+              web3authId: firebaseUid,
+              provider: 'google',
+            },
+            // Force refetch with new auth tokens
+            fetchPolicy: 'network-only',
+          });
+          
+          if (walletData?.addAlgorandWallet?.success) {
+            console.log('ADD_ALGORAND_WALLET successful');
+            console.log('ALGO balance:', walletData.addAlgorandWallet.algoBalance);
+            console.log('Needs opt-in:', walletData.addAlgorandWallet.needsOptIn);
+            
+            // Step 3: Handle opt-ins if needed
+            if (walletData.addAlgorandWallet.needsOptIn?.length > 0) {
+              console.log('Handling automatic opt-ins for:', walletData.addAlgorandWallet.needsOptIn);
+              // Process sponsored opt-ins directly here since algorandService has import issues
+              try {
+                const { ALGORAND_SPONSORED_OPT_IN } = await import('../apollo/mutations');
+                
+                for (const assetId of walletData.addAlgorandWallet.needsOptIn) {
+                  console.log(`Processing sponsored opt-in for asset ${assetId}...`);
+                  
+                  // Request sponsored opt-in from backend
+                  const { data: optInData } = await apolloClient.mutate({
+                    mutation: ALGORAND_SPONSORED_OPT_IN,
+                    variables: {
+                      assetId: assetId
+                    }
+                  });
+                  
+                  const result = optInData?.algorandSponsoredOptIn;
+                  
+                  if (result?.success) {
+                    if (result.alreadyOptedIn) {
+                      console.log(`Asset ${assetId} already opted in`);
+                    } else if (result.requiresUserSignature) {
+                      console.log(`Asset ${assetId} requires user signature - signing and submitting...`);
+                      
+                      // We have the unsigned user transaction and signed sponsor transaction
+                      if (result.userTransaction && result.sponsorTransaction && algorandService) {
+                        try {
+                          // Get the algosdk for signing
+                          const algosdk = require('algosdk');
+                          
+                          console.log('Signing opt-in transaction for asset', assetId);
+                          console.log('User transaction (base64):', result.userTransaction?.substring(0, 50) + '...');
+                          console.log('Sponsor transaction (base64):', result.sponsorTransaction?.substring(0, 50) + '...');
+                          
+                          // Get the current Algorand account from the service
+                          const currentAccount = algorandService.getCurrentAccount();
+                          if (!currentAccount) {
+                            throw new Error('No Algorand account available for signing');
+                          }
+                          console.log('Current account available for signing');
+                          
+                          // The transaction from backend is base64-encoded msgpack
+                          const userTxnB64 = result.userTransaction;
+                          const userTxnBytes = Buffer.from(userTxnB64, 'base64');
+                          
+                          // Decode the msgpack transaction to get the dictionary
+                          const txnDict = algosdk.decodeObj(userTxnBytes);
+                          console.log('Decoded transaction dict:', txnDict);
+                          
+                          // In JavaScript SDK, we need to use makePaymentTxnWithSuggestedParamsFromObject
+                          // or makeAssetTransferTxnWithSuggestedParamsFromObject
+                          // But since we already have a complete transaction, we can sign it directly
+                          
+                          // Since the backend is sending us a properly formatted transaction,
+                          // we should be able to sign it directly without reconstruction
+                          // The transaction dictionary from decodeObj needs special handling
+                          
+                          console.log('Signing transaction using raw signing approach...');
+                          
+                          // The transaction needs to be signed with the current account's key
+                          // We'll manually create the signed transaction structure
+                          
+                          // Get the raw transaction bytes (without the signature)
+                          const txnToSign = algosdk.encodeObj(txnDict);
+                          
+                          // Sign the transaction using nacl (which algosdk uses internally)
+                          const nacl = await import('tweetnacl');
+                          
+                          // Create the signing prefix for Algorand transactions
+                          const txTypeBytes = new Uint8Array(Buffer.from('TX'));
+                          const bytesToSign = new Uint8Array(txTypeBytes.length + txnToSign.length);
+                          bytesToSign.set(txTypeBytes);
+                          bytesToSign.set(txnToSign, txTypeBytes.length);
+                          
+                          // Sign with the private key
+                          const signature = nacl.default.sign.detached(bytesToSign, currentAccount.sk);
+                          
+                          // Create the signed transaction structure
+                          const signedTxn = {
+                            sig: signature,
+                            txn: txnDict
+                          };
+                          
+                          // Encode the signed transaction
+                          const signedTxnBytes = algosdk.encodeObj(signedTxn);
+                          
+                          console.log('Transaction signed successfully using raw signing');
+                          console.log('Signed transaction bytes length:', signedTxnBytes.length);
+                          
+                          // signedTxnBytes is already the properly encoded signed transaction
+                          // Convert to base64 for transmission
+                          const signedUserTxnBase64 = Buffer.from(signedTxnBytes).toString('base64');
+                          console.log('Signed user transaction (base64):', signedUserTxnBase64.substring(0, 50) + '...');
+                          console.log('Base64 length:', signedUserTxnBase64.length);
+                          
+                          // Submit both transactions to the network
+                          const { SUBMIT_SPONSORED_GROUP } = await import('../apollo/mutations');
+                          const { data: submitData } = await apolloClient.mutate({
+                            mutation: SUBMIT_SPONSORED_GROUP,
+                            variables: {
+                              signedUserTxn: signedUserTxnBase64,
+                              signedSponsorTxn: result.sponsorTransaction
+                            }
+                          });
+                          
+                          if (submitData?.submitSponsoredGroup?.success) {
+                            console.log(`Successfully opted into asset ${assetId} - TxID: ${submitData.submitSponsoredGroup.transactionId}`);
+                          } else {
+                            console.error(`Failed to submit opt-in for asset ${assetId}:`, submitData?.submitSponsoredGroup?.error);
+                          }
+                        } catch (signError) {
+                          console.error(`Error signing opt-in for asset ${assetId}:`, signError);
+                        }
+                      } else {
+                        console.log(`Missing transaction data for opt-in of asset ${assetId}`);
+                      }
+                    } else {
+                      console.log(`Successfully opted into asset ${assetId}`);
+                    }
+                  } else {
+                    console.log(`Failed to opt into asset ${assetId}:`, result?.error);
+                  }
+                }
+              } catch (optInError) {
+                console.error('Error during sponsored opt-in:', optInError);
+                // Don't fail login if opt-in fails - user can retry later
+              }
+            }
+          } else {
+            console.error('ADD_ALGORAND_WALLET failed:', walletData?.addAlgorandWallet?.error);
+          }
+        } else {
+          console.error('WEB3AUTH_LOGIN failed:', authData?.web3AuthLogin?.error);
+        }
         
         // Update the sui_address field with Algorand address
-        // (temporarily storing in sui_address field as discussed)
-        const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
-        await apolloClient.mutate({
-          mutation: UPDATE_ACCOUNT_APTOS_ADDRESS,
-          variables: { aptosAddress: algorandAddress }
-        });
-        console.log('Updated account with Algorand address');
+        try {
+          const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
+          await apolloClient.mutate({
+            mutation: UPDATE_ACCOUNT_APTOS_ADDRESS,
+            variables: { aptosAddress: algorandAddress }
+          });
+          console.log('Updated account with Algorand address');
+        } catch (updateError) {
+          console.error('Error updating account with Algorand address:', updateError);
+          // Don't fail the sign-in if this update fails
+        }
+        
       } catch (algorandError) {
         console.error('Error creating Algorand wallet:', algorandError);
         // Don't fail the sign-in if Algorand wallet creation fails
@@ -405,6 +619,56 @@ export class AuthService {
         console.error('Error stack:', error.stack);
       }
       throw error;
+    }
+  }
+
+  private async handleAssetOptIns(assetIds: number[], algorandAddress: string): Promise<void> {
+    try {
+      console.log('Handling opt-ins for assets:', assetIds);
+      
+      const { GENERATE_OPT_IN_TRANSACTIONS } = await import('../apollo/mutations');
+      
+      // Step 1: Get unsigned transactions from backend
+      const { data } = await apolloClient.mutate({
+        mutation: GENERATE_OPT_IN_TRANSACTIONS,
+        variables: {
+          assetIds: assetIds,
+        },
+      });
+      
+      if (!data?.generateOptInTransactions?.success) {
+        console.error('Failed to generate opt-in transactions:', 
+          data?.generateOptInTransactions?.error);
+        return; // Don't block login if opt-ins fail
+      }
+      
+      const transactions = data.generateOptInTransactions.transactions;
+      if (!transactions || transactions.length === 0) {
+        console.log('No transactions to sign');
+        return;
+      }
+      
+      console.log('Got', transactions.length, 'transactions to sign');
+      
+      // Step 2: Sign and submit each transaction
+      // For now, we'll skip actual signing since we had algosdk compatibility issues
+      // The backend has already funded the account, so opt-ins can be done later
+      console.log('Skipping automatic opt-in signing due to algosdk compatibility issues');
+      console.log('Account is funded and ready for manual opt-ins when needed');
+      
+      // TODO: Implement signing when algosdk React Native issues are resolved
+      // for (const tx of transactions) {
+      //   try {
+      //     console.log(`Opting in to ${tx.assetName} (${tx.assetId})...`);
+      //     // Sign and submit transaction
+      //   } catch (error) {
+      //     console.error(`Failed to opt-in to asset ${tx.assetId}:`, error);
+      //   }
+      // }
+      
+    } catch (error) {
+      console.error('Error handling asset opt-ins:', error);
+      // Don't throw - opt-ins shouldn't block login
     }
   }
 

@@ -666,8 +666,14 @@ def resolve_finalize_zk_login(self, info, input):
                     # Don't fail authentication if device tracking fails
 
             # Calculate is_phone_verified based on phone_number and phone_country
-            is_phone_verified = bool(account.user.phone_number and account.user.phone_country)
-            logger.info(f"Phone verification status: {is_phone_verified} (phone_number: {bool(account.user.phone_number)}, phone_country: {bool(account.user.phone_country)})")
+            # Use the user object directly, not account.user, to ensure we're checking the right object
+            is_phone_verified = bool(user.phone_number and user.phone_country)
+            logger.info(f"Phone verification status for user {user.id} (firebase_uid: {user.firebase_uid[:10]}...): {is_phone_verified}")
+            logger.info(f"  - user.phone_number: '{user.phone_number}' (exists: {bool(user.phone_number)})")
+            logger.info(f"  - user.phone_country: '{user.phone_country}' (exists: {bool(user.phone_country)})")
+            logger.info(f"  - account.user.id == user.id: {account.user.id == user.id}")
+            logger.info(f"  - account.user.phone_number: '{account.user.phone_number}' (exists: {bool(account.user.phone_number)})")
+            logger.info(f"  - account.user.phone_country: '{account.user.phone_country}' (exists: {bool(account.user.phone_country)})")
 
             return FinalizeZkLoginPayload(
                 success=True,

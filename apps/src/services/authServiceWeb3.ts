@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import { apolloClient } from '../apollo/client';
 import { web3AuthService, Web3AuthSession } from './web3AuthService';
 import { algorandWalletService, AlgorandAccount } from './algorandWalletService';
+import algorandService from './algorandService';
 
 // Type for storing JWT tokens
 type TokenStorage = {
@@ -97,6 +98,22 @@ export class AuthServiceWeb3 {
       const algoAccount = await algorandWalletService.createAccountFromWeb3Auth();
       this.algorandAccount = algoAccount;
       
+      // Auto opt-in to CONFIO token with sponsored transaction
+      console.log('AuthServiceWeb3 - Processing automatic CONFIO opt-in...');
+      try {
+        // Ensure algorandService has the account loaded
+        await algorandService.initializeWeb3Auth();
+        const optInSuccess = await algorandService.processSponsoredOptIn();
+        if (optInSuccess) {
+          console.log('AuthServiceWeb3 - Successfully opted into CONFIO token');
+        } else {
+          console.log('AuthServiceWeb3 - CONFIO opt-in failed or already opted in');
+        }
+      } catch (optInError) {
+        console.warn('AuthServiceWeb3 - Could not complete auto opt-in:', optInError);
+        // Don't fail the login if opt-in fails - user can retry later
+      }
+      
       // Prepare user info
       const userInfo: UserInfo = {
         email: session.user.email,
@@ -142,6 +159,22 @@ export class AuthServiceWeb3 {
       const algoAccount = await algorandWalletService.createAccountFromWeb3Auth();
       this.algorandAccount = algoAccount;
       
+      // Auto opt-in to CONFIO token with sponsored transaction
+      console.log('AuthServiceWeb3 - Processing automatic CONFIO opt-in...');
+      try {
+        // Ensure algorandService has the account loaded
+        await algorandService.initializeWeb3Auth();
+        const optInSuccess = await algorandService.processSponsoredOptIn();
+        if (optInSuccess) {
+          console.log('AuthServiceWeb3 - Successfully opted into CONFIO token');
+        } else {
+          console.log('AuthServiceWeb3 - CONFIO opt-in failed or already opted in');
+        }
+      } catch (optInError) {
+        console.warn('AuthServiceWeb3 - Could not complete auto opt-in:', optInError);
+        // Don't fail the login if opt-in fails - user can retry later
+      }
+      
       // Prepare user info
       const userInfo: UserInfo = {
         email: session.user.email,
@@ -171,11 +204,15 @@ export class AuthServiceWeb3 {
     try {
       console.log('AuthServiceWeb3 - Authenticating with backend...');
       
-      // Create mutation for Web3Auth authentication
+      // Step 1: Web3Auth Login to create/update user (no JWT tokens)
       const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
       
-      const { data } = await apolloClient.mutate({
+      console.log('AuthServiceWeb3 - Calling WEB3AUTH_LOGIN mutation...');
+      const { data: authData } = await apolloClient.mutate({
         mutation: WEB3AUTH_LOGIN,
+        context: {
+          skipAuth: true, // This is a login mutation, don't send existing token
+        },
         variables: {
           provider: session.user.typeOfLogin,
           web3AuthId: session.user.verifierId,
@@ -187,17 +224,45 @@ export class AuthServiceWeb3 {
         },
       });
       
-      if (data?.web3AuthLogin?.success) {
-        const tokens = {
-          accessToken: data.web3AuthLogin.accessToken,
-          refreshToken: data.web3AuthLogin.refreshToken,
-        };
-        
-        await this.storeTokens(tokens);
-        console.log('AuthServiceWeb3 - Backend authentication successful');
-      } else {
-        throw new Error(data?.web3AuthLogin?.error || 'Backend authentication failed');
+      if (!authData?.web3AuthLogin?.success) {
+        throw new Error(authData?.web3AuthLogin?.error || 'Backend user creation failed');
       }
+      
+      // Store JWT tokens from GraphQL response
+      const tokens = {
+        accessToken: authData.web3AuthLogin.accessToken,
+        refreshToken: authData.web3AuthLogin.refreshToken,
+      };
+      await this.storeTokens(tokens);
+      console.log('AuthServiceWeb3 - JWT tokens stored successfully');
+      
+      // Step 2: Add Algorand wallet and check for opt-ins
+      const { ADD_ALGORAND_WALLET } = await import('../apollo/mutations');
+      
+      console.log('AuthServiceWeb3 - Calling ADD_ALGORAND_WALLET mutation...');
+      const { data: walletData } = await apolloClient.mutate({
+        mutation: ADD_ALGORAND_WALLET,
+        variables: {
+          algorandAddress: userInfo.algorandAddress,
+          web3authId: session.user.verifierId,
+          provider: session.user.typeOfLogin,
+        },
+      });
+      
+      if (!walletData?.addAlgorandWallet?.success) {
+        throw new Error(walletData?.addAlgorandWallet?.error || 'Failed to add Algorand wallet');
+      }
+      
+      console.log('AuthServiceWeb3 - Wallet added successfully');
+      console.log('AuthServiceWeb3 - ALGO balance:', walletData.addAlgorandWallet.algoBalance);
+      console.log('AuthServiceWeb3 - Needs opt-in for assets:', walletData.addAlgorandWallet.needsOptIn);
+      
+      // Step 3: Handle asset opt-ins if needed
+      if (walletData.addAlgorandWallet.needsOptIn?.length > 0) {
+        await this.handleAssetOptIns(walletData.addAlgorandWallet.needsOptIn);
+      }
+      
+      console.log('AuthServiceWeb3 - Backend authentication complete');
     } catch (error) {
       console.error('AuthServiceWeb3 - Backend authentication error:', error);
       throw error;

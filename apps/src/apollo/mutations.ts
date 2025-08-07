@@ -1,5 +1,128 @@
 import { gql } from '@apollo/client';
 
+// Web3Auth and Algorand mutations
+export const WEB3AUTH_LOGIN = gql`
+  mutation Web3AuthLogin(
+    $provider: String!
+    $web3AuthId: String!
+    $email: String
+    $firstName: String
+    $lastName: String
+    $algorandAddress: String
+    $idToken: String
+  ) {
+    web3AuthLogin(
+      provider: $provider
+      web3AuthId: $web3AuthId
+      email: $email
+      firstName: $firstName
+      lastName: $lastName
+      algorandAddress: $algorandAddress
+      idToken: $idToken
+    ) {
+      success
+      error
+      accessToken
+      refreshToken
+      user {
+        id
+        email
+        algorandAddress
+      }
+    }
+  }
+`;
+
+export const ADD_ALGORAND_WALLET = gql`
+  mutation AddAlgorandWallet($algorandAddress: String!, $web3authId: String, $provider: String) {
+    addAlgorandWallet(
+      algorandAddress: $algorandAddress
+      web3authId: $web3authId
+      provider: $provider
+    ) {
+      success
+      error
+      isNewWallet
+      optedInAssets
+      needsOptIn
+      algoBalance
+      user {
+        id
+        email
+        algorandAddress
+      }
+    }
+  }
+`;
+
+export const GENERATE_OPT_IN_TRANSACTIONS = gql`
+  mutation GenerateOptInTransactions($assetIds: [Int]) {
+    generateOptInTransactions(assetIds: $assetIds) {
+      success
+      error
+      transactions
+    }
+  }
+`;
+
+export const ALGORAND_SPONSORED_SEND = gql`
+  mutation AlgorandSponsoredSend(
+    $recipient: String!
+    $amount: Float!
+    $assetType: String
+    $note: String
+  ) {
+    algorandSponsoredSend(
+      recipient: $recipient
+      amount: $amount
+      assetType: $assetType
+      note: $note
+    ) {
+      success
+      error
+      userTransaction
+      sponsorTransaction
+      groupId
+      totalFee
+      feeInAlgo
+    }
+  }
+`;
+
+export const ALGORAND_SPONSORED_OPT_IN = gql`
+  mutation AlgorandSponsoredOptIn($assetId: Int) {
+    algorandSponsoredOptIn(assetId: $assetId) {
+      success
+      error
+      alreadyOptedIn
+      requiresUserSignature
+      userTransaction
+      sponsorTransaction
+      groupId
+      assetId
+      assetName
+    }
+  }
+`;
+
+export const SUBMIT_SPONSORED_GROUP = gql`
+  mutation SubmitSponsoredGroup(
+    $signedUserTxn: String!
+    $signedSponsorTxn: String!
+  ) {
+    submitSponsoredGroup(
+      signedUserTxn: $signedUserTxn
+      signedSponsorTxn: $signedSponsorTxn
+    ) {
+      success
+      error
+      transactionId
+      confirmedRound
+      feesSaved
+    }
+  }
+`;
+
 export const REFRESH_ACCOUNT_BALANCE = gql`
   mutation RefreshAccountBalance {
     refreshAccountBalance {

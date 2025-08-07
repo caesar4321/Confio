@@ -398,6 +398,57 @@ export class AlgorandWalletService {
       console.error('Error clearing Algorand account:', error);
     }
   }
+
+  public async signTransaction(encodedTxn: string): Promise<Uint8Array> {
+    try {
+      if (!this.currentAccount) {
+        throw new Error('No Algorand account available for signing');
+      }
+
+      console.log('Signing transaction...');
+      
+      // Decode the base64 encoded transaction
+      const txnBytes = Buffer.from(encodedTxn, 'base64');
+      
+      // Decode the msgpack transaction
+      const msgpack = require('algosdk/dist/cjs/src/encoding/msgpack');
+      const txnObj = msgpack.decode(txnBytes);
+      
+      // Create transaction from decoded object
+      const txn = algosdk.Transaction.from_obj_for_encoding(txnObj);
+      
+      // Sign the transaction
+      const signedTxn = txn.signTxn(this.currentAccount.privateKey);
+      
+      console.log('Transaction signed successfully');
+      return signedTxn;
+    } catch (error) {
+      console.error('Error signing transaction:', error);
+      throw error;
+    }
+  }
+
+  public async submitTransaction(signedTxn: Uint8Array): Promise<string> {
+    try {
+      if (!this.client) {
+        throw new Error('Algorand client not initialized');
+      }
+
+      console.log('Submitting transaction to Algorand network...');
+      
+      // Submit the signed transaction
+      const { txId } = await this.client.sendRawTransaction(signedTxn).do();
+      
+      // Wait for confirmation
+      await algosdk.waitForConfirmation(this.client, txId, 4);
+      
+      console.log('Transaction confirmed:', txId);
+      return txId;
+    } catch (error) {
+      console.error('Error submitting transaction:', error);
+      throw error;
+    }
+  }
 }
 
 // Export singleton instance
