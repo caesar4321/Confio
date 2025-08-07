@@ -10,6 +10,8 @@ import { ALGORAND_SPONSORED_SEND, SUBMIT_SPONSORED_GROUP } from '../apollo/mutat
 import { AccountManager } from '../utils/accountManager';
 import { EnhancedAuthService } from '../services/enhancedAuthService';
 import algorandService from '../services/algorandService';
+import * as nacl from 'tweetnacl';
+import * as msgpack from 'algorand-msgpack';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -310,26 +312,48 @@ export const TransactionProcessingScreen = () => {
         setCurrentStep(2);
         console.log('TransactionProcessingScreen: Signing Algorand transaction...');
         
-        // Decode base64 transactions to Uint8Array
-        const userTxnBytes = Uint8Array.from(atob(userTransaction), c => c.charCodeAt(0));
-        const sponsorTxnBytes = Uint8Array.from(atob(sponsorTransaction), c => c.charCodeAt(0));
-        
-        // Sign the user transaction using the Algorand service
-        const currentAccount = algorandService.getCurrentAccount();
+        // Load the stored wallet if not already loaded
+        let currentAccount = algorandService.getCurrentAccount();
         if (!currentAccount) {
-          console.error('TransactionProcessingScreen: No Algorand account available');
-          setTransactionError('No Algorand wallet connected. Please set up your wallet first.');
+          console.log('TransactionProcessingScreen: Loading stored Algorand wallet...');
+          const loaded = await algorandService.loadStoredWallet();
+          if (!loaded) {
+            console.error('TransactionProcessingScreen: No Algorand wallet found in storage');
+            setTransactionError('No Algorand wallet connected. Please set up your wallet first.');
+            setIsComplete(true);
+            return;
+          }
+          currentAccount = algorandService.getCurrentAccount();
+        }
+        
+        if (!currentAccount) {
+          console.error('TransactionProcessingScreen: Failed to load Algorand account');
+          setTransactionError('Failed to load Algorand wallet. Please try again.');
           setIsComplete(true);
           return;
         }
         
-        // Sign the transaction using the imported algosdk
-        const algosdk = algorandService.getAlgosdk();
-        const txn = algosdk.decodeObj(userTxnBytes);
-        const signedUserTxn = txn.signTxn(currentAccount.sk);
+        // Decode the unsigned transaction
+        const userTxnBytes = Uint8Array.from(atob(userTransaction), c => c.charCodeAt(0));
+        const txnToSign = msgpack.decode(userTxnBytes);
         
-        // Convert to base64 for submission
-        const signedUserTxnB64 = btoa(String.fromCharCode(...signedUserTxn));
+        // Sign using raw nacl approach
+        const txTypeBytes = new Uint8Array(Buffer.from('TX'));
+        const bytesToSign = new Uint8Array(txTypeBytes.length + userTxnBytes.length);
+        bytesToSign.set(txTypeBytes);
+        bytesToSign.set(userTxnBytes, txTypeBytes.length);
+        
+        const signature = nacl.sign.detached(bytesToSign, currentAccount.sk);
+        
+        // Create signed transaction structure
+        const signedTxn = {
+          sig: signature,
+          txn: txnToSign
+        };
+        
+        // Encode the signed transaction
+        const signedTxnBytes = msgpack.encode(signedTxn);
+        const signedUserTxnB64 = btoa(String.fromCharCode(...new Uint8Array(signedTxnBytes)));
         
         console.log('TransactionProcessingScreen: Submitting signed Algorand transaction group...');
         
