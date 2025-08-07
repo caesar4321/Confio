@@ -392,8 +392,9 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             asyncio.set_event_loop(loop)
             
             try:
+                # Create the sponsored transfer (returns unsigned user txn and signed sponsor txn)
                 result = loop.run_until_complete(
-                    algorand_sponsor_service.create_and_submit_sponsored_transfer(
+                    algorand_sponsor_service.create_sponsored_transfer(
                         sender=account.aptos_address,
                         recipient=recipient,
                         amount=Decimal(str(amount)),
@@ -407,19 +408,20 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             if not result['success']:
                 return cls(success=False, error=result.get('error', 'Failed to create sponsored transaction'))
             
-            # Log the transaction
+            # Return the transactions for client signing
+            # The client will sign the user transaction and call SubmitSponsoredGroup
             logger.info(
                 f"Created sponsored {asset_type} transfer for user {user.id}: "
-                f"{amount} from {account.aptos_address[:10]}... to {recipient[:10]}..."
+                f"{amount} from {account.aptos_address[:10]}... to {recipient[:10]}... (awaiting client signature)"
             )
             
             return cls(
                 success=True,
-                user_transaction=result['user_transaction']['txn'],
-                sponsor_transaction=result['sponsor_transaction']['signed'],
+                user_transaction=result['user_transaction'],  # Base64 encoded unsigned transaction
+                sponsor_transaction=result['sponsor_transaction'],  # Base64 encoded signed transaction
                 group_id=result['group_id'],
                 total_fee=result['total_fee'],
-                fee_in_algo=result['fee_in_algo']
+                fee_in_algo=result['total_fee'] / 1_000_000  # Convert to ALGO
             )
             
         except Exception as e:

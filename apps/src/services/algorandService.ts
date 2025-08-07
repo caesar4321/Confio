@@ -455,6 +455,40 @@ class AlgorandService {
     }
   }
 
+  async loadStoredWallet(): Promise<boolean> {
+    try {
+      console.log('[AlgorandService] Loading stored wallet from Keychain...');
+      
+      const credentials = await Keychain.getInternetCredentials('algorand.confio.app', {
+        service: 'com.confio.algorand'
+      });
+      
+      if (credentials) {
+        const walletData = JSON.parse(credentials.password);
+        console.log('[AlgorandService] Found stored wallet for address:', walletData.address);
+        
+        // Reconstruct the account object
+        // The stored data has the private key as a HEX string (not base64!)
+        const privateKeyBuffer = Buffer.from(walletData.privateKey, 'hex');
+        
+        this.currentAccount = {
+          addr: walletData.address,
+          sk: privateKeyBuffer  // The 64-byte secret key
+        };
+        
+        console.log('[AlgorandService] Wallet loaded successfully');
+        console.log('[AlgorandService] Private key length:', privateKeyBuffer.length, 'bytes');
+        return true;
+      }
+      
+      console.log('[AlgorandService] No stored wallet found');
+      return false;
+    } catch (error) {
+      console.error('[AlgorandService] Error loading stored wallet:', error);
+      return false;
+    }
+  }
+
   async optInToConfioToken(): Promise<boolean> {
     try {
       console.log('[AlgorandService] Starting CONFIO token opt-in...');

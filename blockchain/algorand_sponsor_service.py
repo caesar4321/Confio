@@ -615,6 +615,124 @@ class AlgorandSponsorService:
                 'error': str(e)
             }
 
+    async def create_sponsored_transfer(
+        self,
+        sender: str,
+        recipient: str,
+        amount: Decimal,
+        asset_id: Optional[int] = None,
+        note: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a sponsored transfer transaction for client signing.
+        Similar to create_sponsored_opt_in but for transfers.
+        
+        Args:
+            sender: Sender's Algorand address
+            recipient: Recipient's Algorand address
+            amount: Amount to send
+            asset_id: Asset ID for ASA transfer, None for ALGO transfer
+            note: Optional transaction note
+            
+        Returns:
+            Dict with unsigned user transaction and signed sponsor transaction
+        """
+        try:
+            # Check sponsor health
+            health = await self.check_sponsor_health()
+            if not health['can_sponsor']:
+                return {
+                    'success': False,
+                    'error': 'Sponsor service unavailable',
+                    'details': health
+                }
+            
+            # Get suggested params
+            params = self.algod.suggested_params()
+            
+            # Create user transaction with 0 fee
+            if asset_id is None:
+                # ALGO transfer
+                amount_microalgos = int(amount * 1_000_000)
+                user_txn = PaymentTxn(
+                    sender=sender,
+                    sp=params,
+                    receiver=recipient,
+                    amt=amount_microalgos,
+                    note=note.encode() if note else None
+                )
+            else:
+                # ASA transfer
+                # Get asset info to determine decimals
+                asset_info = self.algod.asset_info(asset_id)
+                decimals = asset_info['params'].get('decimals', 0)
+                amount_units = int(amount * (10 ** decimals))
+                
+                user_txn = AssetTransferTxn(
+                    sender=sender,
+                    sp=params,
+                    receiver=recipient,
+                    amt=amount_units,
+                    index=asset_id,
+                    note=note.encode() if note else None
+                )
+            
+            user_txn.fee = 0  # User pays no fee
+            
+            # Calculate total fees
+            total_fee = params.min_fee * 2
+            
+            # Create fee payment transaction from sponsor
+            fee_payment_txn = PaymentTxn(
+                sender=self.sponsor_address,
+                sp=params,
+                receiver=sender,
+                amt=0,  # Just paying fees, no ALGO transfer
+                note=b"Transfer fee sponsorship"
+            )
+            fee_payment_txn.fee = total_fee  # Sponsor pays all fees
+            
+            # Create atomic group
+            txn_group = [user_txn, fee_payment_txn]
+            
+            # Assign group ID
+            gid = calculate_group_id(txn_group)
+            for txn in txn_group:
+                txn.group = gid
+            
+            # Sign sponsor transaction
+            signed_fee_txn = await self._sign_transaction(fee_payment_txn)
+            
+            if not signed_fee_txn:
+                return {
+                    'success': False,
+                    'error': 'Failed to sign sponsor transaction'
+                }
+            
+            # Return transaction data for client signing
+            # Encode the user transaction as base64 for client
+            import msgpack
+            user_txn_bytes = msgpack.packb(user_txn.dictify())
+            user_txn_b64 = base64.b64encode(user_txn_bytes).decode('utf-8')
+            
+            return {
+                'success': True,
+                'user_transaction': user_txn_b64,
+                'sponsor_transaction': signed_fee_txn,
+                'group_id': gid.hex(),
+                'total_fee': total_fee,
+                'amount': str(amount),
+                'recipient': recipient,
+                'asset_id': asset_id
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating sponsored transfer: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
     async def create_and_submit_sponsored_transfer(
         self,
         sender: str,
