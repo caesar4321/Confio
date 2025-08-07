@@ -1,5 +1,8 @@
 import * as Keychain from 'react-native-keychain';
 
+// CONFIO token configuration
+const CONFIO_ASSET_ID = 743890784; // Testnet CONFIO asset ID
+
 class AlgorandService {
   private web3auth: any = null;
   private algodClient: any = null;
@@ -82,10 +85,12 @@ class AlgorandService {
           healthCheck: async () => ({ do: async () => ({ status: 'ok' }) }),
           status: async () => ({ do: async () => ({ 'last-round': 0 }) }),
           getTransactionParams: async () => ({ do: async () => ({
-            'min-fee': 1000,
-            'last-round': 1000,
-            'genesis-hash': 'SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=',
-            'genesis-id': 'testnet-v1.0'
+            fee: 1000,
+            firstRound: 1000,
+            lastRound: 2000,
+            genesisHash: 'SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=',
+            genesisID: 'testnet-v1.0',
+            flatFee: false
           }) }),
           accountInformation: async (address: string) => ({ do: async () => ({
             amount: 0 // Mock balance
@@ -345,6 +350,11 @@ class AlgorandService {
       );
       
       console.log('Algorand wallet created/restored:', algorandAddress);
+      
+      // Skip automatic opt-in for now due to algosdk React Native compatibility issues
+      // The backend will handle opt-ins through the newer authServiceWeb3.ts flow
+      console.log('[AlgorandService] Skipping automatic opt-in - will be handled by backend');
+      
       return algorandAddress;
     } catch (error) {
       console.error('Error creating/restoring Algorand wallet:', error);
@@ -412,6 +422,14 @@ class AlgorandService {
     return this.currentAccount?.addr || null;
   }
 
+  getCurrentAccount(): any {
+    return this.currentAccount;
+  }
+
+  getAlgosdk(): any {
+    return this.algosdk;
+  }
+
   async clearWallet() {
     this.currentAccount = null;
     // Clear from Keychain
@@ -434,6 +452,599 @@ class AlgorandService {
     } catch (error) {
       console.error('Error retrieving stored Algorand address:', error);
       return null;
+    }
+  }
+
+  async optInToConfioToken(): Promise<boolean> {
+    try {
+      console.log('[AlgorandService] Starting CONFIO token opt-in...');
+      
+      // Ensure we have the necessary components
+      if (!this.algosdk || !this.currentAccount) {
+        console.error('[AlgorandService] Algorand SDK or account not initialized');
+        console.error('[AlgorandService] algosdk available:', !!this.algosdk);
+        console.error('[AlgorandService] currentAccount available:', !!this.currentAccount);
+        console.error('[AlgorandService] currentAccount.addr:', this.currentAccount?.addr);
+        return false;
+      }
+      
+      // Debug current account structure
+      console.log('[AlgorandService] Current account keys:', Object.keys(this.currentAccount));
+      console.log('[AlgorandService] Current account.addr type:', typeof this.currentAccount.addr);
+      console.log('[AlgorandService] Current account.addr value:', this.currentAccount.addr);
+
+      // Always create a fresh real Algod client for transactions
+      console.log('[AlgorandService] Creating real Algod client for opt-in...');
+      let realAlgodClient;
+      try {
+        // Use Algonode's free API for testnet
+        const algodToken = '';
+        const algodServer = 'https://testnet-api.algonode.cloud';
+        const algodPort = '';
+        
+        // Create a fresh client instance using the imported algosdk
+        if (this.algosdk.Algodv2) {
+          realAlgodClient = new this.algosdk.Algodv2(algodToken, algodServer, algodPort);
+        } else if (this.algosdk.default?.Algodv2) {
+          realAlgodClient = new this.algosdk.default.Algodv2(algodToken, algodServer, algodPort);
+        } else {
+          console.error('[AlgorandService] Algodv2 constructor not found in algosdk');
+          console.error('[AlgorandService] Available algosdk keys:', Object.keys(this.algosdk));
+          throw new Error('Algodv2 constructor not available');
+        }
+        console.log('[AlgorandService] Real Algod client created successfully');
+      } catch (clientError) {
+        console.error('[AlgorandService] Failed to create Algod client:', clientError);
+        return false;
+      }
+
+      console.log(`[AlgorandService] Opting in address ${this.currentAccount.addr} to CONFIO asset ${CONFIO_ASSET_ID}`);
+      
+      try {
+        // Get suggested params using the real client
+        const params = await realAlgodClient.getTransactionParams().do();
+        console.log('[AlgorandService] Got transaction params:', params);
+        
+        // Validate params structure
+        if (!params || typeof params !== 'object') {
+          console.error('[AlgorandService] Invalid transaction params:', params);
+          throw new Error('Transaction parameters are invalid');
+        }
+        
+        // Convert BigInt values to regular numbers and clean the object
+        const processedParams = {
+          fee: typeof params.fee === 'bigint' ? Number(params.fee) : (params.fee || 1000),
+          firstRound: typeof params.firstValid === 'bigint' ? Number(params.firstValid) : (params.firstValid || params.firstRound || 1000),
+          lastRound: typeof params.lastValid === 'bigint' ? Number(params.lastValid) : (params.lastValid || params.lastRound || 2000),
+          genesisHash: params.genesisHash || 'SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=',
+          genesisID: params.genesisID || params['genesis-id'] || 'testnet-v1.0',
+          flatFee: params.flatFee !== undefined ? params.flatFee : false
+        };
+        console.log('[AlgorandService] Processed transaction params:', processedParams);
+        
+        // Validate account address before creating transaction
+        if (!this.currentAccount.addr || typeof this.currentAccount.addr !== 'string') {
+          console.error('[AlgorandService] Invalid account address:', this.currentAccount.addr);
+          throw new Error('Account address is null or invalid');
+        }
+        
+        console.log('[AlgorandService] Using address:', this.currentAccount.addr);
+        
+        // Create opt-in transaction using direct method
+        console.log('[AlgorandService] Creating asset transfer transaction for opt-in...');
+        
+        let txn;
+        try {
+          // Try using Transaction constructor directly - most reliable approach
+          console.log('[AlgorandService] Trying direct Transaction constructor...');
+          
+          const txnParams = {
+            type: 'axfer',  // Asset transfer
+            from: this.currentAccount.addr,
+            to: this.currentAccount.addr,
+            assetIndex: CONFIO_ASSET_ID,
+            amount: 0,
+            fee: processedParams.fee,
+            firstRound: processedParams.firstRound,
+            lastRound: processedParams.lastRound,
+            genesisHash: processedParams.genesisHash,
+            genesisID: processedParams.genesisID,
+            flatFee: processedParams.flatFee
+          };
+          
+          console.log('[AlgorandService] Transaction params for constructor:', txnParams);
+          
+          if (this.algosdk.Transaction) {
+            txn = new this.algosdk.Transaction(txnParams);
+            console.log('[AlgorandService] Direct Transaction constructor succeeded');
+          } else {
+            throw new Error('Transaction constructor not found');
+          }
+          
+        } catch (directError) {
+          console.error('[AlgorandService] Direct constructor failed:', directError);
+          
+          try {
+            // Fallback to makeAssetTransferTxn if it exists
+            console.log('[AlgorandService] Trying makeAssetTransferTxn...');
+            if (this.algosdk.makeAssetTransferTxn) {
+              txn = this.algosdk.makeAssetTransferTxn(
+                this.currentAccount.addr,  // from
+                this.currentAccount.addr,  // to  
+                undefined,                 // closeRemainderTo
+                undefined,                 // revocationTarget
+                0,                        // amount (0 for opt-in)
+                undefined,                // note
+                CONFIO_ASSET_ID,          // assetIndex
+                processedParams           // suggestedParams
+              );
+              console.log('[AlgorandService] makeAssetTransferTxn succeeded');
+            } else {
+              throw new Error('makeAssetTransferTxn not found');
+            }
+          } catch (makeError) {
+            console.error('[AlgorandService] makeAssetTransferTxn failed:', makeError);
+            
+            // Final fallback to object method
+            let makeAssetTransferTxn;
+            if (this.algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject) {
+              makeAssetTransferTxn = this.algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject;
+            } else if (this.algosdk.default?.makeAssetTransferTxnWithSuggestedParamsFromObject) {
+              makeAssetTransferTxn = this.algosdk.default.makeAssetTransferTxnWithSuggestedParamsFromObject;
+            } else {
+              console.error('[AlgorandService] makeAssetTransferTxnWithSuggestedParamsFromObject not found');
+              console.error('[AlgorandService] Available algosdk methods:', Object.keys(this.algosdk));
+              throw new Error('No suitable asset transfer transaction method found');
+            }
+            
+            console.log('[AlgorandService] Creating transaction with object method and params:', {
+              from: this.currentAccount.addr,
+              to: this.currentAccount.addr,
+              amount: 0,
+              assetIndex: CONFIO_ASSET_ID,
+              suggestedParams: processedParams
+            });
+            
+            txn = makeAssetTransferTxn({
+              from: this.currentAccount.addr,
+              to: this.currentAccount.addr,
+              amount: 0,
+              assetIndex: CONFIO_ASSET_ID,
+              suggestedParams: processedParams,
+            });
+          }
+        }
+        console.log('[AlgorandService] Created opt-in transaction');
+
+        // Sign transaction
+        const signedTxn = txn.signTxn(this.currentAccount.sk);
+        console.log('[AlgorandService] Transaction signed');
+        
+        // Submit transaction using the real client
+        const { txId } = await realAlgodClient.sendRawTransaction(signedTxn).do();
+        console.log(`[AlgorandService] Transaction submitted. TxID: ${txId}`);
+        
+        // Wait for confirmation using the real client
+        const confirmedTxn = await this.algosdk.waitForConfirmation(realAlgodClient, txId, 4);
+        console.log(`[AlgorandService] Transaction confirmed in round ${confirmedTxn['confirmed-round']}`);
+        
+        // Store successful opt-in status
+        await Keychain.setInternetCredentials(
+          'algorand.confio.optin',
+          'confio',
+          JSON.stringify({
+            assetId: CONFIO_ASSET_ID,
+            address: this.currentAccount.addr,
+            optedInAt: new Date().toISOString(),
+            status: 'confirmed',
+            txId: txId,
+            confirmedRound: confirmedTxn['confirmed-round']
+          }),
+          {
+            service: 'com.confio.algorand.optin'
+          }
+        );
+        
+        console.log(`[AlgorandService] Successfully opted in to CONFIO token. TxID: ${txId}`);
+        return true;
+        
+      } catch (txError: any) {
+        // Check if already opted in
+        if (txError?.message?.includes('already owns this asset')) {
+          console.log('[AlgorandService] Already opted in to CONFIO token');
+          
+          // Store the opt-in status even though it was already done
+          await Keychain.setInternetCredentials(
+            'algorand.confio.optin',
+            'confio',
+            JSON.stringify({
+              assetId: CONFIO_ASSET_ID,
+              address: this.currentAccount.addr,
+              optedInAt: new Date().toISOString(),
+              status: 'already_opted_in'
+            }),
+            {
+              service: 'com.confio.algorand.optin'
+            }
+          );
+          
+          return true;
+        }
+        
+        console.error('[AlgorandService] Transaction error:', txError);
+        throw txError;
+      }
+      
+    } catch (error) {
+      console.error('[AlgorandService] Error opting in to CONFIO token:', error);
+      return false;
+    }
+  }
+
+  async checkConfioOptInStatus(): Promise<boolean> {
+    try {
+      const credentials = await Keychain.getInternetCredentials('algorand.confio.optin', {
+        service: 'com.confio.algorand.optin'
+      });
+      
+      if (credentials) {
+        const optInData = JSON.parse(credentials.password);
+        return optInData.assetId === CONFIO_ASSET_ID;
+      }
+      return false;
+    } catch (error) {
+      console.error('[AlgorandService] Error checking CONFIO opt-in status:', error);
+      return false;
+    }
+  }
+
+  async createSponsoredSendTransaction(
+    toAddress: string,
+    amount: number,
+    assetType: 'CUSD' | 'CONFIO' | 'USDC' = 'CUSD'
+  ): Promise<{
+    userTransaction: Uint8Array;
+    sponsorTransaction: Uint8Array;
+    groupId: string;
+    totalFee: number;
+  } | null> {
+    try {
+      await this.ensureInitialized();
+      
+      if (!this.currentAccount) {
+        console.error('[AlgorandService] No account available for sponsored send');
+        return null;
+      }
+
+      console.log(`[AlgorandService] Creating sponsored send: ${amount} ${assetType} to ${toAddress}`);
+      
+      // Call the backend to create sponsored transaction
+      const response = await fetch('https://api.confio.app/graphql', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Add auth token if available
+        },
+        body: JSON.stringify({
+          query: `
+            mutation AlgorandSponsoredSend($recipient: String!, $amount: Float!, $assetType: String!) {
+              algorandSponsoredSend(recipient: $recipient, amount: $amount, assetType: $assetType) {
+                success
+                error
+                userTransaction
+                sponsorTransaction
+                groupId
+                totalFee
+                feeInAlgo
+              }
+            }
+          `,
+          variables: {
+            recipient: toAddress,
+            amount: amount,
+            assetType: assetType
+          }
+        })
+      });
+
+      const data = await response.json();
+      
+      if (!data.data?.algorandSponsoredSend?.success) {
+        console.error('[AlgorandService] Failed to create sponsored transaction:', data.data?.algorandSponsoredSend?.error);
+        return null;
+      }
+
+      const result = data.data.algorandSponsoredSend;
+      
+      // Decode base64 transactions
+      const userTxn = Uint8Array.from(atob(result.userTransaction), c => c.charCodeAt(0));
+      const sponsorTxn = Uint8Array.from(atob(result.sponsorTransaction), c => c.charCodeAt(0));
+      
+      return {
+        userTransaction: userTxn,
+        sponsorTransaction: sponsorTxn,
+        groupId: result.groupId,
+        totalFee: result.totalFee
+      };
+      
+    } catch (error) {
+      console.error('[AlgorandService] Error creating sponsored send:', error);
+      return null;
+    }
+  }
+
+  async signAndSubmitSponsoredTransaction(
+    userTransaction: Uint8Array,
+    sponsorTransaction: Uint8Array
+  ): Promise<string | null> {
+    try {
+      await this.ensureInitialized();
+      
+      if (!this.currentAccount) {
+        console.error('[AlgorandService] No account available for signing');
+        return null;
+      }
+
+      console.log('[AlgorandService] Signing user transaction...');
+      
+      // Decode and sign the user transaction
+      const txn = this.algosdk.decodeObj(userTransaction);
+      const signedUserTxn = txn.signTxn(this.currentAccount.sk);
+      
+      // Encode for submission
+      const signedUserTxnB64 = btoa(String.fromCharCode(...signedUserTxn));
+      const sponsorTxnB64 = btoa(String.fromCharCode(...sponsorTransaction));
+      
+      console.log('[AlgorandService] Submitting sponsored transaction group...');
+      
+      // Submit to backend
+      const response = await fetch('https://api.confio.app/graphql', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Add auth token if available
+        },
+        body: JSON.stringify({
+          query: `
+            mutation SubmitSponsoredGroup($signedUserTxn: String!, $signedSponsorTxn: String!) {
+              submitSponsoredGroup(signedUserTxn: $signedUserTxn, signedSponsorTxn: $signedSponsorTxn) {
+                success
+                error
+                transactionId
+                confirmedRound
+                feesSaved
+              }
+            }
+          `,
+          variables: {
+            signedUserTxn: signedUserTxnB64,
+            signedSponsorTxn: sponsorTxnB64
+          }
+        })
+      });
+
+      const data = await response.json();
+      
+      if (!data.data?.submitSponsoredGroup?.success) {
+        console.error('[AlgorandService] Failed to submit sponsored transaction:', data.data?.submitSponsoredGroup?.error);
+        return null;
+      }
+
+      const result = data.data.submitSponsoredGroup;
+      console.log(`[AlgorandService] Transaction confirmed! ID: ${result.transactionId}, Round: ${result.confirmedRound}`);
+      console.log(`[AlgorandService] Fees saved: ${result.feesSaved} ALGO`);
+      
+      return result.transactionId;
+      
+    } catch (error) {
+      console.error('[AlgorandService] Error signing/submitting sponsored transaction:', error);
+      return null;
+    }
+  }
+
+  async processSponsoredOptIn(
+    assetId: number = 743890784 // Default to CONFIO
+  ): Promise<boolean> {
+    try {
+      await this.ensureInitialized();
+      
+      if (!this.currentAccount) {
+        console.error('[AlgorandService] No account available for opt-in');
+        return false;
+      }
+
+      console.log(`[AlgorandService] Processing sponsored opt-in for asset ${assetId}`);
+      
+      // Step 1: Request sponsored opt-in from backend using Apollo client
+      // Import at the top of the function to avoid Metro bundler issues
+      const apolloClient = require('../apollo/client').apolloClient;
+      const ALGORAND_SPONSORED_OPT_IN = require('../apollo/mutations').ALGORAND_SPONSORED_OPT_IN;
+      
+      const { data } = await apolloClient.mutate({
+        mutation: ALGORAND_SPONSORED_OPT_IN,
+        variables: {
+          assetId: assetId
+        }
+      });
+
+      const result = data?.algorandSponsoredOptIn;
+      
+      if (!result?.success) {
+        console.error('[AlgorandService] Failed to create sponsored opt-in:', result?.error);
+        return false;
+      }
+
+      // Check if already opted in
+      if (result.alreadyOptedIn) {
+        console.log(`[AlgorandService] Already opted into ${result.assetName} (${result.assetId})`);
+        return true;
+      }
+
+      // Check if user signature is required
+      if (!result.requiresUserSignature) {
+        console.log(`[AlgorandService] Opt-in completed server-side for ${result.assetName}`);
+        return true;
+      }
+
+      console.log(`[AlgorandService] Signing opt-in transaction for ${result.assetName}...`);
+      
+      // Step 2: Decode and sign the user transaction
+      const userTxnBytes = Uint8Array.from(atob(result.userTransaction), c => c.charCodeAt(0));
+      
+      // Decode the transaction object
+      const txn = this.algosdk.decodeObj(userTxnBytes);
+      
+      // Sign with user's private key from Web3Auth
+      const signedUserTxn = txn.signTxn(this.currentAccount.sk);
+      
+      // Convert to base64
+      const signedUserTxnB64 = btoa(String.fromCharCode(...signedUserTxn));
+      
+      console.log(`[AlgorandService] Submitting signed opt-in for ${result.assetName}...`);
+      
+      // Step 3: Submit the signed transaction group
+      const submitResponse = await fetch('https://api.confio.app/graphql', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // Add auth token if available
+        },
+        body: JSON.stringify({
+          query: `
+            mutation SubmitSponsoredGroup($signedUserTxn: String!, $signedSponsorTxn: String!) {
+              submitSponsoredGroup(
+                signedUserTxn: $signedUserTxn
+                signedSponsorTxn: $signedSponsorTxn
+              ) {
+                success
+                error
+                transactionId
+                confirmedRound
+                feesSaved
+              }
+            }
+          `,
+          variables: {
+            signedUserTxn: signedUserTxnB64,
+            signedSponsorTxn: result.sponsorTransaction // Already signed by server
+          }
+        })
+      });
+
+      const submitData = await submitResponse.json();
+      const submitResult = submitData.data?.submitSponsoredGroup;
+      
+      if (!submitResult?.success) {
+        console.error('[AlgorandService] Failed to submit opt-in:', submitResult?.error);
+        return false;
+      }
+
+      console.log(`[AlgorandService] Successfully opted into ${result.assetName}!`);
+      console.log(`[AlgorandService] Transaction ID: ${submitResult.transactionId}`);
+      console.log(`[AlgorandService] Fees saved: ${submitResult.feesSaved} ALGO`);
+      
+      // Store opt-in status in keychain
+      await Keychain.setInternetCredentials(
+        'algorand.confio.optin',
+        result.assetName.toLowerCase(),
+        JSON.stringify({
+          assetId: result.assetId,
+          address: this.currentAccount.addr,
+          optedInAt: new Date().toISOString(),
+          status: 'confirmed',
+          txId: submitResult.transactionId,
+          confirmedRound: submitResult.confirmedRound
+        }),
+        {
+          service: 'com.confio.algorand.optin'
+        }
+      );
+      
+      return true;
+      
+    } catch (error) {
+      console.error('[AlgorandService] Error processing sponsored opt-in:', error);
+      return false;
+    }
+  }
+
+  async sponsoredSend(
+    toAddress: string,
+    amount: number,
+    assetType: 'CUSD' | 'CONFIO' | 'USDC' = 'CUSD'
+  ): Promise<string | null> {
+    try {
+      console.log(`[AlgorandService] Initiating sponsored send of ${amount} ${assetType} to ${toAddress}`);
+      
+      // Step 1: Create sponsored transaction
+      const sponsoredTx = await this.createSponsoredSendTransaction(toAddress, amount, assetType);
+      if (!sponsoredTx) {
+        console.error('[AlgorandService] Failed to create sponsored transaction');
+        return null;
+      }
+      
+      console.log(`[AlgorandService] Created sponsored transaction. Group ID: ${sponsoredTx.groupId}`);
+      
+      // Step 2: Sign and submit
+      const txId = await this.signAndSubmitSponsoredTransaction(
+        sponsoredTx.userTransaction,
+        sponsoredTx.sponsorTransaction
+      );
+      
+      if (!txId) {
+        console.error('[AlgorandService] Failed to submit sponsored transaction');
+        return null;
+      }
+      
+      console.log(`[AlgorandService] Successfully sent ${amount} ${assetType} with sponsored fees. TxID: ${txId}`);
+      return txId;
+      
+    } catch (error) {
+      console.error('[AlgorandService] Error in sponsored send:', error);
+      return null;
+    }
+  }
+
+  async getConfioBalance(address?: string): Promise<number> {
+    try {
+      await this.ensureInitialized();
+      
+      // Create Algod client if needed
+      if (!this.algodClient || typeof this.algodClient.accountInformation !== 'function') {
+        const algodToken = '';
+        const algodServer = 'https://testnet-api.algonode.cloud';
+        const algodPort = '';
+        this.algodClient = new this.algosdk.Algodv2(algodToken, algodServer, algodPort);
+      }
+
+      const addr = address || this.currentAccount?.addr;
+      if (!addr) {
+        console.error('[AlgorandService] No address provided for CONFIO balance check');
+        return 0;
+      }
+
+      try {
+        const accountInfo = await this.algodClient.accountInformation(addr).do();
+        
+        // Find CONFIO asset in the account's assets
+        const confioAsset = accountInfo.assets?.find((asset: any) => asset['asset-id'] === CONFIO_ASSET_ID);
+        
+        if (confioAsset) {
+          // CONFIO has 6 decimals, so divide by 1,000,000
+          const balance = confioAsset.amount / 1000000;
+          console.log(`[AlgorandService] CONFIO balance for ${addr}: ${balance}`);
+          return balance;
+        } else {
+          console.log(`[AlgorandService] Address ${addr} not opted in to CONFIO`);
+          return 0;
+        }
+      } catch (error) {
+        console.error('[AlgorandService] Error fetching CONFIO balance:', error);
+        return 0;
+      }
+    } catch (error) {
+      console.error('[AlgorandService] Error in getConfioBalance:', error);
+      return 0;
     }
   }
 }

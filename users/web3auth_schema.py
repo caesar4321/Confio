@@ -20,16 +20,129 @@ class Web3AuthUserType(DjangoObjectType):
     
     def resolve_algorand_address(self, info):
         try:
-            account = self.accounts.filter(account_type='personal').first()
+            account = self.accounts.filter(account_type='personal', deleted_at__isnull=True).first()
             # Temporarily using aptos_address field to store Algorand address
             return account.aptos_address if account else None
-        except:
+        except Exception as e:
+            logger.error(f"Error resolving algorand_address: {e}")
             return None
 
 
-# Removed Web3AuthLoginMutation - we don't need it
-# Users authenticate with existing Firebase flow
-# Then add Algorand wallet with AddAlgorandWalletMutation
+class Web3AuthLoginMutation(graphene.Mutation):
+    """
+    Web3Auth authentication mutation.
+    Creates/updates user data AND generates JWT tokens using the existing JWT system.
+    """
+    class Arguments:
+        provider = graphene.String(required=True)  # 'google', 'apple', etc.
+        web3_auth_id = graphene.String(required=True)  # Web3Auth verifier ID
+        email = graphene.String()
+        first_name = graphene.String()
+        last_name = graphene.String() 
+        algorand_address = graphene.String()
+        id_token = graphene.String()  # Firebase ID token for verification
+    
+    success = graphene.Boolean()
+    error = graphene.String()
+    access_token = graphene.String()
+    refresh_token = graphene.String()
+    user = graphene.Field(Web3AuthUserType)
+    
+    @classmethod
+    def mutate(cls, root, info, provider, web3_auth_id, email=None, first_name=None, 
+               last_name=None, algorand_address=None, id_token=None):
+        try:
+            from django.contrib.auth import get_user_model
+            from graphql_jwt.utils import jwt_encode
+            from users.jwt import jwt_payload_handler, refresh_token_payload_handler
+            
+            User = get_user_model()
+            
+            # Find or create user based on Firebase UID (which is the Web3Auth verifier ID)
+            user, created = User.objects.get_or_create(
+                firebase_uid=web3_auth_id,
+                defaults={
+                    'email': email or f'{web3_auth_id}@confio.placeholder',
+                    'first_name': first_name or '',
+                    'last_name': last_name or '',
+                    'username': email or f'user_{web3_auth_id[:8]}',
+                }
+            )
+            
+            # Update user info if provided
+            if not created:
+                if email and user.email != email:
+                    user.email = email
+                if first_name and user.first_name != first_name:
+                    user.first_name = first_name
+                if last_name and user.last_name != last_name:
+                    user.last_name = last_name
+                user.save()
+            
+            # Create/update Algorand account if address provided
+            if algorand_address:
+                account, _ = Account.objects.get_or_create(
+                    user=user,
+                    account_type='personal',
+                    defaults={
+                        'aptos_address': algorand_address,  # Temporarily using aptos_address field
+                    }
+                )
+                if account.aptos_address != algorand_address:
+                    account.aptos_address = algorand_address
+                    account.save()
+                
+                # Trigger sponsored opt-in for CONFIO (async)
+                from blockchain.algorand_sponsor_service import algorand_sponsor_service
+                from blockchain.algorand_account_manager import AlgorandAccountManager
+                import asyncio
+                
+                if AlgorandAccountManager.CONFIO_ASSET_ID:
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        opt_in_result = loop.run_until_complete(
+                            algorand_sponsor_service.execute_server_side_opt_in(
+                                user_address=algorand_address,
+                                asset_id=AlgorandAccountManager.CONFIO_ASSET_ID
+                            )
+                        )
+                        loop.close()
+                        
+                        if opt_in_result.get('success'):
+                            if opt_in_result.get('already_opted_in'):
+                                logger.info(f"User {user.id} already opted into CONFIO")
+                            else:
+                                logger.info(f"Created CONFIO opt-in for user {user.id}")
+                    except Exception as e:
+                        logger.warning(f"Could not create auto opt-in for CONFIO: {e}")
+            
+            # Generate JWT tokens using the existing system
+            # Access token with default personal account context
+            access_payload = jwt_payload_handler(user, context=None)
+            access_token = jwt_encode(access_payload)
+            
+            # Refresh token with default personal account context  
+            refresh_payload = refresh_token_payload_handler(
+                user, 
+                account_type='personal', 
+                account_index=0, 
+                business_id=None
+            )
+            refresh_token = jwt_encode(refresh_payload)
+            
+            logger.info(f'Web3Auth user {"created" if created else "updated"} for {email} ({provider})')
+            
+            return cls(
+                success=True,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                user=user
+            )
+            
+        except Exception as e:
+            logger.error(f'Web3Auth login error: {str(e)}')
+            return cls(success=False, error=str(e))
 
 
 class AddAlgorandWalletMutation(graphene.Mutation):
@@ -37,6 +150,8 @@ class AddAlgorandWalletMutation(graphene.Mutation):
     Add Algorand wallet to an existing Firebase-authenticated user.
     This is called after the user has already signed in with Firebase
     and Web3Auth has generated their Algorand wallet.
+    
+    Automatically opts the wallet into CONFIO and future cUSD tokens.
     """
     class Arguments:
         algorand_address = graphene.String(required=True)
@@ -47,6 +162,10 @@ class AddAlgorandWalletMutation(graphene.Mutation):
     error = graphene.String()
     user = graphene.Field(Web3AuthUserType)
     is_new_wallet = graphene.Boolean()
+    opted_in_assets = graphene.List(graphene.Int)
+    opt_in_errors = graphene.List(graphene.String)
+    needs_opt_in = graphene.List(graphene.Int)  # Assets that need frontend opt-in
+    algo_balance = graphene.Float()  # Current ALGO balance
     
     @classmethod
     def mutate(cls, root, info, algorand_address, web3auth_id=None, provider=None):
@@ -59,31 +178,67 @@ class AddAlgorandWalletMutation(graphene.Mutation):
             if not algorand_address or len(algorand_address) != 58:
                 return cls(success=False, error='Invalid Algorand address')
             
-            # Get or create the user's personal account
-            account, created = Account.objects.get_or_create(
+            # Use the AlgorandAccountManager for get_or_create with auto opt-ins
+            from blockchain.algorand_account_manager import AlgorandAccountManager
+            
+            result = AlgorandAccountManager.get_or_create_algorand_account(
                 user=user,
-                account_type='personal',
-                defaults={}
+                existing_address=algorand_address
             )
             
-            # Check if this is a new wallet
-            # Temporarily using aptos_address field to store Algorand address
-            is_new = not account.aptos_address
+            account = result['account']
+            is_new = result['created']
+            opted_in_assets = result['opted_in_assets']
+            opt_in_errors = result['errors']
             
-            # Update wallet address (using aptos_address field temporarily)
-            account.aptos_address = algorand_address
-            if web3auth_id:
-                account.web3auth_id = web3auth_id
-            if provider:
-                account.web3auth_provider = provider
-            account.save()
+            # TODO: Store Web3Auth metadata when needed
+            # For now, just log the association
+            if web3auth_id or provider:
+                logger.info(f"Web3Auth metadata for user {user.firebase_uid}: id={web3auth_id}, provider={provider}")
             
-            logger.info(f'{"Added" if is_new else "Updated"} Algorand wallet for user {user.firebase_uid}: {algorand_address}')
+            logger.info(
+                f'{"Added" if is_new else "Updated"} Algorand wallet for user {user.firebase_uid}: {algorand_address}. '
+                f'Opted into assets: {opted_in_assets}'
+            )
+            
+            if opt_in_errors:
+                logger.warning(f'Opt-in errors for {algorand_address}: {opt_in_errors}')
+            
+            # Check what assets need opt-in from frontend
+            from algosdk.v2client import algod
+            needs_opt_in = []
+            algo_balance = 0.0
+            
+            try:
+                algod_client = algod.AlgodClient(
+                    AlgorandAccountManager.ALGOD_TOKEN,
+                    AlgorandAccountManager.ALGOD_ADDRESS
+                )
+                account_info = algod_client.account_info(algorand_address)
+                algo_balance = account_info.get('amount', 0) / 1_000_000  # Convert to ALGO
+                
+                # Check which assets need opt-in
+                current_assets = [asset['asset-id'] for asset in account_info.get('assets', [])]
+                
+                # CONFIO should be opted in
+                if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_assets:
+                    needs_opt_in.append(AlgorandAccountManager.CONFIO_ASSET_ID)
+                
+                # Future: cUSD when available
+                # if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_assets:
+                #     needs_opt_in.append(AlgorandAccountManager.CUSD_ASSET_ID)
+                
+            except Exception as e:
+                logger.error(f"Error checking opt-in status: {e}")
             
             return cls(
                 success=True, 
                 user=user,
-                is_new_wallet=is_new
+                is_new_wallet=is_new,
+                opted_in_assets=opted_in_assets,
+                opt_in_errors=opt_in_errors,
+                needs_opt_in=needs_opt_in,
+                algo_balance=algo_balance
             )
             
         except Exception as e:
@@ -160,10 +315,9 @@ class VerifyAlgorandOwnershipMutation(graphene.Mutation):
             verified = True  # Placeholder
             
             if verified:
-                # Mark account as verified
-                account.algorand_verified = True
-                account.algorand_verified_at = datetime.now()
-                account.save()
+                # TODO: Implement account verification when needed
+                # For now, just log the verification
+                logger.info(f"Algorand address verified for user {user.id}")
             
             return cls(success=True, verified=verified)
             
@@ -216,6 +370,7 @@ class CreateAlgorandTransactionMutation(graphene.Mutation):
 
 
 class Web3AuthMutation(graphene.ObjectType):
+    web3_auth_login = Web3AuthLoginMutation.Field()
     add_algorand_wallet = AddAlgorandWalletMutation.Field()
     update_algorand_address = UpdateAlgorandAddressMutation.Field()
     verify_algorand_ownership = VerifyAlgorandOwnershipMutation.Field()

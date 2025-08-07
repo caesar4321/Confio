@@ -12,7 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from .models import Balance
-from .pysui_client import get_pysui_client
+from .algorand_client import get_algorand_client
 from users.models import Account
 
 logger = logging.getLogger(__name__)
@@ -197,16 +197,17 @@ class BalanceService:
         asyncio.set_event_loop(loop)
         
         async def get_balance():
-            async with await get_pysui_client() as client:
+            async with await get_algorand_client() as client:
                 if token == 'CUSD':
-                    return await client.get_cusd_balance(account.aptos_address)
+                    # Use USDC as cUSD until we create custom cUSD ASA
+                    return await client.get_usdc_balance(account.aptos_address)
                 elif token == 'CONFIO':
                     return await client.get_confio_balance(account.aptos_address)
                 elif token == 'SUI':
-                    return await client.get_sui_balance(account.aptos_address)
-                elif token == 'USDC':
-                    # USDC not implemented in pysui_client yet, return 0
+                    # No SUI on Algorand - return 0
                     return Decimal('0')
+                elif token == 'USDC':
+                    return await client.get_usdc_balance(account.aptos_address)
                 else:
                     return Decimal('0')
         

@@ -1,0 +1,39 @@
+"""
+Blockchain GraphQL schema - Algorand operations
+"""
+import graphene
+from .mutations import (
+    EnsureAlgorandReadyMutation,
+    GenerateOptInTransactionsMutation,
+    OptInToAssetMutation,
+    CheckAssetOptInsQuery,
+    AlgorandSponsoredSendMutation,
+    SubmitSponsoredGroupMutation,
+    AlgorandSponsoredOptInMutation,
+    CheckSponsorHealthQuery
+)
+
+
+class Query(graphene.ObjectType):
+    """Blockchain-related queries"""
+    check_asset_opt_ins = graphene.Field(CheckAssetOptInsQuery)
+    check_sponsor_health = graphene.Field(CheckSponsorHealthQuery)
+    
+    def resolve_check_asset_opt_ins(self, info):
+        return CheckAssetOptInsQuery()
+    
+    def resolve_check_sponsor_health(self, info):
+        return CheckSponsorHealthQuery()
+
+
+class Mutation(graphene.ObjectType):
+    """Blockchain-related mutations"""
+    ensure_algorand_ready = EnsureAlgorandReadyMutation.Field()
+    generate_opt_in_transactions = GenerateOptInTransactionsMutation.Field()
+    opt_in_to_asset = OptInToAssetMutation.Field()
+    algorand_sponsored_send = AlgorandSponsoredSendMutation.Field()
+    algorand_sponsored_opt_in = AlgorandSponsoredOptInMutation.Field()
+    submit_sponsored_group = SubmitSponsoredGroupMutation.Field()
+
+
+__all__ = ['Query', 'Mutation']

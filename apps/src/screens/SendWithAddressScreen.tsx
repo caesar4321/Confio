@@ -96,18 +96,31 @@ export const SendWithAddressScreen = () => {
       setShowError(true);
       return;
     }
-    if (!destination || !destination.startsWith('0x')) {
+    if (!destination) {
       setErrorMessage('Dirección de destino inválida');
       setShowError(true);
       return;
     }
     
-    // Validate Sui address format (0x + 64 hex characters)
-    if (!destination.match(/^0x[0-9a-f]{64}$/)) {
-      if (destination.length < 66) {
-        setErrorMessage('La dirección Sui debe tener 64 caracteres hexadecimales después de 0x');
+    // Check if it's an Algorand address (58 characters, uppercase letters and numbers 2-7)
+    const isAlgorandAddress = destination.length === 58 && /^[A-Z2-7]{58}$/.test(destination);
+    
+    // Check if it's a Sui address (0x + 64 hex characters)
+    const isSuiAddress = destination.startsWith('0x') && destination.match(/^0x[0-9a-f]{64}$/);
+    
+    if (!isAlgorandAddress && !isSuiAddress) {
+      if (destination.startsWith('0x')) {
+        // Attempted Sui address
+        if (destination.length < 66) {
+          setErrorMessage('La dirección Sui debe tener 64 caracteres hexadecimales después de 0x');
+        } else {
+          setErrorMessage('La dirección contiene caracteres inválidos. Use solo 0-9 y a-f');
+        }
+      } else if (destination.length === 58) {
+        // Attempted Algorand address
+        setErrorMessage('La dirección Algorand debe contener solo letras mayúsculas y números 2-7');
       } else {
-        setErrorMessage('La dirección contiene caracteres inválidos. Use solo 0-9 y a-f');
+        setErrorMessage('Formato de dirección inválido. Use una dirección Algorand (58 caracteres) o Sui (0x + 64 hex)');
       }
       setShowError(true);
       return;

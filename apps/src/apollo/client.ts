@@ -195,13 +195,34 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   }
 });
 
-const authLink = setContext(async (operation, { headers }) => {
+const authLink = setContext(async (operation, previousContext) => {
   console.log('AuthLink called for operation:', operation.operationName);
+  
+  // Extract headers from previous context
+  const { headers = {} } = previousContext || {};
+
+  // Check if we should skip authentication (for login mutations)
+  // The custom context is passed through previousContext when using mutation context option
+  if (previousContext?.skipAuth) {
+    console.log('Skipping authentication for operation:', operation.operationName);
+    return { 
+      headers: {
+        ...headers,
+        // Ensure basic headers are always present
+        'Content-Type': 'application/json',
+      }
+    };
+  }
 
   // Skip token refresh for the refresh token mutation itself
   if (operation.operationName === 'RefreshToken') {
     console.log('Skipping token refresh for RefreshToken operation');
-    return { headers };
+    return { 
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      }
+    };
   }
 
   try {
@@ -224,7 +245,12 @@ const authLink = setContext(async (operation, { headers }) => {
 
     if (!credentials) {
       console.log('No credentials found in Keychain');
-      return { headers };
+      return { 
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+        }
+      };
     }
 
     // Type assertion to handle the false | UserCredentials type
@@ -259,7 +285,12 @@ const authLink = setContext(async (operation, { headers }) => {
         service: AUTH_KEYCHAIN_SERVICE,
         username: AUTH_KEYCHAIN_USERNAME
       });
-      return { headers };
+      return { 
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+        }
+      };
     }
 
     // Check if token is expired or about to expire (within 5 minutes)
@@ -327,7 +358,12 @@ const authLink = setContext(async (operation, { headers }) => {
                 username: AUTH_KEYCHAIN_USERNAME
               });
             }
-            return { headers };
+            return { 
+              headers: {
+                ...headers,
+                'Content-Type': 'application/json',
+              }
+            };
           } finally {
             isRefreshing = false;
           }
@@ -361,7 +397,12 @@ const authLink = setContext(async (operation, { headers }) => {
           service: AUTH_KEYCHAIN_SERVICE,
           username: AUTH_KEYCHAIN_USERNAME
         });
-        return { headers };
+        return { 
+          headers: {
+            ...headers,
+            'Content-Type': 'application/json',
+          }
+        };
       }
 
       // Always include the token in the header for authenticated requests
@@ -387,11 +428,21 @@ const authLink = setContext(async (operation, { headers }) => {
         service: AUTH_KEYCHAIN_SERVICE,
         username: AUTH_KEYCHAIN_USERNAME
       });
-      return { headers };
+      return { 
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+        }
+      };
     }
   } catch (error) {
     console.error('Error in authLink:', error);
-    return { headers };
+    return { 
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      }
+    };
   }
 });
 

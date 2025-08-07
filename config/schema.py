@@ -1,5 +1,6 @@
 from users import schema as users_schema
 from users.graphql_views import UnifiedTransactionQuery
+from users import web3auth_schema
 from prover import schema as prover_schema
 from telegram_verification import schema as telegram_verification_schema
 from send import schema as send_schema
@@ -11,12 +12,13 @@ from usdc_transactions import schema as usdc_transactions_schema
 from security import schema as security_schema
 from presale import schema as presale_schema
 from notifications import schema as notifications_schema
+from blockchain import schema as blockchain_schema
 import graphene
 import logging
 
 logger = logging.getLogger(__name__)
 
-class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, usdc_transactions_schema.Query, security_schema.Query, presale_schema.PresaleQueries, notifications_schema.Query, graphene.ObjectType):
+class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, payments_schema.Query, p2p_exchange_schema.Query, exchange_rates_schema.Query, conversion_schema.Query, usdc_transactions_schema.Query, security_schema.Query, presale_schema.PresaleQueries, notifications_schema.Query, blockchain_schema.Query, web3auth_schema.Web3AuthQuery, graphene.ObjectType):
 	# Override the legalDocument field to make it public
 	legalDocument = users_schema.Query.legalDocument
 	# Expose the user query
@@ -35,6 +37,8 @@ class Mutation(
 	security_schema.Mutation,
 	presale_schema.PresaleMutations,
 	notifications_schema.Mutation,
+	blockchain_schema.Mutation,
+	web3auth_schema.Web3AuthMutation,
 	graphene.ObjectType
 ):
 	pass

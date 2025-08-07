@@ -36,7 +36,9 @@ export const AuthScreen = () => {
     try {
       console.log('AuthScreen - Starting Google Sign-In...');
       const result = await authService.signInWithGoogle();
-      await handleSuccessfulLogin(result.isPhoneVerified);
+      console.log('Google Sign-In result:', result);
+      console.log('Phone verification status:', result.zkLoginData?.isPhoneVerified);
+      await handleSuccessfulLogin(result.zkLoginData?.isPhoneVerified || false);
     } catch (error) {
       console.error('Google Sign-In failed:', error);
     }
@@ -46,7 +48,9 @@ export const AuthScreen = () => {
     try {
       console.log('AuthScreen - Starting Apple Sign-In...');
       const result = await authService.signInWithApple();
-      await handleSuccessfulLogin(result.isPhoneVerified);
+      console.log('Apple Sign-In result:', result);
+      console.log('Phone verification status:', result.zkLoginData?.isPhoneVerified);
+      await handleSuccessfulLogin(result.zkLoginData?.isPhoneVerified || false);
     } catch (error) {
       console.error('Apple Sign-In Error:', error);
     }

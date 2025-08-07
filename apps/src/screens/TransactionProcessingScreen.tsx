@@ -6,8 +6,10 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
 import { useMutation } from '@apollo/client';
 import { PAY_INVOICE, CREATE_SEND_TRANSACTION, PREPARE_TRANSACTION, EXECUTE_TRANSACTION } from '../apollo/queries';
+import { ALGORAND_SPONSORED_SEND, SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
 import { AccountManager } from '../utils/accountManager';
 import { EnhancedAuthService } from '../services/enhancedAuthService';
+import algorandService from '../services/algorandService';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -78,6 +80,8 @@ export const TransactionProcessingScreen = () => {
   const [createSendTransaction] = useMutation(CREATE_SEND_TRANSACTION);
   const [prepareTransaction] = useMutation(PREPARE_TRANSACTION);
   const [executeTransaction] = useMutation(EXECUTE_TRANSACTION);
+  const [algorandSponsoredSend] = useMutation(ALGORAND_SPONSORED_SEND);
+  const [submitSponsoredGroup] = useMutation(SUBMIT_SPONSORED_GROUP);
   
   // Ref to prevent duplicate transaction processing within this session
   const hasProcessedRef = useRef(false);
@@ -276,15 +280,118 @@ export const TransactionProcessingScreen = () => {
       }
     };
 
+    const processAlgorandSponsoredSend = async () => {
+      try {
+        // Step 2: Create sponsored transaction on backend
+        setCurrentStep(1);
+        console.log('TransactionProcessingScreen: Creating Algorand sponsored transaction...');
+        
+        const { data: sponsorData } = await algorandSponsoredSend({
+          variables: {
+            recipient: transactionData.recipientAddress,
+            amount: parseFloat(transactionData.amount),
+            assetType: transactionData.tokenType || 'CUSD',
+            note: transactionData.memo || undefined
+          }
+        });
+        
+        if (!sponsorData?.algorandSponsoredSend?.success) {
+          const error = sponsorData?.algorandSponsoredSend?.error || 'Failed to create sponsored transaction';
+          console.error('TransactionProcessingScreen: Sponsored transaction failed:', error);
+          setTransactionError(error);
+          setIsComplete(true);
+          return;
+        }
+        
+        const { userTransaction, sponsorTransaction, groupId, totalFee } = sponsorData.algorandSponsoredSend;
+        console.log(`TransactionProcessingScreen: Sponsored transaction created. Group ID: ${groupId}, Fee: ${totalFee}`);
+        
+        // Step 3: Sign the user transaction with Algorand wallet
+        setCurrentStep(2);
+        console.log('TransactionProcessingScreen: Signing Algorand transaction...');
+        
+        // Decode base64 transactions to Uint8Array
+        const userTxnBytes = Uint8Array.from(atob(userTransaction), c => c.charCodeAt(0));
+        const sponsorTxnBytes = Uint8Array.from(atob(sponsorTransaction), c => c.charCodeAt(0));
+        
+        // Sign the user transaction using the Algorand service
+        const currentAccount = algorandService.getCurrentAccount();
+        if (!currentAccount) {
+          console.error('TransactionProcessingScreen: No Algorand account available');
+          setTransactionError('No Algorand wallet connected. Please set up your wallet first.');
+          setIsComplete(true);
+          return;
+        }
+        
+        // Sign the transaction using the imported algosdk
+        const algosdk = algorandService.getAlgosdk();
+        const txn = algosdk.decodeObj(userTxnBytes);
+        const signedUserTxn = txn.signTxn(currentAccount.sk);
+        
+        // Convert to base64 for submission
+        const signedUserTxnB64 = btoa(String.fromCharCode(...signedUserTxn));
+        
+        console.log('TransactionProcessingScreen: Submitting signed Algorand transaction group...');
+        
+        // Submit the signed transaction group
+        const { data: submitData } = await submitSponsoredGroup({
+          variables: {
+            signedUserTxn: signedUserTxnB64,
+            signedSponsorTxn: sponsorTransaction // Already base64
+          }
+        });
+        
+        if (!submitData?.submitSponsoredGroup?.success) {
+          const error = submitData?.submitSponsoredGroup?.error || 'Failed to submit transaction';
+          console.error('TransactionProcessingScreen: Transaction submission failed:', error);
+          setTransactionError(error);
+          setIsComplete(true);
+          return;
+        }
+        
+        const { transactionId, confirmedRound, feesSaved } = submitData.submitSponsoredGroup;
+        console.log(`TransactionProcessingScreen: Algorand transaction confirmed! ID: ${transactionId}, Round: ${confirmedRound}`);
+        console.log(`TransactionProcessingScreen: Fees saved: ${feesSaved} ALGO`);
+        
+        // Store transaction details for success screen
+        if (transactionData) {
+          transactionData.transactionId = transactionId;
+          transactionData.transactionHash = transactionId; // Algorand uses tx ID as hash
+          transactionData.confirmedRound = confirmedRound;
+          transactionData.feesSaved = feesSaved;
+        }
+        
+        // Mark transaction as successful
+        setTransactionSuccess(true);
+        setIsComplete(true);
+        
+      } catch (error) {
+        console.error('TransactionProcessingScreen: Error processing Algorand sponsored send:', error);
+        setTransactionError('Failed to process Algorand transaction. Please try again.');
+        setIsComplete(true);
+      }
+    };
+
     const processUnifiedSend = async () => {
       try {
         // Step 1: Verifying transaction
         setCurrentStep(0);
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Step 2: Prepare transaction
+        // Check if this is an Algorand address (58 characters starting with uppercase letter)
+        const isAlgorandAddress = transactionData.recipientAddress && 
+                                 transactionData.recipientAddress.length === 58 &&
+                                 /^[A-Z2-7]{58}$/.test(transactionData.recipientAddress);
+        
+        if (isAlgorandAddress) {
+          console.log('TransactionProcessingScreen: Processing Algorand sponsored send...');
+          await processAlgorandSponsoredSend();
+          return;
+        }
+        
+        // Step 2: Prepare transaction for Sui
         setCurrentStep(1);
-        console.log('TransactionProcessingScreen: Preparing transaction...');
+        console.log('TransactionProcessingScreen: Preparing Sui transaction...');
         
         // Prepare input for prepare mutation
         const prepareInput: any = {
