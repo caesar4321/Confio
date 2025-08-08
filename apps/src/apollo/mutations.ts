@@ -28,6 +28,7 @@ export const WEB3AUTH_LOGIN = gql`
         id
         email
         algorandAddress
+        isPhoneVerified
       }
     }
   }
@@ -50,6 +51,7 @@ export const ADD_ALGORAND_WALLET = gql`
         id
         email
         algorandAddress
+        isPhoneVerified
       }
     }
   }

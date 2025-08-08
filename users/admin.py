@@ -3,7 +3,10 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.utils import timezone
-from .models import User, Account, Business, Country, Bank, BankInfo
+from django.contrib import messages
+from django.db import transaction
+import secrets
+from .models import User, Account, Business, Country, Bank, BankInfo, WalletPepper
 from .models_unified import UnifiedTransactionTable
 from .models_employee import BusinessEmployee, EmployeeInvitation
 
@@ -712,3 +715,202 @@ class EmployeeInvitationAdmin(admin.ModelAdmin):
 
 
 # Achievement admin classes have been moved to achievements/admin.py
+
+
+class WalletPepperAdmin(admin.ModelAdmin):
+    """Admin interface for WalletPepper model with security features"""
+    
+    list_display = ('firebase_uid_display', 'version', 'status_display', 'grace_status', 'created_at', 'rotated_at')
+    list_filter = ('version', 'created_at', 'rotated_at')
+    search_fields = ('firebase_uid',)
+    # Include custom display methods in readonly_fields so they can be used in fieldsets
+    readonly_fields = ('firebase_uid', 'version', 'previous_version', 
+                      'created_at', 'updated_at', 'rotated_at', 'grace_period_until',
+                      'pepper_display', 'previous_pepper_display', 'user_link')
+    ordering = ('-updated_at',)
+    
+    fieldsets = (
+        ('User Information', {
+            'fields': ('firebase_uid', 'user_link')
+        }),
+        ('Current Pepper', {
+            'fields': ('pepper_display', 'version'),
+            'description': 'Current active pepper for this user'
+        }),
+        ('Rotation Information', {
+            'fields': ('previous_pepper_display', 'previous_version', 'grace_period_until', 'rotated_at'),
+            'classes': ('collapse',),
+            'description': 'Information about pepper rotation and grace period'
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    actions = ['rotate_pepper', 'extend_grace_period', 'clear_grace_period']
+    
+    def firebase_uid_display(self, obj):
+        """Display truncated Firebase UID for security"""
+        if obj.firebase_uid:
+            if len(obj.firebase_uid) > 12:
+                return f"{obj.firebase_uid[:6]}...{obj.firebase_uid[-4:]}"
+            return obj.firebase_uid
+        return "-"
+    firebase_uid_display.short_description = "Firebase UID"
+    
+    def pepper_display(self, obj):
+        """Display pepper status without revealing the actual value"""
+        if obj.pepper:
+            return format_html(
+                '<span style="font-family: monospace; background: #f0f0f0; padding: 2px 4px; border-radius: 3px;">'
+                '●●●●●●●● (Hidden for security)</span>'
+            )
+        return "-"
+    pepper_display.short_description = "Pepper"
+    
+    def previous_pepper_display(self, obj):
+        """Display previous pepper status without revealing the actual value"""
+        if obj.previous_pepper:
+            return format_html(
+                '<span style="font-family: monospace; background: #fff3cd; padding: 2px 4px; border-radius: 3px;">'
+                '●●●●●●●● (Hidden for security)</span>'
+            )
+        return "-"
+    previous_pepper_display.short_description = "Previous Pepper"
+    
+    def status_display(self, obj):
+        """Display pepper status with visual indicators"""
+        if obj.rotated_at:
+            time_since = timezone.now() - obj.rotated_at
+            if time_since.days == 0:
+                color = '#28a745'  # Green for recently rotated
+                status = 'Recently Rotated'
+            elif time_since.days < 30:
+                color = '#17a2b8'  # Blue for rotated this month
+                status = f'Rotated {time_since.days}d ago'
+            else:
+                color = '#6c757d'  # Gray for older
+                status = f'Rotated {time_since.days}d ago'
+        else:
+            color = '#6c757d'
+            status = 'Never Rotated'
+        
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">⚡ {}</span>',
+            color, status
+        )
+    status_display.short_description = "Status"
+    
+    def grace_status(self, obj):
+        """Display grace period status"""
+        if obj.is_in_grace_period():
+            remaining = obj.grace_period_until - timezone.now()
+            days = remaining.days
+            hours = remaining.seconds // 3600
+            
+            if days > 3:
+                color = '#28a745'  # Green
+            elif days > 1:
+                color = '#ffc107'  # Yellow
+            else:
+                color = '#dc3545'  # Red
+            
+            return format_html(
+                '<span style="color: {};">⏰ {}d {}h remaining</span>',
+                color, days, hours
+            )
+        elif obj.grace_period_until and obj.grace_period_until < timezone.now():
+            return format_html('<span style="color: #6c757d;">✓ Expired</span>')
+        return format_html('<span style="color: #6c757d;">-</span>')
+    grace_status.short_description = "Grace Period"
+    
+    def user_link(self, obj):
+        """Link to the associated user"""
+        try:
+            user = User.objects.get(firebase_uid=obj.firebase_uid)
+            url = reverse('admin:users_user_change', args=[user.id])
+            return format_html('<a href="{}">View User: {}</a>', url, user.email or user.username)
+        except User.DoesNotExist:
+            return format_html('<span style="color: #dc3545;">User not found</span>')
+    user_link.short_description = "Associated User"
+    
+    @admin.action(description='Rotate selected peppers')
+    def rotate_pepper(self, request, queryset):
+        """Admin action to rotate peppers"""
+        rotated_count = 0
+        
+        with transaction.atomic():
+            for pepper_obj in queryset.select_for_update():
+                old_version = pepper_obj.version
+                old_pepper = pepper_obj.pepper
+                
+                # Rotate pepper
+                pepper_obj.previous_pepper = old_pepper
+                pepper_obj.previous_version = old_version
+                pepper_obj.grace_period_until = timezone.now() + timezone.timedelta(days=7)
+                pepper_obj.version += 1
+                pepper_obj.pepper = secrets.token_hex(32)
+                pepper_obj.rotated_at = timezone.now()
+                pepper_obj.save()
+                
+                rotated_count += 1
+        
+        self.message_user(
+            request,
+            f"Successfully rotated {rotated_count} pepper(s). Grace period set to 7 days.",
+            messages.SUCCESS
+        )
+    
+    @admin.action(description='Extend grace period by 7 days')
+    def extend_grace_period(self, request, queryset):
+        """Extend grace period for selected peppers"""
+        extended_count = 0
+        
+        for pepper_obj in queryset:
+            if pepper_obj.previous_pepper:
+                if pepper_obj.grace_period_until:
+                    pepper_obj.grace_period_until += timezone.timedelta(days=7)
+                else:
+                    pepper_obj.grace_period_until = timezone.now() + timezone.timedelta(days=7)
+                pepper_obj.save()
+                extended_count += 1
+        
+        self.message_user(
+            request,
+            f"Extended grace period for {extended_count} pepper(s).",
+            messages.SUCCESS
+        )
+    
+    @admin.action(description='Clear grace period (end immediately)')
+    def clear_grace_period(self, request, queryset):
+        """Clear grace period for selected peppers"""
+        cleared_count = 0
+        
+        for pepper_obj in queryset:
+            if pepper_obj.grace_period_until:
+                pepper_obj.grace_period_until = None
+                pepper_obj.previous_pepper = None
+                pepper_obj.previous_version = None
+                pepper_obj.save()
+                cleared_count += 1
+        
+        self.message_user(
+            request,
+            f"Cleared grace period for {cleared_count} pepper(s).",
+            messages.WARNING
+        )
+    
+    def has_add_permission(self, request):
+        """Prevent manual creation of peppers (should be created via API)"""
+        return False
+    
+    def has_delete_permission(self, request, obj=None):
+        """Prevent deletion of peppers (for audit trail)"""
+        return request.user.is_superuser
+    
+    def get_readonly_fields(self, request, obj=None):
+        """Make all fields readonly to prevent accidental modification"""
+        if not request.user.is_superuser:
+            return list(set([field.name for field in self.model._meta.fields]))
+        return self.readonly_fields

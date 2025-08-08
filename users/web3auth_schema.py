@@ -2,10 +2,12 @@ import graphene
 from graphene_django import DjangoObjectType
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.utils import timezone
 import json
 import logging
+import secrets
 from datetime import datetime
-from .models import Account
+from .models import Account, WalletPepper
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -13,10 +15,11 @@ User = get_user_model()
 
 class Web3AuthUserType(DjangoObjectType):
     algorand_address = graphene.String()
+    is_phone_verified = graphene.Boolean()
     
     class Meta:
         model = User
-        fields = ['id', 'email', 'username', 'first_name', 'last_name', 'is_phone_verified']
+        fields = ['id', 'email', 'username', 'first_name', 'last_name']
     
     def resolve_algorand_address(self, info):
         try:
@@ -26,6 +29,10 @@ class Web3AuthUserType(DjangoObjectType):
         except Exception as e:
             logger.error(f"Error resolving algorand_address: {e}")
             return None
+    
+    def resolve_is_phone_verified(self, info):
+        """Check if user has a phone number stored"""
+        return bool(self.phone_number)
 
 
 class Web3AuthLoginMutation(graphene.Mutation):
@@ -92,9 +99,54 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     account.aptos_address = algorand_address
                     account.save()
                 
+                # Check balance and auto-fund if needed
+                from blockchain.algorand_account_manager import AlgorandAccountManager
+                from algosdk.v2client import algod
+                
+                try:
+                    algod_client = algod.AlgodClient(
+                        AlgorandAccountManager.ALGOD_TOKEN,
+                        AlgorandAccountManager.ALGOD_ADDRESS
+                    )
+                    account_info = algod_client.account_info(algorand_address)
+                    balance = account_info.get('amount', 0)
+                    num_assets = len(account_info.get('assets', []))
+                    
+                    # Calculate minimum balance needed:
+                    # 0.1 ALGO for account + 0.1 ALGO per asset
+                    min_balance_needed = 100000 + (num_assets * 100000)  # in microAlgos
+                    # Add buffer for opt-ins (2 more assets: CONFIO and future cUSD)
+                    min_balance_with_buffer = min_balance_needed + 200000  # 0.2 ALGO buffer
+                    
+                    if balance < min_balance_with_buffer:
+                        # Fund the account
+                        funding_amount = min_balance_with_buffer - balance + 100000  # Extra 0.1 ALGO for fees
+                        logger.info(f"Auto-funding Web3Auth user {algorand_address} with {funding_amount} microAlgos")
+                        
+                        # Use AlgorandAccountManager's funding logic
+                        from algosdk import mnemonic
+                        from algosdk.transaction import PaymentTxn, wait_for_confirmation
+                        
+                        sponsor_private_key = mnemonic.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
+                        params = algod_client.suggested_params()
+                        
+                        fund_txn = PaymentTxn(
+                            sender=AlgorandAccountManager.SPONSOR_ADDRESS,
+                            sp=params,
+                            receiver=algorand_address,
+                            amt=funding_amount
+                        )
+                        
+                        signed_txn = fund_txn.sign(sponsor_private_key)
+                        tx_id = algod_client.send_transaction(signed_txn)
+                        wait_for_confirmation(algod_client, tx_id, 4)
+                        logger.info(f"Successfully funded {algorand_address} with {funding_amount} microAlgos. TX: {tx_id}")
+                        
+                except Exception as e:
+                    logger.warning(f"Could not check/fund account balance: {e}")
+                
                 # Trigger sponsored opt-in for CONFIO (async)
                 from blockchain.algorand_sponsor_service import algorand_sponsor_service
-                from blockchain.algorand_account_manager import AlgorandAccountManager
                 import asyncio
                 
                 if AlgorandAccountManager.CONFIO_ASSET_ID:
@@ -369,12 +421,160 @@ class CreateAlgorandTransactionMutation(graphene.Mutation):
             return cls(success=False, error=str(e))
 
 
+class GetServerPepperMutation(graphene.Mutation):
+    """
+    Get or create a server pepper for wallet key derivation.
+    Each user gets exactly one pepper for additional security.
+    During grace period after rotation, can optionally return previous pepper.
+    """
+    class Arguments:
+        firebase_uid = graphene.String(required=True)
+        request_version = graphene.Int()  # Optional: specific version requested (for grace period)
+    
+    success = graphene.Boolean()
+    pepper = graphene.String()
+    version = graphene.Int()
+    is_rotated = graphene.Boolean()  # True if pepper was recently rotated
+    grace_period_until = graphene.String()  # ISO timestamp when grace period ends
+    error = graphene.String()
+    
+    @classmethod
+    def mutate(cls, root, info, firebase_uid, request_version=None):
+        try:
+            # Verify the user is authenticated and accessing their own pepper
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+            
+            # Check if the firebase_uid matches the authenticated user
+            if user.firebase_uid != firebase_uid:
+                return cls(success=False, error='Unauthorized access to pepper')
+            
+            # Use transaction.atomic() for thread safety
+            with transaction.atomic():
+                pepper_obj, created = WalletPepper.objects.get_or_create(
+                    firebase_uid=firebase_uid,
+                    defaults={
+                        'pepper': secrets.token_hex(32),  # 32 bytes -> 64 char hex
+                        'version': 1
+                    }
+                )
+            
+            if created:
+                logger.info(f'Created new wallet pepper for user {firebase_uid}')
+            
+            # Check if client requested a specific version (during grace period)
+            if request_version and request_version == pepper_obj.previous_version:
+                if pepper_obj.is_in_grace_period():
+                    logger.info(f'Returning previous pepper v{request_version} during grace period for {firebase_uid}')
+                    return cls(
+                        success=True,
+                        pepper=pepper_obj.previous_pepper,
+                        version=pepper_obj.previous_version,
+                        is_rotated=True,
+                        grace_period_until=pepper_obj.grace_period_until.isoformat() if pepper_obj.grace_period_until else None
+                    )
+            
+            # Return current pepper
+            return cls(
+                success=True,
+                pepper=pepper_obj.pepper,
+                version=pepper_obj.version,
+                is_rotated=bool(pepper_obj.rotated_at),
+                grace_period_until=pepper_obj.grace_period_until.isoformat() if pepper_obj.grace_period_until else None
+            )
+            
+        except Exception as e:
+            logger.error(f'Get server pepper error: {str(e)}')
+            return cls(success=False, error=str(e))
+
+
+class RotateServerPepperMutation(graphene.Mutation):
+    """
+    Rotate the server pepper for a user.
+    This will increment the version and generate a new pepper.
+    Client must re-wrap (re-encrypt) the seed with the new pepper.
+    """
+    class Arguments:
+        firebase_uid = graphene.String(required=True)
+    
+    success = graphene.Boolean()
+    pepper = graphene.String()
+    version = graphene.Int()
+    old_version = graphene.Int()
+    error = graphene.String()
+    
+    @classmethod
+    def mutate(cls, root, info, firebase_uid):
+        try:
+            # Verify the user is authenticated and accessing their own pepper
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+            
+            # Check if the firebase_uid matches the authenticated user
+            if user.firebase_uid != firebase_uid:
+                return cls(success=False, error='Unauthorized access to pepper')
+            
+            # Use select_for_update to lock the row during rotation
+            with transaction.atomic():
+                try:
+                    pepper_obj = WalletPepper.objects.select_for_update().get(
+                        firebase_uid=firebase_uid
+                    )
+                    old_version = pepper_obj.version
+                    old_pepper = pepper_obj.pepper
+                    
+                    # Rotate: save previous pepper for grace period (7 days)
+                    pepper_obj.previous_pepper = old_pepper
+                    pepper_obj.previous_version = old_version
+                    from datetime import timedelta
+                    pepper_obj.grace_period_until = timezone.now() + timedelta(days=7)
+                    
+                    # Set new pepper and increment version
+                    pepper_obj.version += 1
+                    pepper_obj.pepper = secrets.token_hex(32)  # New 32-byte pepper
+                    pepper_obj.rotated_at = timezone.now()
+                    pepper_obj.save()
+                    
+                    logger.info(f'Rotated wallet pepper for user {firebase_uid}: v{old_version} -> v{pepper_obj.version}')
+                    
+                    return cls(
+                        success=True,
+                        pepper=pepper_obj.pepper,
+                        version=pepper_obj.version,
+                        old_version=old_version
+                    )
+                    
+                except WalletPepper.DoesNotExist:
+                    # No existing pepper, create one
+                    pepper_obj = WalletPepper.objects.create(
+                        firebase_uid=firebase_uid,
+                        pepper=secrets.token_hex(32),
+                        version=1
+                    )
+                    logger.info(f'Created initial wallet pepper during rotation for user {firebase_uid}')
+                    
+                    return cls(
+                        success=True,
+                        pepper=pepper_obj.pepper,
+                        version=1,
+                        old_version=0
+                    )
+            
+        except Exception as e:
+            logger.error(f'Rotate server pepper error: {str(e)}')
+            return cls(success=False, error=str(e))
+
+
 class Web3AuthMutation(graphene.ObjectType):
     web3_auth_login = Web3AuthLoginMutation.Field()
     add_algorand_wallet = AddAlgorandWalletMutation.Field()
     update_algorand_address = UpdateAlgorandAddressMutation.Field()
     verify_algorand_ownership = VerifyAlgorandOwnershipMutation.Field()
     create_algorand_transaction = CreateAlgorandTransactionMutation.Field()
+    get_server_pepper = GetServerPepperMutation.Field()
+    rotate_server_pepper = RotateServerPepperMutation.Field()
 
 
 class Web3AuthQuery(graphene.ObjectType):
@@ -411,7 +611,8 @@ class Web3AuthQuery(graphene.ObjectType):
                 return []
             
             account = user.accounts.filter(account_type='personal').first()
-            if not account or not account.algorand_address:
+            # Using aptos_address field to store Algorand address (temporary)
+            if not account or not account.aptos_address:
                 return []
             
             # TODO: Implement actual Algorand transaction history fetching

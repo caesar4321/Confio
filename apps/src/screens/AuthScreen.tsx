@@ -31,6 +31,20 @@ export const AuthScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const { handleSuccessfulLogin } = useAuth();
 
+  // Initialize auth service when component mounts
+  useEffect(() => {
+    const initializeAuthService = async () => {
+      try {
+        console.log('AuthScreen - Initializing auth service...');
+        await authService.initialize();
+        console.log('AuthScreen - Auth service initialized successfully');
+      } catch (error) {
+        console.error('AuthScreen - Failed to initialize auth service:', error);
+      }
+    };
+    
+    initializeAuthService();
+  }, []);
 
   const handleGoogleSignIn = async () => {
     try {

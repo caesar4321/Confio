@@ -172,7 +172,7 @@ export const CreateBusinessScreen = () => {
           });
           
           // Generate the Sui address
-          const aptosAddress = await authService.getZkLoginAddress();
+          const aptosAddress = await authService.getAptosAddress();
           
           console.log('Generated Sui address for business account:', {
             accountId: createdAccount.accountId,

@@ -3,6 +3,23 @@
 
 console.log('[polyfills] Starting polyfills setup...');
 
+// CRITICAL: Random values for cryptographic operations (must be first!)
+// Skip react-native-get-random-values on iOS to avoid NativeEventEmitter issues
+// Use fallback implementation instead
+console.log('[polyfills] Setting up crypto.getRandomValues...');
+if (typeof global.crypto === 'undefined') {
+  global.crypto = {};
+}
+if (!global.crypto.getRandomValues) {
+  global.crypto.getRandomValues = function(array) {
+    for (let i = 0; i < array.length; i++) {
+      array[i] = Math.floor(Math.random() * 256);
+    }
+    return array;
+  };
+  console.log('[polyfills] Using Math.random for crypto.getRandomValues (iOS compatible)');
+}
+
 // FIRST: URL polyfill for algosdk compatibility
 import 'react-native-url-polyfill/auto';
 
@@ -35,6 +52,10 @@ global.Buffer = global.Buffer ?? Buffer;
 console.log('[polyfills] Buffer setup complete');
 
 // Full WebCrypto (has AES-GCM & HMAC) from react-native-quick-crypto
+// Skip on iOS to avoid NativeEventEmitter initialization issues
+console.log('[polyfills] Skipping react-native-quick-crypto to avoid iOS crashes...');
+// TODO: Re-enable when iOS compatibility is fixed
+/*
 console.log('[polyfills] Installing react-native-quick-crypto...');
 import { install } from 'react-native-quick-crypto';
 try {
@@ -42,9 +63,9 @@ try {
   console.log('[polyfills] react-native-quick-crypto installed successfully');
 } catch (error) {
   console.error('[polyfills] Failed to install react-native-quick-crypto:', error);
-  // Fall back to previous crypto setup
   console.log('[polyfills] Falling back to manual crypto setup...');
 }
+*/
 
 // Hermes <0.72 lacks TypedArray.slice
 if (!Uint8Array.prototype.slice) {

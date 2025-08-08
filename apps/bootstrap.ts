@@ -33,7 +33,7 @@ const client = new ApolloClient({
 });
 
 // Import React Native components
-import { AppRegistry } from 'react-native';
+import { AppRegistry, Platform } from 'react-native';
 import { name as appName } from './app.json';
 import * as suiUtils from '@mysten/sui/utils';
 import { Buffer } from 'buffer';

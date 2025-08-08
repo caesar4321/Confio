@@ -1,0 +1,516 @@
+import { jwtDecode } from 'jwt-decode';
+import * as Keychain from 'react-native-keychain';
+import { API_URL } from '../config/env';
+import { Platform } from 'react-native';
+import { apolloClient } from '../apollo/client';
+import algorandService from './algorandService';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import auth from '@react-native-firebase/auth';
+
+// Type for storing JWT tokens
+type TokenStorage = {
+  accessToken: string;
+  refreshToken: string;
+};
+
+// Type for user info
+export interface UserInfo {
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  photoURL?: string | null;
+  algorandAddress?: string;
+  web3AuthId?: string;
+}
+
+// Keychain services
+export const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth.web3';
+export const AUTH_KEYCHAIN_USERNAME = 'auth_tokens_web3';
+
+export class AuthServiceWeb3 {
+  private static instance: AuthServiceWeb3;
+  private currentUser: UserInfo | null = null;
+  private algorandAddress: string | null = null;
+  private isInitialized = false;
+
+  private constructor() {}
+
+  public static getInstance(): AuthServiceWeb3 {
+    if (!AuthServiceWeb3.instance) {
+      AuthServiceWeb3.instance = new AuthServiceWeb3();
+    }
+    return AuthServiceWeb3.instance;
+  }
+
+  public async initialize(): Promise<void> {
+    try {
+      console.log('AuthServiceWeb3 - initialize() called');
+      
+      if (this.isInitialized) {
+        console.log('AuthServiceWeb3 - Already initialized');
+        return;
+      }
+
+      // Check if user has an existing Algorand address
+      // Note: algorandService will initialize Web3Auth automatically when needed
+      console.log('AuthServiceWeb3 - Checking for existing Algorand address...');
+      const existingAddress = await algorandService.getStoredAddress();
+      if (existingAddress) {
+        console.log('AuthServiceWeb3 - Found existing Algorand address:', existingAddress);
+        this.algorandAddress = existingAddress;
+      }
+      
+      this.isInitialized = true;
+      console.log('AuthServiceWeb3 - Initialization complete');
+    } catch (error) {
+      console.error('AuthServiceWeb3 - Failed to initialize:', error);
+      throw error;
+    }
+  }
+
+  public async signInWithGoogle(): Promise<UserInfo> {
+    try {
+      console.log('AuthServiceWeb3 - Starting Google Sign-In with Web3Auth...');
+      
+      // Ensure services are initialized
+      await this.initialize();
+      
+      // Configure Google Sign-In
+      GoogleSignin.configure({
+        webClientId: '637088276899-9nuo48mnrrjdj3e4r5mhbocv7p09h0gf.apps.googleusercontent.com', // From Firebase console
+        offlineAccess: true,
+        scopes: ['profile', 'email']
+      });
+      
+      // Sign out first to ensure clean state (force account selection)
+      try {
+        console.log('AuthServiceWeb3 - Signing out from Google to force account selection...');
+        await GoogleSignin.signOut();
+      } catch (error) {
+        // It's okay if sign out fails, user might not be signed in
+        console.log('AuthServiceWeb3 - Sign out error (continuing):', error.message);
+      }
+      
+      // Sign in with Google
+      console.log('AuthServiceWeb3 - Signing in with Google...');
+      await GoogleSignin.hasPlayServices();
+      
+      // Step 1: Sign in with Google (this just gets the Google account)
+      try {
+        const userInfo = await GoogleSignin.signIn();
+        console.log('AuthServiceWeb3 - Google sign-in successful');
+        console.log('AuthServiceWeb3 - User info received:', userInfo ? 'Yes' : 'No');
+      } catch (signInError) {
+        console.error('AuthServiceWeb3 - Google sign-in error:', signInError);
+        console.error('AuthServiceWeb3 - Error message:', signInError.message);
+        console.error('AuthServiceWeb3 - Error code:', signInError.code);
+        console.error('AuthServiceWeb3 - Full error:', JSON.stringify(signInError, null, 2));
+        throw signInError;
+      }
+      
+      // Step 2: Get the ID token (separate call, as per working authService)
+      console.log('AuthServiceWeb3 - Getting Google ID token...');
+      const { idToken } = await GoogleSignin.getTokens();
+      console.log('AuthServiceWeb3 - Got ID token:', idToken ? 'Token received' : 'No token');
+      
+      if (!idToken) {
+        throw new Error('No ID token received from Google Sign-In');
+      }
+      
+      // Sign in with Firebase to get Firebase ID token
+      console.log('AuthServiceWeb3 - Creating Firebase credential...');
+      const firebaseCred = auth.GoogleAuthProvider.credential(idToken);
+      const { user } = await auth().signInWithCredential(firebaseCred);
+      
+      // Get Firebase ID token for Web3Auth
+      const firebaseIdToken = await user.getIdToken();
+      console.log('AuthServiceWeb3 - Got Firebase ID token for Web3Auth');
+      
+      // Create/restore Algorand wallet using algorandService (which handles Web3Auth internally)
+      console.log('AuthServiceWeb3 - Creating/restoring Algorand wallet...');
+      const algorandAddress = await algorandService.createOrRestoreWallet(firebaseIdToken, user.uid);
+      this.algorandAddress = algorandAddress;
+      console.log('AuthServiceWeb3 - Algorand address:', algorandAddress);
+      
+      // Auto opt-in to CONFIO token with sponsored transaction
+      console.log('AuthServiceWeb3 - Processing automatic CONFIO opt-in...');
+      try {
+        // Check if already opted in
+        const isOptedIn = await algorandService.checkConfioOptInStatus();
+        if (!isOptedIn) {
+          const optInSuccess = await algorandService.optInToConfioToken();
+          if (optInSuccess) {
+            console.log('AuthServiceWeb3 - Successfully opted into CONFIO token');
+          } else {
+            console.log('AuthServiceWeb3 - CONFIO opt-in failed');
+          }
+        } else {
+          console.log('AuthServiceWeb3 - Already opted into CONFIO token');
+        }
+      } catch (optInError) {
+        console.warn('AuthServiceWeb3 - Could not complete auto opt-in:', optInError);
+        // Don't fail the login if opt-in fails - user can retry later
+      }
+      
+      // Prepare user info
+      // Note: Avoid accessing signInResult.user directly due to casting issues
+      let firstName = null;
+      let lastName = null;
+      
+      // Try to get name from Firebase user instead of Google Sign-In result
+      // This avoids the casting error from the native bridge
+      if (user.displayName) {
+        const nameParts = user.displayName.split(' ');
+        firstName = nameParts[0] || null;
+        lastName = nameParts.slice(1).join(' ') || null;
+      }
+      
+      const returnUserInfo: UserInfo = {
+        email: user.email,
+        firstName: firstName,
+        lastName: lastName,
+        photoURL: user.photoURL,
+        algorandAddress: algorandAddress,
+        web3AuthId: user.uid, // Use Firebase UID as the Web3Auth ID
+      };
+      
+      // Send authentication to backend with Firebase ID token
+      await this.authenticateWithBackend(returnUserInfo, firebaseIdToken);
+      
+      this.currentUser = returnUserInfo;
+      
+      console.log('AuthServiceWeb3 - Sign-in successful');
+      console.log('AuthServiceWeb3 - Algorand address:', algorandAddress);
+      
+      return returnUserInfo;
+    } catch (error) {
+      console.error('AuthServiceWeb3 - Error signing in with Google:', error);
+      throw error;
+    }
+  }
+
+  public async signInWithApple(): Promise<UserInfo> {
+    if (Platform.OS !== 'ios') {
+      throw new Error('Apple Sign In is only supported on iOS');
+    }
+
+    try {
+      console.log('AuthServiceWeb3 - Starting Apple Sign-In with Web3Auth...');
+      
+      // Ensure services are initialized
+      await this.initialize();
+      
+      // First, sign in with Apple to get the ID token
+      const appleAuth = await import('@invertase/react-native-apple-authentication');
+      
+      // Apple Sign-In
+      console.log('AuthServiceWeb3 - Signing in with Apple...');
+      const appleAuthResponse = await appleAuth.appleAuth.performRequest({
+        requestedOperation: appleAuth.AppleAuthRequestOperation.LOGIN,
+        requestedScopes: [appleAuth.AppleAuthRequestScope.EMAIL, appleAuth.AppleAuthRequestScope.FULL_NAME],
+      });
+      
+      if (!appleAuthResponse.identityToken) {
+        throw new Error('No identity token returned from Apple Sign-In');
+      }
+      
+      // Sign in with Firebase
+      const appleCredential = auth.AppleAuthProvider.credential(appleAuthResponse.identityToken, appleAuthResponse.nonce);
+      const userCredential = await auth().signInWithCredential(appleCredential);
+      
+      // Get Firebase ID token for Web3Auth
+      const firebaseIdToken = await userCredential.user.getIdToken();
+      console.log('AuthServiceWeb3 - Got Firebase ID token for Web3Auth');
+      
+      // Login with Web3Auth using the Firebase ID token
+      // Create/restore Algorand wallet using algorandService (which handles Web3Auth internally)
+      console.log('AuthServiceWeb3 - Creating/restoring Algorand wallet...');
+      const algorandAddress = await algorandService.createOrRestoreWallet(firebaseIdToken, userCredential.user.uid);
+      this.algorandAddress = algorandAddress;
+      console.log('AuthServiceWeb3 - Algorand address:', algorandAddress);
+      
+      // Auto opt-in to CONFIO token with sponsored transaction
+      console.log('AuthServiceWeb3 - Processing automatic CONFIO opt-in...');
+      try {
+        // Check if already opted in
+        const isOptedIn = await algorandService.checkConfioOptInStatus();
+        if (!isOptedIn) {
+          const optInSuccess = await algorandService.optInToConfioToken();
+          if (optInSuccess) {
+            console.log('AuthServiceWeb3 - Successfully opted into CONFIO token');
+          } else {
+            console.log('AuthServiceWeb3 - CONFIO opt-in failed');
+          }
+        } else {
+          console.log('AuthServiceWeb3 - Already opted into CONFIO token');
+        }
+      } catch (optInError) {
+        console.warn('AuthServiceWeb3 - Could not complete auto opt-in:', optInError);
+        // Don't fail the login if opt-in fails - user can retry later
+      }
+      
+      // Prepare user info (for Apple Sign-In)
+      // Safely extract name from Apple Sign-In response
+      let firstName = null;
+      let lastName = null;
+      
+      if (appleAuthResponse && appleAuthResponse.fullName) {
+        // Check if fullName is an object (not a string)
+        if (typeof appleAuthResponse.fullName === 'object') {
+          firstName = appleAuthResponse.fullName.givenName || null;
+          lastName = appleAuthResponse.fullName.familyName || null;
+        }
+      }
+      
+      // If we couldn't get the name from Apple Sign-In, try to parse from Firebase displayName
+      if (!firstName && userCredential.user.displayName) {
+        const nameParts = userCredential.user.displayName.split(' ');
+        firstName = nameParts[0] || null;
+        lastName = nameParts.slice(1).join(' ') || null;
+      }
+      
+      const returnUserInfo: UserInfo = {
+        email: userCredential.user.email,
+        firstName: firstName,
+        lastName: lastName,
+        photoURL: userCredential.user.photoURL,
+        algorandAddress: algorandAddress,
+        web3AuthId: userCredential.user.uid, // Use Firebase UID as the Web3Auth ID
+      };
+      
+      // Send authentication to backend with Firebase ID token
+      await this.authenticateWithBackend(returnUserInfo, firebaseIdToken);
+      
+      this.currentUser = returnUserInfo;
+      
+      console.log('AuthServiceWeb3 - Sign-in successful');
+      console.log('AuthServiceWeb3 - Algorand address:', algorandAddress);
+      
+      return returnUserInfo;
+    } catch (error) {
+      console.error('AuthServiceWeb3 - Error signing in with Apple:', error);
+      throw error;
+    }
+  }
+
+  private async authenticateWithBackend(userInfo: UserInfo, firebaseIdToken?: string): Promise<void> {
+    try {
+      console.log('AuthServiceWeb3 - Authenticating with backend...');
+      
+      // Step 1: Web3Auth Login to create/update user (no JWT tokens)
+      const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
+      
+      console.log('AuthServiceWeb3 - Calling WEB3AUTH_LOGIN mutation...');
+      const { data: authData } = await apolloClient.mutate({
+        mutation: WEB3AUTH_LOGIN,
+        context: {
+          skipAuth: true, // This is a login mutation, don't send existing token
+        },
+        variables: {
+          provider: 'google', // TODO: Get from userInfo when we support Apple
+          web3AuthId: userInfo.web3AuthId,
+          email: userInfo.email,
+          firstName: userInfo.firstName,
+          lastName: userInfo.lastName,
+          algorandAddress: userInfo.algorandAddress,
+          idToken: firebaseIdToken,
+        },
+      });
+      
+      if (!authData?.web3AuthLogin?.success) {
+        throw new Error(authData?.web3AuthLogin?.error || 'Backend user creation failed');
+      }
+      
+      // Store JWT tokens from GraphQL response
+      const tokens = {
+        accessToken: authData.web3AuthLogin.accessToken,
+        refreshToken: authData.web3AuthLogin.refreshToken,
+      };
+      await this.storeTokens(tokens);
+      console.log('AuthServiceWeb3 - JWT tokens stored successfully');
+      
+      // Step 2: Add Algorand wallet and check for opt-ins
+      const { ADD_ALGORAND_WALLET } = await import('../apollo/mutations');
+      
+      console.log('AuthServiceWeb3 - Calling ADD_ALGORAND_WALLET mutation...');
+      const { data: walletData } = await apolloClient.mutate({
+        mutation: ADD_ALGORAND_WALLET,
+        variables: {
+          algorandAddress: userInfo.algorandAddress,
+          web3authId: userInfo.web3AuthId,
+          provider: 'google', // TODO: Get from userInfo when we support Apple
+        },
+      });
+      
+      if (!walletData?.addAlgorandWallet?.success) {
+        throw new Error(walletData?.addAlgorandWallet?.error || 'Failed to add Algorand wallet');
+      }
+      
+      console.log('AuthServiceWeb3 - Wallet added successfully');
+      console.log('AuthServiceWeb3 - ALGO balance:', walletData.addAlgorandWallet.algoBalance);
+      console.log('AuthServiceWeb3 - Needs opt-in for assets:', walletData.addAlgorandWallet.needsOptIn);
+      
+      // Step 3: Handle asset opt-ins if needed
+      if (walletData.addAlgorandWallet.needsOptIn?.length > 0) {
+        await this.handleAssetOptIns(walletData.addAlgorandWallet.needsOptIn);
+      }
+      
+      console.log('AuthServiceWeb3 - Backend authentication complete');
+    } catch (error) {
+      console.error('AuthServiceWeb3 - Backend authentication error:', error);
+      throw error;
+    }
+  }
+
+  public async signOut(): Promise<void> {
+    try {
+      console.log('AuthServiceWeb3 - Starting sign out process...');
+      
+      // Clear Algorand wallet
+      await algorandService.clearWallet();
+      
+      // Clear stored tokens
+      await this.clearTokens();
+      
+      // Clear local state
+      this.currentUser = null;
+      this.algorandAddress = null;
+      
+      console.log('AuthServiceWeb3 - Sign out completed');
+    } catch (error) {
+      console.error('AuthServiceWeb3 - Sign out error:', error);
+      // Continue with cleanup even if some operations fail
+      this.currentUser = null;
+      this.algorandAddress = null;
+    }
+  }
+
+  public async getAlgorandBalance(): Promise<number> {
+    try {
+      if (!this.algorandAddress) {
+        throw new Error('No Algorand address available');
+      }
+      
+      const balance = await algorandService.getBalance(this.algorandAddress);
+      return balance || 0;
+    } catch (error) {
+      console.error('AuthServiceWeb3 - Error getting Algorand balance:', error);
+      throw error;
+    }
+  }
+
+  public async sendAlgorandTransaction(to: string, amount: number, note?: string): Promise<string> {
+    try {
+      if (!this.algorandAddress) {
+        throw new Error('No Algorand address available');
+      }
+      
+      // Use algorandService to send transaction
+      const txId = await algorandService.sendPayment(to, amount,
+        note,
+      });
+      
+      return txId;
+    } catch (error) {
+      console.error('AuthServiceWeb3 - Error sending Algorand transaction:', error);
+      throw error;
+    }
+  }
+
+  public getAlgorandAddress(): string | null {
+    return this.algorandAddress || null;
+  }
+
+  public getCurrentUser(): UserInfo | null {
+    return this.currentUser;
+  }
+
+  public isSignedIn(): boolean {
+    return this.currentUser !== null && this.algorandAddress !== null;
+  }
+
+  // Token management methods
+  private async storeTokens(tokens: TokenStorage): Promise<void> {
+    try {
+      await Keychain.setGenericPassword(
+        AUTH_KEYCHAIN_USERNAME,
+        JSON.stringify(tokens),
+        {
+          service: AUTH_KEYCHAIN_SERVICE,
+          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
+        }
+      );
+      console.log('AuthServiceWeb3 - Tokens stored successfully');
+    } catch (error) {
+      console.error('AuthServiceWeb3 - Error storing tokens:', error);
+      throw error;
+    }
+  }
+
+  private async clearTokens(): Promise<void> {
+    try {
+      await Keychain.resetGenericPassword({
+        service: AUTH_KEYCHAIN_SERVICE,
+      });
+      console.log('AuthServiceWeb3 - Tokens cleared');
+    } catch (error) {
+      console.error('AuthServiceWeb3 - Error clearing tokens:', error);
+    }
+  }
+
+  public async getToken(): Promise<string | null> {
+    try {
+      const credentials = await Keychain.getGenericPassword({
+        service: AUTH_KEYCHAIN_SERVICE,
+        username: AUTH_KEYCHAIN_USERNAME,
+      });
+
+      if (credentials === false) {
+        return null;
+      }
+
+      const tokens = JSON.parse(credentials.password);
+      return tokens.accessToken || null;
+    } catch (error) {
+      console.error('AuthServiceWeb3 - Error getting token:', error);
+      return null;
+    }
+  }
+
+  // Migration helper from existing Firebase auth
+  public async migrateFromFirebase(firebaseUser: any): Promise<UserInfo> {
+    try {
+      console.log('AuthServiceWeb3 - Migrating user from Firebase...');
+      
+      // Create/restore Algorand wallet for migrated user
+      const firebaseIdToken = await firebaseUser.getIdToken();
+      const algorandAddress = await algorandService.createOrRestoreWallet(firebaseIdToken, firebaseUser.uid);
+      this.algorandAddress = algorandAddress;
+      
+      // Prepare user info
+      const userInfo: UserInfo = {
+        email: firebaseUser.email,
+        firstName: firebaseUser.displayName?.split(' ')[0],
+        lastName: firebaseUser.displayName?.split(' ').slice(1).join(' '),
+        photoURL: firebaseUser.photoURL,
+        algorandAddress: algorandAddress,
+        web3AuthId: firebaseUser.uid,
+      };
+      
+      // Authenticate with backend
+      await this.authenticateWithBackend(userInfo, firebaseIdToken);
+      
+      this.currentUser = userInfo;
+      
+      console.log('AuthServiceWeb3 - Migration successful');
+      return userInfo;
+    } catch (error) {
+      console.error('AuthServiceWeb3 - Migration error:', error);
+      throw error;
+    }
+  }
+}
+
+// Export singleton instance
+const authServiceWeb3 = AuthServiceWeb3.getInstance();
+export default authServiceWeb3;

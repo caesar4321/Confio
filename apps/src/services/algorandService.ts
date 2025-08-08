@@ -1,13 +1,23 @@
 import * as Keychain from 'react-native-keychain';
+import { secureDeterministicWallet } from './secureDeterministicWallet';
+import { jwtDecode } from 'jwt-decode';
+import { Buffer } from 'buffer'; // RN polyfill for base64
 
 // CONFIO token configuration
 const CONFIO_ASSET_ID = 743890784; // Testnet CONFIO asset ID
 
+// Type for account info
+type AccountLite = { addr: string; sk: null };
+
 class AlgorandService {
-  private web3auth: any = null;
+  // Web3Auth properties no longer used - we use secure deterministic wallet
+  private web3auth: any = null; // Kept for compatibility checks
   private algodClient: any = null;
-  private currentAccount: any = null;
+  private currentAccount: AccountLite | null = null;
   private algosdk: any = null;
+  private currentFirebaseUid: string | null = null;
+  
+  // Deprecated Web3Auth properties (no longer initialized)
   private Web3Auth: any = null;
   private web3authBase: any = null;
   private CommonPrivateKeyProvider: any = null;
@@ -26,14 +36,8 @@ class AlgorandService {
         const algosdk = await import('algosdk');
         console.log('algosdk imported successfully');
         
-        console.log('Importing @web3auth/single-factor-auth...');
-        const web3authSFA = await import('@web3auth/single-factor-auth');
-        
-        console.log('Importing @web3auth/base...');
-        const web3authBase = await import('@web3auth/base');
-        
-        console.log('Importing @web3auth/base-provider...');
-        const baseProvider = await import('@web3auth/base-provider');
+        // Web3Auth is no longer used - we use secure deterministic wallet instead
+        // Skip Web3Auth imports to avoid casting errors
         
         // Debug algosdk import
         console.log('algosdk keys:', Object.keys(algosdk));
@@ -41,41 +45,13 @@ class AlgorandService {
         console.log('algosdk.Algodv2:', algosdk.Algodv2);
         
         this.algosdk = algosdk;
-        this.Web3Auth = web3authSFA.Web3Auth || web3authSFA.default?.Web3Auth;
-        this.SDK_MODE = web3authSFA.SDK_MODE;
-        this.WEB3AUTH_NETWORK = web3authSFA.WEB3AUTH_NETWORK || web3authBase.WEB3AUTH_NETWORK;
         
-        // Debug what's actually in the imported modules
-        console.log('web3authBase keys:', Object.keys(web3authBase));
-        console.log('web3authBase.default keys:', web3authBase.default ? Object.keys(web3authBase.default) : 'no default');
-        console.log('baseProvider keys:', Object.keys(baseProvider));
-        console.log('baseProvider.default keys:', baseProvider.default ? Object.keys(baseProvider.default) : 'no default');
-        
-        // Try different ways to access CHAIN_NAMESPACES
-        let chainNamespaces = web3authBase.CHAIN_NAMESPACES || 
-                             web3authBase.default?.CHAIN_NAMESPACES ||
-                             web3authBase.CHAIN_NAMESPACES?.CHAIN_NAMESPACES;
-        
-        // Try different ways to access CommonPrivateKeyProvider
-        let commonProvider = baseProvider.CommonPrivateKeyProvider || 
-                            baseProvider.default?.CommonPrivateKeyProvider;
-        
-        console.log('Found CHAIN_NAMESPACES:', !!chainNamespaces);
-        console.log('Found CommonPrivateKeyProvider:', !!commonProvider);
-        
-        if (chainNamespaces) {
-          console.log('CHAIN_NAMESPACES keys:', Object.keys(chainNamespaces));
-        }
-        
-        // Store the imported modules with proper destructuring
-        this.web3authBase = {
-          CHAIN_NAMESPACES: chainNamespaces,
-          ...web3authBase
-        };
-        this.CommonPrivateKeyProvider = commonProvider;
-        
-        console.log('CHAIN_NAMESPACES available:', !!this.web3authBase.CHAIN_NAMESPACES);
-        console.log('CommonPrivateKeyProvider available:', !!this.CommonPrivateKeyProvider);
+        // Clear Web3Auth references - no longer used
+        this.Web3Auth = null;
+        this.web3authBase = null;
+        this.CommonPrivateKeyProvider = null;
+        this.SDK_MODE = null;
+        this.WEB3AUTH_NETWORK = null;
         
         console.log('Skipping Algodv2 client creation (not needed for wallet generation)...');
         // For now, skip Algod client creation since it's causing URL parsing issues
@@ -111,87 +87,69 @@ class AlgorandService {
     }
   }
 
-  async initializeWeb3Auth() {
-    await this.ensureInitialized();
-    if (this.web3auth) return;
-
-    try {
-      console.log('Initializing Web3Auth with CommonPrivateKeyProvider...');
-      
-      // Configure chain for Algorand
-      const chainConfig = {
-        chainNamespace: this.web3authBase.CHAIN_NAMESPACES.OTHER,
-        chainId: 'algorand:testnet', // Testnet
-        rpcTarget: 'https://testnet-api.algonode.cloud',
-        displayName: 'Algorand Testnet',
-        blockExplorerUrl: 'https://testnet.algoexplorer.io',
-        ticker: 'ALGO',
-        tickerName: 'Algorand',
-      };
-      
-      // Create CommonPrivateKeyProvider for OTHER chain (Algorand)
-      console.log('Creating CommonPrivateKeyProvider...');
-      const privateKeyProvider = new this.CommonPrivateKeyProvider({
-        config: { chainConfig }
-      });
-      
-      // Custom storage adapter for React Native using Keychain
-      const storageAdapter = {
-        getItem: async (key: string) => {
-          try {
-            const credentials = await Keychain.getInternetCredentials(`web3auth.${key}`);
-            return credentials ? credentials.password : null;
-          } catch (error) {
-            console.error('Storage getItem error:', error);
-            return null;
-          }
-        },
-        setItem: async (key: string, value: string) => {
-          try {
-            await Keychain.setInternetCredentials(
-              `web3auth.${key}`,
-              key,
-              value
-            );
-          } catch (error) {
-            console.error('Storage setItem error:', error);
-          }
-        },
-        removeItem: async (key: string) => {
-          try {
-            await Keychain.resetInternetCredentials(`web3auth.${key}`);
-          } catch (error) {
-            console.error('Storage removeItem error:', error);
-          }
-        }
-      };
-      
-      console.log('Creating Web3Auth instance...');
-      this.web3auth = new this.Web3Auth({
-        clientId: 'BKPbVLK-kIWlnwKwgYrcVFtOhkKIt4Sp1dxnF-qIPOdRAHLII_mfoJKpjfWwhOUIMwGYqjEX5n_5uQXtsEEPakE',
-        web3AuthNetwork: this.WEB3AUTH_NETWORK.SAPPHIRE_DEVNET,
-        privateKeyProvider, // Required for SFA
-        storage: storageAdapter, // Custom storage for RN
-        mode: this.SDK_MODE.REACT_NATIVE, // Set React Native mode
-      });
-
-      await this.web3auth.init();
-      console.log('Web3Auth initialized successfully with CommonPrivateKeyProvider');
-    } catch (error) {
-      console.error('Failed to initialize Web3Auth:', error);
-      throw error;
-    }
+  /**
+   * Normalize transaction parameters to handle BigInt and different field names
+   * Reusable utility for consistent parameter processing
+   */
+  private normalizeParams(params: any): any {
+    return {
+      fee: typeof params.fee === 'bigint' ? Number(params.fee) : (params.fee || 1000),
+      firstRound: typeof params.firstValid === 'bigint' ? Number(params.firstValid) : (params.firstValid ?? params.firstRound ?? 0),
+      lastRound: typeof params.lastValid === 'bigint' ? Number(params.lastValid) : (params.lastValid ?? params.lastRound ?? 0),
+      genesisHash: params.genesisHash ?? params['genesis-hash'],
+      genesisID: params.genesisID ?? params['genesis-id'],
+      flatFee: params.flatFee ?? false
+    };
   }
 
-  async createOrRestoreWallet(firebaseIdToken: string, firebaseUid: string): Promise<string> {
+  /**
+   * Safely get SDK function handling ESM/CommonJS module differences
+   */
+  private getSdkFn<T = any>(name: string): T {
+    return (this.algosdk?.[name] ?? this.algosdk?.default?.[name]);
+  }
+
+  /**
+   * Set the current Firebase UID for transaction signing
+   * Call this when restoring login session on app restart
+   */
+  setCurrentFirebaseUid(uid: string): void {
+    this.currentFirebaseUid = uid;
+    console.log('Firebase UID set for Algorand service:', uid);
+  }
+
+  // Web3Auth initialization is no longer used - kept for reference only
+  // We use secure deterministic wallet instead
+  /*
+  async initializeWeb3Auth() {
+    // This method is deprecated - we use secureDeterministicWallet instead
+    throw new Error('Web3Auth is no longer used. Use secureDeterministicWallet instead.');
+  }
+  */
+
+  async createOrRestoreWallet(firebaseIdToken: string, firebaseUid: string, oauthSubject?: string): Promise<string> {
     try {
       await this.ensureInitialized();
-      await this.initializeWeb3Auth();
       
-      if (!this.web3auth) {
-        throw new Error('Web3Auth not initialized');
+      // CRITICAL: If we have a current account but it's for a different user, clear it
+      if (this.currentAccount && this.currentFirebaseUid !== firebaseUid) {
+        // Check if the stored wallet belongs to this Firebase user
+        const storedWallet = await this.getStoredAddress();
+        console.log(`Checking if we need to switch users...`);
+        console.log(`Current stored address: ${storedWallet}`);
+        console.log(`Current account address: ${this.currentAccount.addr}`);
+        console.log(`Current UID: ${this.currentFirebaseUid}, new UID: ${firebaseUid}`);
+        
+        // Clear the current account for the new user
+        this.currentAccount = null;
+        
+        // Clear any Web3Auth reference (no longer used)
+        if (this.web3auth) {
+          this.web3auth = null;
+        }
       }
-
+      
+      // Skip Web3Auth initialization - we're not using it
       console.log(`Creating/restoring Algorand wallet for Firebase user: ${firebaseUid}`);
       
       // Pre-Web3Auth check - verify WebCrypto is available
@@ -201,14 +159,8 @@ class AlgorandService {
       console.log('[pre-web3auth] subtle.importKey type:', typeof global.crypto?.subtle?.importKey);
       
       // Check Node-style path that Web3Auth might use
-      try {
-        const nodeCrypto = require('crypto');
-        console.log('[pre-web3auth] require("crypto").webcrypto exists:', !!nodeCrypto.webcrypto);
-        console.log('[pre-web3auth] require("crypto").webcrypto.subtle exists:', !!nodeCrypto.webcrypto?.subtle);
-        console.log('[pre-web3auth] require("crypto").webcrypto.subtle.importKey type:', typeof nodeCrypto.webcrypto?.subtle?.importKey);
-      } catch (e) {
-        console.log('[pre-web3auth] require("crypto") error:', e.message);
-      }
+      // Skip crypto module check in React Native - it's not available
+      console.log('[pre-web3auth] Skipping Node crypto check in React Native');
       
       if (typeof global.crypto?.subtle?.digest !== 'function') {
         console.error('[pre-web3auth] WebCrypto digest is not available! This will fail.');
@@ -223,139 +175,43 @@ class AlgorandService {
       
       console.log(`Using verifier: ${verifierName} with verifierId: ${verifierId}`);
       
-      // Check if already connected before attempting to connect
-      let web3authProvider;
-      if (this.web3auth.status === 'connected') {
-        console.log('Web3Auth already connected, getting existing provider...');
-        web3authProvider = this.web3auth.provider;
-        if (!web3authProvider) {
-          throw new Error('Web3Auth is connected but provider is null');
-        }
-      } else {
-        console.log('Web3Auth not connected, connecting...');
-        // Connect using Single Factor Auth with Firebase ID token
-        web3authProvider = await this.web3auth.connect({
-          verifier: verifierName,
-          verifierId: verifierId, // Firebase UID for consistent wallet
-          idToken: firebaseIdToken, // Firebase ID token
-        });
-      }
-
-      if (!web3authProvider) {
-        throw new Error('Failed to connect to Web3Auth');
-      }
-
-      console.log('Web3Auth connected, requesting private key...');
+      // BYPASS WEB3AUTH COMPLETELY - Use secure deterministic wallet
+      console.log('Using secure deterministic wallet with proper KDF and salt formula from README.md');
       
-      // Get the private key from Web3Auth using the correct RPC method for OTHER chain
-      const hexPrivateKey = await web3authProvider.request({
-        method: 'private_key' // For OTHER chain (CommonPrivateKeyProvider), use 'private_key'
-      }) as string;
+      // Decode the Firebase ID token to determine provider
+      const decoded = jwtDecode<{ iss: string; firebase?: { sign_in_provider?: string } }>(firebaseIdToken);
+      let provider: 'google' | 'apple' = 'google';
       
-      console.log('Got private key from Web3Auth, converting to Algorand format...');
-      console.log('Web3Auth hex private key:', hexPrivateKey);
-      
-      // Convert hex private key to Buffer (remove 0x prefix if present)
-      const cleanHex = hexPrivateKey.replace(/^0x/, '');
-      const privateKeyBuffer = Buffer.from(cleanHex, 'hex');
-      console.log('Private key buffer length:', privateKeyBuffer.length);
-      
-      // For Algorand, we need a 32-byte seed
-      let seed;
-      if (privateKeyBuffer.length === 32) {
-        // Perfect size, use as-is
-        seed = privateKeyBuffer;
-        console.log('Using 32-byte private key as seed directly');
-      } else if (privateKeyBuffer.length > 32) {
-        // Too long, take first 32 bytes
-        seed = privateKeyBuffer.slice(0, 32);
-        console.log('Truncating private key to 32 bytes for seed');
-      } else {
-        // Too short, pad with zeros
-        seed = Buffer.alloc(32);
-        privateKeyBuffer.copy(seed);
-        console.log('Padding private key to 32 bytes for seed');
+      // Check the sign-in provider from Firebase token
+      if (decoded.firebase?.sign_in_provider === 'apple.com') {
+        provider = 'apple';
       }
       
-      console.log('Converting seed to Algorand mnemonic and account...');
+      console.log(`Detected provider: ${provider}`);
       
-      // Check if algosdk has the methods we need
-      if (!this.algosdk || !this.algosdk.secretKeyToMnemonic) {
-        console.error('algosdk methods not available, skipping Algorand account creation');
-        console.log('Available algosdk keys:', this.algosdk ? Object.keys(this.algosdk) : 'algosdk is null');
-        
-        // For debugging, let's manually derive an Algorand address from the seed
-        // Algorand address = base32(publicKey + checksum)
-        console.log('=== ALGORAND WALLET DEBUG INFO ===');
-        console.log('Seed (hex):', seed.toString('hex'));
-        console.log('Seed (base64):', seed.toString('base64'));
-        console.log('Note: Without algosdk, cannot derive proper Algorand address');
-        console.log('===================================');
-        
-        this.currentAccount = {
-          addr: 'ALGORAND_ADDRESS_PENDING',
-          sk: seed
-        };
-        return this.currentAccount.addr;
-      }
-      
-      // Convert to Algorand account using mnemonic
-      const mnemonic = this.algosdk.secretKeyToMnemonic(seed);
-      const account = this.algosdk.mnemonicToSecretKey(mnemonic);
-      
-      // Fix address conversion - algosdk sometimes returns address as object with publicKey
-      let algorandAddress;
-      if (typeof account.addr === 'string') {
-        // Already a string address
-        algorandAddress = account.addr;
-      } else if (account.addr && account.addr.publicKey) {
-        // Address is an object with publicKey - convert to string
-        const publicKeyBytes = new Uint8Array(account.addr.publicKey);
-        algorandAddress = this.algosdk.encodeAddress(publicKeyBytes);
-      } else {
-        // Fallback - extract public key from secret key and encode
-        const publicKeyBytes = account.sk.slice(32); // Public key is last 32 bytes of 64-byte secret key
-        algorandAddress = this.algosdk.encodeAddress(publicKeyBytes);
-      }
-      
-      // Log the Algorand wallet details (for debugging only - remove in production!)
-      console.log('=== ALGORAND WALLET GENERATED ===');
-      console.log('Raw account.addr:', account.addr);
-      console.log('Converted Algorand Address:', algorandAddress);
-      console.log('Account object keys:', Object.keys(account));
-      console.log('Algorand Private Key (hex):', Buffer.from(account.sk).toString('hex'));
-      console.log('Algorand Mnemonic:', mnemonic);
-      console.log('==================================');
-      
-      // Create corrected account object with proper string address
-      this.currentAccount = {
-        ...account,
-        addr: algorandAddress
-      };
-      
-      // Store the wallet data securely in Keychain (avoid freezing binary objects)
-      const walletData = {
-        address: algorandAddress, // Use the corrected string address
-        mnemonic: mnemonic,
-        privateKey: Buffer.from(account.sk).toString('hex') // Convert to hex string
-      };
-      
-      await Keychain.setInternetCredentials(
-        'algorand.confio.app',
-        'wallet',
-        JSON.stringify(walletData),
-        {
-          service: 'com.confio.algorand'
-        }
+      // Use the secure deterministic wallet service
+      const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+        firebaseIdToken,
+        firebaseUid,
+        provider,
+        'personal', // accountType - default to personal
+        0,          // accountIndex - first account
+        undefined,  // businessId - not applicable for personal accounts
+        'mainnet',  // network
+        oauthSubject // Pass the original OAuth subject if available
       );
       
-      console.log('Algorand wallet created/restored:', algorandAddress);
+      console.log('Secure wallet created:', wallet.address);
       
-      // Skip automatic opt-in for now due to algosdk React Native compatibility issues
-      // The backend will handle opt-ins through the newer authServiceWeb3.ts flow
-      console.log('[AlgorandService] Skipping automatic opt-in - will be handled by backend');
+      // Store the address and Firebase UID for later use
+      this.currentAccount = {
+        addr: wallet.address,
+        sk: null // We don't expose the private key directly
+      };
+      this.currentFirebaseUid = firebaseUid; // Store for transaction signing
       
-      return algorandAddress;
+      await this.storeAddress(wallet.address);
+      return wallet.address;
     } catch (error) {
       console.error('Error creating/restoring Algorand wallet:', error);
       throw error;
@@ -365,8 +221,17 @@ class AlgorandService {
   async getBalance(address?: string): Promise<number> {
     try {
       await this.ensureInitialized();
-      if (!this.algodClient) {
-        throw new Error('Algod client not initialized');
+      
+      // Always use real Algod client for balance queries
+      let realAlgodClient: any;
+      if (this.algosdk?.Algodv2) {
+        const token = '';
+        const server = 'https://testnet-api.algonode.cloud';
+        const port = ''; // Empty string for https
+        realAlgodClient = new this.algosdk.Algodv2(token, server, port);
+      } else {
+        console.error('Algosdk not properly initialized');
+        return 0;
       }
 
       const addr = address || this.currentAccount?.addr;
@@ -374,7 +239,7 @@ class AlgorandService {
         throw new Error('No address provided');
       }
 
-      const accountInfo = await this.algodClient.accountInformation(addr).do();
+      const accountInfo = await realAlgodClient.accountInformation(addr).do();
       // Return balance in ALGOs (microAlgos / 1,000,000)
       return accountInfo.amount / 1000000;
     } catch (error) {
@@ -386,29 +251,53 @@ class AlgorandService {
   async sendTransaction(toAddress: string, amount: number): Promise<string> {
     try {
       await this.ensureInitialized();
-      if (!this.currentAccount || !this.algodClient) {
+      if (!this.currentAccount) {
         throw new Error('Wallet not initialized');
       }
 
+      // Always use real Algod client for transactions
+      let realAlgodClient: any;
+      if (this.algosdk?.Algodv2) {
+        const token = '';
+        const server = 'https://testnet-api.algonode.cloud';
+        const port = ''; // Empty string for https
+        realAlgodClient = new this.algosdk.Algodv2(token, server, port);
+      } else {
+        throw new Error('Algosdk not properly initialized');
+      }
+
       // Get suggested params
-      const params = await this.algodClient.getTransactionParams().do();
+      const params = await realAlgodClient.getTransactionParams().do();
+      
+      // Normalize parameters using shared utility
+      const processedParams = this.normalizeParams(params);
+      
+      // Validate critical fields to catch RPC issues early
+      if (!processedParams.genesisHash || !processedParams.genesisID) {
+        throw new Error(`RPC missing genesisHash/genesisID (raw keys: ${Object.keys(params).join(', ')})`);
+      }
       
       // Create transaction
-      const txn = this.algosdk.makePaymentTxnWithSuggestedParamsFromObject({
+      const makePaymentTxn = this.getSdkFn('makePaymentTxnWithSuggestedParamsFromObject');
+      const txn = makePaymentTxn({
         from: this.currentAccount.addr,
         to: toAddress,
         amount: Math.floor(amount * 1000000), // Convert to microAlgos
-        suggestedParams: params,
+        suggestedParams: processedParams,
       });
 
-      // Sign transaction
-      const signedTxn = txn.signTxn(this.currentAccount.sk);
+      // Sign transaction using secure wallet
+      if (!this.currentFirebaseUid) {
+        throw new Error('No Firebase UID available for signing');
+      }
+      const signedTxn = await secureDeterministicWallet.signTransaction(this.currentFirebaseUid, txn);
       
       // Submit transaction
-      const { txId } = await this.algodClient.sendRawTransaction(signedTxn).do();
+      const { txId } = await realAlgodClient.sendRawTransaction(signedTxn).do();
       
       // Wait for confirmation
-      await this.algosdk.waitForConfirmation(this.algodClient, txId, 4);
+      const waitForConfirmation = this.getSdkFn('waitForConfirmation');
+      await waitForConfirmation(realAlgodClient, txId, 4);
       
       console.log('Transaction sent:', txId);
       return txId;
@@ -430,19 +319,68 @@ class AlgorandService {
     return this.algosdk;
   }
 
+  private async storeAddress(address: string): Promise<void> {
+    try {
+      await Keychain.setInternetCredentials(
+        'algorand.confio.app',
+        'confio',
+        JSON.stringify({ address, storedAt: new Date().toISOString() })
+      );
+      console.log('Algorand address stored:', address);
+    } catch (error) {
+      console.error('Error storing address:', error);
+      throw error;
+    }
+  }
+
   async clearWallet() {
+    const uid = this.currentFirebaseUid;
     this.currentAccount = null;
-    // Clear from Keychain
-    await Keychain.resetInternetCredentials('algorand.confio.app', {
-      service: 'com.confio.algorand'
-    });
+    
+    // Clear memory seed first
+    if (uid) {
+      try {
+        await secureDeterministicWallet.clearWallet(uid);
+        console.log('Cleared wallet from secureDeterministicWallet');
+      } catch (error) {
+        console.error('Error clearing secureDeterministicWallet:', error);
+      }
+    }
+    
+    this.currentFirebaseUid = null;
+    
+    // Web3Auth is no longer used - we use secure deterministic wallet instead
+    // Just clear the reference if it exists
+    if (this.web3auth) {
+      this.web3auth = null;
+      console.log('Cleared Web3Auth reference');
+    }
+    
+    // Clear Algorand-related keychain entries
+    // Note: We're skipping web3auth entries since Web3Auth is no longer used
+    const keychainEntriesToClear = [
+      'algorand.confio.app',
+      'algorand.confio.optin'
+    ];
+    
+    // Clear each entry using resetInternetCredentials
+    for (const key of keychainEntriesToClear) {
+      try {
+        // resetInternetCredentials expects just the server string
+        await Keychain.resetInternetCredentials(key);
+        console.log(`Reset keychain entry: ${key}`);
+      } catch (error: any) {
+        // Entry might not exist, which is fine
+        console.log(`Could not reset ${key}:`, error?.message);
+      }
+    }
+    
+    console.log('All Algorand wallet credentials cleared');
   }
   
   async getStoredAddress(): Promise<string | null> {
     try {
-      const credentials = await Keychain.getInternetCredentials('algorand.confio.app', {
-        service: 'com.confio.algorand'
-      });
+      const credentials = await Keychain.getInternetCredentials('algorand.confio.app');
       
       if (credentials) {
         const walletData = JSON.parse(credentials.password);
@@ -457,27 +395,21 @@ class AlgorandService {
 
   async loadStoredWallet(): Promise<boolean> {
     try {
-      console.log('[AlgorandService] Loading stored wallet from Keychain...');
+      console.log('[AlgorandService] Loading stored wallet address from Keychain...');
       
-      const credentials = await Keychain.getInternetCredentials('algorand.confio.app', {
-        service: 'com.confio.algorand'
-      });
+      const credentials = await Keychain.getInternetCredentials('algorand.confio.app');
       
       if (credentials) {
         const walletData = JSON.parse(credentials.password);
-        console.log('[AlgorandService] Found stored wallet for address:', walletData.address);
+        console.log('[AlgorandService] Found stored address:', walletData.address);
         
-        // Reconstruct the account object
-        // The stored data has the private key as a HEX string (not base64!)
-        const privateKeyBuffer = Buffer.from(walletData.privateKey, 'hex');
-        
+        // Only restore the address, not the private key (which is now encrypted or in memory)
         this.currentAccount = {
           addr: walletData.address,
-          sk: privateKeyBuffer  // The 64-byte secret key
+          sk: null  // Private key is now managed by secureDeterministicWallet
         };
         
-        console.log('[AlgorandService] Wallet loaded successfully');
-        console.log('[AlgorandService] Private key length:', privateKeyBuffer.length, 'bytes');
+        console.log('[AlgorandService] Address loaded successfully');
         return true;
       }
       
@@ -545,16 +477,14 @@ class AlgorandService {
           throw new Error('Transaction parameters are invalid');
         }
         
-        // Convert BigInt values to regular numbers and clean the object
-        const processedParams = {
-          fee: typeof params.fee === 'bigint' ? Number(params.fee) : (params.fee || 1000),
-          firstRound: typeof params.firstValid === 'bigint' ? Number(params.firstValid) : (params.firstValid || params.firstRound || 1000),
-          lastRound: typeof params.lastValid === 'bigint' ? Number(params.lastValid) : (params.lastValid || params.lastRound || 2000),
-          genesisHash: params.genesisHash || 'SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=',
-          genesisID: params.genesisID || params['genesis-id'] || 'testnet-v1.0',
-          flatFee: params.flatFee !== undefined ? params.flatFee : false
-        };
+        // Normalize parameters using shared utility
+        const processedParams = this.normalizeParams(params);
         console.log('[AlgorandService] Processed transaction params:', processedParams);
+        
+        // Validate critical fields to catch RPC issues early
+        if (!processedParams.genesisHash || !processedParams.genesisID) {
+          throw new Error(`RPC missing genesisHash/genesisID (raw keys: ${Object.keys(params).join(', ')})`);
+        }
         
         // Validate account address before creating transaction
         if (!this.currentAccount.addr || typeof this.currentAccount.addr !== 'string') {
@@ -564,94 +494,36 @@ class AlgorandService {
         
         console.log('[AlgorandService] Using address:', this.currentAccount.addr);
         
-        // Create opt-in transaction using direct method
+        // Create opt-in transaction using makeAssetTransferTxnWithSuggestedParamsFromObject
         console.log('[AlgorandService] Creating asset transfer transaction for opt-in...');
         
-        let txn;
-        try {
-          // Try using Transaction constructor directly - most reliable approach
-          console.log('[AlgorandService] Trying direct Transaction constructor...');
-          
-          const txnParams = {
-            type: 'axfer',  // Asset transfer
-            from: this.currentAccount.addr,
-            to: this.currentAccount.addr,
-            assetIndex: CONFIO_ASSET_ID,
-            amount: 0,
-            fee: processedParams.fee,
-            firstRound: processedParams.firstRound,
-            lastRound: processedParams.lastRound,
-            genesisHash: processedParams.genesisHash,
-            genesisID: processedParams.genesisID,
-            flatFee: processedParams.flatFee
-          };
-          
-          console.log('[AlgorandService] Transaction params for constructor:', txnParams);
-          
-          if (this.algosdk.Transaction) {
-            txn = new this.algosdk.Transaction(txnParams);
-            console.log('[AlgorandService] Direct Transaction constructor succeeded');
-          } else {
-            throw new Error('Transaction constructor not found');
-          }
-          
-        } catch (directError) {
-          console.error('[AlgorandService] Direct constructor failed:', directError);
-          
-          try {
-            // Fallback to makeAssetTransferTxn if it exists
-            console.log('[AlgorandService] Trying makeAssetTransferTxn...');
-            if (this.algosdk.makeAssetTransferTxn) {
-              txn = this.algosdk.makeAssetTransferTxn(
-                this.currentAccount.addr,  // from
-                this.currentAccount.addr,  // to  
-                undefined,                 // closeRemainderTo
-                undefined,                 // revocationTarget
-                0,                        // amount (0 for opt-in)
-                undefined,                // note
-                CONFIO_ASSET_ID,          // assetIndex
-                processedParams           // suggestedParams
-              );
-              console.log('[AlgorandService] makeAssetTransferTxn succeeded');
-            } else {
-              throw new Error('makeAssetTransferTxn not found');
-            }
-          } catch (makeError) {
-            console.error('[AlgorandService] makeAssetTransferTxn failed:', makeError);
-            
-            // Final fallback to object method
-            let makeAssetTransferTxn;
-            if (this.algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject) {
-              makeAssetTransferTxn = this.algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject;
-            } else if (this.algosdk.default?.makeAssetTransferTxnWithSuggestedParamsFromObject) {
-              makeAssetTransferTxn = this.algosdk.default.makeAssetTransferTxnWithSuggestedParamsFromObject;
-            } else {
-              console.error('[AlgorandService] makeAssetTransferTxnWithSuggestedParamsFromObject not found');
-              console.error('[AlgorandService] Available algosdk methods:', Object.keys(this.algosdk));
-              throw new Error('No suitable asset transfer transaction method found');
-            }
-            
-            console.log('[AlgorandService] Creating transaction with object method and params:', {
-              from: this.currentAccount.addr,
-              to: this.currentAccount.addr,
-              amount: 0,
-              assetIndex: CONFIO_ASSET_ID,
-              suggestedParams: processedParams
-            });
-            
-            txn = makeAssetTransferTxn({
-              from: this.currentAccount.addr,
-              to: this.currentAccount.addr,
-              amount: 0,
-              assetIndex: CONFIO_ASSET_ID,
-              suggestedParams: processedParams,
-            });
-          }
+        // Find the correct method (try named export first, then default export)
+        let makeAssetTransferTxn;
+        if (this.algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject) {
+          makeAssetTransferTxn = this.algosdk.makeAssetTransferTxnWithSuggestedParamsFromObject;
+        } else if (this.algosdk.default?.makeAssetTransferTxnWithSuggestedParamsFromObject) {
+          makeAssetTransferTxn = this.algosdk.default.makeAssetTransferTxnWithSuggestedParamsFromObject;
+        } else {
+          console.error('[AlgorandService] makeAssetTransferTxnWithSuggestedParamsFromObject not found');
+          console.error('[AlgorandService] Available algosdk methods:', Object.keys(this.algosdk).slice(0, 20));
+          throw new Error('makeAssetTransferTxnWithSuggestedParamsFromObject not found in algosdk');
         }
+        
+        // Create the transaction
+        const txn = makeAssetTransferTxn({
+          from: this.currentAccount.addr,
+          to: this.currentAccount.addr,
+          amount: 0,  // 0 for opt-in
+          assetIndex: CONFIO_ASSET_ID,
+          suggestedParams: processedParams
+        });
         console.log('[AlgorandService] Created opt-in transaction');
 
-        // Sign transaction
-        const signedTxn = txn.signTxn(this.currentAccount.sk);
+        // Sign transaction using secure wallet
+        if (!this.currentFirebaseUid) {
+          throw new Error('No Firebase UID available for signing');
+        }
+        const signedTxn = await secureDeterministicWallet.signTransaction(this.currentFirebaseUid, txn);
         console.log('[AlgorandService] Transaction signed');
         
         // Submit transaction using the real client
@@ -659,7 +531,8 @@ class AlgorandService {
         console.log(`[AlgorandService] Transaction submitted. TxID: ${txId}`);
         
         // Wait for confirmation using the real client
-        const confirmedTxn = await this.algosdk.waitForConfirmation(realAlgodClient, txId, 4);
+        const waitForConfirmation = this.getSdkFn('waitForConfirmation');
+        const confirmedTxn = await waitForConfirmation(realAlgodClient, txId, 4);
         console.log(`[AlgorandService] Transaction confirmed in round ${confirmedTxn['confirmed-round']}`);
         
         // Store successful opt-in status
@@ -673,10 +546,7 @@ class AlgorandService {
             status: 'confirmed',
             txId: txId,
             confirmedRound: confirmedTxn['confirmed-round']
-          }),
-          {
-            service: 'com.confio.algorand.optin'
-          }
+          })
         );
         
         console.log(`[AlgorandService] Successfully opted in to CONFIO token. TxID: ${txId}`);
@@ -696,10 +566,7 @@ class AlgorandService {
               address: this.currentAccount.addr,
               optedInAt: new Date().toISOString(),
               status: 'already_opted_in'
-            }),
-            {
-              service: 'com.confio.algorand.optin'
-            }
+            })
           );
           
           return true;
@@ -717,9 +584,7 @@ class AlgorandService {
 
   async checkConfioOptInStatus(): Promise<boolean> {
     try {
-      const credentials = await Keychain.getInternetCredentials('algorand.confio.optin', {
-        service: 'com.confio.algorand.optin'
-      });
+      const credentials = await Keychain.getInternetCredentials('algorand.confio.optin');
       
       if (credentials) {
         const optInData = JSON.parse(credentials.password);
@@ -790,9 +655,9 @@ class AlgorandService {
 
       const result = data.data.algorandSponsoredSend;
       
-      // Decode base64 transactions
-      const userTxn = Uint8Array.from(atob(result.userTransaction), c => c.charCodeAt(0));
-      const sponsorTxn = Uint8Array.from(atob(result.sponsorTransaction), c => c.charCodeAt(0));
+      // Decode base64 transactions (RN compatible)
+      const userTxn = Uint8Array.from(Buffer.from(result.userTransaction, 'base64'));
+      const sponsorTxn = Uint8Array.from(Buffer.from(result.sponsorTransaction, 'base64'));
       
       return {
         userTransaction: userTxn,
@@ -821,13 +686,15 @@ class AlgorandService {
 
       console.log('[AlgorandService] Signing user transaction...');
       
-      // Decode and sign the user transaction
-      const txn = this.algosdk.decodeObj(userTransaction);
-      const signedUserTxn = txn.signTxn(this.currentAccount.sk);
+      // Sign the user transaction using secure wallet (pass raw bytes)
+      if (!this.currentFirebaseUid) {
+        throw new Error('No Firebase UID available for signing');
+      }
+      const signedUserTxn = await secureDeterministicWallet.signTransaction(this.currentFirebaseUid, userTransaction);
       
-      // Encode for submission
-      const signedUserTxnB64 = btoa(String.fromCharCode(...signedUserTxn));
-      const sponsorTxnB64 = btoa(String.fromCharCode(...sponsorTransaction));
+      // Encode for submission (RN compatible)
+      const signedUserTxnB64 = Buffer.from(signedUserTxn).toString('base64');
+      const sponsorTxnB64 = Buffer.from(sponsorTransaction).toString('base64');
       
       console.log('[AlgorandService] Submitting sponsored transaction group...');
       
@@ -922,17 +789,17 @@ class AlgorandService {
 
       console.log(`[AlgorandService] Signing opt-in transaction for ${result.assetName}...`);
       
-      // Step 2: Decode and sign the user transaction
-      const userTxnBytes = Uint8Array.from(atob(result.userTransaction), c => c.charCodeAt(0));
+      // Step 2: Decode and sign the user transaction (RN compatible)
+      const userTxnBytes = Uint8Array.from(Buffer.from(result.userTransaction, 'base64'));
       
-      // Decode the transaction object
-      const txn = this.algosdk.decodeObj(userTxnBytes);
+      // Sign with user's private key using secure wallet (pass raw bytes, not base64 string!)
+      if (!this.currentFirebaseUid) {
+        throw new Error('No Firebase UID available for signing');
+      }
+      const signedUserTxn = await secureDeterministicWallet.signTransaction(this.currentFirebaseUid, userTxnBytes);
       
-      // Sign with user's private key from Web3Auth
-      const signedUserTxn = txn.signTxn(this.currentAccount.sk);
-      
-      // Convert to base64
-      const signedUserTxnB64 = btoa(String.fromCharCode(...signedUserTxn));
+      // Convert to base64 (RN compatible)
+      const signedUserTxnB64 = Buffer.from(signedUserTxn).toString('base64');
       
       console.log(`[AlgorandService] Submitting signed opt-in for ${result.assetName}...`);
       
@@ -988,10 +855,7 @@ class AlgorandService {
           status: 'confirmed',
           txId: submitResult.transactionId,
           confirmedRound: submitResult.confirmedRound
-        }),
-        {
-          service: 'com.confio.algorand.optin'
-        }
+        })
       );
       
       return true;
