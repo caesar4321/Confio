@@ -4,21 +4,7 @@
 console.log('[polyfills] Starting polyfills setup...');
 
 // CRITICAL: Random values for cryptographic operations (must be first!)
-// Skip react-native-get-random-values on iOS to avoid NativeEventEmitter issues
-// Use fallback implementation instead
-console.log('[polyfills] Setting up crypto.getRandomValues...');
-if (typeof global.crypto === 'undefined') {
-  global.crypto = {};
-}
-if (!global.crypto.getRandomValues) {
-  global.crypto.getRandomValues = function(array) {
-    for (let i = 0; i < array.length; i++) {
-      array[i] = Math.floor(Math.random() * 256);
-    }
-    return array;
-  };
-  console.log('[polyfills] Using Math.random for crypto.getRandomValues (iOS compatible)');
-}
+import 'react-native-get-random-values';
 
 // FIRST: URL polyfill for algosdk compatibility
 import 'react-native-url-polyfill/auto';
