@@ -1,0 +1,83 @@
+/**
+ * Web3Auth polyfills for React Native
+ * This file sets up necessary polyfills before Web3Auth is initialized
+ */
+
+// Ensure global object exists
+if (typeof global === 'undefined') {
+  (window as any).global = window;
+}
+
+// Setup self reference
+if (typeof self === 'undefined') {
+  (global as any).self = global;
+}
+
+// Ensure URL has prototype
+if (typeof URL !== 'undefined' && !URL.prototype) {
+  try {
+    Object.defineProperty(URL, 'prototype', {
+      value: Object.create(Object.prototype),
+      writable: true,
+      enumerable: false,
+      configurable: true
+    });
+  } catch (e) {
+    console.log('[Web3Auth Polyfills] Could not set URL.prototype:', e);
+  }
+}
+
+// Ensure fetch exists
+if (typeof fetch === 'undefined') {
+  console.warn('[Web3Auth Polyfills] fetch is not defined, Web3Auth may not work properly');
+}
+
+// Ensure TextEncoder/TextDecoder exist
+if (typeof TextEncoder === 'undefined') {
+  console.warn('[Web3Auth Polyfills] TextEncoder is not defined');
+  try {
+    const { TextEncoder: TE, TextDecoder: TD } = require('util');
+    (global as any).TextEncoder = TE;
+    (global as any).TextDecoder = TD;
+  } catch (e) {
+    console.log('[Web3Auth Polyfills] Could not load TextEncoder/TextDecoder from util');
+  }
+}
+
+// Ensure AbortController exists
+if (typeof AbortController === 'undefined') {
+  console.warn('[Web3Auth Polyfills] AbortController is not defined');
+  (global as any).AbortController = class AbortController {
+    signal = { aborted: false };
+    abort() {
+      this.signal.aborted = true;
+    }
+  };
+}
+
+// Export a function to verify all polyfills are in place
+export function verifyWeb3AuthPolyfills(): boolean {
+  const checks = {
+    URL: typeof URL !== 'undefined',
+    URLPrototype: typeof URL !== 'undefined' && URL.prototype !== undefined,
+    crypto: typeof crypto !== 'undefined',
+    cryptoSubtle: typeof crypto !== 'undefined' && crypto.subtle !== undefined,
+    fetch: typeof fetch !== 'undefined',
+    TextEncoder: typeof TextEncoder !== 'undefined',
+    TextDecoder: typeof TextDecoder !== 'undefined',
+    AbortController: typeof AbortController !== 'undefined',
+    atob: typeof atob !== 'undefined',
+    btoa: typeof btoa !== 'undefined'
+  };
+  
+  console.log('[Web3Auth Polyfills] Verification:', checks);
+  
+  // Return true if all critical checks pass
+  return checks.URL && checks.crypto && checks.cryptoSubtle;
+}
+
+// Run verification
+const isReady = verifyWeb3AuthPolyfills();
+console.log('[Web3Auth Polyfills] Ready for Web3Auth:', isReady);
+
+export default isReady;

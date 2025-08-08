@@ -45,7 +45,7 @@ interface StoredZkLogin {
     zkProof: any;        // the full proof object (points a/b/c etc)
     subject: string;     // sub
     clientId: string;    // oauth clientId
-    aptosAddress: string;  // the user's Sui address
+    aptosAddress: string;  // the user's Aptos address
   };
   secretKey: string;     // base64-encoded 32-byte seed
   initRandomness: string; // randomness from initializeZkLogin
@@ -139,40 +139,21 @@ export class AuthService {
     try {
       console.log('Starting Google Sign-In process...');
       
-      // Ensure Google Sign-In is configured before attempting to sign in
-      await this.configureGoogleSignIn();
-      
       // Sign out first to force account selection
       try {
-        // Note: isSignedIn() might not exist in newer versions
-        // Just try to sign out regardless
-        console.log('Attempting to sign out from Google to force account selection...');
-        await GoogleSignin.signOut();
+        const isSignedIn = await GoogleSignin.isSignedIn();
+        if (isSignedIn) {
+          console.log('User already signed in to Google, signing out to force account selection...');
+          await GoogleSignin.signOut();
+        }
       } catch (error) {
-        // It's okay if sign out fails, user might not be signed in
-        console.log('Sign out attempt (expected to fail if not signed in):', error?.message);
+        console.log('Error checking/signing out from Google:', error);
       }
       
       // 1) Sign in with Google first
       console.log('Checking Play Services...');
-      try {
-        // Try with more lenient check first
-        await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: false });
-        console.log('Play Services check passed');
-      } catch (playServicesError) {
-        console.error('Play Services error details:', {
-          error: playServicesError,
-          message: playServicesError?.message,
-          code: playServicesError?.code,
-          stack: playServicesError?.stack,
-          name: playServicesError?.name
-        });
-        
-        // TEMPORARY: Try to continue without Play Services check
-        console.warn('WARNING: Continuing without Play Services check - this may fail');
-        // Don't throw, try to continue
-        // throw playServicesError;
-      }
+      await GoogleSignin.hasPlayServices();
+      console.log('Play Services check passed');
       
       console.log('Attempting Google Sign-In...');
       const userInfo = await GoogleSignin.signIn();
@@ -375,6 +356,7 @@ export class AuthService {
 
       // 10) Create Algorand wallet using Web3Auth and backend opt-ins
       let algorandAddress = '';
+      let isPhoneVerified = false; // Default to false if we can't get the status
       try {
         console.log('Creating Algorand wallet with Web3Auth using Firebase token...');
         
@@ -382,8 +364,13 @@ export class AuthService {
         const freshFirebaseToken = await user.getIdToken(true);
         const firebaseUid = user.uid;
         
-        // Create Algorand wallet with Web3Auth
-        algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, firebaseUid);
+        // Create Algorand wallet with the Google OAuth subject for non-custodial derivation
+        // Decode the ID token to get the real Google OAuth subject
+        const decodedIdToken = jwtDecode<{ sub: string, iss: string }>(idToken);
+        const googleSubject = decodedIdToken.sub; // The real Google OAuth subject
+        console.log('Using Google OAuth subject for Algorand:', googleSubject);
+        console.log('Google OAuth issuer:', decodedIdToken.iss);
+        algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, firebaseUid, googleSubject);
         console.log('Algorand wallet created:', algorandAddress);
         
         // Now call backend mutations for authentication and opt-ins
@@ -420,6 +407,11 @@ export class AuthService {
             });
             console.log('Stored new authentication tokens');
           }
+          
+          // Get the phone verification status from the user
+          isPhoneVerified = authData.web3AuthLogin.user?.isPhoneVerified || false;
+          console.log('Phone verification status from backend:', isPhoneVerified);
+          
           
           // Step 2: Add Algorand wallet and check opt-ins (now with proper auth)
           console.log('Calling ADD_ALGORAND_WALLET mutation...');
@@ -506,26 +498,16 @@ export class AuthService {
                           // Get the raw transaction bytes (without the signature)
                           const txnToSign = algosdk.encodeObj(txnDict);
                           
-                          // Sign the transaction using nacl (which algosdk uses internally)
-                          const nacl = await import('tweetnacl');
+                          // Use the secure wallet to sign the transaction
+                          // The secureDeterministicWallet handles the private key securely
+                          const { secureDeterministicWallet } = await import('./secureDeterministicWallet');
                           
-                          // Create the signing prefix for Algorand transactions
-                          const txTypeBytes = new Uint8Array(Buffer.from('TX'));
-                          const bytesToSign = new Uint8Array(txTypeBytes.length + txnToSign.length);
-                          bytesToSign.set(txTypeBytes);
-                          bytesToSign.set(txnToSign, txTypeBytes.length);
-                          
-                          // Sign with the private key
-                          const signature = nacl.default.sign.detached(bytesToSign, currentAccount.sk);
-                          
-                          // Create the signed transaction structure
-                          const signedTxn = {
-                            sig: signature,
-                            txn: txnDict
-                          };
-                          
-                          // Encode the signed transaction
-                          const signedTxnBytes = algosdk.encodeObj(signedTxn);
+                          // Sign the transaction using the secure wallet service
+                          // Pass the raw transaction bytes directly to the signing method
+                          const signedTxnBytes = await secureDeterministicWallet.signTransaction(
+                            firebaseUid,   // Firebase UID from earlier in the function
+                            userTxnBytes   // The raw transaction bytes from the backend
+                          );
                           
                           console.log('Transaction signed successfully using raw signing');
                           console.log('Signed transaction bytes length:', signedTxnBytes.length);
@@ -576,7 +558,7 @@ export class AuthService {
           console.error('WEB3AUTH_LOGIN failed:', authData?.web3AuthLogin?.error);
         }
         
-        // Update the sui_address field with Algorand address
+        // Update the aptos_address field with Algorand address
         try {
           const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
           await apolloClient.mutate({
@@ -604,9 +586,12 @@ export class AuthService {
           photoURL: user.photoURL 
         },
         zkLoginData: { 
-          zkProof: fin.zkProof, 
-          aptosAddress: algorandAddress || fin.aptosAddress, // Use Algorand address if available
-          isPhoneVerified: fin.isPhoneVerified 
+          zkProof: {
+            aptosAddress: algorandAddress, // Store Algorand address in the zkProof object
+            zkProof: null // We don't have actual zkProof when using Algorand
+          },
+          aptosAddress: algorandAddress, // Also store at top level for compatibility
+          isPhoneVerified // Use the actual value from backend
         }
       };
       console.log('Sign-in process completed successfully:', result);
@@ -619,56 +604,6 @@ export class AuthService {
         console.error('Error stack:', error.stack);
       }
       throw error;
-    }
-  }
-
-  private async handleAssetOptIns(assetIds: number[], algorandAddress: string): Promise<void> {
-    try {
-      console.log('Handling opt-ins for assets:', assetIds);
-      
-      const { GENERATE_OPT_IN_TRANSACTIONS } = await import('../apollo/mutations');
-      
-      // Step 1: Get unsigned transactions from backend
-      const { data } = await apolloClient.mutate({
-        mutation: GENERATE_OPT_IN_TRANSACTIONS,
-        variables: {
-          assetIds: assetIds,
-        },
-      });
-      
-      if (!data?.generateOptInTransactions?.success) {
-        console.error('Failed to generate opt-in transactions:', 
-          data?.generateOptInTransactions?.error);
-        return; // Don't block login if opt-ins fail
-      }
-      
-      const transactions = data.generateOptInTransactions.transactions;
-      if (!transactions || transactions.length === 0) {
-        console.log('No transactions to sign');
-        return;
-      }
-      
-      console.log('Got', transactions.length, 'transactions to sign');
-      
-      // Step 2: Sign and submit each transaction
-      // For now, we'll skip actual signing since we had algosdk compatibility issues
-      // The backend has already funded the account, so opt-ins can be done later
-      console.log('Skipping automatic opt-in signing due to algosdk compatibility issues');
-      console.log('Account is funded and ready for manual opt-ins when needed');
-      
-      // TODO: Implement signing when algosdk React Native issues are resolved
-      // for (const tx of transactions) {
-      //   try {
-      //     console.log(`Opting in to ${tx.assetName} (${tx.assetId})...`);
-      //     // Sign and submit transaction
-      //   } catch (error) {
-      //     console.error(`Failed to opt-in to asset ${tx.assetId}:`, error);
-      //   }
-      // }
-      
-    } catch (error) {
-      console.error('Error handling asset opt-ins:', error);
-      // Don't throw - opt-ins shouldn't block login
     }
   }
 
@@ -852,6 +787,8 @@ export class AuthService {
       // Generate salt and ephemeral keypair
       const decodedAppleJwt = jwtDecode<{ sub: string, iss: string }>(appleAuthResponse.identityToken);
       const appleSub = decodedAppleJwt.sub;
+      console.log('Apple OAuth subject:', appleSub);
+      console.log('Apple OAuth issuer:', decodedAppleJwt.iss);
       const salt = await this.generateZkLoginSalt(decodedAppleJwt.iss, appleSub, 'apple');
       const ephemeralKeypair = this.deriveEphemeralKeypair(salt, appleSub, 'apple');
       this.suiKeypair = ephemeralKeypair;
@@ -938,22 +875,74 @@ export class AuthService {
 
       // Create Algorand wallet using Web3Auth SFA with Firebase
       let algorandAddress = '';
+      let isPhoneVerified = false;
       try {
         console.log('Creating Algorand wallet with Web3Auth SFA using Firebase (Apple)...');
         // Get fresh Firebase ID token for Web3Auth
         const freshFirebaseToken = await userCredential.user.getIdToken(true);
         const firebaseUid = userCredential.user.uid;
-        algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, firebaseUid);
+        // Pass the Apple OAuth subject for non-custodial wallet derivation
+        algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, firebaseUid, appleSub);
         console.log('Algorand wallet created (Apple):', algorandAddress);
         
-        // Update the sui_address field with Algorand address
-        // (temporarily storing in sui_address field as discussed)
-        const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
-        await apolloClient.mutate({
-          mutation: UPDATE_ACCOUNT_APTOS_ADDRESS,
-          variables: { aptosAddress: algorandAddress }
+        // Call WEB3AUTH_LOGIN mutation to authenticate and get user info
+        const { WEB3AUTH_LOGIN, ADD_ALGORAND_WALLET } = await import('../apollo/mutations');
+        
+        console.log('Calling WEB3AUTH_LOGIN mutation for Apple...');
+        const { data: authData } = await apolloClient.mutate({
+          mutation: WEB3AUTH_LOGIN,
+          variables: {
+            provider: 'apple',
+            web3AuthId: firebaseUid,
+            email: userCredential.user.email,
+            firstName: firstName || '',
+            lastName: lastName || '',
+            algorandAddress,
+            idToken: freshFirebaseToken,
+          },
+          context: {
+            skipAuth: true, // Tell the auth link to skip adding JWT token
+          },
         });
-        console.log('Updated account with Algorand address (Apple)');
+        
+        if (authData?.web3AuthLogin?.success) {
+          console.log('WEB3AUTH_LOGIN successful (Apple)');
+          
+          // Store the new tokens from Web3Auth login
+          if (authData.web3AuthLogin.accessToken && authData.web3AuthLogin.refreshToken) {
+            await this.storeTokens({
+              accessToken: authData.web3AuthLogin.accessToken,
+              refreshToken: authData.web3AuthLogin.refreshToken,
+            });
+            console.log('Stored new authentication tokens (Apple)');
+          }
+          
+          // Get the phone verification status from the user
+          isPhoneVerified = authData.web3AuthLogin.user?.isPhoneVerified || false;
+          console.log('Phone verification status from backend (Apple):', isPhoneVerified);
+          
+          // Call ADD_ALGORAND_WALLET for opt-ins
+          console.log('Calling ADD_ALGORAND_WALLET mutation (Apple)...');
+          const { data: walletData } = await apolloClient.mutate({
+            mutation: ADD_ALGORAND_WALLET,
+            variables: {
+              algorandAddress,
+              web3authId: firebaseUid,
+              provider: 'apple'
+            }
+          });
+          
+          if (walletData?.addAlgorandWallet?.success) {
+            console.log('ADD_ALGORAND_WALLET successful (Apple)');
+            // Handle opt-ins if needed
+            if (walletData.addAlgorandWallet.needsOptIn?.length > 0) {
+              console.log('Needs opt-in for assets (Apple):', walletData.addAlgorandWallet.needsOptIn);
+              // Handle opt-ins similar to Google flow
+            }
+          }
+        } else {
+          console.error('WEB3AUTH_LOGIN failed (Apple):', authData?.web3AuthLogin?.error);
+        }
       } catch (algorandError) {
         console.error('Error creating Algorand wallet (Apple):', algorandError);
         // Don't fail the sign-in if Algorand wallet creation fails
@@ -968,9 +957,12 @@ export class AuthService {
           photoURL: userCredential.user.photoURL
         },
         zkLoginData: {
-          zkProof: finalizeData.finalizeZkLogin.zkProof,
-          aptosAddress: algorandAddress || finalizeData.finalizeZkLogin.aptosAddress, // Use Algorand address if available
-          isPhoneVerified: finalizeData.finalizeZkLogin.isPhoneVerified
+          zkProof: {
+            aptosAddress: algorandAddress, // Store Algorand address in the zkProof object
+            zkProof: null // We don't have actual zkProof when using Algorand
+          },
+          aptosAddress: algorandAddress, // Also store at top level for compatibility
+          isPhoneVerified // Use the actual value from backend
         }
       };
     } catch (error) {
@@ -1069,7 +1061,7 @@ export class AuthService {
         hasSecretKey: !!data.secretKey,
         hasInitRandomness: !!data.initRandomness,
         hasInitJwt: !!data.initJwt,
-        hasSuiAddress: !!data.zkProof?.aptosAddress,
+        hasAptosAddress: !!data.zkProof?.aptosAddress,
         secretKeyLength: data.secretKey?.length
       });
 
@@ -1147,7 +1139,7 @@ export class AuthService {
           hasZkProof: !!this.zkProof?.zkProof,
           hasSubject: !!this.zkProof?.subject,
           hasClientId: !!this.zkProof?.clientId,
-          hasSuiAddress: !!this.zkProof?.aptosAddress
+          hasAptosAddress: !!this.zkProof?.aptosAddress
         }
       });
     } catch (error) {
@@ -1179,7 +1171,7 @@ export class AuthService {
     // Log the incoming proof structure
     console.log('Incoming proof structure:', {
       hasZkProof: !!proof.zkProof,
-      hasSuiAddress: !!proof.aptosAddress,
+      hasAptosAddress: !!proof.aptosAddress,
       success: proof.success,
       error: proof.error,
       proof: proof
@@ -1196,7 +1188,7 @@ export class AuthService {
 
     // Ensure we have a valid Sui address
     if (!proof.aptosAddress) {
-      throw new Error('No Sui address provided in proof');
+      throw new Error('No Aptos address provided in proof');
     }
 
     // Structure the zkProof data with only required fields
@@ -1204,7 +1196,7 @@ export class AuthService {
       zkProof: proof.zkProof,
       subject,
       clientId,
-      aptosAddress: proof.aptosAddress,  // Store the Sui address at the top level
+      aptosAddress: proof.aptosAddress,  // Store the Aptos address at the top level
       extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
       userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0)))
     };
@@ -1253,7 +1245,7 @@ export class AuthService {
   }
 
   // Get the user's Sui address
-  public async getZkLoginAddress(): Promise<string> {
+  public async getAptosAddress(): Promise<string> {
     if (!this.firebaseIsInitialized) {
       await this.initialize();
     }
@@ -1299,17 +1291,17 @@ export class AuthService {
     );
 
     // Get the Sui address for the current account context
-    const currentSuiAddress = currentKeypair.getPublicKey().toSuiAddress();
+    const currentAptosAddress = currentKeypair.getPublicKey().toSuiAddress();
 
     console.log('Generated deterministic Sui address:', {
       accountType: accountContext.type,
       accountIndex: accountContext.index,
       accountId: accountId,
-      aptosAddress: currentSuiAddress,
+      aptosAddress: currentAptosAddress,
       note: 'Address derived from deterministic salt for current account context'
     });
 
-    return currentSuiAddress;
+    return currentAptosAddress;
   }
 
   // Sign out
@@ -2094,12 +2086,12 @@ export class AuthService {
     
     // Verify that the Sui address changes for the new account context
     try {
-      const newSuiAddress = await this.getZkLoginAddress();
+      const newAptosAddress = await this.getAptosAddress();
       console.log('AuthService - Account switch completed with new Sui address:', {
         accountId: accountId,
         accountType: accountContext.type,
         accountIndex: accountContext.index,
-        aptosAddress: newSuiAddress,
+        aptosAddress: newAptosAddress,
         note: accountContext.type === 'personal' ? 'Personal account (index 0)' : `Business account (index ${accountContext.index})`
       });
     } catch (error) {
@@ -2181,7 +2173,6 @@ export class AuthService {
   }
 }
 
-// Export both the class and singleton instance
-export { AuthService };
+// Export a singleton instance
 const authService = AuthService.getInstance();
 export default authService; 

@@ -14,7 +14,7 @@ from django.utils.html import format_html
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from users.models import User, Account, Business, Country, Bank, BankInfo
+from users.models import User, Account, Business, Country, Bank, BankInfo, WalletPepper
 from security.models import IdentityVerification
 from achievements.admin_views import achievement_dashboard
 from achievements.models import UserAchievement
@@ -584,7 +584,7 @@ confio_admin_site = ConfioAdminSite(name='confio_admin')
 
 # Re-register all models with the custom admin site
 from django.contrib.auth.models import Group
-from users.admin import UserAdmin, AccountAdmin, BusinessAdmin, CountryAdmin, BankAdmin, BankInfoAdmin, UnifiedTransactionAdmin, BusinessEmployeeAdmin, EmployeeInvitationAdmin
+from users.admin import UserAdmin, AccountAdmin, BusinessAdmin, CountryAdmin, BankAdmin, BankInfoAdmin, UnifiedTransactionAdmin, BusinessEmployeeAdmin, EmployeeInvitationAdmin, WalletPepperAdmin
 from security.admin import IdentityVerificationAdmin, SuspiciousActivityAdmin
 from p2p_exchange.admin import (
     P2PPaymentMethodAdmin, P2POfferAdmin, P2PTradeAdmin, 
@@ -615,6 +615,7 @@ confio_admin_site.register(AMLCheck, AMLCheckAdmin)
 confio_admin_site.register(Country, CountryAdmin)
 confio_admin_site.register(Bank, BankAdmin)
 confio_admin_site.register(BankInfo, BankInfoAdmin)
+confio_admin_site.register(WalletPepper, WalletPepperAdmin)
 
 # Employee models
 from users.models_employee import BusinessEmployee, EmployeeInvitation
