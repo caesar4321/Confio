@@ -93,8 +93,3 @@ project(':react-native-device-info').projectDir = new File(rootProject.projectDi
 include ':notifee_react-native'
 project(':notifee_react-native').projectDir = new File(rootProject.projectDir, '../node_modules/@notifee/react-native/android')
 
-include ':react-native-webcrypto'
-project(':react-native-webcrypto').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-webcrypto/android')
-
-include ':react-native-quick-crypto'
-project(':react-native-quick-crypto').projectDir = new File(rootProject.projectDir, '../node_modules/react-native-quick-crypto/android')
