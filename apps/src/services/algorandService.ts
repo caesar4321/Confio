@@ -142,31 +142,25 @@ class AlgorandService {
   }
   */
 
-  async createOrRestoreWallet(firebaseIdToken: string, firebaseUid: string, oauthSubject?: string): Promise<string> {
+  async createOrRestoreWallet(
+    firebaseIdToken: string, 
+    oauthSubject: string,
+    accountType: 'personal' | 'business' = 'personal',
+    accountIndex: number = 0,
+    businessId?: string
+  ): Promise<string> {
     try {
       await this.ensureInitialized();
       
-      // CRITICAL: If we have a current account but it's for a different user, clear it
-      if (this.currentAccount && this.currentFirebaseUid !== firebaseUid) {
-        // Check if the stored wallet belongs to this Firebase user
-        const storedWallet = await this.getStoredAddress();
-        console.log(`Checking if we need to switch users...`);
-        console.log(`Current stored address: ${storedWallet}`);
-        console.log(`Current account address: ${this.currentAccount.addr}`);
-        console.log(`Current UID: ${this.currentFirebaseUid}, new UID: ${firebaseUid}`);
-        
-        // Clear the current account for the new user
+      // Clear any existing account to ensure fresh wallet generation
+      if (this.currentAccount) {
+        console.log('Clearing existing account for fresh wallet generation');
         this.currentAccount = null;
-        
-        // Clear any Web3Auth reference (no longer used)
-        if (this.web3auth) {
-          this.web3auth = null;
-        }
       }
       
       // Skip Web3Auth initialization - we're not using it
-      console.log(`[AlgorandService] Creating/restoring Algorand wallet for Firebase user: ${firebaseUid}`);
-      console.log(`[AlgorandService] OAuth subject provided: ${oauthSubject || 'NONE - will use Firebase UID'}`);
+      console.log(`[AlgorandService] Creating/restoring Algorand wallet with OAuth subject: ${oauthSubject}`);
+      console.log(`[AlgorandService] Account context:`, { accountType, accountIndex, businessId });
       
       // BYPASS WEB3AUTH COMPLETELY - Use secure deterministic wallet
       console.log('[AlgorandService] Using secure deterministic wallet with proper KDF and salt formula from README.md');
@@ -182,26 +176,32 @@ class AlgorandService {
       
       console.log(`Detected provider: ${provider}`);
       
-      // Use the secure deterministic wallet service
+      // Get the actual Google web client ID from environment
+      const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+      const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+      
+      // Determine the OAuth issuer and audience based on provider
+      const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+      const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+      
+      // Use the secure deterministic wallet service with OAuth claims directly
       const wallet = await secureDeterministicWallet.createOrRestoreWallet(
-        firebaseIdToken,
-        firebaseUid,
+        iss,          // OAuth issuer
+        oauthSubject, // OAuth subject is REQUIRED for deterministic derivation
+        aud,          // OAuth audience (web client ID)
         provider,
-        'personal', // accountType - default to personal
-        0,          // accountIndex - first account
-        undefined,  // businessId - not applicable for personal accounts
-        'mainnet',  // network
-        oauthSubject // Pass the original OAuth subject if available
+        accountType,  // Use the provided account type
+        accountIndex, // Use the provided account index
+        businessId    // Use the provided business ID (if applicable)
       );
       
       console.log('Secure wallet created:', wallet.address);
       
-      // Store the address and Firebase UID for later use
+      // Store the address for later use
       this.currentAccount = {
         addr: wallet.address,
         sk: null // We don't expose the private key directly
       };
-      this.currentFirebaseUid = firebaseUid; // Store for transaction signing
       
       await this.storeAddress(wallet.address);
       return wallet.address;
@@ -328,24 +328,18 @@ class AlgorandService {
 
   async clearWallet() {
     try {
-      const uid = this.currentFirebaseUid;
       this.currentAccount = null;
+      this.currentFirebaseUid = null;
       
-      // Clear memory seed first
-      if (uid) {
-        try {
-          console.log(`Calling secureDeterministicWallet.clearWallet with uid: ${uid}`);
-          await secureDeterministicWallet.clearWallet(uid);
-          console.log('Cleared wallet from secureDeterministicWallet');
-        } catch (error: any) {
-          console.error('Error clearing secureDeterministicWallet:', error?.message || error);
-          console.error('Error stack:', error?.stack);
-        }
-      } else {
-        console.log('No Firebase UID available for clearing wallet');
+      // Clear ALL wallet data (no multi-user support)
+      try {
+        console.log('Calling secureDeterministicWallet.clearWallet...');
+        await secureDeterministicWallet.clearWallet();
+        console.log('Cleared ALL wallet data from secureDeterministicWallet');
+      } catch (error: any) {
+        console.error('Error clearing secureDeterministicWallet:', error?.message || error);
+        console.error('Error stack:', error?.stack);
       }
-    
-    this.currentFirebaseUid = null;
     
     // Web3Auth is no longer used - we use secure deterministic wallet instead
     // Just clear the reference if it exists

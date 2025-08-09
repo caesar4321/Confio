@@ -173,44 +173,6 @@ class User(AbstractUser, SoftDeleteModel):
         return bool(self.phone_number)
 
 
-class WalletPepper(models.Model):
-    """
-    Per-user server pepper for wallet key derivation.
-    Provides additional entropy that's server-controlled but user-specific.
-    Each user has exactly one pepper (no scope separation).
-    
-    Supports grace period during rotation by keeping previous pepper.
-    """
-    firebase_uid = models.CharField(max_length=128, unique=True, db_index=True)
-    pepper = models.CharField(max_length=64, unique=True)  # 32 bytes in hex
-    version = models.IntegerField(default=1)
-    
-    # Grace period support for rotation
-    previous_pepper = models.CharField(max_length=64, blank=True, null=True)  # Previous pepper for grace period
-    previous_version = models.IntegerField(blank=True, null=True)  # Previous version number
-    grace_period_until = models.DateTimeField(blank=True, null=True)  # When previous pepper expires
-    
-    # Timestamps
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)  # Track any updates
-    rotated_at = models.DateTimeField(blank=True, null=True)  # Last rotation time
-    
-    class Meta:
-        db_table = 'user_wallet_pepper'
-        indexes = [
-            models.Index(fields=['firebase_uid', 'version']),
-        ]
-    
-    def __str__(self):
-        return f"Pepper for {self.firebase_uid} v{self.version}"
-    
-    def is_in_grace_period(self):
-        """Check if we're still in grace period for previous pepper"""
-        if not self.grace_period_until:
-            return False
-        from django.utils import timezone
-        return timezone.now() < self.grace_period_until
-
 
 class Business(SoftDeleteModel):
     """Business information for business accounts"""
@@ -900,3 +862,6 @@ def ensure_single_default_bank_account(sender, instance, **kwargs):
 
 
 # Achievement System Models have been moved to achievements/models.py
+
+# Import wallet models
+from .models_wallet import WalletPepper

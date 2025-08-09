@@ -119,7 +119,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           phone: normalizedType === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
           category: serverAcc.business?.category,
           avatar: avatar,
-          aptosAddress: serverAcc.aptosAddress,
+          aptosAddress: '', // Client will compute this on-demand
           createdAt: serverAcc.createdAt,
           isActive: true,
           isEmployee: serverAcc.isEmployee || false,
@@ -227,8 +227,18 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       });
       
       if (active) {
-        setActiveAccount(active);
-        console.log('loadAccounts - setActiveAccount called with:', active);
+        // Get the address for the active account (may already be computed)
+        const currentAddress = await authService.getAptosAddress();
+        const activeWithAddress = {
+          ...active,
+          aptosAddress: currentAddress || ''
+        };
+        
+        setActiveAccount(activeWithAddress);
+        console.log('loadAccounts - setActiveAccount called with:', {
+          ...active,
+          addressPreview: currentAddress ? currentAddress.substring(0, 10) + '...' : 'none'
+        });
         
         // Note: Profile refresh is handled by AuthContext, not here
         // This prevents circular dependencies and unnecessary network requests
@@ -340,7 +350,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           phone: normalizedType === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
           category: serverAcc.business?.category,
           avatar: avatar,
-          aptosAddress: serverAcc.aptosAddress || '',
+          aptosAddress: '', // Client will compute this on-demand
           createdAt: serverAcc.createdAt || new Date().toISOString(),
           isActive: true,
           isEmployee: serverAcc.isEmployee || false,
@@ -415,6 +425,20 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           }
         } catch (error) {
           console.error('useAccountManager - Error refreshing profile after account switch:', error);
+        }
+        
+        // Get the computed address after the switch
+        // Address computation happens during authService.switchAccount while loading spinner is active
+        const computedAddress = await authService.getAptosAddress();
+        if (computedAddress) {
+          const activeWithAddress = {
+            ...newActiveAccount,
+            aptosAddress: computedAddress
+          };
+          setActiveAccount(activeWithAddress);
+          console.log('useAccountManager - Account has address after switch:', {
+            addressPreview: computedAddress.substring(0, 10) + '...'
+          });
         }
       } else {
         console.log('useAccountManager - Could not find account with ID:', accountId);

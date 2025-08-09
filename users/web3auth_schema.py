@@ -497,11 +497,10 @@ class CreateAlgorandTransactionMutation(graphene.Mutation):
 class GetServerPepperMutation(graphene.Mutation):
     """
     Get or create a server pepper for wallet key derivation.
-    Each user gets exactly one pepper for additional security.
+    Pepper is per-account (derived from JWT context: user_id + account_type + account_index + business_id).
     During grace period after rotation, can optionally return previous pepper.
     """
     class Arguments:
-        firebase_uid = graphene.String(required=True)
         request_version = graphene.Int()  # Optional: specific version requested (for grace period)
     
     success = graphene.Boolean()
@@ -512,21 +511,39 @@ class GetServerPepperMutation(graphene.Mutation):
     error = graphene.String()
     
     @classmethod
-    def mutate(cls, root, info, firebase_uid, request_version=None):
+    def mutate(cls, root, info, request_version=None):
         try:
-            # Verify the user is authenticated and accessing their own pepper
+            # Get user and account context from JWT
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
-            # Check if the firebase_uid matches the authenticated user
-            if user.firebase_uid != firebase_uid:
-                return cls(success=False, error='Unauthorized access to pepper')
+            # Get account context from JWT
+            from .jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            if not jwt_context:
+                # Fallback to personal account if no JWT context
+                jwt_context = {
+                    'account_type': 'personal',
+                    'account_index': 0,
+                    'business_id': None
+                }
+            
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
+            
+            # Create a unique pepper key based on account context
+            # This ensures each account (personal/business) has its own pepper
+            if account_type == 'business' and business_id:
+                pepper_key = f"user_{user.id}_business_{business_id}_{account_index}"
+            else:
+                pepper_key = f"user_{user.id}_{account_type}_{account_index}"
             
             # Use transaction.atomic() for thread safety
             with transaction.atomic():
                 pepper_obj, created = WalletPepper.objects.get_or_create(
-                    firebase_uid=firebase_uid,
+                    account_key=pepper_key,
                     defaults={
                         'pepper': secrets.token_hex(32),  # 32 bytes -> 64 char hex
                         'version': 1
@@ -534,12 +551,12 @@ class GetServerPepperMutation(graphene.Mutation):
                 )
             
             if created:
-                logger.info(f'Created new wallet pepper for user {firebase_uid}')
+                logger.info(f'Created new wallet pepper for account {pepper_key}')
             
             # Check if client requested a specific version (during grace period)
             if request_version and request_version == pepper_obj.previous_version:
                 if pepper_obj.is_in_grace_period():
-                    logger.info(f'Returning previous pepper v{request_version} during grace period for {firebase_uid}')
+                    logger.info(f'Returning previous pepper v{request_version} during grace period for {pepper_key}')
                     return cls(
                         success=True,
                         pepper=pepper_obj.previous_pepper,
@@ -564,12 +581,13 @@ class GetServerPepperMutation(graphene.Mutation):
 
 class RotateServerPepperMutation(graphene.Mutation):
     """
-    Rotate the server pepper for a user.
+    Rotate the server pepper for an account.
     This will increment the version and generate a new pepper.
     Client must re-wrap (re-encrypt) the seed with the new pepper.
+    Pepper is per-account based on JWT context.
     """
     class Arguments:
-        firebase_uid = graphene.String(required=True)
+        pass  # No arguments needed, uses JWT context
     
     success = graphene.Boolean()
     pepper = graphene.String()
@@ -578,22 +596,39 @@ class RotateServerPepperMutation(graphene.Mutation):
     error = graphene.String()
     
     @classmethod
-    def mutate(cls, root, info, firebase_uid):
+    def mutate(cls, root, info):
         try:
-            # Verify the user is authenticated and accessing their own pepper
+            # Get user and account context from JWT
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
-            # Check if the firebase_uid matches the authenticated user
-            if user.firebase_uid != firebase_uid:
-                return cls(success=False, error='Unauthorized access to pepper')
+            # Get account context from JWT
+            from .jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            if not jwt_context:
+                # Fallback to personal account if no JWT context
+                jwt_context = {
+                    'account_type': 'personal',
+                    'account_index': 0,
+                    'business_id': None
+                }
+            
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
+            
+            # Create a unique pepper key based on account context
+            if account_type == 'business' and business_id:
+                pepper_key = f"user_{user.id}_business_{business_id}_{account_index}"
+            else:
+                pepper_key = f"user_{user.id}_{account_type}_{account_index}"
             
             # Use select_for_update to lock the row during rotation
             with transaction.atomic():
                 try:
                     pepper_obj = WalletPepper.objects.select_for_update().get(
-                        firebase_uid=firebase_uid
+                        account_key=pepper_key
                     )
                     old_version = pepper_obj.version
                     old_pepper = pepper_obj.pepper
@@ -610,7 +645,7 @@ class RotateServerPepperMutation(graphene.Mutation):
                     pepper_obj.rotated_at = timezone.now()
                     pepper_obj.save()
                     
-                    logger.info(f'Rotated wallet pepper for user {firebase_uid}: v{old_version} -> v{pepper_obj.version}')
+                    logger.info(f'Rotated wallet pepper for account {pepper_key}: v{old_version} -> v{pepper_obj.version}')
                     
                     return cls(
                         success=True,
@@ -622,11 +657,11 @@ class RotateServerPepperMutation(graphene.Mutation):
                 except WalletPepper.DoesNotExist:
                     # No existing pepper, create one
                     pepper_obj = WalletPepper.objects.create(
-                        firebase_uid=firebase_uid,
+                        account_key=pepper_key,
                         pepper=secrets.token_hex(32),
                         version=1
                     )
-                    logger.info(f'Created initial wallet pepper during rotation for user {firebase_uid}')
+                    logger.info(f'Created initial wallet pepper during rotation for account {pepper_key}')
                     
                     return cls(
                         success=True,

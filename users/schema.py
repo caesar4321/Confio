@@ -121,7 +121,8 @@ class AccountType(DjangoObjectType):
 	
 	class Meta:
 		model = Account
-		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'aptos_address', 'created_at', 'last_login_at')
+		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'created_at', 'last_login_at')
+		# Note: 'aptos_address' removed - client computes addresses on-demand
 	
 	@classmethod
 	def get_queryset(cls, queryset, info):
@@ -159,40 +160,9 @@ class AccountType(DjangoObjectType):
 	def resolve_employee_role(self, info):
 		return getattr(self, 'employee_role', None)
 	
-	def resolve_aptos_address(self, info):
-		"""Custom resolver for aptos_address to check permissions"""
-		# If this is an employee accessing business account
-		if self.account_type == 'business':
-			# Get JWT context to check if user is accessing as employee
-			from .jwt_context import get_jwt_business_context_with_validation
-			jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-			if jwt_context:
-				jwt_business_id = jwt_context.get('business_id')
-				user = getattr(info.context, 'user', None)
-				
-				# Check if this is an employee accessing this specific business account
-				if jwt_business_id and user and self.business and str(self.business.id) == str(jwt_business_id):
-					# Check if user is an employee (not owner)
-					from .models_employee import BusinessEmployee
-					employee_record = BusinessEmployee.objects.filter(
-						user=user,
-						business_id=jwt_business_id,
-						is_active=True,
-						deleted_at__isnull=True
-					).first()
-					
-					if employee_record and employee_record.role != 'owner':
-						# Employee accessing business account - check permission
-						try:
-							from .permissions import check_employee_permission
-							from django.core.exceptions import PermissionDenied
-							check_employee_permission(user, self.business, 'view_business_address')
-						except PermissionDenied:
-							# Employee doesn't have permission to view business address
-							return None
-		
-		# Return the actual address for owners or employees with permission
-		return self.aptos_address
+	# Note: resolve_aptos_address removed - client computes addresses on-demand
+	# The client will generate unique addresses based on OAuth subject + account context
+	# and update the server via updateAccountAptosAddress mutation when needed
 	
 	def resolve_employee_permissions(self, info):
 		permissions = getattr(self, 'employee_permissions', None)

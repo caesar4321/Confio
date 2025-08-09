@@ -18,8 +18,7 @@ import { MainStackParamList, RootStackParamList } from '../types/navigation';
 import { Header } from '../navigation/Header';
 import { useAccount } from '../contexts/AccountContext';
 import { useMutation, useQuery } from '@apollo/client';
-import { CREATE_BUSINESS, GET_USER_ACCOUNTS, UPDATE_ACCOUNT_APTOS_ADDRESS } from '../apollo/queries';
-import { AuthService } from '../services/authService';
+import { CREATE_BUSINESS, GET_USER_ACCOUNTS } from '../apollo/queries';
 
 type CreateBusinessNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
@@ -73,7 +72,6 @@ export const CreateBusinessScreen = () => {
   const navigation = useNavigation<CreateBusinessNavigationProp>();
   const { syncWithServer } = useAccount();
   const [createBusiness] = useMutation(CREATE_BUSINESS);
-  const [updateAccountAptosAddress] = useMutation(UPDATE_ACCOUNT_APTOS_ADDRESS);
   const { refetch: refetchAccounts } = useQuery(GET_USER_ACCOUNTS);
   const [currentStep, setCurrentStep] = useState(1);
   const [isCreating, setIsCreating] = useState(false);
@@ -160,42 +158,8 @@ export const CreateBusinessScreen = () => {
           category: createdBusiness?.category
         });
         
-        // Generate Sui address using the server's account type and index
-        try {
-          const authService = AuthService.getInstance();
-          
-          // Set the active account context to the newly created business account
-          await authService.setActiveAccountContext({
-            type: createdAccount.accountType,
-            index: createdAccount.accountIndex,
-            businessId: createdBusiness?.id
-          });
-          
-          // Generate the Sui address
-          const aptosAddress = await authService.getAptosAddress();
-          
-          console.log('Generated Sui address for business account:', {
-            accountId: createdAccount.accountId,
-            accountType: createdAccount.accountType,
-            accountIndex: createdAccount.accountIndex,
-            aptosAddress: aptosAddress
-          });
-          
-          // Update the account with the Sui address on the server
-          const updateResult = await updateAccountAptosAddress({
-            variables: {
-              aptosAddress: aptosAddress
-            }
-          });
-          
-          if (updateResult.data?.updateAccountAptosAddress?.success) {
-            console.log('Sui address updated successfully on server');
-          } else {
-            console.error('Failed to update Sui address on server:', updateResult.data?.updateAccountAptosAddress?.error);
-          }
-        } catch (error) {
-          console.error('Error generating or updating Sui address:', error);
-        }
+        // No need to generate address here - it will be generated automatically
+        // when the user switches to or initializes this business account
         
         // Fetch updated accounts from server to get the new business account
         const { data: accountsData } = await refetchAccounts();
