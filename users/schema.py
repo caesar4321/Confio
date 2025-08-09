@@ -122,7 +122,7 @@ class AccountType(DjangoObjectType):
 	class Meta:
 		model = Account
 		fields = ('id', 'user', 'account_type', 'account_index', 'business', 'created_at', 'last_login_at')
-		# Note: 'aptos_address' removed - client computes addresses on-demand
+		# Note: 'algorand_address' removed from fields - client computes addresses on-demand
 	
 	@classmethod
 	def get_queryset(cls, queryset, info):
@@ -160,7 +160,7 @@ class AccountType(DjangoObjectType):
 	def resolve_employee_role(self, info):
 		return getattr(self, 'employee_role', None)
 	
-	# Note: resolve_aptos_address removed - client computes addresses on-demand
+	# Note: resolve_algorand_address removed - client computes addresses on-demand
 	# The client will generate unique addresses based on OAuth subject + account context
 	# and update the server via updateAccountAptosAddress mutation when needed
 	
@@ -477,7 +477,7 @@ class UserByPhoneType(graphene.ObjectType):
 	last_name = graphene.String()
 	is_on_confio = graphene.Boolean()
 	active_account_id = graphene.ID()
-	active_account_aptos_address = graphene.String()
+	active_account_algorand_address = graphene.String()
 
 class Query(EmployeeQueries, graphene.ObjectType):
 	me = graphene.Field(UserType)
@@ -799,7 +799,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					account_index=account_index
 				)
 				
-			print(f"AccountBalance resolver - Found account with Sui address: {account.aptos_address}")
+			print(f"AccountBalance resolver - Found account with Algorand address: {account.algorand_address}")
 		except (Account.DoesNotExist, Business.DoesNotExist) as e:
 			print(f"AccountBalance resolver - Account not found: {account_type}_{account_index}")
 			return "0"
@@ -811,8 +811,8 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		normalized_token_type = token_type.upper()
 		
 		# Check if account has a Sui address
-		if not account.aptos_address:
-			print(f"AccountBalance resolver - Account has no Sui address, returning 0")
+		if not account.algorand_address:
+			print(f"AccountBalance resolver - Account has no Algorand address, returning 0")
 			return "0"
 		
 		# Use the blockchain integration to get real balance
@@ -1054,7 +1054,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					last_name=found_user.last_name,
 					is_on_confio=True,
 					active_account_id=active_account.id if active_account else None,
-					active_account_aptos_address=active_account.aptos_address if active_account else None
+					active_account_algorand_address=active_account.algorand_address if active_account else None
 				))
 			else:
 				# User not found on Confío
@@ -1066,7 +1066,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					last_name=None,
 					is_on_confio=False,
 					active_account_id=None,
-					active_account_aptos_address=None
+					active_account_algorand_address=None
 				))
 		
 		return results
@@ -1658,16 +1658,16 @@ class UpdateBusiness(graphene.Mutation):
 			logger.error(f"Error updating business: {str(e)}")
 			return UpdateBusiness(success=False, error="Error interno del servidor")
 
-class UpdateAccountAptosAddress(graphene.Mutation):
+class UpdateAccountAlgorandAddress(graphene.Mutation):
 	class Arguments:
-		aptos_address = graphene.String(required=True)
+		algorand_address = graphene.String(required=True)
 
 	success = graphene.Boolean()
 	error = graphene.String()
 	account = graphene.Field(AccountType)
 
 	@classmethod
-	def mutate(cls, root, info, aptos_address):
+	def mutate(cls, root, info, algorand_address):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return UpdateAccountAptosAddress(success=False, error="Authentication required")
@@ -1714,8 +1714,8 @@ class UpdateAccountAptosAddress(graphene.Mutation):
 					account_index=account_index
 				)
 			
-			# Update the Sui address
-			account.aptos_address = aptos_address
+			# Update the Algorand address
+			account.algorand_address = algorand_address
 			account.save()
 			
 			return UpdateAccountAptosAddress(
@@ -2225,7 +2225,7 @@ class RefreshAccountBalance(graphene.Mutation):
 				)
 			
 			# Check if account has a Sui address
-			if not account.aptos_address:
+			if not account.algorand_address:
 				return RefreshAccountBalance(
 					success=False, 
 					errors="Account has no blockchain address"
@@ -2396,13 +2396,13 @@ class CreateTestUsers(graphene.Mutation):
 				# Generate a valid Sui address using hash of phone number
 				# Sui addresses are 0x + 64 hex characters (32 bytes)
 				phone_hash = hashlib.sha256(cleaned_phone.encode()).hexdigest()
-				test_aptos_address = f"0x{phone_hash}"
+				test_algorand_address = f"0x{phone_hash}"
 				
 				personal_account = Account.objects.create(
 					user=new_user,
 					account_type='personal',
 					account_index=0,
-					aptos_address=test_aptos_address  # Valid Sui address format
+					algorand_address=test_algorand_address  # Valid Algorand address format
 				)
 				
 				created_users.append(UserByPhoneType(
@@ -2413,7 +2413,7 @@ class CreateTestUsers(graphene.Mutation):
 					last_name=new_user.last_name,
 					is_on_confio=True,
 					active_account_id=personal_account.id,
-					active_account_aptos_address=personal_account.aptos_address
+					active_account_algorand_address=personal_account.algorand_address
 				))
 				
 				logger.info(f"Created test user: {username} for phone: {cleaned_phone}")
@@ -2984,7 +2984,7 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
 	reject_identity_verification = RejectIdentityVerification.Field()
 	create_business = CreateBusiness.Field()
 	update_business = UpdateBusiness.Field()
-	update_account_aptos_address = UpdateAccountAptosAddress.Field()
+	update_account_algorand_address = UpdateAccountAlgorandAddress.Field()
 	
 	# Bank info mutations
 	create_bank_info = CreateBankInfo.Field()
