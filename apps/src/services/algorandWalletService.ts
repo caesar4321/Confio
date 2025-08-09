@@ -391,7 +391,7 @@ export class AlgorandWalletService {
 
   public async clearAccount(): Promise<void> {
     try {
-      await Keychain.resetInternetCredentials(KEYCHAIN_SERVICE);
+      await Keychain.resetInternetCredentials({ server: KEYCHAIN_SERVICE });
       this.currentAccount = null;
       console.log('Algorand account cleared');
     } catch (error) {

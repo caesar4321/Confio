@@ -166,6 +166,13 @@ export class AuthService {
       const { idToken } = await GoogleSignin.getTokens();
       console.log('Got ID token:', idToken ? 'Token received' : 'No token');
       
+      // Debug: Check what's in the userInfo from Google Sign-In
+      console.log('[AuthService] Google Sign-In userInfo:', {
+        id: userInfo?.user?.id,
+        email: userInfo?.user?.email,
+        name: userInfo?.user?.name
+      });
+      
       if (!idToken) {
         throw new Error('No ID token received from Google Sign-In');
       }
@@ -364,10 +371,14 @@ export class AuthService {
         
         // Create Algorand wallet with the Google OAuth subject for non-custodial derivation
         // Decode the ID token to get the real Google OAuth subject
-        const decodedIdToken = jwtDecode<{ sub: string, iss: string }>(idToken);
+        const decodedIdToken = jwtDecode<{ sub: string, iss: string, aud?: string }>(idToken);
         const googleSubject = decodedIdToken.sub; // The real Google OAuth subject
-        console.log('Using Google OAuth subject for Algorand:', googleSubject);
-        console.log('Google OAuth issuer:', decodedIdToken.iss);
+        console.log('[AuthService] Google OAuth token decoded:', {
+          subject: googleSubject,
+          issuer: decodedIdToken.iss,
+          audience: decodedIdToken.aud,
+          email: userInfo?.user?.email
+        });
         algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, firebaseUid, googleSubject);
         console.log('Algorand wallet created:', algorandAddress);
         
@@ -1411,7 +1422,17 @@ export class AuthService {
       const accountManager = AccountManager.getInstance();
       await accountManager.clearAllAccounts();
       
-      // 5. Clear local state
+      // 5. Clear Algorand wallet data (including encrypted seed cache)
+      try {
+        const algorandService = (await import('./algorandService')).default;
+        await algorandService.clearWallet();
+        console.log('Algorand wallet cleared');
+      } catch (error) {
+        console.error('Error clearing Algorand wallet:', error);
+        // Continue with sign out even if Algorand clearing fails
+      }
+      
+      // 6. Clear local state
       this.suiKeypair = null;
       this.userSalt = null;
       this.zkProof = null;
@@ -1419,7 +1440,7 @@ export class AuthService {
       this.firebaseIsInitialized = false;
       console.log('Local state cleared');
       
-      // 4. Clear all stored credentials from Keychain
+      // 7. Clear all stored credentials from Keychain
       try {
         // Check tokens before clearing
         const preReset = await Keychain.getGenericPassword({

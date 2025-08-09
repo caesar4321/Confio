@@ -150,10 +150,11 @@ class AlgorandService {
       }
       
       // Skip Web3Auth initialization - we're not using it
-      console.log(`Creating/restoring Algorand wallet for Firebase user: ${firebaseUid}`);
+      console.log(`[AlgorandService] Creating/restoring Algorand wallet for Firebase user: ${firebaseUid}`);
+      console.log(`[AlgorandService] OAuth subject provided: ${oauthSubject || 'NONE - will use Firebase UID'}`);
       
       // BYPASS WEB3AUTH COMPLETELY - Use secure deterministic wallet
-      console.log('Using secure deterministic wallet with proper KDF and salt formula from README.md');
+      console.log('[AlgorandService] Using secure deterministic wallet with proper KDF and salt formula from README.md');
       
       // Decode the Firebase ID token to determine provider
       const decoded = jwtDecode<{ iss: string; firebase?: { sign_in_provider?: string } }>(firebaseIdToken);
@@ -311,18 +312,23 @@ class AlgorandService {
   }
 
   async clearWallet() {
-    const uid = this.currentFirebaseUid;
-    this.currentAccount = null;
-    
-    // Clear memory seed first
-    if (uid) {
-      try {
-        await secureDeterministicWallet.clearWallet(uid);
-        console.log('Cleared wallet from secureDeterministicWallet');
-      } catch (error) {
-        console.error('Error clearing secureDeterministicWallet:', error);
+    try {
+      const uid = this.currentFirebaseUid;
+      this.currentAccount = null;
+      
+      // Clear memory seed first
+      if (uid) {
+        try {
+          console.log(`Calling secureDeterministicWallet.clearWallet with uid: ${uid}`);
+          await secureDeterministicWallet.clearWallet(uid);
+          console.log('Cleared wallet from secureDeterministicWallet');
+        } catch (error: any) {
+          console.error('Error clearing secureDeterministicWallet:', error?.message || error);
+          console.error('Error stack:', error?.stack);
+        }
+      } else {
+        console.log('No Firebase UID available for clearing wallet');
       }
-    }
     
     this.currentFirebaseUid = null;
     
@@ -343,8 +349,8 @@ class AlgorandService {
     // Clear each entry using resetInternetCredentials
     for (const key of keychainEntriesToClear) {
       try {
-        // resetInternetCredentials expects just the server string
-        await Keychain.resetInternetCredentials(key);
+        // resetInternetCredentials in v10 expects an options object
+        await Keychain.resetInternetCredentials({ server: key });
         console.log(`Reset keychain entry: ${key}`);
       } catch (error: any) {
         // Entry might not exist, which is fine
@@ -353,6 +359,11 @@ class AlgorandService {
     }
     
     console.log('All Algorand wallet credentials cleared');
+    } catch (error: any) {
+      console.error('Error in clearWallet:', error?.message || error);
+      console.error('Error stack:', error?.stack);
+      // Don't re-throw, just log the error
+    }
   }
   
   async getStoredAddress(): Promise<string | null> {

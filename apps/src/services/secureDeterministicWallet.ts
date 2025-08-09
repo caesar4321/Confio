@@ -21,6 +21,7 @@ import { apolloClient } from '../apollo/client';
 import { gql } from '@apollo/client';
 import { randomBytes } from '@noble/hashes/utils';
 import { Buffer } from 'buffer'; // RN polyfill for base64
+import { GOOGLE_CLIENT_IDS } from '../config/env';
 
 // GraphQL mutations for server pepper (per-user, not per-scope)
 const GET_SERVER_PEPPER = gql`
@@ -52,9 +53,15 @@ function makeScope(
 
 /**
  * Generate consistent cache key for encrypted seed storage
+ * Returns server and username components for proper keychain usage
  */
-function makeCacheKey(uid: string, scope: string): string {
-  return `wallet.seed.enc.${uid}:${scope}`;
+function makeCacheKey(uid: string, scope: string): { server: string; username: string } {
+  // Use a consistent server name like other services in the codebase
+  // Put the unique identifier in the username field
+  return {
+    server: 'wallet.confio.app',
+    username: `${uid}_${scope.replace(/[^a-zA-Z0-9_]/g, '_')}`
+  };
 }
 
 export interface DeriveWalletOptions {
@@ -269,6 +276,7 @@ export class SecureDeterministicWalletService {
   private static instance: SecureDeterministicWalletService;
   private inMemSeeds = new Map<string, string>(); // In-memory seed cache for session
   private currentScope = new Map<string, string>(); // Track current scope per user
+  private cacheKeysPerUser = new Map<string, Set<string>>(); // Track all cache keys created per user
   
   private constructor() {}
   
@@ -360,6 +368,12 @@ export class SecureDeterministicWalletService {
       const scope = makeScope(provider, subject, accountType, accountIndex, businessId);
       const cacheKey = makeCacheKey(firebaseUid, scope);
       
+      // Track this cache key for later cleanup (store username for identification)
+      if (!this.cacheKeysPerUser.has(firebaseUid)) {
+        this.cacheKeysPerUser.set(firebaseUid, new Set());
+      }
+      this.cacheKeysPerUser.get(firebaseUid)!.add(cacheKey.username);
+      
       // Get server pepper (optional for 2-of-2 security) with version
       const { pepper: serverPepper, version: pepperVersion } = await this.getServerPepper(firebaseUid);
       
@@ -370,8 +384,8 @@ export class SecureDeterministicWalletService {
       let wallet: DerivedWallet | null = null;
       
       try {
-        const credentials = await Keychain.getInternetCredentials(cacheKey);
-        if (credentials && credentials.password) {
+        const credentials = await Keychain.getInternetCredentials(cacheKey.server);
+        if (credentials && credentials.username === cacheKey.username && credentials.password) {
           console.log('Found cached encrypted seed, checking version...');
           
           // Parse blob to get the pepper version it was encrypted with
@@ -416,7 +430,7 @@ export class SecureDeterministicWalletService {
           if (needsReWrap) {
             console.log(`Re-wrapping seed with new pepper v${pepperVersion}...`);
             const newEncryptedBlob = wrapSeed(seed, kek, pepperVersion);
-            await Keychain.setInternetCredentials(cacheKey, firebaseUid, newEncryptedBlob);
+            await Keychain.setInternetCredentials(cacheKey.server, cacheKey.username, newEncryptedBlob);
             console.log('Seed re-wrapped successfully');
           }
         }
@@ -437,11 +451,24 @@ export class SecureDeterministicWalletService {
         const oauthSubjectToUse = oauthSubject || firebaseUid;
         
         // Use canonical client ID for consistency
+        // CRITICAL: Use the same web client ID for both iOS and Android to ensure same addresses
         const canonicalClientId = provider === 'google'
-          ? '637088276899-9nuo48mnrrjdj3e4r5mhbocv7p09h0gf.apps.googleusercontent.com'
+          ? GOOGLE_CLIENT_IDS.production.web  // From .env via config - ensures consistency
           : 'com.confio.app';
         
         // Generate client-controlled salt using the exact formula from README.md
+        console.log('[SecureDeterministicWallet] Salt generation inputs:', {
+          platform: require('react-native').Platform.OS,
+          oauthIssuer,
+          oauthSubjectToUse,
+          canonicalClientId,
+          accountType,
+          accountIndex,
+          businessId: businessId || 'none',
+          firebaseUid,
+          originalOauthSubject: oauthSubject
+        });
+        
         const clientSalt = generateClientSalt(
           oauthIssuer,        // Real OAuth issuer (not Firebase)
           oauthSubjectToUse,  // Real OAuth subject (not Firebase UID)
@@ -450,6 +477,8 @@ export class SecureDeterministicWalletService {
           accountIndex,
           businessId
         );
+        
+        console.log('[SecureDeterministicWallet] Generated client salt:', clientSalt.substring(0, 20) + '...');
         
         // Derive deterministic wallet
         wallet = deriveDeterministicAlgorandKey({
@@ -470,8 +499,8 @@ export class SecureDeterministicWalletService {
         const encryptedBlob = wrapSeed(seed, kek, pepperVersion);
         
         await Keychain.setInternetCredentials(
-          cacheKey,
-          firebaseUid,
+          cacheKey.server,
+          cacheKey.username,
           encryptedBlob
         );
         
@@ -527,8 +556,14 @@ export class SecureDeterministicWalletService {
       const scope = makeScope(provider, subject, accountType, accountIndex, businessId);
       const cacheKey = makeCacheKey(firebaseUid, scope);
       
-      const credentials = await Keychain.getInternetCredentials(cacheKey);
-      if (!credentials?.password) {
+      // Track this cache key for later cleanup (store username for identification)
+      if (!this.cacheKeysPerUser.has(firebaseUid)) {
+        this.cacheKeysPerUser.set(firebaseUid, new Set());
+      }
+      this.cacheKeysPerUser.get(firebaseUid)!.add(cacheKey.username);
+      
+      const credentials = await Keychain.getInternetCredentials(cacheKey.server);
+      if (!credentials || credentials.username !== cacheKey.username || !credentials.password) {
         return false;
       }
       
@@ -547,7 +582,7 @@ export class SecureDeterministicWalletService {
         console.error('Could not get pepper for version', storedPepperVersion);
         console.error('Grace period may have expired. User needs to re-authenticate.');
         // Clear the invalid cached seed
-        await Keychain.resetInternetCredentials(cacheKey);
+        await Keychain.resetInternetCredentials({ server: cacheKey.server });
         return false;
       }
       
@@ -579,8 +614,8 @@ export class SecureDeterministicWalletService {
           
           // Update cached encrypted seed
           await Keychain.setInternetCredentials(
-            cacheKey,
-            firebaseUid,
+            cacheKey.server,
+            cacheKey.username,
             newEncryptedBlob
           );
           
@@ -600,7 +635,7 @@ export class SecureDeterministicWalletService {
         const subject = oauthSubject || firebaseUid;
         const scope = makeScope(provider, subject, accountType, accountIndex, businessId);
         const cacheKey = makeCacheKey(firebaseUid, scope);
-        await Keychain.resetInternetCredentials(cacheKey);
+        await Keychain.resetInternetCredentials({ server: cacheKey.server });
       }
       
       return false;
@@ -695,8 +730,13 @@ export class SecureDeterministicWalletService {
   /**
    * Clear all wallet data for a user
    */
-  async clearWallet(firebaseUid: string): Promise<void> {
+  async clearWallet(firebaseUid: string | null | undefined): Promise<void> {
     try {
+      // Guard against null/undefined firebaseUid
+      if (!firebaseUid) {
+        console.log('clearWallet called with no firebaseUid, skipping');
+        return;
+      }
       // Clear memory cache for all scopes of this user
       const scope = this.currentScope.get(firebaseUid);
       if (scope) {
@@ -712,10 +752,21 @@ export class SecureDeterministicWalletService {
       // Clear scope tracking
       this.currentScope.delete(firebaseUid);
       
-      // Clear encrypted cache (but could keep for recovery)
-      // await Keychain.resetInternetCredentials(`wallet.seed.enc.${firebaseUid}*`);
+      // Clear encrypted cache from keychain
+      // Since all wallets for this app use the same server 'wallet.confio.app',
+      // calling resetInternetCredentials will clear ALL wallet entries at once
+      try {
+        await Keychain.resetInternetCredentials({ server: 'wallet.confio.app' });
+        console.log('Cleared all wallet entries from keychain for server: wallet.confio.app');
+      } catch (err: any) {
+        // Server might not have any entries, which is fine
+        console.log('Could not clear wallet.confio.app:', err?.message || err);
+      }
       
-      console.log('Wallet cleared from memory for user:', firebaseUid);
+      // Clear the tracking set
+      this.cacheKeysPerUser.delete(firebaseUid);
+      
+      console.log('Wallet cleared from memory and keychain for user:', firebaseUid);
     } catch (error) {
       console.error('Error clearing wallet:', error);
     }

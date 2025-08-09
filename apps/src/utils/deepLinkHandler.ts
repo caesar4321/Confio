@@ -194,7 +194,7 @@ export class DeepLinkHandler {
   
   private async clearDeferredLink() {
     try {
-      await Keychain.resetInternetCredentials(DEFERRED_LINK_KEY);
+      await Keychain.resetInternetCredentials({ server: DEFERRED_LINK_KEY });
     } catch (error) {
       console.error('Error clearing deferred link:', error);
     }

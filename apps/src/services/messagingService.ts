@@ -206,7 +206,7 @@ class MessagingService {
         },
       });
       
-      await Keychain.resetInternetCredentials(FCM_TOKEN_SERVICE);
+      await Keychain.resetInternetCredentials({ server: FCM_TOKEN_SERVICE });
       this.fcmToken = null;
       
       console.log('FCM token unregistered successfully');
