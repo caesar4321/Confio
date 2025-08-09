@@ -1636,11 +1636,28 @@ export class AuthService {
       // 3. Clear zkLogin data
       await this.clearZkLoginData();
       
-      // 4. Clear account data
+      // 4. Get accounts before clearing (for efficient address cleanup)
       const accountManager = AccountManager.getInstance();
+      const accounts = accountManager.getAllAccounts();
+      
+      // 5. Clear Algorand wallet data (including encrypted seed cache and stored addresses)
+      try {
+        const algorandService = (await import('./algorandService')).default;
+        await algorandService.clearWallet();
+        console.log('Algorand wallet cleared');
+        
+        // Clear stored Algorand addresses - pass accounts for efficient cleanup
+        const { clearAllStoredAlgorandAddresses } = await import('../utils/clearStoredAddresses');
+        await clearAllStoredAlgorandAddresses(accounts);
+      } catch (error) {
+        console.error('Error clearing Algorand wallet:', error);
+        // Continue with sign out even if Algorand clearing fails
+      }
+      
+      // 6. Clear account data
       await accountManager.clearAllAccounts();
       
-      // 5. Clear stored OAuth subject
+      // 7. Clear stored OAuth subject
       try {
         const { oauthStorage } = await import('./oauthStorageService');
         await oauthStorage.clearOAuthSubject();
@@ -1649,22 +1666,7 @@ export class AuthService {
         console.error('Error clearing OAuth subject:', error);
       }
       
-      // 6. Clear Algorand wallet data (including encrypted seed cache and stored addresses)
-      try {
-        const algorandService = (await import('./algorandService')).default;
-        await algorandService.clearWallet();
-        console.log('Algorand wallet cleared');
-        
-        // Clear stored Algorand addresses
-        // Roll back to using the utility function that clears individually
-        const { clearAllStoredAlgorandAddresses } = await import('../utils/clearStoredAddresses');
-        await clearAllStoredAlgorandAddresses();
-      } catch (error) {
-        console.error('Error clearing Algorand wallet:', error);
-        // Continue with sign out even if Algorand clearing fails
-      }
-      
-      // 6. Clear local state
+      // 8. Clear local state
       this.suiKeypair = null;
       this.userSalt = null;
       this.zkProof = null;
