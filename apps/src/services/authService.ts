@@ -1420,15 +1420,14 @@ export class AuthService {
     } else {
       cacheKey = `algo_address_${accountContext.type}_${accountContext.index}`;
     }
-    
-    console.log('🔑 getAptosAddress - Using cache key:', cacheKey);
 
-    // Try to get the stored address for this account from keychain
+    // Use a unique service per account to avoid overwrites
+    const serviceName = `com.confio.algorand.addresses.${cacheKey}`;
+    console.log('🔑 getAptosAddress - Using service:', serviceName);
+
+    // Try to get the stored address for this account from Keychain (per-service entry)
     try {
-      const credentials = await Keychain.getGenericPassword({
-        service: 'com.confio.algorand.addresses',
-        username: cacheKey
-      });
+      const credentials = await Keychain.getGenericPassword({ service: serviceName });
       
       if (credentials && credentials.password) {
         const address = credentials.password;
@@ -1497,15 +1496,19 @@ export class AuthService {
         oauthSubject: oauthSubject.substring(0, 20) + '...'
       });
       
+      // Determine issuer and audience consistently (same as switchAccount)
+      const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+      const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+      const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+
       const wallet = await secureDeterministicWallet.createOrRestoreWallet(
-        firebaseIdToken,
-        oauthSubject,
-        provider,
+        iss,                    // OAuth issuer
+        oauthSubject,           // OAuth subject
+        aud,                    // OAuth audience
+        provider,               // Provider
         accountContext.type,
         accountContext.index,
-        accountContext.businessId,
-        'mainnet',
-        oauthSubject // Pass OAuth subject as last parameter too
+        accountContext.businessId
       );
       
       console.log('🎯 Generated Algorand address for account:', {
@@ -1547,7 +1550,11 @@ export class AuthService {
       cacheKey = `algo_address_${accountContext.type}_${accountContext.index}`;
     }
 
+    // Use a unique service per account to avoid overwrites
+    const serviceName = `com.confio.algorand.addresses.${cacheKey}`;
+
     console.log('📝 STORING Algorand address:', {
+      service: serviceName,
       cacheKey: cacheKey,
       address: address,
       accountType: accountContext.type,
@@ -1556,12 +1563,11 @@ export class AuthService {
     });
 
     try {
-      // Store with service and username parameters like other keychain entries
       await Keychain.setGenericPassword(
-        cacheKey,  // username - this becomes the unique identifier
+        cacheKey,  // username (informational)
         address,   // password - the actual data to store
         {
-          service: 'com.confio.algorand.addresses',
+          service: serviceName,
           accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
         }
       );
@@ -1580,16 +1586,15 @@ export class AuthService {
       cacheKey = `algo_address_${accountContext.type}_${accountContext.index}`;
     }
 
-    console.log('🔍 RETRIEVING Algorand address with cache key:', cacheKey);
+    const serviceName = `com.confio.algorand.addresses.${cacheKey}`;
+    console.log('🔍 RETRIEVING Algorand address from service:', serviceName);
 
     try {
-      const credentials = await Keychain.getGenericPassword({
-        service: 'com.confio.algorand.addresses',
-        username: cacheKey
-      });
+      const credentials = await Keychain.getGenericPassword({ service: serviceName });
       
       if (credentials && credentials.password) {
         console.log('✅ Found stored Algorand address:', {
+          service: serviceName,
           cacheKey: cacheKey,
           address: credentials.password,
           accountType: accountContext.type,
@@ -1599,7 +1604,7 @@ export class AuthService {
         return credentials.password;
       }
       
-      console.log('⚠️ No stored address found for cache key:', cacheKey);
+      console.log('⚠️ No stored address found for service:', serviceName);
       return null;
     } catch (error) {
       console.error('❌ Error retrieving stored Algorand address:', error);
