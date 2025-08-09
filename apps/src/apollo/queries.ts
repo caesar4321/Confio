@@ -75,7 +75,6 @@ export const GET_USER_ACCOUNTS = gql`
       id
       accountType
       accountIndex
-      aptosAddress
       lastLoginAt
       displayName
       avatarLetter
@@ -260,7 +259,6 @@ export const UPDATE_ACCOUNT_APTOS_ADDRESS = gql`
         accountId
         accountType
         accountIndex
-        aptosAddress
       }
       success
       error

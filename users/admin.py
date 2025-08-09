@@ -718,24 +718,25 @@ class EmployeeInvitationAdmin(admin.ModelAdmin):
 
 
 class WalletPepperAdmin(admin.ModelAdmin):
-    """Admin interface for WalletPepper model with security features"""
+    """Admin interface for WalletPepper model with account-based pepper management"""
     
-    list_display = ('firebase_uid_display', 'version', 'status_display', 'grace_status', 'created_at', 'rotated_at')
-    list_filter = ('version', 'created_at', 'rotated_at')
-    search_fields = ('firebase_uid',)
+    list_display = ('account_key_display', 'account_type', 'version', 'status_display', 'grace_status', 'created_at', 'rotated_at')
+    list_filter = ('version', 'created_at', 'rotated_at', 'grace_period_until')
+    search_fields = ('account_key',)
     # Include custom display methods in readonly_fields so they can be used in fieldsets
-    readonly_fields = ('firebase_uid', 'version', 'previous_version', 
+    readonly_fields = ('account_key', 'version', 'previous_version', 
                       'created_at', 'updated_at', 'rotated_at', 'grace_period_until',
                       'pepper_display', 'previous_pepper_display', 'user_link')
     ordering = ('-updated_at',)
     
     fieldsets = (
-        ('User Information', {
-            'fields': ('firebase_uid', 'user_link')
+        ('Account Information', {
+            'fields': ('account_key', 'user_link'),
+            'description': 'Account-based pepper for secure wallet key derivation'
         }),
         ('Current Pepper', {
             'fields': ('pepper_display', 'version'),
-            'description': 'Current active pepper for this user'
+            'description': 'Current active pepper for this account'
         }),
         ('Rotation Information', {
             'fields': ('previous_pepper_display', 'previous_version', 'grace_period_until', 'rotated_at'),
@@ -750,14 +751,57 @@ class WalletPepperAdmin(admin.ModelAdmin):
     
     actions = ['rotate_pepper', 'extend_grace_period', 'clear_grace_period']
     
-    def firebase_uid_display(self, obj):
-        """Display truncated Firebase UID for security"""
-        if obj.firebase_uid:
-            if len(obj.firebase_uid) > 12:
-                return f"{obj.firebase_uid[:6]}...{obj.firebase_uid[-4:]}"
-            return obj.firebase_uid
+    def account_type(self, obj):
+        """Display the account type (Personal/Business/Legacy)"""
+        if obj.account_key and obj.account_key.startswith('user_'):
+            parts = obj.account_key.split('_')
+            if len(parts) >= 3:
+                account_type = parts[2]
+                if account_type == 'business':
+                    return format_html('<span style="color: #1976d2; font-weight: bold;">👔 Business</span>')
+                elif account_type == 'personal':
+                    return format_html('<span style="color: #7b1fa2; font-weight: bold;">👤 Personal</span>')
+        return format_html('<span style="color: #666;">📦 Legacy</span>')
+    account_type.short_description = "Type"
+    account_type.admin_order_field = 'account_key'
+    
+    def account_key_display(self, obj):
+        """Display account key with type information"""
+        if obj.account_key:
+            # Parse the account key to extract meaningful info
+            if obj.account_key.startswith('user_'):
+                parts = obj.account_key.split('_')
+                if len(parts) >= 3:
+                    user_id = parts[1]
+                    account_type = parts[2]
+                    
+                    # Handle business accounts
+                    if account_type == 'business' and len(parts) >= 4:
+                        business_id = parts[3]
+                        account_index = parts[4] if len(parts) > 4 else '0'
+                        return format_html(
+                            '<span style="font-family: monospace; background: #e3f2fd; padding: 2px 4px; border-radius: 3px;">'
+                            '👔 Business #{} (User #{}, Index {})</span>',
+                            business_id, user_id, account_index
+                        )
+                    # Handle personal accounts
+                    else:
+                        account_index = parts[3] if len(parts) > 3 else '0'
+                        return format_html(
+                            '<span style="font-family: monospace; background: #f3e5f5; padding: 2px 4px; border-radius: 3px;">'
+                            '👤 Personal (User #{}, Index {})</span>',
+                            user_id, account_index
+                        )
+            
+            # Fallback for old Firebase UIDs or unknown formats
+            if len(obj.account_key) > 20:
+                return format_html(
+                    '<span style="font-family: monospace; color: #666;">📦 Legacy: {}...{}</span>',
+                    obj.account_key[:6], obj.account_key[-4:]
+                )
+            return obj.account_key
         return "-"
-    firebase_uid_display.short_description = "Firebase UID"
+    account_key_display.short_description = "Account"
     
     def pepper_display(self, obj):
         """Display pepper status without revealing the actual value"""
@@ -826,14 +870,43 @@ class WalletPepperAdmin(admin.ModelAdmin):
     grace_status.short_description = "Grace Period"
     
     def user_link(self, obj):
-        """Link to the associated user"""
+        """Link to the associated user and account"""
         try:
-            user = User.objects.get(firebase_uid=obj.firebase_uid)
-            url = reverse('admin:users_user_change', args=[user.id])
-            return format_html('<a href="{}">View User: {}</a>', url, user.email or user.username)
+            # Extract user ID from account_key (format: user_{id}_{type}_{index})
+            if obj.account_key and obj.account_key.startswith('user_'):
+                parts = obj.account_key.split('_')
+                if len(parts) >= 2:
+                    user_id = parts[1]
+                    user = User.objects.get(id=user_id)
+                    
+                    # Build the display with account context
+                    links = []
+                    
+                    # User link
+                    user_url = reverse('admin:users_user_change', args=[user.id])
+                    links.append(format_html('<a href="{}">👤 {}</a>', user_url, user.email or user.username))
+                    
+                    # Account type and business link if applicable
+                    if len(parts) >= 3:
+                        account_type = parts[2]
+                        if account_type == 'business' and len(parts) >= 4:
+                            business_id = parts[3]
+                            try:
+                                business = Business.objects.get(id=business_id)
+                                business_url = reverse('admin:users_business_change', args=[business.id])
+                                links.append(format_html('<a href="{}">🏢 {}</a>', business_url, business.name))
+                            except Business.DoesNotExist:
+                                links.append(format_html('<span style="color: #666;">🏢 Business #{}</span>', business_id))
+                    
+                    return format_html(' | '.join(links))
+            else:
+                # Legacy Firebase UID - try to find user
+                user = User.objects.get(firebase_uid=obj.account_key)
+                url = reverse('admin:users_user_change', args=[user.id])
+                return format_html('<a href="{}">📦 Legacy User: {}</a>', url, user.email or user.username)
         except User.DoesNotExist:
             return format_html('<span style="color: #dc3545;">User not found</span>')
-    user_link.short_description = "Associated User"
+    user_link.short_description = "Associated User & Account"
     
     @admin.action(description='Rotate selected peppers')
     def rotate_pepper(self, request, queryset):

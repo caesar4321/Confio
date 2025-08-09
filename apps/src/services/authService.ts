@@ -18,6 +18,14 @@ import { AccountManager, AccountContext } from '../utils/accountManager';
 import { generateZkLoginSalt as generateZkLoginSaltUtil } from '../utils/zkLogin';
 import { DeviceFingerprint } from '../utils/deviceFingerprint';
 import algorandService from './algorandService';
+// Import OAuth storage - handle gracefully if module not found
+let oauthStorage: any = null;
+try {
+  const module = require('./oauthStorageService');
+  oauthStorage = module.oauthStorage;
+} catch (error) {
+  console.warn('OAuth storage service not available:', error);
+}
 
 // Debug logging for environment variables
 console.log('Environment variables loaded:');
@@ -401,9 +409,22 @@ export class AuthService {
           audience: decodedIdToken.aud,
           email: userInfo?.user?.email
         });
-        algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, firebaseUid, googleSubject);
+        
+        // Store OAuth subject securely for future account switching
+        const { oauthStorage } = await import('./oauthStorageService');
+        await oauthStorage.storeOAuthSubject(googleSubject, 'google');
+        console.log('Stored OAuth subject securely for future use');
+        
+        algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, googleSubject);
         console.log('Algorand wallet created:', algorandAddress);
         perfLog('Algorand wallet created');
+        
+        // Store the address for the personal account (default on sign-in)
+        const defaultAccountContext: AccountContext = {
+          type: 'personal',
+          index: 0
+        };
+        await this.storeAlgorandAddress(algorandAddress, defaultAccountContext);
         
         // Now call backend mutations for authentication and opt-ins
         console.log('Calling backend mutations for Web3Auth authentication...');
@@ -674,12 +695,13 @@ export class AuthService {
 
   async clearZkLoginData() {
     try {
+      // v10 API: resetGenericPassword accepts options object with service
       await Keychain.resetGenericPassword({
-        service: ZKLOGIN_KEYCHAIN_SERVICE,
+        service: ZKLOGIN_KEYCHAIN_SERVICE
       });
     } catch (error) {
       console.error('Error clearing zkLogin data:', error);
-      throw error;
+      // Not critical if this fails, continue
     }
   }
 
@@ -920,9 +942,21 @@ export class AuthService {
         // Get fresh Firebase ID token for Web3Auth
         const freshFirebaseToken = await userCredential.user.getIdToken(true);
         const firebaseUid = userCredential.user.uid;
+        // Store OAuth subject securely for future account switching
+        const { oauthStorage } = await import('./oauthStorageService');
+        await oauthStorage.storeOAuthSubject(appleSub, 'apple');
+        console.log('Stored Apple OAuth subject securely for future use');
+        
         // Pass the Apple OAuth subject for non-custodial wallet derivation
-        algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, firebaseUid, appleSub);
+        algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, appleSub);
         console.log('Algorand wallet created (Apple):', algorandAddress);
+        
+        // Store the address for the personal account (default on sign-in)
+        const defaultAccountContext: AccountContext = {
+          type: 'personal',
+          index: 0
+        };
+        await this.storeAlgorandAddress(algorandAddress, defaultAccountContext);
         
         // Call WEB3AUTH_LOGIN mutation to authenticate and get user info
         const { WEB3AUTH_LOGIN, ADD_ALGORAND_WALLET } = await import('../apollo/mutations');
@@ -1363,66 +1397,223 @@ export class AuthService {
     }
   }
 
-  // Get the user's Sui address
+  // Get the user's Algorand address (renamed from Sui/Aptos address)
   public async getAptosAddress(): Promise<string> {
     if (!this.firebaseIsInitialized) {
       await this.initialize();
     }
 
-    // Get stored zkLogin data
-    const storedData = await this.getStoredZkLoginData();
-    if (!storedData) {
-      throw new Error('No zkLogin data stored');
-    }
-
     // Get current account context
     const accountManager = AccountManager.getInstance();
     const accountContext = await accountManager.getActiveAccountContext();
-    const accountId = accountManager.generateAccountId(accountContext.type, accountContext.index);
-
-    console.log('Getting zkLogin address for account context:', {
-      accountType: accountContext.type,
-      accountIndex: accountContext.index,
-      accountId: accountId
-    });
-
-    // Get the original JWT issuer from the stored data
-    const decodedJwt = jwtDecode(storedData.initJwt);
-    const originalIssuer = decodedJwt.iss;
     
-    if (!originalIssuer) {
-      throw new Error('No issuer found in stored JWT');
+    console.log('🔎 getAptosAddress - Current account context:', {
+      type: accountContext.type,
+      index: accountContext.index,
+      businessId: accountContext.businessId
+    });
+    
+    // Generate cache key for this account
+    let cacheKey: string;
+    if (accountContext.type === 'business' && accountContext.businessId) {
+      cacheKey = `algo_address_business_${accountContext.businessId}_${accountContext.index}`;
+    } else {
+      cacheKey = `algo_address_${accountContext.type}_${accountContext.index}`;
     }
     
-    // Generate the deterministic salt for the current account context
-    const currentSalt = await this.generateZkLoginSalt(
-      originalIssuer, 
-      storedData.subject, 
-      storedData.clientId, 
-      accountContext
-    );
+    console.log('🔑 getAptosAddress - Using cache key:', cacheKey);
 
-    // Derive the keypair for the current account context using the deterministic salt
-    const currentKeypair = this.deriveEphemeralKeypair(
-      currentSalt, 
-      storedData.subject, 
-      storedData.clientId
-    );
+    // Try to get the stored address for this account from keychain
+    try {
+      const credentials = await Keychain.getGenericPassword({
+        service: 'com.confio.algorand.addresses',
+        username: cacheKey
+      });
+      
+      if (credentials && credentials.password) {
+        const address = credentials.password;
+        console.log('Retrieved stored Algorand address for account:', {
+          accountType: accountContext.type,
+          accountIndex: accountContext.index,
+          businessId: accountContext.businessId,
+          address: address
+        });
+        return address;
+      }
+    } catch (error) {
+      console.log('No stored address found, will need to regenerate during sign-in');
+    }
 
-    // Get the Sui address for the current account context
-    const currentAptosAddress = currentKeypair.getPublicKey().toSuiAddress();
-
-    console.log('Generated deterministic Sui address:', {
+    // No stored address for this account
+    console.log('No Algorand address found for account:', {
       accountType: accountContext.type,
       accountIndex: accountContext.index,
-      accountId: accountId,
-      aptosAddress: currentAptosAddress,
-      note: 'Address derived from deterministic salt for current account context'
+      businessId: accountContext.businessId,
+      cacheKey: cacheKey
     });
-
-    return currentAptosAddress;
+    
+    // Return empty string or throw error - addresses should be generated during account switch
+    // We should NOT fall back to a different account's address
+    return ''; // Return empty string to indicate no address yet
   }
 
+  /**
+   * Store Algorand address for a specific account context
+   */
+  async computeAndStoreAlgorandAddress(accountContext: AccountContext): Promise<string> {
+    try {
+      console.log('🔐 Computing Algorand address for account context:', accountContext);
+      
+      // Get the Firebase ID token
+      const currentUser = this.auth.currentUser;
+      if (!currentUser) {
+        console.error('No authenticated user');
+        return '';
+      }
+      
+      const firebaseIdToken = await currentUser.getIdToken();
+      
+      // Get OAuth subject from keychain
+      const { oauthStorage } = await import('./oauthStorageService');
+      const oauthData = await oauthStorage.getOAuthSubject();
+      
+      if (!oauthData || !oauthData.subject) {
+        console.error('No OAuth subject found in keychain');
+        return '';
+      }
+      
+      const oauthSubject = oauthData.subject;
+      const provider = oauthData.provider;
+      
+      // Use the secure deterministic wallet service to generate address for this account
+      const { SecureDeterministicWalletService } = await import('./secureDeterministicWallet');
+      const secureDeterministicWallet = SecureDeterministicWalletService.getInstance();
+      
+      console.log('🔐 Calling createOrRestoreWallet with:', {
+        accountType: accountContext.type,
+        accountIndex: accountContext.index,
+        businessId: accountContext.businessId,
+        provider: provider,
+        oauthSubject: oauthSubject.substring(0, 20) + '...'
+      });
+      
+      const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+        firebaseIdToken,
+        oauthSubject,
+        provider,
+        accountContext.type,
+        accountContext.index,
+        accountContext.businessId,
+        'mainnet',
+        oauthSubject // Pass OAuth subject as last parameter too
+      );
+      
+      console.log('🎯 Generated Algorand address for account:', {
+        accountType: accountContext.type,
+        accountIndex: accountContext.index,
+        businessId: accountContext.businessId,
+        algorandAddress: wallet.address,
+      });
+      
+      // Store the address for this account
+      await this.storeAlgorandAddress(wallet.address, accountContext);
+      
+      // Also update on server
+      try {
+        const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
+        await apolloClient.mutate({
+          mutation: UPDATE_ACCOUNT_APTOS_ADDRESS,
+          variables: { aptosAddress: wallet.address }
+        });
+        console.log('Updated server with new address');
+      } catch (error) {
+        console.error('Failed to update server with address:', error);
+        // Continue even if server update fails
+      }
+      
+      return wallet.address;
+    } catch (error) {
+      console.error('Error computing Algorand address:', error);
+      return '';
+    }
+  }
+
+  private async storeAlgorandAddress(address: string, accountContext: AccountContext): Promise<void> {
+    // Generate cache key for this account
+    let cacheKey: string;
+    if (accountContext.type === 'business' && accountContext.businessId) {
+      cacheKey = `algo_address_business_${accountContext.businessId}_${accountContext.index}`;
+    } else {
+      cacheKey = `algo_address_${accountContext.type}_${accountContext.index}`;
+    }
+
+    console.log('📝 STORING Algorand address:', {
+      cacheKey: cacheKey,
+      address: address,
+      accountType: accountContext.type,
+      accountIndex: accountContext.index,
+      businessId: accountContext.businessId
+    });
+
+    try {
+      // Store with service and username parameters like other keychain entries
+      await Keychain.setGenericPassword(
+        cacheKey,  // username - this becomes the unique identifier
+        address,   // password - the actual data to store
+        {
+          service: 'com.confio.algorand.addresses',
+          accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+        }
+      );
+      console.log('✅ Successfully stored Algorand address for account');
+    } catch (error) {
+      console.error('❌ Error storing Algorand address:', error);
+    }
+  }
+  
+  private async getStoredAlgorandAddress(accountContext: AccountContext): Promise<string | null> {
+    // Generate cache key for this account
+    let cacheKey: string;
+    if (accountContext.type === 'business' && accountContext.businessId) {
+      cacheKey = `algo_address_business_${accountContext.businessId}_${accountContext.index}`;
+    } else {
+      cacheKey = `algo_address_${accountContext.type}_${accountContext.index}`;
+    }
+
+    console.log('🔍 RETRIEVING Algorand address with cache key:', cacheKey);
+
+    try {
+      const credentials = await Keychain.getGenericPassword({
+        service: 'com.confio.algorand.addresses',
+        username: cacheKey
+      });
+      
+      if (credentials && credentials.password) {
+        console.log('✅ Found stored Algorand address:', {
+          cacheKey: cacheKey,
+          address: credentials.password,
+          accountType: accountContext.type,
+          accountIndex: accountContext.index,
+          businessId: accountContext.businessId
+        });
+        return credentials.password;
+      }
+      
+      console.log('⚠️ No stored address found for cache key:', cacheKey);
+      return null;
+    } catch (error) {
+      console.error('❌ Error retrieving stored Algorand address:', error);
+      return null;
+    }
+  }
+
+  // Debug utility to clear all Algorand addresses
+  async debugClearAllAddresses(): Promise<void> {
+    const { clearAllAlgorandAddresses, listStoredAlgorandAddresses } = await import('../utils/clearAlgorandAddresses');
+    await listStoredAlgorandAddresses();
+    await clearAllAlgorandAddresses();
+  }
+  
   // Sign out
   async signOut() {
     try {
@@ -1452,11 +1643,25 @@ export class AuthService {
       const accountManager = AccountManager.getInstance();
       await accountManager.clearAllAccounts();
       
-      // 5. Clear Algorand wallet data (including encrypted seed cache)
+      // 5. Clear stored OAuth subject
+      try {
+        const { oauthStorage } = await import('./oauthStorageService');
+        await oauthStorage.clearOAuthSubject();
+        console.log('Cleared stored OAuth subject');
+      } catch (error) {
+        console.error('Error clearing OAuth subject:', error);
+      }
+      
+      // 6. Clear Algorand wallet data (including encrypted seed cache and stored addresses)
       try {
         const algorandService = (await import('./algorandService')).default;
         await algorandService.clearWallet();
         console.log('Algorand wallet cleared');
+        
+        // Clear stored Algorand addresses
+        // Roll back to using the utility function that clears individually
+        const { clearAllStoredAlgorandAddresses } = await import('../utils/clearStoredAddresses');
+        await clearAllStoredAlgorandAddresses();
       } catch (error) {
         console.error('Error clearing Algorand wallet:', error);
         // Continue with sign out even if Algorand clearing fails
@@ -1487,17 +1692,15 @@ export class AuthService {
           });
         }
 
-        // Clear zkLogin data
+        // Clear zkLogin data - v10 API accepts options object
         await Keychain.resetGenericPassword({
-          service: ZKLOGIN_KEYCHAIN_SERVICE,
-          username: ZKLOGIN_KEYCHAIN_USERNAME
+          service: ZKLOGIN_KEYCHAIN_SERVICE
         });
         console.log('Cleared zkLogin data from Keychain');
 
         // Clear auth tokens
         await Keychain.resetGenericPassword({
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: AUTH_KEYCHAIN_USERNAME
+          service: AUTH_KEYCHAIN_SERVICE
         });
         console.log('Cleared auth tokens from Keychain');
 
@@ -1537,12 +1740,10 @@ export class AuthService {
       this.firebaseIsInitialized = false;
       
       // Attempt to clear all Keychain data even if previous operations failed
+      // v10 API: resetGenericPassword accepts options object
       try {
         await Keychain.resetGenericPassword({
           service: ZKLOGIN_KEYCHAIN_SERVICE
-        });
-        await Keychain.resetGenericPassword({
-          service: AUTH_KEYCHAIN_SERVICE
         });
         await Keychain.resetGenericPassword({
           service: AUTH_KEYCHAIN_SERVICE
@@ -2213,18 +2414,135 @@ export class AuthService {
     // 3. All accounts share the same zkLogin authentication
     // 4. Only the salt generation changes based on account context
     
-    // Verify that the Sui address changes for the new account context
+    // Generate new Algorand address for the switched account context
     try {
-      const newAptosAddress = await this.getAptosAddress();
-      console.log('AuthService - Account switch completed with new Sui address:', {
+      console.log('AuthService - Generating Algorand address for account:', {
         accountId: accountId,
         accountType: accountContext.type,
         accountIndex: accountContext.index,
-        aptosAddress: newAptosAddress,
+        businessId: accountContext.businessId
+      });
+      
+      // Generate address for the new account
+      // Get the Firebase UID and OAuth subject from stored zkLogin data
+      const zkCredentials = await Keychain.getGenericPassword({
+        service: ZKLOGIN_KEYCHAIN_SERVICE,
+        username: ZKLOGIN_KEYCHAIN_USERNAME
+      });
+        
+        // First, try to retrieve stored address for this account
+        const storedAddress = await this.getStoredAlgorandAddress(accountContext);
+        
+        if (storedAddress) {
+          console.log('AuthService - Using stored Algorand address for account:', {
+            accountId: accountId,
+            address: storedAddress
+          });
+          
+          // Update the backend with the stored address if needed
+          if (apolloClient) {
+            try {
+              const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
+              await apolloClient.mutate({
+                mutation: UPDATE_ACCOUNT_APTOS_ADDRESS,
+                variables: { aptosAddress: storedAddress }
+              });
+              console.log('AuthService - Updated backend with stored Algorand address');
+            } catch (updateError) {
+              console.error('AuthService - Error updating backend with Algorand address:', updateError);
+            }
+          }
+          return; // Address already exists, no need to generate
+        }
+        
+        // Get OAuth subject from secure storage (only needed if no stored address)
+        const { oauthStorage } = await import('./oauthStorageService');
+        const oauthData = await oauthStorage.getOAuthSubject();
+        
+        if (!oauthData) {
+          console.error('No OAuth subject found in secure storage - cannot generate address for new account');
+          return; // Cannot generate without OAuth subject
+        }
+        
+        const oauthSubject = oauthData.subject;
+        const provider = oauthData.provider;
+        
+        // Use the secure deterministic wallet service to generate address for this account
+        const { SecureDeterministicWalletService } = await import('./secureDeterministicWallet');
+        const secureDeterministicWallet = SecureDeterministicWalletService.getInstance();
+        
+        // Get the actual Google web client ID from environment config
+        const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+        const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+        
+        // Determine the OAuth issuer and audience based on provider
+        const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+        const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+        
+        console.log('🔐 CALLING createOrRestoreWallet with OAuth claims:', {
+          iss,
+          sub: oauthSubject.substring(0, 20) + '...',
+          aud: aud.substring(0, 20) + '...',
+          accountType: accountContext.type,
+          accountIndex: accountContext.index,
+          businessId: accountContext.businessId,
+          provider: provider
+        });
+        
+        const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+          iss,                    // OAuth issuer
+          oauthSubject,           // OAuth subject
+          aud,                    // OAuth audience (Google web client ID or Apple bundle ID)
+          provider,
+          accountContext.type,    // Use the actual account type (personal or business)
+          accountContext.index,   // Use the actual account index
+          accountContext.businessId // Pass the businessId for business accounts
+        );
+          
+          console.log('🎯 GENERATED NEW Algorand address for account:', {
+            accountId: accountId,
+            accountType: accountContext.type,
+            accountIndex: accountContext.index,
+            businessId: accountContext.businessId,
+            algorandAddress: wallet.address,
+            provider: provider,
+            isUnique: wallet.address !== 'U3A3SWOU7NHMS6UWZ3KCE5DHNYIFYQ2F4GASYJXCTYUQZ7FLUFD2ICVXUU' ? '✅ UNIQUE' : '❌ DUPLICATE'
+          });
+          
+          // Store the address in keychain for future use
+          await this.storeAlgorandAddress(wallet.address, accountContext);
+          
+          // Update the current account's Algorand address in the backend if needed
+          if (apolloClient) {
+            try {
+              const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
+              await apolloClient.mutate({
+                mutation: UPDATE_ACCOUNT_APTOS_ADDRESS,
+                variables: { aptosAddress: wallet.address }
+              });
+              console.log('AuthService - Updated backend with new Algorand address');
+            } catch (updateError) {
+              console.error('AuthService - Error updating backend with Algorand address:', updateError);
+              // Non-fatal error - continue
+            }
+          }
+    } catch (error) {
+      console.error('AuthService - Error generating Algorand address for account switch:', error);
+      // Non-fatal error - continue with the switch
+    }
+    
+    // Verify that the address changes for the new account context
+    try {
+      const newAptosAddress = await this.getAptosAddress();
+      console.log('AuthService - Account switch completed with address:', {
+        accountId: accountId,
+        accountType: accountContext.type,
+        accountIndex: accountContext.index,
+        address: newAptosAddress,
         note: accountContext.type === 'personal' ? 'Personal account (index 0)' : `Business account (index ${accountContext.index})`
       });
     } catch (error) {
-      console.error('AuthService - Error getting new Sui address after account switch:', error);
+      console.error('AuthService - Error getting new address after account switch:', error);
     }
   }
 

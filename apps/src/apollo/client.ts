@@ -147,9 +147,9 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
                      error.message === 'No refresh token found' ||
                      error.message.includes('Invalid refresh token') ||
                      error.message === 'Invalid payload')) {
-                  await Keychain.resetGenericPassword({ 
-                    service: AUTH_KEYCHAIN_SERVICE,
-                    username: AUTH_KEYCHAIN_USERNAME
+                  // v10 API: resetGenericPassword accepts options object
+                  await Keychain.resetGenericPassword({
+                    service: AUTH_KEYCHAIN_SERVICE
                   });
                 }
                 observer.error(error);
@@ -296,9 +296,9 @@ const authLink = setContext(async (operation, previousContext) => {
       refreshToken = tokens.refreshToken;
     } catch (error) {
       console.error('Error parsing tokens:', error);
-      await Keychain.resetGenericPassword({ 
-        service: AUTH_KEYCHAIN_SERVICE,
-        username: AUTH_KEYCHAIN_USERNAME
+      // v10 API: resetGenericPassword accepts options object
+      await Keychain.resetGenericPassword({
+        service: AUTH_KEYCHAIN_SERVICE
       });
       return { 
         headers: {
@@ -439,9 +439,9 @@ const authLink = setContext(async (operation, previousContext) => {
       };
     } catch (error) {
       console.error('Error decoding token:', error);
-      await Keychain.resetGenericPassword({ 
-        service: AUTH_KEYCHAIN_SERVICE,
-        username: AUTH_KEYCHAIN_USERNAME
+      // v10 API: resetGenericPassword accepts options object
+      await Keychain.resetGenericPassword({
+        service: AUTH_KEYCHAIN_SERVICE
       });
       return { 
         headers: {
