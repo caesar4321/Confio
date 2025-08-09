@@ -438,6 +438,8 @@ export function FriendDetailScreen() {
     // Navigate to SendToFriend screen with selected token
     navigation.navigate('SendToFriend', { 
       friend: {
+        id: friend.id,  // Include the friend ID for Confío users
+        userId: friend.id,  // Also as userId for compatibility
         name: friend.name,
         avatar: friend.avatar,
         isOnConfio: friend.isOnConfio,

@@ -61,13 +61,17 @@ export const GENERATE_OPT_IN_TRANSACTIONS = gql`
 
 export const ALGORAND_SPONSORED_SEND = gql`
   mutation AlgorandSponsoredSend(
-    $recipient: String!
+    $recipientAddress: String
+    $recipientUserId: ID
+    $recipientPhone: String
     $amount: Float!
     $assetType: String
     $note: String
   ) {
     algorandSponsoredSend(
-      recipient: $recipient
+      recipientAddress: $recipientAddress
+      recipientUserId: $recipientUserId
+      recipientPhone: $recipientPhone
       amount: $amount
       assetType: $assetType
       note: $note

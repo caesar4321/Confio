@@ -1099,6 +1099,8 @@ class ExecuteTransaction(graphene.Mutation):
 
 class Mutation(graphene.ObjectType):
     """GraphQL mutations for send transactions"""
-    create_send_transaction = CreateSendTransaction.Field()
-    prepare_transaction = PrepareTransaction.Field()
-    execute_transaction = ExecuteTransaction.Field() 
+    # Note: Send transactions now handled by Algorand mutations in blockchain/schema.py
+    # These mutations are kept for backwards compatibility but should not be used
+    # create_send_transaction = CreateSendTransaction.Field()  # Deprecated - use algorandSponsoredSend
+    # prepare_transaction = PrepareTransaction.Field()  # Deprecated - Sui/zkLogin specific
+    # execute_transaction = ExecuteTransaction.Field()  # Deprecated - Sui/zkLogin specific 

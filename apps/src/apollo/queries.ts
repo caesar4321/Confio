@@ -27,7 +27,7 @@ export const CHECK_USERS_BY_PHONES = gql`
       username
       isOnConfio
       activeAccountId
-      activeAccountSuiAddress
+      activeAccountAlgorandAddress
     }
   }
 `;
@@ -47,7 +47,7 @@ export const CREATE_TEST_USERS = gql`
         lastName
         isOnConfio
         activeAccountId
-        activeAccountSuiAddress
+        activeAccountAlgorandAddress
       }
     }
   }
@@ -343,82 +343,8 @@ export const PAY_INVOICE = gql`
   }
 `;
 
-// Send Transaction Mutations
-export const CREATE_SEND_TRANSACTION = gql`
-  mutation CreateSendTransaction($input: SendTransactionInput!) {
-    createSendTransaction(input: $input) {
-      sendTransaction {
-        id
-        senderUser {
-          id
-          username
-          firstName
-          lastName
-        }
-        recipientUser {
-          id
-          username
-          firstName
-          lastName
-        }
-        senderBusiness {
-          id
-          name
-          category
-        }
-        recipientBusiness {
-          id
-          name
-          category
-        }
-        senderType
-        recipientType
-        senderDisplayName
-        recipientDisplayName
-        senderAddress
-        recipientAddress
-        amount
-        tokenType
-        memo
-        status
-        transactionHash
-        createdAt
-      }
-      success
-      errors
-    }
-  }
-`;
-
-// Two-phase transaction mutations
-export const PREPARE_TRANSACTION = gql`
-  mutation PrepareTransaction($input: PrepareTransactionInput!) {
-    prepareTransaction(input: $input) {
-      success
-      txBytes
-      sponsorSignature
-      transactionMetadata
-      errors
-    }
-  }
-`;
-
-export const EXECUTE_TRANSACTION = gql`
-  mutation ExecuteTransaction($input: ExecuteTransactionInput!) {
-    executeTransaction(input: $input) {
-      sendTransaction {
-        id
-        status
-        transactionHash
-        amount
-        tokenType
-        createdAt
-      }
-      success
-      errors
-    }
-  }
-`;
+// Note: Send mutations moved to mutations.ts (ALGORAND_SPONSORED_SEND and SUBMIT_SPONSORED_GROUP)
+// Old Sui-based mutations have been removed
 
 // Queries for send transactions and invoices
 export const GET_SEND_TRANSACTIONS = gql`
