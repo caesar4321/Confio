@@ -452,7 +452,7 @@ export class AuthServiceHybrid {
 
   private async clearHybridData(): Promise<void> {
     try {
-      await Keychain.resetInternetCredentials(HYBRID_KEYCHAIN_SERVICE);
+      await Keychain.resetInternetCredentials({ server: HYBRID_KEYCHAIN_SERVICE });
     } catch (error) {
       console.error('Error clearing hybrid data:', error);
     }

@@ -707,7 +707,7 @@ export class ContactService {
    */
   async clearContacts(): Promise<void> {
     try {
-      await Keychain.resetInternetCredentials(CONTACTS_KEYCHAIN_SERVICE);
+      await Keychain.resetInternetCredentials({ server: CONTACTS_KEYCHAIN_SERVICE });
       this.contactsCache = null;
     } catch (error) {
       console.error('Error clearing contacts:', error);

@@ -329,7 +329,7 @@ export class Web3AuthService {
 
   private async clearSession(): Promise<void> {
     try {
-      await Keychain.resetInternetCredentials(KEYCHAIN_SERVICE);
+      await Keychain.resetInternetCredentials({ server: KEYCHAIN_SERVICE });
       console.log('Web3Auth session cleared');
     } catch (error) {
       console.error('Error clearing Web3Auth session:', error);
