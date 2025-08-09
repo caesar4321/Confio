@@ -23,9 +23,9 @@ export interface UserInfo {
   web3AuthId?: string;
 }
 
-// Keychain services
-export const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth.web3';
-export const AUTH_KEYCHAIN_USERNAME = 'auth_tokens_web3';
+// Keychain services - Use same as Apollo client for token refresh to work
+export const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
+export const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
 
 export class AuthServiceWeb3 {
   private static instance: AuthServiceWeb3;
@@ -204,6 +204,17 @@ export class AuthServiceWeb3 {
     try {
       console.log('AuthServiceWeb3 - Authenticating with backend...');
       
+      // Get device fingerprint for security and achievement tracking
+      let deviceFingerprint = null;
+      try {
+        const securityService = (await import('./securityService')).SecurityService.getInstance();
+        const fingerprintData = await securityService.getDeviceFingerprint();
+        deviceFingerprint = JSON.stringify(fingerprintData.fingerprint);
+        console.log('AuthServiceWeb3 - Device fingerprint obtained');
+      } catch (fpError) {
+        console.warn('AuthServiceWeb3 - Could not get device fingerprint:', fpError);
+      }
+      
       // Step 1: Web3Auth Login to create/update user (no JWT tokens)
       const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
       
@@ -221,6 +232,7 @@ export class AuthServiceWeb3 {
           lastName: userInfo.lastName,
           algorandAddress: userInfo.algorandAddress,
           idToken: session.user.idToken,
+          deviceFingerprint: deviceFingerprint,
         },
       });
       

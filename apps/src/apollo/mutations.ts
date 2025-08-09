@@ -10,6 +10,7 @@ export const WEB3AUTH_LOGIN = gql`
     $lastName: String
     $algorandAddress: String
     $idToken: String
+    $deviceFingerprint: JSONString
   ) {
     web3AuthLogin(
       provider: $provider
@@ -19,6 +20,7 @@ export const WEB3AUTH_LOGIN = gql`
       lastName: $lastName
       algorandAddress: $algorandAddress
       idToken: $idToken
+      deviceFingerprint: $deviceFingerprint
     ) {
       success
       error
