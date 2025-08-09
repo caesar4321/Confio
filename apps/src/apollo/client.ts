@@ -234,10 +234,22 @@ const authLink = setContext(async (operation, previousContext) => {
       username: AUTH_KEYCHAIN_USERNAME
     });
 
-    const credentials = await Keychain.getGenericPassword({
-      service: AUTH_KEYCHAIN_SERVICE,
-      username: AUTH_KEYCHAIN_USERNAME
-    });
+    let credentials;
+    try {
+      credentials = await Keychain.getGenericPassword({
+        service: AUTH_KEYCHAIN_SERVICE,
+        username: AUTH_KEYCHAIN_USERNAME
+      });
+    } catch (keychainError: any) {
+      // "No entry found" is normal when not logged in - suppress this error
+      if (keychainError?.message?.includes('No entry found')) {
+        credentials = false;
+      } else {
+        // Log other keychain errors
+        console.error('Keychain error:', keychainError?.message);
+        credentials = false;
+      }
+    }
 
     console.log('Fetched credentials at authLink:', {
       hasCredentials: !!credentials,

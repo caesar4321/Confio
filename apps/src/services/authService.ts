@@ -134,27 +134,38 @@ export class AuthService {
   }
 
   async signInWithGoogle() {
+    const startTime = Date.now();
+    const perfLog = (step: string) => {
+      console.log(`[PERF] ${step}: ${Date.now() - startTime}ms`);
+    };
+    
     try {
       console.log('Starting Google Sign-In process...');
+      perfLog('Start');
       
       // Sign out first to force account selection
       try {
-        const isSignedIn = await GoogleSignin.isSignedIn();
-        if (isSignedIn) {
-          console.log('User already signed in to Google, signing out to force account selection...');
+        // Check if the method exists before calling (compatibility issue)
+        if (GoogleSignin.signOut) {
           await GoogleSignin.signOut();
+          console.log('Signed out from Google to force account selection');
         }
       } catch (error) {
-        console.log('Error checking/signing out from Google:', error);
+        // Ignore sign-out errors - not critical
+        console.log('Sign-out skipped:', error.message);
       }
       
       // 1) Sign in with Google first
       console.log('Checking Play Services...');
+      perfLog('Before Play Services check');
       await GoogleSignin.hasPlayServices();
+      perfLog('After Play Services check');
       console.log('Play Services check passed');
       
       console.log('Attempting Google Sign-In...');
+      perfLog('Before GoogleSignin.signIn()');
       const userInfo = await GoogleSignin.signIn();
+      perfLog('After GoogleSignin.signIn()');
       console.log('Google Sign-In response:', userInfo);
       
       if (!userInfo) {
@@ -162,9 +173,11 @@ export class AuthService {
       }
 
       // 2) Get the ID token after successful sign-in
+      perfLog('Google Sign-In complete');
       console.log('Getting Google ID token...');
       const { idToken } = await GoogleSignin.getTokens();
       console.log('Got ID token:', idToken ? 'Token received' : 'No token');
+      perfLog('Got Google ID token');
       
       // Debug: Check what's in the userInfo from Google Sign-In
       console.log('[AuthService] Google Sign-In userInfo:', {
@@ -183,6 +196,7 @@ export class AuthService {
       console.log('Signing in with Firebase...');
       const { user } = await this.auth.signInWithCredential(firebaseCred);
       console.log('Firebase sign-in response:', user ? 'User received' : 'No user');
+      perfLog('Firebase sign-in complete');
       
       if (!user) {
         throw new Error('No user returned from Firebase sign-in');
@@ -205,6 +219,7 @@ export class AuthService {
 
       // 5) Initialize zkLogin with device fingerprint
       console.log('Initializing zkLogin...');
+      perfLog('Starting zkLogin init');
       const { data: { initializeZkLogin: init } } = await apolloClient.mutate({
         mutation: INITIALIZE_ZKLOGIN,
         variables: { 
@@ -215,6 +230,7 @@ export class AuthService {
         }
       });
       console.log('zkLogin initialization response:', init ? 'Data received' : 'No data');
+      perfLog('zkLogin initialized');
 
       if (!init) {
         throw new Error('No data received from zkLogin initialization');
@@ -363,6 +379,7 @@ export class AuthService {
       let algorandAddress = '';
       let isPhoneVerified = false; // Default to false if we can't get the status
       try {
+        perfLog('Starting Algorand wallet creation');
         console.log('Creating Algorand wallet with Web3Auth using Firebase token...');
         
         // Get fresh Firebase ID token for Web3Auth
@@ -381,6 +398,7 @@ export class AuthService {
         });
         algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, firebaseUid, googleSubject);
         console.log('Algorand wallet created:', algorandAddress);
+        perfLog('Algorand wallet created');
         
         // Now call backend mutations for authentication and opt-ins
         console.log('Calling backend mutations for Web3Auth authentication...');
@@ -603,6 +621,7 @@ export class AuthService {
           isPhoneVerified // Use the actual value from backend
         }
       };
+      perfLog('Total sign-in time');
       console.log('Sign-in process completed successfully:', result);
       return result;
     } catch (error) {

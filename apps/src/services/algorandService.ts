@@ -28,6 +28,21 @@ class AlgorandService {
     // Delay initialization to avoid import errors
   }
 
+  /**
+   * Pre-initialize the SDK at app startup to avoid delays during sign-in
+   * This is called from bootstrap.ts to warm up the imports
+   */
+  async preInitialize(): Promise<void> {
+    try {
+      console.log('[AlgorandService] Pre-initializing SDK...');
+      await this.ensureInitialized();
+      console.log('[AlgorandService] SDK pre-initialized successfully');
+    } catch (error) {
+      console.warn('[AlgorandService] Pre-initialization failed:', error);
+      // Non-fatal - will retry on actual use
+    }
+  }
+
   private async ensureInitialized() {
     if (!this.algosdk) {
       try {
