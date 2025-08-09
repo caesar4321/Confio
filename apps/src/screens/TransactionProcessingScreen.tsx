@@ -12,6 +12,7 @@ import { EnhancedAuthService } from '../services/enhancedAuthService';
 import algorandService from '../services/algorandService';
 import * as nacl from 'tweetnacl';
 import * as msgpack from 'algorand-msgpack';
+import { Buffer } from 'buffer';
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -333,20 +334,20 @@ export const TransactionProcessingScreen = () => {
           return;
         }
         
-        // Backend handles signing with JWT context
-        // Client just needs to submit the request for backend signing
-        // The backend will sign the user transaction and submit the atomic group
-        
-        // This is now a single-step process where backend handles everything
-        console.log('TransactionProcessingScreen: Backend will handle signing and submission...');
-        
+        // Decode user transaction (base64 -> bytes)
+        const userTxnBytes = Uint8Array.from(Buffer.from(userTransaction, 'base64'));
+
+        // Sign the user transaction locally using deterministic wallet
+        const signedUserTxnBytes = await algorandService.signTransactionBytes(userTxnBytes);
+        const signedUserTxnB64 = Buffer.from(signedUserTxnBytes).toString('base64');
+
         console.log('TransactionProcessingScreen: Submitting signed Algorand transaction group...');
-        
-        // Submit the signed transaction group
+
+        // Submit the signed transaction group (user signed locally, sponsor signed by server)
         const { data: submitData } = await submitSponsoredGroup({
           variables: {
             signedUserTxn: signedUserTxnB64,
-            signedSponsorTxn: sponsorTransaction // Already base64
+            signedSponsorTxn: sponsorTransaction
           }
         });
         
