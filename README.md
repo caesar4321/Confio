@@ -36,7 +36,7 @@ Confío helps people access stable dollars, send remittances, and pay each other
 | Frontend        | React Native (no Expo)        |
 | Web App         | React + TypeScript            |
 | Auth            | Firebase Authentication       |
-| Blockchain      | [Algorand](https://algorand.com) |
+| Blockchain      | [Algorand](https://algorand.co) |
 | Smart Contracts | PyTeal/TEAL (Algorand)        |
 | Backend API     | Django + GraphQL              |
 | Real-time       | Django Channels + WebSocket   |
