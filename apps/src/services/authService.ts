@@ -53,7 +53,7 @@ interface StoredZkLogin {
     zkProof: any;        // the full proof object (points a/b/c etc)
     subject: string;     // sub
     clientId: string;    // oauth clientId
-    aptosAddress: string;  // the user's Aptos address
+    algorandAddress: string;  // the user's Aptos address
   };
   secretKey: string;     // base64-encoded 32-byte seed
   initRandomness: string; // randomness from initializeZkLogin
@@ -613,10 +613,10 @@ export class AuthService {
         
         // Update the aptos_address field with Algorand address
         try {
-          const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
+          const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
           await apolloClient.mutate({
-            mutation: UPDATE_ACCOUNT_APTOS_ADDRESS,
-            variables: { aptosAddress: algorandAddress }
+            mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
+            variables: { algorandAddress: algorandAddress }
           });
           console.log('Updated account with Algorand address');
         } catch (updateError) {
@@ -640,10 +640,10 @@ export class AuthService {
         },
         zkLoginData: { 
           zkProof: {
-            aptosAddress: algorandAddress, // Store Algorand address in the zkProof object
+            algorandAddress: algorandAddress, // Store Algorand address in the zkProof object
             zkProof: null // We don't have actual zkProof when using Algorand
           },
-          aptosAddress: algorandAddress, // Also store at top level for compatibility
+          algorandAddress: algorandAddress, // Also store at top level for compatibility
           isPhoneVerified // Use the actual value from backend
         }
       };
@@ -1111,10 +1111,10 @@ export class AuthService {
         },
         zkLoginData: {
           zkProof: {
-            aptosAddress: algorandAddress, // Store Algorand address in the zkProof object
+            algorandAddress: algorandAddress, // Store Algorand address in the zkProof object
             zkProof: null // We don't have actual zkProof when using Algorand
           },
-          aptosAddress: algorandAddress, // Also store at top level for compatibility
+          algorandAddress: algorandAddress, // Also store at top level for compatibility
           isPhoneVerified // Use the actual value from backend
         }
       };
@@ -1254,7 +1254,7 @@ export class AuthService {
         zkProof: data.zkProof.zkProof,
         subject: data.subject,
         clientId: data.clientId,
-        aptosAddress: data.zkProof.aptosAddress
+        algorandAddress: data.zkProof.aptosAddress
       };
 
       // Check if we need to refresh the proof
@@ -1349,7 +1349,7 @@ export class AuthService {
       zkProof: proof.zkProof,
       subject,
       clientId,
-      aptosAddress: proof.aptosAddress,  // Store the Aptos address at the top level
+      algorandAddress: proof.aptosAddress,  // Store the Aptos address at the top level
       extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
       userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0)))
     };
@@ -1523,10 +1523,10 @@ export class AuthService {
       
       // Also update on server
       try {
-        const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
+        const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
         await apolloClient.mutate({
-          mutation: UPDATE_ACCOUNT_APTOS_ADDRESS,
-          variables: { aptosAddress: wallet.address }
+          mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
+          variables: { algorandAddress: wallet.address }
         });
         console.log('Updated server with new address');
       } catch (error) {
@@ -2447,10 +2447,10 @@ export class AuthService {
           // Update the backend with the stored address if needed
           if (apolloClient) {
             try {
-              const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
+              const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
               await apolloClient.mutate({
-                mutation: UPDATE_ACCOUNT_APTOS_ADDRESS,
-                variables: { aptosAddress: storedAddress }
+                mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
+                variables: { algorandAddress: storedAddress }
               });
               console.log('AuthService - Updated backend with stored Algorand address');
             } catch (updateError) {
@@ -2520,10 +2520,10 @@ export class AuthService {
           // Update the current account's Algorand address in the backend if needed
           if (apolloClient) {
             try {
-              const { UPDATE_ACCOUNT_APTOS_ADDRESS } = await import('../apollo/queries');
+              const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
               await apolloClient.mutate({
-                mutation: UPDATE_ACCOUNT_APTOS_ADDRESS,
-                variables: { aptosAddress: wallet.address }
+                mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
+                variables: { algorandAddress: wallet.address }
               });
               console.log('AuthService - Updated backend with new Algorand address');
             } catch (updateError) {

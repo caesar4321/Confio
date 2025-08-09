@@ -165,7 +165,6 @@ export const FINALIZE_ZKLOGIN = gql`
         b
         c
       }
-      aptosAddress
       error
       isPhoneVerified
     }
@@ -238,7 +237,6 @@ export const CREATE_BUSINESS = gql`
         accountId
         accountType
         accountIndex
-        aptosAddress
         business {
           id
           name
@@ -251,9 +249,9 @@ export const CREATE_BUSINESS = gql`
   }
 `;
 
-export const UPDATE_ACCOUNT_APTOS_ADDRESS = gql`
-  mutation UpdateAccountAptosAddress($aptosAddress: String!) {
-    updateAccountAptosAddress(aptosAddress: $aptosAddress) {
+export const UPDATE_ACCOUNT_ALGORAND_ADDRESS = gql`
+  mutation UpdateAccountAlgorandAddress($algorandAddress: String!) {
+    updateAccountAlgorandAddress(algorandAddress: $algorandAddress) {
       account {
         id
         accountId
@@ -323,8 +321,7 @@ export const GET_INVOICE = gql`
           id
           accountType
           accountIndex
-          aptosAddress
-          business {
+            business {
             id
             name
             category
@@ -617,7 +614,6 @@ export const GET_INVOICES = gql`
         id
         accountType
         accountIndex
-        aptosAddress
         business {
           id
           name
@@ -638,8 +634,7 @@ export const GET_INVOICES = gql`
           id
           accountType
           accountIndex
-          aptosAddress
-          business {
+            business {
             id
             name
             category
@@ -656,8 +651,7 @@ export const GET_INVOICES = gql`
           id
           accountType
           accountIndex
-          aptosAddress
-          business {
+            business {
             id
             name
             category
@@ -2265,7 +2259,6 @@ export const GET_USER_BY_ID = gql`
         id
         accountType
         accountIndex
-        aptosAddress
         displayName
       }
     }
