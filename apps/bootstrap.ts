@@ -33,7 +33,7 @@ const client = new ApolloClient({
 });
 
 // Import React Native components
-import { AppRegistry, Platform } from 'react-native';
+import { AppRegistry, Platform, UIManager } from 'react-native';
 import { name as appName } from './app.json';
 import * as suiUtils from '@mysten/sui/utils';
 import { Buffer } from 'buffer';
@@ -57,8 +57,20 @@ const AppWithApollo = () => (
 // Register the app
 AppRegistry.registerComponent(appName, () => AppWithApollo);
 
-// react-native-screens is now auto-enabled in newer versions
-// No need to manually call enableScreens()
+// Configure react-native-screens defensively to avoid sheet prop crashes
+try {
+  // Require lazily so it doesn't throw if not present
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const Screens = require('react-native-screens');
+  // Enable native screens for better performance with native stacks
+  Screens.enableScreens(true);
+  const cfg = UIManager.getViewManagerConfig('RNSScreen');
+  const nativeProps = new Set(Object.keys((cfg && (cfg as any).NativeProps) || {}));
+  const supportsSheet = nativeProps.has('sheetLargestUndimmedDetent') || nativeProps.has('sheetLargestUndimmedDetentIndex');
+  console.log('[RNScreens] enabled:', Screens.screensEnabled(), 'supportsSheet:', supportsSheet, 'hasViewManager:', !!cfg);
+} catch (_e) {
+  // If screens isn't available, proceed without enabling it
+}
 
 try {
   require('./src/services/backgroundMessaging');

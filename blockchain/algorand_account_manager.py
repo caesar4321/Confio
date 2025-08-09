@@ -33,7 +33,7 @@ class AlgorandAccountManager:
     ALGOD_TOKEN = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '')
     
     # Funding amounts
-    INITIAL_ALGO_FUNDING = 300000  # 0.3 ALGO in microAlgos (for 2 opt-ins)
+    INITIAL_ALGO_FUNDING = 310000  # 0.31 ALGO in microAlgos (0.3 for MBR + 0.01 for fees)
     INITIAL_CONFIO_GRANT = 100_000_000  # 100 CONFIO tokens (6 decimals)
     
     @classmethod

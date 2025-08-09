@@ -7979,7 +7979,12 @@ react-native-get-random-values@^1.9.0:
   dependencies:
     fast-base64-decode "^1.0.0"
 
-react-native-is-edge-to-edge@^1.1.7, react-native-is-edge-to-edge@1.1.7:
+react-native-is-edge-to-edge@^1.2.1:
+  version "1.2.1"
+  resolved "https://registry.npmjs.org/react-native-is-edge-to-edge/-/react-native-is-edge-to-edge-1.2.1.tgz"
+  integrity sha512-FLbPWl/MyYQWz+KwqOZsSyj2JmLKglHatd3xLZWskXOpRaio4LfEDEz8E/A6uD8QoTHW6Aobw1jbEwK7KMgR7Q==
+
+react-native-is-edge-to-edge@1.1.7:
   version "1.1.7"
   resolved "https://registry.npmjs.org/react-native-is-edge-to-edge/-/react-native-is-edge-to-edge-1.1.7.tgz"
   integrity sha512-EH6i7E8epJGIcu7KpfXYXiV2JFIYITtq+rVS8uEb+92naMRBdxhTuS8Wn2Q7j9sqyO0B+Xbaaf9VdipIAmGW4w==
@@ -8021,13 +8026,13 @@ react-native-safe-area-context@^5.4.1, "react-native-safe-area-context@>= 4.0.0"
   resolved "https://registry.npmjs.org/react-native-safe-area-context/-/react-native-safe-area-context-5.4.1.tgz"
   integrity sha512-x+g3NblZ9jof8y+XkVvaGlpMrSlixhrJJ33BRzhTAKUKctQVecO1heSXmzxc5UdjvGYBKS6kPZVUw2b8NxHcPg==
 
-react-native-screens@^4.11.1, "react-native-screens@>= 4.0.0":
-  version "4.11.1"
-  resolved "https://registry.npmjs.org/react-native-screens/-/react-native-screens-4.11.1.tgz"
-  integrity sha512-F0zOzRVa3ptZfLpD0J8ROdo+y1fEPw+VBFq1MTY/iyDu08al7qFUO5hLMd+EYMda5VXGaTFCa8q7bOppUszhJw==
+react-native-screens@^4.13.1, "react-native-screens@>= 4.0.0":
+  version "4.13.1"
+  resolved "https://registry.npmjs.org/react-native-screens/-/react-native-screens-4.13.1.tgz"
+  integrity sha512-EESsMAtyzYcL3gpAI2NKKiIo+Ew0fnX4P4b3Zy/+MTc6SJIo3foJbZwdIWd/SUBswOf7IYCvWBppg+D8tbwnsw==
   dependencies:
     react-freeze "^1.0.0"
-    react-native-is-edge-to-edge "^1.1.7"
+    react-native-is-edge-to-edge "^1.2.1"
     warn-once "^0.1.0"
 
 react-native-svg-transformer@^1.5.0:
@@ -8083,7 +8088,7 @@ react-native-worklets-core@*, react-native-worklets-core@^1.5.0:
   dependencies:
     string-hash-64 "^1.0.3"
 
-react-native@*, react-native@>=0.56, react-native@>=0.59, react-native@>=0.59.0, react-native@>=0.63.4, react-native@>=0.64.0, react-native@0.79.3:
+react-native@*, react-native@^0.79.3, react-native@>=0.56, react-native@>=0.59, react-native@>=0.59.0, react-native@>=0.63.4, react-native@>=0.64.0:
   version "0.79.3"
   resolved "https://registry.npmjs.org/react-native/-/react-native-0.79.3.tgz"
   integrity sha512-EzH1+9gzdyEo9zdP6u7Sh3Jtf5EOMwzy+TK65JysdlgAzfEVfq4mNeXcAZ6SmD+CW6M7ARJbvXLyTD0l2S5rpg==

@@ -152,29 +152,6 @@ class AlgorandService {
       // Skip Web3Auth initialization - we're not using it
       console.log(`Creating/restoring Algorand wallet for Firebase user: ${firebaseUid}`);
       
-      // Pre-Web3Auth check - verify WebCrypto is available
-      console.log('[pre-web3auth] global.crypto exists:', !!global.crypto);
-      console.log('[pre-web3auth] global.crypto.subtle exists:', !!global.crypto?.subtle);
-      console.log('[pre-web3auth] subtle.digest type:', typeof global.crypto?.subtle?.digest);
-      console.log('[pre-web3auth] subtle.importKey type:', typeof global.crypto?.subtle?.importKey);
-      
-      // Check Node-style path that Web3Auth might use
-      // Skip crypto module check in React Native - it's not available
-      console.log('[pre-web3auth] Skipping Node crypto check in React Native');
-      
-      if (typeof global.crypto?.subtle?.digest !== 'function') {
-        console.error('[pre-web3auth] WebCrypto digest is not available! This will fail.');
-      }
-      if (typeof global.crypto?.subtle?.importKey !== 'function') {
-        console.error('[pre-web3auth] WebCrypto importKey is not available! This will fail.');
-      }
-      
-      // Use Firebase verifier - one wallet per Firebase user regardless of login method
-      const verifierName = 'firebase-confio-test';
-      const verifierId = firebaseUid; // Firebase UID (sub claim) for consistent wallet
-      
-      console.log(`Using verifier: ${verifierName} with verifierId: ${verifierId}`);
-      
       // BYPASS WEB3AUTH COMPLETELY - Use secure deterministic wallet
       console.log('Using secure deterministic wallet with proper KDF and salt formula from README.md');
       

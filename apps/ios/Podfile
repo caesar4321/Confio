@@ -1,67 +1,57 @@
-platform :ios, "15.1"
+require_relative '../node_modules/react-native/scripts/react_native_pods'
 
-# bring in RN's own pod helpers (this will include autolinking)
-require_relative "../node_modules/react-native/scripts/react_native_pods"
+# Disable VisionCamera Frame Processors to avoid worklets-core issues
+$VCEnableFrameProcessors = false
 
+# Force disable New Architecture to prevent React Native Screens crashes
+ENV['RCT_NEW_ARCH_ENABLED'] = '0'
+
+platform :ios, '16.0'
 prepare_react_native_project!
 
-# Build Swift pods (like FirebaseAuth) as static frameworks:
+# Flipper is disabled due to Firebase use_frameworks requirement
+# flipper_config = ENV['NO_FLIPPER'] == '1' ? FlipperConfiguration.disabled : FlipperConfiguration.enabled
+
+# Firebase requires frameworks linkage
 use_frameworks! :linkage => :static
 
 target 'Confio' do
   config = use_native_modules!
-
+  
   use_react_native!(
     :path => config[:reactNativePath],
+    # Hermes is enabled for better debugging and performance
     :hermes_enabled => true,
+    # Fabric is disabled - using old architecture
     :fabric_enabled => false,
-    :new_arch_enabled => false
+    # An absolute path to your application root
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
-
-  # Some pods need explicit inclusion due to use_frameworks!
-  # GoogleSignIn
-  pod 'GoogleSignIn', '~> 7.1'
-  pod 'RNGoogleSignin', :path => '../node_modules/@react-native-google-signin/google-signin'
   
-  # Firebase
-  pod 'Firebase/Core'
-  pod 'Firebase/Auth'
-  pod 'Firebase/Messaging'
-  pod 'RNFBApp', :path => '../node_modules/@react-native-firebase/app'
-  pod 'RNFBAuth', :path => '../node_modules/@react-native-firebase/auth'
-  pod 'RNFBMessaging', :path => '../node_modules/@react-native-firebase/messaging'
-  
-  # Notifee
-  pod 'RNNotifee', :path => '../node_modules/@notifee/react-native'
-end
-
-post_install do |installer|
-  react_native_post_install(installer)
-
-  installer.pods_project.targets.each do |target|
-    target.build_configurations.each do |config|
-      # keep your C++ flags happy
-      config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++20'
-      config.build_settings['CLANG_CXX_LIBRARY']        = 'libc++'
-      # M1 simulator hack
-      config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"
-      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']          = '16.0'
-      # ensure Swift pods compile with Swift 5+
-      config.build_settings['SWIFT_VERSION'] = '5.0'
-      
-      # Build performance optimizations
-      config.build_settings['COMPILER_INDEX_STORE_ENABLE'] = 'NO'
-      config.build_settings['SWIFT_COMPILATION_MODE'] = 'wholemodule'
-      config.build_settings['SWIFT_OPTIMIZATION_LEVEL'] = '-O'
-      config.build_settings['GCC_OPTIMIZATION_LEVEL'] = 's'
-      
-      # Disable bitcode for faster builds
-      config.build_settings['ENABLE_BITCODE'] = 'NO'
-      
-      # Only build active architecture in debug
-      if config.name == 'Debug'
-        config.build_settings['ONLY_ACTIVE_ARCH'] = 'YES'
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false
+    )
+    
+    # Standard fixes for React Native
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        # Disable bitcode
+        config.build_settings['ENABLE_BITCODE'] = 'NO'
+        
+        # Fix for arm64 simulator
+        config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = 'arm64'
+        
+        # Minimum iOS deployment target
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '16.0'
+        
+        # Fix for React Native Screens sheet presentation
+        if target.name == 'RNScreens'
+          config.build_settings['RCT_NEW_ARCH_ENABLED'] = '0'
+        end
       end
     end
   end
-end 
+end

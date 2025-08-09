@@ -8,7 +8,7 @@ import { GOOGLE_CLIENT_IDS, API_URL } from '../config/env';
 import auth from '@react-native-firebase/auth';
 import { Platform } from 'react-native';
 import { INITIALIZE_ZKLOGIN, FINALIZE_ZKLOGIN } from '../apollo/queries';
-import { apolloClient } from '../apollo/client';
+import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
 import { gql } from '@apollo/client';
 import { Buffer } from 'buffer';
 import { sha256 } from '@noble/hashes/sha256';
@@ -53,9 +53,7 @@ interface StoredZkLogin {
 }
 
 export const ZKLOGIN_KEYCHAIN_SERVICE = 'com.confio.zklogin';
-export const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const ZKLOGIN_KEYCHAIN_USERNAME = 'zkLoginData';
-export const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
 
 export class AuthService {
   private static instance: AuthService;
@@ -936,8 +934,88 @@ export class AuthService {
             console.log('ADD_ALGORAND_WALLET successful (Apple)');
             // Handle opt-ins if needed
             if (walletData.addAlgorandWallet.needsOptIn?.length > 0) {
-              console.log('Needs opt-in for assets (Apple):', walletData.addAlgorandWallet.needsOptIn);
-              // Handle opt-ins similar to Google flow
+              console.log('Handling automatic opt-ins for (Apple):', walletData.addAlgorandWallet.needsOptIn);
+              // Process sponsored opt-ins directly here (same as Google flow)
+              try {
+                const { ALGORAND_SPONSORED_OPT_IN } = await import('../apollo/mutations');
+                
+                for (const assetId of walletData.addAlgorandWallet.needsOptIn) {
+                  console.log(`Processing sponsored opt-in for asset ${assetId} (Apple)...`);
+                  
+                  // Request sponsored opt-in from backend
+                  const { data: optInData } = await apolloClient.mutate({
+                    mutation: ALGORAND_SPONSORED_OPT_IN,
+                    variables: {
+                      assetId: assetId
+                    }
+                  });
+                  
+                  const result = optInData?.algorandSponsoredOptIn;
+                  
+                  if (result?.success) {
+                    if (result.alreadyOptedIn) {
+                      console.log(`Asset ${assetId} already opted in (Apple)`);
+                    } else if (result.requiresUserSignature) {
+                      console.log(`Asset ${assetId} requires user signature (Apple) - signing and submitting...`);
+                      
+                      // We have the unsigned user transaction and signed sponsor transaction
+                      if (result.userTransaction && result.sponsorTransaction && algorandService) {
+                        try {
+                          // Use the secure wallet to sign the transaction
+                          const { secureDeterministicWallet } = await import('./secureDeterministicWallet');
+                          
+                          // The transaction from backend is base64-encoded msgpack
+                          const userTxnB64 = result.userTransaction;
+                          const userTxnBytes = Buffer.from(userTxnB64, 'base64');
+                          
+                          console.log('Signing opt-in transaction for asset (Apple)', assetId);
+                          
+                          // Sign the transaction using the secure wallet service
+                          const signedTxnBytes = await secureDeterministicWallet.signTransaction(
+                            firebaseUid,   // Firebase UID from earlier in the function
+                            userTxnBytes   // The raw transaction bytes from the backend
+                          );
+                          
+                          console.log('Transaction signed successfully (Apple)');
+                          
+                          // Convert signed transaction to base64 for submission
+                          const signedTxnB64 = Buffer.from(signedTxnBytes).toString('base64');
+                          
+                          // Submit the signed transaction group
+                          const { SUBMIT_SPONSORED_GROUP } = await import('../apollo/mutations');
+                          
+                          const { data: submitData } = await apolloClient.mutate({
+                            mutation: SUBMIT_SPONSORED_GROUP,
+                            variables: {
+                              signedUserTxn: signedTxnB64,
+                              signedSponsorTxn: result.sponsorTransaction  // Already signed by backend
+                            }
+                          });
+                          
+                          if (submitData?.submitSponsoredGroup?.success) {
+                            console.log(`Asset ${assetId} opt-in successful (Apple)! TxID: ${submitData.submitSponsoredGroup.transactionId}`);
+                          } else {
+                            console.error(`Failed to submit opt-in for asset ${assetId} (Apple):`, submitData?.submitSponsoredGroup?.error);
+                          }
+                        } catch (signError) {
+                          console.error(`Error signing/submitting opt-in for asset ${assetId} (Apple):`, signError);
+                        }
+                      } else {
+                        console.log(`Asset ${assetId} opt-in completed server-side (Apple)`);
+                      }
+                    } else {
+                      console.log(`Asset ${assetId} opt-in completed without signature (Apple)`);
+                    }
+                  } else {
+                    console.error(`Failed to opt-in to asset ${assetId} (Apple):`, result?.error);
+                  }
+                }
+                
+                console.log('Completed processing all opt-ins (Apple)');
+              } catch (optInError) {
+                console.error('Error processing opt-ins (Apple):', optInError);
+                // Don't fail the sign-in if opt-ins fail
+              }
             }
           }
         } else {

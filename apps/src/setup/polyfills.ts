@@ -3,6 +3,7 @@
 
 console.log('[polyfills] Starting polyfills setup...');
 
+
 // CRITICAL: Random values for cryptographic operations (must be first!)
 import 'react-native-get-random-values';
 

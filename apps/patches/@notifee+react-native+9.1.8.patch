@@ -1,0 +1,31 @@
+diff --git a/node_modules/@notifee/react-native/src/NotifeeNativeModule.ts b/node_modules/@notifee/react-native/src/NotifeeNativeModule.ts
+index 138d916..a72800d 100644
+--- a/node_modules/@notifee/react-native/src/NotifeeNativeModule.ts
++++ b/node_modules/@notifee/react-native/src/NotifeeNativeModule.ts
+@@ -24,9 +24,23 @@ export default class NotifeeNativeModule {
+   public constructor(config: NativeModuleConfig) {
+     this._nativeModule = null;
+     this._moduleConfig = Object.assign({}, config);
+-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+-    // @ts-ignore - change here needs resolution https://github.com/DefinitelyTyped/DefinitelyTyped/pull/49560/files
+-    this._nativeEmitter = new NativeEventEmitter(this.native as EventSubscription['subscriber']);
++    
++    // Check if native module exists before creating NativeEventEmitter
++    const nativeModule = NativeModules[config.nativeModuleName];
++    if (nativeModule) {
++      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
++      // @ts-ignore - change here needs resolution https://github.com/DefinitelyTyped/DefinitelyTyped/pull/49560/files
++      this._nativeEmitter = new NativeEventEmitter(nativeModule as EventSubscription['subscriber']);
++    } else {
++      // Create a dummy emitter that does nothing if native module is not available
++      this._nativeEmitter = {
++        addListener: () => ({ remove: () => {} }),
++        removeListener: () => {},
++        removeAllListeners: () => {},
++        listenerCount: () => 0
++      } as any;
++      console.warn(`Notifee native module '${config.nativeModuleName}' not found, using dummy emitter`);
++    }
+     for (let i = 0; i < config.nativeEvents.length; i++) {
+       const eventName = config.nativeEvents[i];
+       this._nativeEmitter.addListener(eventName, (payload: any) => {
