@@ -48,6 +48,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
         last_name = graphene.String() 
         algorand_address = graphene.String()
         id_token = graphene.String()  # Firebase ID token for verification
+        device_fingerprint = graphene.JSONString()  # Device fingerprint data
     
     success = graphene.Boolean()
     error = graphene.String()
@@ -57,7 +58,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
     
     @classmethod
     def mutate(cls, root, info, provider, web3_auth_id, email=None, first_name=None, 
-               last_name=None, algorand_address=None, id_token=None):
+               last_name=None, algorand_address=None, id_token=None, device_fingerprint=None):
         try:
             from django.contrib.auth import get_user_model
             from graphql_jwt.utils import jwt_encode
@@ -84,7 +85,73 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     user.first_name = first_name
                 if last_name and user.last_name != last_name:
                     user.last_name = last_name
+                # Update last login timestamp
+                user.last_login = timezone.now()
                 user.save()
+            
+            # Track device fingerprint if provided
+            if device_fingerprint:
+                try:
+                    from security.utils import track_user_device, calculate_device_fingerprint
+                    import json
+                    
+                    # Parse device fingerprint if it's a string
+                    fingerprint_data = json.loads(device_fingerprint) if isinstance(device_fingerprint, str) else device_fingerprint
+                    
+                    # Track the device
+                    track_user_device(user, fingerprint_data, info.context)
+                    
+                    # Store fingerprint hash on user for achievement validation
+                    fingerprint_hash = calculate_device_fingerprint(fingerprint_data)
+                    user._device_fingerprint_hash = fingerprint_hash
+                    
+                    # Also store IP for fraud detection
+                    if hasattr(info.context, 'META'):
+                        user._registration_ip = info.context.META.get('REMOTE_ADDR')
+                    
+                    logger.info(f"Device fingerprint tracked for user {user.id}")
+                except Exception as e:
+                    logger.error(f"Error tracking device fingerprint: {e}")
+                    # Don't fail authentication if device tracking fails
+            
+            # Trigger achievement for new users (Pionero Beta)
+            if created:
+                try:
+                    from achievements.models import AchievementType, UserAchievement
+                    from achievements.signals import send_achievement_notification
+                    
+                    # Check if Pionero Beta achievement exists and user count is below limit
+                    pionero_achievement = AchievementType.objects.filter(
+                        slug='pionero_beta',
+                        is_active=True
+                    ).first()
+                    
+                    if pionero_achievement:
+                        # Check if we're still under the 10,000 user limit
+                        total_users = User.objects.count()
+                        
+                        if total_users <= 10000:
+                            # Create the achievement for the user
+                            user_achievement, achievement_created = UserAchievement.objects.get_or_create(
+                                user=user,
+                                achievement_type=pionero_achievement,
+                                defaults={
+                                    'status': 'earned',
+                                    'earned_at': timezone.now(),
+                                    'device_fingerprint_hash': getattr(user, '_device_fingerprint_hash', None),
+                                    'claim_ip_address': getattr(user, '_registration_ip', None),
+                                }
+                            )
+                            
+                            if achievement_created:
+                                logger.info(f"Pionero Beta achievement awarded to user {user.id} (user #{total_users})")
+                                # Send notification (signal will handle this automatically)
+                        else:
+                            logger.info(f"User {user.id} is user #{total_users}, beyond Pionero Beta limit")
+                    
+                except Exception as e:
+                    logger.error(f"Error awarding Pionero Beta achievement: {e}")
+                    # Don't fail authentication if achievement awarding fails
             
             # Create/update Algorand account if address provided
             if algorand_address:
@@ -98,6 +165,10 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 if account.aptos_address != algorand_address:
                     account.aptos_address = algorand_address
                     account.save()
+                
+                # Update last login timestamp for the account
+                account.last_login_at = timezone.now()
+                account.save(update_fields=['last_login_at'])
                 
                 # Check balance and auto-fund if needed
                 from blockchain.algorand_account_manager import AlgorandAccountManager
