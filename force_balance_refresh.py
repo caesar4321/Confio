@@ -30,7 +30,7 @@ def force_refresh_balance():
     
     # Find the account
     try:
-        account = Account.objects.filter(aptos_address=recipient_address).first()
+        account = Account.objects.filter(algorand_address=recipient_address).first()
         
         if not account:
             print("❌ Account not found in database")
@@ -38,7 +38,7 @@ def force_refresh_balance():
             
         print(f"\n✅ Found account:")
         print(f"   User: {account.user.email}")
-        print(f"   Address: {account.aptos_address}")
+        print(f"   Address: {account.algorand_address}")
         
         # Clear all caches for this account
         print(f"\n1. Clearing all caches...")

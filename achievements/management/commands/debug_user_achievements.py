@@ -35,7 +35,7 @@ class Command(BaseCommand):
         accounts = Account.objects.filter(user=user)
         self.stdout.write(f'\n  Accounts: {accounts.count()}')
         for acc in accounts:
-            self.stdout.write(f'    - {acc.account_type}: {acc.account_id} (sui: {acc.aptos_address[:20] if acc.aptos_address else "None"}...)')
+            self.stdout.write(f'    - {acc.account_type}: {acc.account_id} (sui: {acc.algorand_address[:20] if acc.algorand_address else "None"}...)')
         
         # Achievement Types
         self.stdout.write(self.style.WARNING('\n\nACHIEVEMENT TYPES:'))

@@ -117,7 +117,7 @@ class AppleSignInHandler:
     async def _get_or_create_session_key(
         cls,
         apple_subject: str,
-        aptos_address: str
+        algorand_address: str
     ) -> Optional[str]:
         """
         Get or create a session key for an Apple user.

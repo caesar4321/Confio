@@ -91,7 +91,7 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
                 deleted_at__isnull=True
             ).first()
             
-            if not account or not account.aptos_address:
+            if not account or not account.algorand_address:
                 return cls(success=False, error='No Algorand address found')
             
             # Default assets if not specified
@@ -114,7 +114,7 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             )
             
             # Check current opt-ins
-            account_info = algod_client.account_info(account.aptos_address)
+            account_info = algod_client.account_info(account.algorand_address)
             current_assets = [asset['asset-id'] for asset in account_info.get('assets', [])]
             
             transactions = []
@@ -126,9 +126,9 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
                 
                 # Create opt-in transaction
                 opt_in_txn = AssetTransferTxn(
-                    sender=account.aptos_address,
+                    sender=account.algorand_address,
                     sp=params,
-                    receiver=account.aptos_address,
+                    receiver=account.algorand_address,
                     amt=0,
                     index=asset_id
                 )
@@ -190,11 +190,11 @@ class OptInToAssetMutation(graphene.Mutation):
                 deleted_at__isnull=True
             ).first()
             
-            if not account or not account.aptos_address:
+            if not account or not account.algorand_address:
                 return cls(success=False, error='No Algorand address found')
             
             # Validate it's an Algorand address
-            if len(account.aptos_address) != 58:
+            if len(account.algorand_address) != 58:
                 return cls(success=False, error='Invalid Algorand address format')
             
             # Check if already opted in
@@ -204,7 +204,7 @@ class OptInToAssetMutation(graphene.Mutation):
                 AlgorandAccountManager.ALGOD_ADDRESS
             )
             
-            account_info = algod_client.account_info(account.aptos_address)
+            account_info = algod_client.account_info(account.algorand_address)
             assets = account_info.get('assets', [])
             
             if any(asset['asset-id'] == asset_id for asset in assets):
@@ -221,9 +221,9 @@ class OptInToAssetMutation(graphene.Mutation):
             params = algod_client.suggested_params()
             
             opt_in_txn = AssetTransferTxn(
-                sender=account.aptos_address,
+                sender=account.algorand_address,
                 sp=params,
-                receiver=account.aptos_address,
+                receiver=account.algorand_address,
                 amt=0,
                 index=asset_id
             )
@@ -272,7 +272,7 @@ class CheckAssetOptInsQuery(graphene.ObjectType):
             deleted_at__isnull=True
         ).first()
         
-        return account.aptos_address if account else None
+        return account.algorand_address if account else None
     
     def resolve_opted_in_assets(self, info):
         address = self.resolve_algorand_address(info)
@@ -337,11 +337,11 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 deleted_at__isnull=True
             ).first()
             
-            if not account or not account.aptos_address:
+            if not account or not account.algorand_address:
                 return cls(success=False, error='No Algorand address found')
             
             # Validate it's an Algorand address
-            if len(account.aptos_address) != 58:
+            if len(account.algorand_address) != 58:
                 return cls(success=False, error='Invalid Algorand address format')
             
             # Determine asset ID based on type
@@ -366,7 +366,7 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                     AlgorandAccountManager.ALGOD_ADDRESS
                 )
                 
-                account_info = algod_client.account_info(account.aptos_address)
+                account_info = algod_client.account_info(account.algorand_address)
                 assets = account_info.get('assets', [])
                 
                 if not any(asset['asset-id'] == asset_id for asset in assets):
@@ -395,7 +395,7 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 # Create the sponsored transfer (returns unsigned user txn and signed sponsor txn)
                 result = loop.run_until_complete(
                     algorand_sponsor_service.create_sponsored_transfer(
-                        sender=account.aptos_address,
+                        sender=account.algorand_address,
                         recipient=recipient,
                         amount=Decimal(str(amount)),
                         asset_id=asset_id,
@@ -412,7 +412,7 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             # The client will sign the user transaction and call SubmitSponsoredGroup
             logger.info(
                 f"Created sponsored {asset_type} transfer for user {user.id}: "
-                f"{amount} from {account.aptos_address[:10]}... to {recipient[:10]}... (awaiting client signature)"
+                f"{amount} from {account.algorand_address[:10]}... to {recipient[:10]}... (awaiting client signature)"
             )
             
             return cls(
@@ -518,11 +518,11 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
                 deleted_at__isnull=True
             ).first()
             
-            if not account or not account.aptos_address:
+            if not account or not account.algorand_address:
                 return cls(success=False, error='No Algorand address found')
             
             # Validate it's an Algorand address
-            if len(account.aptos_address) != 58:
+            if len(account.algorand_address) != 58:
                 return cls(success=False, error='Invalid Algorand address format')
             
             # Default to CONFIO if no asset specified
@@ -546,7 +546,7 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
             try:
                 result = loop.run_until_complete(
                     algorand_sponsor_service.execute_server_side_opt_in(
-                        user_address=account.aptos_address,
+                        user_address=account.algorand_address,
                         asset_id=asset_id
                     )
                 )
@@ -559,7 +559,7 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
             # Log the opt-in request
             logger.info(
                 f"Created sponsored opt-in for user {user.id}: "
-                f"Asset {asset_name} (ID: {asset_id}), Address: {account.aptos_address[:10]}..."
+                f"Asset {asset_name} (ID: {asset_id}), Address: {account.algorand_address[:10]}..."
             )
             
             if result.get('already_opted_in'):

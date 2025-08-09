@@ -50,7 +50,7 @@ class Migration(migrations.Migration):
                 ('user_salt', models.BinaryField(help_text='Persistent salt used to derive the same Sui address')),
                 ('google_sub', models.CharField(blank=True, help_text="'sub' claim from Google ID token", max_length=255, null=True)),
                 ('apple_sub', models.CharField(blank=True, help_text="'sub' claim from Apple ID token", max_length=255, null=True)),
-                ('aptos_address', models.CharField(blank=True, help_text='Last‑computed Sui address', max_length=66, null=True)),
+                ('algorand_address', models.CharField(blank=True, help_text='Last‑computed Sui address', max_length=66, null=True)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('last_login_at', models.DateTimeField(blank=True, null=True)),
                 ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='profile', to='users.user')),

@@ -144,7 +144,7 @@ class Command(BaseCommand):
             # Create a test recipient address
             test_recipient = "0x" + "0" * 64  # Mock address
             
-            self.stdout.write(f"\n📤 Sending from: {account.aptos_address[:16]}...")
+            self.stdout.write(f"\n📤 Sending from: {account.algorand_address[:16]}...")
             self.stdout.write(f"📥 Sending to: {test_recipient[:16]}...")
             
             # Execute sponsored transaction

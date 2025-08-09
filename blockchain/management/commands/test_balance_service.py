@@ -43,7 +43,7 @@ class Command(BaseCommand):
                 return
             
             self.stdout.write(f"\n🧪 Testing balance service for {email}")
-            self.stdout.write(f"Sui Address: {account.aptos_address}\n")
+            self.stdout.write(f"Sui Address: {account.algorand_address}\n")
             
             # Test 1: Get cached balance
             self.stdout.write("1️⃣ Getting cached balance...")
@@ -107,7 +107,7 @@ class Command(BaseCommand):
         
         # Get a test account
         account = Account.objects.filter(
-            aptos_address__isnull=False,
+            algorand_address__isnull=False,
             deleted_at__isnull=True
         ).first()
         

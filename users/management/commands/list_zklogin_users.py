@@ -3,14 +3,14 @@ from users.models import User, Account
 
 
 class Command(BaseCommand):
-    help = 'List users with zkLogin (aptos_address) that are not test users'
+    help = 'List users with zkLogin (algorand_address) that are not test users'
 
     def handle(self, *args, **options):
-        # Get accounts with aptos_address
+        # Get accounts with algorand_address
         zklogin_accounts = Account.objects.filter(
-            aptos_address__isnull=False
+            algorand_address__isnull=False
         ).exclude(
-            aptos_address=''
+            algorand_address=''
         ).select_related('user').order_by('user__created_at')
         
         # Filter out auto-generated test users
@@ -32,7 +32,7 @@ class Command(BaseCommand):
             self.stdout.write(
                 f'Username: {self.style.WARNING(user.username.ljust(20))} '
                 f'Created: {user.created_at.strftime("%Y-%m-%d %H:%M")} '
-                f'Sui: {account.aptos_address[:20]}...'
+                f'Sui: {account.algorand_address[:20]}...'
             )
         
         if not real_users:

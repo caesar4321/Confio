@@ -3,23 +3,13 @@ import { gql } from '@apollo/client';
 // Web3Auth and Algorand mutations
 export const WEB3AUTH_LOGIN = gql`
   mutation Web3AuthLogin(
-    $provider: String!
-    $web3AuthId: String!
-    $email: String
-    $firstName: String
-    $lastName: String
-    $algorandAddress: String
-    $idToken: String
+    $firebaseIdToken: String!
+    $algorandAddress: String!
     $deviceFingerprint: JSONString
   ) {
     web3AuthLogin(
-      provider: $provider
-      web3AuthId: $web3AuthId
-      email: $email
-      firstName: $firstName
-      lastName: $lastName
+      firebaseIdToken: $firebaseIdToken
       algorandAddress: $algorandAddress
-      idToken: $idToken
       deviceFingerprint: $deviceFingerprint
     ) {
       success

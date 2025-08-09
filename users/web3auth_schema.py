@@ -40,13 +40,8 @@ class Web3AuthLoginMutation(graphene.Mutation):
     Creates/updates user data AND generates JWT tokens using the existing JWT system.
     """
     class Arguments:
-        provider = graphene.String(required=True)  # 'google', 'apple', etc.
-        web3_auth_id = graphene.String(required=True)  # Web3Auth verifier ID
-        email = graphene.String()
-        first_name = graphene.String()
-        last_name = graphene.String() 
-        algorand_address = graphene.String()
-        id_token = graphene.String()  # Firebase ID token for verification
+        firebase_id_token = graphene.String(required=True)  # Firebase ID token containing all user info
+        algorand_address = graphene.String(required=True)  # Client-generated Algorand address
         device_fingerprint = graphene.JSONString()  # Device fingerprint data
     
     success = graphene.Boolean()
@@ -56,37 +51,64 @@ class Web3AuthLoginMutation(graphene.Mutation):
     user = graphene.Field(Web3AuthUserType)
     
     @classmethod
-    def mutate(cls, root, info, provider, web3_auth_id, email=None, first_name=None, 
-               last_name=None, algorand_address=None, id_token=None, device_fingerprint=None):
+    def mutate(cls, root, info, firebase_id_token, algorand_address, device_fingerprint=None):
         try:
             from django.contrib.auth import get_user_model
             from graphql_jwt.utils import jwt_encode
             from users.jwt import jwt_payload_handler, refresh_token_payload_handler
+            from firebase_admin import auth
             
             User = get_user_model()
             
-            # Find or create user based on Firebase UID (which is the Web3Auth verifier ID)
+            # Verify Firebase ID token and extract user info
+            try:
+                decoded_token = auth.verify_id_token(firebase_id_token)
+            except Exception as e:
+                logger.error(f"Firebase token verification failed: {e}")
+                return cls(success=False, error="Invalid Firebase ID token")
+            
+            # Extract user information from verified token
+            firebase_uid = decoded_token['uid']
+            email = decoded_token.get('email', '')
+            name = decoded_token.get('name', '')
+            
+            # Parse name into first and last
+            name_parts = name.split(' ', 1) if name else []
+            first_name = name_parts[0] if len(name_parts) > 0 else ''
+            last_name = name_parts[1] if len(name_parts) > 1 else ''
+            
+            # Extract provider from token
+            provider_data = decoded_token.get('firebase', {})
+            sign_in_provider = provider_data.get('sign_in_provider', '')
+            provider = 'google' if 'google' in sign_in_provider else 'apple' if 'apple' in sign_in_provider else 'unknown'
+            
+            # Find or create user based on Firebase UID
             user, created = User.objects.get_or_create(
-                firebase_uid=web3_auth_id,
+                firebase_uid=firebase_uid,
                 defaults={
-                    'email': email or f'{web3_auth_id}@confio.placeholder',
-                    'first_name': first_name or '',
-                    'last_name': last_name or '',
-                    'username': email or f'user_{web3_auth_id[:8]}',
+                    'email': email or f'{firebase_uid}@confio.placeholder',
+                    'first_name': first_name,
+                    'last_name': last_name,
+                    'username': email or f'user_{firebase_uid[:8]}',
                 }
             )
             
-            # Update user info if provided
+            # Update user info if changed
             if not created:
+                updated = False
                 if email and user.email != email:
                     user.email = email
+                    updated = True
                 if first_name and user.first_name != first_name:
                     user.first_name = first_name
+                    updated = True
                 if last_name and user.last_name != last_name:
                     user.last_name = last_name
+                    updated = True
                 # Update last login timestamp
                 user.last_login = timezone.now()
-                user.save()
+                if updated or user.last_login:
+                    user.save()
             
             # Track device fingerprint if provided
             if device_fingerprint:
