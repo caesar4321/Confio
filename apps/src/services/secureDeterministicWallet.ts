@@ -360,8 +360,14 @@ export class SecureDeterministicWalletService {
     network: 'testnet' | 'mainnet' = 'mainnet',
     oauthSubject?: string  // The original OAuth subject from Google/Apple
   ): Promise<DerivedWallet> {
+    const startTime = Date.now();
+    const perfLog = (step: string) => {
+      console.log(`[WALLET-PERF] ${step}: ${Date.now() - startTime}ms`);
+    };
+    
     try {
       console.log(`Creating/restoring ${provider} wallet for user ${firebaseUid} on ${network}`);
+      perfLog('Start');
       
       // Use the original OAuth subject if available, otherwise fall back to Firebase UID
       const subject = oauthSubject || firebaseUid;
@@ -375,7 +381,9 @@ export class SecureDeterministicWalletService {
       this.cacheKeysPerUser.get(firebaseUid)!.add(cacheKey.username);
       
       // Get server pepper (optional for 2-of-2 security) with version
+      perfLog('Before server pepper');
       const { pepper: serverPepper, version: pepperVersion } = await this.getServerPepper(firebaseUid);
+      perfLog('Got server pepper');
       
       // Derive KEK for encryption
       const kek = deriveKEK(idToken, serverPepper, scope);
@@ -384,6 +392,7 @@ export class SecureDeterministicWalletService {
       let wallet: DerivedWallet | null = null;
       
       try {
+        perfLog('Checking cache');
         const credentials = await Keychain.getInternetCredentials(cacheKey.server);
         if (credentials && credentials.username === cacheKey.username && credentials.password) {
           console.log('Found cached encrypted seed, checking version...');
@@ -424,6 +433,7 @@ export class SecureDeterministicWalletService {
             publicKey: keyPair.publicKey
           };
           
+          perfLog('Wallet restored from cache');
           console.log('Wallet restored from encrypted cache:', wallet.address);
           
           // Re-wrap with new pepper if needed
@@ -440,6 +450,7 @@ export class SecureDeterministicWalletService {
       
       // If cache miss or failed, derive fresh (slow path ~5s)
       if (!wallet) {
+        perfLog('Cache miss - deriving fresh');
         console.log('Deriving wallet from OAuth claims (this may take a few seconds)...');
         
         // Use the real OAuth claims for non-custodial wallet
@@ -481,6 +492,7 @@ export class SecureDeterministicWalletService {
         console.log('[SecureDeterministicWallet] Generated client salt:', clientSalt.substring(0, 20) + '...');
         
         // Derive deterministic wallet
+        perfLog('Starting key derivation');
         wallet = deriveDeterministicAlgorandKey({
           idToken,
           clientSalt,
@@ -492,9 +504,11 @@ export class SecureDeterministicWalletService {
           network
         });
         
+        perfLog('Key derivation complete');
         console.log('Wallet derived successfully:', wallet.address);
         
         // Encrypt and cache the seed for next time
+        perfLog('Encrypting for cache');
         const seed = hexToBytes(wallet.privSeedHex);
         const encryptedBlob = wrapSeed(seed, kek, pepperVersion);
         
@@ -513,6 +527,7 @@ export class SecureDeterministicWalletService {
       this.currentScope.set(firebaseUid, scope); // Track current scope for this user
       console.log(`Seed stored in memory cache with scope: ${scope}`);
       
+      perfLog('Total wallet generation time');
       return wallet;
     } catch (error) {
       console.error('Error creating/restoring wallet:', error);

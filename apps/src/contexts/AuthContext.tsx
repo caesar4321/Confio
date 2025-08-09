@@ -76,28 +76,51 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   }, [navigationRef.current]);
 
   const navigateToScreen = (screenName: keyof RootStackParamList) => {
+    console.log(`[NAV] navigateToScreen called for ${screenName}`, {
+      isNavigationReady,
+      hasNavigationRef: !!navigationRef.current,
+      currentRoute: navigationRef.current?.getCurrentRoute()?.name
+    });
+    
     if (!isNavigationReady || !navigationRef.current) {
-      console.log('Navigation not ready yet, will navigate when ready');
+      console.log('[NAV] Navigation not ready yet, queuing navigation');
+      // Queue navigation for when ready
+      setTimeout(() => {
+        if (isNavigationReady && navigationRef.current) {
+          console.log(`[NAV] Retrying navigation to ${screenName}`);
+          navigateToScreen(screenName);
+        }
+      }, 100);
       return;
     }
     
-    console.log(`Navigating to ${screenName}`);
-    navigationRef.current.reset({
-      index: 0,
-      routes: [{ 
-        name: screenName,
-        params: undefined,
-        state: undefined
-      }],
-    });
+    console.log(`[NAV] Executing navigation to ${screenName}`);
     
-    // After navigating to Main, process any pending push notifications
-    if (screenName === 'Main') {
-      console.log('[AuthContext] Navigated to Main, processing pending notifications...');
-      setTimeout(() => {
-        pushNotificationService.processPendingNotification();
-      }, 1000); // Give time for Main navigator to mount
-    }
+    // Use setTimeout to ensure navigation happens on next tick
+    // This fixes Android navigation freeze issue
+    setTimeout(() => {
+      try {
+        navigationRef.current?.reset({
+          index: 0,
+          routes: [{ 
+            name: screenName,
+            params: undefined,
+            state: undefined
+          }],
+        });
+        console.log(`[NAV] Navigation reset completed for ${screenName}`);
+        
+        // After navigating to Main, process any pending push notifications
+        if (screenName === 'Main') {
+          console.log('[AuthContext] Navigated to Main, processing pending notifications...');
+          setTimeout(() => {
+            pushNotificationService.processPendingNotification();
+          }, 1000); // Give time for Main navigator to mount
+        }
+      } catch (error) {
+        console.error(`[NAV] Navigation error:`, error);
+      }
+    }, 0);
   };
 
   // Fetch profile from server based on account type

@@ -78,3 +78,13 @@ try {
 } catch (error) {
   console.warn('Failed to register background messaging:', error);
 }
+
+// Pre-initialize algosdk to avoid dynamic import delay during sign-in
+try {
+  const algorandService = require('./src/services/algorandService').default;
+  // Trigger initialization but don't await - let it happen in background
+  algorandService.preInitialize().catch(console.warn);
+  console.log('Algorand SDK pre-initialization started');
+} catch (error) {
+  console.warn('Failed to pre-initialize Algorand SDK:', error);
+}
