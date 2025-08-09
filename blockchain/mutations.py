@@ -306,10 +306,15 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
     """
     Create a sponsored send transaction where the server pays for fees.
     Returns unsigned user transaction and signed sponsor transaction for atomic group.
+    Handles recipient resolution from user_id, phone, or direct address.
     """
     
     class Arguments:
-        recipient = graphene.String(required=True)
+        # Recipient identification - provide ONE of these
+        recipient_address = graphene.String(required=False, description="Algorand address (58 chars) for external wallets")
+        recipient_user_id = graphene.ID(required=False, description="User ID for Confío recipients")
+        recipient_phone = graphene.String(required=False, description="Phone number for any recipient")
+        
         amount = graphene.Float(required=True)
         asset_type = graphene.String(required=False, default_value='CUSD')  # CUSD, CONFIO, or USDC
         note = graphene.String(required=False)
@@ -324,25 +329,135 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
     transaction_id = graphene.String()  # After submission
     
     @classmethod
-    def mutate(cls, root, info, recipient, amount, asset_type='CUSD', note=None):
+    def mutate(cls, root, info, recipient_address=None, recipient_user_id=None, recipient_phone=None, amount=None, asset_type='CUSD', note=None):
         try:
+            # Debug logging to see what parameters are received
+            logger.info(f"AlgorandSponsoredSend received parameters:")
+            logger.info(f"  recipient_address: {recipient_address}")
+            logger.info(f"  recipient_user_id: {recipient_user_id}")
+            logger.info(f"  recipient_phone: {recipient_phone}")
+            logger.info(f"  amount: {amount}")
+            logger.info(f"  asset_type: {asset_type}")
+            logger.info(f"  note: {note}")
+            
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
-            # Get user's account
-            account = Account.objects.filter(
-                user=user,
-                account_type='personal',
-                deleted_at__isnull=True
-            ).first()
+            # Get JWT context for account determination
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+            if not jwt_context:
+                return cls(success=False, error='No access or permission to send funds')
+            
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
+            
+            # Get the sender's account based on JWT context
+            if account_type == 'business' and business_id:
+                from users.models import Business
+                try:
+                    business = Business.objects.get(id=business_id)
+                    account = Account.objects.get(
+                        business=business,
+                        account_type='business'
+                    )
+                except (Business.DoesNotExist, Account.DoesNotExist):
+                    return cls(success=False, error='Business account not found')
+            else:
+                # Personal account
+                account = Account.objects.filter(
+                    user=user,
+                    account_type=account_type,
+                    account_index=account_index,
+                    deleted_at__isnull=True
+                ).first()
             
             if not account or not account.algorand_address:
-                return cls(success=False, error='No Algorand address found')
+                return cls(success=False, error='Sender Algorand address not found')
             
-            # Validate it's an Algorand address
+            # Validate sender's address format
             if len(account.algorand_address) != 58:
-                return cls(success=False, error='Invalid Algorand address format')
+                return cls(success=False, error='Invalid sender Algorand address format')
+            
+            # Resolve recipient address based on input type
+            # Note: recipient_address might already be set from the parameter
+            resolved_recipient_address = None
+            
+            # Priority 1: User ID lookup (Confío users)
+            if recipient_user_id:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                try:
+                    recipient_user = User.objects.get(id=recipient_user_id)
+                    # Get recipient's personal account
+                    recipient_account = recipient_user.accounts.filter(
+                        account_type='personal',
+                        account_index=0
+                    ).first()
+                    if recipient_account and recipient_account.algorand_address:
+                        resolved_recipient_address = recipient_account.algorand_address
+                        logger.info(f"Resolved recipient address from user_id {recipient_user_id}: {resolved_recipient_address[:10]}...")
+                    else:
+                        return cls(success=False, error="Recipient's Algorand address not found")
+                except User.DoesNotExist:
+                    return cls(success=False, error='Recipient user not found')
+            
+            # Priority 2: Phone number lookup
+            elif recipient_phone:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                # Clean phone number - remove all non-digits
+                cleaned_phone = ''.join(filter(str.isdigit, recipient_phone))
+                logger.info(f"Looking up user by phone: original='{recipient_phone}', cleaned='{cleaned_phone}'")
+                
+                # Try to find user using the same logic as check_users_by_phones
+                found_user = None
+                
+                # First, try exact match
+                found_user = User.objects.filter(phone_number=cleaned_phone).first()
+                
+                # If not found, try without country code (last 10 digits for Venezuelan numbers)
+                if not found_user and len(cleaned_phone) > 10:
+                    phone_without_code = cleaned_phone[-10:]
+                    found_user = User.objects.filter(phone_number=phone_without_code).first()
+                    if found_user:
+                        logger.info(f"Found user by phone without country code: {phone_without_code}")
+                
+                # If not found, try with Venezuelan country code
+                if not found_user and not cleaned_phone.startswith('58'):
+                    phone_with_ve_code = '58' + cleaned_phone
+                    found_user = User.objects.filter(phone_number=phone_with_ve_code).first()
+                    if found_user:
+                        logger.info(f"Found user by phone with VE code: {phone_with_ve_code}")
+                
+                if found_user:
+                    # Get recipient's personal account
+                    recipient_account = found_user.accounts.filter(
+                        account_type='personal',
+                        account_index=0
+                    ).first()
+                    if recipient_account and recipient_account.algorand_address:
+                        resolved_recipient_address = recipient_account.algorand_address
+                        logger.info(f"Resolved recipient address from phone {recipient_phone}: {resolved_recipient_address[:10]}...")
+                    else:
+                        return cls(success=False, error="Recipient's Algorand address not found")
+                else:
+                    # Non-Confío user - create invitation (not supported for Algorand yet)
+                    return cls(success=False, error='Phone number not registered with Confío. Please ask them to sign up first.')
+            
+            # Priority 3: Direct Algorand address
+            elif recipient_address:
+                # Validate it's an Algorand address (58 chars, uppercase letters and numbers 2-7)
+                import re
+                if len(recipient_address) != 58 or not re.match(r'^[A-Z2-7]{58}$', recipient_address):
+                    return cls(success=False, error='Invalid recipient Algorand address format')
+                resolved_recipient_address = recipient_address
+                logger.info(f"Using direct Algorand address: {resolved_recipient_address[:10]}...")
+            
+            else:
+                return cls(success=False, error='Recipient identification required (user_id, phone, or address)')
             
             # Determine asset ID based on type
             asset_id = None
@@ -396,7 +511,7 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 result = loop.run_until_complete(
                     algorand_sponsor_service.create_sponsored_transfer(
                         sender=account.algorand_address,
-                        recipient=recipient,
+                        recipient=resolved_recipient_address,  # Use the resolved address
                         amount=Decimal(str(amount)),
                         asset_id=asset_id,
                         note=note
@@ -412,7 +527,7 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             # The client will sign the user transaction and call SubmitSponsoredGroup
             logger.info(
                 f"Created sponsored {asset_type} transfer for user {user.id}: "
-                f"{amount} from {account.algorand_address[:10]}... to {recipient[:10]}... (awaiting client signature)"
+                f"{amount} from {account.algorand_address[:10]}... to {resolved_recipient_address[:10]}... (awaiting client signature)"
             )
             
             return cls(

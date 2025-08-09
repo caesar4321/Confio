@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
 import { useMutation } from '@apollo/client';
-import { PAY_INVOICE, CREATE_SEND_TRANSACTION, PREPARE_TRANSACTION, EXECUTE_TRANSACTION } from '../apollo/queries';
+import { PAY_INVOICE } from '../apollo/queries';
 import { ALGORAND_SPONSORED_SEND, SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
 import { AccountManager } from '../utils/accountManager';
 import { EnhancedAuthService } from '../services/enhancedAuthService';
@@ -80,9 +80,6 @@ export const TransactionProcessingScreen = () => {
 
   // GraphQL mutations
   const [payInvoice] = useMutation(PAY_INVOICE);
-  const [createSendTransaction] = useMutation(CREATE_SEND_TRANSACTION);
-  const [prepareTransaction] = useMutation(PREPARE_TRANSACTION);
-  const [executeTransaction] = useMutation(EXECUTE_TRANSACTION);
   const [algorandSponsoredSend] = useMutation(ALGORAND_SPONSORED_SEND);
   const [submitSponsoredGroup] = useMutation(SUBMIT_SPONSORED_GROUP);
   
@@ -289,13 +286,34 @@ export const TransactionProcessingScreen = () => {
         setCurrentStep(1);
         console.log('TransactionProcessingScreen: Creating Algorand sponsored transaction...');
         
+        // Build variables based on what recipient info we have
+        const variables: any = {
+          amount: parseFloat(transactionData.amount),
+          assetType: transactionData.tokenType || transactionData.currency || 'CUSD',
+          note: transactionData.memo || undefined
+        };
+        
+        // Add recipient identification based on what's available
+        if (transactionData.recipientUserId) {
+          variables.recipientUserId = transactionData.recipientUserId;
+          console.log('TransactionProcessingScreen: Using recipientUserId:', transactionData.recipientUserId);
+        } else if (transactionData.recipientPhone) {
+          variables.recipientPhone = transactionData.recipientPhone;
+          console.log('TransactionProcessingScreen: Using recipientPhone:', transactionData.recipientPhone);
+        } else if (transactionData.recipientAddress) {
+          variables.recipientAddress = transactionData.recipientAddress;
+          console.log('TransactionProcessingScreen: Using recipientAddress:', transactionData.recipientAddress);
+        } else {
+          console.error('TransactionProcessingScreen: No recipient identification available');
+          setTransactionError('No recipient information available');
+          setIsComplete(true);
+          return;
+        }
+        
+        console.log('TransactionProcessingScreen: Calling algorandSponsoredSend with variables:', JSON.stringify(variables, null, 2));
+        
         const { data: sponsorData } = await algorandSponsoredSend({
-          variables: {
-            recipient: transactionData.recipientAddress,
-            amount: parseFloat(transactionData.amount),
-            assetType: transactionData.tokenType || 'CUSD',
-            note: transactionData.memo || undefined
-          }
+          variables
         });
         
         if (!sponsorData?.algorandSponsoredSend?.success) {
@@ -388,146 +406,12 @@ export const TransactionProcessingScreen = () => {
         setCurrentStep(0);
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Check if this is an Algorand address (58 characters starting with uppercase letter)
-        const isAlgorandAddress = transactionData.recipientAddress && 
-                                 transactionData.recipientAddress.length === 58 &&
-                                 /^[A-Z2-7]{58}$/.test(transactionData.recipientAddress);
-        
-        if (isAlgorandAddress) {
-          console.log('TransactionProcessingScreen: Processing Algorand sponsored send...');
-          await processAlgorandSponsoredSend();
-          return;
-        }
-        
-        // Step 2: Prepare transaction for Sui
-        setCurrentStep(1);
-        console.log('TransactionProcessingScreen: Preparing Sui transaction...');
-        
-        // Prepare input for prepare mutation
-        const prepareInput: any = {
-          amount: transactionData.amount,
-          tokenType: transactionData.currency,
-          recipientDisplayName: transactionData.recipient
-        };
-        
-        // Add recipient identifier
-        if (transactionData.recipientUserId && transactionData.isOnConfio) {
-          prepareInput.recipientUserId = transactionData.recipientUserId;
-        } else if (transactionData.recipientPhone) {
-          prepareInput.recipientPhone = transactionData.recipientPhone;
-        } else if (transactionData.recipientAddress?.startsWith('0x')) {
-          prepareInput.recipientAddress = transactionData.recipientAddress;
-        }
-        
-        console.log('TransactionProcessingScreen: Calling prepareTransaction with:', prepareInput);
-        
-        // Phase 1: Prepare transaction
-        const prepareResult = await prepareTransaction({
-          variables: { input: prepareInput }
-        });
-        
-        if (prepareResult.errors || !prepareResult.data?.prepareTransaction?.success) {
-          const errorMessage = prepareResult.errors?.map(e => e.message).join('\n') || 
-                             prepareResult.data?.prepareTransaction?.errors?.join('\n') ||
-                             'Error al preparar la transacción';
-          setTransactionError(errorMessage);
-          setIsComplete(true);
-          return;
-        }
-        
-        const { txBytes, sponsorSignature, transactionMetadata } = prepareResult.data.prepareTransaction;
-        console.log('TransactionProcessingScreen: Transaction prepared, signing with zkLogin...');
-        
-        // Phase 2: Sign transaction with zkLogin
-        const authService = enhancedAuthService.authService;
-        const zkLoginSignature = await authService.createZkLoginSignatureForTransaction(txBytes);
-        
-        if (!zkLoginSignature) {
-          setTransactionError('Error al firmar la transacción. Por favor, inténtalo de nuevo.');
-          setIsComplete(true);
-          return;
-        }
-        
-        console.log('TransactionProcessingScreen: Transaction signed, executing...');
-        
-        // Step 3: Execute transaction
-        setCurrentStep(2);
-        
-        const executeInput = {
-          txBytes,
-          zkLoginSignature,
-          sponsorSignature,
-          transactionMetadata
-        };
-        
-        // Phase 3: Execute transaction with signatures
-        const executeResult = await enhancedAuthService.performSecureOperation(
-          async () => {
-            return await executeTransaction({
-              variables: { input: executeInput }
-            });
-          },
-          'send_money',
-          parseFloat(transactionData.amount)
-        );
-        
-        const { data, errors } = executeResult.result;
-        console.log('TransactionProcessingScreen: Execute mutation response:', { data, errors });
-        
-        // Check for errors
-        if (errors && errors.length > 0) {
-          console.error('TransactionProcessingScreen: GraphQL errors:', errors);
-          const errorMessage = errors.map(e => e.message).join('\n');
-          setTransactionError(errorMessage || 'Error al procesar la transacción');
-          setIsComplete(true);
-          return;
-        }
-        
-        // Check the mutation response
-        if (data?.executeTransaction?.sendTransaction) {
-          console.log('TransactionProcessingScreen: Send successful!');
-          console.log('TransactionProcessingScreen: Transaction object:', data.executeTransaction.sendTransaction);
-          console.log('TransactionProcessingScreen: Transaction ID:', data.executeTransaction.sendTransaction.id);
-          console.log('TransactionProcessingScreen: Transaction hash:', data.executeTransaction.sendTransaction.transactionHash);
-          
-          // Store the transaction ID for success screen
-          if (transactionData) {
-            transactionData.transactionId = data.executeTransaction.sendTransaction.id;
-            transactionData.transactionHash = data.executeTransaction.sendTransaction.transactionHash;
-          }
-          
-          // Log success metrics
-          console.log('TransactionProcessingScreen: Transaction executed successfully:', {
-            id: data.executeTransaction.sendTransaction.id,
-            hash: data.executeTransaction.sendTransaction.transactionHash,
-            amount: transactionData.amount,
-            recipient: transactionData.recipient
-          });
-          
-          // Mark transaction as successful
-          setTransactionSuccess(true);
-          setIsComplete(true);
-        } else if (data?.executeTransaction?.errors && data.executeTransaction.errors.length > 0) {
-          console.error('TransactionProcessingScreen: Execute failed with errors:', data.executeTransaction.errors);
-          setTransactionError(data.executeTransaction.errors.join('\n'));
-          setIsComplete(true);
-          return;
-        } else if (data?.executeTransaction) {
-          // The mutation returned but with unexpected structure
-          console.error('TransactionProcessingScreen: Unexpected mutation response structure:', data.executeTransaction);
-          console.error('TransactionProcessingScreen: Keys in response:', Object.keys(data.executeTransaction));
-          
-          setTransactionError('La transacción no se pudo completar correctamente. Por favor, inténtalo de nuevo.');
-          setIsComplete(true);
-          return;
-        } else {
-          console.error('TransactionProcessingScreen: No executeTransaction in response:', data);
-          setTransactionError('Error inesperado al procesar la transacción.');
-          setIsComplete(true);
-          return;
-        }
+        // For Algorand blockchain, always use sponsored send
+        // This handles all cases: recipientUserId, recipientPhone, or recipientAddress
+        console.log('TransactionProcessingScreen: Processing Algorand sponsored send...');
+        await processAlgorandSponsoredSend();
       } catch (error) {
-        console.error('TransactionProcessingScreen: Error processing Confío send:', error);
+        console.error('TransactionProcessingScreen: Error processing send:', error);
         console.error('TransactionProcessingScreen: Error details:', {
           message: error.message,
           networkError: error.networkError,
