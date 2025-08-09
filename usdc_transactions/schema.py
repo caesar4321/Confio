@@ -194,7 +194,7 @@ class CreateUSDCDeposit(graphene.Mutation):
                     actor_business=actor_business,
                     actor_type=actor_type,
                     actor_display_name=actor_display_name,
-                    actor_address=active_account.aptos_address or '',
+                    actor_address=active_account.algorand_address or '',
                     amount=Decimal(input.amount),
                     source_address=input.source_address,
                     status='PENDING'
@@ -339,7 +339,7 @@ class CreateUSDCWithdrawal(graphene.Mutation):
             logger.info(f"  actor_business: {actor_business.id if actor_business else None}")
             logger.info(f"  actor_type: {actor_type}")
             logger.info(f"  actor_display_name: {actor_display_name}")
-            logger.info(f"  actor_address: {active_account.aptos_address or ''}")
+            logger.info(f"  actor_address: {active_account.algorand_address or ''}")
             logger.info(f"  amount: {input.amount}")
             logger.info(f"  destination_address: {input.destinationAddress}")
             logger.info(f"  service_fee: {input.serviceFee or '0'}")
@@ -352,7 +352,7 @@ class CreateUSDCWithdrawal(graphene.Mutation):
                     actor_business=actor_business,
                     actor_type=actor_type,
                     actor_display_name=actor_display_name,
-                    actor_address=active_account.aptos_address or '',
+                    actor_address=active_account.algorand_address or '',
                     amount=Decimal(input.amount),
                     destination_address=input.destinationAddress,
                     service_fee=Decimal(input.serviceFee or '0'),

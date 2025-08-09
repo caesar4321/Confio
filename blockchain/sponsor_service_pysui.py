@@ -342,7 +342,7 @@ class SponsorServicePySui:
                 
                 # 2. Get user's coins
                 coins = await client.get_coins(
-                    address=account.aptos_address,
+                    address=account.algorand_address,
                     coin_type=coin_type,
                     limit=10
                 )
@@ -385,7 +385,7 @@ class SponsorServicePySui:
                 
                 # 4. Build sponsored transaction (reusing same client)
                 tx_bytes = await client.build_sponsored_transaction(
-                    sender=account.aptos_address,
+                    sender=account.algorand_address,
                     sponsor=sponsor_address,
                     transactions=[tx_data],
                     gas_budget=min(tx_data.get('gasBudget', 50000000), cls.MAX_GAS_PER_TX)
@@ -452,7 +452,7 @@ class SponsorServicePySui:
             # Get user's coins
             async with await get_pysui_client() as client:
                 coins = await client.get_coins(
-                    address=account.aptos_address,
+                    address=account.algorand_address,
                     coin_type=coin_type,
                     limit=10
                 )
@@ -495,7 +495,7 @@ class SponsorServicePySui:
             
             # Create sponsored transaction
             result = await cls.create_sponsored_transaction(
-                user_address=account.aptos_address,
+                user_address=account.algorand_address,
                 transaction_data=tx_data,
                 zklogin_available=bool(user_signature),
                 account_id=account.id,
@@ -983,7 +983,7 @@ async def sponsor_transaction_pysui(
         }
         
         return await SponsorServicePySui.create_sponsored_transaction(
-            user_address=account.aptos_address,
+            user_address=account.algorand_address,
             transaction_data=tx_data,
             zklogin_available=bool(user_signature),
             account_id=account.id,

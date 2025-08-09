@@ -109,7 +109,7 @@ async def test_balance_service():
     try:
         test_account = Account.objects.filter(deleted_at__isnull=True).first()
         if test_account:
-            print(f"Using account: {test_account.aptos_address}")
+            print(f"Using account: {test_account.algorand_address}")
             
             # Test balance retrieval through service
             balance_data = BalanceService.get_balance(test_account, 'CUSD')

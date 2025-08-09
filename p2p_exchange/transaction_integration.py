@@ -49,7 +49,7 @@ class P2PTransactionHandler:
             "arguments": [
                 prepared_coins['primary_coin']['objectId'],
                 int(amount * Decimal(10 ** 6)),  # Convert to smallest unit
-                trade.buyer.aptos_address,
+                trade.buyer.algorand_address,
                 trade.id  # Trade reference
             ],
             "gasBudget": "100000000"
@@ -112,7 +112,7 @@ class P2PTransactionHandler:
         
         No coin preparation needed as escrow already holds the funds.
         """
-        recipient = trade.seller.aptos_address if release_to_seller else trade.buyer.aptos_address
+        recipient = trade.seller.algorand_address if release_to_seller else trade.buyer.algorand_address
         
         tx_data = {
             "packageObjectId": "0x2",  # Would be P2P_TRADE_PACKAGE_ID
@@ -188,7 +188,7 @@ class P2PTransactionHandler:
 # Usage example in GraphQL mutation
 async def create_p2p_trade_mutation(
     seller_account: 'Account',
-    buyer_aptos_address: str,
+    buyer_algorand_address: str,
     amount: Decimal,
     payment_method_id: int
 ) -> Dict:
@@ -200,7 +200,7 @@ async def create_p2p_trade_mutation(
     # Create trade record
     trade = Trade.objects.create(
         seller=seller_account,
-        buyer_aptos_address=buyer_aptos_address,
+        buyer_algorand_address=buyer_algorand_address,
         amount=amount,
         token_type='CUSD',
         payment_method_id=payment_method_id,

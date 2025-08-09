@@ -86,7 +86,7 @@ class TransactionManager:
         try:
             # Get all coin objects
             all_coins = await CoinManager.get_coin_objects(
-                account.aptos_address,
+                account.algorand_address,
                 coin_type
             )
             
@@ -95,7 +95,7 @@ class TransactionManager:
             
             # Select coins for the amount
             selected_coins = await CoinManager.select_coins_for_amount(
-                account.aptos_address,
+                account.algorand_address,
                 coin_type,
                 amount,
                 token_config['decimals']
@@ -214,14 +214,14 @@ class TransactionManager:
                 # Check if first arg is self/cls
                 if args and hasattr(args[0], '__class__'):
                     # Method call - account might be second argument
-                    if len(args) > 1 and hasattr(args[1], 'aptos_address'):
+                    if len(args) > 1 and hasattr(args[1], 'algorand_address'):
                         account = args[1]
                     # Or in kwargs
                     elif 'account' in kwargs:
                         account = kwargs['account']
                 else:
                     # Function call - account might be first argument
-                    if args and hasattr(args[0], 'aptos_address'):
+                    if args and hasattr(args[0], 'algorand_address'):
                         account = args[0]
                     elif 'account' in kwargs:
                         account = kwargs['account']
@@ -337,10 +337,10 @@ class TransactionManager:
                 # TODO: Re-enable when Celery is running
                 # from blockchain.tasks import mark_transaction_balances_stale
                 # mark_transaction_balances_stale.delay(
-                #     [account.aptos_address],
+                #     [account.algorand_address],
                 #     result.get('digest', 'unknown')
                 # )
-                logger.info(f"Would mark balance stale for {account.aptos_address}")
+                logger.info(f"Would mark balance stale for {account.algorand_address}")
             
             return result
             
@@ -422,12 +422,12 @@ class TransactionManager:
         
         # Get coin information
         all_coins = await CoinManager.get_coin_objects(
-            account.aptos_address,
+            account.algorand_address,
             coin_type
         )
         
         selected_coins = await CoinManager.select_coins_for_amount(
-            account.aptos_address,
+            account.algorand_address,
             coin_type,
             amount,
             token_config['decimals']

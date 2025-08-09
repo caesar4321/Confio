@@ -31,7 +31,7 @@ def add_salud_de_julian_deposits():
         return
     
     print(f"Adding deposits for: {business_account.business.name}")
-    print(f"Business address: {business_account.aptos_address}")
+    print(f"Business address: {business_account.algorand_address}")
     
     # External wallet addresses
     external_addresses = [
@@ -60,7 +60,7 @@ def add_salud_de_julian_deposits():
             recipient_business=business_account.business,
             recipient_type='business',
             recipient_display_name=business_account.business.name,
-            recipient_address=business_account.aptos_address or f"0x{wonju.id:064x}",
+            recipient_address=business_account.algorand_address or f"0x{wonju.id:064x}",
             
             amount=str(amount),
             token_type=token,

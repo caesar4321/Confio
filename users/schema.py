@@ -162,7 +162,7 @@ class AccountType(DjangoObjectType):
 	
 	# Note: resolve_algorand_address removed - client computes addresses on-demand
 	# The client will generate unique addresses based on OAuth subject + account context
-	# and update the server via updateAccountAptosAddress mutation when needed
+	# and update the server via updateAccountAlgorandAddress mutation when needed
 	
 	def resolve_employee_permissions(self, info):
 		permissions = getattr(self, 'employee_permissions', None)
@@ -810,7 +810,7 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		# Normalize token type - always use uppercase for consistency
 		normalized_token_type = token_type.upper()
 		
-		# Check if account has a Sui address
+		# Check if account has an Algorand address
 		if not account.algorand_address:
 			print(f"AccountBalance resolver - Account has no Algorand address, returning 0")
 			return "0"
@@ -1670,14 +1670,14 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
 	def mutate(cls, root, info, algorand_address):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
-			return UpdateAccountAptosAddress(success=False, error="Authentication required")
+			return UpdateAccountAlgorandAddress(success=False, error="Authentication required")
 
 		try:
 			# Get JWT context with validation and permission check
 			from .jwt_context import get_jwt_business_context_with_validation
 			jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
 			if not jwt_context:
-				return UpdateAccountAptosAddress(success=False, error="Invalid account context")
+				return UpdateAccountAlgorandAddress(success=False, error="Invalid account context")
 			
 			account_type = jwt_context['account_type']
 			account_index = jwt_context['account_index']
@@ -1705,7 +1705,7 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
 					).first()
 					
 					if not employee_record:
-						return UpdateAccountAptosAddress(success=False, error="No tienes acceso a esta cuenta de negocio")
+						return UpdateAccountAlgorandAddress(success=False, error="No tienes acceso a esta cuenta de negocio")
 			else:
 				# For personal accounts
 				account = Account.objects.get(
@@ -1718,17 +1718,17 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
 			account.algorand_address = algorand_address
 			account.save()
 			
-			return UpdateAccountAptosAddress(
+			return UpdateAccountAlgorandAddress(
 				success=True,
 				error=None,
 				account=account
 			)
 
 		except Account.DoesNotExist:
-			return UpdateAccountAptosAddress(success=False, error="Cuenta no encontrada")
+			return UpdateAccountAlgorandAddress(success=False, error="Cuenta no encontrada")
 		except Exception as e:
-			logger.error(f"Error updating account Sui address: {str(e)}")
-			return UpdateAccountAptosAddress(success=False, error="Error interno del servidor")
+			logger.error(f"Error updating account Algorand address: {str(e)}")
+			return UpdateAccountAlgorandAddress(success=False, error="Error interno del servidor")
 
 class SwitchAccountToken(graphene.Mutation):
 	"""Generate a new JWT token with updated account context"""
@@ -2181,7 +2181,7 @@ class BalancesType(graphene.ObjectType):
 	cusd = graphene.String()
 	confio = graphene.String()
 	usdc = graphene.String()
-	sui = graphene.String()  # Keep for compatibility but return "0.00"
+	algo = graphene.String()  # ALGO balance in Algorand
 
 class RefreshAccountBalance(graphene.Mutation):
 	"""Force refresh balance from blockchain for the current account"""
@@ -2224,7 +2224,7 @@ class RefreshAccountBalance(graphene.Mutation):
 					account_index=account_index
 				)
 			
-			# Check if account has a Sui address
+			# Check if account has an Algorand address
 			if not account.algorand_address:
 				return RefreshAccountBalance(
 					success=False, 
@@ -2264,7 +2264,7 @@ class RefreshAccountBalance(graphene.Mutation):
 				cusd=f"{all_balances['cusd']['amount']:.2f}",
 				confio=f"{all_balances['confio']['amount']:.2f}",
 				usdc=f"{all_balances['usdc']['amount']:.2f}",
-				sui=f"{all_balances['sui']['amount']:.2f}"
+				algo=f"{all_balances['algo']['amount']:.2f}"
 			)
 			
 			last_synced = max(
@@ -2393,10 +2393,12 @@ class CreateTestUsers(graphene.Mutation):
 				from .models import Account
 				import hashlib
 				
-				# Generate a valid Sui address using hash of phone number
-				# Sui addresses are 0x + 64 hex characters (32 bytes)
-				phone_hash = hashlib.sha256(cleaned_phone.encode()).hexdigest()
-				test_algorand_address = f"0x{phone_hash}"
+				# Generate a valid Algorand address using hash of phone number
+				# Algorand addresses are 58 characters (base32 encoded)
+				import base64
+				phone_hash = hashlib.sha256(cleaned_phone.encode()).digest()
+				# Create a valid-looking test Algorand address (not cryptographically valid)
+				test_algorand_address = base64.b32encode(phone_hash[:32]).decode('utf-8').replace('=', '')[:58]
 				
 				personal_account = Account.objects.create(
 					user=new_user,

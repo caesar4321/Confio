@@ -39,7 +39,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AlterField(
             model_name='account',
-            name='aptos_address',
+            name='algorand_address',
             field=models.CharField(blank=True, help_text='Last‑computed Aptos address for this account (temporarily storing Algorand)', max_length=66, null=True),
         ),
         migrations.AlterField(

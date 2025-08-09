@@ -1,4 +1,4 @@
-# Generated manually to rename aptos_address to algorand_address
+# Generated manually to rename algorand_address to algorand_address
 
 from django.db import migrations, models
 
@@ -10,9 +10,9 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # Remove the old aptos_address column if it exists
+        # Remove the old algorand_address column if it exists
         migrations.RemoveField(
             model_name='account',
-            name='aptos_address',
+            name='algorand_address',
         ),
     ]

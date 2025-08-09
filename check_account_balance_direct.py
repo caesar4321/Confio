@@ -50,7 +50,7 @@ def check_recipient_balance():
     print("\n2. DATABASE BALANCE (Django Account model):")
     try:
         # Find account by Algorand address
-        accounts = Account.objects.filter(aptos_address=recipient_address)
+        accounts = Account.objects.filter(algorand_address=recipient_address)
         
         if accounts.exists():
             for account in accounts:
@@ -59,7 +59,7 @@ def check_recipient_balance():
                 print(f"   - Account Type: {account.account_type}")
                 print(f"   - Account Index: {account.account_index}")
                 print(f"   - Active: {account.is_active}")
-                print(f"   - Algorand Address: {account.aptos_address}")
+                print(f"   - Algorand Address: {account.algorand_address}")
                 
                 # Check cached balance
                 print(f"\n   Cached Balance (from BalanceService):")
@@ -98,7 +98,7 @@ def check_recipient_balance():
         from django.core.cache import cache
         
         # Try to find the account to get its ID
-        accounts = Account.objects.filter(aptos_address=recipient_address)
+        accounts = Account.objects.filter(algorand_address=recipient_address)
         if accounts.exists():
             account = accounts.first()
             cache_key = f"balance:{account.id}:CONFIO"

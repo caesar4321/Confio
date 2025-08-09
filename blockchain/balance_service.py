@@ -200,20 +200,20 @@ class BalanceService:
             async with await get_algorand_client() as client:
                 if token == 'CUSD':
                     # Use USDC as cUSD until we create custom cUSD ASA
-                    return await client.get_usdc_balance(account.aptos_address)
+                    return await client.get_usdc_balance(account.algorand_address)
                 elif token == 'CONFIO':
-                    return await client.get_confio_balance(account.aptos_address)
+                    return await client.get_confio_balance(account.algorand_address)
                 elif token == 'SUI':
                     # No SUI on Algorand - return 0
                     return Decimal('0')
                 elif token == 'USDC':
-                    return await client.get_usdc_balance(account.aptos_address)
+                    return await client.get_usdc_balance(account.algorand_address)
                 else:
                     return Decimal('0')
         
         try:
             amount = loop.run_until_complete(get_balance())
-            logger.info(f"Blockchain balance for {account.aptos_address} - {token}: {amount}")
+            logger.info(f"Blockchain balance for {account.algorand_address} - {token}: {amount}")
             
             return {
                 'amount': amount,

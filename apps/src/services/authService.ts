@@ -436,13 +436,8 @@ export class AuthService {
         const { data: authData } = await apolloClient.mutate({
           mutation: WEB3AUTH_LOGIN,
           variables: {
-            provider: 'google',
-            web3AuthId: firebaseUid,
-            email: user.email,
-            firstName,
-            lastName,
+            firebaseIdToken: freshFirebaseToken,
             algorandAddress,
-            idToken: freshFirebaseToken,
             deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null,
           },
           context: {
@@ -966,13 +961,8 @@ export class AuthService {
         const { data: authData } = await apolloClient.mutate({
           mutation: WEB3AUTH_LOGIN,
           variables: {
-            provider: 'apple',
-            web3AuthId: firebaseUid,
-            email: userCredential.user.email,
-            firstName: firstName || '',
-            lastName: lastName || '',
+            firebaseIdToken: freshFirebaseToken,
             algorandAddress,
-            idToken: freshFirebaseToken,
             deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null,
           },
           context: {

@@ -107,7 +107,7 @@ class TransactionManagerPySui:
                 # Log successful transaction
                 logger.info(
                     f"Successful send: {amount} {token_type} "
-                    f"from {sender_account.aptos_address[:16]}... "
+                    f"from {sender_account.algorand_address[:16]}... "
                     f"to {recipient_address[:16]}... "
                     f"Digest: {result.get('digest', 'N/A')}"
                 )
@@ -139,19 +139,19 @@ class TransactionManagerPySui:
             
             async with await get_pysui_client() as client:
                 if token_type == 'CUSD':
-                    return await client.get_cusd_balance(account.aptos_address)
+                    return await client.get_cusd_balance(account.algorand_address)
                 elif token_type == 'CONFIO':
-                    return await client.get_confio_balance(account.aptos_address)
+                    return await client.get_confio_balance(account.algorand_address)
                 elif token_type == 'SUI':
-                    return await client.get_sui_balance(account.aptos_address)
+                    return await client.get_sui_balance(account.algorand_address)
                 else:
                     # Generic token balance
                     coin_type = cls.TOKEN_CONFIGS[token_type]['type']
-                    balances = await client.get_balance(account.aptos_address, coin_type)
+                    balances = await client.get_balance(account.algorand_address, coin_type)
                     return balances.get(coin_type, Decimal('0'))
                     
         except Exception as e:
-            logger.error(f"Error getting {token_type} balance for {account.aptos_address}: {e}")
+            logger.error(f"Error getting {token_type} balance for {account.algorand_address}: {e}")
             return Decimal('0')
     
     @classmethod
@@ -170,7 +170,7 @@ class TransactionManagerPySui:
             
             async with await get_pysui_client() as client:
                 # Get all balances from blockchain
-                all_balances = await client.get_balance(account.aptos_address)
+                all_balances = await client.get_balance(account.algorand_address)
                 
                 # Map to our token types
                 for token_type, config in cls.TOKEN_CONFIGS.items():
@@ -180,7 +180,7 @@ class TransactionManagerPySui:
             return balances
             
         except Exception as e:
-            logger.error(f"Error getting all balances for {account.aptos_address}: {e}")
+            logger.error(f"Error getting all balances for {account.algorand_address}: {e}")
             return {token_type: Decimal('0') for token_type in cls.TOKEN_CONFIGS.keys()}
     
     @classmethod
@@ -214,7 +214,7 @@ class TransactionManagerPySui:
             async with await get_pysui_client() as client:
                 # Get available coins
                 coins = await client.get_coins(
-                    address=account.aptos_address,
+                    address=account.algorand_address,
                     coin_type=coin_type,
                     limit=20  # Get up to 20 coins
                 )
@@ -348,14 +348,14 @@ class TransactionManagerPySui:
         from django.core.cache import cache
         
         # Invalidate specific token balance
-        cache_key = f"balance:{account.aptos_address}:{cls.TOKEN_CONFIGS[token_type]['type']}"
+        cache_key = f"balance:{account.algorand_address}:{cls.TOKEN_CONFIGS[token_type]['type']}"
         cache.delete(cache_key)
         
         # Invalidate all balances cache
-        cache_key_all = f"balance:{account.aptos_address}:all"
+        cache_key_all = f"balance:{account.algorand_address}:all"
         cache.delete(cache_key_all)
         
-        logger.info(f"Invalidated balance cache for {account.aptos_address} {token_type}")
+        logger.info(f"Invalidated balance cache for {account.algorand_address} {token_type}")
     
     @classmethod
     async def sync_balance_to_database(cls, account: Account):
@@ -379,7 +379,7 @@ class TransactionManagerPySui:
                     defaults={'amount': amount}
                 )
             
-            logger.info(f"Synced balances to database for {account.aptos_address}")
+            logger.info(f"Synced balances to database for {account.algorand_address}")
             
         except Exception as e:
             logger.error(f"Error syncing balances to database: {e}")

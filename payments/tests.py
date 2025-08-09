@@ -38,14 +38,14 @@ class PayInvoiceTestCase(TestCase):
             account_type='business',
             account_index=0,
             business=self.business,
-            aptos_address='0x1234567890123456789012345678901234567890123456789012345678901234'
+            algorand_address='0x1234567890123456789012345678901234567890123456789012345678901234'
         )
         
         self.payer_account = Account.objects.create(
             user=self.payer_user,
             account_type='personal',
             account_index=0,
-            aptos_address='0x9876543210987654321098765432109876543210987654321098765432109876'
+            algorand_address='0x9876543210987654321098765432109876543210987654321098765432109876'
         )
         
         # Create test invoice

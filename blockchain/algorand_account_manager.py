@@ -66,17 +66,17 @@ class AlgorandAccountManager:
             )
             
             # Check if account already has an Algorand address
-            if account.aptos_address and len(account.aptos_address) == 58:
+            if account.algorand_address and len(account.algorand_address) == 58:
                 # Account already exists with Algorand address
-                logger.info(f"Existing Algorand account found for user {user.email}: {account.aptos_address}")
+                logger.info(f"Existing Algorand account found for user {user.email}: {account.algorand_address}")
                 
                 # Check opt-in status
-                opted_in_assets = cls._check_opt_ins(account.aptos_address)
+                opted_in_assets = cls._check_opt_ins(account.algorand_address)
                 
                 return {
                     'account': account,
                     'created': False,
-                    'algorand_address': account.aptos_address,
+                    'algorand_address': account.algorand_address,
                     'opted_in_assets': opted_in_assets,
                     'errors': errors
                 }
@@ -96,7 +96,7 @@ class AlgorandAccountManager:
                 logger.debug(f"Mnemonic (SECURE THIS): {mnemonic_phrase}")
             
             # Update account with Algorand address
-            account.aptos_address = algorand_address  # Using aptos_address field temporarily
+            account.algorand_address = algorand_address  # Using algorand_address field temporarily
             account.save()
             
             # Initialize Algod client

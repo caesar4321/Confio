@@ -94,7 +94,7 @@ async def test_mutation_directly():
     test_account, _ = Account.objects.get_or_create(
         user=test_user,
         account_type='personal',
-        defaults={'aptos_address': test_address}
+        defaults={'algorand_address': test_address}
     )
     
     print(f"Test User: {test_user.email}")

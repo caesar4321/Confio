@@ -324,7 +324,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         
         # Set the user's address on each transaction for the resolvers
         for transaction in transactions:
-            transaction._user_address = account.aptos_address
+            transaction._user_address = account.algorand_address
             
         return transactions
     
@@ -407,7 +407,7 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         
         # Set the user's address on each transaction for the resolvers
         for transaction in transactions:
-            transaction._user_address = account.aptos_address
+            transaction._user_address = account.algorand_address
             
         return transactions
     
@@ -508,6 +508,6 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         
         # Set the user's address on each transaction for the resolvers
         for transaction in transactions:
-            transaction._user_address = account.aptos_address
+            transaction._user_address = account.algorand_address
             
         return transactions

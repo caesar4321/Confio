@@ -203,7 +203,7 @@ class PurchasePresaleTokens(graphene.Mutation):
             confio_amount=confio_amount,
             price_per_token=phase.price_per_token,
             status='processing',
-            from_address=cusd_account.aptos_address
+            from_address=cusd_account.algorand_address
         )
         
         # TODO: Execute blockchain transaction here

@@ -71,7 +71,7 @@ async def test_confio_token():
             # Get a test account (if exists)
             test_account = Account.objects.filter(deleted_at__isnull=True).first()
             if test_account:
-                print(f"   Using account: {test_account.aptos_address[:20]}...")
+                print(f"   Using account: {test_account.algorand_address[:20]}...")
                 
                 # Try to get CONFIO balance through service
                 balance_data = BalanceService.get_balance(test_account, 'CONFIO')
