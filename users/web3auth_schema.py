@@ -115,13 +115,13 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     # Calculate minimum balance needed:
                     # 0.1 ALGO for account + 0.1 ALGO per asset
                     min_balance_needed = 100000 + (num_assets * 100000)  # in microAlgos
-                    # Add buffer for opt-ins (2 assets: CONFIO and cUSD)
-                    # MBR: 0.1 base + 0.1 CONFIO + 0.1 cUSD = 0.3 ALGO
-                    # Plus 0.01 ALGO for transaction fees
-                    min_balance_with_buffer = 310000  # 0.31 ALGO (0.3 MBR + 0.01 fees)
+                    # MBR for 2 assets: CONFIO and cUSD
+                    # 0.1 base + 0.1 CONFIO + 0.1 cUSD = 0.3 ALGO
+                    # Sponsor pays opt-in fees separately
+                    min_balance_with_buffer = 300000  # 0.3 ALGO (exactly the MBR)
                     
                     if balance < min_balance_with_buffer:
-                        # Fund the account to reach 0.31 ALGO
+                        # Fund the account to reach 0.3 ALGO
                         funding_amount = min_balance_with_buffer - balance
                         logger.info(f"Auto-funding Web3Auth user {algorand_address} with {funding_amount} microAlgos")
                         

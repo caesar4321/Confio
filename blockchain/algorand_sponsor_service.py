@@ -520,7 +520,7 @@ class AlgorandSponsorService:
                 sender=self.sponsor_address,
                 sp=params,
                 receiver=user_address,
-                amt=total_fee,  # Transfer fee amount to user
+                amt=0,  # No ALGO transfer, just paying fees
                 note=b"Opt-in fee sponsorship"
             )
             fee_payment_txn.fee = total_fee  # Sponsor pays all fees
