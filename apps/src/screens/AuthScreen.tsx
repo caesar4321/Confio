@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, Easing } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, Easing, ActivityIndicator, Modal } from 'react-native';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { appleAuth } from '@invertase/react-native-apple-authentication';
 import authService from '../services/authService';
@@ -30,6 +30,9 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Auth'>;
 export const AuthScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const { handleSuccessfulLogin } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
+  const rotateAnim = useRef(new Animated.Value(0)).current;
 
   // Initialize auth service when component mounts
   useEffect(() => {
@@ -46,29 +49,82 @@ export const AuthScreen = () => {
     initializeAuthService();
   }, []);
 
+  // Rotation animation for loading spinner
+  useEffect(() => {
+    if (isLoading) {
+      Animated.loop(
+        Animated.timing(rotateAnim, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+    }
+  }, [isLoading]);
+
   const handleGoogleSignIn = async () => {
     try {
       console.log('AuthScreen - Starting Google Sign-In...');
-      const result = await authService.signInWithGoogle();
+      
+      // Don't show loading during Google modal
+      const result = await authService.signInWithGoogle((message) => {
+        // Only show loading AFTER Google sign-in completes
+        if (!isLoading && message) {
+          setIsLoading(true);
+        }
+        setLoadingMessage(message);
+      });
+      
+      // Ensure loading is shown if not already
+      if (!isLoading) {
+        setIsLoading(true);
+        setLoadingMessage('¡Casi listo! Finalizando configuración...');
+      }
+      
       console.log('Google Sign-In result:', result);
       console.log('Phone verification status:', result.zkLoginData?.isPhoneVerified);
+      
       await handleSuccessfulLogin(result.zkLoginData?.isPhoneVerified || false);
     } catch (error) {
       console.error('Google Sign-In failed:', error);
+      setIsLoading(false);
     }
   };
 
   const handleAppleSignIn = async () => {
     try {
       console.log('AuthScreen - Starting Apple Sign-In...');
-      const result = await authService.signInWithApple();
+      
+      // Don't show loading during Apple modal
+      const result = await authService.signInWithApple((message) => {
+        // Only show loading AFTER Apple sign-in completes
+        if (!isLoading && message) {
+          setIsLoading(true);
+        }
+        setLoadingMessage(message);
+      });
+      
+      // Ensure loading is shown if not already
+      if (!isLoading) {
+        setIsLoading(true);
+        setLoadingMessage('¡Casi listo! Finalizando configuración...');
+      }
+      
       console.log('Apple Sign-In result:', result);
       console.log('Phone verification status:', result.zkLoginData?.isPhoneVerified);
+      
       await handleSuccessfulLogin(result.zkLoginData?.isPhoneVerified || false);
     } catch (error) {
       console.error('Apple Sign-In Error:', error);
+      setIsLoading(false);
     }
   };
+
+  const spin = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg']
+  });
 
   return (
     <View style={styles.container}>
@@ -173,6 +229,35 @@ export const AuthScreen = () => {
         </View>
       </View>
       
+      {/* Loading Overlay */}
+      <Modal
+        visible={isLoading}
+        transparent={true}
+        animationType="fade"
+        statusBarTranslucent={true}
+      >
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingCard}>
+            {/* Animated Confío Logo */}
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <Image
+                source={require('../assets/png/CONFIO.png')}
+                style={styles.loadingLogo}
+              />
+            </Animated.View>
+            
+            {/* Loading Message */}
+            <Text style={styles.loadingText}>{loadingMessage}</Text>
+            
+            {/* Progress Dots Animation */}
+            <View style={styles.dotsContainer}>
+              <View style={[styles.dot, { backgroundColor: colors.confioGreen }]} />
+              <View style={[styles.dot, { backgroundColor: colors.confioGreen, opacity: 0.6 }]} />
+              <View style={[styles.dot, { backgroundColor: colors.confioGreen, opacity: 0.3 }]} />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -381,5 +466,49 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.6,
+  },
+  // Loading Overlay Styles
+  loadingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingCard: {
+    backgroundColor: colors.white,
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    minWidth: 280,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  loadingLogo: {
+    width: 64,
+    height: 64,
+    resizeMode: 'contain',
+    marginBottom: 20,
+  },
+  loadingText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.darkGray,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  dotsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
 }); 

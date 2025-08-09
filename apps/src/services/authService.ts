@@ -133,7 +133,7 @@ export class AuthService {
     }
   }
 
-  async signInWithGoogle() {
+  async signInWithGoogle(onProgress?: (message: string) => void) {
     const startTime = Date.now();
     const perfLog = (step: string) => {
       console.log(`[PERF] ${step}: ${Date.now() - startTime}ms`);
@@ -142,6 +142,7 @@ export class AuthService {
     try {
       console.log('Starting Google Sign-In process...');
       perfLog('Start');
+      // Don't show progress during Google modal
       
       // Sign out first to force account selection
       try {
@@ -174,6 +175,8 @@ export class AuthService {
 
       // 2) Get the ID token after successful sign-in
       perfLog('Google Sign-In complete');
+      // NOW show loading - Google modal is closed
+      onProgress?.('Verificando tu cuenta...');
       console.log('Getting Google ID token...');
       const { idToken } = await GoogleSignin.getTokens();
       console.log('Got ID token:', idToken ? 'Token received' : 'No token');
@@ -191,6 +194,7 @@ export class AuthService {
       }
 
       // 3) Sign in with Firebase using the Google credential
+      onProgress?.('Autenticando tu cuenta...');
       console.log('Creating Firebase credential...');
       const firebaseCred = auth.GoogleAuthProvider.credential(idToken);
       console.log('Signing in with Firebase...');
@@ -379,6 +383,7 @@ export class AuthService {
       let algorandAddress = '';
       let isPhoneVerified = false; // Default to false if we can't get the status
       try {
+        onProgress?.('Preparando tu cuenta segura...');
         perfLog('Starting Algorand wallet creation');
         console.log('Creating Algorand wallet with Web3Auth using Firebase token...');
         
@@ -679,12 +684,13 @@ export class AuthService {
   }
 
   // Apple Sign-In
-  public async signInWithApple() {
+  public async signInWithApple(onProgress?: (message: string) => void) {
     if (Platform.OS !== 'ios') {
       throw new Error('Apple Sign In is only supported on iOS');
     }
 
     try {
+      // Don't show progress during Apple modal
       if (!apolloClient) {
         throw new Error('Apollo client not initialized');
       }
@@ -702,6 +708,9 @@ export class AuthService {
       if (!appleAuthResponse.identityToken) {
         throw new Error('No identity token received from Apple');
       }
+      
+      // NOW show loading - Apple modal is closed
+      onProgress?.('Verificando tu identidad con Apple...');
       
       // Sign in with Firebase
       const appleCredential = auth.AppleAuthProvider.credential(appleAuthResponse.identityToken, appleAuthResponse.nonce);
@@ -721,6 +730,7 @@ export class AuthService {
       }
       
       // Initialize zkLogin with server-side nonce generation
+      onProgress?.('Autenticando tu cuenta...');
       const { data: initData } = await apolloClient.mutate({
         mutation: INITIALIZE_ZKLOGIN,
         variables: {
@@ -905,6 +915,7 @@ export class AuthService {
       let algorandAddress = '';
       let isPhoneVerified = false;
       try {
+        onProgress?.('Preparando tu cuenta segura...');
         console.log('Creating Algorand wallet with Web3Auth SFA using Firebase (Apple)...');
         // Get fresh Firebase ID token for Web3Auth
         const freshFirebaseToken = await userCredential.user.getIdToken(true);
