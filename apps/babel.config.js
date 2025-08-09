@@ -8,6 +8,8 @@ module.exports = {
       whitelist: null,
       safe: false,
       allowUndefined: true,
-    }]
+    }],
+    // Reanimated must be last
+    'react-native-reanimated/plugin'
   ]
 };

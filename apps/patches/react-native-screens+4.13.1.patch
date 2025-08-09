@@ -1,0 +1,19 @@
+diff --git a/node_modules/react-native-screens/ios/RNSScreenStackHeaderConfig.mm b/node_modules/react-native-screens/ios/RNSScreenStackHeaderConfig.mm
+index 1234567..8901234 100644
+--- a/node_modules/react-native-screens/ios/RNSScreenStackHeaderConfig.mm
++++ b/node_modules/react-native-screens/ios/RNSScreenStackHeaderConfig.mm
+@@ -150,6 +150,14 @@ @implementation RNSScreenStackHeaderConfig {
+ 
+ @synthesize translucent = _translucent;
+ 
++- (void)setColor:(UIColor *)color
++{
++  // This is a workaround for React Native 0.79.x compatibility
++  // The color property should not be set on this view
++  // Instead, it should be handled through backgroundColor
++  [super setBackgroundColor:color];
++}
++
+ - (instancetype)initWithFrame:(CGRect)frame
+ {
+   if (self = [super initWithFrame:frame]) {

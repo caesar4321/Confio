@@ -2,7 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { ApolloProvider } from '@apollo/client';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Text } from 'react-native';
 import apolloClient from './apollo/client';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { HeaderProvider } from './contexts/HeaderContext';
@@ -18,13 +18,7 @@ import { pushNotificationService } from './services/pushNotificationService';
 import { navigationRef } from './navigation/RootNavigation';
 import { initializeNotifee } from './services/notifeeConfig';
 
-// Enable screens for better performance
-try {
-  const { enableScreens } = require('react-native-screens');
-  enableScreens();
-} catch (error) {
-  console.warn('Failed to enable screens:', error);
-}
+// Native screens are enabled in bootstrap.ts for better performance
 
 // Initialize app services immediately
 console.log('[PERF] App.tsx loaded, initializing app services');
@@ -74,12 +68,12 @@ const Navigation: React.FC = () => {
   }
 
   console.log('Rendering navigation stack, isAuthenticated:', isAuthenticated);
+  
   return (
     <Stack.Navigator
       screenOptions={{
         headerShown: false,
-        animation: 'none',
-        presentation: 'transparentModal'
+        animation: 'none'
       }}
     >
       {!isAuthenticated ? (

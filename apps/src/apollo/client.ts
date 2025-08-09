@@ -2,12 +2,15 @@ import { ApolloClient, InMemoryCache, createHttpLink, from, FetchResult } from '
 import { onError, ErrorResponse } from '@apollo/client/link/error';
 import { setContext } from '@apollo/client/link/context';
 import * as Keychain from 'react-native-keychain';
-import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../services/authService';
 import { jwtDecode } from 'jwt-decode';
 import { getApiUrl } from '../config/env';
 import { gql } from '@apollo/client';
 import { Observable as ApolloObservable } from '@apollo/client/utilities';
 import { AccountManager } from '../utils/accountManager';
+
+// Extract constants to avoid circular dependency
+export const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
+export const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
 
 interface CustomJwtPayload {
   user_id: number;

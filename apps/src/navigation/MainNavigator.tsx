@@ -56,8 +56,7 @@ export const MainNavigator = () => {
     <Stack.Navigator
       screenOptions={{
         headerShown: false,
-        animation: 'none',
-        presentation: 'transparentModal'
+        animation: 'none'
       }}
     >
       <Stack.Screen name="BottomTabs" component={BottomTabNavigator} />
