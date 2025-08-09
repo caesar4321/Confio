@@ -1019,28 +1019,14 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		
 		# Clean and normalize phone numbers
 		for phone in phone_numbers:
-			# Clean the phone number - remove all non-digits
+			# Clean the phone number - remove all non-digits (normalized format)
 			cleaned_phone = ''.join(filter(str.isdigit, phone))
 			
 			if not cleaned_phone:
 				continue
 			
-			# Try to find user by phone number
-			# Check both with and without country code
-			found_user = None
-			
-			# First, try exact match
+			# Exact match only - phones should be stored normalized (digits only, with country code)
 			found_user = User.objects.filter(phone_number=cleaned_phone).first()
-			
-			# If not found, try without country code (last 10 digits for Venezuelan numbers)
-			if not found_user and len(cleaned_phone) > 10:
-				phone_without_code = cleaned_phone[-10:]
-				found_user = User.objects.filter(phone_number=phone_without_code).first()
-			
-			# If not found, try with Venezuelan country code
-			if not found_user and not cleaned_phone.startswith('58'):
-				phone_with_ve_code = '58' + cleaned_phone
-				found_user = User.objects.filter(phone_number=phone_with_ve_code).first()
 			
 			if found_user:
 				# Get the user's active account

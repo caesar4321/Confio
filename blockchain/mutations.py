@@ -408,29 +408,12 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             elif recipient_phone:
                 from django.contrib.auth import get_user_model
                 User = get_user_model()
-                # Clean phone number - remove all non-digits
+                # Clean phone number - remove all non-digits (normalized format)
                 cleaned_phone = ''.join(filter(str.isdigit, recipient_phone))
                 logger.info(f"Looking up user by phone: original='{recipient_phone}', cleaned='{cleaned_phone}'")
                 
-                # Try to find user using the same logic as check_users_by_phones
-                found_user = None
-                
-                # First, try exact match
+                # Exact match only - phones should be stored normalized (digits only, with country code)
                 found_user = User.objects.filter(phone_number=cleaned_phone).first()
-                
-                # If not found, try without country code (last 10 digits for Venezuelan numbers)
-                if not found_user and len(cleaned_phone) > 10:
-                    phone_without_code = cleaned_phone[-10:]
-                    found_user = User.objects.filter(phone_number=phone_without_code).first()
-                    if found_user:
-                        logger.info(f"Found user by phone without country code: {phone_without_code}")
-                
-                # If not found, try with Venezuelan country code
-                if not found_user and not cleaned_phone.startswith('58'):
-                    phone_with_ve_code = '58' + cleaned_phone
-                    found_user = User.objects.filter(phone_number=phone_with_ve_code).first()
-                    if found_user:
-                        logger.info(f"Found user by phone with VE code: {phone_with_ve_code}")
                 
                 if found_user:
                     # Get recipient's personal account
