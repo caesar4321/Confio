@@ -124,7 +124,6 @@ export const REFRESH_ACCOUNT_BALANCE = gql`
         cusd
         confio
         usdc
-        sui
       }
       lastSynced
       success

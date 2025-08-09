@@ -26,7 +26,7 @@ export interface StoredAccount {
   avatar: string;
   phone?: string;
   category?: string;
-  aptosAddress?: string;
+  algorandAddress?: string;
   createdAt: string;
   isActive: boolean;
   isEmployee?: boolean;
@@ -394,7 +394,7 @@ export class AccountManager {
           name: serverAccount.business?.name || `Account ${serverAccount.accountIndex}`,
           avatar: serverAccount.business?.name?.charAt(0).toUpperCase() || 'A',
           category: serverAccount.business?.category,
-          aptosAddress: serverAccount.aptosAddress,
+          algorandAddress: serverAccount.algorandAddress,
           createdAt: serverAccount.createdAt,
           isActive: false
         };

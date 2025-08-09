@@ -688,7 +688,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontWeight: '500',
   },
-  suiBadge: {
+  algoBadge: {
     position: 'absolute',
     bottom: -4,
     right: -4,
@@ -699,7 +699,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#ffffff',
   },
-  suiBadgeText: {
+  algoBadgeText: {
     fontSize: 10,
     fontWeight: 'bold',
     color: '#ffffff',
@@ -916,7 +916,7 @@ const styles = StyleSheet.create({
                   <TextInput
                     value={withdrawalAddress}
                     onChangeText={setWithdrawalAddress}
-                    placeholder="0x... (dirección USDC en red Sui)"
+                    placeholder="Dirección USDC en red de Algorand"
                     style={styles.addressInputField}
                   />
                   <TouchableOpacity style={styles.walletButton}>
@@ -924,7 +924,7 @@ const styles = StyleSheet.create({
                   </TouchableOpacity>
                 </View>
                 <Text style={styles.inputHelper}>
-                  Solo direcciones USDC válidas en red Sui
+                  Solo direcciones USDC válidas en red de Algorand
                 </Text>
               </View>
               
@@ -1073,7 +1073,7 @@ const styles = StyleSheet.create({
                     <TextInput
                       value={withdrawalAddress}
                       onChangeText={setWithdrawalAddress}
-                      placeholder="0x... (dirección USDC en red Sui)"
+                      placeholder="Dirección USDC en red de Algorand"
                       style={styles.addressInputField}
                     />
                     <TouchableOpacity style={styles.walletButton}>
@@ -1081,7 +1081,7 @@ const styles = StyleSheet.create({
                     </TouchableOpacity>
                   </View>
                   <Text style={styles.inputHelper}>
-                    Solo direcciones USDC válidas en red Sui
+                    Solo direcciones USDC válidas en red de Algorand
                   </Text>
                 </View>
               )}

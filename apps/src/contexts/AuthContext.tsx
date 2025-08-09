@@ -134,41 +134,28 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           fetchPolicy: 'network-only',
         });
         
-        // Validate phone verification status and sync with zkLogin data
+        // Check phone verification status from server
         const serverPhoneVerified = data?.me?.phoneNumber && data?.me?.phoneCountry;
         console.log('Profile refresh - Server phone verification status:', serverPhoneVerified);
         
-        try {
-          const authService = AuthService.getInstance();
-          const zkLoginData = await authService.getStoredZkLoginData();
-          
-          if (zkLoginData && zkLoginData.isPhoneVerified !== serverPhoneVerified) {
-            console.log(`Profile refresh - Syncing zkLogin phone verification: ${zkLoginData.isPhoneVerified} -> ${serverPhoneVerified}`);
-            zkLoginData.isPhoneVerified = serverPhoneVerified;
-            await authService.storeZkLoginData(zkLoginData);
-            
-            // If phone verification was lost on server but user is authenticated, require re-verification
-            if (!serverPhoneVerified && isAuthenticated) {
-              console.log('Profile refresh - Phone verification lost on server, requiring re-verification');
-              setIsAuthenticated(false);
-              if (isNavigationReady && navigationRef.current) {
-                navigationRef.current.reset({
-                  index: 0,
-                  routes: [
-                    {
-                      name: 'Auth',
-                      params: {
-                        screen: 'PhoneVerification',
-                      },
-                    },
-                  ],
-                });
-              }
-              return; // Exit early to prevent setting profile data
-            }
+        // If phone verification was lost on server but user is authenticated, require re-verification
+        if (!serverPhoneVerified && isAuthenticated) {
+          console.log('Profile refresh - Phone verification lost on server, requiring re-verification');
+          setIsAuthenticated(false);
+          if (isNavigationReady && navigationRef.current) {
+            navigationRef.current.reset({
+              index: 0,
+              routes: [
+                {
+                  name: 'Auth',
+                  params: {
+                    screen: 'PhoneVerification',
+                  },
+                },
+              ],
+            });
           }
-        } catch (syncError) {
-          console.error('Error syncing phone verification status:', syncError);
+          return; // Exit early to prevent setting profile data
         }
         
         setProfileData({
@@ -275,49 +262,61 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const checkAuthState = async () => {
     try {
       console.log('Checking auth state...');
-      const authService = AuthService.getInstance();
-      const zkLoginData = await authService.getStoredZkLoginData();
-      console.log('Auth state zkLogin data:', JSON.stringify(zkLoginData, null, 2));
       
-      if (zkLoginData) {
-        const hasRequiredFields = zkLoginData.zkProof && 
-                                zkLoginData.salt && 
-                                zkLoginData.subject && 
-                                zkLoginData.clientId;
-        
-        console.log('Has required fields:', hasRequiredFields);
-        console.log('Is phone verified (from zkLogin):', zkLoginData.isPhoneVerified);
-        
-        if (hasRequiredFields) {
-          if (zkLoginData.isPhoneVerified) {
-            console.log('Valid zkLogin data found with verified phone');
-            setIsAuthenticated(true);
-            navigateToScreen('Main');
-          } else {
-            console.log('Valid zkLogin data found but phone not verified');
-            // Keep user in Auth flow for phone verification
-            setIsAuthenticated(false);
-            if (isNavigationReady && navigationRef.current) {
-              navigationRef.current.reset({
-                index: 0,
-                routes: [
-                  {
-                    name: 'Auth',
-                    params: {
-                      screen: 'PhoneVerification',
-                    },
-                  },
-                ],
-              });
+      // Check for JWT tokens instead of zkLogin data
+      const Keychain = await import('react-native-keychain');
+      const credentials = await Keychain.getGenericPassword({
+        service: 'com.confio.auth',
+        username: 'auth_tokens'
+      });
+      
+      console.log('Auth state JWT tokens:', {
+        hasCredentials: !!credentials,
+        credentialType: typeof credentials
+      });
+      
+      if (credentials && credentials !== false) {
+        try {
+          const tokens = JSON.parse(credentials.password);
+          const hasValidTokens = tokens.accessToken && tokens.refreshToken;
+          
+          console.log('Has valid JWT tokens:', hasValidTokens);
+          
+          if (hasValidTokens) {
+            // Decode access token to check if it's valid
+            const { jwtDecode } = await import('jwt-decode');
+            const decoded = jwtDecode(tokens.accessToken);
+            const now = Math.floor(Date.now() / 1000);
+            const isTokenValid = decoded.exp > now;
+            
+            console.log('JWT token validity:', {
+              exp: decoded.exp,
+              now: now,
+              isValid: isTokenValid
+            });
+            
+            if (isTokenValid || tokens.refreshToken) {
+              // Token is valid or we have a refresh token to get a new one
+              console.log('Valid authentication found, user is logged in');
+              setIsAuthenticated(true);
+              navigateToScreen('Main');
+            } else {
+              console.log('JWT tokens expired and no refresh token');
+              setIsAuthenticated(false);
+              navigateToScreen('Auth');
             }
+          } else {
+            console.log('Invalid token structure');
+            setIsAuthenticated(false);
+            navigateToScreen('Auth');
           }
-        } else {
-          console.log('Invalid zkLogin data, missing required fields');
+        } catch (parseError) {
+          console.error('Error parsing stored tokens:', parseError);
           setIsAuthenticated(false);
           navigateToScreen('Auth');
         }
       } else {
-        console.log('No zkLogin data found, setting isAuthenticated to false');
+        console.log('No JWT tokens found, user not authenticated');
         setIsAuthenticated(false);
         navigateToScreen('Auth');
       }
@@ -332,12 +331,24 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
   const checkLocalAuthState = async (): Promise<boolean> => {
     try {
-      const authService = AuthService.getInstance();
-      const hasZkLoginData = await authService.getStoredZkLoginData();
-      setIsAuthenticated(!!hasZkLoginData);
-      return !!hasZkLoginData;
+      // Check for JWT tokens instead of zkLogin data
+      const Keychain = await import('react-native-keychain');
+      const credentials = await Keychain.getGenericPassword({
+        service: 'com.confio.auth',
+        username: 'auth_tokens'
+      });
+      
+      if (credentials && credentials !== false) {
+        const tokens = JSON.parse(credentials.password);
+        const hasValidTokens = tokens.accessToken && tokens.refreshToken;
+        setIsAuthenticated(hasValidTokens);
+        return hasValidTokens;
+      } else {
+        setIsAuthenticated(false);
+        return false;
+      }
     } catch (error) {
-      console.error('Error checking auth state:', error);
+      console.error('Error checking local auth state:', error);
       setIsAuthenticated(false);
       return false;
     }
@@ -362,17 +373,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     try {
       console.log('Completing phone verification...');
       
-      // Update the stored zkLoginData to mark phone as verified
-      const authService = AuthService.getInstance();
-      const zkLoginData = await authService.getStoredZkLoginData();
-      
-      if (zkLoginData) {
-        // Update the phone verification status
-        zkLoginData.isPhoneVerified = true;
-        await authService.storeZkLoginData(zkLoginData);
-        console.log('Updated zkLogin data with phone verification status');
-      }
-      
+      // With Web3Auth, phone verification completion should be handled by the backend
+      // We just need to set the authentication state and navigate to Main
       setIsAuthenticated(true);
       await refreshProfile('personal');
       

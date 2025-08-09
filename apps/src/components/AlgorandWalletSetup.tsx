@@ -18,11 +18,11 @@ export function AlgorandWalletSetup({ onWalletCreated, showStatus = false }: Alg
   const [isLoading, setIsLoading] = useState(false);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const { activeAccount, refreshAccount } = useAccount();
+  const { activeAccount, refreshAccounts } = useAccount();
 
   useEffect(() => {
     console.log('AlgorandWalletSetup - Component mounted');
-    console.log('AlgorandWalletSetup - Current address:', activeAccount?.aptosAddress);
+    console.log('AlgorandWalletSetup - Current address:', activeAccount?.algorandAddress);
     checkAndSetupWallet();
   }, []);
 
@@ -30,7 +30,7 @@ export function AlgorandWalletSetup({ onWalletCreated, showStatus = false }: Alg
     try {
       // Check if user already has an Algorand wallet (not Aptos)
       // Algorand addresses are 58 characters, Aptos addresses start with "0x"
-      const currentAddress = activeAccount?.aptosAddress;
+      const currentAddress = activeAccount?.algorandAddress;
       
       if (currentAddress) {
         console.log('AlgorandWalletSetup - Current address:', currentAddress);

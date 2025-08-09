@@ -37,7 +37,7 @@ const tokenConfig = {
     color: colors.primary,
     minSend: 1,
     fee: 0,  // Sponsored transactions
-    description: 'Envía cUSD a cualquier dirección Sui',
+    description: 'Envía cUSD a cualquier dirección Algorand',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
   confio: {
@@ -47,7 +47,7 @@ const tokenConfig = {
     color: colors.secondary,
     minSend: 1,
     fee: 0,  // Sponsored transactions
-    description: 'Envía CONFIO a cualquier dirección Sui',
+    description: 'Envía CONFIO a cualquier dirección Algorand',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
 };
@@ -105,14 +105,14 @@ export const SendWithAddressScreen = () => {
     // Check if it's an Algorand address (58 characters, uppercase letters and numbers 2-7)
     const isAlgorandAddress = destination.length === 58 && /^[A-Z2-7]{58}$/.test(destination);
     
-    // Check if it's a Sui address (0x + 64 hex characters)
-    const isSuiAddress = destination.startsWith('0x') && destination.match(/^0x[0-9a-f]{64}$/);
+    // Check if it's a Sui address (0x + 64 hex characters) - legacy support
+    const isSuiAddress = destination.startsWith('0x') && destination.match(/^0x[0-9a-f]{64}$/); // Legacy Sui support
     
     if (!isAlgorandAddress && !isSuiAddress) {
       if (destination.startsWith('0x')) {
-        // Attempted Sui address
+        // Attempted legacy Sui address
         if (destination.length < 66) {
-          setErrorMessage('La dirección Sui debe tener 64 caracteres hexadecimales después de 0x');
+          setErrorMessage('La dirección Sui (legacy) debe tener 64 caracteres hexadecimales después de 0x');
         } else {
           setErrorMessage('La dirección contiene caracteres inválidos. Use solo 0-9 y a-f');
         }
@@ -120,7 +120,7 @@ export const SendWithAddressScreen = () => {
         // Attempted Algorand address
         setErrorMessage('La dirección Algorand debe contener solo letras mayúsculas y números 2-7');
       } else {
-        setErrorMessage('Formato de dirección inválido. Use una dirección Algorand (58 caracteres) o Sui (0x + 64 hex)');
+        setErrorMessage('Formato de dirección inválido. Use una dirección Algorand (58 caracteres)');
       }
       setShowError(true);
       return;
@@ -229,7 +229,7 @@ export const SendWithAddressScreen = () => {
 
           {/* Address Input */}
           <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Dirección Sui</Text>
+            <Text style={styles.inputLabel}>Dirección Algorand</Text>
             <TextInput
               style={styles.addressField}
               value={destination}
@@ -239,7 +239,7 @@ export const SendWithAddressScreen = () => {
               autoCorrect={false}
             />
             <Text style={styles.addressHelp}>
-              Ingresa la dirección Sui del destinatario (comienza con 0x)
+              Ingresa la dirección Algorand del destinatario (58 caracteres)
             </Text>
           </View>
 

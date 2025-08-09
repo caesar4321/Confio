@@ -119,7 +119,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           phone: normalizedType === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
           category: serverAcc.business?.category,
           avatar: avatar,
-          aptosAddress: '', // Client will compute this on-demand
+          algorandAddress: '', // Client will compute this on-demand
           createdAt: serverAcc.createdAt,
           isActive: true,
           isEmployee: serverAcc.isEmployee || false,
@@ -184,7 +184,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           phone: profileData?.userProfile?.phoneNumber || undefined,
           category: undefined,
           avatar: avatar,
-          aptosAddress: '', // Will be set during zkLogin finalization
+          algorandAddress: '', // Will be set during authentication
           createdAt: new Date().toISOString(),
           isActive: true,
         };
@@ -228,10 +228,10 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       
       if (active) {
         // Get the address for the active account (may already be computed)
-        const currentAddress = await authService.getAptosAddress();
+        const currentAddress = await authService.getAlgorandAddress();
         const activeWithAddress = {
           ...active,
-          aptosAddress: currentAddress || ''
+          algorandAddress: currentAddress || ''
         };
         
         setActiveAccount(activeWithAddress);
@@ -350,7 +350,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
           phone: normalizedType === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
           category: serverAcc.business?.category,
           avatar: avatar,
-          aptosAddress: '', // Client will compute this on-demand
+          algorandAddress: '', // Client will compute this on-demand
           createdAt: serverAcc.createdAt || new Date().toISOString(),
           isActive: true,
           isEmployee: serverAcc.isEmployee || false,
@@ -429,11 +429,11 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         
         // Get the computed address after the switch
         // Address computation happens during authService.switchAccount while loading spinner is active
-        const computedAddress = await authService.getAptosAddress();
+        const computedAddress = await authService.getAlgorandAddress();
         if (computedAddress) {
           const activeWithAddress = {
             ...newActiveAccount,
-            aptosAddress: computedAddress
+            algorandAddress: computedAddress
           };
           setActiveAccount(activeWithAddress);
           console.log('useAccountManager - Account has address after switch:', {

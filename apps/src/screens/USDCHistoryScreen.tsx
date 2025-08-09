@@ -229,7 +229,7 @@ export const USDCHistoryScreen = () => {
         date: moment.utc(transaction.createdAt).local().format('YYYY-MM-DD'),
         time: moment.utc(transaction.createdAt).local().format('HH:mm'),
         hash: transaction.transactionId,
-        network: transaction.network || 'SUI',
+        network: transaction.network || 'ALGORAND',
       }
     });
   };

@@ -191,10 +191,13 @@ export class AuthService {
       perfLog('Got Google ID token');
       
       // Debug: Check what's in the userInfo from Google Sign-In
-      console.log('[AuthService] Google Sign-In userInfo:', {
-        id: userInfo?.user?.id,
-        email: userInfo?.user?.email,
-        name: userInfo?.user?.name
+      console.log('[AuthService] Google Sign-In userInfo - parsed:', {
+        type: userInfo?.type,
+        userId: userInfo?.data?.user?.id,
+        userEmail: userInfo?.data?.user?.email,
+        userName: userInfo?.data?.user?.name,
+        idToken: userInfo?.data?.idToken,
+        serverAuthCode: userInfo?.data?.serverAuthCode,
       });
       
       if (!idToken) {
@@ -233,10 +236,17 @@ export class AuthService {
       console.log('Generating Algorand wallet...');
       perfLog('Starting Algorand wallet generation');
       
-      // Get OAuth subject for wallet derivation
-      const googleSubject = decodedFirebaseToken?.sub || decodedFirebaseToken?.user_id;
+      // Use OAuth subject directly from Google Sign-In response
+      // The structure is userInfo.data.user.id based on the actual response
+      const googleSubject = userInfo?.data?.user?.id;
       if (!googleSubject) {
-        throw new Error('No OAuth subject found in Firebase token');
+        console.error('Failed to get Google subject. userInfo structure:', {
+          hasData: !!userInfo?.data,
+          hasUser: !!userInfo?.data?.user,
+          hasUserId: !!userInfo?.data?.user?.id,
+          fullUserInfo: JSON.stringify(userInfo)
+        });
+        throw new Error('No OAuth subject found in Google sign-in response. Check console for userInfo structure.');
       }
       
       // Store OAuth subject securely for future account switching
@@ -337,8 +347,7 @@ export class AuthService {
           type: 'personal',
           index: 0
         };
-        const accountId = accountManager.generateAccountId(defaultAccountContext.type, defaultAccountContext.index);
-        await algorandService.storeAddress(algorandAddress, accountId);
+        await this.storeAlgorandAddress(algorandAddress, defaultAccountContext);
       } catch (accountError) {
         console.error('Error creating default account:', accountError);
         // Don't throw here - account creation failure shouldn't break the sign-in flow
@@ -470,9 +479,13 @@ export class AuthService {
       onProgress?.('Preparando tu cuenta segura...');
       console.log('Generating Algorand wallet for Apple sign-in...');
       
-      // Decode the Apple ID token to get the OAuth subject
-      const decodedAppleToken = jwtDecode<{ sub: string }>(appleAuthResponse.identityToken);
-      const appleSub = decodedAppleToken.sub;
+      // Use Apple user ID directly from the auth response
+      let appleSub = appleAuthResponse.user;
+      if (!appleSub) {
+        // Fallback: decode the token if user field is not available (happens on subsequent sign-ins)
+        const decodedAppleToken = jwtDecode<{ sub: string }>(appleAuthResponse.identityToken);
+        appleSub = decodedAppleToken.sub;
+      }
       
       // Store OAuth subject securely for future account switching
       const { oauthStorage } = await import('./oauthStorageService');
@@ -590,8 +603,7 @@ export class AuthService {
           type: 'personal',
           index: 0
         };
-        const accountId = accountManager.generateAccountId(defaultAccountContext.type, defaultAccountContext.index);
-        await algorandService.storeAddress(algorandAddress, accountId);
+        await this.storeAlgorandAddress(algorandAddress, defaultAccountContext);
       } catch (accountError) {
         console.error('Error creating default account (Apple):', accountError);
         // Don't throw here - account creation failure shouldn't break the sign-in flow
@@ -718,7 +730,7 @@ export class AuthService {
         hasSecretKey: !!data.secretKey,
         hasInitRandomness: !!data.initRandomness,
         hasInitJwt: !!data.initJwt,
-        hasAptosAddress: !!data.zkProof?.aptosAddress,
+        hasAlgorandAddress: !!data.zkProof?.algorandAddress,
         secretKeyLength: data.secretKey?.length
       });
 
@@ -758,7 +770,7 @@ export class AuthService {
         zkProof: data.zkProof.zkProof,
         subject: data.subject,
         clientId: data.clientId,
-        algorandAddress: data.zkProof.aptosAddress
+        algorandAddress: data.zkProof.algorandAddress
       };
 
       // Check if we need to refresh the proof
@@ -796,7 +808,7 @@ export class AuthService {
           hasZkProof: !!this.zkProof?.zkProof,
           hasSubject: !!this.zkProof?.subject,
           hasClientId: !!this.zkProof?.clientId,
-          hasAptosAddress: !!this.zkProof?.aptosAddress
+          hasAlgorandAddress: !!this.zkProof?.algorandAddress
         }
       });
     } catch (error) {
@@ -828,7 +840,7 @@ export class AuthService {
     // Log the incoming proof structure
     console.log('Incoming proof structure:', {
       hasZkProof: !!proof.zkProof,
-      hasAptosAddress: !!proof.aptosAddress,
+      hasAlgorandAddress: !!proof.algorandAddress,
       success: proof.success,
       error: proof.error,
       proof: proof
@@ -844,8 +856,8 @@ export class AuthService {
     const secretKeyB64 = btoa(String.fromCharCode.apply(null, Array.from(secretKey).map(Number)));
 
     // Ensure we have a valid Sui address
-    if (!proof.aptosAddress) {
-      throw new Error('No Aptos address provided in proof');
+    if (!proof.algorandAddress) {
+      throw new Error('No Algorand address provided in proof');
     }
 
     // Structure the zkProof data with only required fields
@@ -853,7 +865,7 @@ export class AuthService {
       zkProof: proof.zkProof,
       subject,
       clientId,
-      algorandAddress: proof.aptosAddress,  // Store the Aptos address at the top level
+      algorandAddress: proof.algorandAddress,  // Store the Algorand address at the top level
       extendedEphemeralPublicKey: this.suiKeypair.getPublicKey().toBase64(),
       userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0)))
     };
@@ -902,7 +914,7 @@ export class AuthService {
   }
 
   // Get the user's Algorand address (renamed from Sui/Aptos address)
-  public async getAptosAddress(): Promise<string> {
+  public async getAlgorandAddress(): Promise<string> {
     if (!this.firebaseIsInitialized) {
       await this.initialize();
     }
@@ -911,7 +923,7 @@ export class AuthService {
     const accountManager = AccountManager.getInstance();
     const accountContext = await accountManager.getActiveAccountContext();
     
-    console.log('🔎 getAptosAddress - Current account context:', {
+    console.log('🔎 getAlgorandAddress - Current account context:', {
       type: accountContext.type,
       index: accountContext.index,
       businessId: accountContext.businessId
@@ -927,7 +939,7 @@ export class AuthService {
 
     // Use a unique service per account to avoid overwrites
     const serviceName = `com.confio.algorand.addresses.${cacheKey}`;
-    console.log('🔑 getAptosAddress - Using service:', serviceName);
+    console.log('🔑 getAlgorandAddress - Using service:', serviceName);
 
     // Try to get the stored address for this account from Keychain (per-service entry)
     try {
@@ -1150,7 +1162,7 @@ export class AuthService {
       
       // 4. Get accounts before clearing (for efficient address cleanup)
       const accountManager = AccountManager.getInstance();
-      const accounts = accountManager.getAllAccounts();
+      const accounts = await accountManager.getStoredAccounts();
       
       // 5. Clear Algorand wallet data (including encrypted seed cache and stored addresses)
       try {
@@ -2044,12 +2056,12 @@ export class AuthService {
     
     // Verify that the address changes for the new account context
     try {
-      const newAptosAddress = await this.getAptosAddress();
+      const newAlgorandAddress = await this.getAlgorandAddress();
       console.log('AuthService - Account switch completed with address:', {
         accountId: accountId,
         accountType: accountContext.type,
         accountIndex: accountContext.index,
-        address: newAptosAddress,
+        address: newAlgorandAddress,
         note: accountContext.type === 'personal' ? 'Personal account (index 0)' : `Business account (index ${accountContext.index})`
       });
     } catch (error) {

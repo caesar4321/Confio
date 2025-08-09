@@ -30,7 +30,8 @@ def validate_transaction_amount(amount) -> None:
         raise ValidationError("Amount must be a valid number")
 
 def validate_recipient(address: str) -> None:
-    """Validate the recipient's Sui address"""
-    # Sui addresses are 32 bytes (64 hex characters)
-    if not re.match(r'^0x[0-9a-fA-F]{64}$', address):
-        raise ValidationError("Invalid Sui address format") 
+    """Validate the recipient's Algorand address"""
+    # Algorand addresses are 58 characters in base32 format
+    # They start with capital letters and contain only alphanumeric characters (no 0, 1, 8, 9)
+    if not re.match(r'^[A-Z2-7]{58}$', address):
+        raise ValidationError("Invalid Algorand address format") 

@@ -37,7 +37,7 @@ type PaymentConfirmationRouteProp = RouteProp<{
         id: string;
         accountType: string;
         accountIndex: number;
-        aptosAddress: string;
+        algorandAddress: string;
         business?: {
           id: string;
           name: string;

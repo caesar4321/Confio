@@ -95,7 +95,7 @@ export const USDCWithdrawScreen = () => {
     }
     
     if (!recipientAddress || recipientAddress.length < 42) {
-      Alert.alert('Error', 'Por favor ingresa una dirección de Sui válida');
+      Alert.alert('Error', 'Por favor ingresa una dirección de Algorand válida');
       return;
     }
     
@@ -111,9 +111,9 @@ export const USDCWithdrawScreen = () => {
       return;
     }
     
-    // Validate Sui address format (basic validation)
+    // Validate Algorand address format (basic validation)
     if (!recipientAddress.startsWith('0x') || recipientAddress.length < 66) {
-      Alert.alert('Error', 'La dirección de Sui debe comenzar con 0x y tener 66 caracteres');
+      Alert.alert('Error', 'La dirección de Algorand debe tener 58 caracteres');
       return;
     }
     
@@ -164,7 +164,7 @@ export const USDCWithdrawScreen = () => {
           ) : (
             <Text style={styles.balanceAmount}>{usdcBalance.toFixed(2)} USDC</Text>
           )}
-          <Text style={styles.balanceNote}>En la red Sui</Text>
+          <Text style={styles.balanceNote}>En la red de Algorand</Text>
         </View>
         
         {/* Warning */}
@@ -173,7 +173,7 @@ export const USDCWithdrawScreen = () => {
           <View style={styles.warningContent}>
             <Text style={styles.warningTitle}>Importante</Text>
             <Text style={styles.warningText}>
-              Los retiros se procesan en la red Sui. Asegúrate de usar una dirección de Sui válida.
+              Los retiros se procesan en la red de Algorand. Asegúrate de usar una dirección de Algorand válida.
             </Text>
           </View>
         </View>
@@ -213,7 +213,7 @@ export const USDCWithdrawScreen = () => {
               autoCapitalize="none"
               autoCorrect={false}
             />
-            <Text style={styles.inputHint}>Ingresa tu dirección de Sui wallet</Text>
+            <Text style={styles.inputHint}>Ingresa tu dirección de Algorand wallet</Text>
           </View>
           
           {/* Minimum amount notice */}
@@ -271,7 +271,7 @@ export const USDCWithdrawScreen = () => {
           <View style={styles.infoContainer}>
             <Icon name="info" size={16} color={colors.text.secondary} />
             <Text style={styles.infoText}>
-              Los retiros se procesan inmediatamente. Monto mínimo: 1 USDC. El tiempo de confirmación depende de la congestión de la red Sui.
+              Los retiros se procesan inmediatamente. Monto mínimo: 1 USDC. El tiempo de confirmación depende de la congestión de la red de Algorand.
             </Text>
           </View>
         </View>
