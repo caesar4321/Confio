@@ -213,7 +213,7 @@ export const ViralTemplatesScreen: React.FC<ViralTemplatesScreenProps> = ({ navi
           <Text style={styles.tipText}>• Usa trends de música actual</Text>
           <Text style={styles.tipText}>• Interactúa con comentarios</Text>
           <Text style={styles.tipText}>• Publica entre 6-10pm</Text>
-          <Text style={styles.tipText}>• Consistencia > Perfección</Text>
+          <Text style={styles.tipText}>• Consistencia {'>'} Perfección</Text>
         </View>
       </View>
 

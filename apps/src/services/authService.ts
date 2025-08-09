@@ -466,41 +466,57 @@ export class AuthService {
         console.error('Error collecting device fingerprint (Apple):', error);
       }
       
-      // Initialize zkLogin with server-side nonce generation
-      onProgress?.('Autenticando tu cuenta...');
-      const { data: initData } = await apolloClient.mutate({
-        mutation: INITIALIZE_ZKLOGIN,
+      // Generate Algorand wallet first
+      onProgress?.('Preparando tu cuenta segura...');
+      console.log('Generating Algorand wallet for Apple sign-in...');
+      
+      // Decode the Apple ID token to get the OAuth subject
+      const decodedAppleToken = jwtDecode<{ sub: string }>(appleAuthResponse.identityToken);
+      const appleSub = decodedAppleToken.sub;
+      
+      // Store OAuth subject securely for future account switching
+      const { oauthStorage } = await import('./oauthStorageService');
+      await oauthStorage.storeOAuthSubject(appleSub, 'apple');
+      console.log('Stored Apple OAuth subject securely for future use');
+      
+      // Create or restore Algorand wallet
+      const algorandService = (await import('./algorandService')).default;
+      const algorandAddress = await algorandService.createOrRestoreWallet(firebaseToken, appleSub);
+      console.log('Algorand wallet created (Apple):', algorandAddress);
+      
+      // Authenticate with backend using Web3Auth
+      console.log('Authenticating with backend (Apple)...');
+      const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
+      const { data: { web3AuthLogin: authData } } = await apolloClient.mutate({
+        mutation: WEB3AUTH_LOGIN,
         variables: {
-          firebaseToken: firebaseToken,
-          providerToken: appleAuthResponse.identityToken,
-          provider: 'apple',
+          firebaseIdToken: firebaseToken,
+          algorandAddress: algorandAddress,
           deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null
         }
       });
       
-      if (!initData?.initializeZkLogin) {
-        throw new Error('No data received from zkLogin initialization');
+      if (!authData || !authData.success) {
+        throw new Error(authData?.error || 'Backend authentication failed');
       }
       
-      const { maxEpoch, randomness: serverRandomness, authAccessToken, authRefreshToken } = initData.initializeZkLogin;
-      
       // Store Django JWT tokens for authenticated requests using Keychain
-      if (authAccessToken) {
+      if (authData.accessToken) {
         console.log('About to store tokens in Keychain (Apple):', {
           service: AUTH_KEYCHAIN_SERVICE,
           username: AUTH_KEYCHAIN_USERNAME,
-          hasAccessToken: !!authAccessToken,
-          hasRefreshToken: !!authRefreshToken,
-          accessTokenLength: authAccessToken?.length,
-          refreshTokenLength: authRefreshToken?.length
+          hasAccessToken: !!authData.accessToken,
+          hasRefreshToken: !!authData.refreshToken,
+          accessTokenLength: authData.accessToken?.length,
+          refreshTokenLength: authData.refreshToken?.length
         });
 
         try {
           await Keychain.setGenericPassword(
             AUTH_KEYCHAIN_USERNAME,
             JSON.stringify({
-              accessToken: authAccessToken,
-              refreshToken: authRefreshToken
+              accessToken: authData.accessToken,
+              refreshToken: authData.refreshToken
             }),
             {
               service: AUTH_KEYCHAIN_SERVICE,
@@ -555,265 +571,40 @@ export class AuthService {
           throw error;
         }
       } else {
-        console.error('No auth tokens received from initializeZkLogin');
+        console.error('No auth tokens received from Web3Auth login');
         throw new Error('No auth tokens received from server');
       }
 
-      // Generate salt and ephemeral keypair
-      const decodedAppleJwt = jwtDecode<{ sub: string, iss: string }>(appleAuthResponse.identityToken);
-      const appleSub = decodedAppleJwt.sub;
-      console.log('Apple OAuth subject:', appleSub);
-      console.log('Apple OAuth issuer:', decodedAppleJwt.iss);
-      const salt = await this.generateZkLoginSalt(decodedAppleJwt.iss, appleSub, 'apple');
-      const ephemeralKeypair = this.deriveEphemeralKeypair(salt, appleSub, 'apple');
-      this.suiKeypair = ephemeralKeypair;
-      
-      // Generate the zkLogin nonce for Apple Sign In
-      const computedNonce = await this._generateNonce(ephemeralKeypair, maxEpoch, serverRandomness);
-      console.log('Computed zkLogin nonce for Apple:', computedNonce);
-      
-      // Get current account context for finalization
-      const accountManager = AccountManager.getInstance();
-      const accountContext = await accountManager.getActiveAccountContext();
-      console.log('Account context for finalization (Apple):', {
-        accountType: accountContext.type,
-        accountIndex: accountContext.index,
-        accountId: accountManager.generateAccountId(accountContext.type, accountContext.index)
-      });
-
-      // Get the extended ephemeral public key
-      const extendedEphemeralPublicKey = this.suiKeypair.getPublicKey().toBase64();
-
-      // Finalize zkLogin with device fingerprint
-      const { data: finalizeData } = await apolloClient.mutate({
-        mutation: FINALIZE_ZKLOGIN,
-        variables: {
-          input: {
-            extendedEphemeralPublicKey,
-            jwt: appleAuthResponse.identityToken,  // Send Apple JWT - server will handle nonce issue
-            maxEpoch: maxEpoch.toString(),
-            randomness: serverRandomness,
-            salt: salt,
-            userSignature: bytesToBase64(await this.suiKeypair.sign(new Uint8Array(0))),
-            keyClaimName: 'sub',
-            audience: 'apple',
-            firebaseToken: firebaseToken,
-            accountType: accountContext.type,
-            accountIndex: accountContext.index,
-            deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null,
-            computedNonce: computedNonce  // Send computed nonce for Apple Sign In
-          }
-        }
-      });
-
-      if (!finalizeData?.finalizeZkLogin) {
-        throw new Error('No data received from zkLogin finalization');
-      }
-
-      // Store sensitive data securely
-      await this.storeSensitiveData(
-        finalizeData.finalizeZkLogin,
-        salt,
-        appleSub,
-        'apple',
-        Number(maxEpoch),
-        serverRandomness,
-        appleAuthResponse.identityToken
-      );
-
-      // Automatically create default personal account after successful zkLogin
-      console.log('Creating default personal account (Apple)...');
+      // Set default personal account context
+      console.log('Setting default personal account context (Apple)...');
       try {
         const accountManager = AccountManager.getInstance();
-        const storedAccounts = await accountManager.getStoredAccounts();
+        await accountManager.setActiveAccountContext({
+          type: 'personal',
+          index: 0
+        });
+        console.log('Set default personal account context (personal_0)');
         
-        if (storedAccounts.length === 0) {
-          console.log('No local accounts found, but server should have created default personal account during zkLogin initialization (Apple)');
-          // Set default personal account context (server should have created this)
-          await accountManager.setActiveAccountContext({
-            type: 'personal',
-            index: 0
-          });
-          
-          console.log('Set default personal account context (personal_0) for Apple sign-in');
-        } else {
-          console.log('Local accounts already exist, skipping default account creation (Apple)');
-        }
-      } catch (accountError) {
-        console.error('Error creating default account (Apple):', accountError);
-        // Don't throw here - account creation failure shouldn't break the sign-in flow
-      }
-
-      // Split display name into first and last name
-      const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
-      const lastName = lastNameParts.join(' ');
-
-      // Create Algorand wallet using Web3Auth SFA with Firebase
-      let algorandAddress = '';
-      let isPhoneVerified = false;
-      try {
-        onProgress?.('Preparando tu cuenta segura...');
-        console.log('Creating Algorand wallet with Web3Auth SFA using Firebase (Apple)...');
-        // Get fresh Firebase ID token for Web3Auth
-        const freshFirebaseToken = await userCredential.user.getIdToken(true);
-        const firebaseUid = userCredential.user.uid;
-        // Store OAuth subject securely for future account switching
-        const { oauthStorage } = await import('./oauthStorageService');
-        await oauthStorage.storeOAuthSubject(appleSub, 'apple');
-        console.log('Stored Apple OAuth subject securely for future use');
-        
-        // Pass the Apple OAuth subject for non-custodial wallet derivation
-        algorandAddress = await algorandService.createOrRestoreWallet(freshFirebaseToken, appleSub);
-        console.log('Algorand wallet created (Apple):', algorandAddress);
-        
-        // Store the address for the personal account (default on sign-in)
+        // Store the Algorand address for the personal account
         const defaultAccountContext: AccountContext = {
           type: 'personal',
           index: 0
         };
-        await this.storeAlgorandAddress(algorandAddress, defaultAccountContext);
-        
-        // Call WEB3AUTH_LOGIN mutation to authenticate and get user info
-        const { WEB3AUTH_LOGIN, ADD_ALGORAND_WALLET } = await import('../apollo/mutations');
-        
-        console.log('Calling WEB3AUTH_LOGIN mutation for Apple...');
-        const { data: authData } = await apolloClient.mutate({
-          mutation: WEB3AUTH_LOGIN,
-          variables: {
-            firebaseIdToken: freshFirebaseToken,
-            algorandAddress,
-            deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null,
-          },
-          context: {
-            skipAuth: true, // Tell the auth link to skip adding JWT token
-          },
-        });
-        
-        if (authData?.web3AuthLogin?.success) {
-          console.log('WEB3AUTH_LOGIN successful (Apple)');
-          
-          // Store the new tokens from Web3Auth login
-          if (authData.web3AuthLogin.accessToken && authData.web3AuthLogin.refreshToken) {
-            await this.storeTokens({
-              accessToken: authData.web3AuthLogin.accessToken,
-              refreshToken: authData.web3AuthLogin.refreshToken,
-            });
-            console.log('Stored new authentication tokens (Apple)');
-          }
-          
-          // Get the phone verification status from the user
-          isPhoneVerified = authData.web3AuthLogin.user?.isPhoneVerified || false;
-          console.log('Phone verification status from backend (Apple):', isPhoneVerified);
-          
-          // Call ADD_ALGORAND_WALLET for opt-ins
-          console.log('Calling ADD_ALGORAND_WALLET mutation (Apple)...');
-          const { data: walletData } = await apolloClient.mutate({
-            mutation: ADD_ALGORAND_WALLET,
-            variables: {
-              algorandAddress,
-              web3authId: firebaseUid,
-              provider: 'apple'
-            }
-          });
-          
-          if (walletData?.addAlgorandWallet?.success) {
-            console.log('ADD_ALGORAND_WALLET successful (Apple)');
-            // Handle opt-ins if needed
-            if (walletData.addAlgorandWallet.needsOptIn?.length > 0) {
-              console.log('Handling automatic opt-ins for (Apple):', walletData.addAlgorandWallet.needsOptIn);
-              // Process sponsored opt-ins directly here (same as Google flow)
-              try {
-                const { ALGORAND_SPONSORED_OPT_IN } = await import('../apollo/mutations');
-                
-                for (const assetId of walletData.addAlgorandWallet.needsOptIn) {
-                  console.log(`Processing sponsored opt-in for asset ${assetId} (Apple)...`);
-                  
-                  // Request sponsored opt-in from backend
-                  const { data: optInData } = await apolloClient.mutate({
-                    mutation: ALGORAND_SPONSORED_OPT_IN,
-                    variables: {
-                      assetId: assetId
-                    }
-                  });
-                  
-                  const result = optInData?.algorandSponsoredOptIn;
-                  
-                  if (result?.success) {
-                    if (result.alreadyOptedIn) {
-                      console.log(`Asset ${assetId} already opted in (Apple)`);
-                    } else if (result.requiresUserSignature) {
-                      console.log(`Asset ${assetId} requires user signature (Apple) - signing and submitting...`);
-                      
-                      // We have the unsigned user transaction and signed sponsor transaction
-                      if (result.userTransaction && result.sponsorTransaction && algorandService) {
-                        try {
-                          // Use the secure wallet to sign the transaction
-                          const { secureDeterministicWallet } = await import('./secureDeterministicWallet');
-                          
-                          // The transaction from backend is base64-encoded msgpack
-                          const userTxnB64 = result.userTransaction;
-                          const userTxnBytes = Buffer.from(userTxnB64, 'base64');
-                          
-                          console.log('Signing opt-in transaction for asset (Apple)', assetId);
-                          
-                          // Sign the transaction using the secure wallet service
-                          const signedTxnBytes = await secureDeterministicWallet.signTransaction(
-                            firebaseUid,   // Firebase UID from earlier in the function
-                            userTxnBytes   // The raw transaction bytes from the backend
-                          );
-                          
-                          console.log('Transaction signed successfully (Apple)');
-                          
-                          // Convert signed transaction to base64 for submission
-                          const signedTxnB64 = Buffer.from(signedTxnBytes).toString('base64');
-                          
-                          // Submit the signed transaction group
-                          const { SUBMIT_SPONSORED_GROUP } = await import('../apollo/mutations');
-                          
-                          const { data: submitData } = await apolloClient.mutate({
-                            mutation: SUBMIT_SPONSORED_GROUP,
-                            variables: {
-                              signedUserTxn: signedTxnB64,
-                              signedSponsorTxn: result.sponsorTransaction  // Already signed by backend
-                            }
-                          });
-                          
-                          if (submitData?.submitSponsoredGroup?.success) {
-                            console.log(`Asset ${assetId} opt-in successful (Apple)! TxID: ${submitData.submitSponsoredGroup.transactionId}`);
-                          } else {
-                            console.error(`Failed to submit opt-in for asset ${assetId} (Apple):`, submitData?.submitSponsoredGroup?.error);
-                          }
-                        } catch (signError) {
-                          console.error(`Error signing/submitting opt-in for asset ${assetId} (Apple):`, signError);
-                        }
-                      } else {
-                        console.log(`Asset ${assetId} opt-in completed server-side (Apple)`);
-                      }
-                    } else {
-                      console.log(`Asset ${assetId} opt-in completed without signature (Apple)`);
-                    }
-                  } else {
-                    console.error(`Failed to opt-in to asset ${assetId} (Apple):`, result?.error);
-                  }
-                }
-                
-                console.log('Completed processing all opt-ins (Apple)');
-              } catch (optInError) {
-                console.error('Error processing opt-ins (Apple):', optInError);
-                // Don't fail the sign-in if opt-ins fail
-              }
-            }
-          }
-        } else {
-          console.error('WEB3AUTH_LOGIN failed (Apple):', authData?.web3AuthLogin?.error);
-        }
-      } catch (algorandError) {
-        console.error('Error creating Algorand wallet (Apple):', algorandError);
-        // Don't fail the sign-in if Algorand wallet creation fails
-        // We can retry later
+        const accountId = accountManager.generateAccountId(defaultAccountContext.type, defaultAccountContext.index);
+        await algorandService.storeAddress(algorandAddress, accountId);
+      } catch (accountError) {
+        console.error('Error creating default account (Apple):', accountError);
+        // Don't throw here - account creation failure shouldn't break the sign-in flow
       }
-
-      return {
+      
+      // Get user info for return
+      const [firstName, ...lastNameParts] = userCredential.user.displayName?.split(' ') || [];
+      const lastName = lastNameParts.join(' ');
+      const isPhoneVerified = authData.user?.isPhoneVerified || false;
+      console.log('Phone verification status from backend (Apple):', isPhoneVerified);
+      
+      // Return user info with Algorand address
+      const result = {
         userInfo: {
           email: userCredential.user.email,
           firstName: firstName || '',
@@ -829,6 +620,8 @@ export class AuthService {
           isPhoneVerified // Use the actual value from backend
         }
       };
+      console.log('Apple sign-in process completed successfully:', result);
+      return result;
     } catch (error) {
       console.error('Apple Sign In Error:', error);
       throw error;
