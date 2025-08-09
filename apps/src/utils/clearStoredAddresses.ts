@@ -7,30 +7,19 @@ import * as Keychain from 'react-native-keychain';
 export async function clearAllStoredAlgorandAddresses(): Promise<void> {
   console.log('🧹 Clearing all stored Algorand addresses...');
   
-  // Common cache key patterns
-  const keyPatterns = [
-    'algo_address_personal_0',
-    'algo_address_business_0',
-  ];
-  
-  // Also clear business addresses with IDs (1-100 as a reasonable range)
-  for (let i = 1; i <= 100; i++) {
-    keyPatterns.push(`algo_address_business_${i}_0`);
+  // Clear per-account services introduced to avoid overwrites
+  const keyPatterns: string[] = ['algo_address_personal_0'];
+  for (let i = 1; i <= 200; i++) keyPatterns.push(`algo_address_business_${i}_0`);
+
+  let cleared = 0;
+  for (const key of keyPatterns) {
+    const service = `com.confio.algorand.addresses.${key}`;
+    try {
+      await Keychain.resetGenericPassword({ service });
+      cleared += 1;
+      console.log(`  Cleared: ${service}`);
+    } catch {}
   }
-  
-  let clearedCount = 0;
-  
-  // In v10, we can't clear individual entries with a specific username
-  // Instead, we'll clear the entire service at once
-  try {
-    await Keychain.resetGenericPassword({
-      service: 'com.confio.algorand.addresses'
-    });
-    console.log(`  ✅ Cleared all addresses for service: com.confio.algorand.addresses`);
-    clearedCount = keyPatterns.length; // Assume all were cleared
-  } catch (e) {
-    console.log(`  ⚠️ Could not clear addresses:`, e);
-  }
-  
-  console.log(`🧹 Cleared ${clearedCount} stored addresses`);
+
+  console.log(`🧹 Cleared ${cleared} stored addresses`);
 }
