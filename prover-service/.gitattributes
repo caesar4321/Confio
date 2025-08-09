@@ -1,6 +1,0 @@
-# Encrypt sensitive files with git-crypt
-.env.production filter=git-crypt diff=git-crypt
-.env filter=git-crypt diff=git-crypt
-*.pem filter=git-crypt diff=git-crypt
-"../Sui custom prover.pem" filter=git-crypt diff=git-crypt
-ec2-credentials.json filter=git-crypt diff=git-crypt
