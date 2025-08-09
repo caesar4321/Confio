@@ -17,11 +17,13 @@ class PrepareTransactionInput(graphene.InputObjectType):
     # Recipient identification - use ONE of these
     recipient_user_id = graphene.ID(description="User ID of the recipient (for Confío users)")
     recipient_phone = graphene.String(description="Phone number of the recipient (for any user)")
-    recipient_address = graphene.String(description="Sui address for external wallet recipients (0x...)")
+    recipient_address = graphene.String(description="Algorand address for external wallet recipients (58 chars)")
     
     # Transaction details
     amount = graphene.String(required=True, description="Amount to send (e.g., '10.50')")
     token_type = graphene.String(required=True, description="Type of token to send (e.g., 'cUSD', 'CONFIO')")
+    memo = graphene.String(description="Optional memo for the transaction")
+    idempotency_key = graphene.String(description="Optional idempotency key to prevent duplicate transactions")
     
     # Display info (for UI purposes only)
     recipient_display_name = graphene.String(description="Display name for the recipient (for UI)")
@@ -38,7 +40,7 @@ class SendTransactionInput(graphene.InputObjectType):
     # Recipient identification - use ONE of these
     recipient_user_id = graphene.ID(description="User ID of the recipient (for Confío users)")
     recipient_phone = graphene.String(description="Phone number of the recipient (for any user)")
-    recipient_address = graphene.String(description="Sui address for external wallet recipients (0x...)")
+    recipient_address = graphene.String(description="Algorand address for external wallet recipients (58 chars)")
     
     # Transaction details
     amount = graphene.String(required=True, description="Amount to send (e.g., '10.50')")
@@ -190,17 +192,17 @@ class CreateSendTransaction(graphene.Mutation):
                         account_index=account_index
                     ).first()
                 
-                if not active_account or not active_account.sui_address:
+                if not active_account or not active_account.algorand_address:
                     return CreateSendTransaction(
                         send_transaction=None,
                         success=False,
-                        errors=["Sender's Sui address not found"]
+                        errors=["Sender's Algorand address not found"]
                     )
                 
-                sender_address = active_account.sui_address
+                sender_address = active_account.algorand_address
                 sender_account = active_account  # Store for later use in notifications
 
-                # Find recipient and their Sui address
+                # Find recipient and their Algorand address
                 recipient_user = None
                 recipient_account = None
                 recipient_address = None
@@ -215,14 +217,14 @@ class CreateSendTransaction(graphene.Mutation):
                             account_type='personal',
                             account_index=0
                         ).first()
-                        if recipient_account and recipient_account.sui_address:
-                            recipient_address = recipient_account.sui_address
+                        if recipient_account and recipient_account.algorand_address:
+                            recipient_address = recipient_account.algorand_address
                             print(f"CreateSendTransaction: Found recipient address by user ID: {recipient_address}")
                         else:
                             return CreateSendTransaction(
                                 send_transaction=None,
                                 success=False,
-                                errors=["Recipient's Sui address not found"]
+                                errors=["Recipient's Algorand address not found"]
                             )
                     except User.DoesNotExist:
                         return CreateSendTransaction(
@@ -245,15 +247,15 @@ class CreateSendTransaction(graphene.Mutation):
                             account_type='personal',
                             account_index=0
                         ).first()
-                        if recipient_account and recipient_account.sui_address:
-                            recipient_address = recipient_account.sui_address
+                        if recipient_account and recipient_account.algorand_address:
+                            recipient_address = recipient_account.algorand_address
                             print(f"CreateSendTransaction: Found recipient address by phone: {recipient_address}")
                         else:
                             # Confío user without address - shouldn't happen
                             return CreateSendTransaction(
                                 send_transaction=None,
                                 success=False,
-                                errors=["Recipient's Sui address not found"]
+                                errors=["Recipient's Algorand address not found"]
                             )
                     except User.DoesNotExist:
                         # Non-Confío user - create invitation transaction
@@ -271,7 +273,7 @@ class CreateSendTransaction(graphene.Mutation):
                     validate_recipient(recipient_address)
                     # Try to find if this is actually a Confío user's address
                     try:
-                        recipient_account = Account.objects.get(sui_address=recipient_address)
+                        recipient_account = Account.objects.get(algorand_address=recipient_address)
                         recipient_user = recipient_account.user
                         print(f"CreateSendTransaction: Found Confío user for external address")
                     except Account.DoesNotExist:
@@ -371,40 +373,63 @@ class CreateSendTransaction(graphene.Mutation):
                 import time
                 import uuid
                 
-                # Execute blockchain transaction using pysui
-                from blockchain.transaction_manager_pysui import TransactionManagerPySui
+                # Execute blockchain transaction using Algorand
+                from blockchain.algorand_sponsor_service import algorand_sponsor_service
                 import asyncio
                 
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 
                 try:
-                    # Get zkLogin signature from client input
-                    user_signature = getattr(input, 'zk_login_signature', None)
-                    if not user_signature:
-                        # For backward compatibility, log warning but continue
-                        print("WARNING: No zkLogin signature provided by client - transaction will use sponsor key only")
+                    # For Algorand, we don't need zkLogin signature - using Web3Auth instead
+                    # Create sponsored transfer
+                    asset_id = None
+                    if input.token_type.upper() == 'CONFIO':
+                        asset_id = getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 743890784)
+                    elif input.token_type.upper() == 'USDC':
+                        asset_id = getattr(settings, 'ALGORAND_USDC_ASSET_ID', 10458941)
+                    # For ALGO transfers, asset_id remains None
                     
-                    # Execute the sponsored transaction using pysui
+                    # Use proper atomic group transaction where user sends and sponsor pays fees
                     result = loop.run_until_complete(
-                        TransactionManagerPySui.send_tokens(
-                            sender_account,
-                            recipient_address,
-                            amount_decimal,
-                            input.token_type.upper(),
-                            user_signature
+                        algorand_sponsor_service.create_sponsored_transfer(
+                            sender=sender_address,
+                            recipient=recipient_address,
+                            amount=amount_decimal,
+                            asset_id=asset_id,
+                            note=input.memo
                         )
                     )
                     
                     if result['success']:
+                        # Return the atomic group data for client-side signing
+                        # This follows the proper two-step process:
+                        # 1. Server creates atomic group (this step)
+                        # 2. Client signs user transaction and submits group (next step)
+                        
+                        return CreateSendTransaction(
+                            send_transaction=None,
+                            success=True,
+                            errors=[],
+                            # Add atomic group data for frontend
+                            atomic_group_data=result
+                        )
+                    else:
+                        return CreateSendTransaction(
+                            send_transaction=None,
+                            success=False,
+                            errors=[result.get('error', 'Failed to create atomic group transaction')]
+                        )
+                    
+                    if result['success']:
                         # Update transaction with blockchain result
                         send_transaction.status = 'CONFIRMED'
-                        send_transaction.transaction_hash = result.get('digest', '')
+                        send_transaction.transaction_hash = result.get('tx_id', '')
                         
                         # Log the blockchain transaction
                         print(f"Blockchain send successful: {amount_decimal} {input.token_type} to {recipient_address[:16]}...")
-                        print(f"Transaction digest: {result.get('digest')}")
-                        print(f"Gas saved: {result.get('gas_saved', 0)} SUI")
+                        print(f"Transaction ID: {result.get('tx_id')}")
+                        print(f"Fees saved: {result.get('fees_saved', 0)} ALGO")
                         
                         if result.get('warning'):
                             print(f"WARNING: {result['warning']}")
@@ -627,11 +652,11 @@ class Query(graphene.ObjectType):
                     account_index=account_index
                 )
             
-            # Filter by account's Sui address
-            if account.sui_address:
+            # Filter by account's Algorand address
+            if account.algorand_address:
                 return SendTransaction.objects.filter(
-                    models.Q(sender_address=account.sui_address) | 
-                    models.Q(recipient_address=account.sui_address)
+                    models.Q(sender_address=account.algorand_address) | 
+                    models.Q(recipient_address=account.algorand_address)
                 ).order_by('-created_at')
         except Account.DoesNotExist:
             pass
@@ -689,7 +714,7 @@ class Query(graphene.ObjectType):
                     account_index=account_index
                 )
             
-            if not user_account.sui_address:
+            if not user_account.algorand_address:
                 return []
                 
         except Account.DoesNotExist:
@@ -699,13 +724,13 @@ class Query(graphene.ObjectType):
         if friend_user_id and not friend_user_id.startswith('contact_'):
             # Regular Confío user - search by user ID and account addresses
             # Get all accounts for the friend user
-            friend_accounts = Account.objects.filter(user_id=friend_user_id).values_list('sui_address', flat=True)
+            friend_accounts = Account.objects.filter(user_id=friend_user_id).values_list('algorand_address', flat=True)
             friend_addresses = list(friend_accounts)
             
             if friend_addresses:
                 queryset = SendTransaction.objects.filter(
-                    (models.Q(sender_address=user_account.sui_address) & models.Q(recipient_address__in=friend_addresses)) |
-                    (models.Q(sender_address__in=friend_addresses) & models.Q(recipient_address=user_account.sui_address))
+                    (models.Q(sender_address=user_account.algorand_address) & models.Q(recipient_address__in=friend_addresses)) |
+                    (models.Q(sender_address__in=friend_addresses) & models.Q(recipient_address=user_account.algorand_address))
                 ).order_by('-created_at')
             else:
                 # Friend has no accounts with addresses yet
@@ -713,7 +738,7 @@ class Query(graphene.ObjectType):
         elif friend_phone:
             # Non-Confío friend - search by phone number from user's account
             queryset = SendTransaction.objects.filter(
-                models.Q(sender_address=user_account.sui_address) & models.Q(recipient_phone=friend_phone)
+                models.Q(sender_address=user_account.algorand_address) & models.Q(recipient_phone=friend_phone)
             ).order_by('-created_at')
         else:
             # No valid identifier provided
@@ -757,7 +782,7 @@ class PrepareTransaction(graphene.Mutation):
         try:
             from decimal import Decimal
             from users.jwt_context import get_jwt_business_context_with_validation
-            from blockchain.transaction_manager_pysui import TransactionManagerPySui
+            from blockchain.algorand_sponsor_service import algorand_sponsor_service
             import asyncio
             
             # Get account context from JWT
@@ -805,12 +830,12 @@ class PrepareTransaction(graphene.Mutation):
                         account_type='personal',
                         account_index=0
                     ).first()
-                    if recipient_account and recipient_account.sui_address:
-                        recipient_address = recipient_account.sui_address
+                    if recipient_account and recipient_account.algorand_address:
+                        recipient_address = recipient_account.algorand_address
                     else:
                         return PrepareTransaction(
                             success=False,
-                            errors=["Recipient's Sui address not found"]
+                            errors=["Recipient's Algorand address not found"]
                         )
                 except User.DoesNotExist:
                     return PrepareTransaction(
@@ -826,8 +851,8 @@ class PrepareTransaction(graphene.Mutation):
                         account_type='personal',
                         account_index=0
                     ).first()
-                    if recipient_account and recipient_account.sui_address:
-                        recipient_address = recipient_account.sui_address
+                    if recipient_account and recipient_account.algorand_address:
+                        recipient_address = recipient_account.algorand_address
                 except User.DoesNotExist:
                     # Non-Confío user - create invitation address
                     import hashlib
@@ -846,33 +871,51 @@ class PrepareTransaction(graphene.Mutation):
             asyncio.set_event_loop(loop)
             
             try:
-                # Prepare the transaction (but don't execute)
-                from blockchain.sponsor_service_pysui import SponsorServicePySui
+                # Prepare the transaction (but don't execute) - Algorand version
+                asset_id = None
+                if input.token_type.upper() == 'CONFIO':
+                    asset_id = getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 743890784)
+                elif input.token_type.upper() == 'USDC':
+                    asset_id = getattr(settings, 'ALGORAND_USDC_ASSET_ID', 10458941)
                 
                 result = loop.run_until_complete(
-                    SponsorServicePySui.prepare_send_transaction(
-                        account=active_account,
+                    algorand_sponsor_service.create_sponsored_transfer(
+                        sender=active_account.algorand_address,
                         recipient=recipient_address,
                         amount=amount_decimal,
-                        token_type=input.token_type.upper()
+                        asset_id=asset_id
                     )
                 )
                 
-                if result.get('success') and result.get('requiresUserSignature'):
+                if result.get('success'):
+                    # Prioritize frontend's display name (contact name), fallback to user data
+                    recipient_display_name = getattr(input, 'recipient_display_name', '')
+                    
+                    # Only fallback to user data if frontend didn't provide a name
+                    if not recipient_display_name and recipient_user:
+                        recipient_display_name = f"{recipient_user.first_name} {recipient_user.last_name}".strip()
+                        if not recipient_display_name:
+                            recipient_display_name = recipient_user.username or f"User {recipient_user.id}"
+                    
+                    # Ensure we never have an empty string (database constraint)
+                    if not recipient_display_name:
+                        recipient_display_name = "External Address"
+                    
                     # Transaction prepared successfully
                     transaction_metadata = {
-                        'sender_address': active_account.sui_address,
+                        'sender_address': active_account.algorand_address,
                         'recipient_address': recipient_address,
                         'amount': str(amount_decimal),
                         'token_type': input.token_type,
-                        'recipient_display_name': getattr(input, 'recipient_display_name', ''),
-                        'timestamp': timezone.now().isoformat()
+                        'recipient_display_name': recipient_display_name,
+                        'timestamp': timezone.now().isoformat(),
+                        'asset_id': asset_id
                     }
                     
                     return PrepareTransaction(
                         success=True,
-                        tx_bytes=result['txBytes'],
-                        sponsor_signature=result['sponsorSignature'],
+                        tx_bytes=result['user_transaction'],
+                        sponsor_signature=result['sponsor_transaction'],
                         transaction_metadata=transaction_metadata,
                         errors=None
                     )
@@ -917,7 +960,7 @@ class ExecuteTransaction(graphene.Mutation):
 
         try:
             from users.jwt_context import get_jwt_business_context_with_validation
-            from blockchain.sponsor_service_pysui import SponsorServicePySui
+            from blockchain.algorand_sponsor_service import algorand_sponsor_service
             import asyncio
             import json
             
@@ -993,18 +1036,16 @@ class ExecuteTransaction(graphene.Mutation):
                     )
                 
                 result = loop.run_until_complete(
-                    SponsorServicePySui.execute_transaction_with_signatures(
-                        tx_bytes=input.tx_bytes,
-                        sponsor_signature=input.sponsor_signature,
-                        user_signature=input.zk_login_signature,
-                        account_id=active_account.id if active_account else None
+                    algorand_sponsor_service.submit_sponsored_group(
+                        signed_user_txn=input.zk_login_signature,  # This is now the user's signed transaction
+                        signed_sponsor_txn=input.sponsor_signature
                     )
                 )
                 
                 if result.get('success'):
                     # Update transaction with success
                     send_transaction.status = 'CONFIRMED'
-                    send_transaction.transaction_hash = result.get('digest', '')
+                    send_transaction.transaction_hash = result.get('tx_id', '')
                     send_transaction.save()
                     
                     # Create notifications

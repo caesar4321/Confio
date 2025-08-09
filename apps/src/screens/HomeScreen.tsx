@@ -36,7 +36,6 @@ import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
 import { useQuery, useMutation } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE, GET_PRESALE_STATUS } from '../apollo/queries';
-import { REFRESH_ACCOUNT_BALANCE } from '../apollo/mutations';
 import { useCountry } from '../contexts/CountryContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
@@ -108,7 +107,7 @@ export const HomeScreen = () => {
   const { userCountry, selectedCountry } = useCountry();
   const { currency, formatAmount, exchangeRate } = useCurrency();
   const { rate: marketRate, loading: rateLoading } = useSelectedCountryRate();
-  const [aptosAddress, setAptosAddress] = React.useState<string>('');
+  const [algorandAddress, setAlgorandAddress] = React.useState<string>('');
   // Show local currency by default if not in US and rate is available
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -319,8 +318,6 @@ export const HomeScreen = () => {
     userProfileName: userProfile?.firstName || userProfile?.username
   });
 
-  // Refresh balance mutation for force-refreshing from blockchain
-  const [refreshBalanceMutation] = useMutation(REFRESH_ACCOUNT_BALANCE);
   
   // Pull to refresh handler
   const onRefresh = useCallback(async () => {
@@ -331,13 +328,6 @@ export const HomeScreen = () => {
     }
     
     try {
-      // Force refresh from blockchain using the mutation
-      const { data } = await refreshBalanceMutation();
-      
-      if (data?.refreshAccountBalance?.success) {
-        console.log('Balances refreshed from blockchain:', data.refreshAccountBalance.balances);
-      }
-      
       // Then refetch the cached data and refresh accounts
       await Promise.all([
         refreshAccounts(),
@@ -349,7 +339,7 @@ export const HomeScreen = () => {
     } finally {
       setRefreshing(false);
     }
-  }, [refreshAccounts, refetchCUSD, refetchConfio, refreshBalanceMutation]);
+  }, [refreshAccounts, refetchCUSD, refetchConfio]);
   
   // Quick actions configuration - filter based on permissions
   const quickActionsData: QuickAction[] = [
@@ -474,8 +464,8 @@ export const HomeScreen = () => {
         
         if (!mounted) return;
         
-        const address = await authService.getAptosAddress();
-        setAptosAddress(address);
+        const address = await authService.getAlgorandAddress();
+        setAlgorandAddress(address);
         
       } catch (error) {
         console.error('HomeScreen - Error during initialization:', error);
@@ -528,9 +518,9 @@ export const HomeScreen = () => {
       accountName: 'Confío Dollar',
       accountSymbol: '$cUSD',
       accountBalance: cUSDBalance.toFixed(2),
-      accountAddress: activeAccount?.aptosAddress || ''
+      accountAddress: activeAccount?.algorandAddress || ''
     });
-  }, [navigation, cUSDBalance, activeAccount?.aptosAddress]);
+  }, [navigation, cUSDBalance, activeAccount?.algorandAddress]);
 
   const navigateToConfioAccount = useCallback(() => {
     navigation.navigate('AccountDetail', { 
@@ -538,9 +528,9 @@ export const HomeScreen = () => {
       accountName: 'Confío',
       accountSymbol: '$CONFIO',
       accountBalance: confioBalance.toFixed(2),
-      accountAddress: activeAccount?.aptosAddress || ''
+      accountAddress: activeAccount?.algorandAddress || ''
     });
-  }, [navigation, confioBalance, activeAccount?.aptosAddress]);
+  }, [navigation, confioBalance, activeAccount?.algorandAddress]);
   
   useFocusEffect(
     React.useCallback(() => {

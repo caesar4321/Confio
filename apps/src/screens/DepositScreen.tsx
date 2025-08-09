@@ -155,8 +155,8 @@ const DepositScreen = () => {
   const tokenType: TokenType = (route.params as RouteParams)?.tokenType || 'usdc';
   const config = tokenConfig[tokenType];
   
-  // Use the real Sui address from the active account
-  const depositAddress = activeAccount?.aptosAddress || "0x0000000000000000000000000000000000000000";
+  // Use the real Algorand address from the active account
+  const depositAddress = activeAccount?.algorandAddress || "";
 
   const handleCopy = async () => {
     await Clipboard.setString(depositAddress);

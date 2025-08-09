@@ -174,8 +174,7 @@ class AlgorandExtension {
       });
       
       // Check if user has wallet address in their account
-      // Temporarily using aptos_address field to store Algorand address
-      const algorandAddress = data?.me?.accounts?.[0]?.aptosAddress;
+      const algorandAddress = data?.me?.accounts?.[0]?.algorandAddress;
       
       if (algorandAddress) {
         // Also check if we can restore the wallet locally

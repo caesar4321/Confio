@@ -48,7 +48,7 @@ const CREATE_TEST_USERS = gql`
         lastName
         isOnConfio
         activeAccountId
-        activeAccountSuiAddress
+        activeAccountAlgorandAddress
       }
     }
   }
@@ -465,7 +465,7 @@ export const ContactsScreen = () => {
       phone: contact.phoneNumbers && contact.phoneNumbers[0] ? contact.phoneNumbers[0] : '',
       isOnConfio: contact.isOnConfio || false,
       userId: contact.confioUserId || null,
-      aptosAddress: contact.confioSuiAddress || null
+      algorandAddress: contact.confioAlgorandAddress || null
     }));
     
     console.log(`[PERF] Formatting took ${Date.now() - formatStart}ms`);
@@ -692,10 +692,10 @@ export const ContactsScreen = () => {
 
   const handleSendToFriend = (friend: any) => {
     console.log('ContactsScreen: handleSendToFriend called with friend:', friend.name);
-    // Include Sui address if available
+    // Include Algorand address if available
     const friendWithAddress = {
       ...friend,
-      aptosAddress: friend.aptosAddress || null
+      algorandAddress: friend.algorandAddress || null
     };
     setSelectedFriend(friendWithAddress);
     setShowFriendTokenSelection(true);

@@ -2176,7 +2176,7 @@ export const TransactionDetailScreen = () => {
                       );
                     } else {
                       // This is a Confío user - we just need their phone number
-                      // The server will look up their current active Sui address
+                      // The server will look up their current active Algorand address
                       const friendData = {
                         name: friendName || 'Amigo',
                         avatar: currentTx.avatar || friendName?.charAt(0) || 'A',

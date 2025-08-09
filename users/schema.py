@@ -2181,7 +2181,6 @@ class BalancesType(graphene.ObjectType):
 	cusd = graphene.String()
 	confio = graphene.String()
 	usdc = graphene.String()
-	algo = graphene.String()  # ALGO balance in Algorand
 
 class RefreshAccountBalance(graphene.Mutation):
 	"""Force refresh balance from blockchain for the current account"""
@@ -2263,8 +2262,7 @@ class RefreshAccountBalance(graphene.Mutation):
 			balances = BalancesType(
 				cusd=f"{all_balances['cusd']['amount']:.2f}",
 				confio=f"{all_balances['confio']['amount']:.2f}",
-				usdc=f"{all_balances['usdc']['amount']:.2f}",
-				algo=f"{all_balances['algo']['amount']:.2f}"
+				usdc=f"{all_balances['usdc']['amount']:.2f}"
 			)
 			
 			last_synced = max(

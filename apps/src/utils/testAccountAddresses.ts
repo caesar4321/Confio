@@ -23,8 +23,8 @@ export async function testAccountAddresses() {
     console.log('\n📍 Current account context:', currentContext);
     
     // Test getting address for current account
-    console.log('\n🔍 Testing getAptosAddress() for current account...');
-    const currentAddress = await authService.getAptosAddress();
+    console.log('\n🔍 Testing getAlgorandAddress() for current account...');
+    const currentAddress = await authService.getAlgorandAddress();
     console.log('Current account address:', currentAddress || '(empty - no address)');
     
     // Get all stored accounts to test switching
@@ -51,7 +51,7 @@ export async function testAccountAddresses() {
         console.log('✅ Switched to account');
         
         // Get the address after switching
-        const address = await authService.getAptosAddress();
+        const address = await authService.getAlgorandAddress();
         console.log(`Address: ${address || '(empty - no address)'}`);
         
         // Verify the account context changed
@@ -126,7 +126,7 @@ export async function forceRegenerateAllAddresses() {
         await authService.switchAccount(account.id);
         
         // Get the new address
-        const address = await authService.getAptosAddress();
+        const address = await authService.getAlgorandAddress();
         console.log(`✅ New address: ${address || '(failed to generate)'}`);
         
       } catch (error) {

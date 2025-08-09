@@ -15,7 +15,6 @@ class AlgorandService {
   private algodClient: any = null;
   private currentAccount: AccountLite | null = null;
   private algosdk: any = null;
-  private currentFirebaseUid: string | null = null;
   
   // Deprecated Web3Auth properties (no longer initialized)
   private Web3Auth: any = null;
@@ -124,14 +123,6 @@ class AlgorandService {
     return (this.algosdk?.[name] ?? this.algosdk?.default?.[name]);
   }
 
-  /**
-   * Set the current Firebase UID for transaction signing
-   * Call this when restoring login session on app restart
-   */
-  setCurrentFirebaseUid(uid: string): void {
-    this.currentFirebaseUid = uid;
-    console.log('Firebase UID set for Algorand service:', uid);
-  }
 
   // Web3Auth initialization is no longer used - kept for reference only
   // We use secure deterministic wallet instead
@@ -280,10 +271,9 @@ class AlgorandService {
       });
 
       // Sign transaction using secure wallet
-      if (!this.currentFirebaseUid) {
-        throw new Error('No Firebase UID available for signing');
-      }
-      const signedTxn = await secureDeterministicWallet.signTransaction(this.currentFirebaseUid, txn);
+      // Backend will handle signing with JWT context
+      // For now, throw error to indicate client-side signing is not available
+      throw new Error('Client-side signing not available - transaction must be signed on backend');
       
       // Submit transaction
       const { txId } = await realAlgodClient.sendRawTransaction(signedTxn).do();
@@ -307,6 +297,57 @@ class AlgorandService {
   getCurrentAccount(): any {
     return this.currentAccount;
   }
+  
+  async signTransactionBytes(txnBytes: Uint8Array): Promise<Uint8Array> {
+    // Sign a transaction using deterministic wallet derived from JWT + account context
+    try {
+      await this.ensureInitialized();
+
+      // Ensure wallet scope is ready from OAuth subject and active account context
+      const { oauthStorage } = await import('./oauthStorageService');
+      const oauthData = await oauthStorage.getOAuthSubject();
+      if (!oauthData || !oauthData.subject || !oauthData.provider) {
+        throw new Error('Missing OAuth subject/provider for signing');
+      }
+
+      const provider: 'google' | 'apple' = oauthData.provider;
+      const sub: string = oauthData.subject;
+
+      // Get active account context (type/index/businessId)
+      const { AuthService } = await import('./authService');
+      const authService = AuthService.getInstance();
+      const accountContext = await authService.getActiveAccountContext();
+
+      // Determine issuer/audience consistently with derivation
+      const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+      const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+      const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+      const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+
+      // Create/restore wallet to ensure in-memory seed and scope are set
+      const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+        iss,
+        sub,
+        aud,
+        provider,
+        accountContext.type,
+        accountContext.index,
+        accountContext.businessId
+      );
+
+      // Ensure currentAccount is set for downstream consumers
+      if (!this.currentAccount) {
+        this.currentAccount = { addr: wallet.address, sk: null };
+      }
+
+      // Now sign the raw transaction bytes using secure wallet
+      const signedTxn = await secureDeterministicWallet.signTransaction(sub, txnBytes);
+      return signedTxn;
+    } catch (error) {
+      console.error('Error signing transaction:', error);
+      throw error;
+    }
+  }
 
   getAlgosdk(): any {
     return this.algosdk;
@@ -329,7 +370,6 @@ class AlgorandService {
   async clearWallet() {
     try {
       this.currentAccount = null;
-      this.currentFirebaseUid = null;
       
       // Clear ALL wallet data (no multi-user support)
       try {
@@ -517,10 +557,9 @@ class AlgorandService {
         console.log('[AlgorandService] Created opt-in transaction');
 
         // Sign transaction using secure wallet
-        if (!this.currentFirebaseUid) {
-          throw new Error('No Firebase UID available for signing');
-        }
-        const signedTxn = await secureDeterministicWallet.signTransaction(this.currentFirebaseUid, txn);
+        // Backend will handle signing with JWT context
+        // For now, throw error to indicate client-side signing is not available
+        throw new Error('Client-side signing not available - transaction must be signed on backend');
         console.log('[AlgorandService] Transaction signed');
         
         // Submit transaction using the real client
@@ -682,13 +721,7 @@ class AlgorandService {
       }
 
       console.log('[AlgorandService] Signing user transaction...');
-      
-      // Sign the user transaction using secure wallet (pass raw bytes)
-      if (!this.currentFirebaseUid) {
-        throw new Error('No Firebase UID available for signing');
-      }
-      const signedUserTxn = await secureDeterministicWallet.signTransaction(this.currentFirebaseUid, userTransaction);
-      
+      const signedUserTxn = await this.signTransactionBytes(userTransaction);
       // Encode for submission (RN compatible)
       const signedUserTxnB64 = Buffer.from(signedUserTxn).toString('base64');
       const sponsorTxnB64 = Buffer.from(sponsorTransaction).toString('base64');
@@ -788,13 +821,7 @@ class AlgorandService {
       
       // Step 2: Decode and sign the user transaction (RN compatible)
       const userTxnBytes = Uint8Array.from(Buffer.from(result.userTransaction, 'base64'));
-      
-      // Sign with user's private key using secure wallet (pass raw bytes, not base64 string!)
-      if (!this.currentFirebaseUid) {
-        throw new Error('No Firebase UID available for signing');
-      }
-      const signedUserTxn = await secureDeterministicWallet.signTransaction(this.currentFirebaseUid, userTxnBytes);
-      
+      const signedUserTxn = await this.signTransactionBytes(userTxnBytes);
       // Convert to base64 (RN compatible)
       const signedUserTxnB64 = Buffer.from(signedUserTxn).toString('base64');
       

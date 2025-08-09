@@ -37,7 +37,7 @@ const tokenConfig = {
     color: colors.primary,
     minSend: 1,
     fee: 0,  // Sponsored transactions
-    description: 'Envía cUSD a cualquier dirección Sui',
+    description: 'Envía cUSD a cualquier dirección Algorand',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
   confio: {
@@ -47,7 +47,7 @@ const tokenConfig = {
     color: colors.secondary,
     minSend: 1,
     fee: 0,  // Sponsored transactions
-    description: 'Envía CONFIO a cualquier dirección Sui',
+    description: 'Envía CONFIO a cualquier dirección Algorand',
     quickAmounts: ['10.00', '50.00', '100.00'],
   },
 };
@@ -57,7 +57,7 @@ type Friend = {
   avatar: string;
   isOnConfio: boolean;
   phone: string;
-  aptosAddress?: string;
+  algorandAddress?: string;
   userId?: string;
   id?: string; // Some screens pass 'id' instead of 'userId'
 };
@@ -74,8 +74,8 @@ export const SendToFriendScreen = () => {
   console.log('SendToFriendScreen: route.params:', route.params);
   console.log('SendToFriendScreen: friend data:', friend);
   console.log('SendToFriendScreen: friend.isOnConfio:', friend.isOnConfio);
-  console.log('SendToFriendScreen: friend.aptosAddress:', friend.aptosAddress);
-  console.log('SendToFriendScreen: friend.aptosAddress length:', friend.aptosAddress?.length);
+  console.log('SendToFriendScreen: friend.algorandAddress:', friend.algorandAddress);
+  console.log('SendToFriendScreen: friend.algorandAddress length:', friend.algorandAddress?.length);
   const [tokenType, setTokenType] = useState<TokenType>((route.params as any)?.tokenType || 'cusd');
   const config = tokenConfig[tokenType];
 

@@ -333,27 +333,12 @@ export const TransactionProcessingScreen = () => {
           return;
         }
         
-        // Decode the unsigned transaction
-        const userTxnBytes = Uint8Array.from(atob(userTransaction), c => c.charCodeAt(0));
-        const txnToSign = msgpack.decode(userTxnBytes);
+        // Backend handles signing with JWT context
+        // Client just needs to submit the request for backend signing
+        // The backend will sign the user transaction and submit the atomic group
         
-        // Sign using raw nacl approach
-        const txTypeBytes = new Uint8Array(Buffer.from('TX'));
-        const bytesToSign = new Uint8Array(txTypeBytes.length + userTxnBytes.length);
-        bytesToSign.set(txTypeBytes);
-        bytesToSign.set(userTxnBytes, txTypeBytes.length);
-        
-        const signature = nacl.sign.detached(bytesToSign, currentAccount.sk);
-        
-        // Create signed transaction structure
-        const signedTxn = {
-          sig: signature,
-          txn: txnToSign
-        };
-        
-        // Encode the signed transaction
-        const signedTxnBytes = msgpack.encode(signedTxn);
-        const signedUserTxnB64 = btoa(String.fromCharCode(...new Uint8Array(signedTxnBytes)));
+        // This is now a single-step process where backend handles everything
+        console.log('TransactionProcessingScreen: Backend will handle signing and submission...');
         
         console.log('TransactionProcessingScreen: Submitting signed Algorand transaction group...');
         

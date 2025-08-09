@@ -427,12 +427,12 @@ export function FriendDetailScreen() {
   const handleTokenSelect = useCallback((tokenType: 'cusd' | 'confio') => {
     setShowTokenSelection(false);
     
-    // Get the active account's Sui address from the user data
-    let aptosAddress = undefined;
+    // Get the active account's Algorand address from the user data
+    let algorandAddress = undefined;
     if (userData?.me?.accounts && userData.me.accounts.length > 0) {
       // Get the personal account (accountIndex 0) by default
       const personalAccount = userData.me.accounts.find((acc: any) => acc.accountType === 'personal' && acc.accountIndex === 0);
-      aptosAddress = personalAccount?.aptosAddress;
+      algorandAddress = personalAccount?.algorandAddress;
     }
     
     // Navigate to SendToFriend screen with selected token

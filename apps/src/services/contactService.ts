@@ -188,7 +188,7 @@ export class ContactService {
               confioUsersMap.set(userInfo.phoneNumber, {
                 userId: userInfo.userId,
                 username: userInfo.username,
-                aptosAddress: userInfo.activeAccountSuiAddress
+                algorandAddress: userInfo.activeAccountAlgorandAddress
               });
             }
           });
@@ -301,7 +301,7 @@ export class ContactService {
               contact.isOnConfio = true;
               contact.confioUserId = userInfo.userId;
               contact.confioUsername = userInfo.username;
-              contact.confioSuiAddress = userInfo.aptosAddress;
+              contact.confioAlgorandAddress = userInfo.algorandAddress;
               
               // Keep the local contact name - don't replace with Confío user's profile name
               // Users should see the names they have saved in their contacts
