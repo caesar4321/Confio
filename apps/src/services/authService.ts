@@ -7,7 +7,7 @@ import * as Keychain from 'react-native-keychain';
 import { GOOGLE_CLIENT_IDS, API_URL } from '../config/env';
 import auth from '@react-native-firebase/auth';
 import { Platform } from 'react-native';
-import { INITIALIZE_ZKLOGIN, FINALIZE_ZKLOGIN } from '../apollo/queries';
+// zkLogin mutations removed - using Web3Auth mutations from mutations.ts instead
 import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
 import { gql } from '@apollo/client';
 import { Buffer } from 'buffer';
@@ -443,6 +443,7 @@ export class AuthService {
             lastName,
             algorandAddress,
             idToken: freshFirebaseToken,
+            deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null,
           },
           context: {
             skipAuth: true, // Tell the auth link to skip adding JWT token
@@ -972,6 +973,7 @@ export class AuthService {
             lastName: lastName || '',
             algorandAddress,
             idToken: freshFirebaseToken,
+            deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null,
           },
           context: {
             skipAuth: true, // Tell the auth link to skip adding JWT token

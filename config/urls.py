@@ -63,7 +63,6 @@ from .admin_dashboard import confio_admin_site
 urlpatterns = [
     path('admin/', confio_admin_site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
-    path('prover/', include('prover.urls')),
     path('terms/', terms_view, name='terms'),
     path('privacy/', privacy_view, name='privacy'),
     path('deletion/', deletion_view, name='deletion'),

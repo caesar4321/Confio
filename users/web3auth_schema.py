@@ -24,8 +24,7 @@ class Web3AuthUserType(DjangoObjectType):
     def resolve_algorand_address(self, info):
         try:
             account = self.accounts.filter(account_type='personal', deleted_at__isnull=True).first()
-            # Temporarily using aptos_address field to store Algorand address
-            return account.aptos_address if account else None
+            return account.algorand_address if account else None
         except Exception as e:
             logger.error(f"Error resolving algorand_address: {e}")
             return None
@@ -159,11 +158,11 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     user=user,
                     account_type='personal',
                     defaults={
-                        'aptos_address': algorand_address,  # Temporarily using aptos_address field
+                        'algorand_address': algorand_address,
                     }
                 )
-                if account.aptos_address != algorand_address:
-                    account.aptos_address = algorand_address
+                if account.algorand_address != algorand_address:
+                    account.algorand_address = algorand_address
                     account.save()
                 
                 # Update last login timestamp for the account
@@ -391,17 +390,16 @@ class UpdateAlgorandAddressMutation(graphene.Mutation):
                 return cls(success=False, error='Invalid Algorand address')
             
             # Update the user's personal account
-            # Temporarily using aptos_address field to store Algorand address
             account = user.accounts.filter(account_type='personal').first()
             if account:
-                account.aptos_address = algorand_address
+                account.algorand_address = algorand_address
                 account.save()
             else:
                 # Create account if it doesn't exist
                 Account.objects.create(
                     user=user,
                     account_type='personal',
-                    aptos_address=algorand_address
+                    algorand_address=algorand_address
                 )
             
             return cls(success=True, user=user)
@@ -428,8 +426,7 @@ class VerifyAlgorandOwnershipMutation(graphene.Mutation):
                 return cls(success=False, error='Not authenticated')
             
             account = user.accounts.filter(account_type='personal').first()
-            # Temporarily using aptos_address field to store Algorand address
-            if not account or not account.aptos_address:
+            if not account or not account.algorand_address:
                 return cls(success=False, error='No Algorand address found')
             
             # TODO: Implement actual Algorand signature verification
@@ -470,8 +467,7 @@ class CreateAlgorandTransactionMutation(graphene.Mutation):
                 return cls(success=False, error='Not authenticated')
             
             account = user.accounts.filter(account_type='personal').first()
-            # Temporarily using aptos_address field to store Algorand address
-            if not account or not account.aptos_address:
+            if not account or not account.algorand_address:
                 return cls(success=False, error='No Algorand address found')
             
             # TODO: Implement actual Algorand transaction creation
@@ -697,8 +693,7 @@ class Web3AuthQuery(graphene.ObjectType):
             
             if not address:
                 account = user.accounts.filter(account_type='personal').first()
-                # Temporarily using aptos_address field to store Algorand address
-                address = account.aptos_address if account else None
+                address = account.algorand_address if account else None
             
             if not address:
                 return 0.0
@@ -719,8 +714,7 @@ class Web3AuthQuery(graphene.ObjectType):
                 return []
             
             account = user.accounts.filter(account_type='personal').first()
-            # Using aptos_address field to store Algorand address (temporary)
-            if not account or not account.aptos_address:
+            if not account or not account.algorand_address:
                 return []
             
             # TODO: Implement actual Algorand transaction history fetching

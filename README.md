@@ -1,7 +1,7 @@
 # Confío: LATAM's Open Wallet for the Dollar Economy
 
 **Confío** is an open-source Web3 wallet and transaction platform designed for Latin America.  
-It enables users to **send, receive, and hold stablecoins** (like USDC or cUSD) on the **Sui blockchain**, with zero gas fees and no crypto complexity.
+It enables users to **send, receive, and hold stablecoins** (like USDC or cUSD) on the **Algorand blockchain**, with zero gas fees and no crypto complexity.
 
 Built for real people — not just crypto experts.
 
@@ -23,7 +23,7 @@ Confío helps people access stable dollars, send remittances, and pay each other
 - 💸 Send cUSD to any phone contact
 - 📲 Receive money through WhatsApp links
 - ⚡️ Enjoy gasless (sponsored) transactions
-- 🪙 Interact directly with Sui-based smart contracts
+- 🪙 Interact directly with Algorand-based smart contracts
 - 🏪 P2P Trading: Buy and sell crypto with local payment methods
 - 💬 Real-time chat for P2P trades with WebSocket support
 - 🏢 Business accounts for commercial operations
@@ -36,8 +36,8 @@ Confío helps people access stable dollars, send remittances, and pay each other
 | Frontend        | React Native (no Expo)        |
 | Web App         | React + TypeScript            |
 | Auth            | Firebase Authentication       |
-| Blockchain      | [Sui](https://sui.io)         |
-| Smart Contracts | Move language                 |
+| Blockchain      | [Algorand](https://algorand.com) |
+| Smart Contracts | PyTeal/TEAL (Algorand)        |
 | Backend API     | Django + GraphQL              |
 | Real-time       | Django Channels + WebSocket   |
 | Cache/Sessions  | Redis                         |
@@ -59,7 +59,7 @@ We host all infrastructure in **AWS eu-central-2 (Zurich)** region for optimal d
 - ❌ Not a custodial wallet — we never store user funds or signing keys
 - ❌ No backend "tricks" — money logic lives entirely on-chain
 - ❌ No crypto knowledge required — users sign in with Google or Apple
-- ❌ No server-side zkLogin proofs — all signing happens on the client
+- ❌ No server-side private keys — all signing happens on the client
 
 ## 💬 Join the Community
 
@@ -150,16 +150,15 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── default_payment_methods.py # Country-specific payment methods
 │   └── migrations/    # Database migrations for P2P models
 
-├── blockchain/        # Sui blockchain integration
+├── blockchain/        # Algorand blockchain integration
 │   ├── models.py      # Blockchain event and balance models
 │   ├── balance_service.py # Hybrid balance caching system
-│   ├── pysui_client.py    # pysui SDK client for Sui blockchain
-│   ├── transaction_manager_pysui.py # Transaction management with pysui
-│   ├── sponsor_service_pysui.py # Gas sponsorship service
-│   ├── zklogin_pysui.py   # zkLogin helper functions (client-side only)
-│   ├── zklogin_client_helper.py # zkLogin utilities for client-side proofs
+│   ├── algorand_client.py  # Algorand SDK client for blockchain interaction
+│   ├── transaction_manager.py # Transaction management with Algorand SDK
+│   ├── sponsor_service.py # Atomic group transaction fee payment service
+│   ├── auth_helper.py      # Authentication helper functions (client-side only)
 │   ├── tasks.py       # Celery tasks for blockchain polling
-│   ├── management/    # Management commands (poll_blockchain, test_sui_connection)
+│   ├── management/    # Management commands (poll_blockchain, test_algorand_connection)
 │   ├── migrations/    # Database migrations
 │   └── README.md      # Blockchain integration documentation
 
@@ -180,11 +179,7 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── admin.py       # Enhanced admin interface for security monitoring
 │   └── migrations/    # Database migrations for security models
 
-├── prover/            # zkLogin initialization and coordination
-│   ├── models.py      # Empty - zkLogin proofs remain client-side
-│   ├── schema.py      # GraphQL schema for zkLogin initialization
-│   ├── admin.py       # Empty - no server-side proof storage
-│   └── migrations/    # Database migrations
+# Note: prover/ directory removed - using deterministic wallet generation instead
 
 ├── prover-service/    # Standalone service for proof generation and verification
 │   ├── index.js      # Main entry point for the prover service
@@ -193,7 +188,7 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── tests/        # Test cases for the prover service
 │   └── package.json  # Node.js dependencies and scripts
 │       ├── Dependencies:
-│       │   ├── @mysten/zklogin: zkLogin functionality
+│       │   ├── algosdk: Algorand SDK for blockchain interaction
 │       │   ├── express: Web server
 │       │   ├── cors: Cross-Origin Resource Sharing
 │       │   └── dotenv: Environment variable management
@@ -236,14 +231,14 @@ This is a **monolithic repository** containing the full Confío stack:
 │   │   │   ├── HomeScreen.tsx        # Main app screen
 │   │   │   └── CreateBusinessScreen.tsx     # Business account creation
 │   │   ├── services/      # API and business logic services
-│   │   │   ├── authService.ts    # Authentication service with zkLogin signing
+│   │   │   ├── authService.ts    # Authentication service with deterministic wallet
 │   │   │   ├── enhancedAuthService.ts # Enhanced auth with device fingerprinting
 │   │   │   └── ...        # Other services
 │   │   ├── types/         # TypeScript type definitions
 │   │   ├── utils/         # Utility functions
 │   │   │   ├── accountManager.ts # Multi-account storage and management
 │   │   │   ├── countries.ts  # Country codes mapping [name, code, iso, flag]
-│   │   │   ├── zkLogin.ts   # zkLogin utilities with multi-account salt generation
+│   │   │   ├── deterministicWallet.ts # Deterministic wallet generation for multi-account
 │   │   │   └── ...        # Other utility functions
 │   │   └── ...            # Other source files
 │   ├── scripts/           # Build and development scripts
@@ -253,36 +248,36 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── metro.config.js    # Metro bundler configuration
 │   └── package.json       # Node.js dependencies
 
-├── contracts/    # Sui Move smart contracts
+├── contracts/    # Algorand smart contracts
 │   ├── README.md     # Contracts overview and deployment guide
 │   ├── PERMISSIONS.md # Comprehensive permissions and multi-sig guide
 │   ├── cusd/     # CUSD stablecoin implementation
-│   │   ├── sources/  # Move source files
-│   │   │   ├── cusd.move              # CUSD stablecoin implementation
-│   │   │   ├── cusd_vault_usdc.move   # USDC vault for CUSD minting/burning
-│   │   │   └── cusd_vault_treasury.move # Treasury vault for CUSD operations
-│   │   ├── Move.toml # Package configuration
+│   │   ├── contracts/  # PyTeal source files
+│   │   │   ├── cusd.py               # CUSD ASA implementation
+│   │   │   ├── cusd_vault_usdc.py    # USDC vault for CUSD minting/burning
+│   │   │   └── cusd_vault_treasury.py # Treasury vault for CUSD operations
+│   │   ├── config.py # Contract configuration
 │   │   └── Move.lock # Dependency lock file
 │   ├── confio/   # CONFIO governance token
-│   │   ├── sources/  # Move source files
-│   │   │   └── confio.move            # CONFIO governance token implementation
-│   │   ├── Move.toml # Package configuration
+│   │   ├── contracts/  # PyTeal source files
+│   │   │   └── confio.py             # CONFIO ASA implementation
+│   │   ├── config.py # Contract configuration
 │   │   └── Move.lock # Dependency lock file
 │   ├── pay/      # Payment processing with fee collection
-│   │   ├── sources/  # Move source files
-│   │   │   └── pay.move               # Payment system with 0.9% fee
-│   │   ├── Move.toml # Package configuration
+│   │   ├── contracts/  # PyTeal source files
+│   │   │   └── pay.py                # Payment system with 0.9% fee
+│   │   ├── config.py # Contract configuration
 │   │   └── Move.lock # Dependency lock file
 │   ├── invite_send/  # Send funds to non-users with invitations
-│   │   ├── sources/  # Move source files
-│   │   │   └── invite_send.move       # Invitation system with 7-day reclaim
-│   │   ├── Move.toml # Package configuration
+│   │   ├── contracts/  # PyTeal source files
+│   │   │   └── invite_send.py        # Invitation system with 7-day reclaim
+│   │   ├── config.py # Contract configuration
 │   │   └── Move.lock # Dependency lock file
 │   └── p2p_trade/    # P2P trading with escrow and dispute resolution
-│       ├── sources/  # Move source files
-│       │   └── p2p_trade.move         # Escrow-based P2P trading system
+│       ├── contracts/  # PyTeal source files
+│       │   └── p2p_trade.py          # Escrow-based P2P trading system
 │       ├── tests/    # Test files
-│       │   └── escrow_security_test.move  # Security test cases
+│       │   └── escrow_security_test.py   # Security test cases
 │       ├── README.md # Contract documentation
 │       ├── Move.toml # Package configuration
 │       └── Move.lock # Dependency lock file
@@ -317,14 +312,14 @@ This is a **monolithic repository** containing the full Confío stack:
    - Telegram-based verification system
    - Country code support for LATAM
 
-3. **zkLogin Integration (Client-Side)**
-   - Zero-knowledge proof authentication
-   - All proofs and ephemeral keys remain client-side
-   - Server only stores the resulting Sui address
+3. **Deterministic Wallet System (Client-Side)**
+   - OAuth-based deterministic key generation
+   - All private keys remain client-side only
+   - Server only stores the resulting Algorand address
    - Two-phase transaction flow:
-     - Server prepares transaction → returns unsigned bytes
-     - Client signs with zkLogin → sends signature back
-     - Server executes with dual signatures (user + sponsor)
+     - Server prepares transaction → returns unsigned transaction
+     - Client signs with private key → sends signature back
+     - Server combines into atomic group with sponsor transaction
 
 ### Multi-Account System
 
@@ -358,9 +353,9 @@ Where:
 **⚠️ CRITICAL: Salt Format Locked at 32 Bytes**
 
 The salt generation MUST always produce a 32-byte (256-bit) value using SHA-256. This format is permanently locked to maintain wallet compatibility:
-- Changing the salt size would generate different Sui addresses for existing users
+- Changing the salt size would generate different Algorand addresses for existing users
 - Users would lose access to their funds as the addresses would change
-- There is no migration path as zkLogin addresses are deterministic based on the salt
+- There is no migration path as Algorand addresses are deterministic based on the salt
 - If you ever need to change this, you'll need a complex migration strategy involving fund transfers
 
 #### JWT Integration
@@ -473,13 +468,13 @@ The frontend automatically adapts based on employee permissions:
 #### Default Behavior
 - **New users**: Automatically get `personal_0` as their default account
 - **Existing users**: Continue using their current salt (equivalent to `personal_0`)
-- **Account switching**: Each account type/index combination generates a unique Sui address
+- **Account switching**: Each account type/index combination generates a unique Algorand address
 - **Employee accounts**: Access business through JWT with embedded business_id
 - **Business owners**: Also receive business_id in JWT for consistent security model
 
 #### Security Model
-1. **Deterministic**: Same OAuth identity + account context = same Sui address
-2. **Isolated**: Each account has its own private key and Sui address
+1. **Deterministic**: Same OAuth identity + account context = same Algorand address
+2. **Isolated**: Each account has its own private key and Algorand address
 3. **Non-custodial**: Private keys are never stored on servers
 4. **Stateless**: Server doesn't track active accounts, client manages state
 5. **Role-based**: Negative-check permission system ensures only explicitly allowed actions
@@ -493,7 +488,7 @@ The app uses atomic account switching to prevent partial state updates where dif
 #### Problem Solved
 - Profile and balance showing Business account, but acting like Personal account
 - Offers created by Business account requiring Personal account permissions
-- JWT token, Sui address, and zkLogin private values getting out of sync
+- JWT token, Algorand address, and authentication private values getting out of sync
 
 #### Implementation
 
@@ -716,16 +711,16 @@ Confío uses a **soft delete** system for all critical models, including:
 - TelegramVerification
 
 Instead of permanently deleting records, a `deleted_at` timestamp is set. This ensures:
-- **No index reuse**: Deleted accounts/businesses/users cannot be recreated with the same index, preventing Sui address collisions and key reuse.
-- **Prevents collision of eliminated and newly created accounts**: If an account is deleted, its index is never reused, so a new account cannot be created with the same index and thus cannot generate the same Sui address. This eliminates the risk of a new user accidentally or maliciously taking over the Sui address of a previously deleted account.
+- **No index reuse**: Deleted accounts/businesses/users cannot be recreated with the same index, preventing Algorand address collisions and key reuse.
+- **Prevents collision of eliminated and newly created accounts**: If an account is deleted, its index is never reused, so a new account cannot be created with the same index and thus cannot generate the same Algorand address. This eliminates the risk of a new user accidentally or maliciously taking over the Algorand address of a previously deleted account.
 - **Auditability**: All actions are traceable for compliance and security audits.
 - **Data integrity**: Financial and identity records are never truly lost, only flagged as deleted.
-- **Security**: Prevents accidental or malicious recreation of accounts with the same salt, which would result in the same Sui address and potential fund loss or takeover.
+- **Security**: Prevents accidental or malicious recreation of accounts with the same salt, which would result in the same Algorand address and potential fund loss or takeover.
 
 All queries for account creation/index assignment include soft-deleted rows to prevent index reuse. Normal queries (default manager) exclude soft-deleted rows, so deleted items are hidden from the UI and API by default.
 
 #### Example: Why Soft Delete?
-If a business account `business_2` is deleted, the next business account will be `business_3`, not `business_2` again. This ensures that the Sui address for `business_2` is never reused, maintaining cryptographic and financial safety.
+If a business account `business_2` is deleted, the next business account will be `business_3`, not `business_2` again. This ensures that the Algorand address for `business_2` is never reused, maintaining cryptographic and financial safety.
 
 ## 🔒 Recent Security Enhancements
 
@@ -765,7 +760,7 @@ User Wallet = HKDF(OAuth Claims + Server Pepper)
 - ✅ **Deterministic**: Same OAuth identity + pepper = same wallet address
 - ✅ **Recoverable**: User can restore wallet on any device with OAuth login
 - ✅ **Secure**: Neither party alone can access funds
-- ✅ **Blockchain agnostic**: Works with Algorand, Sui, or any Ed25519-based chain
+- ✅ **Blockchain agnostic**: Works with Algorand or any Ed25519-based chain
 
 #### Implementation Components
 
@@ -917,7 +912,7 @@ class RotateServerPepperMutation(graphene.Mutation):
 **4. Blockchain Agnostic**
 - Works with any Ed25519-based blockchain
 - Currently supports Algorand (production)
-- Easily adaptable to Sui, Solana, etc.
+- Easily adaptable to other blockchains like Solana, etc.
 
 #### Implementation Highlights
 
@@ -1079,18 +1074,18 @@ Confío supports four main categories of transactions, each with distinct types 
 Direct transfers between users with different recipient types:
 
 - **👥 Confío Friend** - Send to existing Confío users
-  - Recipient has a registered Confío account with their deterministic non-custodial Sui address
+  - Recipient has a registered Confío account with their deterministic non-custodial Algorand address
   - Instant delivery to their wallet
   - Real-time notifications
 
 - **📧 Non-Confío Friend** - Invite new users via phone number
   - Recipient receives invitation via phone/WhatsApp
   - Funds held in smart contract until claimed
-  - When the invitee claims the funds, it's released to the invitee's Sui wallet address
+  - When the invitee claims the funds, it's released to the invitee's Algorand wallet address
   - 7-day expiration period before reversion
 
 - **🔗 External Wallet** - Direct blockchain transfers
-  - Send to any Sui wallet address
+  - Send to any Algorand wallet address
   - No invitation or registration required
   - Pure on-chain transaction
 
@@ -1134,12 +1129,12 @@ Currency conversion within the same account:
 
 ### Transaction Fees
 
-- **Send**: Free (including Sui network fees - sponsored by Confío)
+- **Send**: Free (including Algorand network fees - sponsored by Confío)
 - **Payment**: 0.9% merchant fee (automatically deducted via smart contract)
-- **Exchange**: Free (including Sui network fees - sponsored by Confío)
-- **Conversion**: Free (including Sui network fees - sponsored by Confío)
+- **Exchange**: Free (including Algorand network fees - sponsored by Confío)
+- **Conversion**: Free (including Algorand network fees - sponsored by Confío)
 
-All Sui blockchain network fees are covered by Confío through sponsored transactions, ensuring users never need to hold SUI tokens for gas fees.
+All Algorand blockchain network fees are covered by Confío through atomic grouped transactions, where the sponsor pays fees for user transactions, ensuring users never need to hold ALGO tokens.
 
 ## 🏪 P2P Trading Platform
 
@@ -2020,7 +2015,7 @@ make test
 4. **Multi-Account Features**
    - Account creation and switching
    - Personal and business account support
-   - Deterministic Sui address generation
+   - Deterministic Algorand address generation
    - Secure account storage using Keychain
 
 5. **P2P Trading Features**
@@ -2112,7 +2107,7 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
 ## 📜 Smart Contracts
 
 ### Confío Dollar ($cUSD)
-- **File**: `contracts/cusd/sources/cusd.move`
+- **File**: `contracts/cusd/contracts/cusd.py`
 - **Purpose**: Implementation of the $cUSD stablecoin, a gasless stablecoin designed for everyday transactions in Latin America
 - **Key Features**:
   - 6 decimal places precision for micro-transactions
@@ -2127,7 +2122,7 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
   - Admin-only functions protected by capability objects
 
 ### Confío ($CONFIO)
-- **File**: `contracts/confio/sources/confio.move`
+- **File**: `contracts/confio/contracts/confio.py`
 - **Purpose**: Governance and utility token for the Confío platform
 - **Key Features**:
   - Fixed supply of 1 billion tokens
@@ -2140,7 +2135,7 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
   - No burn functionality to maintain fixed supply
 
 ### Confío Pay
-- **File**: `contracts/pay/sources/pay.move`
+- **File**: `contracts/pay/contracts/pay.py`
 - **Purpose**: Payment processing system with automatic fee collection
 - **Key Features**:
   - Automatic 0.9% fee deduction on all payments
@@ -2158,7 +2153,7 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
   - Business validation handled off-chain in Django
 
 ### Invite Send
-- **File**: `contracts/invite_send/sources/invite_send.move`
+- **File**: `contracts/invite_send/contracts/invite_send.py`
 - **Purpose**: Send funds to non-Confío users with phone number verification
 - **Key Features**:
   - Send cUSD or CONFIO to users who haven't signed up yet
@@ -2169,7 +2164,7 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
 - **Security Flow**:
   1. Sender creates invitation with funds and Django-generated ID
   2. Django stores phone number + invitation ID mapping in database
-  3. New user signs up with phone number → gets zkLogin Sui address
+  3. New user signs up with phone number → gets Algorand address
   4. Django verifies phone match → calls admin claim function
   5. Funds automatically transfer to new user's address
 - **Reclaim Feature**:
@@ -2178,7 +2173,7 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
   - One-click reclaim by original sender only
 
 ### P2P Trade
-- **File**: `contracts/p2p_trade/sources/p2p_trade.move`
+- **File**: `contracts/p2p_trade/contracts/p2p_trade.py`
 - **Purpose**: Secure escrow-based peer-to-peer trading system for crypto-to-fiat exchanges
 - **Key Features**:
   - Escrow protection: Crypto funds locked until fiat payment confirmed
@@ -2205,14 +2200,14 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
   - Dispute resolution for building trust
 
 ### Gasless Transactions
-- **Implementation**: Handled off-chain through Sui's native sponsored transaction system
+- **Implementation**: Handled through Algorand's atomic transaction groups
 - **Components**:
-  - App server maintains SUI balance for gas sponsorship
-  - Client SDK integrates with Sui's sponsored transaction API
+  - App server maintains ALGO balance for transaction fee sponsorship
+  - Client SDK creates atomic groups with sponsor paying fees
   - Rate limiting and gas budget controls implemented at the application level
 - **Benefits**:
   - Zero gas fees for end users
-  - Native Sui protocol support
+  - Uses Algorand's atomic transaction groups for fee sponsorship
   - Simplified implementation without additional smart contracts
 
 ### Smart Contract Security & Permissions
@@ -2237,7 +2232,7 @@ For detailed information about smart contract permissions and multi-signature se
 
 ## 🔒 Blockchain Integration
 
-Django app for Sui blockchain integration with hybrid balance caching for optimal performance.
+Django app for Algorand blockchain integration with hybrid balance caching for optimal performance.
 
 ### Quick Start
 
@@ -2273,7 +2268,7 @@ The blockchain integration uses a **two-part system**:
 #### How Polling Works
 
 ```
-Sui Blockchain → poll_blockchain → Celery Queue → process_transaction → Update Cache
+Algorand Blockchain → poll_blockchain → Celery Queue → process_transaction → Update Cache
        ↑              (detect)         (queue)        (parse & route)      (invalidate)
        |                                                    ↓
    RPC calls                                         handle_*_transaction
@@ -2309,7 +2304,7 @@ The `poll_blockchain` management command:
 
 #### Management Commands
 - `poll_blockchain`: Long-running blockchain monitor
-- `test_sui_connection`: Test RPC connectivity
+- `test_algorand_connection`: Test RPC connectivity
 - `test_balance_service`: Test hybrid caching system
 - `test_transaction_manager`: Test coin preparation and estimates
 
@@ -2323,7 +2318,7 @@ The `poll_blockchain` management command:
 - `RawBlockchainEvent`: Raw blockchain data storage
 - `Balance`: Cached token balances with staleness tracking
 - `TransactionProcessingLog`: Processing audit trail
-- `SuiEpoch`: Epoch tracking for network monitoring
+- `AlgorandRound`: Round tracking for network monitoring
 
 ### Balance Caching Strategy
 
@@ -2394,7 +2389,7 @@ result = await TransactionManager.send_tokens(
     recipient_address,
     Decimal('100'),
     'CUSD',
-    user_signature  # zkLogin signature
+    user_signature  # Deterministic wallet signature
 )
 ```
 
@@ -2415,7 +2410,7 @@ estimate = await SponsorService.estimate_sponsorship_cost(
     'send',
     {'coin_count': 5}
 )
-print(f"Estimated gas: {estimate['estimated_gas_sui']} SUI")
+print(f"Estimated fee: {estimate['estimated_fee_algo']} ALGO")
 ```
 
 **GraphQL Mutations for Sending:**
@@ -2464,7 +2459,7 @@ python manage.py test_balance_service --user-email user@example.com
 python manage.py test_balance_service --benchmark
 
 # Check RPC connection
-python manage.py test_sui_connection --address 0x123...
+python manage.py test_algorand_connection --address ABCD...
 
 # Test transaction preparation
 python manage.py test_transaction_manager --email user@example.com --token CUSD --amount 5
@@ -2558,9 +2553,9 @@ WantedBy=multi-user.target
 python manage.py test blockchain
 ```
 
-## 💰 Sui Coin Management Strategy
+## 💰 Algorand Asset Management Strategy
 
-On Sui blockchain, tokens are represented as individual `Coin<T>` objects rather than account balances. This creates unique challenges that Confío handles transparently for users.
+On Algorand blockchain, tokens are represented as Algorand Standard Assets (ASAs). Confío handles asset opt-ins and management transparently for users.
 
 ### Key Concepts
 
@@ -2570,14 +2565,14 @@ On Sui blockchain, tokens are represented as individual `Coin<T>` objects rather
 - Example: Receiving 5 payments of 1 USDC = 5 separate coin objects
 
 #### Transaction Limits
-- Sui limits objects per transaction (typically 512)
+- Algorand has transaction size and group limits
 - Gas optimization requires careful coin selection
 - Many small coins increase transaction costs
 
 ### Current Implementation
 
 #### Balance Display
-- **Method**: `suix_getBalance` RPC call automatically aggregates all coin objects
+- **Method**: Algorand SDK calls to query asset balances
 - **User Experience**: Users see total balance, not individual coins
 - **Caching**: Database stores aggregated balances with Redis cache
 

@@ -8,7 +8,6 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('prover', '0003_remove_zkloginproof_profile'),
         ('users', '0004_user_auth_token_version'),
     ]
 

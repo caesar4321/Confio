@@ -275,10 +275,10 @@ class Account(SoftDeleteModel):
     # —————————————————————————————
     # persistent per‑user state
     # —————————————————————————————
-    aptos_address = models.CharField(
-        max_length=66,
+    algorand_address = models.CharField(
+        max_length=58,  # Algorand addresses are 58 characters
         blank=True, null=True,
-        help_text="Last‑computed Aptos address for this account (temporarily storing Algorand)"
+        help_text="Algorand address for this account"
     )
 
     # —————————————————————————————

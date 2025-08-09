@@ -1,7 +1,6 @@
 from users import schema as users_schema
 from users.graphql_views import UnifiedTransactionQuery
 from users import web3auth_schema
-from prover import schema as prover_schema
 from telegram_verification import schema as telegram_verification_schema
 from send import schema as send_schema
 from payments import schema as payments_schema
@@ -26,7 +25,6 @@ class Query(users_schema.Query, UnifiedTransactionQuery, send_schema.Query, paym
 
 class Mutation(
 	users_schema.Mutation,
-	prover_schema.Mutation,
 	telegram_verification_schema.Mutation,
 	send_schema.Mutation,
 	payments_schema.Mutation,

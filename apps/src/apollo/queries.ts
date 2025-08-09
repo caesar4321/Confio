@@ -144,32 +144,7 @@ export const GET_LEGAL_DOCUMENT = gql`
   }
 `;
 
-// ZKLogin Mutations
-export const INITIALIZE_ZKLOGIN = gql`
-  mutation InitializeZkLogin($firebaseToken: String!, $providerToken: String!, $provider: String!, $deviceFingerprint: JSONString) {
-    initializeZkLogin(firebaseToken: $firebaseToken, providerToken: $providerToken, provider: $provider, deviceFingerprint: $deviceFingerprint) {
-      maxEpoch
-      randomness
-      authAccessToken
-      authRefreshToken
-    }
-  }
-`;
-
-export const FINALIZE_ZKLOGIN = gql`
-  mutation FinalizeZkLogin($input: FinalizeZkLoginInput!) {
-    finalizeZkLogin(input: $input) {
-      success
-      zkProof {
-        a
-        b
-        c
-      }
-      error
-      isPhoneVerified
-    }
-  }
-`;
+// zkLogin mutations removed - using Web3Auth mutations from mutations.ts instead
 
 // Telegram Verification
 export const INITIATE_TELEGRAM_VERIFICATION = gql`
