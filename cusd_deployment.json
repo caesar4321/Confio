@@ -1,13 +1,9 @@
 {
   "network": "testnet",
-  "package_id": "0x1eaf40cd86c66cf6da72202ee2f11b2922be0270cd5ce248057ed48f106f8233",
-  "treasury_cap_id": "0x2dba12e8a3c92ce824861814fb9fab482abc175a8952de293f4eb10469b2501b",
-  "pause_state_id": "0xefc39f994141412a66fad49b4594a6c9f81789f14b9406614ddb933e8f441f2c",
-  "freeze_registry_id": "0xf5fddd7297e650af9d73dc314355fc909efae879f218966baf6b60839cf057aa",
-  "deployment_tx": "HpnRD5pU5pN1HcQnhHjCWz7cR8iPsTtbaYAyn3i23xp2",
-  "mint_tx": "3xVE7nbGUUXnzgpvUKUrxqVQdUKXNDW1PYhabdANaW6p",
-  "sponsor_cusd_coin": "0x37c25918136ed6886ced3193a2ef698f6b7ad8c905f8d2f478610a06f13d2324",
-  "sponsor_balance": "1000 cUSD",
-  "timestamp": "2025-08-02",
-  "notes": "Fresh deployment with 1000 cUSD minted to sponsor account for testing"
+  "deployer_address": "KNKFUBM3GHOLF6S7L2O7JU6YDB7PCRV3PKBOBRCABLYHBHXRFXKNDWGAWE",
+  "app_id": 744031412,
+  "app_address": "KKGQY57MM4EIC4DT4L56PSOMELE64H4BYJTCBT2DIWMPYX3ELFJR5PHPAA",
+  "cusd_asset_id": 744031413,
+  "usdc_asset_id": 10458941,
+  "deployment_status": "Assets configured. Ready for use!"
 }

@@ -1,0 +1,1043 @@
+#pragma version 8
+intcblock 0 1 32 8
+bytecblock 0x69735f706175736564 0x 0x61646d696e 0x637573645f61737365745f6964 0x746f74616c5f7472616465735f636f6d706c65746564 0x746f74616c5f636f6e66696f5f766f6c756d65 0x746f74616c5f637573645f766f6c756d65 0x01 0x636f6e66696f5f61737365745f6964 0x00 0x746f74616c5f7472616465735f63726561746564 0x151f7c75 0x02 0x746f74616c5f7472616465735f63616e63656c6c6564 0x04 0x5f64697370757465 0x746f74616c5f7472616465735f6469737075746564
+txna ApplicationArgs 0
+pushbytes 0x4c5c61ba // "create()void"
+==
+bnz main_l28
+txna ApplicationArgs 0
+pushbytes 0x990af164 // "setup_assets(uint64,uint64)void"
+==
+bnz main_l27
+txna ApplicationArgs 0
+pushbytes 0x8d7d30d8 // "create_trade(string,axfer,uint64,string)void"
+==
+bnz main_l26
+txna ApplicationArgs 0
+pushbytes 0x09c6a53b // "accept_trade(string)void"
+==
+bnz main_l25
+txna ApplicationArgs 0
+pushbytes 0xc2a144f3 // "confirm_payment_received(string)void"
+==
+bnz main_l24
+txna ApplicationArgs 0
+pushbytes 0x6b608df5 // "cancel_trade(string)void"
+==
+bnz main_l23
+txna ApplicationArgs 0
+pushbytes 0x112748e3 // "open_dispute(string,string)void"
+==
+bnz main_l22
+txna ApplicationArgs 0
+pushbytes 0xed33f039 // "resolve_dispute(string,address)void"
+==
+bnz main_l21
+txna ApplicationArgs 0
+pushbytes 0x0178f94b // "pause()void"
+==
+bnz main_l20
+txna ApplicationArgs 0
+pushbytes 0x1b529de8 // "unpause()void"
+==
+bnz main_l19
+txna ApplicationArgs 0
+pushbytes 0x5d85b4bb // "get_created_count()uint64"
+==
+bnz main_l18
+txna ApplicationArgs 0
+pushbytes 0xc89dbdfd // "get_completed_count()uint64"
+==
+bnz main_l17
+txna ApplicationArgs 0
+pushbytes 0x0385f7ec // "get_volume()(uint64,uint64)"
+==
+bnz main_l16
+txna ApplicationArgs 0
+pushbytes 0x24378d3c // "delete()void"
+==
+bnz main_l15
+err
+main_l15:
+txn OnCompletion
+pushint 5 // DeleteApplication
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub deletecaster_27
+intc_1 // 1
+return
+main_l16:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub getvolumecaster_26
+intc_1 // 1
+return
+main_l17:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub getcompletedcountcaster_25
+intc_1 // 1
+return
+main_l18:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub getcreatedcountcaster_24
+intc_1 // 1
+return
+main_l19:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub unpausecaster_23
+intc_1 // 1
+return
+main_l20:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub pausecaster_22
+intc_1 // 1
+return
+main_l21:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub resolvedisputecaster_21
+intc_1 // 1
+return
+main_l22:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub opendisputecaster_20
+intc_1 // 1
+return
+main_l23:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub canceltradecaster_19
+intc_1 // 1
+return
+main_l24:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub confirmpaymentreceivedcaster_18
+intc_1 // 1
+return
+main_l25:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub accepttradecaster_17
+intc_1 // 1
+return
+main_l26:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub createtradecaster_16
+intc_1 // 1
+return
+main_l27:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub setupassetscaster_15
+intc_1 // 1
+return
+main_l28:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+==
+&&
+assert
+callsub createcaster_14
+intc_1 // 1
+return
+
+// create
+create_0:
+proto 0 0
+bytec_2 // "admin"
+txn Sender
+app_global_put
+bytec_0 // "is_paused"
+intc_0 // 0
+app_global_put
+intc_1 // 1
+return
+
+// setup_assets
+setupassets_1:
+proto 2 0
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+bytec_3 // "cusd_asset_id"
+app_global_get
+intc_0 // 0
+==
+&&
+bytec 8 // "confio_asset_id"
+app_global_get
+intc_0 // 0
+==
+&&
+assert
+bytec_3 // "cusd_asset_id"
+frame_dig -2
+app_global_put
+bytec 8 // "confio_asset_id"
+frame_dig -1
+app_global_put
+itxn_begin
+pushint 4 // axfer
+itxn_field TypeEnum
+frame_dig -2
+itxn_field XferAsset
+global CurrentApplicationAddress
+itxn_field AssetReceiver
+intc_0 // 0
+itxn_field AssetAmount
+itxn_submit
+itxn_begin
+pushint 4 // axfer
+itxn_field TypeEnum
+frame_dig -1
+itxn_field XferAsset
+global CurrentApplicationAddress
+itxn_field AssetReceiver
+intc_0 // 0
+itxn_field AssetAmount
+itxn_submit
+intc_1 // 1
+return
+
+// create_trade
+createtrade_2:
+proto 4 0
+bytec_0 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+frame_dig -3
+gtxns AssetReceiver
+global CurrentApplicationAddress
+==
+&&
+frame_dig -3
+gtxns AssetAmount
+intc_0 // 0
+>
+&&
+frame_dig -3
+gtxns XferAsset
+bytec_3 // "cusd_asset_id"
+app_global_get
+==
+frame_dig -3
+gtxns XferAsset
+bytec 8 // "confio_asset_id"
+app_global_get
+==
+||
+&&
+assert
+frame_dig -4
+extract 2 0
+txn Sender
+frame_dig -3
+gtxns AssetAmount
+itob
+concat
+frame_dig -3
+gtxns XferAsset
+itob
+concat
+frame_dig -2
+itob
+concat
+global LatestTimestamp
+itob
+concat
+global LatestTimestamp
+pushint 900 // 900
++
+itob
+concat
+bytec 9 // 0x00
+concat
+intc_0 // 0
+itob
+concat
+pushbytes 0x0000000000000000000000000000000000000000000000000000000000000000000000 // base32(AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA)
+concat
+box_put
+bytec 10 // "total_trades_created"
+bytec 10 // "total_trades_created"
+app_global_get
+intc_1 // 1
++
+app_global_put
+intc_1 // 1
+return
+
+// accept_trade
+accepttrade_3:
+proto 1 0
+frame_dig -1
+extract 2 0
+box_get
+store 6
+store 5
+load 6
+assert
+load 5
+intc_0 // 0
+intc_2 // 32
+box_extract
+store 0
+load 5
+intc_2 // 32
+intc_3 // 8
+box_extract
+btoi
+store 1
+load 5
+pushint 40 // 40
+intc_3 // 8
+box_extract
+btoi
+store 2
+load 5
+pushint 64 // 64
+intc_3 // 8
+box_extract
+btoi
+store 3
+load 5
+pushint 72 // 72
+intc_1 // 1
+box_extract
+store 4
+bytec_0 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+load 4
+bytec 9 // 0x00
+==
+&&
+load 0
+txn Sender
+!=
+&&
+global LatestTimestamp
+load 3
+<=
+&&
+assert
+frame_dig -1
+extract 2 0
+pushint 72 // 72
+bytec 7 // 0x01
+box_replace
+frame_dig -1
+extract 2 0
+pushint 73 // 73
+global LatestTimestamp
+itob
+box_replace
+frame_dig -1
+extract 2 0
+pushint 81 // 81
+txn Sender
+box_replace
+intc_1 // 1
+return
+
+// confirm_payment_received
+confirmpaymentreceived_4:
+proto 1 0
+frame_dig -1
+extract 2 0
+box_get
+store 13
+store 12
+load 13
+assert
+load 12
+intc_0 // 0
+intc_2 // 32
+box_extract
+store 7
+load 12
+intc_2 // 32
+intc_3 // 8
+box_extract
+btoi
+store 8
+load 12
+pushint 40 // 40
+intc_3 // 8
+box_extract
+btoi
+store 9
+load 12
+pushint 72 // 72
+intc_1 // 1
+box_extract
+store 10
+load 12
+pushint 81 // 81
+intc_2 // 32
+box_extract
+store 11
+bytec_0 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+txn Sender
+load 7
+==
+&&
+load 10
+bytec 7 // 0x01
+==
+&&
+assert
+itxn_begin
+pushint 4 // axfer
+itxn_field TypeEnum
+load 9
+itxn_field XferAsset
+load 11
+itxn_field AssetReceiver
+load 8
+itxn_field AssetAmount
+itxn_submit
+frame_dig -1
+extract 2 0
+pushint 72 // 72
+bytec 12 // 0x02
+box_replace
+bytec 4 // "total_trades_completed"
+bytec 4 // "total_trades_completed"
+app_global_get
+intc_1 // 1
++
+app_global_put
+load 9
+bytec_3 // "cusd_asset_id"
+app_global_get
+==
+bnz confirmpaymentreceived_4_l2
+bytec 5 // "total_confio_volume"
+bytec 5 // "total_confio_volume"
+app_global_get
+load 8
++
+app_global_put
+b confirmpaymentreceived_4_l3
+confirmpaymentreceived_4_l2:
+bytec 6 // "total_cusd_volume"
+bytec 6 // "total_cusd_volume"
+app_global_get
+load 8
++
+app_global_put
+confirmpaymentreceived_4_l3:
+intc_1 // 1
+return
+
+// cancel_trade
+canceltrade_5:
+proto 1 0
+frame_dig -1
+extract 2 0
+box_get
+store 20
+store 19
+load 20
+assert
+load 19
+intc_0 // 0
+intc_2 // 32
+box_extract
+store 14
+load 19
+intc_2 // 32
+intc_3 // 8
+box_extract
+btoi
+store 15
+load 19
+pushint 40 // 40
+intc_3 // 8
+box_extract
+btoi
+store 16
+load 19
+pushint 64 // 64
+intc_3 // 8
+box_extract
+btoi
+store 17
+load 19
+pushint 72 // 72
+intc_1 // 1
+box_extract
+store 18
+bytec_0 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+load 18
+bytec 9 // 0x00
+==
+txn Sender
+load 14
+==
+&&
+load 18
+bytec 7 // 0x01
+==
+global LatestTimestamp
+load 17
+>
+&&
+||
+&&
+assert
+itxn_begin
+pushint 4 // axfer
+itxn_field TypeEnum
+load 16
+itxn_field XferAsset
+load 14
+itxn_field AssetReceiver
+load 15
+itxn_field AssetAmount
+itxn_submit
+frame_dig -1
+extract 2 0
+pushint 72 // 72
+pushbytes 0x03 // 0x03
+box_replace
+bytec 13 // "total_trades_cancelled"
+bytec 13 // "total_trades_cancelled"
+app_global_get
+intc_1 // 1
++
+app_global_put
+intc_1 // 1
+return
+
+// open_dispute
+opendispute_6:
+proto 2 0
+frame_dig -2
+extract 2 0
+box_get
+store 25
+store 24
+load 25
+assert
+load 24
+intc_0 // 0
+intc_2 // 32
+box_extract
+store 21
+load 24
+pushint 72 // 72
+intc_1 // 1
+box_extract
+store 22
+load 24
+pushint 81 // 81
+intc_2 // 32
+box_extract
+store 23
+bytec_0 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+load 22
+bytec 7 // 0x01
+==
+&&
+txn Sender
+load 21
+==
+txn Sender
+load 23
+==
+||
+&&
+assert
+frame_dig -2
+extract 2 0
+pushint 72 // 72
+bytec 14 // 0x04
+box_replace
+frame_dig -2
+extract 2 0
+bytec 15 // "_dispute"
+concat
+txn Sender
+global LatestTimestamp
+itob
+concat
+frame_dig -1
+extract 2 0
+concat
+box_put
+bytec 16 // "total_trades_disputed"
+bytec 16 // "total_trades_disputed"
+app_global_get
+intc_1 // 1
++
+app_global_put
+intc_1 // 1
+return
+
+// resolve_dispute
+resolvedispute_7:
+proto 2 0
+frame_dig -2
+extract 2 0
+box_get
+store 32
+store 31
+load 32
+assert
+load 31
+intc_0 // 0
+intc_2 // 32
+box_extract
+store 26
+load 31
+intc_2 // 32
+intc_3 // 8
+box_extract
+btoi
+store 27
+load 31
+pushint 40 // 40
+intc_3 // 8
+box_extract
+btoi
+store 28
+load 31
+pushint 72 // 72
+intc_1 // 1
+box_extract
+store 29
+load 31
+pushint 81 // 81
+intc_2 // 32
+box_extract
+store 30
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+bytec_0 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+&&
+load 29
+bytec 14 // 0x04
+==
+&&
+frame_dig -1
+load 26
+==
+frame_dig -1
+load 30
+==
+||
+&&
+assert
+itxn_begin
+pushint 4 // axfer
+itxn_field TypeEnum
+load 28
+itxn_field XferAsset
+frame_dig -1
+itxn_field AssetReceiver
+load 27
+itxn_field AssetAmount
+itxn_submit
+frame_dig -2
+extract 2 0
+pushint 72 // 72
+bytec 12 // 0x02
+box_replace
+frame_dig -1
+load 30
+==
+bz resolvedispute_7_l4
+load 28
+bytec_3 // "cusd_asset_id"
+app_global_get
+==
+bnz resolvedispute_7_l3
+bytec 5 // "total_confio_volume"
+bytec 5 // "total_confio_volume"
+app_global_get
+load 27
++
+app_global_put
+b resolvedispute_7_l4
+resolvedispute_7_l3:
+bytec 6 // "total_cusd_volume"
+bytec 6 // "total_cusd_volume"
+app_global_get
+load 27
++
+app_global_put
+resolvedispute_7_l4:
+bytec 4 // "total_trades_completed"
+bytec 4 // "total_trades_completed"
+app_global_get
+intc_1 // 1
++
+app_global_put
+frame_dig -2
+extract 2 0
+bytec 15 // "_dispute"
+concat
+box_del
+pop
+intc_1 // 1
+return
+
+// pause
+pause_8:
+proto 0 0
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+bytec_0 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+&&
+assert
+bytec_0 // "is_paused"
+intc_1 // 1
+app_global_put
+intc_1 // 1
+return
+
+// unpause
+unpause_9:
+proto 0 0
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+bytec_0 // "is_paused"
+app_global_get
+intc_1 // 1
+==
+&&
+assert
+bytec_0 // "is_paused"
+intc_0 // 0
+app_global_put
+intc_1 // 1
+return
+
+// get_created_count
+getcreatedcount_10:
+proto 0 1
+intc_0 // 0
+bytec 10 // "total_trades_created"
+app_global_get
+frame_bury 0
+retsub
+
+// get_completed_count
+getcompletedcount_11:
+proto 0 1
+intc_0 // 0
+bytec 4 // "total_trades_completed"
+app_global_get
+frame_bury 0
+retsub
+
+// get_volume
+getvolume_12:
+proto 0 1
+bytec_1 // ""
+intc_0 // 0
+dupn 3
+bytec_1 // ""
+dup
+bytec 6 // "total_cusd_volume"
+app_global_get
+frame_bury 1
+bytec 5 // "total_confio_volume"
+app_global_get
+frame_bury 2
+frame_dig 1
+itob
+frame_dig 2
+itob
+concat
+frame_bury 0
+retsub
+
+// delete
+delete_13:
+proto 0 0
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+assert
+intc_1 // 1
+return
+
+// create_caster
+createcaster_14:
+proto 0 0
+callsub create_0
+retsub
+
+// setup_assets_caster
+setupassetscaster_15:
+proto 0 0
+intc_0 // 0
+dup
+txna ApplicationArgs 1
+btoi
+frame_bury 0
+txna ApplicationArgs 2
+btoi
+frame_bury 1
+frame_dig 0
+frame_dig 1
+callsub setupassets_1
+retsub
+
+// create_trade_caster
+createtradecaster_16:
+proto 0 0
+bytec_1 // ""
+intc_0 // 0
+dup
+bytec_1 // ""
+txna ApplicationArgs 1
+frame_bury 0
+txna ApplicationArgs 2
+btoi
+frame_bury 2
+txna ApplicationArgs 3
+frame_bury 3
+txn GroupIndex
+intc_1 // 1
+-
+frame_bury 1
+frame_dig 1
+gtxns TypeEnum
+pushint 4 // axfer
+==
+assert
+frame_dig 0
+frame_dig 1
+frame_dig 2
+frame_dig 3
+callsub createtrade_2
+retsub
+
+// accept_trade_caster
+accepttradecaster_17:
+proto 0 0
+bytec_1 // ""
+txna ApplicationArgs 1
+frame_bury 0
+frame_dig 0
+callsub accepttrade_3
+retsub
+
+// confirm_payment_received_caster
+confirmpaymentreceivedcaster_18:
+proto 0 0
+bytec_1 // ""
+txna ApplicationArgs 1
+frame_bury 0
+frame_dig 0
+callsub confirmpaymentreceived_4
+retsub
+
+// cancel_trade_caster
+canceltradecaster_19:
+proto 0 0
+bytec_1 // ""
+txna ApplicationArgs 1
+frame_bury 0
+frame_dig 0
+callsub canceltrade_5
+retsub
+
+// open_dispute_caster
+opendisputecaster_20:
+proto 0 0
+bytec_1 // ""
+dup
+txna ApplicationArgs 1
+frame_bury 0
+txna ApplicationArgs 2
+frame_bury 1
+frame_dig 0
+frame_dig 1
+callsub opendispute_6
+retsub
+
+// resolve_dispute_caster
+resolvedisputecaster_21:
+proto 0 0
+bytec_1 // ""
+dup
+txna ApplicationArgs 1
+frame_bury 0
+txna ApplicationArgs 2
+frame_bury 1
+frame_dig 0
+frame_dig 1
+callsub resolvedispute_7
+retsub
+
+// pause_caster
+pausecaster_22:
+proto 0 0
+callsub pause_8
+retsub
+
+// unpause_caster
+unpausecaster_23:
+proto 0 0
+callsub unpause_9
+retsub
+
+// get_created_count_caster
+getcreatedcountcaster_24:
+proto 0 0
+intc_0 // 0
+callsub getcreatedcount_10
+frame_bury 0
+bytec 11 // 0x151f7c75
+frame_dig 0
+itob
+concat
+log
+retsub
+
+// get_completed_count_caster
+getcompletedcountcaster_25:
+proto 0 0
+intc_0 // 0
+callsub getcompletedcount_11
+frame_bury 0
+bytec 11 // 0x151f7c75
+frame_dig 0
+itob
+concat
+log
+retsub
+
+// get_volume_caster
+getvolumecaster_26:
+proto 0 0
+bytec_1 // ""
+callsub getvolume_12
+frame_bury 0
+bytec 11 // 0x151f7c75
+frame_dig 0
+concat
+log
+retsub
+
+// delete_caster
+deletecaster_27:
+proto 0 0
+callsub delete_13
+retsub

@@ -1,0 +1,799 @@
+#pragma version 8
+intcblock 0 1 8 4
+bytecblock 0x 0x69735f706175736564 0x00 0x746f74616c5f636f6e66696f5f6c6f636b6564 0x746f74616c5f637573645f6c6f636b6564 0x61646d696e 0x637573645f61737365745f6964 0x636f6e66696f5f61737365745f6964 0x746f74616c5f696e7669746174696f6e735f63726561746564 0x01 0x746f74616c5f696e7669746174696f6e735f636c61696d6564 0x746f74616c5f696e7669746174696f6e735f7265636c61696d6564 0x151f7c75
+txna ApplicationArgs 0
+pushbytes 0x4c5c61ba // "create()void"
+==
+bnz main_l20
+txna ApplicationArgs 0
+pushbytes 0x990af164 // "setup_assets(uint64,uint64)void"
+==
+bnz main_l19
+txna ApplicationArgs 0
+pushbytes 0x44004427 // "create_invitation(string,axfer,string)void"
+==
+bnz main_l18
+txna ApplicationArgs 0
+pushbytes 0xc2a67c7d // "claim_invitation(string,address)void"
+==
+bnz main_l17
+txna ApplicationArgs 0
+pushbytes 0x7a4725f1 // "reclaim_invitation(string)void"
+==
+bnz main_l16
+txna ApplicationArgs 0
+pushbytes 0x0178f94b // "pause()void"
+==
+bnz main_l15
+txna ApplicationArgs 0
+pushbytes 0x1b529de8 // "unpause()void"
+==
+bnz main_l14
+txna ApplicationArgs 0
+pushbytes 0x99f0426e // "get_invitation_status(string)(bool,bool,bool)"
+==
+bnz main_l13
+txna ApplicationArgs 0
+pushbytes 0x95eef5a6 // "get_stats()(uint64,uint64,uint64,uint64,uint64)"
+==
+bnz main_l12
+txna ApplicationArgs 0
+pushbytes 0x24378d3c // "delete()void"
+==
+bnz main_l11
+err
+main_l11:
+txn OnCompletion
+pushint 5 // DeleteApplication
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub deletecaster_19
+intc_1 // 1
+return
+main_l12:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub getstatscaster_18
+intc_1 // 1
+return
+main_l13:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub getinvitationstatuscaster_17
+intc_1 // 1
+return
+main_l14:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub unpausecaster_16
+intc_1 // 1
+return
+main_l15:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub pausecaster_15
+intc_1 // 1
+return
+main_l16:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub reclaiminvitationcaster_14
+intc_1 // 1
+return
+main_l17:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub claiminvitationcaster_13
+intc_1 // 1
+return
+main_l18:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub createinvitationcaster_12
+intc_1 // 1
+return
+main_l19:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub setupassetscaster_11
+intc_1 // 1
+return
+main_l20:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+==
+&&
+assert
+callsub createcaster_10
+intc_1 // 1
+return
+
+// create
+create_0:
+proto 0 0
+bytec 5 // "admin"
+txn Sender
+app_global_put
+bytec_1 // "is_paused"
+intc_0 // 0
+app_global_put
+intc_1 // 1
+return
+
+// setup_assets
+setupassets_1:
+proto 2 0
+txn Sender
+bytec 5 // "admin"
+app_global_get
+==
+bytec 6 // "cusd_asset_id"
+app_global_get
+intc_0 // 0
+==
+&&
+bytec 7 // "confio_asset_id"
+app_global_get
+intc_0 // 0
+==
+&&
+assert
+bytec 6 // "cusd_asset_id"
+frame_dig -2
+app_global_put
+bytec 7 // "confio_asset_id"
+frame_dig -1
+app_global_put
+itxn_begin
+intc_3 // axfer
+itxn_field TypeEnum
+frame_dig -2
+itxn_field XferAsset
+global CurrentApplicationAddress
+itxn_field AssetReceiver
+intc_0 // 0
+itxn_field AssetAmount
+itxn_submit
+itxn_begin
+intc_3 // axfer
+itxn_field TypeEnum
+frame_dig -1
+itxn_field XferAsset
+global CurrentApplicationAddress
+itxn_field AssetReceiver
+intc_0 // 0
+itxn_field AssetAmount
+itxn_submit
+intc_1 // 1
+return
+
+// create_invitation
+createinvitation_2:
+proto 3 0
+bytec_1 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+frame_dig -2
+gtxns AssetReceiver
+global CurrentApplicationAddress
+==
+&&
+frame_dig -2
+gtxns AssetAmount
+intc_0 // 0
+>
+&&
+frame_dig -2
+gtxns XferAsset
+bytec 6 // "cusd_asset_id"
+app_global_get
+==
+frame_dig -2
+gtxns XferAsset
+bytec 7 // "confio_asset_id"
+app_global_get
+==
+||
+&&
+assert
+frame_dig -3
+extract 2 0
+txn Sender
+frame_dig -2
+gtxns AssetAmount
+itob
+concat
+frame_dig -2
+gtxns XferAsset
+itob
+concat
+global LatestTimestamp
+itob
+concat
+global LatestTimestamp
+pushint 604800 // 604800
++
+itob
+concat
+bytec_2 // 0x00
+concat
+bytec_2 // 0x00
+concat
+frame_dig -1
+extract 2 0
+len
+itob
+extract 6 2
+concat
+frame_dig -1
+extract 2 0
+concat
+box_put
+bytec 8 // "total_invitations_created"
+bytec 8 // "total_invitations_created"
+app_global_get
+intc_1 // 1
++
+app_global_put
+frame_dig -2
+gtxns XferAsset
+bytec 6 // "cusd_asset_id"
+app_global_get
+==
+bnz createinvitation_2_l2
+bytec_3 // "total_confio_locked"
+bytec_3 // "total_confio_locked"
+app_global_get
+frame_dig -2
+gtxns AssetAmount
++
+app_global_put
+b createinvitation_2_l3
+createinvitation_2_l2:
+bytec 4 // "total_cusd_locked"
+bytec 4 // "total_cusd_locked"
+app_global_get
+frame_dig -2
+gtxns AssetAmount
++
+app_global_put
+createinvitation_2_l3:
+intc_1 // 1
+return
+
+// claim_invitation
+claiminvitation_3:
+proto 2 0
+frame_dig -2
+extract 2 0
+box_get
+store 7
+store 6
+load 7
+assert
+load 6
+intc_0 // 0
+pushint 32 // 32
+box_extract
+store 0
+load 6
+pushint 32 // 32
+intc_2 // 8
+box_extract
+btoi
+store 1
+load 6
+pushint 40 // 40
+intc_2 // 8
+box_extract
+btoi
+store 2
+load 6
+pushint 56 // 56
+intc_2 // 8
+box_extract
+btoi
+store 3
+load 6
+pushint 64 // 64
+intc_1 // 1
+box_extract
+store 4
+load 6
+pushint 65 // 65
+intc_1 // 1
+box_extract
+store 5
+txn Sender
+bytec 5 // "admin"
+app_global_get
+==
+bytec_1 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+&&
+load 4
+bytec_2 // 0x00
+==
+&&
+load 5
+bytec_2 // 0x00
+==
+&&
+global LatestTimestamp
+load 3
+<=
+&&
+assert
+itxn_begin
+intc_3 // axfer
+itxn_field TypeEnum
+load 2
+itxn_field XferAsset
+frame_dig -1
+itxn_field AssetReceiver
+load 1
+itxn_field AssetAmount
+itxn_submit
+frame_dig -2
+extract 2 0
+pushint 64 // 64
+bytec 9 // 0x01
+box_replace
+bytec 10 // "total_invitations_claimed"
+bytec 10 // "total_invitations_claimed"
+app_global_get
+intc_1 // 1
++
+app_global_put
+load 2
+bytec 6 // "cusd_asset_id"
+app_global_get
+==
+bnz claiminvitation_3_l2
+bytec_3 // "total_confio_locked"
+bytec_3 // "total_confio_locked"
+app_global_get
+load 1
+-
+app_global_put
+b claiminvitation_3_l3
+claiminvitation_3_l2:
+bytec 4 // "total_cusd_locked"
+bytec 4 // "total_cusd_locked"
+app_global_get
+load 1
+-
+app_global_put
+claiminvitation_3_l3:
+intc_1 // 1
+return
+
+// reclaim_invitation
+reclaiminvitation_4:
+proto 1 0
+frame_dig -1
+extract 2 0
+box_get
+store 15
+store 14
+load 15
+assert
+load 14
+intc_0 // 0
+pushint 32 // 32
+box_extract
+store 8
+load 14
+pushint 32 // 32
+intc_2 // 8
+box_extract
+btoi
+store 9
+load 14
+pushint 40 // 40
+intc_2 // 8
+box_extract
+btoi
+store 10
+load 14
+pushint 56 // 56
+intc_2 // 8
+box_extract
+btoi
+store 11
+load 14
+pushint 64 // 64
+intc_1 // 1
+box_extract
+store 12
+load 14
+pushint 65 // 65
+intc_1 // 1
+box_extract
+store 13
+bytec_1 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+txn Sender
+load 8
+==
+&&
+load 12
+bytec_2 // 0x00
+==
+&&
+load 13
+bytec_2 // 0x00
+==
+&&
+global LatestTimestamp
+load 11
+>
+&&
+assert
+itxn_begin
+intc_3 // axfer
+itxn_field TypeEnum
+load 10
+itxn_field XferAsset
+load 8
+itxn_field AssetReceiver
+load 9
+itxn_field AssetAmount
+itxn_submit
+frame_dig -1
+extract 2 0
+pushint 65 // 65
+bytec 9 // 0x01
+box_replace
+bytec 11 // "total_invitations_reclaimed"
+bytec 11 // "total_invitations_reclaimed"
+app_global_get
+intc_1 // 1
++
+app_global_put
+load 10
+bytec 6 // "cusd_asset_id"
+app_global_get
+==
+bnz reclaiminvitation_4_l2
+bytec_3 // "total_confio_locked"
+bytec_3 // "total_confio_locked"
+app_global_get
+load 9
+-
+app_global_put
+b reclaiminvitation_4_l3
+reclaiminvitation_4_l2:
+bytec 4 // "total_cusd_locked"
+bytec 4 // "total_cusd_locked"
+app_global_get
+load 9
+-
+app_global_put
+reclaiminvitation_4_l3:
+intc_1 // 1
+return
+
+// pause
+pause_5:
+proto 0 0
+txn Sender
+bytec 5 // "admin"
+app_global_get
+==
+bytec_1 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+&&
+assert
+bytec_1 // "is_paused"
+intc_1 // 1
+app_global_put
+intc_1 // 1
+return
+
+// unpause
+unpause_6:
+proto 0 0
+txn Sender
+bytec 5 // "admin"
+app_global_get
+==
+bytec_1 // "is_paused"
+app_global_get
+intc_1 // 1
+==
+&&
+assert
+bytec_1 // "is_paused"
+intc_0 // 0
+app_global_put
+intc_1 // 1
+return
+
+// get_invitation_status
+getinvitationstatus_7:
+proto 1 1
+bytec_0 // ""
+intc_0 // 0
+dupn 4
+bytec_0 // ""
+dup
+frame_dig -1
+extract 2 0
+box_get
+store 17
+store 16
+load 17
+bnz getinvitationstatus_7_l2
+intc_0 // 0
+frame_bury 1
+intc_0 // 0
+frame_bury 2
+intc_0 // 0
+frame_bury 3
+b getinvitationstatus_7_l3
+getinvitationstatus_7_l2:
+intc_1 // 1
+frame_bury 1
+load 16
+pushint 64 // 64
+intc_1 // 1
+box_extract
+bytec 9 // 0x01
+==
+!
+!
+frame_bury 2
+global LatestTimestamp
+load 16
+pushint 56 // 56
+intc_2 // 8
+box_extract
+btoi
+>
+!
+!
+frame_bury 3
+getinvitationstatus_7_l3:
+bytec_2 // 0x00
+intc_0 // 0
+frame_dig 1
+setbit
+intc_1 // 1
+frame_dig 2
+setbit
+pushint 2 // 2
+frame_dig 3
+setbit
+frame_bury 0
+retsub
+
+// get_stats
+getstats_8:
+proto 0 1
+bytec_0 // ""
+intc_0 // 0
+dupn 6
+bytec_0 // ""
+dup
+bytec 8 // "total_invitations_created"
+app_global_get
+frame_bury 1
+bytec 10 // "total_invitations_claimed"
+app_global_get
+frame_bury 2
+bytec 11 // "total_invitations_reclaimed"
+app_global_get
+frame_bury 3
+bytec 4 // "total_cusd_locked"
+app_global_get
+frame_bury 4
+bytec_3 // "total_confio_locked"
+app_global_get
+frame_bury 5
+frame_dig 1
+itob
+frame_dig 2
+itob
+concat
+frame_dig 3
+itob
+concat
+frame_dig 4
+itob
+concat
+frame_dig 5
+itob
+concat
+frame_bury 0
+retsub
+
+// delete
+delete_9:
+proto 0 0
+txn Sender
+bytec 5 // "admin"
+app_global_get
+==
+assert
+intc_1 // 1
+return
+
+// create_caster
+createcaster_10:
+proto 0 0
+callsub create_0
+retsub
+
+// setup_assets_caster
+setupassetscaster_11:
+proto 0 0
+intc_0 // 0
+dup
+txna ApplicationArgs 1
+btoi
+frame_bury 0
+txna ApplicationArgs 2
+btoi
+frame_bury 1
+frame_dig 0
+frame_dig 1
+callsub setupassets_1
+retsub
+
+// create_invitation_caster
+createinvitationcaster_12:
+proto 0 0
+bytec_0 // ""
+intc_0 // 0
+bytec_0 // ""
+txna ApplicationArgs 1
+frame_bury 0
+txna ApplicationArgs 2
+frame_bury 2
+txn GroupIndex
+intc_1 // 1
+-
+frame_bury 1
+frame_dig 1
+gtxns TypeEnum
+intc_3 // axfer
+==
+assert
+frame_dig 0
+frame_dig 1
+frame_dig 2
+callsub createinvitation_2
+retsub
+
+// claim_invitation_caster
+claiminvitationcaster_13:
+proto 0 0
+bytec_0 // ""
+dup
+txna ApplicationArgs 1
+frame_bury 0
+txna ApplicationArgs 2
+frame_bury 1
+frame_dig 0
+frame_dig 1
+callsub claiminvitation_3
+retsub
+
+// reclaim_invitation_caster
+reclaiminvitationcaster_14:
+proto 0 0
+bytec_0 // ""
+txna ApplicationArgs 1
+frame_bury 0
+frame_dig 0
+callsub reclaiminvitation_4
+retsub
+
+// pause_caster
+pausecaster_15:
+proto 0 0
+callsub pause_5
+retsub
+
+// unpause_caster
+unpausecaster_16:
+proto 0 0
+callsub unpause_6
+retsub
+
+// get_invitation_status_caster
+getinvitationstatuscaster_17:
+proto 0 0
+bytec_0 // ""
+dup
+txna ApplicationArgs 1
+frame_bury 1
+frame_dig 1
+callsub getinvitationstatus_7
+frame_bury 0
+bytec 12 // 0x151f7c75
+frame_dig 0
+concat
+log
+retsub
+
+// get_stats_caster
+getstatscaster_18:
+proto 0 0
+bytec_0 // ""
+callsub getstats_8
+frame_bury 0
+bytec 12 // 0x151f7c75
+frame_dig 0
+concat
+log
+retsub
+
+// delete_caster
+deletecaster_19:
+proto 0 0
+callsub delete_9
+retsub
