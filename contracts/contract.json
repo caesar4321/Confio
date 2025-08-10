@@ -24,7 +24,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Setup asset IDs and opt-in to both assets\nNote: cUSD reserve address should be rekeyed to this app for minting authority"
+            "desc": "Setup asset IDs and opt-in to both assets with proper funding\nMust be called as part of atomic group with payment to app for fees/min balance\nGroup structure: - Tx 0: Payment to app (at least 0.6 ALGO for opt-ins and fees) - Tx 1: This app call"
         },
         {
             "name": "pause",

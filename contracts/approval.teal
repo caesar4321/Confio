@@ -383,6 +383,26 @@ app_global_get
 intc_0 // 0
 ==
 assert
+global GroupSize
+pushint 2 // 2
+==
+assert
+txn GroupIndex
+intc_1 // 1
+==
+assert
+gtxn 0 TypeEnum
+intc_1 // pay
+==
+assert
+gtxn 0 Receiver
+global CurrentApplicationAddress
+==
+assert
+gtxn 0 Amount
+pushint 600000 // 600000
+>=
+assert
 bytec 4 // "cusd_asset_id"
 frame_dig -2
 app_global_put
@@ -390,6 +410,8 @@ bytec 12 // "usdc_asset_id"
 frame_dig -1
 app_global_put
 itxn_begin
+intc_0 // 0
+itxn_field Fee
 intc_2 // axfer
 itxn_field TypeEnum
 frame_dig -1
@@ -400,6 +422,8 @@ intc_0 // 0
 itxn_field AssetAmount
 itxn_submit
 itxn_begin
+intc_0 // 0
+itxn_field Fee
 intc_2 // axfer
 itxn_field TypeEnum
 frame_dig -2
@@ -568,6 +592,8 @@ intc_0 // 0
 >
 assert
 itxn_begin
+intc_0 // 0
+itxn_field Fee
 intc_2 // axfer
 itxn_field TypeEnum
 bytec 4 // "cusd_asset_id"
@@ -712,6 +738,8 @@ app_global_get
 /
 store 1
 itxn_begin
+intc_0 // 0
+itxn_field Fee
 intc_2 // axfer
 itxn_field TypeEnum
 bytec 4 // "cusd_asset_id"
@@ -816,6 +844,8 @@ load 3
 >=
 assert
 itxn_begin
+intc_0 // 0
+itxn_field Fee
 intc_2 // axfer
 itxn_field TypeEnum
 bytec 12 // "usdc_asset_id"
