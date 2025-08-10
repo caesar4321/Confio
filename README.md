@@ -61,6 +61,20 @@ We host all infrastructure in **AWS eu-central-2 (Zurich)** region for optimal d
 - ❌ No crypto knowledge required — users sign in with Google or Apple
 - ❌ No server-side private keys — all signing happens on the client
 
+## 🔄 Recent Updates (August 2025)
+
+### Blockchain Migration Complete
+- ✅ **Migrated from Aptos/Move to Algorand** - All smart contracts now use PyTeal/TEAL
+- ✅ **Removed zkLogin infrastructure** - Now using Firebase Auth with Algorand
+- ✅ **Deployed cUSD stablecoin** - Fully operational with dual backing system
+- ✅ **Maximum supply configured** - 2^64-1 tokens for unlimited scalability
+
+### Project Cleanup
+- 📁 **Organized contract files** - All Algorand contracts now in `/contracts` with proper subdirectories
+- 🗑️ **Removed legacy code** - Cleaned up 40+ zkLogin debug files and old deployment scripts
+- 📚 **Updated documentation** - Moved docs to `/docs` folder, removed outdated guides
+- 🎯 **Streamlined root directory** - Only essential files remain in project root
+
 ## 💬 Join the Community
 
 Confío is more than a wallet — it's a mission to bring financial confidence to Latin America through transparency, crypto, and culture.
@@ -179,23 +193,7 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── admin.py       # Enhanced admin interface for security monitoring
 │   └── migrations/    # Database migrations for security models
 
-# Note: prover/ directory removed - using deterministic wallet generation instead
-
-├── prover-service/    # Standalone service for proof generation and verification
-│   ├── index.js      # Main entry point for the prover service
-│   ├── prover.js     # Core proof generation and verification logic
-│   ├── utils.js      # Utility functions for proof operations
-│   ├── tests/        # Test cases for the prover service
-│   └── package.json  # Node.js dependencies and scripts
-│       ├── Dependencies:
-│       │   ├── algosdk: Algorand SDK for blockchain interaction
-│       │   ├── express: Web server
-│       │   ├── cors: Cross-Origin Resource Sharing
-│       │   └── dotenv: Environment variable management
-│       └── Scripts:
-│           ├── start: Run the service
-│           ├── test: Run tests
-│           └── lint: Run the linter
+# Note: zkLogin/prover-service removed - now using Algorand with Firebase Auth
 
 ├── users/             # User authentication and management
 │   ├── models.py      # User models
@@ -248,19 +246,41 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── metro.config.js    # Metro bundler configuration
 │   └── package.json       # Node.js dependencies
 
-├── contracts/    # Algorand smart contracts (PyTeal)
-│   ├── README.md     # Contracts overview and deployment guide
+├── contracts/         # Algorand smart contracts (PyTeal)
+│   ├── README.md      # Contracts overview and deployment guide
 │   ├── PERMISSIONS.md # Comprehensive permissions and multi-sig guide
-│   ├── ALGORAND_MIGRATION.md # Migration from Aptos/Move to Algorand
-│   ├── DEPLOYMENT.md # Deployment instructions and status
+│   ├── DEPLOYMENT.md  # Deployment instructions and status
 │   │
-│   ├── cusd.py       # cUSD stablecoin with dual backing (USDC + T-bills)
-│   ├── cusd_abi.json # cUSD contract ABI
+│   ├── config/        # Configuration files
+│   │   ├── algorand_localnet_config.py  # LocalNet connection settings
+│   │   ├── localnet_accounts.py         # Test account addresses
+│   │   ├── localnet_assets.py           # Asset IDs for testing
+│   │   └── localnet_test_config.py      # Test deployment config
+│   │
+│   ├── deploy/        # Deployment scripts
+│   │   ├── complete_localnet_test.py    # Full LocalNet deployment
+│   │   ├── create_localnet_assets.py    # Asset creation scripts
+│   │   ├── deploy_localnet_contract.py  # Contract deployment
+│   │   └── setup_localnet_accounts.py   # Account setup scripts
+│   │
+│   ├── tests/         # Test scripts
+│   │   ├── test_cusd_functionality.py   # Comprehensive cUSD tests
+│   │   ├── test_cusd_readonly.py        # Read-only state tests
+│   │   ├── test_admin_mint.py           # Admin minting tests
+│   │   └── test_collateral_mint.py      # Collateral system tests
+│   │
+│   ├── scripts/       # Utility scripts
+│   │   ├── create_cusd_algorand.py      # cUSD asset creation
+│   │   ├── create_confio_token_algorand.py # CONFIO token creation
+│   │   └── setup_cusd_assets.py         # Asset setup utilities
+│   │
+│   ├── cusd.py        # cUSD stablecoin with dual backing (USDC + T-bills)
+│   ├── cusd_abi.json  # cUSD contract ABI
 │   ├── cusd_approval.teal # Compiled cUSD approval program
 │   ├── cusd_clear.teal    # Compiled cUSD clear program
 │   │
-│   ├── payment.py    # Payment processing with 0.9% fee
-│   ├── payment.json  # Payment contract ABI
+│   ├── payment.py     # Payment processing with 0.9% fee
+│   ├── payment.json   # Payment contract ABI
 │   ├── payment_approval.teal # Compiled payment approval program
 │   ├── payment_clear.teal    # Compiled payment clear program
 │   │
@@ -2102,7 +2122,7 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
 
 ## 📜 Smart Contracts
 
-> **🔄 Migration Update**: Confío has successfully migrated from Aptos/Move to Algorand/PyTeal blockchain infrastructure. The cUSD stablecoin with dual backing system is fully deployed and operational on Algorand testnet. For migration details, see [contracts/ALGORAND_MIGRATION.md](contracts/ALGORAND_MIGRATION.md).
+> **🔄 Migration Complete**: Confío has successfully migrated from Aptos/Move to Algorand/PyTeal blockchain infrastructure. The cUSD stablecoin with dual backing system is fully deployed and operational on Algorand testnet with maximum supply (2^64-1) configured for scalability.
 
 ### Confío Dollar ($cUSD)
 - **File**: `contracts/cusd.py`
@@ -2129,7 +2149,6 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
   - Collateral ratio validation and auditing
 
 ### Confío ($CONFIO)
-- **File**: `contracts/confio/` (Legacy Move implementation - being migrated to PyTeal)
 - **Purpose**: Governance and utility token for the Confío platform
 - **Key Features**:
   - Fixed supply of 1 billion tokens
