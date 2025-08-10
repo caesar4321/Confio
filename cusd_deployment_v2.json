@@ -1,9 +1,0 @@
-{
-  "network": "testnet",
-  "deployer_address": "KNKFUBM3GHOLF6S7L2O7JU6YDB7PCRV3PKBOBRCABLYHBHXRFXKNDWGAWE",
-  "app_id": 744031997,
-  "app_address": "3GM6PNCIWNNQWXS3G43XLJA4IASDAGMROLSZ3YT4FWBKWAEPYOTHUZMJRA",
-  "cusd_asset_id": 744031413,
-  "usdc_asset_id": 10458941,
-  "deployment_status": "Contract deployed. Using existing cUSD asset. Needs funding and setup."
-}

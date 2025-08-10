@@ -37,6 +37,10 @@ def get_usdc_asset_id():
 # Get the USDC asset ID for current environment
 USDC_ASSET_ID = get_usdc_asset_id()
 
+# For LocalNet, we'll create a test USDC
+if os.getenv('ALGORAND_NETWORK', '').lower() == 'localnet':
+    USDC_ASSET_ID = 0  # Will be set dynamically during setup
+
 class CUSDState:
     """Global and local state for Confío Dollar management"""
     
@@ -135,21 +139,35 @@ def create():
 @app.external
 def setup_assets(cusd_id: abi.Uint64, usdc_id: abi.Uint64):
     """
-    Setup asset IDs and opt-in to both assets
-    Note: cUSD reserve address should be rekeyed to this app for minting authority
+    Setup asset IDs and opt-in to both assets with proper funding
+    Must be called as part of atomic group with payment to app for fees/min balance
+    
+    Group structure:
+    - Tx 0: Payment to app (at least 0.6 ALGO for opt-ins and fees)
+    - Tx 1: This app call
     """
+    min_fund = Int(600000)  # 0.6 ALGO buffer for opt-ins and fees
+    
     return Seq(
         # Admin only
         Assert(Txn.sender() == app.state.admin),
         Assert(app.state.cusd_asset_id == Int(0)),  # Can only be set once
         
+        # Verify atomic group with funding
+        Assert(Global.group_size() == Int(2)),
+        Assert(Txn.group_index() == Int(1)),
+        Assert(Gtxn[0].type_enum() == TxnType.Payment),
+        Assert(Gtxn[0].receiver() == Global.current_application_address()),
+        Assert(Gtxn[0].amount() >= min_fund),
+        
         # Store asset IDs
         app.state.cusd_asset_id.set(cusd_id.get()),
         app.state.usdc_asset_id.set(usdc_id.get()),
         
-        # Opt-in to USDC
+        # Opt-in to USDC with fee=0 (outer txn pays)
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
+            TxnField.fee: Int(0),
             TxnField.type_enum: TxnType.AssetTransfer,
             TxnField.xfer_asset: usdc_id.get(),
             TxnField.asset_receiver: Global.current_application_address(),
@@ -157,9 +175,10 @@ def setup_assets(cusd_id: abi.Uint64, usdc_id: abi.Uint64):
         }),
         InnerTxnBuilder.Submit(),
         
-        # Opt-in to cUSD
+        # Opt-in to cUSD with fee=0 (outer txn pays)
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
+            TxnField.fee: Int(0),
             TxnField.type_enum: TxnType.AssetTransfer,
             TxnField.xfer_asset: cusd_id.get(),
             TxnField.asset_receiver: Global.current_application_address(),
@@ -284,6 +303,7 @@ def mint_admin(
         # The contract is the clawback authority, so it can transfer from reserve
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
+            TxnField.fee: Int(0),  # Inner transaction fee=0
             TxnField.type_enum: TxnType.AssetTransfer,
             TxnField.xfer_asset: app.state.cusd_asset_id,
             TxnField.asset_amount: amount.get(),
@@ -393,6 +413,7 @@ def mint_with_collateral():
         # The contract is the clawback authority, so it can transfer from reserve
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
+            TxnField.fee: Int(0),  # Inner transaction fee=0
             TxnField.type_enum: TxnType.AssetTransfer,
             TxnField.xfer_asset: app.state.cusd_asset_id,
             TxnField.asset_amount: cusd_to_mint.load(),
@@ -472,6 +493,7 @@ def burn_for_collateral():
         # Send USDC back to user
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
+            TxnField.fee: Int(0),  # Inner transaction fee=0
             TxnField.type_enum: TxnType.AssetTransfer,
             TxnField.xfer_asset: app.state.usdc_asset_id,
             TxnField.asset_amount: usdc_to_redeem.load(),

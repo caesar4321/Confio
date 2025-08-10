@@ -1,9 +1,0 @@
-{
-  "network": "testnet",
-  "deployer_address": "KNKFUBM3GHOLF6S7L2O7JU6YDB7PCRV3PKBOBRCABLYHBHXRFXKNDWGAWE",
-  "app_id": 744031412,
-  "app_address": "KKGQY57MM4EIC4DT4L56PSOMELE64H4BYJTCBT2DIWMPYX3ELFJR5PHPAA",
-  "cusd_asset_id": 744031413,
-  "usdc_asset_id": 10458941,
-  "deployment_status": "Assets configured. Ready for use!"
-}
