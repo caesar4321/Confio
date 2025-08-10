@@ -1,0 +1,254 @@
+{
+    "name": "ConfioDollar",
+    "methods": [
+        {
+            "name": "create",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Initialize the Conf\u00edo Dollar contract"
+        },
+        {
+            "name": "setup_assets",
+            "args": [
+                {
+                    "type": "uint64",
+                    "name": "cusd_id"
+                },
+                {
+                    "type": "uint64",
+                    "name": "usdc_id"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Setup asset IDs and opt-in to both assets\nNote: cUSD reserve address should be rekeyed to this app for minting authority"
+        },
+        {
+            "name": "pause",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Pause all operations"
+        },
+        {
+            "name": "unpause",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Unpause operations"
+        },
+        {
+            "name": "opt_in",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Allow accounts to opt-in"
+        },
+        {
+            "name": "add_vault",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "vault_address"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Add a vault address"
+        },
+        {
+            "name": "remove_vault",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "vault_address"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Remove a vault address"
+        },
+        {
+            "name": "freeze_address",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "target_address"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Freeze an address from transacting"
+        },
+        {
+            "name": "unfreeze_address",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "target_address"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Unfreeze an address"
+        },
+        {
+            "name": "mint_admin",
+            "args": [
+                {
+                    "type": "uint64",
+                    "name": "amount"
+                },
+                {
+                    "type": "address",
+                    "name": "recipient"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Admin minting backed by T-bills or other reserves\nThis is separate from USDC collateralized minting Can be used for treasury-backed issuance"
+        },
+        {
+            "name": "burn_admin",
+            "args": [
+                {
+                    "type": "uint64",
+                    "name": "amount"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Admin burning to reduce supply (e.g., when selling T-bills)\nMust be called with cUSD transfer to app"
+        },
+        {
+            "name": "mint_with_collateral",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Mint cUSD by depositing USDC (1:1 ratio)\nMust be called as part of atomic group with USDC transfer\nGroup structure: - Tx 0: USDC transfer from user to app - Tx 1: This app call"
+        },
+        {
+            "name": "burn_for_collateral",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Burn cUSD to redeem USDC (1:1 ratio)\nMust be called as part of atomic group with cUSD transfer\nGroup structure: - Tx 0: cUSD transfer from user to app - Tx 1: This app call"
+        },
+        {
+            "name": "transfer_cusd",
+            "args": [
+                {
+                    "type": "axfer",
+                    "name": "asset_transfer"
+                },
+                {
+                    "type": "address",
+                    "name": "recipient"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Transfer Conf\u00edo Dollar with freeze checks\nCalled alongside an ASA transfer transaction"
+        },
+        {
+            "name": "update_admin",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "new_admin"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Transfer admin rights to a new address (can be a multi-sig wallet)\nOnly current admin can transfer rights"
+        },
+        {
+            "name": "update_collateral_ratio",
+            "args": [
+                {
+                    "type": "uint64",
+                    "name": "new_ratio"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Update collateral ratio (admin only)\n1000000 = 1:1, 1500000 = 1.5:1 (150% collateralized)"
+        },
+        {
+            "name": "get_stats",
+            "args": [],
+            "returns": {
+                "type": "(uint64,uint64)"
+            },
+            "desc": "Get minting and burning statistics"
+        },
+        {
+            "name": "get_reserves",
+            "args": [],
+            "returns": {
+                "type": "(uint64,uint64,uint64,uint64,uint64)"
+            },
+            "desc": "Get reserve statistics\nReturns: (total_usdc_locked, cusd_circulating_supply, tbills_backed_supply, collateral_ratio, total_supply)"
+        },
+        {
+            "name": "verify_backing",
+            "args": [],
+            "returns": {
+                "type": "bool"
+            },
+            "desc": "Verify that USDC reserves match or exceed cUSD supply\nReturns true if properly backed"
+        },
+        {
+            "name": "is_frozen",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "address"
+                }
+            ],
+            "returns": {
+                "type": "bool"
+            },
+            "desc": "Check if an address is frozen"
+        },
+        {
+            "name": "is_vault",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "address"
+                }
+            ],
+            "returns": {
+                "type": "bool"
+            },
+            "desc": "Check if an address is a vault"
+        },
+        {
+            "name": "delete",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Only admin can delete the application"
+        }
+    ],
+    "networks": {}
+}

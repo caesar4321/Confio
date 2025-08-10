@@ -1,0 +1,63 @@
+{
+  "name": "ConfioDollar",
+  "methods": [
+    {
+      "name": "setup_assets",
+      "args": [
+        {"type": "uint64", "name": "cusd_id"},
+        {"type": "uint64", "name": "usdc_id"}
+      ],
+      "returns": {"type": "void"}
+    },
+    {
+      "name": "mint_admin",
+      "args": [
+        {"type": "uint64", "name": "amount"},
+        {"type": "address", "name": "recipient"}
+      ],
+      "returns": {"type": "void"}
+    },
+    {
+      "name": "burn_admin",
+      "args": [
+        {"type": "uint64", "name": "amount"}
+      ],
+      "returns": {"type": "void"}
+    },
+    {
+      "name": "mint_with_collateral",
+      "args": [],
+      "returns": {"type": "void"}
+    },
+    {
+      "name": "burn_for_collateral",
+      "args": [],
+      "returns": {"type": "void"}
+    },
+    {
+      "name": "update_admin",
+      "args": [
+        {"type": "address", "name": "new_admin"}
+      ],
+      "returns": {"type": "void"}
+    },
+    {
+      "name": "update_collateral_ratio",
+      "args": [
+        {"type": "uint64", "name": "new_ratio"}
+      ],
+      "returns": {"type": "void"}
+    },
+    {
+      "name": "pause",
+      "args": [],
+      "returns": {"type": "void"}
+    },
+    {
+      "name": "unpause",
+      "args": [],
+      "returns": {"type": "void"}
+    }
+  ],
+  "desc": "Confío Dollar stablecoin with dual backing (USDC collateral + T-bills)"
+}
