@@ -248,39 +248,35 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── metro.config.js    # Metro bundler configuration
 │   └── package.json       # Node.js dependencies
 
-├── contracts/    # Algorand smart contracts
+├── contracts/    # Algorand smart contracts (PyTeal)
 │   ├── README.md     # Contracts overview and deployment guide
 │   ├── PERMISSIONS.md # Comprehensive permissions and multi-sig guide
-│   ├── cusd/     # CUSD stablecoin implementation
-│   │   ├── contracts/  # PyTeal source files
-│   │   │   ├── cusd.py               # CUSD ASA implementation
-│   │   │   ├── cusd_vault_usdc.py    # USDC vault for CUSD minting/burning
-│   │   │   └── cusd_vault_treasury.py # Treasury vault for CUSD operations
-│   │   ├── config.py # Contract configuration
-│   │   └── Move.lock # Dependency lock file
-│   ├── confio/   # CONFIO governance token
-│   │   ├── contracts/  # PyTeal source files
-│   │   │   └── confio.py             # CONFIO ASA implementation
-│   │   ├── config.py # Contract configuration
-│   │   └── Move.lock # Dependency lock file
-│   ├── pay/      # Payment processing with fee collection
-│   │   ├── contracts/  # PyTeal source files
-│   │   │   └── pay.py                # Payment system with 0.9% fee
-│   │   ├── config.py # Contract configuration
-│   │   └── Move.lock # Dependency lock file
-│   ├── invite_send/  # Send funds to non-users with invitations
-│   │   ├── contracts/  # PyTeal source files
-│   │   │   └── invite_send.py        # Invitation system with 7-day reclaim
-│   │   ├── config.py # Contract configuration
-│   │   └── Move.lock # Dependency lock file
-│   └── p2p_trade/    # P2P trading with escrow and dispute resolution
-│       ├── contracts/  # PyTeal source files
-│       │   └── p2p_trade.py          # Escrow-based P2P trading system
-│       ├── tests/    # Test files
-│       │   └── escrow_security_test.py   # Security test cases
-│       ├── README.md # Contract documentation
-│       ├── Move.toml # Package configuration
-│       └── Move.lock # Dependency lock file
+│   ├── ALGORAND_MIGRATION.md # Migration from Aptos/Move to Algorand
+│   ├── DEPLOYMENT.md # Deployment instructions and status
+│   │
+│   ├── cusd.py       # cUSD stablecoin with dual backing (USDC + T-bills)
+│   ├── cusd_abi.json # cUSD contract ABI
+│   ├── cusd_approval.teal # Compiled cUSD approval program
+│   ├── cusd_clear.teal    # Compiled cUSD clear program
+│   │
+│   ├── payment.py    # Payment processing with 0.9% fee
+│   ├── payment.json  # Payment contract ABI
+│   ├── payment_approval.teal # Compiled payment approval program
+│   ├── payment_clear.teal    # Compiled payment clear program
+│   │
+│   ├── invite_send.py # Send funds to non-users with invitations
+│   ├── invite_send.json # Invitation contract ABI
+│   ├── invite_send_approval.teal # Compiled invitation approval program
+│   ├── invite_send_clear.teal    # Compiled invitation clear program
+│   │
+│   ├── p2p_trade.py  # P2P trading with escrow and dispute resolution
+│   ├── p2p_trade.json # P2P contract ABI
+│   ├── p2p_trade_approval.teal # Compiled P2P approval program
+│   ├── p2p_trade_clear.teal    # Compiled P2P clear program
+│   │
+│   ├── deploy_cusd.py # cUSD deployment script
+│   ├── build_contracts.py # Contract compilation utility
+│   └── config.env.example # Environment configuration template
 
 ├── workers/           # Cloudflare Workers services
 │   └── link-shortener/  # Link shortener for WhatsApp share links
@@ -2106,36 +2102,47 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
 
 ## 📜 Smart Contracts
 
+> **🔄 Migration Update**: Confío has successfully migrated from Aptos/Move to Algorand/PyTeal blockchain infrastructure. The cUSD stablecoin with dual backing system is fully deployed and operational on Algorand testnet. For migration details, see [contracts/ALGORAND_MIGRATION.md](contracts/ALGORAND_MIGRATION.md).
+
 ### Confío Dollar ($cUSD)
-- **File**: `contracts/cusd/contracts/cusd.py`
-- **Purpose**: Implementation of the $cUSD stablecoin, a gasless stablecoin designed for everyday transactions in Latin America
+- **File**: `contracts/cusd.py`
+- **Purpose**: Implementation of the $cUSD stablecoin with dual backing system, designed for everyday transactions in Latin America
 - **Key Features**:
   - 6 decimal places precision for micro-transactions
-  - USD-pegged stablecoin backed 1:1 by USDC reserves
-  - Admin controls for minting, freezing addresses, and pausing system
-  - Two-step burn process requiring user confirmation
-  - Vault registry for managing multiple reserve addresses
+  - **Dual backing system**: USDC collateral (automatic 1:1) + T-bills backing (admin controlled)
+  - Unlimited supply (2^64-1 tokens) for scalability
+  - Clawback mechanism for minting authority
+  - Admin controls for ratio adjustments, freezing addresses, and pausing system
+  - Atomic transaction groups for USDC deposits + cUSD minting
+- **USDC Collateral System**:
+  - Users deposit USDC → automatically receive cUSD 1:1
+  - Fully collateralized and transparent on-chain reserves
+  - Atomic transactions ensure deposit + mint happen together
+- **T-Bills Backing System**:
+  - Confío treasury backs cUSD with government T-bills
+  - Admin can mint/burn based on off-chain reserves
+  - Provides scalability beyond USDC availability limits
 - **Security Features**:
-  - Freeze registry to block malicious addresses
-  - System pause/unpause for emergency situations
-  - Event emission for all critical operations
-  - Admin-only functions protected by capability objects
+  - Frozen address protection
+  - Emergency pause/unpause functionality
+  - Global state tracking for both backing types
+  - Collateral ratio validation and auditing
 
 ### Confío ($CONFIO)
-- **File**: `contracts/confio/contracts/confio.py`
+- **File**: `contracts/confio/` (Legacy Move implementation - being migrated to PyTeal)
 - **Purpose**: Governance and utility token for the Confío platform
 - **Key Features**:
   - Fixed supply of 1 billion tokens
-  - 9 decimal places precision
-  - UTF-8 support for Spanish characters (ñ, í)
-  - Custom icon URL for wallet display
+  - 6 decimal places precision (Algorand Standard Asset)
+  - Creator account: `KNKFUBM3GHOLF6S7L2O7JU6YDB7PCRV3PKBOBRCABLYHBHXRFXKNDWGAWE`
+  - Asset ID: `743890784` (Testnet)
 - **Distribution**:
-  - Initial supply minted to contract deployer
-  - Treasury cap frozen preventing future minting
-  - No burn functionality to maintain fixed supply
+  - Initial supply available from creator account
+  - New users automatically receive 100 CONFIO tokens
+  - Used for platform governance and utility functions
 
 ### Confío Pay
-- **File**: `contracts/pay/contracts/pay.py`
+- **File**: `contracts/payment.py`
 - **Purpose**: Payment processing system with automatic fee collection
 - **Key Features**:
   - Automatic 0.9% fee deduction on all payments
@@ -2153,7 +2160,7 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
   - Business validation handled off-chain in Django
 
 ### Invite Send
-- **File**: `contracts/invite_send/contracts/invite_send.py`
+- **File**: `contracts/invite_send.py`
 - **Purpose**: Send funds to non-Confío users with phone number verification
 - **Key Features**:
   - Send cUSD or CONFIO to users who haven't signed up yet
@@ -2173,7 +2180,7 @@ The project uses `patch-package` to maintain fixes for third-party dependencies.
   - One-click reclaim by original sender only
 
 ### P2P Trade
-- **File**: `contracts/p2p_trade/contracts/p2p_trade.py`
+- **File**: `contracts/p2p_trade.py`
 - **Purpose**: Secure escrow-based peer-to-peer trading system for crypto-to-fiat exchanges
 - **Key Features**:
   - Escrow protection: Crypto funds locked until fiat payment confirmed
@@ -2225,10 +2232,33 @@ For detailed information about smart contract permissions and multi-signature se
 
 **Key Security Features:**
 - Critical operations (minting, freezing) require admin capabilities
-- Fixed supply for CONFIO token (no inflation risk)
+- Clawback mechanism prevents unauthorized minting
 - Escrow protection for P2P trades
 - Time-based expiration for invitations and trades
 - No personal data stored on-chain
+- Atomic transaction groups ensure operation consistency
+
+### 🚀 Current Deployment Status (Testnet)
+
+**cUSD Stablecoin - FULLY DEPLOYED & OPERATIONAL**
+- **Contract Address**: `KKGQY57MM4EIC4DT4L56PSOMELE64H4BYJTCBT2DIWMPYX3ELFJR5PHPAA`
+- **Application ID**: `744031412`
+- **Asset ID**: `744031413`
+- **USDC Asset ID**: `10458941` (Testnet USDC)
+- **Features**: ✅ USDC Collateral System, ✅ T-Bills Backing, ✅ Dual Backing
+
+**CONFIO Token - DEPLOYED & ACTIVE**
+- **Creator Account**: `KNKFUBM3GHOLF6S7L2O7JU6YDB7PCRV3PKBOBRCABLYHBHXRFXKNDWGAWE`
+- **Asset ID**: `743890784`
+- **Features**: ✅ 1B Fixed Supply, ✅ User Onboarding Grants
+
+**Other Contracts - MIGRATION IN PROGRESS**
+- Payment System: PyTeal implementation ready
+- P2P Trading: PyTeal implementation ready  
+- Invite Send: PyTeal implementation ready
+- **Status**: Awaiting deployment and integration testing
+
+For deployment details, see: [contracts/DEPLOYMENT.md](contracts/DEPLOYMENT.md)
 
 ## 🔒 Blockchain Integration
 
