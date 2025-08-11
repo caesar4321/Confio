@@ -9,76 +9,99 @@ Algorand Network Configuration (replacing Sui):
 import os
 from django.conf import settings
 
-# Network selection
-NETWORK = os.environ.get('ALGORAND_NETWORK', 'testnet')  # 'testnet' or 'mainnet'
+# Use Django settings if available, otherwise fall back to environment
+try:
+    # Try to use Django settings first
+    NETWORK = settings.BLOCKCHAIN_CONFIG.get('NETWORK', 'testnet')
+    ALGORAND_ALGOD_ADDRESS = settings.ALGORAND_ALGOD_ADDRESS
+    ALGORAND_ALGOD_TOKEN = settings.ALGORAND_ALGOD_TOKEN
+    ALGORAND_INDEXER_ADDRESS = settings.ALGORAND_INDEXER_ADDRESS
+    ALGORAND_INDEXER_TOKEN = settings.ALGORAND_INDEXER_TOKEN
+    ALGORAND_USDC_ASSET_ID = settings.ALGORAND_USDC_ASSET_ID
+    ALGORAND_CUSD_ASSET_ID = settings.ALGORAND_CUSD_ASSET_ID
+    ALGORAND_CONFIO_ASSET_ID = settings.ALGORAND_CONFIO_ASSET_ID
+    # Keep Sui settings for compatibility
+    SUI_RPC_URL = getattr(settings, 'SUI_RPC_URL', '')
+    CUSD_PACKAGE_ID = getattr(settings, 'CUSD_PACKAGE_ID', '')
+    CONFIO_PACKAGE_ID = getattr(settings, 'CONFIO_PACKAGE_ID', '')
+except (ImportError, AttributeError):
+    # Fall back to environment-based configuration
+    # Network selection
+    NETWORK = os.environ.get('ALGORAND_NETWORK', 'testnet')  # 'testnet' or 'mainnet'
 
-# RPC Endpoints
-if NETWORK == 'testnet':
-    # Algorand Testnet - Using Algonode free service
-    ALGORAND_ALGOD_ADDRESS = os.environ.get('ALGORAND_ALGOD_ADDRESS', 'https://testnet-api.algonode.cloud')
-    ALGORAND_ALGOD_TOKEN = os.environ.get('ALGORAND_ALGOD_TOKEN', '')  # Algonode doesn't require tokens
-    ALGORAND_INDEXER_ADDRESS = os.environ.get('ALGORAND_INDEXER_ADDRESS', 'https://testnet-idx.algonode.cloud')
-    ALGORAND_INDEXER_TOKEN = os.environ.get('ALGORAND_INDEXER_TOKEN', '')
-    
-    # Testnet Asset IDs
-    # USDC on Algorand Testnet (official Circle USDC)
-    ALGORAND_USDC_ASSET_ID = 10458941  # Official testnet USDC
-    
-    # Custom assets
-    ALGORAND_CUSD_ASSET_ID = os.environ.get('ALGORAND_CUSD_ASSET_ID', None)  # Will deploy custom cUSD
-    ALGORAND_CONFIO_ASSET_ID = int(os.environ.get('ALGORAND_CONFIO_ASSET_ID', '743890784'))  # CONFIO token on testnet
-    
-    # Sponsor account for fee sponsorship (to be created)
-    ALGORAND_SPONSOR_ADDRESS = os.environ.get('ALGORAND_SPONSOR_ADDRESS', None)
-    ALGORAND_SPONSOR_MNEMONIC = os.environ.get('ALGORAND_SPONSOR_MNEMONIC', None)
-    
-    # KMD configuration for secure key management
-    ALGORAND_KMD_ADDRESS = os.environ.get('ALGORAND_KMD_ADDRESS', 'http://localhost:4002')
-    ALGORAND_KMD_TOKEN = os.environ.get('ALGORAND_KMD_TOKEN', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
-    ALGORAND_KMD_WALLET_NAME = os.environ.get('ALGORAND_KMD_WALLET_NAME', 'sponsor_wallet')
-    ALGORAND_KMD_WALLET_PASSWORD = os.environ.get('ALGORAND_KMD_WALLET_PASSWORD', 'sponsor_password')
-    
-    # Fee collector account
-    FEE_COLLECTOR_ADDRESS = os.environ.get('ALGORAND_FEE_COLLECTOR_ADDRESS', None)
-    
-    # Keep Sui addresses for compatibility during migration
-    SUI_RPC_URL = "https://fullnode.testnet.sui.io:443"
-    CUSD_PACKAGE_ID = "0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf"
-    SPONSOR_PRIVATE_KEY = os.environ.get('SUI_SPONSOR_PRIVATE_KEY', None)
-    
-else:  # mainnet
-    # Algorand Mainnet - Using Algonode or QuickNode
-    ALGORAND_ALGOD_ADDRESS = os.environ.get('ALGORAND_ALGOD_ADDRESS', 'https://mainnet-api.algonode.cloud')
-    ALGORAND_ALGOD_TOKEN = os.environ.get('ALGORAND_ALGOD_TOKEN', '')
-    ALGORAND_INDEXER_ADDRESS = os.environ.get('ALGORAND_INDEXER_ADDRESS', 'https://mainnet-idx.algonode.cloud')
-    ALGORAND_INDEXER_TOKEN = os.environ.get('ALGORAND_INDEXER_TOKEN', '')
-    
-    # Mainnet Asset IDs
-    # USDC on Algorand Mainnet (official Circle USDC)
-    ALGORAND_USDC_ASSET_ID = 31566704  # Official mainnet USDC
-    
-    # Custom assets (to be deployed on mainnet)
-    ALGORAND_CUSD_ASSET_ID = os.environ.get('ALGORAND_CUSD_ASSET_ID', None)
-    ALGORAND_CONFIO_ASSET_ID = os.environ.get('ALGORAND_CONFIO_ASSET_ID', None)
-    
-    # Keep Sui for compatibility
-    SUI_RPC_URL = f"https://{os.environ.get('QUICKNODE_ENDPOINT', 'fullnode.mainnet.sui.io:443')}"
-    CUSD_PACKAGE_ID = "0xYOUR_MAINNET_CUSD_PACKAGE"
+    # RPC Endpoints
+    if NETWORK == 'testnet':
+        # Algorand Testnet - Using Algonode free service
+        ALGORAND_ALGOD_ADDRESS = os.environ.get('ALGORAND_ALGOD_ADDRESS', 'https://testnet-api.algonode.cloud')
+        ALGORAND_ALGOD_TOKEN = os.environ.get('ALGORAND_ALGOD_TOKEN', '')  # Algonode doesn't require tokens
+        ALGORAND_INDEXER_ADDRESS = os.environ.get('ALGORAND_INDEXER_ADDRESS', 'https://testnet-idx.algonode.cloud')
+        ALGORAND_INDEXER_TOKEN = os.environ.get('ALGORAND_INDEXER_TOKEN', '')
+        
+        # Testnet Asset IDs
+        # USDC on Algorand Testnet (official testing USDC)
+        ALGORAND_USDC_ASSET_ID = int(os.environ.get('ALGORAND_USDC_ASSET_ID', 10458941))
+        
+        # Custom assets deployed on testnet
+        ALGORAND_CUSD_ASSET_ID = int(os.environ.get('ALGORAND_CUSD_ASSET_ID', 0)) if os.environ.get('ALGORAND_CUSD_ASSET_ID') else None
+        ALGORAND_CONFIO_ASSET_ID = int(os.environ.get('ALGORAND_CONFIO_ASSET_ID', 743890784))  # Created on testnet
+        
+        # Keep Sui for compatibility
+        SUI_RPC_URL = os.environ.get('SUI_RPC_URL', 'https://fullnode.testnet.sui.io:443')
+        # Sui testnet package IDs
+        CUSD_PACKAGE_ID = "0x551a39bd96679261aaf731e880b88fa528b66ee2ef6f0da677bdf0762b907bcf"
+        CONFIO_PACKAGE_ID = "0x2c5f46d4dda1ca49ed4b2c223bd1137b0f8f005a7f6012eb8bc09bf3a858cd56"  # New CONFIO contract with correct 1B supply
+
+    elif NETWORK == 'localnet':
+        # Algorand LocalNet - Using local Algorand node
+        ALGORAND_ALGOD_ADDRESS = os.environ.get('ALGORAND_ALGOD_ADDRESS', 'http://localhost:4001')
+        ALGORAND_ALGOD_TOKEN = os.environ.get('ALGORAND_ALGOD_TOKEN', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+        ALGORAND_INDEXER_ADDRESS = os.environ.get('ALGORAND_INDEXER_ADDRESS', 'http://localhost:8980')
+        ALGORAND_INDEXER_TOKEN = os.environ.get('ALGORAND_INDEXER_TOKEN', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
+        
+        # LocalNet Asset IDs (will be set after deployment)
+        ALGORAND_USDC_ASSET_ID = int(os.environ.get('ALGORAND_USDC_ASSET_ID', 0)) if os.environ.get('ALGORAND_USDC_ASSET_ID') else None  # Mock USDC on LocalNet
+        ALGORAND_CUSD_ASSET_ID = int(os.environ.get('ALGORAND_CUSD_ASSET_ID', 0)) if os.environ.get('ALGORAND_CUSD_ASSET_ID') else None
+        ALGORAND_CONFIO_ASSET_ID = int(os.environ.get('ALGORAND_CONFIO_ASSET_ID', 0)) if os.environ.get('ALGORAND_CONFIO_ASSET_ID') else None
+        
+        # Keep Sui for compatibility (LocalNet)
+        SUI_RPC_URL = os.environ.get('SUI_RPC_URL', 'http://127.0.0.1:9000')
+        CUSD_PACKAGE_ID = os.environ.get('CUSD_PACKAGE_ID', None)
+        CONFIO_PACKAGE_ID = os.environ.get('CONFIO_PACKAGE_ID', None)
+
+    else:
+        # Algorand Mainnet - Using Algonode or QuickNode
+        ALGORAND_ALGOD_ADDRESS = os.environ.get('ALGORAND_ALGOD_ADDRESS', 'https://mainnet-api.algonode.cloud')
+        ALGORAND_ALGOD_TOKEN = os.environ.get('ALGORAND_ALGOD_TOKEN', '')
+        ALGORAND_INDEXER_ADDRESS = os.environ.get('ALGORAND_INDEXER_ADDRESS', 'https://mainnet-idx.algonode.cloud')
+        ALGORAND_INDEXER_TOKEN = os.environ.get('ALGORAND_INDEXER_TOKEN', '')
+        
+        # Mainnet Asset IDs
+        # USDC on Algorand Mainnet (official Circle USDC)
+        ALGORAND_USDC_ASSET_ID = int(os.environ.get('ALGORAND_USDC_ASSET_ID', 31566704))  # Official mainnet USDC if not specified
+        
+        # Custom assets (to be deployed on mainnet)
+        ALGORAND_CUSD_ASSET_ID = int(os.environ.get('ALGORAND_CUSD_ASSET_ID', 0)) if os.environ.get('ALGORAND_CUSD_ASSET_ID') else None
+        ALGORAND_CONFIO_ASSET_ID = int(os.environ.get('ALGORAND_CONFIO_ASSET_ID', 0)) if os.environ.get('ALGORAND_CONFIO_ASSET_ID') else None
+        
+        # Keep Sui for compatibility
+        SUI_RPC_URL = f"https://{os.environ.get('QUICKNODE_ENDPOINT', 'fullnode.mainnet.sui.io:443')}"
+        CUSD_PACKAGE_ID = "0xYOUR_MAINNET_CUSD_PACKAGE"
+        CONFIO_PACKAGE_ID = "0xYOUR_MAINNET_CONFIO_PACKAGE"
 
 # Common settings
 POLL_INTERVAL_SECONDS = 2
-BALANCE_CACHE_TTL = 30  # seconds
-TRANSACTION_CACHE_TTL = 60  # seconds
 
-# Gas settings
-DEFAULT_GAS_BUDGET = 10000000  # 0.01 SUI
-MAX_GAS_BUDGET = 50000000      # 0.05 SUI
-
-# Monitoring settings (disabled during migration)
-MONITOR_ADDRESSES = []
-
-# Add to Django settings
-local_vars = dict(locals())
-for key, value in local_vars.items():
-    if key.isupper() and not key.startswith('_'):
-        setattr(settings, key, value)
+# Export all settings as a dict for easy access
+BLOCKCHAIN_SETTINGS = {
+    'NETWORK': NETWORK,
+    'ALGORAND_ALGOD_ADDRESS': ALGORAND_ALGOD_ADDRESS,
+    'ALGORAND_ALGOD_TOKEN': ALGORAND_ALGOD_TOKEN,
+    'ALGORAND_INDEXER_ADDRESS': ALGORAND_INDEXER_ADDRESS,
+    'ALGORAND_INDEXER_TOKEN': ALGORAND_INDEXER_TOKEN,
+    'ALGORAND_USDC_ASSET_ID': ALGORAND_USDC_ASSET_ID,
+    'ALGORAND_CUSD_ASSET_ID': ALGORAND_CUSD_ASSET_ID,
+    'ALGORAND_CONFIO_ASSET_ID': ALGORAND_CONFIO_ASSET_ID,
+    'SUI_RPC_URL': SUI_RPC_URL,
+    'CUSD_PACKAGE_ID': CUSD_PACKAGE_ID,
+    'CONFIO_PACKAGE_ID': CONFIO_PACKAGE_ID,
+}

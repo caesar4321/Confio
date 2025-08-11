@@ -83,9 +83,9 @@ export const AuthScreen = () => {
       }
       
       console.log('Google Sign-In result:', result);
-      console.log('Phone verification status:', result.zkLoginData?.isPhoneVerified);
+      console.log('Phone verification status:', result.walletData?.isPhoneVerified);
       
-      await handleSuccessfulLogin(result.zkLoginData?.isPhoneVerified || false);
+      await handleSuccessfulLogin(result.walletData?.isPhoneVerified || false);
     } catch (error) {
       console.error('Google Sign-In failed:', error);
       setIsLoading(false);
@@ -112,9 +112,9 @@ export const AuthScreen = () => {
       }
       
       console.log('Apple Sign-In result:', result);
-      console.log('Phone verification status:', result.zkLoginData?.isPhoneVerified);
+      console.log('Phone verification status:', result.walletData?.isPhoneVerified);
       
-      await handleSuccessfulLogin(result.zkLoginData?.isPhoneVerified || false);
+      await handleSuccessfulLogin(result.walletData?.isPhoneVerified || false);
     } catch (error) {
       console.error('Apple Sign-In Error:', error);
       setIsLoading(false);

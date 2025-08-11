@@ -653,7 +653,7 @@ export class AccountManager {
 
   /**
    * Initialize default account if no accounts exist
-   * This should only be called after proper zkLogin authentication
+   * This should only be called after proper authentication
    */
   public async initializeDefaultAccount(): Promise<StoredAccount | null> {
     console.log('AccountManager - initializeDefaultAccount: starting initialization');
@@ -669,7 +669,7 @@ export class AccountManager {
     
     if (accounts.length === 0) {
       console.log('AccountManager - initializeDefaultAccount: no accounts found, returning null');
-      console.log('AccountManager - Note: Default accounts should only be created after proper zkLogin authentication');
+      console.log('AccountManager - Note: Default accounts should only be created after proper authentication');
       return null;
     }
     

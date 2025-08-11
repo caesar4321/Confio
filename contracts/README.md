@@ -1,58 +1,139 @@
 # Confío Smart Contracts
 
-This directory contains all Move smart contracts for the Confío platform on the Sui blockchain.
+This directory contains all smart contracts and blockchain-related code for the Confío platform on Algorand.
 
-## Contracts Overview
+## Directory Structure
 
-1. **cUSD** - USD-pegged stablecoin with 1:1 USDC backing
-2. **CONFIO** - Governance token with fixed 1B supply
-3. **Pay** - Payment processing with 0.9% fee collection
-4. **Invite Send** - Send funds to non-users with 7-day reclaim
-5. **P2P Trade** - Escrow-based peer-to-peer trading
+The contracts are organized into 6 main categories:
 
-## Important Documents
+### 📦 [`confio/`](./confio)
+CONFIO utility/governance token (1B fixed supply)
+- Token creation scripts (ASA - Algorand Standard Asset)
+- Not backed by any assets (utility token)
+- Token distribution utilities
+- CONFIO-related tests and configurations
 
-- **[PERMISSIONS.md](./PERMISSIONS.md)** - Comprehensive guide to all admin functions and capabilities
-- Individual contract READMEs in each subdirectory
+### 💵 [`cusd/`](./cusd)
+cUSD stablecoin smart contract (backed by USDC/T-Bills)
+- Main cUSD contract (1:1 backed by USDC or T-Bills)
+- USDC deposits mint cUSD 1:1
+- Admin mints backed by T-Bill reserves
+- Test suites for cUSD functionality
 
-## Security Considerations
+### 📨 [`invite_send/`](./invite_send)
+Send & Invite functionality
+- Inbox router contracts with sponsor support
+- Invite pool management
+- Send tokens via phone/email to non-users
+- 7-day expiry for unclaimed invites
 
-All contracts have been designed with Latin American use cases in mind:
-- Privacy-preserving (no personal data on-chain)
-- Support for informal economy participants
-- Gasless transactions via sponsorship
-- Multi-language support (Spanish characters)
+### 💳 [`payment/`](./payment)
+Payment routing and processing
+- Payment router contracts
+- Atomic payment processing
+- Batch payment support
+- Fee collection mechanisms
+- Token distribution scripts
 
-## Deployment
+### 🤝 [`p2p_trade/`](./p2p_trade)
+P2P trading and escrow system
+- P2P vault contracts with sponsor support
+- Escrow management
+- 15-minute expiry for trades
+- Capital-efficient box storage
 
-Each contract should be deployed in the following order:
-1. cUSD (stablecoin infrastructure)
-2. CONFIO (governance token)
-3. Pay (payment system)
-4. Invite Send (invitation system)
-5. P2P Trade (trading platform)
+### 🚀 [`presale/`](./presale)
+CONFIO token presale system
+- Multi-round presale contract
+- Flexible exchange rates (cUSD/CONFIO)
+- Lock/unlock mechanism for token distribution
+- Full sponsor support for gasless transactions
+- Admin controls for rounds and withdrawals
 
-After deployment, admin capabilities should be transferred to appropriate multi-signature wallets as outlined in PERMISSIONS.md.
+## Key Features
+
+### Sponsor Pattern
+All production contracts implement the sponsor pattern where:
+- Platform (sponsor) funds all Minimum Balance Requirements (MBR)
+- Users only need stablecoins, never ALGO
+- 100% MBR recovery through proper box management
+
+### Production Contracts
+Production-ready contracts include:
+- Sponsor funding for all MBR
+- Explicit MBR refunds after box deletion
+- Recipient opt-in checks
+- Proper order of operations (delete → refund)
+
+## Quick Start
+
+### Deploy All Production Contracts
+```bash
+cd p2p_trade/deploy
+python deploy_production_contracts.py
+```
+
+### Create Tokens
+```bash
+# Create CONFIO token (ASA)
+cd confio
+python create_confio_token_algorand.py
+
+# Deploy cUSD contract
+cd ../cusd
+python deploy_cusd.py
+```
+
+## Architecture Overview
+
+```
+User → Mobile App → GraphQL API → Smart Contracts
+                                    ├── cUSD (USDC/T-Bill backed stablecoin)
+                                    ├── CONFIO (1B fixed utility token)
+                                    ├── P2P Vault (escrow)
+                                    ├── Payment Router
+                                    └── Inbox Router (invites)
+```
+
+### Token Economics
+- **CONFIO**: 1,000,000,000 fixed supply utility/governance token (no backing)
+- **cUSD**: 1:1 backed stablecoin (USDC deposits or T-Bill reserves)
+- **No cross-collateralization**: CONFIO and cUSD are independent
+
+## Security Features
+
+- **Box Storage**: Temporary, recoverable storage for trades/invites
+- **Sponsor Pattern**: Platform covers all blockchain fees
+- **Opt-in Checks**: Verify recipients can receive tokens
+- **Dispute Resolution**: Arbitration for P2P trades
+- **Time Limits**: Auto-expiry for trades (15 min) and invites (7 days)
 
 ## Testing
 
-Run tests for all contracts:
+Each module contains its own test suite:
 ```bash
-cd contracts/cusd && sui move test
-cd contracts/confio && sui move test
-cd contracts/pay && sui move test
-cd contracts/invite_send && sui move test
-cd contracts/p2p_trade && sui move test
+# Test cUSD
+cd cusd/tests
+python test_simple_mint.py
+
+# Test P2P trades
+cd p2p_trade/tests
+python test_production_contracts.py
 ```
 
-## Audit Status
+## Documentation
 
-- [ ] cUSD - Pending audit
-- [ ] CONFIO - Pending audit
-- [ ] Pay - Pending audit
-- [ ] Invite Send - Pending audit
-- [ ] P2P Trade - Pending audit
+- [Sponsor Pattern Guide](./p2p_trade/SPONSOR_PATTERN_GUIDE.md)
+- [Escrow Architecture](./p2p_trade/ESCROW_ARCHITECTURE_V2.md)
+- [Dispute Resolution](./p2p_trade/DISPUTE_RESOLUTION_GUIDE.md)
+- [MBR Recovery](./p2p_trade/MBR_RECOVERY_GUIDE.md)
+
+## Network Configuration
+
+- **LocalNet**: For development and testing
+- **TestNet**: For staging (testnet-api.algonode.cloud)
+- **MainNet**: For production (mainnet-api.algonode.cloud)
 
 ## License
 
-MIT - See repository root for full license text.
+Proprietary - Confío 2024

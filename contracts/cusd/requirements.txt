@@ -1,0 +1,14 @@
+# Algorand cUSD Smart Contract Dependencies
+# Pin versions to avoid breaking changes during CI
+
+# Core Algorand SDK
+py-algorand-sdk==2.3.0
+
+# PyTeal for smart contract development
+pyteal==0.24.1
+
+# Beaker framework for PyTeal
+beaker-pyteal==1.1.1
+
+# Note: These versions are tested and compatible as of January 2025
+# Update carefully and test thoroughly when upgrading
