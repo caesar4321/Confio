@@ -693,6 +693,39 @@ class RotateServerPepperMutation(graphene.Mutation):
             return cls(success=False, error=str(e))
 
 
+class OptInToUSDCMutation(graphene.Mutation):
+    """
+    Opt-in the user's Algorand account to USDC asset for trading.
+    This is called when a trader navigates to the Deposit USDC screen.
+    """
+    
+    success = graphene.Boolean()
+    already_opted_in = graphene.Boolean()
+    error = graphene.String()
+    
+    @classmethod
+    def mutate(cls, root, info):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+            
+            # Use the AlgorandAccountManager to opt-in to USDC
+            from blockchain.algorand_account_manager import AlgorandAccountManager
+            
+            result = AlgorandAccountManager.opt_in_to_usdc(user)
+            
+            return cls(
+                success=result['success'],
+                already_opted_in=result.get('already_opted_in', False),
+                error=result.get('error')
+            )
+            
+        except Exception as e:
+            logger.error(f'USDC opt-in error for user {info.context.user.email}: {str(e)}')
+            return cls(success=False, error=str(e))
+
+
 class Web3AuthMutation(graphene.ObjectType):
     web3_auth_login = Web3AuthLoginMutation.Field()
     add_algorand_wallet = AddAlgorandWalletMutation.Field()
@@ -701,6 +734,7 @@ class Web3AuthMutation(graphene.ObjectType):
     create_algorand_transaction = CreateAlgorandTransactionMutation.Field()
     get_server_pepper = GetServerPepperMutation.Field()
     rotate_server_pepper = RotateServerPepperMutation.Field()
+    opt_in_to_usdc = OptInToUSDCMutation.Field()
 
 
 class Web3AuthQuery(graphene.ObjectType):

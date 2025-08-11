@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+myvenv/
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Algorand
+*.teal.tok
+*.teal.map
+dryrun.json
+*.scratch
+
+# Test coverage
+.coverage
+htmlcov/
+*.cover
+.pytest_cache/
+
+# Deployment artifacts
+production_deployment.json
+deployment_*.json
+
+# Local configuration
+.env
+config.env
+*.local.py

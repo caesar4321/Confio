@@ -98,7 +98,7 @@ export class EnhancedAuthService {
    */
   public async signInWithGoogle(): Promise<{
     userInfo: any;
-    zkLoginData: any;
+    walletData: any;
     securityData: {
       deviceFingerprint: any;
       fingerprintHash: string;
@@ -154,7 +154,7 @@ export class EnhancedAuthService {
    */
   public async signInWithApple(): Promise<{
     userInfo: any;
-    zkLoginData: any;
+    walletData: any;
     securityData: {
       deviceFingerprint: any;
       fingerprintHash: string;

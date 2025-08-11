@@ -2,6 +2,7 @@
 Algorand Account Manager - Handles account creation and asset opt-ins
 """
 import logging
+import os
 from typing import Dict, Optional, Tuple
 from decimal import Decimal
 from algosdk import account, mnemonic
@@ -19,18 +20,56 @@ class AlgorandAccountManager:
     Manages Algorand account creation and asset opt-ins for users
     """
     
-    # Asset configurations
-    CONFIO_ASSET_ID = getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 743890784)
-    USDC_ASSET_ID = getattr(settings, 'ALGORAND_USDC_ASSET_ID', 10458941)
-    # CUSD_ASSET_ID = getattr(settings, 'ALGORAND_CUSD_ASSET_ID', None)  # Future
+    # Determine network from environment or settings
+    NETWORK = os.environ.get('ALGORAND_NETWORK', getattr(settings, 'ALGORAND_NETWORK', 'testnet')).lower()
+    
+    # Network-specific configurations
+    NETWORK_CONFIGS = {
+        'localnet': {
+            'algod_address': 'http://localhost:4001',
+            'algod_token': 'a' * 64,
+            'confio_asset_id': 1057,  # CONFIO with 1 billion supply
+            'usdc_asset_id': 1020,    # Mock USDC (old CONFIO)
+            'cusd_asset_id': 1036,     # cUSD stablecoin
+            # Localnet sponsor account (you may need to update this)
+            'sponsor_address': 'KNKFUBM3GHOLF6S7L2O7JU6YDB7PCRV3PKBOBRCABLYHBHXRFXKNDWGAWE',
+            'sponsor_mnemonic': 'toss vacuum table old mobile sound bid net evidence fee ticket skin twice invest over machine young dad travel custom offer target duck able air'
+        },
+        'testnet': {
+            'algod_address': 'https://testnet-api.algonode.cloud',
+            'algod_token': '',
+            'confio_asset_id': 743890784,
+            'usdc_asset_id': 10458941,
+            'cusd_asset_id': None,  # Not deployed on testnet yet
+            'sponsor_address': 'KNKFUBM3GHOLF6S7L2O7JU6YDB7PCRV3PKBOBRCABLYHBHXRFXKNDWGAWE',
+            'sponsor_mnemonic': 'toss vacuum table old mobile sound bid net evidence fee ticket skin twice invest over machine young dad travel custom offer target duck able air'
+        },
+        'mainnet': {
+            'algod_address': 'https://mainnet-api.algonode.cloud',
+            'algod_token': '',
+            'confio_asset_id': None,  # Will be set when deployed to mainnet
+            'usdc_asset_id': 31566704,  # Real USDC on mainnet
+            'cusd_asset_id': None,  # Will be set when deployed to mainnet
+            'sponsor_address': None,  # Will be set for mainnet
+            'sponsor_mnemonic': None  # Will be set for mainnet
+        }
+    }
+    
+    # Get configuration for current network
+    _config = NETWORK_CONFIGS.get(NETWORK, NETWORK_CONFIGS['testnet'])
+    
+    # Asset configurations from network config or settings override
+    CONFIO_ASSET_ID = getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', _config['confio_asset_id'])
+    USDC_ASSET_ID = getattr(settings, 'ALGORAND_USDC_ASSET_ID', _config['usdc_asset_id'])
+    CUSD_ASSET_ID = getattr(settings, 'ALGORAND_CUSD_ASSET_ID', _config.get('cusd_asset_id'))
     
     # Sponsor account for funding new users
-    SPONSOR_ADDRESS = "KNKFUBM3GHOLF6S7L2O7JU6YDB7PCRV3PKBOBRCABLYHBHXRFXKNDWGAWE"  # CONFIO creator
-    SPONSOR_MNEMONIC = "toss vacuum table old mobile sound bid net evidence fee ticket skin twice invest over machine young dad travel custom offer target duck able air"
+    SPONSOR_ADDRESS = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', _config['sponsor_address'])
+    SPONSOR_MNEMONIC = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', _config['sponsor_mnemonic'])
     
     # Algorand node configuration
-    ALGOD_ADDRESS = getattr(settings, 'ALGORAND_ALGOD_ADDRESS', 'https://testnet-api.algonode.cloud')
-    ALGOD_TOKEN = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '')
+    ALGOD_ADDRESS = getattr(settings, 'ALGORAND_ALGOD_ADDRESS', _config['algod_address'])
+    ALGOD_TOKEN = getattr(settings, 'ALGORAND_ALGOD_TOKEN', _config['algod_token'])
     
     # Funding amounts
     INITIAL_ALGO_FUNDING = 300000  # 0.3 ALGO in microAlgos (exactly the MBR for 2 assets)
@@ -56,6 +95,13 @@ class AlgorandAccountManager:
         
         errors = []
         opted_in_assets = []
+        
+        # Log the network configuration being used
+        logger.info(f"AlgorandAccountManager using network: {cls.NETWORK}")
+        logger.info(f"  Algod: {cls.ALGOD_ADDRESS}")
+        logger.info(f"  CONFIO Asset ID: {cls.CONFIO_ASSET_ID}")
+        logger.info(f"  cUSD Asset ID: {cls.CUSD_ASSET_ID}")
+        logger.info(f"  USDC Asset ID: {cls.USDC_ASSET_ID}")
         
         try:
             # Get or create the user's personal account
@@ -118,15 +164,16 @@ class AlgorandAccountManager:
                 else:
                     errors.append(f"Failed to opt-in to CONFIO (Asset ID: {cls.CONFIO_ASSET_ID})")
             
-            # Auto opt-in to cUSD (when available)
-            # if cls.CUSD_ASSET_ID:
-            #     opt_in_success = cls._opt_in_to_asset(algod_client, algorand_address, cls.CUSD_ASSET_ID)
-            #     if opt_in_success:
-            #         opted_in_assets.append(cls.CUSD_ASSET_ID)
-            #     else:
-            #         errors.append(f"Failed to opt-in to cUSD (Asset ID: {cls.CUSD_ASSET_ID})")
+            # Auto opt-in to cUSD (available on localnet)
+            if cls.CUSD_ASSET_ID:
+                opt_in_success = cls._opt_in_to_asset(algod_client, algorand_address, cls.CUSD_ASSET_ID)
+                if opt_in_success:
+                    opted_in_assets.append(cls.CUSD_ASSET_ID)
+                    logger.info(f"Successfully opted in to cUSD (Asset ID: {cls.CUSD_ASSET_ID})")
+                else:
+                    errors.append(f"Failed to opt-in to cUSD (Asset ID: {cls.CUSD_ASSET_ID})")
             
-            # Note: NOT auto-opting in to USDC - only for traders
+            # Note: NOT auto-opting in to USDC - traders will opt-in when they deposit
             
             logger.info(f"Account setup complete for {user.email}. Opted into assets: {opted_in_assets}")
             
@@ -275,3 +322,84 @@ class AlgorandAccountManager:
         Called during login or when user needs Algorand functionality.
         """
         return cls.get_or_create_algorand_account(user)
+    
+    @classmethod
+    def opt_in_to_usdc(cls, user) -> Dict:
+        """
+        Opt-in a user's account to USDC for trading.
+        This is called when a trader wants to deposit USDC.
+        
+        Returns:
+            Dict with:
+                - success: Boolean indicating if opt-in succeeded
+                - already_opted_in: Boolean if already opted in
+                - error: Error message if failed
+                - algorand_address: The user's Algorand address
+        """
+        try:
+            # Get user's account
+            account = Account.objects.filter(
+                user=user,
+                account_type='personal'
+            ).first()
+            
+            if not account or not account.algorand_address:
+                return {
+                    'success': False,
+                    'already_opted_in': False,
+                    'error': 'User does not have an Algorand account',
+                    'algorand_address': None
+                }
+            
+            algorand_address = account.algorand_address
+            
+            # Check if already opted in
+            opted_in_assets = cls._check_opt_ins(algorand_address)
+            if cls.USDC_ASSET_ID in opted_in_assets:
+                logger.info(f"User {user.email} already opted into USDC")
+                return {
+                    'success': True,
+                    'already_opted_in': True,
+                    'error': None,
+                    'algorand_address': algorand_address
+                }
+            
+            # Initialize Algod client
+            algod_client = algod.AlgodClient(cls.ALGOD_TOKEN, cls.ALGOD_ADDRESS)
+            
+            # Opt-in to USDC
+            if cls.USDC_ASSET_ID:
+                opt_in_success = cls._opt_in_to_asset(algod_client, algorand_address, cls.USDC_ASSET_ID)
+                if opt_in_success:
+                    logger.info(f"Successfully opted user {user.email} into USDC (Asset ID: {cls.USDC_ASSET_ID})")
+                    return {
+                        'success': True,
+                        'already_opted_in': False,
+                        'error': None,
+                        'algorand_address': algorand_address
+                    }
+                else:
+                    error_msg = f"Failed to opt-in to USDC (Asset ID: {cls.USDC_ASSET_ID})"
+                    logger.error(f"USDC opt-in failed for {user.email}: {error_msg}")
+                    return {
+                        'success': False,
+                        'already_opted_in': False,
+                        'error': error_msg,
+                        'algorand_address': algorand_address
+                    }
+            else:
+                return {
+                    'success': False,
+                    'already_opted_in': False,
+                    'error': 'USDC asset ID not configured',
+                    'algorand_address': algorand_address
+                }
+                
+        except Exception as e:
+            logger.error(f"Error opting user {user.email} into USDC: {e}")
+            return {
+                'success': False,
+                'already_opted_in': False,
+                'error': str(e),
+                'algorand_address': None
+            }
