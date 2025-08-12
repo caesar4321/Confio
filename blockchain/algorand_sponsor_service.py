@@ -140,6 +140,75 @@ class AlgorandSponsorService:
             # Fall back to using mnemonic directly if KMD unavailable
             return None
     
+    async def fund_account(self, address: str, amount_micro_algos: int) -> Dict[str, Any]:
+        """
+        Fund an account with the specified amount of ALGO.
+        
+        Args:
+            address: The account address to fund
+            amount_micro_algos: Amount to send in microAlgos
+            
+        Returns:
+            Dict with success status and transaction details
+        """
+        try:
+            # Check sponsor balance first
+            health = await self.check_sponsor_health()
+            if not health['can_sponsor']:
+                return {
+                    'success': False,
+                    'error': 'Sponsor account has insufficient balance'
+                }
+            
+            # Create payment transaction
+            params = self.algod.suggested_params()
+            funding_txn = PaymentTxn(
+                sender=self.sponsor_address,
+                sp=params,
+                receiver=address,
+                amt=amount_micro_algos,
+                note=b"MBR funding for asset opt-in"
+            )
+            
+            # Sign the transaction
+            signed_txn = await self._sign_transaction(funding_txn)
+            if not signed_txn:
+                return {
+                    'success': False,
+                    'error': 'Failed to sign funding transaction'
+                }
+            
+            # Submit the transaction
+            try:
+                tx_id = self.algod.send_raw_transaction(signed_txn)
+                logger.info(f"Funding transaction submitted: {tx_id}")
+                
+                # Wait for confirmation (just a few rounds)
+                try:
+                    confirmed_txn = wait_for_confirmation(self.algod, tx_id, 4)
+                    logger.info(f"Funding confirmed in round {confirmed_txn.get('confirmed-round')}")
+                except Exception as e:
+                    logger.warning(f"Confirmation wait failed: {e}, but transaction may still be confirmed")
+                
+                return {
+                    'success': True,
+                    'tx_id': tx_id,
+                    'amount_algo': amount_micro_algos / 1_000_000
+                }
+            except Exception as e:
+                logger.error(f"Failed to submit funding transaction: {e}")
+                return {
+                    'success': False,
+                    'error': str(e)
+                }
+                
+        except Exception as e:
+            logger.error(f"Error funding account: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
     async def check_sponsor_health(self) -> Dict[str, Any]:
         """
         Check sponsor account health and balance.

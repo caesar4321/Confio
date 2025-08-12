@@ -712,19 +712,72 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
             if len(account.algorand_address) != 58:
                 return cls(success=False, error='Invalid Algorand address format')
             
-            # Execute sponsored opt-in using async function
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            # Check if account needs additional funding for MBR
+            from algosdk.v2client import algod
+            algod_client = algod.AlgodClient(
+                AlgorandAccountManager.ALGOD_TOKEN,
+                AlgorandAccountManager.ALGOD_ADDRESS
+            )
             
-            try:
-                result = loop.run_until_complete(
-                    algorand_sponsor_service.execute_server_side_opt_in(
-                        user_address=account.algorand_address,
-                        asset_id=asset_id
-                    )
+            account_info = algod_client.account_info(account.algorand_address)
+            current_balance = account_info['amount']  # in microAlgos
+            num_assets = len(account_info.get('assets', []))
+            
+            # Calculate required minimum balance
+            # Base: 0.1 ALGO, Per asset: 0.1 ALGO
+            # Need one more asset slot for USDC
+            required_mbr = 100_000 + ((num_assets + 1) * 100_000)  # in microAlgos
+            
+            # If balance is insufficient, fund the difference plus a small buffer
+            if current_balance < required_mbr:
+                funding_needed = required_mbr - current_balance + 10_000  # Add 0.01 ALGO buffer
+                logger.info(
+                    f"Account needs {funding_needed / 1_000_000} ALGO for USDC opt-in. "
+                    f"Current: {current_balance / 1_000_000}, Required: {required_mbr / 1_000_000}"
                 )
-            finally:
-                loop.close()
+                
+                # Fund the account with the needed amount
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                try:
+                    # First fund the account
+                    funding_result = loop.run_until_complete(
+                        algorand_sponsor_service.fund_account(
+                            account.algorand_address,
+                            funding_needed
+                        )
+                    )
+                    
+                    if not funding_result.get('success'):
+                        logger.error(f"Failed to fund account: {funding_result.get('error')}")
+                        return cls(success=False, error='Failed to fund account for opt-in')
+                    
+                    logger.info(f"Successfully funded account with {funding_needed / 1_000_000} ALGO")
+                    
+                    # Now execute the opt-in
+                    result = loop.run_until_complete(
+                        algorand_sponsor_service.execute_server_side_opt_in(
+                            user_address=account.algorand_address,
+                            asset_id=asset_id
+                        )
+                    )
+                finally:
+                    loop.close()
+            else:
+                # Account has sufficient balance, proceed with opt-in
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                try:
+                    result = loop.run_until_complete(
+                        algorand_sponsor_service.execute_server_side_opt_in(
+                            user_address=account.algorand_address,
+                            asset_id=asset_id
+                        )
+                    )
+                finally:
+                    loop.close()
             
             if not result['success']:
                 return cls(success=False, error=result.get('error', 'Failed to create opt-in transaction'))
