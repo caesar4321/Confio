@@ -17,7 +17,7 @@ import * as nacl from 'tweetnacl';
 // algosdk will be required at runtime to avoid RN bundler issues
 import { jwtDecode } from 'jwt-decode';
 import * as Keychain from 'react-native-keychain';
-import { apolloClient } from '../apollo/client';
+import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
 import { gql } from '@apollo/client';
 import { randomBytes } from '@noble/hashes/utils';
 import { Buffer } from 'buffer'; // RN polyfill for base64
@@ -299,6 +299,21 @@ export class SecureDeterministicWalletService {
     gracePeriodUntil?: string;
   }> {
     try {
+      // If user isn't authenticated yet, skip requesting pepper to avoid noisy logs
+      try {
+        const creds = await Keychain.getGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME
+        });
+        if (!creds) {
+          // No auth yet; operate without server pepper silently
+          return { pepper: undefined, version: 1 };
+        }
+      } catch (_) {
+        // Any keychain read issue: treat as unauthenticated and continue quietly
+        return { pepper: undefined, version: 1 };
+      }
+
       // Server pepper is optional - wallet works without it
       // Server will get account context from JWT (user_id, business_id, account_type, account_index)
       const { data } = await apolloClient.mutate({
@@ -315,11 +330,12 @@ export class SecureDeterministicWalletService {
         };
       }
       
-      // It's OK if server doesn't provide pepper
-      console.log('No server pepper available, using client salt only');
+      // It's OK if server doesn't provide pepper (use client-only salt)
+      console.debug('Server pepper not provided; proceeding with client-only salt');
       return { pepper: undefined, version: 1 };
     } catch (error) {
-      console.log('Could not get server pepper, continuing without it:', error);
+      // Network/auth hiccup; proceed without pepper without alarming logs
+      console.debug('Skipping server pepper due to fetch error; using client-only salt');
       return { pepper: undefined, version: 1 };
     }
   }

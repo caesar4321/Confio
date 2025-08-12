@@ -1,0 +1,166 @@
+{
+    "name": "Payment",
+    "methods": [
+        {
+            "name": "create",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Initialize the payment contract"
+        },
+        {
+            "name": "setup_assets",
+            "args": [
+                {
+                    "type": "uint64",
+                    "name": "cusd_id"
+                },
+                {
+                    "type": "uint64",
+                    "name": "confio_id"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Setup asset IDs for payments\nRequires exact sponsor funding for MBR increase"
+        },
+        {
+            "name": "pay_with_cusd",
+            "args": [
+                {
+                    "type": "axfer",
+                    "name": "payment"
+                },
+                {
+                    "type": "address",
+                    "name": "recipient"
+                },
+                {
+                    "type": "string",
+                    "name": "payment_id"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Process a Conf\u00edo Dollar payment with 0.9% fee\nThe payment transaction must be to this application"
+        },
+        {
+            "name": "pay_with_confio",
+            "args": [
+                {
+                    "type": "axfer",
+                    "name": "payment"
+                },
+                {
+                    "type": "address",
+                    "name": "recipient"
+                },
+                {
+                    "type": "string",
+                    "name": "payment_id"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Process a CONFIO payment with 0.9% fee\nThe payment transaction must be to this application"
+        },
+        {
+            "name": "withdraw_fees",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Admin withdraws collected fees to fee recipient\nOnly withdraws tracked fee amounts, not entire balance"
+        },
+        {
+            "name": "update_fee_recipient",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "new_recipient"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Admin updates the fee recipient address"
+        },
+        {
+            "name": "pause",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Pause payment processing"
+        },
+        {
+            "name": "unpause",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Unpause payment processing"
+        },
+        {
+            "name": "get_fee_balances",
+            "args": [],
+            "returns": {
+                "type": "(uint64,uint64)"
+            },
+            "desc": "Get current fee balances held in contract"
+        },
+        {
+            "name": "get_total_volume",
+            "args": [],
+            "returns": {
+                "type": "(uint64,uint64)"
+            },
+            "desc": "Get total payment volume"
+        },
+        {
+            "name": "get_total_fees_collected",
+            "args": [],
+            "returns": {
+                "type": "(uint64,uint64)"
+            },
+            "desc": "Get total fees collected"
+        },
+        {
+            "name": "get_fee_recipient",
+            "args": [],
+            "returns": {
+                "type": "address"
+            },
+            "desc": "Get current fee recipient address"
+        },
+        {
+            "name": "is_paused",
+            "args": [],
+            "returns": {
+                "type": "bool"
+            },
+            "desc": "Check if system is paused"
+        },
+        {
+            "name": "update",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Contract is immutable - updates are not allowed"
+        },
+        {
+            "name": "delete",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Only admin can delete\nPrevents deletion if app holds any ASAs"
+        }
+    ],
+    "networks": {}
+}

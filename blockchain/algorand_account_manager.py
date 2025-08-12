@@ -23,53 +23,22 @@ class AlgorandAccountManager:
     # Determine network from environment or settings
     NETWORK = os.environ.get('ALGORAND_NETWORK', getattr(settings, 'ALGORAND_NETWORK', 'testnet')).lower()
     
-    # Network-specific configurations
-    NETWORK_CONFIGS = {
-        'localnet': {
-            'algod_address': 'http://localhost:4001',
-            'algod_token': 'a' * 64,
-            'confio_asset_id': 1057,  # CONFIO with 1 billion supply
-            'usdc_asset_id': 1020,    # Mock USDC (old CONFIO)
-            'cusd_asset_id': 1036,     # cUSD stablecoin
-            # Localnet sponsor account (you may need to update this)
-            'sponsor_address': 'KNKFUBM3GHOLF6S7L2O7JU6YDB7PCRV3PKBOBRCABLYHBHXRFXKNDWGAWE',
-            'sponsor_mnemonic': 'toss vacuum table old mobile sound bid net evidence fee ticket skin twice invest over machine young dad travel custom offer target duck able air'
-        },
-        'testnet': {
-            'algod_address': 'https://testnet-api.algonode.cloud',
-            'algod_token': '',
-            'confio_asset_id': 743890784,
-            'usdc_asset_id': 10458941,
-            'cusd_asset_id': None,  # Not deployed on testnet yet
-            'sponsor_address': 'KNKFUBM3GHOLF6S7L2O7JU6YDB7PCRV3PKBOBRCABLYHBHXRFXKNDWGAWE',
-            'sponsor_mnemonic': 'toss vacuum table old mobile sound bid net evidence fee ticket skin twice invest over machine young dad travel custom offer target duck able air'
-        },
-        'mainnet': {
-            'algod_address': 'https://mainnet-api.algonode.cloud',
-            'algod_token': '',
-            'confio_asset_id': None,  # Will be set when deployed to mainnet
-            'usdc_asset_id': 31566704,  # Real USDC on mainnet
-            'cusd_asset_id': None,  # Will be set when deployed to mainnet
-            'sponsor_address': None,  # Will be set for mainnet
-            'sponsor_mnemonic': None  # Will be set for mainnet
-        }
-    }
+    # Get ALL configuration from Django settings (single source of truth)
+    # These come from settings.py, which reads from .env
+    # NO FALLBACKS - if not in settings, it should be None
     
-    # Get configuration for current network
-    _config = NETWORK_CONFIGS.get(NETWORK, NETWORK_CONFIGS['testnet'])
+    # Asset IDs from settings
+    CONFIO_ASSET_ID = settings.ALGORAND_CONFIO_ASSET_ID
+    USDC_ASSET_ID = settings.ALGORAND_USDC_ASSET_ID
+    CUSD_ASSET_ID = settings.ALGORAND_CUSD_ASSET_ID
     
-    # Asset configurations from network config or settings override
-    CONFIO_ASSET_ID = getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', _config['confio_asset_id'])
-    USDC_ASSET_ID = getattr(settings, 'ALGORAND_USDC_ASSET_ID', _config['usdc_asset_id'])
-    CUSD_ASSET_ID = getattr(settings, 'ALGORAND_CUSD_ASSET_ID', _config.get('cusd_asset_id'))
+    # Sponsor account from settings
+    SPONSOR_ADDRESS = settings.ALGORAND_SPONSOR_ADDRESS
+    SPONSOR_MNEMONIC = settings.ALGORAND_SPONSOR_MNEMONIC
     
-    # Sponsor account for funding new users
-    SPONSOR_ADDRESS = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', _config['sponsor_address'])
-    SPONSOR_MNEMONIC = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', _config['sponsor_mnemonic'])
-    
-    # Algorand node configuration
-    ALGOD_ADDRESS = getattr(settings, 'ALGORAND_ALGOD_ADDRESS', _config['algod_address'])
-    ALGOD_TOKEN = getattr(settings, 'ALGORAND_ALGOD_TOKEN', _config['algod_token'])
+    # Algorand node configuration from settings
+    ALGOD_ADDRESS = settings.ALGORAND_ALGOD_ADDRESS
+    ALGOD_TOKEN = settings.ALGORAND_ALGOD_TOKEN
     
     # Funding amounts
     INITIAL_ALGO_FUNDING = 300000  # 0.3 ALGO in microAlgos (exactly the MBR for 2 assets)

@@ -265,8 +265,6 @@ class SecurityQuery(graphene.ObjectType):
 
 
 class SecurityMutation(graphene.ObjectType):
-    trust_device = TrustDevice.Field()
-    request_device_trust = RequestDeviceTrust.Field()
     check_kyc_status = CheckKYCStatus.Field()
 
 

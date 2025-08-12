@@ -381,8 +381,16 @@ class AlgorandSponsorService:
             try:
                 # Encode the combined transactions to base64
                 combined_b64 = base64.b64encode(combined_txns).decode('utf-8')
+                logger.info(f"About to submit atomic group to Algorand network...")
+                logger.info(f"Combined transaction size: {len(combined_b64)} characters")
+                logger.info(f"Algod endpoint: {self.algod_address}")
+                
+                # Add timeout to the algod call
+                import time
+                start_time = time.time()
                 tx_id = self.algod.send_raw_transaction(combined_b64)
-                logger.info(f"Successfully submitted atomic group, tx_id: {tx_id}")
+                elapsed_time = time.time() - start_time
+                logger.info(f"Successfully submitted atomic group, tx_id: {tx_id}, took {elapsed_time:.2f} seconds")
                     
             except Exception as e:
                 logger.error(f"Failed to submit atomic group: {e}")
@@ -393,20 +401,20 @@ class AlgorandSponsorService:
                     logger.error(f"First 20 bytes of sponsor txn: {sponsor_stxn[:20].hex() if len(sponsor_stxn) >= 20 else sponsor_stxn.hex()}")
                 raise
             
-            # Wait for confirmation
-            confirmed_txn = transaction.wait_for_confirmation(
-                self.algod, tx_id, 4
-            )
+            # Don't wait for confirmation - just return the tx_id immediately
+            # Confirmation can be handled asynchronously via Celery or polling
+            logger.info(f"Transaction submitted, not waiting for confirmation")
             
-            # Update stats
-            await self._update_sponsor_stats(2000)  # Approximate fee
+            # Update stats asynchronously (don't await)
+            asyncio.create_task(self._update_sponsor_stats(2000))  # Approximate fee
             
             return {
                 'success': True,
                 'tx_id': tx_id,
-                'confirmed_round': confirmed_txn.get('confirmed-round'),
+                'confirmed_round': None,  # Will be confirmed asynchronously
                 'sponsored': True,
-                'fees_saved': 2000 / 1_000_000  # Convert to ALGO
+                'fees_saved': 2000 / 1_000_000,  # Convert to ALGO
+                'pending': True
             }
             
         except Exception as e:

@@ -94,14 +94,6 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             if not account or not account.algorand_address:
                 return cls(success=False, error='No Algorand address found')
             
-            # Default assets if not specified
-            if not asset_ids:
-                asset_ids = []
-                if AlgorandAccountManager.CONFIO_ASSET_ID:
-                    asset_ids.append(AlgorandAccountManager.CONFIO_ASSET_ID)
-                # if AlgorandAccountManager.CUSD_ASSET_ID:
-                #     asset_ids.append(AlgorandAccountManager.CUSD_ASSET_ID)
-            
             # Generate unsigned transactions
             from algosdk.v2client import algod
             from algosdk.transaction import AssetTransferTxn
@@ -117,14 +109,37 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             account_info = algod_client.account_info(account.algorand_address)
             current_assets = [asset['asset-id'] for asset in account_info.get('assets', [])]
             
-            transactions = []
-            params = algod_client.suggested_params()
+            # Default assets if not specified - only include assets user hasn't opted into
+            if not asset_ids:
+                asset_ids = []
+                # Only add CONFIO if it exists and user hasn't opted in
+                if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_assets:
+                    asset_ids.append(AlgorandAccountManager.CONFIO_ASSET_ID)
+                # Only add cUSD if it exists and user hasn't opted in
+                if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_assets:
+                    asset_ids.append(AlgorandAccountManager.CUSD_ASSET_ID)
             
-            for asset_id in asset_ids:
-                if asset_id in current_assets:
-                    continue  # Already opted in
-                
-                # Create opt-in transaction
+            # Filter out assets already opted into
+            assets_to_opt_in = [aid for aid in asset_ids if aid not in current_assets]
+            
+            if not assets_to_opt_in:
+                logger.info(f"User already opted into all requested assets")
+                return cls(
+                    success=True,
+                    transactions=[]
+                )
+            
+            # Create atomic sponsored opt-in for all needed assets
+            from blockchain.algorand_sponsor_service import algorand_sponsor_service
+            from algosdk.transaction import calculate_group_id
+            import asyncio
+            
+            params = algod_client.suggested_params()
+            transactions = []
+            user_txns = []
+            
+            # Create opt-in transactions with 0 fee for each asset
+            for asset_id in assets_to_opt_in:
                 opt_in_txn = AssetTransferTxn(
                     sender=account.algorand_address,
                     sp=params,
@@ -132,10 +147,37 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
                     amt=0,
                     index=asset_id
                 )
-                
-                # Encode for frontend
+                opt_in_txn.fee = 0  # User pays no fee
+                user_txns.append(opt_in_txn)
+            
+            # Create sponsor fee payment transaction
+            from algosdk.transaction import PaymentTxn
+            total_fee = params.min_fee * (len(user_txns) + 1)  # Fee for all txns
+            
+            fee_payment_txn = PaymentTxn(
+                sender=AlgorandAccountManager.SPONSOR_ADDRESS,
+                sp=params,
+                receiver=account.algorand_address,
+                amt=0,  # No ALGO transfer, just paying fees
+                note=b"Multi opt-in fee sponsorship"
+            )
+            fee_payment_txn.fee = total_fee  # Sponsor pays all fees
+            
+            # Create atomic group
+            txn_group = user_txns + [fee_payment_txn]
+            group_id = calculate_group_id(txn_group)
+            for txn in txn_group:
+                txn.group = group_id
+            
+            # Sign sponsor transaction
+            from algosdk import mnemonic
+            sponsor_private_key = mnemonic.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
+            signed_fee_txn = fee_payment_txn.sign(sponsor_private_key)
+            
+            # Encode transactions for frontend
+            for i, (asset_id, user_txn) in enumerate(zip(assets_to_opt_in, user_txns)):
                 unsigned_txn = base64.b64encode(
-                    msgpack.packb(opt_in_txn.dictify())
+                    msgpack.packb(user_txn.dictify())
                 ).decode()
                 
                 # Determine asset name
@@ -144,6 +186,8 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
                     asset_name = "CONFIO"
                 elif asset_id == AlgorandAccountManager.USDC_ASSET_ID:
                     asset_name = "USDC"
+                elif asset_id == AlgorandAccountManager.CUSD_ASSET_ID:
+                    asset_name = "cUSD"
                 
                 transactions.append({
                     'assetId': asset_id,
@@ -151,6 +195,21 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
                     'transaction': unsigned_txn,
                     'type': 'opt-in'
                 })
+            
+            # Add the signed sponsor transaction
+            sponsor_txn_encoded = base64.b64encode(
+                msgpack.packb(signed_fee_txn.dictify())
+            ).decode()
+            
+            transactions.append({
+                'assetId': 0,  # Not an asset transaction
+                'assetName': 'Sponsor Fee',
+                'transaction': sponsor_txn_encoded,
+                'type': 'sponsor',
+                'signed': True  # This one is already signed
+            })
+            
+            logger.info(f"Created atomic opt-in group for {len(assets_to_opt_in)} assets with group ID: {group_id}")
             
             return cls(
                 success=True,
@@ -239,8 +298,8 @@ class OptInToAssetMutation(graphene.Mutation):
                 asset_name = "CONFIO"
             elif asset_id == AlgorandAccountManager.USDC_ASSET_ID:
                 asset_name = "USDC"
-            # elif asset_id == AlgorandAccountManager.CUSD_ASSET_ID:
-            #     asset_name = "cUSD"
+            elif asset_id == AlgorandAccountManager.CUSD_ASSET_ID:
+                asset_name = "cUSD"
             
             return cls(
                 success=True,
@@ -296,6 +355,12 @@ class CheckAssetOptInsQuery(graphene.ObjectType):
                 details[asset_id] = {
                     'name': 'USD Coin',
                     'symbol': 'USDC',
+                    'decimals': 6
+                }
+            elif asset_id == AlgorandAccountManager.CUSD_ASSET_ID:
+                details[asset_id] = {
+                    'name': 'Confío Dollar',
+                    'symbol': 'cUSD',
                     'decimals': 6
                 }
         
@@ -545,21 +610,30 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
     @classmethod
     def mutate(cls, root, info, signed_user_txn, signed_sponsor_txn):
         try:
+            logger.info(f"SubmitSponsoredGroupMutation called")
+            logger.info(f"User transaction size: {len(signed_user_txn)} chars")
+            logger.info(f"Sponsor transaction size: {len(signed_sponsor_txn)} chars")
+            
             user = info.context.user
             if not user.is_authenticated:
+                logger.warning(f"Unauthenticated request to submit sponsored group")
                 return cls(success=False, error='Not authenticated')
+            
+            logger.info(f"Submitting sponsored group for user {user.id}")
             
             # Submit the sponsored group using async function
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
             try:
+                logger.info(f"Calling algorand_sponsor_service.submit_sponsored_group...")
                 result = loop.run_until_complete(
                     algorand_sponsor_service.submit_sponsored_group(
                         signed_user_txn=signed_user_txn,
                         signed_sponsor_txn=signed_sponsor_txn
                     )
                 )
+                logger.info(f"submit_sponsored_group returned: {result}")
             finally:
                 loop.close()
             
@@ -581,6 +655,7 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
         except Exception as e:
             logger.error(f'Error submitting sponsored group: {str(e)}')
             return cls(success=False, error=str(e))
+
 
 
 class AlgorandSponsoredOptInMutation(graphene.Mutation):
@@ -636,6 +711,8 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
                 asset_name = "CONFIO"
             elif asset_id == AlgorandAccountManager.USDC_ASSET_ID:
                 asset_name = "USDC"
+            elif asset_id == AlgorandAccountManager.CUSD_ASSET_ID:
+                asset_name = "cUSD"
             
             # Execute sponsored opt-in using async function
             loop = asyncio.new_event_loop()

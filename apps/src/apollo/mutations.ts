@@ -16,6 +16,8 @@ export const WEB3AUTH_LOGIN = gql`
       error
       accessToken
       refreshToken
+      needsOptIn
+      optInTransactions
       user {
         id
         email

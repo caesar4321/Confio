@@ -60,14 +60,13 @@ def main():
         default_frozen=False,
         unit_name="CONFIO",
         asset_name="Confío",
-        manager=address,
-        reserve="",  # Empty string - no reserve, all to creator
-        freeze="",   # Empty string - no freeze
-        clawback="", # Empty string - no clawback
+        manager=address,  # Temporarily, should be finalized to ZERO_ADDR
+        reserve=None,  # None becomes ZERO_ADDR on-chain
+        freeze=None,   # None becomes ZERO_ADDR on-chain
+        clawback=None, # None becomes ZERO_ADDR on-chain
         decimals=6,
         url="https://confio.lat",
-        metadata_hash=None,
-        strict_empty_address_check=False  # Allow empty addresses
+        metadata_hash=None
     )
     
     signed_txn = txn.sign(private_key)
@@ -83,19 +82,55 @@ def main():
     print(f"Total Supply: 1,000,000,000 CONFIO")
     print(f"All tokens in creator account")
     
+    # Auto-finalize for LocalNet to mirror production behavior
+    print("\n🔒 Finalizing token (setting all authorities to ZERO_ADDR)...")
+    params = algod_client.suggested_params()
+    
+    lock_txn = AssetConfigTxn(
+        sender=address,
+        sp=params,
+        index=asset_id,
+        manager=None,    # ZERO_ADDR - immutable forever
+        reserve=None,    # ZERO_ADDR
+        freeze=None,     # ZERO_ADDR
+        clawback=None    # ZERO_ADDR
+    )
+    
+    signed_lock = lock_txn.sign(private_key)
+    lock_txid = algod_client.send_transaction(signed_lock)
+    wait_for_confirmation(algod_client, lock_txid, 4)
+    print("✅ LocalNet token finalized (all authorities = ZERO_ADDR)")
+    
     # Save configuration (no private keys)
     config_file = os.path.join(os.path.dirname(__file__), "../config/new_token_config.py")
+    
+    # Try to preserve existing MOCK_USDC_ASSET_ID if it exists
+    mock_usdc_id = None
+    if os.path.exists(config_file):
+        try:
+            with open(config_file, "r") as f:
+                content = f.read()
+                import re
+                match = re.search(r"MOCK_USDC_ASSET_ID = (\d+)", content)
+                if match:
+                    mock_usdc_id = match.group(1)
+        except:
+            pass
+    
     with open(config_file, "w") as f:
         f.write("# LocalNet Token Configuration\n\n")
         f.write("# CONFIO Token (Governance) - 1B fixed supply\n")
         f.write(f"CONFIO_ASSET_ID = {asset_id}\n")
         f.write(f'CONFIO_CREATOR_ADDRESS = "{address}"\n\n')
         f.write("# Private keys are not persisted. Use env vars or a key manager.\n\n")
-        f.write("# Mock USDC (using old CONFIO with max supply)\n")
-        f.write("MOCK_USDC_ASSET_ID = 1020\n\n")
+        f.write("# Mock USDC (for collateral testing)\n")
+        if mock_usdc_id:
+            f.write(f"MOCK_USDC_ASSET_ID = {mock_usdc_id}  # Preserved from previous run\n\n")
+        else:
+            f.write("# MOCK_USDC_ASSET_ID = None  # Run deploy_mock_usdc_localnet.py to create\n\n")
         f.write("# cUSD (Stablecoin)\n")
-        f.write("CUSD_ASSET_ID = 1036\n")
-        f.write("CUSD_APP_ID = 1037\n")
+        f.write("# CUSD_ASSET_ID = None  # Will be set by cUSD deployment\n")
+        f.write("# CUSD_APP_ID = None  # Will be set by cUSD deployment\n")
     
     print(f"\nConfiguration saved to: {config_file}")
     
@@ -103,6 +138,30 @@ def main():
     print(f"  CONFIO (new): Asset {asset_id} - 1B governance token")
     print(f"  Mock USDC: Asset 1020 - For collateral testing")
     print(f"  cUSD: Asset 1036 - Stablecoin")
+    
+    # Post-deploy smoke check
+    print("\n🔍 Running post-deploy verification...")
+    os.environ["ALGORAND_CONFIO_ASSET_ID"] = str(asset_id)
+    os.environ["EXPECT_NO_AUTHORITIES"] = "1"  # Expect finalized state
+    
+    # Run the checker script with absolute path
+    import subprocess
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    checker_path = os.path.join(script_dir, "check_confio_asset.py")
+    
+    result = subprocess.run(
+        [sys.executable, checker_path, str(asset_id)],
+        capture_output=True,
+        text=True
+    )
+    
+    if result.returncode != 0:
+        print("❌ Post-deploy check FAILED!")
+        print(result.stdout)
+        print(result.stderr)
+        sys.exit(1)
+    else:
+        print("✅ Post-deploy verification passed!")
 
 if __name__ == "__main__":
     try:

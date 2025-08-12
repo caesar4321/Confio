@@ -47,6 +47,21 @@ python confio/deploy_confio_localnet.py
 export ALLOW_PRINT_PRIVATE_KEYS=1
 ```
 
+### Verify Asset Parameters
+Use the sanity checker to confirm on-chain params (unit name, supply, authorities):
+```bash
+# Option A: pass asset id explicitly
+python contracts/confio/check_confio_asset.py 123456
+
+# Option B: use env var
+export ALGORAND_CONFIO_ASSET_ID=123456
+python contracts/confio/check_confio_asset.py
+
+# Optionally override expectations
+EXPECT_ASSET_NAME="Confío" EXPECT_UNIT_NAME=CONFIO EXPECT_TOTAL=1000000000000000 \
+  python contracts/confio/check_confio_asset.py
+```
+
 ## Token Distribution
 Initial distribution is handled separately through the distribution scripts in `/contracts/scripts/`.
 
@@ -54,6 +69,13 @@ Security Recommendations
 - Use environment variables or a secure key store for private keys and mnemonics.
 - Do not write private keys to repo-tracked files; deployment scripts avoid persisting secrets by default.
 - Verify asset params on-chain after creation (unit name, decimals, total, authorities).
+
+## Environment Setup
+See `.env.example` for Algorand-related variables:
+- ALGOD_ADDRESS, ALGOD_TOKEN: Algod connection.
+- ALGORAND_CONFIO_CREATOR_MNEMONIC: optional creator mnemonic for token creation.
+- CONFIO_CREATOR_PRIVATE_KEY: required for creator-signed transfers in LocalNet.
+- ALLOW_PRINT_PRIVATE_KEYS, ALLOW_PRINT_MNEMONIC, ALLOW_WRITE_KEYS: dev-only toggles.
 
 LocalNet integration notes
 - deploy_cusd_with_confio.py requires `CONFIO_CREATOR_PRIVATE_KEY` in the environment to transfer from the creator account.
