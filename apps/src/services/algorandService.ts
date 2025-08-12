@@ -303,7 +303,7 @@ class AlgorandService {
     try {
       await this.ensureInitialized();
 
-      // Ensure wallet scope is ready from OAuth subject and active account context
+      // Get OAuth data (needed for signing regardless)
       const { oauthStorage } = await import('./oauthStorageService');
       const oauthData = await oauthStorage.getOAuthSubject();
       if (!oauthData || !oauthData.subject || !oauthData.provider) {
@@ -313,30 +313,34 @@ class AlgorandService {
       const provider: 'google' | 'apple' = oauthData.provider;
       const sub: string = oauthData.subject;
 
-      // Get active account context (type/index/businessId)
-      const { AuthService } = await import('./authService');
-      const authService = AuthService.getInstance();
-      const accountContext = await authService.getActiveAccountContext();
+      // Check if we already have a wallet initialized with the right context
+      if (!this.currentAccount) {
+        // Only initialize wallet if we don't have one yet
+        // Get active account context (type/index/businessId)
+        const { AuthService } = await import('./authService');
+        const authService = AuthService.getInstance();
+        const accountContext = await authService.getActiveAccountContext();
 
-      // Determine issuer/audience consistently with derivation
-      const { GOOGLE_CLIENT_IDS } = await import('../config/env');
-      const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
-      const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
-      const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+        // Determine issuer/audience consistently with derivation
+        const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+        const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+        const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+        const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
 
-      // Create/restore wallet to ensure in-memory seed and scope are set
-      const wallet = await secureDeterministicWallet.createOrRestoreWallet(
-        iss,
-        sub,
-        aud,
-        provider,
-        accountContext.type,
-        accountContext.index,
-        accountContext.businessId
-      );
+        // Create/restore wallet to ensure in-memory seed and scope are set
+        const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+          iss,
+          sub,
+          aud,
+          provider,
+          accountContext.type,
+          accountContext.index,
+          accountContext.businessId
+        );
 
-      // Always set currentAccount after wallet is created/restored
-      this.currentAccount = { addr: wallet.address, sk: null };
+        // Set currentAccount after wallet is created/restored
+        this.currentAccount = { addr: wallet.address, sk: null };
+      }
 
       // Now sign the raw transaction bytes using secure wallet
       const signedTxn = await secureDeterministicWallet.signTransaction(sub, txnBytes);
