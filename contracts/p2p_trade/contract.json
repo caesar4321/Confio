@@ -1,5 +1,5 @@
 {
-    "name": "ConfioDollar",
+    "name": "P2PTrade",
     "methods": [
         {
             "name": "create",
@@ -7,7 +7,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Initialize the Conf\u00edo Dollar contract"
+            "desc": "Initialize the P2P trading contract"
         },
         {
             "name": "setup_assets",
@@ -18,13 +18,120 @@
                 },
                 {
                     "type": "uint64",
-                    "name": "usdc_id"
+                    "name": "confio_id"
                 }
             ],
             "returns": {
                 "type": "void"
             },
-            "desc": "Setup asset IDs and opt-in to both assets with proper funding\nMust be called as part of atomic group with payment to app for fees/min balance\nGroup structure: - Tx 0: Payment to app (at least 0.6 ALGO for opt-ins and fees) - Tx 1: This app call"
+            "desc": "Setup asset IDs for trading"
+        },
+        {
+            "name": "create_trade",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "trade_id"
+                },
+                {
+                    "type": "axfer",
+                    "name": "asset_transfer"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Create a new P2P trade offer (seller deposits crypto)\nTrade data stored in box storage with payer tracking Note: fiat_amount and currency stored off-chain with trade_id"
+        },
+        {
+            "name": "accept_trade",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "trade_id"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Buyer accepts the trade - starts 15-minute window"
+        },
+        {
+            "name": "mark_as_paid",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "trade_id"
+                },
+                {
+                    "type": "string",
+                    "name": "payment_ref"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Buyer marks trade as paid and can get one-time 10-minute extension"
+        },
+        {
+            "name": "confirm_payment_received",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "trade_id"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Seller confirms fiat payment received, releases crypto to buyer"
+        },
+        {
+            "name": "cancel_trade",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "trade_id"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Cancel trade (by seller if pending, or anyone if expired with grace period)"
+        },
+        {
+            "name": "open_dispute",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "trade_id"
+                },
+                {
+                    "type": "string",
+                    "name": "reason"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Open dispute (by buyer or seller) - tracks payer for MBR refund"
+        },
+        {
+            "name": "resolve_dispute",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "trade_id"
+                },
+                {
+                    "type": "address",
+                    "name": "winner"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Admin resolves dispute - refunds both boxes"
         },
         {
             "name": "pause",
@@ -32,7 +139,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Pause all operations"
+            "desc": "Pause trading"
         },
         {
             "name": "unpause",
@@ -40,206 +147,36 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Unpause operations"
+            "desc": "Unpause trading"
         },
         {
-            "name": "opt_in",
-            "args": [],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Allow accounts to opt-in"
-        },
-        {
-            "name": "add_vault",
+            "name": "set_sponsor",
             "args": [
                 {
                     "type": "address",
-                    "name": "vault_address"
+                    "name": "sponsor"
                 }
             ],
             "returns": {
                 "type": "void"
             },
-            "desc": "Add a vault address"
-        },
-        {
-            "name": "remove_vault",
-            "args": [
-                {
-                    "type": "address",
-                    "name": "vault_address"
-                }
-            ],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Remove a vault address"
-        },
-        {
-            "name": "freeze_address",
-            "args": [
-                {
-                    "type": "address",
-                    "name": "target_address"
-                }
-            ],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Freeze an address from transacting"
-        },
-        {
-            "name": "unfreeze_address",
-            "args": [
-                {
-                    "type": "address",
-                    "name": "target_address"
-                }
-            ],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Unfreeze an address"
-        },
-        {
-            "name": "mint_admin",
-            "args": [
-                {
-                    "type": "uint64",
-                    "name": "amount"
-                },
-                {
-                    "type": "address",
-                    "name": "recipient"
-                }
-            ],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Admin minting backed by T-bills or other reserves\nThis is separate from USDC collateralized minting Can be used for treasury-backed issuance"
-        },
-        {
-            "name": "burn_admin",
-            "args": [
-                {
-                    "type": "uint64",
-                    "name": "amount"
-                }
-            ],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Admin burning to reduce supply (e.g., when selling T-bills)\nMust be called with cUSD transfer to app"
-        },
-        {
-            "name": "mint_with_collateral",
-            "args": [],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Mint cUSD by depositing USDC (1:1 ratio)\nMust be called as part of atomic group with USDC transfer\nGroup structure: - Tx 0: USDC transfer from user to app - Tx 1: This app call"
-        },
-        {
-            "name": "burn_for_collateral",
-            "args": [],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Burn cUSD to redeem USDC (1:1 ratio)\nMust be called as part of atomic group with cUSD transfer\nGroup structure: - Tx 0: cUSD transfer from user to app - Tx 1: This app call"
-        },
-        {
-            "name": "transfer_cusd",
-            "args": [
-                {
-                    "type": "axfer",
-                    "name": "asset_transfer"
-                },
-                {
-                    "type": "address",
-                    "name": "recipient"
-                }
-            ],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Transfer Conf\u00edo Dollar with freeze checks\nCalled alongside an ASA transfer transaction"
-        },
-        {
-            "name": "update_admin",
-            "args": [
-                {
-                    "type": "address",
-                    "name": "new_admin"
-                }
-            ],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Transfer admin rights to a new address (can be a multi-sig wallet)\nOnly current admin can transfer rights"
-        },
-        {
-            "name": "update_collateral_ratio",
-            "args": [
-                {
-                    "type": "uint64",
-                    "name": "new_ratio"
-                }
-            ],
-            "returns": {
-                "type": "void"
-            },
-            "desc": "Update collateral ratio (admin only)\n1000000 = 1:1, 1500000 = 1.5:1 (150% collateralized)"
+            "desc": "Admin sets or updates the optional sponsor address for MBR/fee funding"
         },
         {
             "name": "get_stats",
             "args": [],
             "returns": {
+                "type": "(uint64,uint64,uint64,uint64)"
+            },
+            "desc": "Get comprehensive trading statistics"
+        },
+        {
+            "name": "get_volume",
+            "args": [],
+            "returns": {
                 "type": "(uint64,uint64)"
             },
-            "desc": "Get minting and burning statistics"
-        },
-        {
-            "name": "get_reserves",
-            "args": [],
-            "returns": {
-                "type": "(uint64,uint64,uint64,uint64,uint64)"
-            },
-            "desc": "Get reserve statistics\nReturns: (total_usdc_locked, cusd_circulating_supply, tbills_backed_supply, collateral_ratio, total_supply)"
-        },
-        {
-            "name": "verify_backing",
-            "args": [],
-            "returns": {
-                "type": "bool"
-            },
-            "desc": "Verify that USDC reserves match or exceed cUSD supply\nReturns true if properly backed"
-        },
-        {
-            "name": "is_frozen",
-            "args": [
-                {
-                    "type": "address",
-                    "name": "address"
-                }
-            ],
-            "returns": {
-                "type": "bool"
-            },
-            "desc": "Check if an address is frozen"
-        },
-        {
-            "name": "is_vault",
-            "args": [
-                {
-                    "type": "address",
-                    "name": "address"
-                }
-            ],
-            "returns": {
-                "type": "bool"
-            },
-            "desc": "Check if an address is a vault"
+            "desc": "Get trading volume (cusd, confio)"
         },
         {
             "name": "delete",
@@ -247,7 +184,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Only admin can delete the application"
+            "desc": "Only admin can delete - must have no active trades"
         }
     ],
     "networks": {}

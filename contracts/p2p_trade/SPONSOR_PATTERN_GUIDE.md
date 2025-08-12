@@ -101,37 +101,23 @@ def complete_trade():
     ])
 ```
 
-### Garbage Collection with Incentives
+### Expired Trade Cleanup
 
 ```python
 @Subroutine(TealType.uint64)
-def gc_expired():
+def cancel_expired():
     return Seq([
-        # ... validate expiry ...
+        # ... validate expiry + grace period ...
         
         # Delete box FIRST
         Assert(App.box_delete(trade_id)),
         
-        # Calculate GC reward (1% of MBR)
-        (gc_reward := TRADE_BOX_MBR * Int(100) / Int(10000)),
-        (sponsor_refund := TRADE_BOX_MBR - gc_reward),
-        
-        # Pay GC caller
-        InnerTxnBuilder.Begin(),
-        InnerTxnBuilder.SetFields({
-            TxnField.type_enum: TxnType.Payment,
-            TxnField.receiver: Txn.sender(),
-            TxnField.amount: gc_reward,
-            TxnField.fee: Int(0)
-        }),
-        InnerTxnBuilder.Submit(),
-        
-        # Refund remainder to sponsor
+        # Refund full MBR to sponsor (no reward)
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
             TxnField.type_enum: TxnType.Payment,
             TxnField.receiver: App.globalGet(sponsor_address),
-            TxnField.amount: sponsor_refund,
+            TxnField.amount: TRADE_BOX_MBR,
             TxnField.fee: Int(0)
         }),
         InnerTxnBuilder.Submit()
@@ -150,9 +136,11 @@ def calculate_box_mbr(key_bytes: int, value_bytes: int) -> int:
 ### Common Box Sizes
 | Use Case | Key | Value | Total Bytes | MBR (ALGO) |
 |----------|-----|-------|-------------|------------|
-| Trade ID | 32 | 136 | 168 | 0.0697 |
-| Invite | 32 | 56 | 88 | 0.0373 |
-| Large Trade | 32 | 200 | 232 | 0.0953 |
+| Trade | 32* | 137 | 169 | 0.0701 |
+| Invite | 32* | 64 | 96 | 0.0409 |
+| Large Trade | 32* | 200 | 232 | 0.0953 |
+
+*Note: Trade IDs must be ≤ 56 bytes to allow for suffixes like "_paid" (5 bytes) and "_dispute" (8 bytes) within Algorand's 64-byte box key limit.
 
 ### Asset Opt-in MBR
 - Per asset opt-in: 0.1 ALGO (permanent until opt-out)
@@ -168,8 +156,8 @@ async function createTrade(tradeData) {
     const appAddr = getApplicationAddress(appId);
     
     // Calculate MBR needed
-    const TRADE_BOX_MBR = 69700; // microAlgos
-    const HEADROOM = 10000; // Extra for fees
+    const TRADE_BOX_MBR = 70100; // microAlgos for 32 + 137 bytes
+    const HEADROOM = 2000; // Enough for a few inner txns
     
     // Build transactions
     const params = await algodClient.getTransactionParams().do();

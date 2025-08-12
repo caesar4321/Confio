@@ -11,11 +11,11 @@ Following ChatGPT's excellent analysis, this revised architecture uses pooled va
 - **Recovery**: Only when trade completes
 
 ### New Design (Pooled Vault + Boxes)
-- **One-time vault setup**: 0.3 ALGO (permanent)
-- **Per P2P Trade**: ~0.0672 ALGO (box storage, recoverable)
-- **5,000 concurrent trades**: ~336 ALGO temporarily + 0.3 permanent
+- **One-time vault setup**: 0.3 ALGO (permanent) - dual asset support
+- **Per P2P Trade**: 0.0701 ALGO (box storage, recoverable)
+- **5,000 concurrent trades**: 350.5 ALGO temporarily + 0.3 permanent
 - **Recovery**: Immediate on trade completion
-- **Savings**: ~78% less ALGO locked
+- **Savings**: 76.7% less ALGO locked
 
 ## Architecture Overview
 
@@ -37,24 +37,29 @@ User → [Atomic Group] → 99.1% Merchant
   └── 15-minute expiry for active trades
 ```
 
-**Box Storage (136 bytes per trade)**:
+**Box Storage (137 bytes per trade)**:
 ```
-trade_id (32B key) → {
+trade_id (max 56B key) → {
   seller: 32 bytes
+  amount: 8 bytes
+  asset_id: 8 bytes (cUSD or CONFIO)
+  created_at: 8 bytes
+  expires_at: 8 bytes
+  status: 1 byte
+  accepted_at: 8 bytes
   buyer: 32 bytes
-  seller_asset: 8 bytes (cUSD or CONFIO)
-  buyer_asset: 8 bytes (cUSD or CONFIO)
-  seller_amount: 8 bytes
-  buyer_amount: 8 bytes
-  state: 8 bytes
-  created_time: 8 bytes
-  expiry_time: 8 bytes
-  seller_funded: 8 bytes
-  buyer_funded: 8 bytes
+  mbr_payer: 32 bytes
 }
 ```
 
-**MBR Cost**: 2500 + 400 × (32 + 136) = 69,700 microAlgos = 0.0697 ALGO per trade
+**MBR Cost**: 2500 + 400 × (key_len + 137) microAlgos
+- With 32-byte key: 70,100 microAlgos = 0.0701 ALGO per trade
+- With 56-byte key: 79,700 microAlgos = 0.0797 ALGO per trade (max)
+- Trade ID must be ≤ 56 bytes to allow for suffixes (_paid, _dispute)
+
+**_paid Box MBR** (value=41 bytes, key=trade_id+"_paid"):
+- With 32-byte trade_id: key=37 → 33,700 microAlgos = 0.0337 ALGO
+- With 56-byte trade_id: key=61 → 43,300 microAlgos = 0.0433 ALGO
 
 ### 3. Inbox Router (Send & Invite) - ARC-59 PATTERN
 ```
@@ -67,7 +72,7 @@ trade_id (32B key) → {
 
 **Box Storage (64 bytes per invite)**:
 ```
-claim_code (32B key) → {
+claim_code (max 56B key) → {
   sender: 32 bytes
   cusd_amount: 8 bytes
   confio_amount: 8 bytes
@@ -76,27 +81,75 @@ claim_code (32B key) → {
 }
 ```
 
-**MBR Cost**: 2500 + 400 × (32 + 64) = 40,900 microAlgos = 0.0409 ALGO per invite
+**MBR Cost**: 2500 + 400 × (key_len + 64) microAlgos
+- With 32-byte key: 40,900 microAlgos = 0.0409 ALGO per invite
+- With 56-byte key: 50,500 microAlgos = 0.0505 ALGO per invite (max)
 
 ## Transaction Flows
 
-### P2P Trade Flow
+**Box References Required**:
+- `create_trade`: trade_id
+- `accept_trade`: trade_id
+- `mark_as_paid`: trade_id, trade_id_paid (create)
+- `confirm_payment_received`: trade_id, trade_id_paid (if exists)
+- `cancel_trade`: trade_id, trade_id_paid (if exists), trade_id_dispute (if exists)
+- `open_dispute`: trade_id, trade_id_dispute (create)
+- `resolve_dispute`: trade_id, trade_id_dispute, trade_id_paid (if exists)
+
+**Important for Client Developers**: 
+- Remember to include both the base trade_id and any suffixed box references (trade_id+"_paid", trade_id+"_dispute") in the AppCall's boxes array. The contract will fail if required box references are missing.
+- When creating "_paid" or "_dispute" boxes, you must include the suffixed key in your boxes array (e.g., for mark_as_paid include both trade_id and trade_id+"_paid").
+- When reading _paid/_dispute boxes in confirm/cancel/resolve operations, include those keys in the AppCall boxes array even if you think they won't exist; the contract handles the 'missing' case but still needs the reference.
+- For operations with sponsor fee-bumps, the sponsor's Payment transaction fee pools for the entire group (Algorand fee pooling) - set it high enough to cover all outer + inner transactions.
+
+### P2P Trade Flow (One-sided deposit + fiat off-chain)
+
+**Client Fee Notes**: 
+- Clients must pay the outer transaction fee (0.001 ALGO) for each operation
+- Operations requiring sponsor fee-bumps (confirm_payment_received, resolve_dispute) need sponsor participation
+- Cancel operations do NOT require sponsor - anyone can clean expired trades
+
 ```python
-# 1. Create trade
-[AppCall create_trade(trade_id, seller, buyer, amounts)]
-→ Creates box (0.0697 ALGO from creator)
+# 1. Create trade (MBR funded)
+[Payment(mbr), AXFER(seller→vault asset), AppCall create_trade]
+→ Creates box (0.0701 ALGO from creator/sponsor)
+→ Seller deposits cUSD or CONFIO
+→ Client pays: 0.003 ALGO tx fees (3 transactions)
 
-# 2. Seller deposits
-[AXFER seller→vault(cUSD), AppCall deposit(trade_id)]
+# 2. Buyer accepts
+[AppCall accept_trade]  # starts 15-min window
+→ Client pays: 0.001 ALGO tx fee
 
-# 3. Buyer deposits  
-[AXFER buyer→vault(CONFIO), AppCall deposit(trade_id)]
+# 3. (optional) Buyer marks as paid
+[Payment(mbr for _paid box), AppCall mark_as_paid]
+→ Creates paid box to signal fiat payment sent
+→ Can extend window by 10 minutes once
+→ Client pays: 0.002 ALGO tx fees + ≈0.034-0.043 ALGO for _paid box MBR (budget 0.045)
 
-# 4. Complete trade
-[AppCall complete(trade_id)]
-→ Inner AXFER vault→buyer (cUSD - fee)
-→ Inner AXFER vault→seller (CONFIO - fee)
-→ box_delete (recovers 0.0697 ALGO)
+# 4. Seller confirms payment received
+[Payment(sponsor fee-bump), AppCall confirm_payment_received]
+→ Inner AXFER vault→buyer (full amount, no fee)
+→ box_delete (frees MBR to app)
+→ Inner payment refund MBR to payer
+→ Fee budgeting: Group must cover 1 inner AXFER + up to 2 inner PAYs ≈ 3000 µALGO
+→ Sponsor Payment: Set fee ≥ 0.003 ALGO (pools for entire group via Algorand fee pooling)
+→ Seller AppCall: Keep at 0.001 ALGO (wallet default)
+
+# 5. Cancel (no sponsor needed - anyone can clean expired)
+[AppCall cancel_trade]
+→ Return funds to seller
+→ box_delete (frees MBR to app)
+→ Inner payment refund MBR to payer
+→ Client pays: 0.003-0.004 ALGO tx fee (covers inner AXFER + 1-2 inner refunds)
+
+# 6. Resolve dispute (admin only)
+[Payment(sponsor fee-bump), AppCall resolve_dispute(winner)]
+→ Inner AXFER vault→winner
+→ box_delete dispute and trade boxes
+→ Inner payment refund MBRs to payers
+→ Fee budgeting: Group must cover 1 inner AXFER + 2 inner PAYs ≈ 4000 µALGO
+→ Sponsor Payment: Set fee ≥ 0.004 ALGO (pools for entire group)
+→ Admin AppCall: Keep at 0.001 ALGO (wallet default)
 ```
 
 ### Send & Invite Flow
@@ -108,12 +161,14 @@ claim_code (32B key) → {
 # 2. Recipient claims (after opt-in)
 [AppCall claim(claim_code)]
 → Inner AXFER inbox→recipient
-→ box_delete (recovers 0.0409 ALGO)
+→ box_delete (frees MBR to app)
+→ Inner payment app→sender (0.0409 ALGO refund)
 
 # 3. Or reclaim if expired
 [AppCall reclaim(claim_code)]
 → Inner AXFER inbox→sender
-→ box_delete (recovers 0.0409 ALGO)
+→ box_delete (frees MBR to app)
+→ Inner payment app→sender (0.0409 ALGO refund)
 ```
 
 ## Dual Asset Support
@@ -130,38 +185,32 @@ Both P2P Vault and Inbox Router support cUSD and CONFIO:
 ### Box Storage Benefits
 1. **Atomic operations**: Box create/update/delete are atomic
 2. **No replay**: Each trade_id is unique
-3. **Automatic cleanup**: box_delete recovers MBR
+3. **Explicit MBR refunds**: box_delete frees MBR, contract sends refunds
 4. **State isolation**: Each trade's state is independent
 
 ### DoS Protection
 1. **MBR deposit**: Creator pays box MBR upfront
 2. **Expiry enforcement**: 15 minutes for P2P, 7 days for invites
-3. **Rate limiting**: Max trades per address
-4. **Garbage collection**: Anyone can cancel expired trades
+3. **Garbage collection**: Anyone can cancel expired trades after grace period
 
 ## Recovery Mechanisms
 
 ### Automatic Recovery
-1. **Garbage Collection (GC)**:
-   - Anyone can call `gc_single` to clean expired trades
-   - Receives 1% of recovered MBR as incentive (~0.0007 ALGO per trade)
-   - Batch GC can clean up to 5 trades in one transaction
+1. **Garbage Collection**:
+   - Anyone can call `cancel_trade` after expiry + grace period
+   - No reward in current implementation (keeps it simple)
+   - Subject to per-transaction box reference limits (8 box refs max)
 
-2. **Emergency Recovery**:
-   - Admin-only function for trades expired >24 hours
-   - Failsafe for stuck funds
-
-3. **Recovery Stats**:
-   - Track total recovered ALGO
-   - Monitor active trades
-   - Last GC timestamp
+2. **Active Trade Monitoring**:
+   - Track active_trades counter
+   - Monitor completion/cancellation stats
 
 ### Recovery Example
 ```python
-# 5,000 expired trades = ~348.5 ALGO locked
-# Anyone calls gc_batch repeatedly:
-# - Recovers: 348.5 ALGO to vault
-# - Earns: ~3.5 ALGO in rewards
+# 5,000 expired trades = 350.5 ALGO locked
+# Anyone can call cancel_trade on expired trades:
+# - Recovers: 350.5 ALGO refunded to MBR payers
+# - No rewards in current implementation
 # - Cost: Only transaction fees
 ```
 
@@ -169,12 +218,21 @@ Both P2P Vault and Inbox Router support cUSD and CONFIO:
 
 | Aspect | Per-Trade Escrows | Pooled Vault + Boxes |
 |--------|------------------|---------------------|
-| ALGO per trade | 0.3 locked | 0.0697 temporary |
+| ALGO per trade | 0.3 locked | 0.0701 temporary |
 | Setup complexity | Deploy per trade | One-time setup |
 | Gas costs | Higher (new contract) | Lower (box ops) |
 | Audit trail | Separate accounts | Box history |
 | Upgrade path | Old trades stuck | New logic for new trades |
 | State queries | Multiple accounts | Single app state |
+
+## Setup Order (IMPORTANT)
+
+To avoid setup confusion, follow this exact initialization sequence:
+
+1. **Deploy app** - Create the smart contract
+2. **set_sponsor** - Configure sponsor address for MBR funding
+3. **setup_assets** - Sponsor funds 0.2 ALGO to app for ASA opt-ins
+4. **Go live** - Start accepting trades
 
 ## Implementation Priority
 
@@ -210,14 +268,14 @@ For existing per-trade escrows:
 - **Total**: 0.7 ALGO permanent
 
 ### Per-Operation Costs (Recoverable)
-- P2P Trade: 0.0697 ALGO (recovered on completion)
+- P2P Trade: 0.0701 ALGO (recovered on completion)
 - Send Invite: 0.0409 ALGO (recovered on claim)
 - Payment: 0.002 ALGO (tx fees only)
 
 ### At Scale (10,000 users, 5,000 trades)
 - **Old design**: ~1,500 ALGO locked
-- **New design**: ~336 ALGO temporary + 0.7 permanent
-- **Savings**: 1,163 ALGO (~78% reduction)
+- **New design**: 350.5 ALGO temporary + 0.7 permanent
+- **Savings**: 1,149 ALGO (~76.7% reduction)
 
 ## Key Takeaways
 
