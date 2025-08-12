@@ -734,40 +734,36 @@ class AlgorandService {
       
       console.log('[AlgorandService] Submitting sponsored transaction group...');
       
-      // Submit to backend
-      const response = await fetch('https://api.confio.app/graphql', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // Add auth token if available
-        },
-        body: JSON.stringify({
-          query: `
-            mutation SubmitSponsoredGroup($signedUserTxn: String!, $signedSponsorTxn: String!) {
-              submitSponsoredGroup(signedUserTxn: $signedUserTxn, signedSponsorTxn: $signedSponsorTxn) {
-                success
-                error
-                transactionId
-                confirmedRound
-                feesSaved
-              }
-            }
-          `,
-          variables: {
-            signedUserTxn: signedUserTxnB64,
-            signedSponsorTxn: sponsorTxnB64
-          }
-        })
-      });
-
-      const data = await response.json();
+      // Use Apollo client for submission with proper auth and endpoint
+      const { apolloClient } = await import('../apollo/client');
+      const { gql } = await import('@apollo/client');
       
-      if (!data.data?.submitSponsoredGroup?.success) {
-        console.error('[AlgorandService] Failed to submit sponsored transaction:', data.data?.submitSponsoredGroup?.error);
+      const SUBMIT_SPONSORED_GROUP = gql`
+        mutation SubmitSponsoredGroup($signedUserTxn: String!, $signedSponsorTxn: String!) {
+          submitSponsoredGroup(signedUserTxn: $signedUserTxn, signedSponsorTxn: $signedSponsorTxn) {
+            success
+            error
+            transactionId
+            confirmedRound
+            feesSaved
+          }
+        }
+      `;
+      
+      const { data } = await apolloClient.mutate({
+        mutation: SUBMIT_SPONSORED_GROUP,
+        variables: {
+          signedUserTxn: signedUserTxnB64,
+          signedSponsorTxn: sponsorTxnB64
+        }
+      });
+      
+      if (!data?.submitSponsoredGroup?.success) {
+        console.error('[AlgorandService] Failed to submit sponsored transaction:', data?.submitSponsoredGroup?.error);
         return null;
       }
 
-      const result = data.data.submitSponsoredGroup;
+      const result = data.submitSponsoredGroup;
       console.log(`[AlgorandService] Transaction confirmed! ID: ${result.transactionId}, Round: ${result.confirmedRound}`);
       console.log(`[AlgorandService] Fees saved: ${result.feesSaved} ALGO`);
       
