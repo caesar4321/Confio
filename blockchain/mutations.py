@@ -658,6 +658,107 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
 
 
 
+class OptInToAssetByTypeMutation(graphene.Mutation):
+    """
+    Create a sponsored opt-in transaction for an asset by type name (USDC, CONFIO, CUSD).
+    Returns unsigned user transaction and signed sponsor transaction for atomic group.
+    """
+    
+    class Arguments:
+        asset_type = graphene.String(required=True)  # "USDC", "CONFIO", or "CUSD"
+    
+    success = graphene.Boolean()
+    error = graphene.String()
+    already_opted_in = graphene.Boolean()
+    requires_user_signature = graphene.Boolean()
+    user_transaction = graphene.String()  # Base64 encoded unsigned user transaction
+    sponsor_transaction = graphene.String()  # Base64 encoded signed sponsor transaction
+    group_id = graphene.String()
+    asset_id = graphene.Int()
+    asset_name = graphene.String()
+    
+    @classmethod
+    def mutate(cls, root, info, asset_type):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+            
+            # Map asset type to asset ID
+            asset_type_upper = asset_type.upper()
+            if asset_type_upper == 'USDC':
+                asset_id = AlgorandAccountManager.USDC_ASSET_ID
+            elif asset_type_upper == 'CONFIO':
+                asset_id = AlgorandAccountManager.CONFIO_ASSET_ID
+            elif asset_type_upper == 'CUSD':
+                asset_id = AlgorandAccountManager.CUSD_ASSET_ID
+            else:
+                return cls(success=False, error=f'Unknown asset type: {asset_type}')
+            
+            if not asset_id:
+                return cls(success=False, error=f'{asset_type} not configured on this network')
+            
+            # Get user's account
+            account = Account.objects.filter(
+                user=user,
+                account_type='personal',
+                deleted_at__isnull=True
+            ).first()
+            
+            if not account or not account.algorand_address:
+                return cls(success=False, error='No Algorand address found')
+            
+            # Validate it's an Algorand address
+            if len(account.algorand_address) != 58:
+                return cls(success=False, error='Invalid Algorand address format')
+            
+            # Execute sponsored opt-in using async function
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                result = loop.run_until_complete(
+                    algorand_sponsor_service.execute_server_side_opt_in(
+                        user_address=account.algorand_address,
+                        asset_id=asset_id
+                    )
+                )
+            finally:
+                loop.close()
+            
+            if not result['success']:
+                return cls(success=False, error=result.get('error', 'Failed to create opt-in transaction'))
+            
+            # Log the opt-in request
+            logger.info(
+                f"Created sponsored opt-in for user {user.id}: "
+                f"Asset {asset_type} (ID: {asset_id}), Address: {account.algorand_address[:10]}..."
+            )
+            
+            if result.get('already_opted_in'):
+                return cls(
+                    success=True,
+                    already_opted_in=True,
+                    asset_id=asset_id,
+                    asset_name=asset_type
+                )
+            
+            return cls(
+                success=True,
+                already_opted_in=False,
+                requires_user_signature=result.get('requires_user_signature', True),
+                user_transaction=result.get('user_transaction'),
+                sponsor_transaction=result.get('sponsor_transaction'),
+                group_id=result.get('group_id'),
+                asset_id=asset_id,
+                asset_name=asset_type
+            )
+            
+        except Exception as e:
+            logger.error(f'Error creating sponsored opt-in for {asset_type}: {str(e)}')
+            return cls(success=False, error=str(e))
+
+
 class AlgorandSponsoredOptInMutation(graphene.Mutation):
     """
     Create a sponsored opt-in transaction for an asset.
