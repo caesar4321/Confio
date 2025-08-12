@@ -116,8 +116,15 @@ class AlgorandClient:
             else:
                 balances['ALGO'] = Decimal('0')
         
-        # Cache for 30 seconds
-        cache.set(cache_key, balances, 30)
+        # Only cache if we're not skipping cache (for normal queries)
+        # Don't cache force-refresh results to avoid polluting cache with potentially stale data
+        if not skip_cache:
+            # Cache for 30 seconds
+            cache.set(cache_key, balances, 30)
+        else:
+            # When force refreshing, also clear the existing cache to ensure fresh data
+            cache.delete(cache_key)
+            logger.info(f"Force refresh: cleared cache for {address}, asset_id={asset_id}")
         
         return balances
     

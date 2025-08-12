@@ -820,11 +820,11 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			from blockchain.balance_service import BalanceService
 			
 			# Get balance from hybrid caching system
-			# Don't force refresh for regular queries - let the balance service handle caching
+			# ALWAYS force refresh to ensure real-time accuracy for financial data
 			balance_data = BalanceService.get_balance(
 				account,
 				normalized_token_type,
-				force_refresh=False  # Regular queries use cache, pull-to-refresh uses force_refresh=True
+				force_refresh=True  # Always get fresh data from blockchain
 			)
 			
 			print(f"AccountBalance resolver - Got balance data for {normalized_token_type}: {balance_data}")

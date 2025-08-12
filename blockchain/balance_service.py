@@ -51,16 +51,32 @@ class BalanceService:
         Returns:
             Dict with 'amount', 'available', 'pending', 'last_synced'
         """
-        # Critical operations always hit blockchain
-        if verify_critical:
-            return cls._fetch_from_blockchain(account, token)
+        # Critical operations or force refresh always hit blockchain
+        if verify_critical or force_refresh:
+            blockchain_data = cls._fetch_from_blockchain(account, token)
+            
+            # Clear all caches when force refreshing
+            if force_refresh:
+                cache_key = f"balance:{account.id}:{token}"
+                cache.delete(cache_key)
+                logger.info(f"Force refresh: cleared balance cache for {account.id}:{token}")
+            
+            # Update database with fresh data
+            balance = cls._update_balance_cache(account, token, blockchain_data['amount'], skip_cache=force_refresh)
+            
+            return {
+                'amount': balance.amount,
+                'available': balance.available_amount,
+                'pending': balance.pending_amount,
+                'last_synced': balance.last_synced,
+                'is_stale': False
+            }
         
-        # Try to get from cache first
+        # Try to get from cache first (normal flow)
         balance = cls._get_cached_balance(account, token)
         
         # Determine if we need to refresh
         needs_refresh = (
-            force_refresh or
             balance is None or
             balance.is_stale or
             timezone.now() - balance.last_synced > cls.STALE_THRESHOLD
@@ -228,7 +244,8 @@ class BalanceService:
         cls,
         account: Account,
         token: str,
-        amount: Decimal
+        amount: Decimal,
+        skip_cache: bool = False
     ) -> Balance:
         """Update balance in database and cache"""
         with transaction.atomic():
@@ -244,9 +261,10 @@ class BalanceService:
                 }
             )
         
-        # Update Redis cache
-        cache_key = f"balance:{account.id}:{token}"
-        cache.set(cache_key, balance, cls.CACHE_TTL)
+        # Update Redis cache only if not force refreshing
+        if not skip_cache:
+            cache_key = f"balance:{account.id}:{token}"
+            cache.set(cache_key, balance, cls.CACHE_TTL)
         
         return balance
 

@@ -313,34 +313,32 @@ class AlgorandService {
       const provider: 'google' | 'apple' = oauthData.provider;
       const sub: string = oauthData.subject;
 
-      // Check if we already have a wallet initialized with the right context
-      if (!this.currentAccount) {
-        // Only initialize wallet if we don't have one yet
-        // Get active account context (type/index/businessId)
-        const { AuthService } = await import('./authService');
-        const authService = AuthService.getInstance();
-        const accountContext = await authService.getActiveAccountContext();
+      // ALWAYS initialize wallet to ensure scope is set, even if address is already loaded
+      // Get active account context (type/index/businessId)
+      const { AuthService } = await import('./authService');
+      const authService = AuthService.getInstance();
+      const accountContext = await authService.getActiveAccountContext();
 
-        // Determine issuer/audience consistently with derivation
-        const { GOOGLE_CLIENT_IDS } = await import('../config/env');
-        const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
-        const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
-        const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+      // Determine issuer/audience consistently with derivation
+      const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+      const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+      const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+      const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
 
-        // Create/restore wallet to ensure in-memory seed and scope are set
-        const wallet = await secureDeterministicWallet.createOrRestoreWallet(
-          iss,
-          sub,
-          aud,
-          provider,
-          accountContext.type,
-          accountContext.index,
-          accountContext.businessId
-        );
+      // Create/restore wallet to ensure in-memory seed and scope are set
+      // This is idempotent - if wallet is already initialized with correct scope, it's fast
+      const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+        iss,
+        sub,
+        aud,
+        provider,
+        accountContext.type,
+        accountContext.index,
+        accountContext.businessId
+      );
 
-        // Set currentAccount after wallet is created/restored
-        this.currentAccount = { addr: wallet.address, sk: null };
-      }
+      // Update currentAccount with wallet address
+      this.currentAccount = { addr: wallet.address, sk: null };
 
       // Now sign the raw transaction bytes using secure wallet
       const signedTxn = await secureDeterministicWallet.signTransaction(sub, txnBytes);

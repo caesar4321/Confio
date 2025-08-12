@@ -328,7 +328,7 @@ export const HomeScreen = () => {
     }
     
     try {
-      // Then refetch the cached data and refresh accounts
+      // Force refresh balances from blockchain (bypass cache)
       await Promise.all([
         refreshAccounts(),
         refetchCUSD(),
