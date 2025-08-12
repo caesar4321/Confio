@@ -172,7 +172,8 @@ function unwrapSeed(blobB64: string, kek32: Uint8Array): Uint8Array {
     
     return seed;
   } catch (error) {
-    console.error('Error unwrapping seed:', error);
+    // Don't log as error since this is expected when cache is invalid
+    // The calling code will handle this gracefully
     throw error;
   }
 }
@@ -441,6 +442,7 @@ export class SecureDeterministicWalletService {
           }
         }
       } catch (cacheError: any) {
+        // This is expected behavior when cache is invalid or KEK has changed
         console.log('Cache miss or decryption failed, will derive fresh:', cacheError?.message || cacheError);
       }
       
