@@ -6,6 +6,7 @@ from .mutations import (
     EnsureAlgorandReadyMutation,
     GenerateOptInTransactionsMutation,
     OptInToAssetMutation,
+    OptInToAssetByTypeMutation,
     CheckAssetOptInsQuery,
     AlgorandSponsoredSendMutation,
     SubmitSponsoredGroupMutation,
@@ -31,6 +32,7 @@ class Mutation(graphene.ObjectType):
     ensure_algorand_ready = EnsureAlgorandReadyMutation.Field()
     generate_opt_in_transactions = GenerateOptInTransactionsMutation.Field()
     opt_in_to_asset = OptInToAssetMutation.Field()
+    opt_in_to_asset_by_type = OptInToAssetByTypeMutation.Field()
     algorand_sponsored_send = AlgorandSponsoredSendMutation.Field()
     algorand_sponsored_opt_in = AlgorandSponsoredOptInMutation.Field()
     submit_sponsored_group = SubmitSponsoredGroupMutation.Field()

@@ -709,8 +709,8 @@ class AlgorandService {
   }
 
   async signAndSubmitSponsoredTransaction(
-    userTransaction: Uint8Array,
-    sponsorTransaction: Uint8Array
+    userTransaction: string | Uint8Array,
+    sponsorTransaction: string | Uint8Array
   ): Promise<string | null> {
     try {
       await this.ensureInitialized();
@@ -720,11 +720,19 @@ class AlgorandService {
         return null;
       }
 
+      // Convert base64 strings to Uint8Array if needed
+      const userTxnBytes = typeof userTransaction === 'string' 
+        ? Uint8Array.from(Buffer.from(userTransaction, 'base64'))
+        : userTransaction;
+      const sponsorTxnBytes = typeof sponsorTransaction === 'string'
+        ? Uint8Array.from(Buffer.from(sponsorTransaction, 'base64'))
+        : sponsorTransaction;
+
       console.log('[AlgorandService] Signing user transaction...');
-      const signedUserTxn = await this.signTransactionBytes(userTransaction);
+      const signedUserTxn = await this.signTransactionBytes(userTxnBytes);
       // Encode for submission (RN compatible)
       const signedUserTxnB64 = Buffer.from(signedUserTxn).toString('base64');
-      const sponsorTxnB64 = Buffer.from(sponsorTransaction).toString('base64');
+      const sponsorTxnB64 = Buffer.from(sponsorTxnBytes).toString('base64');
       
       console.log('[AlgorandService] Submitting sponsored transaction group...');
       

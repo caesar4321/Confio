@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Clipboard, Image } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Clipboard, Image, ActivityIndicator } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -8,6 +8,35 @@ import USDCLogo from '../assets/png/USDC.png';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useAccount } from '../contexts/AccountContext';
+import { gql, useMutation, useQuery } from '@apollo/client';
+import algorandService from '../services/algorandService';
+
+// GraphQL mutation for USDC opt-in specifically
+const OPT_IN_TO_USDC = gql`
+  mutation OptInToAsset($assetType: String!) {
+    optInToAssetByType(assetType: $assetType) {
+      success
+      error
+      alreadyOptedIn
+      requiresUserSignature
+      userTransaction
+      sponsorTransaction
+      groupId
+      assetId
+      assetName
+    }
+  }
+`;
+
+// GraphQL query to check current opt-ins
+const CHECK_ASSET_OPT_INS = gql`
+  query CheckAssetOptIns {
+    checkAssetOptIns {
+      optedInAssets
+      assetDetails
+    }
+  }
+`;
 
 const colors = {
   primary: '#34D399', // emerald-400
@@ -149,6 +178,9 @@ const DepositScreen = () => {
   const route = useRoute();
   const insets = useSafeAreaInsets();
   const [copied, setCopied] = useState(false);
+  const [isOptedIn, setIsOptedIn] = useState<boolean | null>(null);
+  const [checkingOptIn, setCheckingOptIn] = useState(true);
+  const [optingIn, setOptingIn] = useState(false);
   const { activeAccount } = useAccount();
   
   // Get token type from route params, default to 'usdc' for backward compatibility
@@ -157,6 +189,77 @@ const DepositScreen = () => {
   
   // Use the real Algorand address from the active account
   const depositAddress = activeAccount?.algorandAddress || "";
+
+  // GraphQL mutation for opt-in
+  const [optInToAsset] = useMutation(OPT_IN_TO_USDC);
+  
+  // Query to check opt-in status
+  const { data: optInData, loading: loadingOptIns, refetch: refetchOptIns } = useQuery(CHECK_ASSET_OPT_INS, {
+    fetchPolicy: 'network-only',
+  });
+
+  // Check if user is opted in to USDC
+  useEffect(() => {
+    if (optInData?.checkAssetOptIns) {
+      const { assetDetails } = optInData.checkAssetOptIns;
+      
+      // Check if USDC is in the opted-in assets
+      // The backend will include USDC in assetDetails if opted in
+      const hasUSDC = assetDetails && Object.values(assetDetails).some((asset: any) => 
+        asset.symbol === 'USDC'
+      );
+      
+      setIsOptedIn(hasUSDC);
+      setCheckingOptIn(false);
+    } else if (!loadingOptIns) {
+      setCheckingOptIn(false);
+    }
+  }, [optInData, loadingOptIns, tokenType]);
+
+  const handleOptIn = async () => {
+    try {
+      setOptingIn(true);
+      
+      // Request USDC opt-in from backend
+      const { data } = await optInToAsset({
+        variables: { assetType: 'USDC' }
+      });
+      
+      if (data?.optInToAssetByType?.alreadyOptedIn) {
+        // Already opted in
+        setIsOptedIn(true);
+        await refetchOptIns();
+        return;
+      }
+      
+      if (data?.optInToAssetByType?.success && data.optInToAssetByType.requiresUserSignature) {
+        // Need to sign the transaction
+        const userTxn = data.optInToAssetByType.userTransaction;
+        const sponsorTxn = data.optInToAssetByType.sponsorTransaction;
+        
+        // Sign and submit the transaction
+        const txId = await algorandService.signAndSubmitSponsoredTransaction(
+          userTxn,
+          sponsorTxn
+        );
+        
+        if (txId) {
+          // Successfully opted in
+          await refetchOptIns();
+          setIsOptedIn(true);
+          console.log('Successfully opted in to USDC:', txId);
+        } else {
+          console.error('Failed to submit opt-in transaction');
+        }
+      } else {
+        console.error('Failed to generate opt-in transaction:', data?.optInToAssetByType?.error);
+      }
+    } catch (error) {
+      console.error('Error during USDC opt-in:', error);
+    } finally {
+      setOptingIn(false);
+    }
+  };
 
   const handleCopy = async () => {
     await Clipboard.setString(depositAddress);
@@ -375,6 +478,72 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.text.secondary,
   },
+  optInContainer: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 24,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    alignItems: 'center',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
+  },
+  optInIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.accent + '20',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  optInTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: colors.text.primary,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  optInDescription: {
+    fontSize: 14,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 16,
+  },
+  optInButton: {
+    backgroundColor: colors.accent,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  optInButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: colors.text.secondary,
+    marginTop: 16,
+  },
 });
 
   return (
@@ -399,19 +568,53 @@ const styles = StyleSheet.create({
       </View>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        {/* Warning Section */}
-        <View style={styles.warningContainer}>
-          <Icon name="alert-triangle" size={20} color={colors.warning.icon} style={styles.warningIcon} />
-          <View style={styles.warningContent}>
-            <Text style={styles.warningTitle}>¡Importante!</Text>
-            <Text style={styles.warningText}>
-              {config.warning}
-            </Text>
+        {/* Show loading state while checking opt-in status for USDC */}
+        {tokenType === 'usdc' && checkingOptIn ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={config.color} />
+            <Text style={styles.loadingText}>Verificando configuración...</Text>
           </View>
-        </View>
+        ) : tokenType === 'usdc' && isOptedIn === false ? (
+          /* Show opt-in prompt for USDC if not opted in */
+          <View style={styles.optInContainer}>
+            <View style={[styles.optInIcon, { backgroundColor: config.color + '20' }]}>
+              <Icon name="unlock" size={40} color={config.color} />
+            </View>
+            <Text style={styles.optInTitle}>Activa tu dirección USDC</Text>
+            <Text style={styles.optInDescription}>
+              Para recibir USDC, primero necesitas activar tu dirección en la red Algorand. 
+              Este es un proceso único y gratuito que habilita tu wallet para recibir USDC.
+            </Text>
+            <TouchableOpacity 
+              style={[styles.optInButton, { backgroundColor: config.color }]}
+              onPress={handleOptIn}
+              disabled={optingIn}
+            >
+              {optingIn ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <>
+                  <Icon name="check-circle" size={20} color="#ffffff" />
+                  <Text style={styles.optInButtonText}>Activar USDC</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* Warning Section */}
+            <View style={styles.warningContainer}>
+              <Icon name="alert-triangle" size={20} color={colors.warning.icon} style={styles.warningIcon} />
+              <View style={styles.warningContent}>
+                <Text style={styles.warningTitle}>¡Importante!</Text>
+                <Text style={styles.warningText}>
+                  {config.warning}
+                </Text>
+              </View>
+            </View>
 
-        {/* Address Section */}
-        <View style={styles.addressCard}>
+            {/* Address Section */}
+            <View style={styles.addressCard}>
           <Text style={styles.addressTitle}>Tu dirección {config.name}</Text>
           
           {/* QR Code */}
@@ -447,22 +650,24 @@ const styles = StyleSheet.create({
           </TouchableOpacity>
         </View>
 
-        {/* Instructions */}
-        <View style={styles.instructionsCard}>
-          <Text style={styles.instructionsTitle}>Pasos para depositar</Text>
-          
-          {config.instructions.map((instruction, index) => (
-            <View key={index} style={styles.instructionStep}>
-              <View style={[styles.stepNumber, { backgroundColor: config.color }]}>
-                <Text style={styles.stepNumberText}>{instruction.step}</Text>
-              </View>
-              <View style={styles.stepContent}>
-                <Text style={styles.stepTitle}>{instruction.title}</Text>
-                <Text style={styles.stepDescription}>{instruction.description}</Text>
-              </View>
+            {/* Instructions */}
+            <View style={styles.instructionsCard}>
+              <Text style={styles.instructionsTitle}>Pasos para depositar</Text>
+              
+              {config.instructions.map((instruction, index) => (
+                <View key={index} style={styles.instructionStep}>
+                  <View style={[styles.stepNumber, { backgroundColor: config.color }]}>
+                    <Text style={styles.stepNumberText}>{instruction.step}</Text>
+                  </View>
+                  <View style={styles.stepContent}>
+                    <Text style={styles.stepTitle}>{instruction.title}</Text>
+                    <Text style={styles.stepDescription}>{instruction.description}</Text>
+                  </View>
+                </View>
+              ))}
             </View>
-          ))}
-        </View>
+          </>
+        )}
       </ScrollView>
     </View>
   );
