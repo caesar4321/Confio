@@ -604,16 +604,26 @@ export class AuthService {
       console.log('No stored address found, will need to regenerate during sign-in');
     }
 
-    // No stored address for this account
-    console.log('No Algorand address found for account:', {
+    // No stored address for this account - compute it now
+    console.log('No Algorand address found in keychain, computing it now:', {
       accountType: accountContext.type,
       accountIndex: accountContext.index,
       businessId: accountContext.businessId,
       cacheKey: cacheKey
     });
     
-    // Return empty string or throw error - addresses should be generated during account switch
-    // We should NOT fall back to a different account's address
+    // Compute and store the address (this will also cache it in Keychain)
+    try {
+      const computedAddress = await this.computeAndStoreAlgorandAddress(accountContext);
+      if (computedAddress) {
+        console.log('Successfully computed and stored address:', computedAddress);
+        return computedAddress;
+      }
+    } catch (error) {
+      console.error('Failed to compute address:', error);
+    }
+    
+    // Only return empty if we truly can't derive the address
     return ''; // Return empty string to indicate no address yet
   }
 

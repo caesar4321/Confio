@@ -181,7 +181,7 @@ const DepositScreen = () => {
   const [isOptedIn, setIsOptedIn] = useState<boolean | null>(null);
   const [checkingOptIn, setCheckingOptIn] = useState(true);
   const [optingIn, setOptingIn] = useState(false);
-  const { activeAccount } = useAccount();
+  const { activeAccount, refreshAccounts } = useAccount();
   
   // Get token type from route params, default to 'usdc' for backward compatibility
   const tokenType: TokenType = (route.params as RouteParams)?.tokenType || 'usdc';
@@ -295,6 +295,8 @@ const DepositScreen = () => {
           // Successfully opted in
           console.log('[DepositScreen] Successfully opted in to USDC:', txId);
           await refetchOptIns();
+          // Refresh accounts to ensure address is loaded
+          await refreshAccounts();
           setIsOptedIn(true);
         } else {
           console.error('[DepositScreen] Failed to submit opt-in transaction');
@@ -668,7 +670,7 @@ const styles = StyleSheet.create({
           {/* QR Code */}
           <View style={styles.qrContainer}>
             <QRCode
-              value={depositAddress}
+              value={depositAddress || "loading"}
               size={192}
               backgroundColor="white"
               color="black"
