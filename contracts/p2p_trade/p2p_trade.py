@@ -5,17 +5,14 @@ Website: https://confio.lat
 
 Usage and group structures:
 - Create trade: [Payment(sponsor|seller→app, amount=box MBR), AXFER(seller→app, asset=cUSD/CONFIO), AppCall(create_trade)]
-  - The app computes MBR = 2500 + 400*(key_len + value_len) and requires the Payment to cover it. If a sponsor address is configured, the sponsor funds this Payment; otherwise the seller funds it.
-- Accept: [AppCall(accept_trade)]
-- Confirm received: [AppCall(confirm_payment_received)] with enough fee or fee-bump payment; buyer must be opted into the asset.
-- Cancel: [AppCall(cancel_trade)] with enough fee; returns asset to seller and keeps a record in the box.
-- Dispute: [Payment(sponsor|opener→app, amount=dispute MBR), AppCall(open_dispute)] writes a compact dispute record (hashed reason).
-- Resolve: [AppCall(resolve_dispute)] with enough fee or fee-bump; winner must be opted into the asset.
+- Accept: [AppCall(accept_trade)] - sets 15-minute window
+- Confirm received: [AppCall(confirm_payment_received)] - deletes box and refunds MBR via inner payment
+- Cancel: [AppCall(cancel_trade)] - deletes box and refunds MBR via inner payment
+- Dispute: [Payment(sponsor|opener→app, amount=dispute MBR), AppCall(open_dispute)]
+- Resolve: [AppCall(resolve_dispute)] - deletes both boxes and refunds MBR via inner payments
 
-- Notes:
-- Boxes are funded at creation by the sponsor if configured (fallback to caller). Dispute boxes store a 32-byte hash of the reason to bound MBR.
-- Inner transactions set fee to 0; callers should cover outer fees or include a fee-bump payment.
-- Fiat currency code is not stored on-chain to minimize MBR; backends should track it off-chain alongside the trade ID.
+Note: Box deletion (App.box_delete) does NOT automatically return MBR to creator.
+The contract explicitly sends MBR refunds via inner payment transactions to the original payers.
 """
 
 from pyteal import *
@@ -23,13 +20,63 @@ from beaker import *
 from typing import Final
 
 # MBR helpers and limits
-MAX_TRADE_ID_LEN = Int(64)
-TRADE_VALUE_FIXED_LEN = Int(32 + 8 + 8 + 8 + 8 + 8 + 1 + 8 + 32)  # 113 bytes
+MAX_TRADE_ID_LEN = Int(56)  # Max 56 bytes: 56 + len("_dispute") = 64 (Algorand's box key limit)
+# Trade box layout (optimized - moved paid data to separate box):
+# seller(32) + amount(8) + asset_id(8) + created_at(8) + expires_at(8) +
+# status(1) + accepted_at(8) + buyer(32) + mbr_payer(32) = 137 bytes
+TRADE_VALUE_FIXED_LEN = Int(137)  # 32+8+8+8+8+1+8+32+32 = 137 bytes
+# MBR = 2500 + 400*(32+137) = 70,100 µALGO = 0.0701 ALGO
+# Paid box layout (only created when needed):
+# paid_at(8) + ref_hash(32) + extended(1) = 41 bytes  
+PAID_VALUE_LEN = Int(8 + 32 + 1)
+DISPUTE_VALUE_LEN = Int(32 + 8 + 32 + 32)  # 104 bytes (opened_by + opened_at + reason_hash + payer)
 
 # Box MBR = 2500 + 400 * (key_len + value_len)
 @Subroutine(TealType.uint64)
 def box_mbr_cost(key_len: Expr, value_len: Expr) -> Expr:
     return Int(2500) + Int(400) * (key_len + value_len)
+
+# Delete box and explicitly refund MBR to payer via inner payment
+# Note: App.box_delete() does NOT automatically return MBR - we must send it manually
+@Subroutine(TealType.none)
+def refund_box_mbr(box_key: Expr, value_len: Expr, payer: Expr):
+    mbr = ScratchVar(TealType.uint64)
+    return Seq(
+        mbr.store(box_mbr_cost(Len(box_key), value_len)),
+        Assert(App.box_delete(box_key)),
+        InnerTxnBuilder.Begin(),
+        InnerTxnBuilder.SetFields({
+            TxnField.type_enum: TxnType.Payment,
+            TxnField.receiver: payer,
+            TxnField.amount: mbr.load(),
+            TxnField.fee: Int(0)
+        }),
+        InnerTxnBuilder.Submit()
+    )
+
+# Helper to refund _paid box if it exists
+@Subroutine(TealType.none)
+def maybe_refund_paid_box(trade_id: Expr, buyer: Expr):
+    paid_key = ScratchVar(TealType.bytes)
+    return Seq(
+        paid_key.store(Concat(trade_id, Bytes("_paid"))),
+        (mv := App.box_get(paid_key.load())),
+        If(mv.hasValue(), 
+           refund_box_mbr(paid_key.load(), PAID_VALUE_LEN, buyer)
+        )
+    )
+
+# Check for no rekey/close on transaction
+@Subroutine(TealType.uint64)
+def no_rekey_close(txn_index: Expr) -> Expr:
+    return And(
+        Gtxn[txn_index].rekey_to() == Global.zero_address(),
+        Gtxn[txn_index].close_remainder_to() == Global.zero_address(),
+        Or(
+            Gtxn[txn_index].type_enum() != TxnType.AssetTransfer,
+            Gtxn[txn_index].asset_close_to() == Global.zero_address()
+        )
+    )
 
 # Trade status constants
 TRADE_STATUS_PENDING = Int(0)
@@ -37,10 +84,11 @@ TRADE_STATUS_ACTIVE = Int(1)
 TRADE_STATUS_COMPLETED = Int(2)
 TRADE_STATUS_CANCELLED = Int(3)
 TRADE_STATUS_DISPUTED = Int(4)
-TRADE_STATUS_EXPIRED = Int(5)
 
-# Trade window (15 minutes in seconds)
-TRADE_WINDOW_SECONDS = Int(900)
+# Trade window settings
+TRADE_WINDOW_SECONDS = Int(900)  # 15 minutes default
+EXTENSION_SECONDS = Int(600)  # 10 minutes extension when marked as paid
+GRACE_PERIOD_SECONDS = Int(120)  # 2 minutes grace after expiry before third-party can cancel
 
 class P2PTradeState:
     """Global state for P2P trading"""
@@ -56,6 +104,7 @@ class P2PTradeState:
         default=Bytes(""),
         descr="Optional sponsor address for MBR/fee funding"
     )
+    
     
     is_paused: Final[GlobalStateValue] = GlobalStateValue(
         stack_type=TealType.uint64,
@@ -111,6 +160,18 @@ class P2PTradeState:
         default=Int(0),
         descr="Total CONFIO volume"
     )
+    
+    active_trades: Final[GlobalStateValue] = GlobalStateValue(
+        stack_type=TealType.uint64,
+        default=Int(0),
+        descr="Number of active trades (for safe deletion)"
+    )
+    
+    active_disputes: Final[GlobalStateValue] = GlobalStateValue(
+        stack_type=TealType.uint64,
+        default=Int(0),
+        descr="Number of currently disputed trades"
+    )
 
 app = Application("P2PTrade", state=P2PTradeState())
 
@@ -127,6 +188,18 @@ def create():
 def setup_assets(cusd_id: abi.Uint64, confio_id: abi.Uint64):
     """Setup asset IDs for trading"""
     return Seq(
+        # Require sponsor deposit that also covers fees
+        Assert(Global.group_size() == Int(2)),
+        Assert(Gtxn[0].type_enum() == TxnType.Payment),
+        Assert(And(app.state.sponsor_address != Bytes(""), Gtxn[0].sender() == app.state.sponsor_address)),
+        # Deposit must go to the app so its balance can grow by 0.2 ALGO MBR
+        Assert(Gtxn[0].receiver() == Global.current_application_address()),
+        # 0.2 ALGO for two ASA opt-ins + a little headroom for fees
+        Assert(Gtxn[0].amount() >= Int(200_000)),
+        
+        # Verify rekey/close protection on AppCall
+        Assert(no_rekey_close(Int(1))),
+        
         Assert(
             And(
                 Txn.sender() == app.state.admin,
@@ -164,21 +237,28 @@ def setup_assets(cusd_id: abi.Uint64, confio_id: abi.Uint64):
 @app.external
 def create_trade(
     trade_id: abi.String,
-    asset_transfer: abi.AssetTransferTransaction,
-    fiat_amount: abi.Uint64,
-    fiat_currency: abi.String
+    asset_transfer: abi.AssetTransferTransaction
 ):
     """
     Create a new P2P trade offer (seller deposits crypto)
-    Trade data stored in box storage
+    Trade data stored in box storage with payer tracking
+    Note: fiat_amount and currency stored off-chain with trade_id
+    BOX REFS REQUIRED: trade_id
     """
     key_len = ScratchVar(TealType.uint64)
     mbr_cost = ScratchVar(TealType.uint64)
+    mbr_payer = ScratchVar(TealType.bytes)
+    delta = ScratchVar(TealType.uint64)
 
     return Seq(
         # Check system state and asset configuration
         Assert(app.state.is_paused == Int(0)),
         Assert(Or(app.state.cusd_asset_id != Int(0), app.state.confio_asset_id != Int(0))),
+
+        # Verify rekey/close protection on all group transactions
+        Assert(no_rekey_close(Int(0))),  # Payment
+        Assert(no_rekey_close(Int(1))),  # AssetTransfer
+        Assert(no_rekey_close(Int(2))),  # AppCall
 
         # Bind the AXFER to the app call and verify
         Assert(asset_transfer.get().asset_receiver() == Global.current_application_address()),
@@ -198,88 +278,75 @@ def create_trade(
         key_len.store(Len(trade_id.get())),
         Assert(And(key_len.load() > Int(0), key_len.load() <= MAX_TRADE_ID_LEN)),
         mbr_cost.store(box_mbr_cost(key_len.load(), TRADE_VALUE_FIXED_LEN)),
-        # Allow sponsor to fund MBR if configured, otherwise seller funds it
+        
+        # Record the real payer and restrict who it can be
         Assert(Or(
-            And(
-                app.state.sponsor_address != Bytes(""),
-                Gtxn[0].sender() == app.state.sponsor_address,
-                Gtxn[0].amount() >= mbr_cost.load()
-            ),
-            And(
-                Gtxn[0].sender() == Txn.sender(),
-                Gtxn[0].amount() >= mbr_cost.load()
-            )
+            Gtxn[0].sender() == app.state.sponsor_address,
+            Gtxn[0].sender() == Txn.sender()
         )),
+        mbr_payer.store(Gtxn[0].sender()),
+        
+        # Verify payment amount and refund overpayment
+        Assert(Gtxn[0].amount() >= mbr_cost.load()),
+        delta.store(Gtxn[0].amount() - mbr_cost.load()),
+        If(delta.load() > Int(0),
+            Seq(
+                InnerTxnBuilder.Begin(),
+                InnerTxnBuilder.SetFields({
+                    TxnField.type_enum: TxnType.Payment,
+                    TxnField.receiver: Gtxn[0].sender(),
+                    TxnField.amount: delta.load(),
+                    TxnField.fee: Int(0)
+                }),
+                InnerTxnBuilder.Submit()
+            )
+        ),
 
+        # Verify vault is opted into the asset being traded
+        (app_hold := AssetHolding.balance(Global.current_application_address(), asset_transfer.get().xfer_asset())),
+        Assert(app_hold.hasValue()),
+        
         # Ensure new trade
-        Assert(Not(App.box_get(trade_id.get())[0])),
+        (box_exists := App.box_get(trade_id.get())),
+        Assert(Not(box_exists.hasValue())),
         Assert(App.box_create(trade_id.get(), TRADE_VALUE_FIXED_LEN)),
 
-        # Populate fixed-size trade record
+        # Populate fixed-size trade record with zero bytes for buyer
         App.box_replace(trade_id.get(), Int(0), Txn.sender()),                         # seller (32)
         App.box_replace(trade_id.get(), Int(32), Itob(asset_transfer.get().asset_amount())),  # amount (8)
         App.box_replace(trade_id.get(), Int(40), Itob(asset_transfer.get().xfer_asset())),    # asset_id (8)
-        App.box_replace(trade_id.get(), Int(48), Itob(fiat_amount.get())),              # fiat_amount (8)
-        App.box_replace(trade_id.get(), Int(56), Itob(Global.latest_timestamp())),      # created_at (8)
-        App.box_replace(trade_id.get(), Int(64), Itob(Global.latest_timestamp() + TRADE_WINDOW_SECONDS)),  # expires_at (8)
-        App.box_replace(trade_id.get(), Int(72), Bytes("base16", "00")),              # status (1)
-        App.box_replace(trade_id.get(), Int(73), Itob(Int(0))),                        # accepted_at (8)
-        App.box_replace(trade_id.get(), Int(81), Bytes("base32", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")), # buyer (32)
+        App.box_replace(trade_id.get(), Int(48), Itob(Global.latest_timestamp())),      # created_at (8)
+        App.box_replace(trade_id.get(), Int(56), Itob(Int(0))),                        # expires_at (8) - set on accept
+        App.box_replace(trade_id.get(), Int(64), Bytes("base16", "00")),               # status (1)
+        App.box_replace(trade_id.get(), Int(65), Itob(Int(0))),                        # accepted_at (8)
+        App.box_replace(trade_id.get(), Int(73), Bytes("base16", "00" * 32)),          # buyer (32) - zero bytes
+        App.box_replace(trade_id.get(), Int(105), mbr_payer.load()),                   # mbr_payer (32)
 
         # Update statistics
         app.state.total_trades_created.set(app.state.total_trades_created + Int(1)),
+        app.state.active_trades.set(app.state.active_trades + Int(1)),
+        
+        # Event log for indexers
+        Log(Concat(Bytes("ev:create:"), trade_id.get())),
 
         Approve()
     )
 
 @app.external  
 def accept_trade(trade_id: abi.String):
-    """Buyer accepts the trade"""
-    seller = ScratchVar(TealType.bytes)
-    amount = ScratchVar(TealType.uint64)
-    asset_id = ScratchVar(TealType.uint64)
-    expires_at = ScratchVar(TealType.uint64)
-    status = ScratchVar(TealType.bytes)
-    
-    return Seq(
-        # Load trade data - BoxLen > 0 means box exists
-        (trade_data := App.box_get(trade_id.get())),
-        Assert(trade_data.hasValue()),
-        
-        seller.store(Extract(trade_data.value(), Int(0), Int(32))),
-        amount.store(Btoi(Extract(trade_data.value(), Int(32), Int(8)))),
-        asset_id.store(Btoi(Extract(trade_data.value(), Int(40), Int(8)))),
-        expires_at.store(Btoi(Extract(trade_data.value(), Int(64), Int(8)))),
-        status.store(Extract(trade_data.value(), Int(72), Int(1))),
-        
-        # Verify conditions
-        Assert(
-            And(
-                app.state.is_paused == Int(0),
-                status.load() == Bytes("base16", "00"),  # PENDING
-                seller.load() != Txn.sender(),  # Can't self-trade
-                Global.latest_timestamp() <= expires_at.load()
-            )
-        ),
-        
-        # Update trade to ACTIVE
-        App.box_replace(trade_id.get(), Int(72), Bytes("base16", "01")),  # status = ACTIVE
-        App.box_replace(trade_id.get(), Int(73), Itob(Global.latest_timestamp())),  # accepted_at
-        App.box_replace(trade_id.get(), Int(81), Txn.sender()),  # buyer
-        
-        Approve()
-    )
-
-@app.external
-def confirm_payment_received(trade_id: abi.String):
-    """Seller confirms fiat payment received, releases crypto to buyer"""
+    """
+    Buyer accepts the trade - starts 15-minute window
+    BOX REFS REQUIRED: trade_id
+    """
     seller = ScratchVar(TealType.bytes)
     amount = ScratchVar(TealType.uint64)
     asset_id = ScratchVar(TealType.uint64)
     status = ScratchVar(TealType.bytes)
-    buyer = ScratchVar(TealType.bytes)
     
     return Seq(
+        # Verify rekey/close protection
+        Assert(no_rekey_close(Int(0))),
+        
         # Load trade data
         (trade_data := App.box_get(trade_id.get())),
         Assert(trade_data.hasValue()),
@@ -287,23 +354,172 @@ def confirm_payment_received(trade_id: abi.String):
         seller.store(Extract(trade_data.value(), Int(0), Int(32))),
         amount.store(Btoi(Extract(trade_data.value(), Int(32), Int(8)))),
         asset_id.store(Btoi(Extract(trade_data.value(), Int(40), Int(8)))),
-        status.store(Extract(trade_data.value(), Int(72), Int(1))),
-        buyer.store(Extract(trade_data.value(), Int(81), Int(32))),
+        status.store(Extract(trade_data.value(), Int(64), Int(1))),
+        
+        # Verify conditions
+        Assert(
+            And(
+                app.state.is_paused == Int(0),
+                status.load() == Bytes("base16", "00"),  # PENDING
+                seller.load() != Txn.sender(),  # Can't self-trade
+                Extract(trade_data.value(), Int(65), Int(8)) == Itob(Int(0))  # Not previously accepted
+            )
+        ),
+        
+        # Ensure buyer is opted into the asset
+        (bal := AssetHolding.balance(Txn.sender(), asset_id.load())),
+        Assert(bal.hasValue()),
+        
+        # Update trade to ACTIVE and set expiry window NOW
+        App.box_replace(trade_id.get(), Int(56), Itob(Global.latest_timestamp() + TRADE_WINDOW_SECONDS)),  # expires_at
+        App.box_replace(trade_id.get(), Int(64), Bytes("base16", "01")),  # status = ACTIVE
+        App.box_replace(trade_id.get(), Int(65), Itob(Global.latest_timestamp())),  # accepted_at
+        App.box_replace(trade_id.get(), Int(73), Txn.sender()),  # buyer
+        
+        # Event log for indexers
+        Log(Concat(Bytes("ev:accept:"), trade_id.get())),
+        
+        Approve()
+    )
+
+@app.external
+def mark_as_paid(trade_id: abi.String, payment_ref: abi.String):
+    """
+    Buyer marks trade as paid and can get one-time 10-minute extension
+    BOX REFS REQUIRED: trade_id, trade_id+"_paid" (will be created)
+    """
+    buyer = ScratchVar(TealType.bytes)
+    status = ScratchVar(TealType.bytes)
+    expires_at = ScratchVar(TealType.uint64)
+    paid_box_key = ScratchVar(TealType.bytes)
+    paid_mbr = ScratchVar(TealType.uint64)
+    delta = ScratchVar(TealType.uint64)
+    
+    return Seq(
+        # Verify rekey/close protection
+        Assert(no_rekey_close(Int(0))),
+        Assert(no_rekey_close(Int(1))),  # Payment for paid box MBR
+        
+        # Load trade data
+        (trade_data := App.box_get(trade_id.get())),
+        Assert(trade_data.hasValue()),
+        
+        buyer.store(Extract(trade_data.value(), Int(73), Int(32))),
+        status.store(Extract(trade_data.value(), Int(64), Int(1))),
+        expires_at.store(Btoi(Extract(trade_data.value(), Int(56), Int(8)))),
+        
+        # Verify conditions
+        Assert(
+            And(
+                app.state.is_paused == Int(0),
+                status.load() == Bytes("base16", "01"),  # ACTIVE
+                Txn.sender() == buyer.load()  # Only buyer can mark as paid
+            )
+        ),
+        
+        # Check if paid box already exists
+        paid_box_key.store(Concat(trade_id.get(), Bytes("_paid"))),
+        Assert(Len(paid_box_key.load()) <= Int(64)),  # Algorand box key limit
+        (paid_exists := App.box_get(paid_box_key.load())),
+        Assert(Not(paid_exists.hasValue())),  # Can only mark as paid once
+        
+        # Group must be [Payment, AppCall] for paid box MBR
+        Assert(Global.group_size() == Int(2)),
+        Assert(Gtxn[0].type_enum() == TxnType.Payment),
+        Assert(Gtxn[0].receiver() == Global.current_application_address()),
+        paid_mbr.store(box_mbr_cost(Len(paid_box_key.load()), PAID_VALUE_LEN)),
+        Assert(Gtxn[0].amount() >= paid_mbr.load()),
+        Assert(Gtxn[0].sender() == Txn.sender()),  # Buyer pays for paid box
+        
+        # Refund overpayment
+        delta.store(Gtxn[0].amount() - paid_mbr.load()),
+        If(delta.load() > Int(0),
+            Seq(
+                InnerTxnBuilder.Begin(),
+                InnerTxnBuilder.SetFields({
+                    TxnField.type_enum: TxnType.Payment,
+                    TxnField.receiver: Gtxn[0].sender(),
+                    TxnField.amount: delta.load(),
+                    TxnField.fee: Int(0)
+                }),
+                InnerTxnBuilder.Submit()
+            )
+        ),
+        
+        # Create and populate paid box
+        Assert(App.box_create(paid_box_key.load(), PAID_VALUE_LEN)),
+        App.box_replace(paid_box_key.load(), Int(0), Itob(Global.latest_timestamp())),  # paid_at
+        App.box_replace(paid_box_key.load(), Int(8), Sha256(payment_ref.get())),  # ref_hash
+        App.box_replace(paid_box_key.load(), Int(40), Bytes("base16", "00")),  # extended = false
+        
+        # Apply one-time extension if within original window
+        If(
+            Global.latest_timestamp() <= expires_at.load(),
+            Seq(
+                App.box_replace(trade_id.get(), Int(56), Itob(expires_at.load() + EXTENSION_SECONDS)),
+                App.box_replace(paid_box_key.load(), Int(40), Bytes("base16", "01"))  # mark as extended
+            )
+        ),
+        
+        # Event log for indexers
+        Log(Concat(Bytes("ev:paid:"), trade_id.get())),
+        
+        Approve()
+    )
+
+@app.external
+def confirm_payment_received(trade_id: abi.String):
+    """
+    Seller confirms fiat payment received, releases crypto to buyer
+    BOX REFS REQUIRED: trade_id, trade_id+"_paid" (if exists)
+    """
+    seller = ScratchVar(TealType.bytes)
+    amount = ScratchVar(TealType.uint64)
+    asset_id = ScratchVar(TealType.uint64)
+    status = ScratchVar(TealType.bytes)
+    buyer = ScratchVar(TealType.bytes)
+    mbr_payer = ScratchVar(TealType.bytes)
+    
+    return Seq(
+        # Verify rekey/close protection
+        Assert(no_rekey_close(Int(0))),  # Payment
+        Assert(no_rekey_close(Int(1))),  # AppCall
+        
+        # Verify Payment type for fee-bump
+        Assert(Gtxn[0].type_enum() == TxnType.Payment),
+        
+        # Load trade data
+        (trade_data := App.box_get(trade_id.get())),
+        Assert(trade_data.hasValue()),
+        
+        seller.store(Extract(trade_data.value(), Int(0), Int(32))),
+        amount.store(Btoi(Extract(trade_data.value(), Int(32), Int(8)))),
+        asset_id.store(Btoi(Extract(trade_data.value(), Int(40), Int(8)))),
+        status.store(Extract(trade_data.value(), Int(64), Int(1))),
+        buyer.store(Extract(trade_data.value(), Int(73), Int(32))),
+        mbr_payer.store(Extract(trade_data.value(), Int(105), Int(32))),
         
         # Verify authorization
         Assert(
             And(
                 app.state.is_paused == Int(0),
                 Txn.sender() == seller.load(),
-                status.load() == Bytes("base16", "01")  # ACTIVE
+                status.load() == Bytes("base16", "01"),  # ACTIVE
+                buyer.load() != Bytes("base16", "00" * 32)  # Buyer has been set
             )
         ),
+        
+        # Require sponsor fee bump for inner txns
+        Assert(Global.group_size() == Int(2)),
+        Assert(Gtxn[0].type_enum() == TxnType.Payment),
+        Assert(And(app.state.sponsor_address != Bytes(""), Gtxn[0].sender() == app.state.sponsor_address)),
+        Assert(Gtxn[0].fee() >= Int(3000)),  # Covers 1 inner AXFER + up to 2 inner payments
         
         # Ensure buyer is opted-in to asset
         (buyer_hold := AssetHolding.balance(buyer.load(), asset_id.load())),
         Assert(buyer_hold.hasValue()),
 
-        # Transfer funds to buyer
+        # Transfer full amount to buyer (no fees in P2P)
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
             TxnField.type_enum: TxnType.AssetTransfer,
@@ -314,30 +530,44 @@ def confirm_payment_received(trade_id: abi.String):
         }),
         InnerTxnBuilder.Submit(),
         
-        # Update trade status
-        App.box_replace(trade_id.get(), Int(72), Bytes("base16", "02")),  # COMPLETED
-        
         # Update statistics
         app.state.total_trades_completed.set(app.state.total_trades_completed + Int(1)),
+        app.state.active_trades.set(app.state.active_trades - Int(1)),
         If(
             asset_id.load() == app.state.cusd_asset_id,
             app.state.total_cusd_volume.set(app.state.total_cusd_volume + amount.load()),
             app.state.total_confio_volume.set(app.state.total_confio_volume + amount.load())
         ),
         
+        # First, refund _paid box (if any) to buyer
+        maybe_refund_paid_box(trade_id.get(), buyer.load()),
+        # Then delete trade box and refund MBR to payer
+        refund_box_mbr(trade_id.get(), TRADE_VALUE_FIXED_LEN, mbr_payer.load()),
+        
+        # Event log for indexers
+        Log(Concat(Bytes("ev:confirm:"), trade_id.get())),
+        
         Approve()
     )
 
 @app.external
 def cancel_trade(trade_id: abi.String):
-    """Cancel trade (by seller if pending, or anyone if expired)"""
+    """
+    Cancel trade (by seller if pending, or anyone if expired with grace period)
+    BOX REFS REQUIRED: trade_id, trade_id+"_paid" (if exists)
+    """
     seller = ScratchVar(TealType.bytes)
     amount = ScratchVar(TealType.uint64)
     asset_id = ScratchVar(TealType.uint64)
     expires_at = ScratchVar(TealType.uint64)
     status = ScratchVar(TealType.bytes)
+    mbr_payer = ScratchVar(TealType.bytes)
+    paid_at = ScratchVar(TealType.uint64)
     
     return Seq(
+        # Verify rekey/close protection
+        Assert(no_rekey_close(Int(0))),
+        
         # Load trade data
         (trade_data := App.box_get(trade_id.get())),
         Assert(trade_data.hasValue()),
@@ -345,8 +575,12 @@ def cancel_trade(trade_id: abi.String):
         seller.store(Extract(trade_data.value(), Int(0), Int(32))),
         amount.store(Btoi(Extract(trade_data.value(), Int(32), Int(8)))),
         asset_id.store(Btoi(Extract(trade_data.value(), Int(40), Int(8)))),
-        expires_at.store(Btoi(Extract(trade_data.value(), Int(64), Int(8)))),
-        status.store(Extract(trade_data.value(), Int(72), Int(1))),
+        expires_at.store(Btoi(Extract(trade_data.value(), Int(56), Int(8)))),
+        status.store(Extract(trade_data.value(), Int(64), Int(1))),
+        mbr_payer.store(Extract(trade_data.value(), Int(105), Int(32))),
+        # Check if paid box exists
+        (paid_box := App.box_get(Concat(trade_id.get(), Bytes("_paid")))),
+        paid_at.store(If(paid_box.hasValue(), Btoi(Extract(paid_box.value(), Int(0), Int(8))), Int(0))),
         
         # Check authorization
         Assert(
@@ -358,14 +592,24 @@ def cancel_trade(trade_id: abi.String):
                         status.load() == Bytes("base16", "00"),  # PENDING
                         Txn.sender() == seller.load()
                     ),
-                    # Anyone can cancel expired active trade
+                    # Anyone can cancel stale pending trade after 24h
+                    And(
+                        status.load() == Bytes("base16", "00"),  # PENDING
+                        Global.latest_timestamp() > Btoi(Extract(trade_data.value(), Int(48), Int(8))) + Int(86400)  # 24h since creation
+                    ),
+                    # Anyone can cancel expired active trade (with grace period)
                     And(
                         status.load() == Bytes("base16", "01"),  # ACTIVE
-                        Global.latest_timestamp() > expires_at.load()
+                        expires_at.load() > Int(0),  # Expiry has been set
+                        paid_at.load() == Int(0),  # Not marked as paid
+                        Global.latest_timestamp() > expires_at.load() + GRACE_PERIOD_SECONDS
                     )
+                    # Disputed trades must go through resolve_dispute, not cancel
                 )
             )
         ),
+        
+        # No fee-bump needed: caller pays outer fee; refunds use freed MBR
         
         # Ensure seller is opted-in (should be, but enforce)
         (seller_hold := AssetHolding.balance(seller.load(), asset_id.load())),
@@ -382,36 +626,57 @@ def cancel_trade(trade_id: abi.String):
         }),
         InnerTxnBuilder.Submit(),
         
-        # Update status
-        App.box_replace(trade_id.get(), Int(72), Bytes("base16", "03")),  # CANCELLED
-        
         # Update statistics
         app.state.total_trades_cancelled.set(app.state.total_trades_cancelled + Int(1)),
+        app.state.active_trades.set(app.state.active_trades - Int(1)),
+        
+        # Note: Disputed trades cannot be cancelled (enforced by assertion above)
+        # They must go through resolve_dispute instead
+        
+        # Refund _paid box (if any) to buyer, then trade box to payer
+        maybe_refund_paid_box(trade_id.get(), Extract(trade_data.value(), Int(73), Int(32))),  # buyer
+        refund_box_mbr(trade_id.get(), TRADE_VALUE_FIXED_LEN, mbr_payer.load()),
+        
+        # Event log for indexers
+        Log(Concat(Bytes("ev:cancel:"), trade_id.get())),
         
         Approve()
     )
 
 @app.external
 def open_dispute(trade_id: abi.String, reason: abi.String):
-    """Open dispute (by buyer or seller)"""
+    """
+    Open dispute (by buyer or seller) - tracks payer for MBR refund
+    BOX REFS REQUIRED: trade_id, trade_id+"_dispute" (will be created)
+    """
     seller = ScratchVar(TealType.bytes)
     status = ScratchVar(TealType.bytes)
     buyer = ScratchVar(TealType.bytes)
+    dispute_payer = ScratchVar(TealType.bytes)
+    dispute_key = ScratchVar(TealType.bytes)
+    dispute_key_len = ScratchVar(TealType.uint64)
+    dispute_mbr = ScratchVar(TealType.uint64)
+    delta = ScratchVar(TealType.uint64)
     
     return Seq(
+        # Verify rekey/close protection
+        Assert(no_rekey_close(Int(0))),  # Payment
+        Assert(no_rekey_close(Int(1))),  # AppCall
+        
         # Load trade data
         (trade_data := App.box_get(trade_id.get())),
         Assert(trade_data.hasValue()),
         
         seller.store(Extract(trade_data.value(), Int(0), Int(32))),
-        status.store(Extract(trade_data.value(), Int(72), Int(1))),
-        buyer.store(Extract(trade_data.value(), Int(81), Int(32))),
+        status.store(Extract(trade_data.value(), Int(64), Int(1))),
+        buyer.store(Extract(trade_data.value(), Int(73), Int(32))),
         
         # Verify authorization
         Assert(
             And(
                 app.state.is_paused == Int(0),
                 status.load() == Bytes("base16", "01"),  # ACTIVE
+                buyer.load() != Bytes("base16", "00" * 32),  # Buyer has been set
                 Or(
                     Txn.sender() == seller.load(),
                     Txn.sender() == buyer.load()
@@ -419,53 +684,87 @@ def open_dispute(trade_id: abi.String, reason: abi.String):
             )
         ),
         
-        # Update status to DISPUTED
-        App.box_replace(trade_id.get(), Int(72), Bytes("base16", "04")),
+        # Store dispute info with payer tracking
+        # Key: trade_id + "_dispute"; Value: opened_by(32) | opened_at(8) | reason_hash(32) | payer(32) = 104
+        dispute_key.store(Concat(trade_id.get(), Bytes("_dispute"))),
+        dispute_key_len.store(Len(dispute_key.load())),
+        Assert(dispute_key_len.load() <= Int(64)),  # Algorand box key limit
         
-        # Store dispute info in a compact fixed-size box (sponsor-funded if configured)
-        # Key: trade_id + "_dispute"; Value: opened_by(32) | opened_at(8) | reason_hash(32) = 72
-        (dispute_key := Concat(trade_id.get(), Bytes("_dispute"))),
-        (dispute_key_len := Len(dispute_key)),
-        (dispute_val_len := Int(32 + 8 + 32)),
         # Group must be [Payment, AppCall], funded by sponsor if set, else by opener
         Assert(Global.group_size() == Int(2)),
         Assert(Gtxn[0].type_enum() == TxnType.Payment),
         Assert(Gtxn[0].receiver() == Global.current_application_address()),
-        (dispute_mbr := box_mbr_cost(dispute_key_len, dispute_val_len)),
-        Assert(Or(
+        
+        # Track who pays for dispute box
+        If(
             And(
                 app.state.sponsor_address != Bytes(""),
-                Gtxn[0].sender() == app.state.sponsor_address,
-                Gtxn[0].amount() >= dispute_mbr
+                Gtxn[0].sender() == app.state.sponsor_address
             ),
-            And(
-                Gtxn[0].sender() == Txn.sender(),
-                Gtxn[0].amount() >= dispute_mbr
+            dispute_payer.store(app.state.sponsor_address),
+            dispute_payer.store(Txn.sender())
+        ),
+        
+        dispute_mbr.store(box_mbr_cost(dispute_key_len.load(), DISPUTE_VALUE_LEN)),
+        Assert(Gtxn[0].amount() >= dispute_mbr.load()),
+        
+        # Refund overpayment
+        delta.store(Gtxn[0].amount() - dispute_mbr.load()),
+        If(delta.load() > Int(0),
+            Seq(
+                InnerTxnBuilder.Begin(),
+                InnerTxnBuilder.SetFields({
+                    TxnField.type_enum: TxnType.Payment,
+                    TxnField.receiver: Gtxn[0].sender(),
+                    TxnField.amount: delta.load(),
+                    TxnField.fee: Int(0)
+                }),
+                InnerTxnBuilder.Submit()
             )
-        )),
-        # Create and populate dispute box
-        Assert(Not(App.box_get(dispute_key)[0])),
-        Assert(App.box_create(dispute_key, dispute_val_len)),
-        App.box_replace(dispute_key, Int(0), Txn.sender()),
-        App.box_replace(dispute_key, Int(32), Itob(Global.latest_timestamp())),
-        App.box_replace(dispute_key, Int(40), Sha256(reason.get())),
+        ),
+        
+        # Create and populate dispute box with payer
+        (dispute_exists := App.box_get(dispute_key.load())),
+        Assert(Not(dispute_exists.hasValue())),
+        Assert(App.box_create(dispute_key.load(), DISPUTE_VALUE_LEN)),
+        App.box_replace(dispute_key.load(), Int(0), Txn.sender()),                    # opened_by
+        App.box_replace(dispute_key.load(), Int(32), Itob(Global.latest_timestamp())), # opened_at
+        App.box_replace(dispute_key.load(), Int(40), Sha256(reason.get())),           # reason_hash
+        App.box_replace(dispute_key.load(), Int(72), dispute_payer.load()),           # payer for MBR refund
+        
+        # Update status to DISPUTED after all validations succeed
+        App.box_replace(trade_id.get(), Int(64), Bytes("base16", "04")),
         
         # Update statistics
         app.state.total_trades_disputed.set(app.state.total_trades_disputed + Int(1)),
+        app.state.active_disputes.set(app.state.active_disputes + Int(1)),
+        
+        # Event log for indexers
+        Log(Concat(Bytes("ev:dispute:"), trade_id.get())),
         
         Approve()
     )
 
 @app.external
 def resolve_dispute(trade_id: abi.String, winner: abi.Address):
-    """Admin resolves dispute"""
+    """
+    Admin resolves dispute - refunds both boxes
+    BOX REFS REQUIRED: trade_id, trade_id+"_dispute", trade_id+"_paid" (if exists)
+    """
     seller = ScratchVar(TealType.bytes)
     amount = ScratchVar(TealType.uint64)
     asset_id = ScratchVar(TealType.uint64)
     status = ScratchVar(TealType.bytes)
     buyer = ScratchVar(TealType.bytes)
+    mbr_payer = ScratchVar(TealType.bytes)
+    dispute_payer = ScratchVar(TealType.bytes)
+    dispute_key = ScratchVar(TealType.bytes)
     
     return Seq(
+        # Verify rekey/close protection
+        Assert(no_rekey_close(Int(0))),  # Payment
+        Assert(no_rekey_close(Int(1))),  # AppCall
+        
         # Load trade data
         (trade_data := App.box_get(trade_id.get())),
         Assert(trade_data.hasValue()),
@@ -473,8 +772,15 @@ def resolve_dispute(trade_id: abi.String, winner: abi.Address):
         seller.store(Extract(trade_data.value(), Int(0), Int(32))),
         amount.store(Btoi(Extract(trade_data.value(), Int(32), Int(8)))),
         asset_id.store(Btoi(Extract(trade_data.value(), Int(40), Int(8)))),
-        status.store(Extract(trade_data.value(), Int(72), Int(1))),
-        buyer.store(Extract(trade_data.value(), Int(81), Int(32))),
+        status.store(Extract(trade_data.value(), Int(64), Int(1))),
+        buyer.store(Extract(trade_data.value(), Int(73), Int(32))),
+        mbr_payer.store(Extract(trade_data.value(), Int(105), Int(32))),
+        
+        # Load dispute data
+        dispute_key.store(Concat(trade_id.get(), Bytes("_dispute"))),
+        (dispute_data := App.box_get(dispute_key.load())),
+        Assert(dispute_data.hasValue()),
+        dispute_payer.store(Extract(dispute_data.value(), Int(72), Int(32))),
         
         # Verify admin and status
         Assert(
@@ -489,11 +795,17 @@ def resolve_dispute(trade_id: abi.String, winner: abi.Address):
             )
         ),
         
+        # Require sponsor fee bump for inner txns
+        Assert(Global.group_size() == Int(2)),
+        Assert(Gtxn[0].type_enum() == TxnType.Payment),
+        Assert(And(app.state.sponsor_address != Bytes(""), Gtxn[0].sender() == app.state.sponsor_address)),
+        Assert(Gtxn[0].fee() >= Int(4000)),  # Covers 1 inner AXFER + 2 inner refunds
+        
         # Ensure winner is opted-in
         (win_hold := AssetHolding.balance(winner.get(), asset_id.load())),
         Assert(win_hold.hasValue()),
 
-        # Transfer funds to winner
+        # Transfer full amount to winner (no fees in P2P)
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
             TxnField.type_enum: TxnType.AssetTransfer,
@@ -504,27 +816,32 @@ def resolve_dispute(trade_id: abi.String, winner: abi.Address):
         }),
         InnerTxnBuilder.Submit(),
         
-        # Update status
-        App.box_replace(trade_id.get(), Int(72), Bytes("base16", "02")),  # COMPLETED
-        
-        # Update volume if buyer won
+        # Update statistics
+        app.state.total_trades_completed.set(app.state.total_trades_completed + Int(1)),
+        app.state.active_trades.set(app.state.active_trades - Int(1)),
+        app.state.active_disputes.set(app.state.active_disputes - Int(1)),
         If(
-            winner.get() == buyer.load(),
-            If(
-                asset_id.load() == app.state.cusd_asset_id,
-                app.state.total_cusd_volume.set(app.state.total_cusd_volume + amount.load()),
-                app.state.total_confio_volume.set(app.state.total_confio_volume + amount.load())
-            )
+            asset_id.load() == app.state.cusd_asset_id,
+            app.state.total_cusd_volume.set(app.state.total_cusd_volume + amount.load()),
+            app.state.total_confio_volume.set(app.state.total_confio_volume + amount.load())
         ),
         
-        # Update completed count
-        app.state.total_trades_completed.set(app.state.total_trades_completed + Int(1)),
+        # Refund _paid box (if any) to buyer
+        maybe_refund_paid_box(trade_id.get(), buyer.load()),
         
-        # Delete dispute box
-        Pop(App.box_delete(Concat(trade_id.get(), Bytes("_dispute")))),
+        # Delete dispute box and refund MBR to payer
+        refund_box_mbr(dispute_key.load(), DISPUTE_VALUE_LEN, dispute_payer.load()),
+        
+        # Delete trade box and refund MBR
+        refund_box_mbr(trade_id.get(), TRADE_VALUE_FIXED_LEN, mbr_payer.load()),
+        
+        # Event log for indexers
+        Log(Concat(Bytes("ev:resolve:"), trade_id.get())),
         
         Approve()
     )
+
+# Removed set_fee_receiver since P2P trades have no fees
 
 @app.external
 def pause():
@@ -564,14 +881,55 @@ def set_sponsor(sponsor: abi.Address):
     )
 
 @app.external(read_only=True)
-def get_created_count(*, output: abi.Uint64):
-    """Get total trades created"""
-    return output.set(app.state.total_trades_created)
+def get_trade(
+    trade_id: abi.String,
+    *,
+    output: abi.Tuple9[abi.Address, abi.Uint64, abi.Uint64, abi.Uint64, abi.Uint64, abi.Uint8, abi.Uint64, abi.Address, abi.Address]
+):
+    """Get trade details: (seller, amount, asset_id, created_at, expires_at, status, accepted_at, buyer, mbr_payer)"""
+    seller = abi.Address()
+    amount = abi.Uint64()
+    asset_id = abi.Uint64()
+    created_at = abi.Uint64()
+    expires_at = abi.Uint64()
+    status = abi.Uint8()
+    accepted_at = abi.Uint64()
+    buyer = abi.Address()
+    mbr_payer = abi.Address()
+    
+    return Seq(
+        # Load trade data
+        (trade_data := App.box_get(trade_id.get())),
+        Assert(trade_data.hasValue()),
+        
+        # Extract and return all fields
+        seller.set(Extract(trade_data.value(), Int(0), Int(32))),
+        amount.set(Btoi(Extract(trade_data.value(), Int(32), Int(8)))),
+        asset_id.set(Btoi(Extract(trade_data.value(), Int(40), Int(8)))),
+        created_at.set(Btoi(Extract(trade_data.value(), Int(48), Int(8)))),
+        expires_at.set(Btoi(Extract(trade_data.value(), Int(56), Int(8)))),
+        status.set(Btoi(Extract(trade_data.value(), Int(64), Int(1)))),
+        accepted_at.set(Btoi(Extract(trade_data.value(), Int(65), Int(8)))),
+        buyer.set(Extract(trade_data.value(), Int(73), Int(32))),
+        mbr_payer.set(Extract(trade_data.value(), Int(105), Int(32))),
+        
+        output.set(seller, amount, asset_id, created_at, expires_at, status, accepted_at, buyer, mbr_payer)
+    )
 
 @app.external(read_only=True)
-def get_completed_count(*, output: abi.Uint64):
-    """Get total trades completed"""
-    return output.set(app.state.total_trades_completed)
+def get_stats(*, output: abi.Tuple4[abi.Uint64, abi.Uint64, abi.Uint64, abi.Uint64]):
+    """Get comprehensive trading statistics"""
+    created = abi.Uint64()
+    completed = abi.Uint64()
+    cancelled = abi.Uint64()
+    disputed = abi.Uint64()
+    return Seq(
+        created.set(app.state.total_trades_created),
+        completed.set(app.state.total_trades_completed),
+        cancelled.set(app.state.total_trades_cancelled),
+        disputed.set(app.state.total_trades_disputed),
+        output.set(created, completed, cancelled, disputed)
+    )
 
 @app.external(read_only=True)
 def get_volume(*, output: abi.Tuple2[abi.Uint64, abi.Uint64]):
@@ -586,9 +944,10 @@ def get_volume(*, output: abi.Tuple2[abi.Uint64, abi.Uint64]):
 
 @app.delete
 def delete():
-    """Only admin can delete"""
+    """Only admin can delete - must have no active trades"""
     return Seq(
         Assert(Txn.sender() == app.state.admin),
+        Assert(app.state.active_trades == Int(0)),  # No active trades
         Approve()
     )
 
