@@ -216,12 +216,24 @@ const DepositScreen = () => {
       
       // Only check opt-in for USDC token type
       if (tokenType === 'usdc') {
+        // Parse assetDetails if it's a string
+        let parsedAssetDetails = assetDetails;
+        if (typeof assetDetails === 'string') {
+          try {
+            parsedAssetDetails = JSON.parse(assetDetails);
+          } catch (e) {
+            console.error('[DepositScreen] Failed to parse assetDetails:', e);
+            parsedAssetDetails = {};
+          }
+        }
+        
         // Check if USDC is in the opted-in assets
         // The backend will include USDC in assetDetails if opted in
-        const hasUSDC = assetDetails && Object.values(assetDetails).some((asset: any) => 
+        const hasUSDC = parsedAssetDetails && Object.values(parsedAssetDetails).some((asset: any) => 
           asset.symbol === 'USDC'
         );
         
+        console.log('[DepositScreen] Parsed asset details:', parsedAssetDetails);
         console.log('[DepositScreen] Has USDC:', hasUSDC);
         setIsOptedIn(hasUSDC);
       } else {
