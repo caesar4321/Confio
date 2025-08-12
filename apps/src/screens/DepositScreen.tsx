@@ -191,7 +191,12 @@ const DepositScreen = () => {
   const depositAddress = activeAccount?.algorandAddress || "";
 
   // GraphQL mutation for opt-in
-  const [optInToAsset] = useMutation(OPT_IN_TO_USDC);
+  const [optInToAsset] = useMutation(OPT_IN_TO_USDC, {
+    onError: (error) => {
+      console.error('[DepositScreen] Mutation error:', error);
+      setOptingIn(false);
+    }
+  });
   
   // Query to check opt-in status
   const { data: optInData, loading: loadingOptIns, refetch: refetchOptIns } = useQuery(CHECK_ASSET_OPT_INS, {
@@ -219,14 +224,24 @@ const DepositScreen = () => {
   const handleOptIn = async () => {
     try {
       setOptingIn(true);
+      console.log('[DepositScreen] Starting USDC opt-in...');
       
       // Request USDC opt-in from backend
-      const { data } = await optInToAsset({
+      console.log('[DepositScreen] Calling optInToAsset mutation...');
+      const { data, errors } = await optInToAsset({
         variables: { assetType: 'USDC' }
       });
       
+      if (errors) {
+        console.error('[DepositScreen] GraphQL errors:', errors);
+        return;
+      }
+      
+      console.log('[DepositScreen] Opt-in mutation response:', data);
+      
       if (data?.optInToAssetByType?.alreadyOptedIn) {
         // Already opted in
+        console.log('[DepositScreen] User already opted in to USDC');
         setIsOptedIn(true);
         await refetchOptIns();
         return;
@@ -234,28 +249,35 @@ const DepositScreen = () => {
       
       if (data?.optInToAssetByType?.success && data.optInToAssetByType.requiresUserSignature) {
         // Need to sign the transaction
+        console.log('[DepositScreen] Got transactions to sign');
         const userTxn = data.optInToAssetByType.userTransaction;
         const sponsorTxn = data.optInToAssetByType.sponsorTransaction;
         
+        console.log('[DepositScreen] User transaction:', userTxn ? 'present' : 'missing');
+        console.log('[DepositScreen] Sponsor transaction:', sponsorTxn ? 'present' : 'missing');
+        
         // Sign and submit the transaction
+        console.log('[DepositScreen] Signing and submitting transaction...');
         const txId = await algorandService.signAndSubmitSponsoredTransaction(
           userTxn,
           sponsorTxn
         );
         
+        console.log('[DepositScreen] Transaction result:', txId);
+        
         if (txId) {
           // Successfully opted in
+          console.log('[DepositScreen] Successfully opted in to USDC:', txId);
           await refetchOptIns();
           setIsOptedIn(true);
-          console.log('Successfully opted in to USDC:', txId);
         } else {
-          console.error('Failed to submit opt-in transaction');
+          console.error('[DepositScreen] Failed to submit opt-in transaction');
         }
       } else {
-        console.error('Failed to generate opt-in transaction:', data?.optInToAssetByType?.error);
+        console.error('[DepositScreen] Failed to generate opt-in transaction:', data?.optInToAssetByType?.error);
       }
     } catch (error) {
-      console.error('Error during USDC opt-in:', error);
+      console.error('[DepositScreen] Error during USDC opt-in:', error);
     } finally {
       setOptingIn(false);
     }
