@@ -205,16 +205,30 @@ const DepositScreen = () => {
 
   // Check if user is opted in to USDC
   useEffect(() => {
+    console.log('[DepositScreen] Checking opt-in status, optInData:', optInData);
+    console.log('[DepositScreen] Token type:', tokenType);
+    
     if (optInData?.checkAssetOptIns) {
-      const { assetDetails } = optInData.checkAssetOptIns;
+      const { assetDetails, optedInAssets } = optInData.checkAssetOptIns;
       
-      // Check if USDC is in the opted-in assets
-      // The backend will include USDC in assetDetails if opted in
-      const hasUSDC = assetDetails && Object.values(assetDetails).some((asset: any) => 
-        asset.symbol === 'USDC'
-      );
+      console.log('[DepositScreen] Opted in assets:', optedInAssets);
+      console.log('[DepositScreen] Asset details:', assetDetails);
       
-      setIsOptedIn(hasUSDC);
+      // Only check opt-in for USDC token type
+      if (tokenType === 'usdc') {
+        // Check if USDC is in the opted-in assets
+        // The backend will include USDC in assetDetails if opted in
+        const hasUSDC = assetDetails && Object.values(assetDetails).some((asset: any) => 
+          asset.symbol === 'USDC'
+        );
+        
+        console.log('[DepositScreen] Has USDC:', hasUSDC);
+        setIsOptedIn(hasUSDC);
+      } else {
+        // For other tokens (cUSD, CONFIO), assume they're always ready
+        setIsOptedIn(true);
+      }
+      
       setCheckingOptIn(false);
     } else if (!loadingOptIns) {
       setCheckingOptIn(false);
