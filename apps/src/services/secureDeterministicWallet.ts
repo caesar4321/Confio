@@ -665,10 +665,9 @@ export class SecureDeterministicWalletService {
    */
   private decodeTxn(bytes: Uint8Array): any {
     const algosdk = require('algosdk');
-    const msgpack = require('algo-msgpack-with-bigint');
     
-    // Decode the msgpack bytes to get the transaction object
-    const txnObj = msgpack.decode(bytes);
+    // Use algosdk's built-in decodeObj to decode msgpack bytes
+    const txnObj = algosdk.decodeObj(bytes);
     
     // Create a Transaction instance from the decoded object
     const txn = new algosdk.Transaction(txnObj);
