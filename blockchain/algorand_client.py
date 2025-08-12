@@ -32,17 +32,10 @@ class AlgorandClient:
         self._algod_client = None
         self._indexer_client = None
         
-        # Asset IDs for tokens
-        # Try to get from settings first, then use defaults
-        try:
-            self.USDC_ASSET_ID = settings.ALGORAND_USDC_ASSET_ID if hasattr(settings, 'ALGORAND_USDC_ASSET_ID') and settings.ALGORAND_USDC_ASSET_ID else 10458941
-            self.CUSD_ASSET_ID = settings.ALGORAND_CUSD_ASSET_ID if hasattr(settings, 'ALGORAND_CUSD_ASSET_ID') and settings.ALGORAND_CUSD_ASSET_ID else None
-            self.CONFIO_ASSET_ID = settings.ALGORAND_CONFIO_ASSET_ID if hasattr(settings, 'ALGORAND_CONFIO_ASSET_ID') and settings.ALGORAND_CONFIO_ASSET_ID else 743890784
-        except:
-            # Fallback to hardcoded values
-            self.USDC_ASSET_ID = 10458941  # Testnet USDC
-            self.CUSD_ASSET_ID = None  # Custom cUSD if deployed
-            self.CONFIO_ASSET_ID = 743890784  # CONFIO token on testnet
+        # Asset IDs for tokens - single source of truth from settings
+        self.USDC_ASSET_ID = settings.ALGORAND_USDC_ASSET_ID
+        self.CUSD_ASSET_ID = settings.ALGORAND_CUSD_ASSET_ID
+        self.CONFIO_ASSET_ID = settings.ALGORAND_CONFIO_ASSET_ID
     
     async def __aenter__(self):
         """Async context manager entry"""
@@ -71,23 +64,25 @@ class AlgorandClient:
     
     # ===== Balance Operations =====
     
-    async def get_balance(self, address: str, asset_id: Optional[int] = None) -> Dict[str, Decimal]:
+    async def get_balance(self, address: str, asset_id: Optional[int] = None, skip_cache: bool = False) -> Dict[str, Decimal]:
         """
         Get token balances for an address
         
         Args:
             address: Algorand address
             asset_id: Specific asset ID or None for ALGO balance
+            skip_cache: Skip cache and fetch directly from blockchain
         
         Returns:
             Dict of asset_id -> balance
         """
-        # Check cache first
+        # Check cache first (unless skip_cache is True)
         cache_key = f"algo_balance:{address}:{asset_id or 'algo'}"
-        cached = cache.get(cache_key)
-        if cached:
-            logger.info(f"Returning cached balance for {address}, asset_id={asset_id}: {cached}")
-            return cached
+        if not skip_cache:
+            cached = cache.get(cache_key)
+            if cached:
+                logger.info(f"Returning cached balance for {address}, asset_id={asset_id}: {cached}")
+                return cached
         
         balances = {}
         
@@ -126,26 +121,28 @@ class AlgorandClient:
         
         return balances
     
-    async def get_usdc_balance(self, address: str) -> Decimal:
+    async def get_usdc_balance(self, address: str, skip_cache: bool = False) -> Decimal:
         """Get USDC balance for address"""
         if not self.USDC_ASSET_ID:
             logger.warning("USDC_ASSET_ID not configured")
             return Decimal('0')
-        balances = await self.get_balance(address, self.USDC_ASSET_ID)
+        balances = await self.get_balance(address, self.USDC_ASSET_ID, skip_cache=skip_cache)
         return balances.get(str(self.USDC_ASSET_ID), Decimal('0'))
     
-    async def get_cusd_balance(self, address: str) -> Decimal:
-        """Get cUSD balance for address - using USDC until custom cUSD is created"""
-        # For now, cUSD is the same as USDC on Algorand
-        # In production, you would create a custom cUSD ASA
-        return await self.get_usdc_balance(address)
+    async def get_cusd_balance(self, address: str, skip_cache: bool = False) -> Decimal:
+        """Get cUSD balance for address"""
+        if not self.CUSD_ASSET_ID:
+            logger.warning("CUSD_ASSET_ID not configured")
+            return Decimal('0')
+        balances = await self.get_balance(address, self.CUSD_ASSET_ID, skip_cache=skip_cache)
+        return balances.get(str(self.CUSD_ASSET_ID), Decimal('0'))
     
-    async def get_confio_balance(self, address: str) -> Decimal:
+    async def get_confio_balance(self, address: str, skip_cache: bool = False) -> Decimal:
         """Get CONFIO balance for address"""
         if not self.CONFIO_ASSET_ID:
             logger.warning("CONFIO_ASSET_ID not configured")
             return Decimal('0')
-        balances = await self.get_balance(address, self.CONFIO_ASSET_ID)
+        balances = await self.get_balance(address, self.CONFIO_ASSET_ID, skip_cache=skip_cache)
         return balances.get(str(self.CONFIO_ASSET_ID), Decimal('0'))
     
     
