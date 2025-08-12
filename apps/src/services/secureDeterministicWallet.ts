@@ -666,11 +666,9 @@ export class SecureDeterministicWalletService {
   private decodeTxn(bytes: Uint8Array): any {
     const algosdk = require('algosdk');
     
-    // Use algosdk's built-in decodeObj to decode msgpack bytes
-    const txnObj = algosdk.decodeObj(bytes);
-    
-    // Create a Transaction instance from the decoded object
-    const txn = new algosdk.Transaction(txnObj);
+    // Use algosdk's decodeUnsignedTransaction which returns a proper Transaction instance
+    // This handles all the field mapping correctly
+    const txn = algosdk.decodeUnsignedTransaction(bytes);
     
     // Verify it has the signTxn method
     if (typeof txn.signTxn !== 'function') {
