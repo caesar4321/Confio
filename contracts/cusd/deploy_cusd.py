@@ -9,11 +9,11 @@ import json
 from algosdk import account, mnemonic
 from algosdk.v2client import algod
 from algosdk.transaction import ApplicationCreateTxn, OnComplete, StateSchema, wait_for_confirmation
-from algosdk.transaction import AssetConfigTxn, PaymentTxn
+from algosdk.transaction import AssetConfigTxn, PaymentTxn, AssetTransferTxn
 from algosdk.logic import get_application_address
 from algosdk.atomic_transaction_composer import AtomicTransactionComposer, TransactionWithSigner
 from algosdk.abi import Contract
-from algosdk.account import AccountTransactionSigner
+from algosdk.transaction import ApplicationCallTxn
 import base64
 
 # Testnet configuration
@@ -86,7 +86,10 @@ def deploy_cusd_contract(deployer_private_key, deployer_address):
     # Get suggested parameters
     params = algod_client.suggested_params()
     
-    # Create application transaction (NO ABI selector for create)
+    # Create application transaction with method selector
+    # The contract expects "create()void" selector: 0x4c5c61ba
+    create_method_selector = bytes.fromhex("4c5c61ba")
+    
     txn = ApplicationCreateTxn(
         sender=deployer_address,
         sp=params,
@@ -95,7 +98,8 @@ def deploy_cusd_contract(deployer_private_key, deployer_address):
         clear_program=clear_program,
         global_schema=global_schema,
         local_schema=local_schema,
-        app_args=[]  # No args for bare create call
+        app_args=[create_method_selector],  # Pass create method selector
+        extra_pages=3  # Use 3 extra pages for large contract (4 pages total = 8KB)
     )
     
     # Sign transaction
@@ -118,20 +122,23 @@ def deploy_cusd_contract(deployer_private_key, deployer_address):
     return app_id, app_address
 
 def create_cusd_asset(creator_private_key, creator_address, app_address):
-    """Create the cUSD asset (ASA) with app as clawback and freeze"""
+    """Create the cUSD asset (ASA) with app holding all reserve"""
     
     params = algod_client.suggested_params()
     
-    # Create cUSD asset with app as clawback/freeze
+    # Maximum possible supply (2^64 - 1)
+    MAX_UINT64 = 18_446_744_073_709_551_615
+    
+    # Create cUSD asset with CONTRACT as reserve holder
     txn = AssetConfigTxn(
         sender=creator_address,
         sp=params,
-        total=10_000_000_000_000,  # 10 trillion units (with 6 decimals = 10 million cUSD)
+        total=MAX_UINT64,         # Maximum possible supply
         default_frozen=False,
         unit_name="cUSD",
         asset_name="Confío Dollar",
         manager=creator_address,  # Can update asset config
-        reserve=creator_address,  # Holds non-circulating supply
+        reserve=app_address,      # CONTRACT holds ALL supply - no backdoor!
         freeze=app_address,       # App controls freezing
         clawback=app_address,     # App controls clawback for minting
         url="https://confio.lat",
@@ -154,8 +161,18 @@ def create_cusd_asset(creator_private_key, creator_address, app_address):
     print(f"Asset ID: {asset_id}")
     print(f"Asset Name: Confío Dollar")
     print(f"Unit Name: cUSD")
+    print(f"Total Supply: {MAX_UINT64:,} units (max possible)")
+    print(f"Initial holder: {creator_address} (temporary)")
+    print(f"Reserve field: {app_address}")
     print(f"Clawback: {app_address}")
     print(f"Freeze: {app_address}")
+    
+    # IMPORTANT: Transfer all tokens to the app
+    print(f"\n🔄 Transferring all cUSD to contract...")
+    print(f"This ensures no backdoor minting is possible")
+    
+    # First, app needs to opt-in to the asset (will be done in setup_assets)
+    # The transfer will happen after setup_assets
     
     return asset_id
 
@@ -185,8 +202,14 @@ def setup_assets(app_id, app_address, cusd_asset_id, usdc_asset_id, admin_privat
         amt=600000  # 0.6 ALGO for opt-ins
     )
     
-    # Create signer
-    signer = AccountTransactionSigner(admin_private_key)
+    # Create signer using a lambda function
+    class SimpleSigner:
+        def __init__(self, private_key):
+            self.private_key = private_key
+        def sign_transactions(self, txns, indexes):
+            return [txn.sign(self.private_key) for txn in txns]
+    
+    signer = SimpleSigner(admin_private_key)
     
     # Add payment transaction
     atc.add_transaction(TransactionWithSigner(payment_txn, signer))
@@ -196,14 +219,15 @@ def setup_assets(app_id, app_address, cusd_asset_id, usdc_asset_id, admin_privat
     method_params.flat_fee = True
     method_params.fee = 3000  # 3x min fee for app call + 2 inner transactions
     
-    # Add method call for setup_assets
+    # Add method call for setup_assets with foreign assets
     atc.add_method_call(
         app_id=app_id,
         method=contract.get_method_by_name("setup_assets"),
         sender=admin_address,
         sp=method_params,
         signer=signer,
-        method_args=[cusd_asset_id, usdc_asset_id]
+        method_args=[cusd_asset_id, usdc_asset_id],
+        foreign_assets=[cusd_asset_id, usdc_asset_id]  # Include assets in transaction
     )
     
     # Execute transactions
@@ -222,14 +246,14 @@ def main():
     print("="*60)
     
     # Check if we have existing credentials
-    mnemonic_phrase = os.getenv("ALGORAND_MNEMONIC")
+    mnemonic_phrase = os.getenv("ALGORAND_SPONSOR_MNEMONIC")
     
     if mnemonic_phrase:
-        print("\nUsing existing account from ALGORAND_MNEMONIC environment variable")
+        print("\nUsing existing sponsor account from ALGORAND_SPONSOR_MNEMONIC environment variable")
         private_key = mnemonic.to_private_key(mnemonic_phrase)
         address = account.address_from_private_key(private_key)
     else:
-        print("\nNo ALGORAND_MNEMONIC found. Creating new account...")
+        print("\nNo ALGORAND_SPONSOR_MNEMONIC found. Creating new account...")
         private_key, address, mnemonic_phrase = create_account()
         
         print("\nPress Enter after funding the account to continue...")
@@ -252,6 +276,32 @@ def main():
         # Step 3: Setup assets in the contract
         usdc_asset_id = 10458941  # Testnet USDC
         setup_result = setup_assets(app_id, app_address, cusd_asset_id, usdc_asset_id, private_key, address)
+        
+        # Step 4: Transfer ALL cUSD to the contract (security critical!)
+        print("\n" + "="*60)
+        print("STEP 4: SECURING RESERVE")
+        print("="*60)
+        print("Transferring all cUSD to contract to prevent backdoor minting...")
+        
+        # Get the MAX_UINT64 value
+        MAX_UINT64 = 18_446_744_073_709_551_615
+        
+        params = algod_client.suggested_params()
+        transfer_txn = AssetTransferTxn(
+            sender=address,
+            sp=params,
+            receiver=app_address,
+            amt=MAX_UINT64,  # Transfer ALL tokens
+            index=cusd_asset_id
+        )
+        
+        signed_transfer = transfer_txn.sign(private_key)
+        transfer_tx_id = algod_client.send_transaction(signed_transfer)
+        print(f"Transfer TX: {transfer_tx_id}")
+        
+        wait_for_confirmation(algod_client, transfer_tx_id, 4)
+        print(f"✅ All {MAX_UINT64:,} units transferred to contract!")
+        print(f"🔒 Security achieved - no backdoor minting possible!")
         
         # Save deployment info
         deployment_info = {

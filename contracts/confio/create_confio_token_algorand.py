@@ -88,8 +88,8 @@ def create_confio_token():
         balance = account_info.get('amount', 0) / 1_000_000
         print(f"\nCreator account balance: {balance} ALGO")
         
-        if balance < 0.2:
-            print(f"\n⚠️  Insufficient balance! You need at least 0.2 ALGO to create the token.")
+        if balance < 0.5:
+            print(f"\n⚠️  Insufficient balance! You need at least 0.5 ALGO for fees + min balance headroom.")
             print(f"Fund this account using the Algorand Testnet Dispenser:")
             print(f"https://dispenser.testnet.aws.algodev.network/")
             print(f"Address to fund: {creator_address}")
@@ -113,12 +113,11 @@ def create_confio_token():
         "decimals": 6,
         "default_frozen": False,  # Tokens are not frozen by default
         "url": "https://confio.lat",
-        "metadata_hash": b"Utility and governance coin for".ljust(32, b' '),  # Exactly 32 bytes
-        "manager": creator_address,  # Can update asset parameters
-        "reserve": "",  # No reserve - all tokens go directly to creator
-        "freeze": "",  # No freeze authority (tokens can't be frozen)
-        "clawback": "",  # No clawback (tokens can't be revoked)
-        "strict_empty_address_check": False  # Allow empty freeze/clawback
+        "metadata_hash": None,  # Safer to omit unless we need a specific hash
+        "manager": creator_address,  # Temporarily, will be finalized to ZERO_ADDR
+        "reserve": None,  # None becomes ZERO_ADDR on-chain
+        "freeze": None,  # None becomes ZERO_ADDR on-chain
+        "clawback": None  # None becomes ZERO_ADDR on-chain
     }
     
     print(f"Name: {token_params['asset_name']}")
@@ -127,9 +126,9 @@ def create_confio_token():
     print(f"Decimals: {token_params['decimals']}")
     print(f"URL: {token_params['url']}")
     print(f"Manager: {token_params['manager']}")
-    print(f"Reserve: {token_params['reserve'] or 'None (all tokens go to creator)'}")
-    print(f"Freeze Authority: {token_params['freeze'] or 'None (tokens cannot be frozen)'}")
-    print(f"Clawback Authority: {token_params['clawback'] or 'None (tokens cannot be clawed back)'}")
+    print(f"Reserve: {'None (all tokens go to creator)' if token_params['reserve'] is None else token_params['reserve']}")
+    print(f"Freeze Authority: {'None (tokens cannot be frozen)' if token_params['freeze'] is None else token_params['freeze']}")
+    print(f"Clawback Authority: {'None (tokens cannot be clawed back)' if token_params['clawback'] is None else token_params['clawback']}")
     
     # Auto-confirm for non-interactive mode
     print("\n" + "-" * 60)
@@ -158,12 +157,11 @@ def create_confio_token():
             asset_name=token_params["asset_name"],
             manager=token_params["manager"],
             reserve=token_params["reserve"],
-            freeze=token_params["freeze"] if token_params["freeze"] else None,
-            clawback=token_params["clawback"] if token_params["clawback"] else None,
+            freeze=token_params["freeze"],
+            clawback=token_params["clawback"],
             url=token_params["url"],
             metadata_hash=token_params["metadata_hash"],
-            decimals=token_params["decimals"],
-            strict_empty_address_check=False
+            decimals=token_params["decimals"]
         )
         
         # Sign transaction
@@ -188,6 +186,23 @@ def create_confio_token():
         print(f"Transaction ID: {tx_id}")
         print(f"Confirmed in round: {confirmed_txn.get('confirmed-round')}")
         
+        # Verify creator holds full supply
+        print("\n📊 Verifying creator balance...")
+        try:
+            creator_info = algod_client.account_asset_info(creator_address, asset_id)
+            creator_holding = creator_info["asset-holding"]["amount"]
+            
+            if creator_holding == token_params["total"]:
+                print(f"✅ Creator holds full supply: {creator_holding:,} base units")
+                print(f"   = {creator_holding / (10 ** token_params['decimals']):,.0f} CONFIO")
+            else:
+                print(f"⚠️  WARNING: Creator balance mismatch!")
+                print(f"   Expected: {token_params['total']:,}")
+                print(f"   Actual: {creator_holding:,}")
+                # Don't fail, but warn loudly
+        except Exception as e:
+            print(f"⚠️  Could not verify creator balance: {e}")
+        
         # Save configuration
         print("\n" + "-" * 60)
         print("NEXT STEPS:")
@@ -198,10 +213,15 @@ def create_confio_token():
         if not os.environ.get('ALGORAND_CONFIO_CREATOR_MNEMONIC'):
             print(f"   ALGORAND_CONFIO_CREATOR_MNEMONIC=\"{creator_mnemonic}\"")
         
-        print(f"\n2. View your token on Algorand Explorer:")
+        print(f"\n2. ⚠️  IMMEDIATELY finalize the token to make it immutable:")
+        print(f"   ALGORAND_CONFIO_ASSET_ID={asset_id} \\")
+        print(f"   ALGORAND_CONFIO_CREATOR_MNEMONIC=\"...\" \\")
+        print(f"   python contracts/confio/finalize_confio_asset.py")
+        
+        print(f"\n3. View your token on Algorand Explorer:")
         print(f"   https://testnet.algoexplorer.io/asset/{asset_id}")
         
-        print(f"\n3. To distribute tokens, users must first opt-in to the asset")
+        print(f"\n4. To distribute tokens, users must first opt-in to the asset")
         print(f"   Asset ID to opt-in: {asset_id}")
         
         # Save to file
@@ -222,6 +242,72 @@ def create_confio_token():
             json.dump(config_data, f, indent=2)
         
         print(f"\n4. Token configuration saved to: {config_file}")
+        
+        # Post-deploy smoke check (before finalization)
+        print("\n🔍 Running initial verification (pre-finalization)...")
+        import subprocess
+        os.environ["ALGORAND_CONFIO_ASSET_ID"] = str(asset_id)
+        os.environ["EXPECT_NO_AUTHORITIES"] = "0"  # Not finalized yet
+        
+        # Use absolute path for checker script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        checker_path = os.path.join(script_dir, "check_confio_asset.py")
+        
+        result = subprocess.run(
+            [sys.executable, checker_path, str(asset_id)],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode != 0:
+            print("⚠️  Initial verification shows issues:")
+            print(result.stdout)
+        else:
+            print("✅ Initial verification passed - now finalize immediately!")
+        
+        # Optional auto-finalize for zero window of risk
+        if os.getenv("FINALIZE_IMMEDIATELY") == "1":
+            print("\n🔒 Auto-finalizing token (FINALIZE_IMMEDIATELY=1)...")
+            try:
+                # Set all authorities to None (becomes ZERO_ADDR on-chain)
+                finalize_params = algod_client.suggested_params()
+                finalize_txn = AssetConfigTxn(
+                    sender=creator_address,
+                    sp=finalize_params,
+                    index=asset_id,
+                    manager=None,    # Lock forever
+                    reserve=None,    # No reserve
+                    freeze=None,     # No freeze
+                    clawback=None    # No clawback
+                )
+                
+                signed_finalize = finalize_txn.sign(creator_private_key)
+                finalize_txid = algod_client.send_transaction(signed_finalize)
+                
+                print(f"  Finalization transaction: {finalize_txid}")
+                print("  Waiting for confirmation...")
+                
+                wait_for_confirmation(algod_client, finalize_txid, 4)
+                
+                print("\n✅ TOKEN AUTOMATICALLY FINALIZED!")
+                print("  All authorities are now ZERO_ADDR")
+                print("  Token is immutable forever")
+                
+                # Run verification again to confirm finalization
+                os.environ["EXPECT_NO_AUTHORITIES"] = "1"  # Now expect finalized
+                result = subprocess.run(
+                    [sys.executable, checker_path, str(asset_id)],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    print("  Post-finalization check: ✅ PASSED")
+                else:
+                    print("  Post-finalization check: ⚠️  See output above")
+                    
+            except Exception as e:
+                print(f"\n⚠️  Auto-finalization failed: {e}")
+                print("  Please run finalize_confio_asset.py manually")
         
         return asset_id
         
@@ -244,7 +330,7 @@ def check_existing_confio():
             asset_info = algod_client.asset_info(settings.ALGORAND_CONFIO_ASSET_ID)
             params = asset_info.get('params', {})
             print(f"Name: {params.get('name')}")
-            print(f"Symbol: {params.get('unit_name')}")
+            print(f"Symbol: {params.get('unit-name')}")  # Fixed: use dash
             print(f"Total Supply: {params.get('total') / (10 ** params.get('decimals', 0)):,.0f}")
             print(f"Creator: {params.get('creator')}")
             return True

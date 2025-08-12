@@ -6,8 +6,10 @@ Website: https://confio.lat
 Usage and group structures:
 - Create: [Payment(inviter→app, amount=box MBR), AXFER(inviter→app), AppCall(create_invitation)]
   The app calculates MBR dynamically from key/value sizes and requires the payment to cover it.
-- Claim: AppCall(claim_invitation) with enough fee to cover inner txs, or group with a fee-bump Payment.
-- Reclaim: AppCall(reclaim_invitation) with enough fee, or group with a fee-bump Payment.
+- Claim: AppCall(claim_invitation) standalone, or grouped with a 0-amount pay-yourself Payment to add fee budget.
+  Fee-bump format: [Payment(sender→sender, amount=0), AppCall(claim_invitation)]
+- Reclaim: AppCall(reclaim_invitation) standalone, or grouped with a 0-amount pay-yourself Payment to add fee budget.
+  Fee-bump format: [Payment(sender→sender, amount=0), AppCall(reclaim_invitation)]
 
 Notes:
 - On claim/reclaim the original invite box is deleted, a compact receipt box is created, and the original MBR minus the receipt’s MBR is refunded to the inviter.
@@ -23,11 +25,31 @@ RECLAIM_PERIOD_SECONDS = Int(604800)  # 7 days in seconds
 MAX_INVITE_ID_LEN = Int(64)          # cap box key size to control MBR
 MAX_MESSAGE_LEN = Int(256)           # cap message to control MBR
 RECEIPT_PREFIX = Bytes("r:")        # receipt box key prefix
+ASA_OPT_IN_MBR = Int(100000)         # ~0.1 ALGO per ASA opt-in
+MIN_ASSET_AMOUNT = Int(1000)         # Min amount to prevent dust invites (6 decimals)
 
 # Box MBR = 2500 + 400 * (key_len + value_len)
 @Subroutine(TealType.uint64)
 def box_mbr_cost(key_len: Expr, value_len: Expr) -> Expr:
     return Int(2500) + Int(400) * (key_len + value_len)
+
+# Security helper: No rekey/close for payment transactions
+@Subroutine(TealType.uint64)
+def no_rekey_close_pay(idx: Expr) -> Expr:
+    return And(
+        Gtxn[idx].rekey_to() == Global.zero_address(),
+        Gtxn[idx].close_remainder_to() == Global.zero_address()
+    )
+
+# Security helper: No rekey/close/clawback for asset transfers
+@Subroutine(TealType.uint64)
+def no_rekey_close_axfer(idx: Expr) -> Expr:
+    return And(
+        Gtxn[idx].rekey_to() == Global.zero_address(),
+        Gtxn[idx].asset_close_to() == Global.zero_address(),
+        # forbid clawback-mode transfers
+        Gtxn[idx].asset_sender() == Global.zero_address()
+    )
 
 class InviteSendState:
     """Global state for invite & send system"""
@@ -101,7 +123,20 @@ def create():
 @app.external
 def setup_assets(cusd_id: abi.Uint64, confio_id: abi.Uint64):
     """Setup asset IDs for invitations"""
+    need = ScratchVar(TealType.uint64)
+    over = ScratchVar(TealType.uint64)
+    
     return Seq(
+        # Require funding in the same group: [Payment(admin→app), AppCall(setup_assets)]
+        Assert(Global.group_size() == Int(2)),
+        Assert(Gtxn[0].type_enum() == TxnType.Payment),
+        Assert(Gtxn[0].sender() == Txn.sender()),
+        Assert(Gtxn[0].receiver() == Global.current_application_address()),
+        # Need min-balance for 2 ASA opt-ins
+        Assert(Gtxn[0].amount() >= ASA_OPT_IN_MBR * Int(2)),
+        # No rekey/close on payment
+        Assert(no_rekey_close_pay(Int(0))),
+        
         Assert(
             And(
                 Txn.sender() == app.state.admin,
@@ -112,7 +147,7 @@ def setup_assets(cusd_id: abi.Uint64, confio_id: abi.Uint64):
         app.state.cusd_asset_id.set(cusd_id.get()),
         app.state.confio_asset_id.set(confio_id.get()),
         
-        # Opt-in to both assets
+        # Opt-in to both assets (fee = 0)
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
             TxnField.type_enum: TxnType.AssetTransfer,
@@ -133,6 +168,20 @@ def setup_assets(cusd_id: abi.Uint64, confio_id: abi.Uint64):
         }),
         InnerTxnBuilder.Submit(),
         
+        # (Optional) auto-refund overpay so no ALGO is accidentally trapped
+        need.store(ASA_OPT_IN_MBR * Int(2)),
+        over.store(Gtxn[0].amount() - need.load()),
+        If(over.load() > Int(0)).Then(Seq(
+            InnerTxnBuilder.Begin(),
+            InnerTxnBuilder.SetFields({
+                TxnField.type_enum: TxnType.Payment,
+                TxnField.receiver: Txn.sender(),
+                TxnField.amount: over.load(),
+                TxnField.fee: Int(0)
+            }),
+            InnerTxnBuilder.Submit()
+        )),
+        
         Approve()
     )
 
@@ -151,42 +200,78 @@ def create_invitation(
     value_len = ScratchVar(TealType.uint64)
     mbr_cost = ScratchVar(TealType.uint64)
 
+    over = ScratchVar(TealType.uint64)
+    
     return Seq(
         # Check system state and asset configuration
         Assert(app.state.is_paused == Int(0)),
         Assert(Or(app.state.cusd_asset_id != Int(0), app.state.confio_asset_id != Int(0))),
+        
+        # This AppCall must not have rekey
+        Assert(Txn.rekey_to() == Global.zero_address()),
 
         # Enforce bounded sizes (protect MBR)
         key_len.store(Len(invitation_id.get())),
         msg_len.store(Len(message.get())),
         Assert(And(key_len.load() > Int(0), key_len.load() <= MAX_INVITE_ID_LEN)),
         Assert(msg_len.load() <= MAX_MESSAGE_LEN),
+        
+        # Disallow invitation IDs that collide with receipt prefix "r:"
+        Assert(Or(
+            key_len.load() < Int(2),
+            Extract(invitation_id.get(), Int(0), Int(2)) != RECEIPT_PREFIX
+        )),
 
-        # Verify provided asset transfer
+        # ABI arg must reference a group AXFER that sends to the app FROM the inviter
         Assert(asset_transfer.get().asset_receiver() == Global.current_application_address()),
-        Assert(asset_transfer.get().asset_amount() > Int(0)),
+        Assert(asset_transfer.get().asset_amount() >= MIN_ASSET_AMOUNT),  # Min amount to prevent dust
+        Assert(asset_transfer.get().sender() == Txn.sender()),
         Assert(Or(
             asset_transfer.get().xfer_asset() == app.state.cusd_asset_id,
             asset_transfer.get().xfer_asset() == app.state.confio_asset_id
         )),
 
-        # Group must include MBR funding payment
-        # G0: Payment(inviter->app), G1: AXFER(to app), G2: AppCall
+        # Group shape & funding: [Payment(inviter→app), AXFER, AppCall]
         Assert(Global.group_size() == Int(3)),
         Assert(Gtxn[0].type_enum() == TxnType.Payment),
         Assert(Gtxn[0].sender() == Txn.sender()),
         Assert(Gtxn[0].receiver() == Global.current_application_address()),
+        # No rekey/close on payment
+        Assert(no_rekey_close_pay(Int(0))),
+        
+        # Also assert the in-group AXFER matches the ABI arg
+        Assert(Gtxn[1].type_enum() == TxnType.AssetTransfer),
+        Assert(Gtxn[1].asset_receiver() == Global.current_application_address()),
+        Assert(Gtxn[1].sender() == Txn.sender()),
+        Assert(Gtxn[1].xfer_asset() == asset_transfer.get().xfer_asset()),
+        Assert(Gtxn[1].asset_amount() == asset_transfer.get().asset_amount()),
+        # No rekey/close/clawback on AXFER
+        Assert(no_rekey_close_axfer(Int(1))),
 
-        # Compute dynamic value length and MBR, require funding
+        # Compute MBR and require funding; auto-refund overpay
         value_len.store(Int(32 + 8 + 8 + 8 + 8 + 1 + 1 + 2) + msg_len.load()),
         mbr_cost.store(box_mbr_cost(key_len.load(), value_len.load())),
         Assert(Gtxn[0].amount() >= mbr_cost.load()),
 
         # Invitation must be new
-        Assert(Not(App.box_get(invitation_id.get())[0])),
+        (existing_box := App.box_get(invitation_id.get())),
+        Assert(Not(existing_box.hasValue())),
 
         # Create and populate box
         Assert(App.box_create(invitation_id.get(), value_len.load())),
+        
+        # Immediately refund any overpay (prevents trapped ALGO)
+        over.store(Gtxn[0].amount() - mbr_cost.load()),
+        If(over.load() > Int(0)).Then(Seq(
+            InnerTxnBuilder.Begin(),
+            InnerTxnBuilder.SetFields({
+                TxnField.type_enum: TxnType.Payment,
+                TxnField.receiver: Txn.sender(),
+                TxnField.amount: over.load(),
+                TxnField.fee: Int(0)
+            }),
+            InnerTxnBuilder.Submit()
+        )),
         App.box_replace(invitation_id.get(), Int(0), Txn.sender()),
         App.box_replace(invitation_id.get(), Int(32), Itob(asset_transfer.get().asset_amount())),
         App.box_replace(invitation_id.get(), Int(40), Itob(asset_transfer.get().xfer_asset())),
@@ -223,8 +308,31 @@ def claim_invitation(
     expires_at = ScratchVar(TealType.uint64)
     is_claimed = ScratchVar(TealType.bytes)
     is_reclaimed = ScratchVar(TealType.bytes)
+    val_len = ScratchVar(TealType.uint64)
+    key_len2 = ScratchVar(TealType.uint64)
+    receipt_key = ScratchVar(TealType.bytes)
+    receipt_key_len = ScratchVar(TealType.uint64)
+    receipt_val_len = ScratchVar(TealType.uint64)
+    orig_mbr = ScratchVar(TealType.uint64)
+    receipt_mbr = ScratchVar(TealType.uint64)
+    refund = ScratchVar(TealType.uint64)
     
     return Seq(
+        # This AppCall must not have rekey
+        Assert(Txn.rekey_to() == Global.zero_address()),
+        
+        # Allow optional fee-bump (fee-only, no deposit)
+        Assert(Or(
+            Global.group_size() == Int(1),
+            And(
+                Global.group_size() == Int(2),
+                Gtxn[0].type_enum() == TxnType.Payment,
+                Gtxn[0].amount() == Int(0),  # pure fee, no deposit
+                Gtxn[0].receiver() == Gtxn[0].sender(),  # pay-yourself convention
+                no_rekey_close_pay(Int(0))
+            )
+        )),
+        
         # Load invitation data
         (invitation_data := App.box_get(invitation_id.get())),
         Assert(invitation_data.hasValue()),
@@ -247,9 +355,23 @@ def claim_invitation(
             )
         ),
         
-        # Ensure recipient is opted in to the asset
+        # Ensure recipient is opted in to the asset and valid
+        Assert(recipient.get() != Global.zero_address()),
+        Assert(recipient.get() != Global.current_application_address()),  # Prevent sending to app itself
+        Assert(recipient.get() != sender.load()),  # Prevent self-claiming (backend verification flow guard)
         (rec_hold := AssetHolding.balance(recipient.get(), asset_id.load())),
         Assert(rec_hold.hasValue()),
+        
+        # Defensive: re-assert asset_id is one of configured assets
+        Assert(Or(
+            asset_id.load() == app.state.cusd_asset_id,
+            asset_id.load() == app.state.confio_asset_id
+        )),
+        
+        # Assert the app actually has the funds before sending
+        (app_hold := AssetHolding.balance(Global.current_application_address(), asset_id.load())),
+        Assert(app_hold.hasValue()),
+        Assert(app_hold.value() >= amount.load()),
 
         # Transfer funds to recipient
         InnerTxnBuilder.Begin(),
@@ -263,30 +385,33 @@ def claim_invitation(
         InnerTxnBuilder.Submit(),
 
         # Delete box, write compact receipt, and refund remaining MBR to inviter
-        (val_len := Len(invitation_data.value())),
-        (key_len2 := Len(invitation_id.get())),
+        val_len.store(Len(invitation_data.value())),
+        key_len2.store(Len(invitation_id.get())),
         Assert(App.box_delete(invitation_id.get())),
 
         # Create receipt box: key = "r:" + invitation_id, value = status(8) | asset_id(8) | amount(8) | ts(8)
-        (receipt_key := Concat(RECEIPT_PREFIX, invitation_id.get())),
-        (receipt_key_len := Len(receipt_key)),
-        (receipt_val_len := Int(8 + 8 + 8 + 8)),
-        Assert(Not(App.box_get(receipt_key)[0])),
-        Assert(App.box_create(receipt_key, receipt_val_len)),
-        App.box_replace(receipt_key, Int(0), Itob(Int(1))),  # status = claimed (8 bytes)
-        App.box_replace(receipt_key, Int(8), Itob(asset_id.load())),
-        App.box_replace(receipt_key, Int(16), Itob(amount.load())),
-        App.box_replace(receipt_key, Int(24), Itob(Global.latest_timestamp())),
+        receipt_key.store(Concat(RECEIPT_PREFIX, invitation_id.get())),
+        receipt_key_len.store(Len(receipt_key.load())),
+        receipt_val_len.store(Int(8 + 8 + 8 + 8)),
+        (existing_receipt := App.box_get(receipt_key.load())),
+        Assert(Not(existing_receipt.hasValue())),
+        Assert(App.box_create(receipt_key.load(), receipt_val_len.load())),
+        App.box_replace(receipt_key.load(), Int(0), Itob(Int(1))),  # status = claimed (8 bytes)
+        App.box_replace(receipt_key.load(), Int(8), Itob(asset_id.load())),
+        App.box_replace(receipt_key.load(), Int(16), Itob(amount.load())),
+        App.box_replace(receipt_key.load(), Int(24), Itob(Global.latest_timestamp())),
 
         # Refund original MBR minus receipt MBR
-        (orig_mbr := box_mbr_cost(key_len2, val_len)),
-        (receipt_mbr := box_mbr_cost(receipt_key_len, receipt_val_len)),
-        (refund := orig_mbr - receipt_mbr),
+        orig_mbr.store(box_mbr_cost(key_len2.load(), val_len.load())),
+        receipt_mbr.store(box_mbr_cost(receipt_key_len.load(), receipt_val_len.load())),
+        # Safety margin check to prevent underflow
+        Assert(orig_mbr.load() >= receipt_mbr.load()),
+        refund.store(orig_mbr.load() - receipt_mbr.load()),
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
             TxnField.type_enum: TxnType.Payment,
             TxnField.receiver: sender.load(),
-            TxnField.amount: refund,
+            TxnField.amount: refund.load(),
             TxnField.fee: Int(0)
         }),
         InnerTxnBuilder.Submit(),
@@ -314,8 +439,31 @@ def reclaim_invitation(invitation_id: abi.String):
     expires_at = ScratchVar(TealType.uint64)
     is_claimed = ScratchVar(TealType.bytes)
     is_reclaimed = ScratchVar(TealType.bytes)
+    val_len = ScratchVar(TealType.uint64)
+    key_len2 = ScratchVar(TealType.uint64)
+    receipt_key = ScratchVar(TealType.bytes)
+    receipt_key_len = ScratchVar(TealType.uint64)
+    receipt_val_len = ScratchVar(TealType.uint64)
+    orig_mbr = ScratchVar(TealType.uint64)
+    receipt_mbr = ScratchVar(TealType.uint64)
+    refund = ScratchVar(TealType.uint64)
     
     return Seq(
+        # This AppCall must not have rekey
+        Assert(Txn.rekey_to() == Global.zero_address()),
+        
+        # Allow optional fee-bump (fee-only, no deposit)
+        Assert(Or(
+            Global.group_size() == Int(1),
+            And(
+                Global.group_size() == Int(2),
+                Gtxn[0].type_enum() == TxnType.Payment,
+                Gtxn[0].amount() == Int(0),  # pure fee, no deposit
+                Gtxn[0].receiver() == Gtxn[0].sender(),  # pay-yourself convention
+                no_rekey_close_pay(Int(0))
+            )
+        )),
+        
         # Load invitation data
         (invitation_data := App.box_get(invitation_id.get())),
         Assert(invitation_data.hasValue()),
@@ -338,6 +486,17 @@ def reclaim_invitation(invitation_id: abi.String):
             )
         ),
         
+        # Defensive: re-assert asset_id is one of configured assets
+        Assert(Or(
+            asset_id.load() == app.state.cusd_asset_id,
+            asset_id.load() == app.state.confio_asset_id
+        )),
+        
+        # Assert the app actually has the funds before sending
+        (app_hold := AssetHolding.balance(Global.current_application_address(), asset_id.load())),
+        Assert(app_hold.hasValue()),
+        Assert(app_hold.value() >= amount.load()),
+        
         # Return funds to sender
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
@@ -350,30 +509,33 @@ def reclaim_invitation(invitation_id: abi.String):
         InnerTxnBuilder.Submit(),
 
         # Delete box, write compact receipt, and refund remaining MBR to inviter
-        (val_len := Len(invitation_data.value())),
-        (key_len2 := Len(invitation_id.get())),
+        val_len.store(Len(invitation_data.value())),
+        key_len2.store(Len(invitation_id.get())),
         Assert(App.box_delete(invitation_id.get())),
 
         # Create receipt box: key = "r:" + invitation_id, value = status(8) | asset_id(8) | amount(8) | ts(8)
-        (receipt_key := Concat(RECEIPT_PREFIX, invitation_id.get())),
-        (receipt_key_len := Len(receipt_key)),
-        (receipt_val_len := Int(8 + 8 + 8 + 8)),
-        Assert(Not(App.box_get(receipt_key)[0])),
-        Assert(App.box_create(receipt_key, receipt_val_len)),
-        App.box_replace(receipt_key, Int(0), Itob(Int(2))),  # status = reclaimed
-        App.box_replace(receipt_key, Int(8), Itob(asset_id.load())),
-        App.box_replace(receipt_key, Int(16), Itob(amount.load())),
-        App.box_replace(receipt_key, Int(24), Itob(Global.latest_timestamp())),
+        receipt_key.store(Concat(RECEIPT_PREFIX, invitation_id.get())),
+        receipt_key_len.store(Len(receipt_key.load())),
+        receipt_val_len.store(Int(8 + 8 + 8 + 8)),
+        (existing_receipt := App.box_get(receipt_key.load())),
+        Assert(Not(existing_receipt.hasValue())),
+        Assert(App.box_create(receipt_key.load(), receipt_val_len.load())),
+        App.box_replace(receipt_key.load(), Int(0), Itob(Int(2))),  # status = reclaimed
+        App.box_replace(receipt_key.load(), Int(8), Itob(asset_id.load())),
+        App.box_replace(receipt_key.load(), Int(16), Itob(amount.load())),
+        App.box_replace(receipt_key.load(), Int(24), Itob(Global.latest_timestamp())),
 
         # Refund original MBR minus receipt MBR
-        (orig_mbr := box_mbr_cost(key_len2, val_len)),
-        (receipt_mbr := box_mbr_cost(receipt_key_len, receipt_val_len)),
-        (refund := orig_mbr - receipt_mbr),
+        orig_mbr.store(box_mbr_cost(key_len2.load(), val_len.load())),
+        receipt_mbr.store(box_mbr_cost(receipt_key_len.load(), receipt_val_len.load())),
+        # Safety margin check to prevent underflow
+        Assert(orig_mbr.load() >= receipt_mbr.load()),
+        refund.store(orig_mbr.load() - receipt_mbr.load()),
         InnerTxnBuilder.Begin(),
         InnerTxnBuilder.SetFields({
             TxnField.type_enum: TxnType.Payment,
             TxnField.receiver: sender.load(),
-            TxnField.amount: refund,
+            TxnField.amount: refund.load(),
             TxnField.fee: Int(0)
         }),
         InnerTxnBuilder.Submit(),
@@ -431,25 +593,29 @@ def get_invitation_status(
     is_claimed = abi.Bool()
     is_expired = abi.Bool()
     
+    receipt_key = ScratchVar(TealType.bytes)
+    
     return Seq(
-        (invitation_data := App.box_get(invitation_id.get())),
-        If(
-            invitation_data.hasValue(),
-            Seq(
-                exists.set(True),
-                is_claimed.set(
-                    Extract(invitation_data.value(), Int(64), Int(1)) == Bytes("base16", "01")
-                ),
-                is_expired.set(
-                    Global.latest_timestamp() > Btoi(Extract(invitation_data.value(), Int(56), Int(8)))
-                )
-            ),
-            Seq(
+        (bx := App.box_get(invitation_id.get())),
+        If(bx.hasValue()).Then(Seq(
+            exists.set(True),
+            is_claimed.set(Extract(bx.value(), Int(64), Int(1)) == Bytes("base16", "01")),
+            is_expired.set(Global.latest_timestamp() > Btoi(Extract(bx.value(), Int(56), Int(8))))
+        )).Else(Seq(
+            # Fall back to receipt
+            receipt_key.store(Concat(RECEIPT_PREFIX, invitation_id.get())),
+            (rb := App.box_get(receipt_key.load())),
+            If(rb.hasValue()).Then(Seq(
+                exists.set(False),  # Original doesn't exist, but receipt does
+                # status: 1=claimed, 2=reclaimed
+                is_claimed.set(Btoi(Extract(rb.value(), Int(0), Int(8))) == Int(1)),
+                is_expired.set(True)  # if a receipt exists, the invite is no longer active
+            )).Else(Seq(
                 exists.set(False),
                 is_claimed.set(False),
                 is_expired.set(False)
-            )
-        ),
+            ))
+        )),
         output.set(exists, is_claimed, is_expired)
     )
 
@@ -470,9 +636,11 @@ def get_receipt(
     amount = abi.Uint64()
     ts = abi.Uint64()
 
+    key = ScratchVar(TealType.bytes)
+    
     return Seq(
-        (key := Concat(RECEIPT_PREFIX, invitation_id.get())),
-        (bx := App.box_get(key)),
+        key.store(Concat(RECEIPT_PREFIX, invitation_id.get())),
+        (bx := App.box_get(key.load())),
         If(bx.hasValue(),
            Seq(
                exists.set(True),
@@ -510,11 +678,23 @@ def get_stats(*, output: abi.Tuple5[abi.Uint64, abi.Uint64, abi.Uint64, abi.Uint
         output.set(created, claimed, reclaimed, cusd_locked, confio_locked)
     )
 
-@app.delete
-def delete():
-    """Only admin can delete"""
+@app.external
+def set_admin(new_admin: abi.Address):
+    """Admin rotation for operational flexibility"""
     return Seq(
         Assert(Txn.sender() == app.state.admin),
+        Assert(new_admin.get() != Global.zero_address()),
+        app.state.admin.set(new_admin.get()),
+        Approve()
+    )
+
+@app.delete
+def delete():
+    """Only admin can delete - prevent destroying app while value is locked"""
+    return Seq(
+        Assert(Txn.sender() == app.state.admin),
+        Assert(app.state.total_cusd_locked == Int(0)),
+        Assert(app.state.total_confio_locked == Int(0)),
         Approve()
     )
 

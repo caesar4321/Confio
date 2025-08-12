@@ -247,8 +247,8 @@ export class AuthService {
       if (!authData || !authData.success) {
         throw new Error(authData?.error || 'Backend authentication failed');
       }
-
-      // Store Django JWT tokens for authenticated requests using Keychain
+      
+      // Store Django JWT tokens for authenticated requests using Keychain (store BEFORE any further GraphQL)
       if (authData.accessToken) {
         console.log('About to store tokens in Keychain:', {
           service: AUTH_KEYCHAIN_SERVICE,
@@ -299,6 +299,28 @@ export class AuthService {
       } else {
         console.error('No auth tokens received from Web3Auth login');
         throw new Error('No auth tokens received from server');
+      }
+
+      // Now that tokens are stored, process any required opt-ins (authenticated)
+      if (authData.needsOptIn && authData.needsOptIn.length > 0) {
+        console.log('Need to opt-in to assets:', authData.needsOptIn);
+        if (authData.optInTransactions && authData.optInTransactions.length > 0) {
+          console.log('Processing opt-in transactions from backend (after storing tokens)...');
+          try {
+            const optInTxns = typeof authData.optInTransactions === 'string'
+              ? JSON.parse(authData.optInTransactions)
+              : authData.optInTransactions;
+            const ok = await algorandService.processSponsoredOptIn(optInTxns);
+            if (ok) {
+              console.log('Successfully processed opt-in transactions');
+            } else {
+              console.error('Opt-in transactions were not confirmed');
+            }
+          } catch (optInError) {
+            console.error('Failed to process opt-in transactions:', optInError);
+            // Don't fail login if opt-in fails - user can retry later
+          }
+        }
       }
 
       // 7) Set default personal account context
@@ -435,17 +457,8 @@ export class AuthService {
         throw new Error(authData?.error || 'Backend authentication failed');
       }
       
-      // Store Django JWT tokens for authenticated requests using Keychain
+      // Store Django JWT tokens immediately so subsequent GraphQL is authenticated
       if (authData.accessToken) {
-        console.log('About to store tokens in Keychain (Apple):', {
-          service: AUTH_KEYCHAIN_SERVICE,
-          username: AUTH_KEYCHAIN_USERNAME,
-          hasAccessToken: !!authData.accessToken,
-          hasRefreshToken: !!authData.refreshToken,
-          accessTokenLength: authData.accessToken?.length,
-          refreshTokenLength: authData.refreshToken?.length
-        });
-
         try {
           await Keychain.setGenericPassword(
             AUTH_KEYCHAIN_USERNAME,
@@ -459,56 +472,39 @@ export class AuthService {
               accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
             }
           );
-
-          // Verify token was stored
-          const checkCredentials = await Keychain.getGenericPassword({
-            service: AUTH_KEYCHAIN_SERVICE,
-            username: AUTH_KEYCHAIN_USERNAME
-          });
-
-          if (checkCredentials === false) {
-            console.log('JWT in Keychain right after saving (Apple): No credentials');
-            throw new Error('Failed to verify token storage in Keychain');
-          } else {
-            console.log('JWT in Keychain right after saving (Apple):', {
-              hasCredentials: true,
-              hasPassword: !!checkCredentials.password,
-              passwordLength: checkCredentials.password.length,
-              rawCredentials: checkCredentials
-            });
-            if (!checkCredentials.password) {
-              throw new Error('Failed to verify token storage in Keychain');
-            }
-          }
-
-          // Parse and verify the stored tokens
-          const stored = await Keychain.getGenericPassword({
-            service: AUTH_KEYCHAIN_SERVICE,
-            username: AUTH_KEYCHAIN_USERNAME
-          });
-
-          if (stored === false) {
-            throw new Error('Failed to verify token storage');
-          } else {
-            const storedTokens = JSON.parse(stored.password);
-            if (!storedTokens.accessToken || !storedTokens.refreshToken) {
-              throw new Error('Invalid token format in storage');
-            }
-            console.log('Tokens stored and verified successfully:', {
-              hasAccessToken: !!storedTokens.accessToken,
-              hasRefreshToken: !!storedTokens.refreshToken,
-              accessTokenLength: storedTokens.accessToken.length,
-              refreshTokenLength: storedTokens.refreshToken.length
-            });
-          }
-        } catch (error) {
-          console.error('Error storing or verifying tokens:', error);
-          throw error;
+          console.log('Stored JWT tokens in Keychain before processing opt-ins (Apple)');
+        } catch (e) {
+          console.error('Failed to store tokens before opt-ins (Apple):', e);
+          // Continue, but follow-up GraphQL may fail if tokens missing
         }
-      } else {
-        console.error('No auth tokens received from Web3Auth login');
-        throw new Error('No auth tokens received from server');
       }
+
+      // Check if we need to opt-in to assets (Apple Sign-In)
+      if (authData.needsOptIn && authData.needsOptIn.length > 0) {
+        console.log('Need to opt-in to assets (Apple):', authData.needsOptIn);
+        if (authData.optInTransactions && authData.optInTransactions.length > 0) {
+          console.log('Processing opt-in transactions from backend (Apple)...');
+          try {
+            // Parse the opt-in transactions (it's a JSONString from GraphQL)
+            const optInTxns = typeof authData.optInTransactions === 'string' 
+              ? JSON.parse(authData.optInTransactions) 
+              : authData.optInTransactions;
+            console.log('Parsed opt-in transactions (Apple):', JSON.stringify(optInTxns, null, 2));
+            // Process the opt-in transactions using the updated method
+            const ok = await algorandService.processSponsoredOptIn(optInTxns);
+            if (ok) {
+              console.log('Successfully processed opt-in transactions (Apple)');
+            } else {
+              console.error('Opt-in transactions were not confirmed (Apple)');
+            }
+          } catch (optInError) {
+            console.error('Failed to process opt-in transactions (Apple):', optInError);
+            // Don't fail login if opt-in fails - user can retry later
+          }
+        }
+      }
+      
+      // Tokens already stored above for Apple flow
 
       // Set default personal account context
       console.log('Setting default personal account context (Apple)...');

@@ -8,7 +8,6 @@ import { useMutation } from '@apollo/client';
 import { PAY_INVOICE } from '../apollo/queries';
 import { ALGORAND_SPONSORED_SEND, SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
 import { AccountManager } from '../utils/accountManager';
-import { EnhancedAuthService } from '../services/enhancedAuthService';
 import algorandService from '../services/algorandService';
 import * as nacl from 'tweetnacl';
 import * as msgpack from 'algorand-msgpack';
@@ -74,9 +73,6 @@ export const TransactionProcessingScreen = () => {
     new Animated.Value(0),
     new Animated.Value(0)
   ]);
-
-  // Services
-  const enhancedAuthService = EnhancedAuthService.getInstance();
 
   // GraphQL mutations
   const [payInvoice] = useMutation(PAY_INVOICE);
@@ -232,23 +228,15 @@ export const TransactionProcessingScreen = () => {
         setCurrentStep(2);
         console.log('TransactionProcessingScreen: Calling payInvoice mutation with security checks and idempotency key:', idempotencyKey);
         
-        // Perform secure payment operation
-        const secureResult = await enhancedAuthService.performSecureOperation(
-          async () => {
-            return await payInvoice({
-              variables: {
-                invoiceId: transactionData.invoiceId,
-                idempotencyKey: idempotencyKey
-              }
-            });
-          },
-          'payment',
-          parseFloat(transactionData.amount)
-        );
+        // Perform payment operation
+        const { data } = await payInvoice({
+          variables: {
+            invoiceId: transactionData.invoiceId,
+            idempotencyKey: idempotencyKey
+          }
+        });
 
-        const { data } = secureResult.result;
         console.log('TransactionProcessingScreen: Payment mutation response:', data);
-        console.log('TransactionProcessingScreen: Security checks:', secureResult.securityChecks);
         
         if (data?.payInvoice?.success) {
           console.log('TransactionProcessingScreen: Payment successful');

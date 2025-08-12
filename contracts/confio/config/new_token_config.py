@@ -3,7 +3,8 @@
 # CONFIO Token (Governance) - 1B fixed supply
 CONFIO_ASSET_ID = 1057
 CONFIO_CREATOR_ADDRESS = "2R5BUCI2RWTL3YD5LNFTG5X4KPJGWAAW3F2272X6DAXPRBI2IERQ3JVTZE"
-CONFIO_CREATOR_PRIVATE_KEY = "oshlQ7WOT7cTLiLBlQFi3jLEf4nh/VgfiGTDvxjPLwnUehoJGo2mveB9W0szdvxT0msAFtl1r+r+GC74hRpBIw=="
+# Private keys are never persisted here. For creator-signed transfers, set
+# CONFIO_CREATOR_PRIVATE_KEY in your environment or use a secure keystore.
 
 # Mock USDC (using old CONFIO with max supply)
 MOCK_USDC_ASSET_ID = 1020

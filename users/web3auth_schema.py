@@ -49,6 +49,8 @@ class Web3AuthLoginMutation(graphene.Mutation):
     access_token = graphene.String()
     refresh_token = graphene.String()
     user = graphene.Field(Web3AuthUserType)
+    needs_opt_in = graphene.List(graphene.Int)  # Asset IDs that need opt-in
+    opt_in_transactions = graphene.JSONString()  # Unsigned transactions for opt-in
     
     @classmethod
     def mutate(cls, root, info, firebase_id_token, algorand_address, device_fingerprint=None):
@@ -200,22 +202,47 @@ class Web3AuthLoginMutation(graphene.Mutation):
                         AlgorandAccountManager.ALGOD_TOKEN,
                         AlgorandAccountManager.ALGOD_ADDRESS
                     )
-                    account_info = algod_client.account_info(algorand_address)
-                    balance = account_info.get('amount', 0)
-                    num_assets = len(account_info.get('assets', []))
+                    
+                    # Try to get account info - new accounts might not exist on chain yet
+                    try:
+                        account_info = algod_client.account_info(algorand_address)
+                        balance = account_info.get('amount', 0)
+                        current_assets = account_info.get('assets', [])
+                    except Exception as e:
+                        # Account doesn't exist on chain yet - treat as 0 balance, 0 assets
+                        logger.info(f"Account {algorand_address} not on chain yet: {e}")
+                        balance = 0
+                        current_assets = []
+                    
+                    current_asset_ids = [asset['asset-id'] for asset in current_assets]
+                    num_assets = len(current_assets)
+                    
+                    # Calculate how many NEW assets we need to opt into
+                    assets_to_opt_in = []
+                    if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_asset_ids:
+                        assets_to_opt_in.append(AlgorandAccountManager.CONFIO_ASSET_ID)
+                        logger.info(f"User needs to opt into CONFIO: {AlgorandAccountManager.CONFIO_ASSET_ID}")
+                    if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_asset_ids:
+                        assets_to_opt_in.append(AlgorandAccountManager.CUSD_ASSET_ID)
+                        logger.info(f"User needs to opt into cUSD: {AlgorandAccountManager.CUSD_ASSET_ID}")
+                    
+                    logger.info(f"Account {algorand_address}: balance={balance}, current_assets={num_assets}, need_opt_in={len(assets_to_opt_in)}")
                     
                     # Calculate minimum balance needed:
-                    # 0.1 ALGO for account + 0.1 ALGO per asset
-                    min_balance_needed = 100000 + (num_assets * 100000)  # in microAlgos
-                    # MBR for 2 assets: CONFIO and cUSD
-                    # 0.1 base + 0.1 CONFIO + 0.1 cUSD = 0.3 ALGO
-                    # Sponsor pays opt-in fees separately
-                    min_balance_with_buffer = 300000  # 0.3 ALGO (exactly the MBR)
+                    # 0.1 ALGO for account + 0.1 ALGO per asset (existing + new)
+                    # If user has 0 assets: needs 0.3 ALGO total (0.1 base + 0.2 for 2 assets)
+                    # If user has 1 asset: needs 0.1 ALGO more (already has 0.2, needs 0.3 total)
+                    # If user has 2 assets: already has enough (0.3 ALGO)
+                    total_assets_after_optin = num_assets + len(assets_to_opt_in)
+                    min_balance_required = 100000 + (total_assets_after_optin * 100000)  # in microAlgos
                     
-                    if balance < min_balance_with_buffer:
-                        # Fund the account to reach 0.3 ALGO
-                        funding_amount = min_balance_with_buffer - balance
-                        logger.info(f"Auto-funding Web3Auth user {algorand_address} with {funding_amount} microAlgos")
+                    logger.info(f"MBR calculation: {num_assets} existing + {len(assets_to_opt_in)} new = {total_assets_after_optin} total assets")
+                    logger.info(f"Min balance required: {min_balance_required} microAlgos ({min_balance_required/1000000} ALGO)")
+                    
+                    # Only fund what's needed to reach the minimum balance
+                    if balance < min_balance_required:
+                        funding_amount = min_balance_required - balance
+                        logger.info(f"Auto-funding Web3Auth user {algorand_address} with {funding_amount} microAlgos ({funding_amount/1000000} ALGO)")
                         
                         # Use AlgorandAccountManager's funding logic
                         from algosdk import mnemonic
@@ -239,29 +266,40 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 except Exception as e:
                     logger.warning(f"Could not check/fund account balance: {e}")
                 
-                # Trigger sponsored opt-in for CONFIO (async)
+                # Trigger sponsored opt-in for CONFIO and cUSD (async)
                 from blockchain.algorand_sponsor_service import algorand_sponsor_service
                 import asyncio
                 
-                if AlgorandAccountManager.CONFIO_ASSET_ID:
+                # Generate atomic opt-in transactions for all needed assets
+                opt_in_transactions = []
+                
+                if assets_to_opt_in:
+                    logger.info(f"Generating atomic opt-in transactions for assets: {assets_to_opt_in}")
                     try:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        opt_in_result = loop.run_until_complete(
-                            algorand_sponsor_service.execute_server_side_opt_in(
-                                user_address=algorand_address,
-                                asset_id=AlgorandAccountManager.CONFIO_ASSET_ID
-                            )
-                        )
-                        loop.close()
+                        from blockchain.mutations import GenerateOptInTransactionsMutation
+                        # Create a mock info object with authenticated user
+                        class MockInfo:
+                            class Context:
+                                def __init__(self, user):
+                                    self.user = user
+                            def __init__(self, user):
+                                self.context = self.Context(user)
                         
-                        if opt_in_result.get('success'):
-                            if opt_in_result.get('already_opted_in'):
-                                logger.info(f"User {user.id} already opted into CONFIO")
-                            else:
-                                logger.info(f"Created CONFIO opt-in for user {user.id}")
+                        mock_info = MockInfo(user)
+                        opt_in_result = GenerateOptInTransactionsMutation.mutate(
+                            None, mock_info, asset_ids=assets_to_opt_in
+                        )
+                        
+                        if opt_in_result.success and opt_in_result.transactions:
+                            opt_in_transactions = opt_in_result.transactions
+                            logger.info(f"Generated atomic opt-in transactions for {len(assets_to_opt_in)} assets")
+                            logger.info(f"Opt-in transactions structure: {type(opt_in_transactions)}")
+                            if isinstance(opt_in_transactions, list) and len(opt_in_transactions) > 0:
+                                logger.info(f"First transaction keys: {opt_in_transactions[0].keys() if isinstance(opt_in_transactions[0], dict) else 'Not a dict'}")
+                        else:
+                            logger.warning(f"Could not generate opt-in transactions: {opt_in_result.error}")
                     except Exception as e:
-                        logger.warning(f"Could not create auto opt-in for CONFIO: {e}")
+                        logger.warning(f"Could not create atomic opt-in transactions: {e}")
             
             # Generate JWT tokens using the existing system
             # Access token with default personal account context
@@ -283,7 +321,9 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 success=True,
                 access_token=access_token,
                 refresh_token=refresh_token,
-                user=user
+                user=user,
+                needs_opt_in=assets_to_opt_in if 'assets_to_opt_in' in locals() else [],
+                opt_in_transactions=opt_in_transactions if 'opt_in_transactions' in locals() else []
             )
             
         except Exception as e:

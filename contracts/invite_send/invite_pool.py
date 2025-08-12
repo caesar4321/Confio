@@ -2,6 +2,13 @@
 """
 Invite Pool Contract for Algorand
 Handles send_and_invite functionality with a shared pool to minimize ALGO lock.
+
+Usage:
+- Send invite: [AXFER(sender→pool), AppCall(send_invite)]
+- Claim: AppCall(claim_invite) standalone, or grouped with 0-amount pay-yourself Payment for fee budget
+  Fee-bump format: [Payment(sender→sender, amount=0, no rekey/close), AppCall(claim_invite)]
+- Reclaim: AppCall(reclaim_expired) standalone, or grouped with 0-amount pay-yourself Payment for fee budget
+  Fee-bump format: [Payment(sender→sender, amount=0, no rekey/close), AppCall(reclaim_expired)]
 """
 
 from pyteal import *
@@ -95,7 +102,8 @@ def invite_pool_contract():
             Assert(Global.group_size() >= Int(2)),
             
             # Check if invite already exists
-            Assert(Not(App.box_get(box_name)[0])),
+            (existing_box := App.box_get(box_name)),
+            Assert(Not(existing_box.hasValue())),
             
             # Create box for this invite
             Assert(App.box_create(box_name, box_size)),
@@ -146,18 +154,40 @@ def invite_pool_contract():
             Int(1)
         ])
     
+    # Security helper: No rekey/close for payment transactions
+    @Subroutine(TealType.uint64)
+    def no_rekey_close_pay(idx):
+        return And(
+            Gtxn[idx].rekey_to() == Global.zero_address(),
+            Gtxn[idx].close_remainder_to() == Global.zero_address()
+        )
+    
     # Claim invite (recipient claims their funds)
     @Subroutine(TealType.uint64)
     def claim_invite():
         box_name = Txn.sender()
         
         return Seq([
+            # This AppCall must not have rekey
+            Assert(Txn.rekey_to() == Global.zero_address()),
+            
+            # Allow optional fee-bump (fee-only, no deposit)
+            Assert(Or(
+                Global.group_size() == Int(1),
+                And(
+                    Global.group_size() == Int(2),
+                    Gtxn[0].type_enum() == TxnType.Payment,
+                    Gtxn[0].amount() == Int(0),  # pure fee, no deposit
+                    Gtxn[0].receiver() == Gtxn[0].sender(),  # pay-yourself convention
+                    no_rekey_close_pay(Int(0))
+                )
+            )),
             # Box must exist (invite must exist)
             (box_data := App.box_get(box_name)),
-            Assert(box_data[0]),
+            Assert(box_data.hasValue()),
             
             # Parse box data
-            (stored_data := box_data[1]),
+            (stored_data := box_data.value()),
             (cusd_amount := Btoi(Extract(stored_data, Int(32), Int(8)))),
             (confio_amount := Btoi(Extract(stored_data, Int(40), Int(8)))),
             (expiry := Btoi(Extract(stored_data, Int(48), Int(8)))),
@@ -218,12 +248,26 @@ def invite_pool_contract():
         box_name = recipient
         
         return Seq([
+            # This AppCall must not have rekey
+            Assert(Txn.rekey_to() == Global.zero_address()),
+            
+            # Allow optional fee-bump (fee-only, no deposit)
+            Assert(Or(
+                Global.group_size() == Int(1),
+                And(
+                    Global.group_size() == Int(2),
+                    Gtxn[0].type_enum() == TxnType.Payment,
+                    Gtxn[0].amount() == Int(0),  # pure fee, no deposit
+                    Gtxn[0].receiver() == Gtxn[0].sender(),  # pay-yourself convention
+                    no_rekey_close_pay(Int(0))
+                )
+            )),
             # Box must exist
             (box_data := App.box_get(box_name)),
-            Assert(box_data[0]),
+            Assert(box_data.hasValue()),
             
             # Parse box data
-            (stored_data := box_data[1]),
+            (stored_data := box_data.value()),
             (sender := Extract(stored_data, Int(0), Int(32))),
             (cusd_amount := Btoi(Extract(stored_data, Int(32), Int(8)))),
             (confio_amount := Btoi(Extract(stored_data, Int(40), Int(8)))),

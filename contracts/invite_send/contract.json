@@ -1,0 +1,153 @@
+{
+    "name": "InviteSend",
+    "methods": [
+        {
+            "name": "create",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Initialize the invite & send contract"
+        },
+        {
+            "name": "setup_assets",
+            "args": [
+                {
+                    "type": "uint64",
+                    "name": "cusd_id"
+                },
+                {
+                    "type": "uint64",
+                    "name": "confio_id"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Setup asset IDs for invitations"
+        },
+        {
+            "name": "create_invitation",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "invitation_id"
+                },
+                {
+                    "type": "axfer",
+                    "name": "asset_transfer"
+                },
+                {
+                    "type": "string",
+                    "name": "message"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Create an invitation with escrowed funds\nInvitation data stored in box storage"
+        },
+        {
+            "name": "claim_invitation",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "invitation_id"
+                },
+                {
+                    "type": "address",
+                    "name": "recipient"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Admin claims invitation on behalf of verified user\nCalled after user verification through Django backend"
+        },
+        {
+            "name": "reclaim_invitation",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "invitation_id"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Sender reclaims expired invitation\nCan only be called after 7-day expiry period"
+        },
+        {
+            "name": "pause",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Pause invitation system"
+        },
+        {
+            "name": "unpause",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Unpause invitation system"
+        },
+        {
+            "name": "get_invitation_status",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "invitation_id"
+                }
+            ],
+            "returns": {
+                "type": "(bool,bool,bool)"
+            },
+            "desc": "Get invitation status\nReturns: (exists, is_claimed, is_expired)"
+        },
+        {
+            "name": "get_receipt",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "invitation_id"
+                }
+            ],
+            "returns": {
+                "type": "(bool,uint64,uint64,uint64,uint64)"
+            },
+            "desc": "Read compact receipt for an invitation id.\nReturns: (exists, status_code, asset_id, amount, timestamp) status_code: 1 = claimed, 2 = reclaimed"
+        },
+        {
+            "name": "get_stats",
+            "args": [],
+            "returns": {
+                "type": "(uint64,uint64,uint64,uint64,uint64)"
+            },
+            "desc": "Get invitation statistics"
+        },
+        {
+            "name": "set_admin",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "new_admin"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Admin rotation for operational flexibility"
+        },
+        {
+            "name": "delete",
+            "args": [],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Only admin can delete - prevent destroying app while value is locked"
+        }
+    ],
+    "networks": {}
+}

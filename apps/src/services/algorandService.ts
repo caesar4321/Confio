@@ -774,7 +774,7 @@ class AlgorandService {
   }
 
   async processSponsoredOptIn(
-    assetId: number = 743890784 // Default to CONFIO
+    assetIdOrTransactions?: number | any[] // Can be assetId or array of opt-in transactions
   ): Promise<boolean> {
     try {
       await this.ensureInitialized();
@@ -784,6 +784,168 @@ class AlgorandService {
         return false;
       }
 
+      // Check if we received an array of transactions from backend
+      if (Array.isArray(assetIdOrTransactions)) {
+        console.log(`[AlgorandService] Processing ${assetIdOrTransactions.length} opt-in transactions from backend`);
+        
+        // The backend sends an array with the structure from GenerateOptInTransactionsMutation
+        // Find the sponsor transaction (marked with type: 'sponsor' and signed: true)
+        const sponsorTxnData = assetIdOrTransactions.find(t => t.type === 'sponsor' && t.signed === true);
+        
+        if (!sponsorTxnData) {
+          console.error('[AlgorandService] No sponsor transaction found in array');
+          console.error('[AlgorandService] Available transactions:', assetIdOrTransactions.map(t => ({ type: t.type, signed: t.signed })));
+          return false;
+        }
+        
+        // Process each opt-in transaction (skip the sponsor transaction)
+        const optInTransactions = assetIdOrTransactions.filter(t => t.type === 'opt-in');
+        
+        // We need to sign all user transactions first, then submit as a group
+        const signedUserTxns = [];
+        
+        for (const optInData of optInTransactions) {
+          try {
+            const assetName = optInData.assetName || 'Unknown';
+            const assetId = optInData.assetId;
+            console.log(`[AlgorandService] Signing opt-in transaction for ${assetName} (${assetId})`);
+            
+            // Decode and sign the user transaction
+            const userTxnBytes = Uint8Array.from(Buffer.from(optInData.transaction, 'base64'));
+            const signedUserTxn = await this.signTransactionBytes(userTxnBytes);
+            const signedUserTxnB64 = Buffer.from(signedUserTxn).toString('base64');
+            
+            signedUserTxns.push({
+              assetId,
+              assetName,
+              signedTxn: signedUserTxnB64
+            });
+          } catch (error) {
+            console.error(`[AlgorandService] Error signing opt-in for asset ${optInData.assetId}:`, error);
+            return false;
+          }
+        }
+        
+        // Now submit all signed transactions together with the sponsor transaction
+        // For atomic group, we need to concatenate all transactions
+        console.log(`[AlgorandService] Submitting atomic group with ${signedUserTxns.length} opt-ins...`);
+        
+        // The backend's GenerateOptInTransactionsMutation creates an atomic group
+        // We need to submit them all together
+        try {
+          // Concatenate all signed user transactions (they're already base64)
+          // We need to decode each, concatenate the bytes, then re-encode
+          let concatenatedUserTxns = new Uint8Array(0);
+          for (const txnData of signedUserTxns) {
+            const txnBytes = Uint8Array.from(Buffer.from(txnData.signedTxn, 'base64'));
+            const newArray = new Uint8Array(concatenatedUserTxns.length + txnBytes.length);
+            newArray.set(concatenatedUserTxns);
+            newArray.set(txnBytes, concatenatedUserTxns.length);
+            concatenatedUserTxns = newArray;
+          }
+          const allUserTxnsB64 = Buffer.from(concatenatedUserTxns).toString('base64');
+          
+          // Submit the complete atomic group (all user txns + sponsor txn)
+          console.log(`[AlgorandService] Submitting atomic group to backend...`);
+          console.log(`[AlgorandService] User transactions size: ${allUserTxnsB64.length} chars`);
+          console.log(`[AlgorandService] Sponsor transaction size: ${sponsorTxnData.transaction.length} chars`);
+          
+          // Use Apollo client for authenticated GraphQL request
+          console.log(`[AlgorandService] Importing Apollo client and mutation...`);
+          
+          // Import at the top to avoid issues
+          const apolloModule = await import('../apollo/client');
+          const mutationsModule = await import('../apollo/mutations');
+          
+          const apolloClient = apolloModule.apolloClient || apolloModule.default;
+          const SUBMIT_SPONSORED_GROUP = mutationsModule.SUBMIT_SPONSORED_GROUP;
+          
+          console.log(`[AlgorandService] Apollo client imported:`, !!apolloClient);
+          console.log(`[AlgorandService] Mutation imported:`, !!SUBMIT_SPONSORED_GROUP);
+          
+          if (!apolloClient) {
+            console.error(`[AlgorandService] Apollo client not initialized`);
+            return false;
+          }
+          
+          if (!SUBMIT_SPONSORED_GROUP) {
+            console.error(`[AlgorandService] SUBMIT_SPONSORED_GROUP mutation not found`);
+            return false;
+          }
+          
+          console.log(`[AlgorandService] Using Apollo client to submit sponsored group...`);
+          
+          try {
+            const timeoutMs = 20000;
+            console.log(`[AlgorandService] Calling apolloClient.mutate with ${timeoutMs/1000}s timeout...`);
+            
+            const timeoutPromise = new Promise((_, reject) => {
+              setTimeout(() => reject(new Error(`Request timed out after ${timeoutMs/1000} seconds`)), timeoutMs);
+            });
+            
+            const mutationPromise = apolloClient.mutate({
+              mutation: SUBMIT_SPONSORED_GROUP,
+              variables: {
+                signedUserTxn: allUserTxnsB64,
+                signedSponsorTxn: sponsorTxnData.transaction
+              }
+            });
+            
+            const mutateResult: any = await Promise.race([mutationPromise, timeoutPromise]);
+            console.log(`[AlgorandService] Mutation completed, extracting data...`);
+            
+            const submitData = (mutateResult as any)?.data;
+            const submitResult = submitData?.submitSponsoredGroup;
+            
+            if (submitResult?.success) {
+            console.log(`[AlgorandService] Successfully submitted atomic opt-in group!`);
+            console.log(`[AlgorandService] Transaction ID: ${submitResult.transactionId}`);
+            console.log(`[AlgorandService] Confirmed in round: ${submitResult.confirmedRound}`);
+            console.log(`[AlgorandService] Fees saved: ${submitResult.feesSaved} ALGO`);
+            
+            // Store opt-in status for all assets
+            for (const optInData of optInTransactions) {
+              const assetName = optInData.assetName || 'Unknown';
+              const assetId = optInData.assetId;
+              
+              await Keychain.setInternetCredentials(
+                'algorand.confio.optin',
+                assetName.toLowerCase(),
+                JSON.stringify({
+                  assetId: assetId,
+                  address: this.currentAccount.addr,
+                  optedInAt: new Date().toISOString(),
+                  status: 'confirmed',
+                  txId: submitResult.transactionId,
+                  confirmedRound: submitResult.confirmedRound
+                })
+              );
+              console.log(`[AlgorandService] Stored opt-in status for ${assetName}`);
+            }
+            return true;
+          } else {
+            console.error(`[AlgorandService] Failed to submit atomic opt-in group:`, submitResult?.error);
+            return false;
+          }
+          } catch (apolloError) {
+            console.error(`[AlgorandService] Apollo error during submission:`, apolloError);
+            // Check if it's an authentication error
+            if (apolloError.message && apolloError.message.includes('permission')) {
+              console.error(`[AlgorandService] Authentication issue - user may need to re-login`);
+            }
+            return false;
+          }
+        } catch (error) {
+          console.error(`[AlgorandService] Error submitting atomic opt-in group:`, error);
+          return false;
+        }
+        
+        // Should not reach here; handled in branches
+        return false;
+      }
+
+      // Original single asset opt-in logic
+      const assetId = assetIdOrTransactions || 743890784; // Default to old CONFIO ID
       console.log(`[AlgorandService] Processing sponsored opt-in for asset ${assetId}`);
       
       // Step 1: Request sponsored opt-in from backend using Apollo client
