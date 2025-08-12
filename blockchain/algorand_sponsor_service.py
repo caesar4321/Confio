@@ -305,10 +305,15 @@ class AlgorandSponsorService:
             
             # Return unsigned user transaction and signed sponsor transaction
             # Client will sign user transaction and submit both
+            # Both need to be base64 encoded for consistency
+            import base64
+            user_txn_b64 = base64.b64encode(encoding.msgpack_encode(user_txn)).decode('utf-8')
+            sponsor_txn_b64 = base64.b64encode(signed_fee_txn).decode('utf-8')
+            
             return {
                 'success': True,
-                'user_transaction': encoding.msgpack_encode(user_txn),
-                'sponsor_transaction': signed_fee_txn,
+                'user_transaction': user_txn_b64,
+                'sponsor_transaction': sponsor_txn_b64,
                 'group_id': gid.hex(),
                 'total_fee': total_fee,
                 'sponsored': True
