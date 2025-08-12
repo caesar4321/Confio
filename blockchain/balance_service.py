@@ -95,12 +95,12 @@ class BalanceService:
         }
     
     @classmethod
-    def get_all_balances(cls, account: Account, verify_critical: bool = False) -> Dict[str, Dict]:
+    def get_all_balances(cls, account: Account, verify_critical: bool = False, force_refresh: bool = False) -> Dict[str, Dict]:
         """Get all token balances for an account"""
         balances = {}
         for token in ['CUSD', 'CONFIO', 'SUI', 'USDC']:
             balances[token.lower()] = cls.get_balance(
-                account, token, verify_critical=verify_critical
+                account, token, verify_critical=verify_critical, force_refresh=force_refresh
             )
         return balances
     
@@ -190,7 +190,7 @@ class BalanceService:
             return None
     
     @classmethod
-    def _fetch_from_blockchain(cls, account: Account, token: str) -> Dict[str, Decimal]:
+    def _fetch_from_blockchain(cls, account: Account, token: str, skip_cache: bool = True) -> Dict[str, Decimal]:
         """Fetch balance directly from blockchain"""
         # Run async code in sync context
         loop = asyncio.new_event_loop()
@@ -199,15 +199,15 @@ class BalanceService:
         async def get_balance():
             async with await get_algorand_client() as client:
                 if token == 'CUSD':
-                    # Use USDC as cUSD until we create custom cUSD ASA
-                    return await client.get_usdc_balance(account.algorand_address)
+                    # Get actual cUSD balance from the cUSD asset
+                    return await client.get_cusd_balance(account.algorand_address, skip_cache=skip_cache)
                 elif token == 'CONFIO':
-                    return await client.get_confio_balance(account.algorand_address)
+                    return await client.get_confio_balance(account.algorand_address, skip_cache=skip_cache)
                 elif token == 'SUI':
                     # No SUI on Algorand - return 0
                     return Decimal('0')
                 elif token == 'USDC':
-                    return await client.get_usdc_balance(account.algorand_address)
+                    return await client.get_usdc_balance(account.algorand_address, skip_cache=skip_cache)
                 else:
                     return Decimal('0')
         
