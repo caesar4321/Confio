@@ -335,10 +335,8 @@ class AlgorandService {
         accountContext.businessId
       );
 
-      // Ensure currentAccount is set for downstream consumers
-      if (!this.currentAccount) {
-        this.currentAccount = { addr: wallet.address, sk: null };
-      }
+      // Always set currentAccount after wallet is created/restored
+      this.currentAccount = { addr: wallet.address, sk: null };
 
       // Now sign the raw transaction bytes using secure wallet
       const signedTxn = await secureDeterministicWallet.signTransaction(sub, txnBytes);
@@ -715,11 +713,6 @@ class AlgorandService {
     try {
       await this.ensureInitialized();
       
-      if (!this.currentAccount) {
-        console.error('[AlgorandService] No account available for signing');
-        return null;
-      }
-
       // Convert base64 strings to Uint8Array if needed
       const userTxnBytes = typeof userTransaction === 'string' 
         ? Uint8Array.from(Buffer.from(userTransaction, 'base64'))
@@ -729,6 +722,7 @@ class AlgorandService {
         : sponsorTransaction;
 
       console.log('[AlgorandService] Signing user transaction...');
+      // signTransactionBytes will handle wallet initialization
       const signedUserTxn = await this.signTransactionBytes(userTxnBytes);
       // Encode for submission (RN compatible)
       const signedUserTxnB64 = Buffer.from(signedUserTxn).toString('base64');
