@@ -63,6 +63,12 @@ class PaymentState:
         descr="Fee recipient address"
     )
     
+    sponsor_address: Final[GlobalStateValue] = GlobalStateValue(
+        stack_type=TealType.bytes,
+        default=Bytes(""),
+        descr="Sponsor address allowed to send app calls on behalf of users"
+    )
+    
     is_paused: Final[GlobalStateValue] = GlobalStateValue(
         stack_type=TealType.uint64,
         default=Int(0),
@@ -220,8 +226,20 @@ def pay_with_cusd(
     val_len = ScratchVar(TealType.uint64)
     mbr = ScratchVar(TealType.uint64)
     receipt_value = ScratchVar(TealType.bytes)
+    actual_payer = ScratchVar(TealType.bytes)
     
     return Seq(
+        # Determine actual payer (could be sponsor calling on behalf of user)
+        If(
+            And(
+                app.state.sponsor_address.get() != Bytes(""),
+                Txn.sender() == app.state.sponsor_address.get(),
+                Txn.accounts.length() > Int(0)
+            ),
+            actual_payer.store(Txn.accounts[0]),  # User passed as account reference
+            actual_payer.store(Txn.sender())  # Direct call from user
+        ),
+        
         # Basic validation
         Assert(
             And(
@@ -275,7 +293,7 @@ def pay_with_cusd(
         Assert(Gtxn[prev_idx.load()].type_enum() == TxnType.AssetTransfer),
         Assert(Gtxn[prev_idx.load()].asset_receiver() == Global.current_application_address()),
         Assert(Gtxn[prev_idx.load()].xfer_asset() == app.state.cusd_asset_id),
-        Assert(Gtxn[prev_idx.load()].sender() == Txn.sender()),  # Bind payer to app call
+        Assert(Gtxn[prev_idx.load()].sender() == actual_payer.load()),  # Bind payer to app call
         
         # Require zeroed dangerous fields on AXFER
         Assert(Gtxn[prev_idx.load()].asset_close_to() == Global.zero_address()),
@@ -283,7 +301,7 @@ def pay_with_cusd(
         Assert(Gtxn[prev_idx.load()].rekey_to() == Global.zero_address()),
         
         # Bind the ABI payment object to the prev AXFER
-        Assert(payment.get().sender() == Txn.sender()),
+        Assert(payment.get().sender() == actual_payer.load()),
         Assert(payment.get().xfer_asset() == Gtxn[prev_idx.load()].xfer_asset()),
         Assert(payment.get().asset_receiver() == Gtxn[prev_idx.load()].asset_receiver()),
         Assert(payment.get().asset_amount() == Gtxn[prev_idx.load()].asset_amount()),
@@ -310,7 +328,7 @@ def pay_with_cusd(
         Assert(recipient.get() != Global.current_application_address()),
         
         # Self-payment prevention
-        Assert(Txn.sender() != recipient.get()),
+        Assert(actual_payer.load() != recipient.get()),
         
         # Safe fee computation with WideRatio
         payment_amount.store(payment.get().asset_amount()),
@@ -340,7 +358,7 @@ def pay_with_cusd(
                 Assert(Gtxn[0].type_enum() == TxnType.Payment),
                 Assert(Gtxn[0].amount() >= Int(0)),  # Can be 0 if just covering fees
                 Assert(Or(
-                    Gtxn[0].receiver() == Txn.sender(),  # Payment to user
+                    Gtxn[0].receiver() == actual_payer.load(),  # Payment to user
                     Gtxn[0].receiver() == Global.current_application_address()  # Payment to app
                 )),
                 Assert(Gtxn[0].rekey_to() == Global.zero_address()),
@@ -394,7 +412,7 @@ def pay_with_cusd(
                     Seq(
                         # Non-sponsored: MBR payment at index 0
                         Assert(Gtxn[0].type_enum() == TxnType.Payment),
-                        Assert(Gtxn[0].sender() == Txn.sender()),
+                        Assert(Gtxn[0].sender() == actual_payer.load()),
                         Assert(Gtxn[0].receiver() == Global.current_application_address()),
                         Assert(Gtxn[0].amount() == mbr.load()),  # Exact, not >=
                         Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
@@ -404,7 +422,7 @@ def pay_with_cusd(
                         # Sponsored: MBR payment at index 1 (index 0 is sponsor payment)
                         Assert(Global.group_size() == Int(4)),
                         Assert(Gtxn[1].type_enum() == TxnType.Payment),
-                        Assert(Gtxn[1].sender() == Txn.sender()),
+                        Assert(Gtxn[1].sender() == actual_payer.load()),
                         Assert(Gtxn[1].receiver() == Global.current_application_address()),
                         Assert(Gtxn[1].amount() == mbr.load()),  # Exact, not >=
                         Assert(Gtxn[1].close_remainder_to() == Global.zero_address()),
@@ -419,7 +437,7 @@ def pay_with_cusd(
                 
                 # Build and write receipt value in one operation
                 receipt_value.store(Concat(
-                    Txn.sender(),                         # 32 bytes: payer
+                    actual_payer.load(),                  # 32 bytes: payer
                     recipient.get(),                       # 32 bytes: recipient
                     Itob(payment_amount.load()),          # 8 bytes: amount
                     Itob(fee_amount.load()),              # 8 bytes: fee
@@ -462,8 +480,20 @@ def pay_with_confio(
     val_len = ScratchVar(TealType.uint64)
     mbr = ScratchVar(TealType.uint64)
     receipt_value = ScratchVar(TealType.bytes)
+    actual_payer = ScratchVar(TealType.bytes)
     
     return Seq(
+        # Determine actual payer (could be sponsor calling on behalf of user)
+        If(
+            And(
+                app.state.sponsor_address.get() != Bytes(""),
+                Txn.sender() == app.state.sponsor_address.get(),
+                Txn.accounts.length() > Int(0)
+            ),
+            actual_payer.store(Txn.accounts[0]),  # User passed as account reference
+            actual_payer.store(Txn.sender())  # Direct call from user
+        ),
+        
         # Basic validation
         Assert(
             And(
@@ -517,7 +547,7 @@ def pay_with_confio(
         Assert(Gtxn[prev_idx.load()].type_enum() == TxnType.AssetTransfer),
         Assert(Gtxn[prev_idx.load()].asset_receiver() == Global.current_application_address()),
         Assert(Gtxn[prev_idx.load()].xfer_asset() == app.state.confio_asset_id),
-        Assert(Gtxn[prev_idx.load()].sender() == Txn.sender()),  # Bind payer to app call
+        Assert(Gtxn[prev_idx.load()].sender() == actual_payer.load()),  # Bind payer to app call
         
         # Require zeroed dangerous fields on AXFER
         Assert(Gtxn[prev_idx.load()].asset_close_to() == Global.zero_address()),
@@ -525,7 +555,7 @@ def pay_with_confio(
         Assert(Gtxn[prev_idx.load()].rekey_to() == Global.zero_address()),
         
         # Bind the ABI payment object to the prev AXFER
-        Assert(payment.get().sender() == Txn.sender()),
+        Assert(payment.get().sender() == actual_payer.load()),
         Assert(payment.get().xfer_asset() == Gtxn[prev_idx.load()].xfer_asset()),
         Assert(payment.get().asset_receiver() == Gtxn[prev_idx.load()].asset_receiver()),
         Assert(payment.get().asset_amount() == Gtxn[prev_idx.load()].asset_amount()),
@@ -552,7 +582,7 @@ def pay_with_confio(
         Assert(recipient.get() != Global.current_application_address()),
         
         # Self-payment prevention
-        Assert(Txn.sender() != recipient.get()),
+        Assert(actual_payer.load() != recipient.get()),
         
         # Safe fee computation with WideRatio
         payment_amount.store(payment.get().asset_amount()),
@@ -582,7 +612,7 @@ def pay_with_confio(
                 Assert(Gtxn[0].type_enum() == TxnType.Payment),
                 Assert(Gtxn[0].amount() >= Int(0)),  # Can be 0 if just covering fees
                 Assert(Or(
-                    Gtxn[0].receiver() == Txn.sender(),  # Payment to user
+                    Gtxn[0].receiver() == actual_payer.load(),  # Payment to user
                     Gtxn[0].receiver() == Global.current_application_address()  # Payment to app
                 )),
                 Assert(Gtxn[0].rekey_to() == Global.zero_address()),
@@ -636,7 +666,7 @@ def pay_with_confio(
                     Seq(
                         # Non-sponsored: MBR payment at index 0
                         Assert(Gtxn[0].type_enum() == TxnType.Payment),
-                        Assert(Gtxn[0].sender() == Txn.sender()),
+                        Assert(Gtxn[0].sender() == actual_payer.load()),
                         Assert(Gtxn[0].receiver() == Global.current_application_address()),
                         Assert(Gtxn[0].amount() == mbr.load()),  # Exact, not >=
                         Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
@@ -646,7 +676,7 @@ def pay_with_confio(
                         # Sponsored: MBR payment at index 1 (index 0 is sponsor payment)
                         Assert(Global.group_size() == Int(4)),
                         Assert(Gtxn[1].type_enum() == TxnType.Payment),
-                        Assert(Gtxn[1].sender() == Txn.sender()),
+                        Assert(Gtxn[1].sender() == actual_payer.load()),
                         Assert(Gtxn[1].receiver() == Global.current_application_address()),
                         Assert(Gtxn[1].amount() == mbr.load()),  # Exact, not >=
                         Assert(Gtxn[1].close_remainder_to() == Global.zero_address()),
@@ -661,7 +691,7 @@ def pay_with_confio(
                 
                 # Build and write receipt value in one operation
                 receipt_value.store(Concat(
-                    Txn.sender(),                         # 32 bytes: payer
+                    actual_payer.load(),                  # 32 bytes: payer
                     recipient.get(),                       # 32 bytes: recipient
                     Itob(payment_amount.load()),          # 8 bytes: amount
                     Itob(fee_amount.load()),              # 8 bytes: fee
@@ -778,6 +808,16 @@ def update_fee_recipient(new_recipient: abi.Address):
         Assert(new_recipient.get() != Global.current_application_address()),
         
         app.state.fee_recipient.set(new_recipient.get()),
+        Approve()
+    )
+
+@app.external
+def set_sponsor(sponsor: abi.Address):
+    """Admin sets or updates the sponsor address for sponsored transactions"""
+    return Seq(
+        Assert(Txn.sender() == app.state.admin),
+        Assert(Txn.rekey_to() == Global.zero_address()),
+        app.state.sponsor_address.set(sponsor.get()),
         Approve()
     )
 

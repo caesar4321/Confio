@@ -486,11 +486,11 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 try:
                     recipient_user = User.objects.get(id=recipient_user_id)
                     # Get recipient's personal account
-                    recipient_account = recipient_user.accounts.filter(
+                    recipient_user_account = recipient_user.accounts.filter(
                         account_type='personal',
                         account_index=0
                     ).first()
-                    if recipient_account and recipient_user_account.algorand_address:
+                    if recipient_user_account and recipient_user_account.algorand_address:
                         resolved_recipient_address = recipient_user_account.algorand_address
                         logger.info(f"Resolved recipient address from user_id {recipient_user_id}: {resolved_recipient_address[:10]}...")
                     else:
@@ -511,11 +511,11 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 
                 if found_user:
                     # Get recipient's personal account
-                    recipient_account = found_user.accounts.filter(
+                    recipient_user_account = found_user.accounts.filter(
                         account_type='personal',
                         account_index=0
                     ).first()
-                    if recipient_account and recipient_user_account.algorand_address:
+                    if recipient_user_account and recipient_user_account.algorand_address:
                         resolved_recipient_address = recipient_user_account.algorand_address
                         logger.info(f"Resolved recipient address from phone {recipient_phone}: {resolved_recipient_address[:10]}...")
                     else:
@@ -543,8 +543,7 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             elif asset_type == 'USDC':
                 asset_id = AlgorandAccountManager.USDC_ASSET_ID
             elif asset_type == 'CUSD':
-                # For now, using USDC as cUSD placeholder
-                asset_id = AlgorandAccountManager.USDC_ASSET_ID
+                asset_id = AlgorandAccountManager.CUSD_ASSET_ID
             elif asset_type == 'ALGO':
                 asset_id = None  # Native ALGO transfer
             else:

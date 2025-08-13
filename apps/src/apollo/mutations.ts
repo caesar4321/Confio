@@ -81,7 +81,7 @@ export const ALGORAND_SPONSORED_SEND = gql`
       success
       error
       userTransaction
-      sponsorTransactions
+      sponsorTransaction
       groupId
       totalFee
       feeInAlgo
@@ -97,7 +97,7 @@ export const ALGORAND_SPONSORED_OPT_IN = gql`
       alreadyOptedIn
       requiresUserSignature
       userTransaction
-      sponsorTransactions
+      sponsorTransaction
       groupId
       assetId
       assetName
@@ -374,6 +374,90 @@ export const GET_CONVERSION_TRANSACTIONS = gql`
       success
       transactions
       errors
+    }
+  }
+`;
+
+// Payment contract mutations for seamless sponsored payments
+export const CREATE_SPONSORED_PAYMENT = gql`
+  mutation CreateSponsoredPayment(
+    $recipientAddress: String
+    $recipientUserId: ID
+    $recipientPhone: String
+    $amount: Float!
+    $assetType: String
+    $paymentId: String
+    $note: String
+    $createReceipt: Boolean
+  ) {
+    createSponsoredPayment(
+      recipientAddress: $recipientAddress
+      recipientUserId: $recipientUserId
+      recipientPhone: $recipientPhone
+      amount: $amount
+      assetType: $assetType
+      paymentId: $paymentId
+      note: $note
+      createReceipt: $createReceipt
+    ) {
+      success
+      error
+      transactions
+      userSigningIndexes
+      groupId
+      grossAmount
+      netAmount
+      feeAmount
+      paymentId
+    }
+  }
+`;
+
+export const SUBMIT_SPONSORED_PAYMENT = gql`
+  mutation SubmitSponsoredPayment(
+    $signedTransactions: JSONString!
+    $paymentId: String
+  ) {
+    submitSponsoredPayment(
+      signedTransactions: $signedTransactions
+      paymentId: $paymentId
+    ) {
+      success
+      error
+      transactionId
+      confirmedRound
+      netAmount
+      feeAmount
+    }
+  }
+`;
+
+export const CREATE_DIRECT_PAYMENT = gql`
+  mutation CreateDirectPayment(
+    $recipientAddress: String!
+    $amount: Float!
+    $assetType: String
+    $paymentId: String
+    $note: String
+    $createReceipt: Boolean
+  ) {
+    createDirectPayment(
+      recipientAddress: $recipientAddress
+      amount: $amount
+      assetType: $assetType
+      paymentId: $paymentId
+      note: $note
+      createReceipt: $createReceipt
+    ) {
+      success
+      error
+      transactions
+      userSigningIndexes
+      groupId
+      grossAmount
+      netAmount
+      feeAmount
+      totalTransactionFee
     }
   }
 `;

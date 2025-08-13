@@ -1090,6 +1090,157 @@ class AlgorandService {
     }
   }
 
+  async sponsoredPayment(
+    toAddress: string,
+    amount: number,
+    assetType: 'CUSD' | 'CONFIO' = 'CUSD',
+    options?: {
+      userId?: string;
+      phone?: string;
+      note?: string;
+      createReceipt?: boolean;
+    }
+  ): Promise<string | null> {
+    try {
+      console.log(`[AlgorandService] Initiating sponsored payment of ${amount} ${assetType} to ${toAddress || options?.userId || options?.phone}`);
+      
+      // Get auth token
+      const { authStorage } = await import('./authStorageService');
+      const tokenData = await authStorage.getAuthToken();
+      if (!tokenData?.accessToken) {
+        console.error('[AlgorandService] No auth token found');
+        return null;
+      }
+      
+      // Step 1: Create sponsored payment transaction through payment contract
+      const response = await fetch('https://api.confio.app/graphql', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${tokenData.accessToken}`
+        },
+        body: JSON.stringify({
+          query: `
+            mutation CreateSponsoredPayment(
+              $recipientAddress: String
+              $recipientUserId: ID
+              $recipientPhone: String
+              $amount: Float!
+              $assetType: String
+              $note: String
+              $createReceipt: Boolean
+            ) {
+              createSponsoredPayment(
+                recipientAddress: $recipientAddress
+                recipientUserId: $recipientUserId
+                recipientPhone: $recipientPhone
+                amount: $amount
+                assetType: $assetType
+                note: $note
+                createReceipt: $createReceipt
+              ) {
+                success
+                error
+                transactions
+                userSigningIndexes
+                groupId
+                grossAmount
+                netAmount
+                feeAmount
+                paymentId
+              }
+            }
+          `,
+          variables: {
+            recipientAddress: toAddress,
+            recipientUserId: options?.userId,
+            recipientPhone: options?.phone,
+            amount,
+            assetType,
+            note: options?.note,
+            createReceipt: options?.createReceipt || false
+          }
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (!data?.data?.createSponsoredPayment?.success) {
+        console.error('[AlgorandService] Failed to create sponsored payment:', data?.data?.createSponsoredPayment?.error);
+        return null;
+      }
+      
+      const paymentData = data.data.createSponsoredPayment;
+      console.log(`[AlgorandService] Created payment. Gross: ${paymentData.grossAmount}, Net: ${paymentData.netAmount}, Fee: ${paymentData.feeAmount}`);
+      
+      // Step 2: Sign the transactions that require user signature
+      const signedTransactions = [];
+      for (const txn of paymentData.transactions) {
+        if (txn.needs_signature) {
+          // Decode and sign the transaction
+          const txnBytes = Buffer.from(txn.transaction, 'base64');
+          const signedTxn = await this.signTransactionBytes(txnBytes);
+          signedTransactions.push({
+            index: txn.index,
+            transaction: Buffer.from(signedTxn).toString('base64')
+          });
+        } else {
+          // Already signed by sponsor
+          signedTransactions.push({
+            index: txn.index,
+            transaction: txn.transaction
+          });
+        }
+      }
+      
+      // Step 3: Submit the signed transaction group
+      const submitResponse = await fetch('https://api.confio.app/graphql', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${tokenData.accessToken}`
+        },
+        body: JSON.stringify({
+          query: `
+            mutation SubmitSponsoredPayment(
+              $signedTransactions: JSONString!
+              $paymentId: String
+            ) {
+              submitSponsoredPayment(
+                signedTransactions: $signedTransactions
+                paymentId: $paymentId
+              ) {
+                success
+                error
+                transactionId
+                confirmedRound
+              }
+            }
+          `,
+          variables: {
+            signedTransactions: JSON.stringify(signedTransactions),
+            paymentId: paymentData.paymentId
+          }
+        })
+      });
+      
+      const submitData = await submitResponse.json();
+      
+      if (!submitData?.data?.submitSponsoredPayment?.success) {
+        console.error('[AlgorandService] Failed to submit payment:', submitData?.data?.submitSponsoredPayment?.error);
+        return null;
+      }
+      
+      const txId = submitData.data.submitSponsoredPayment.transactionId;
+      console.log(`[AlgorandService] Successfully sent ${amount} ${assetType} (net: ${paymentData.netAmount}) with 0.9% fee. TxID: ${txId}`);
+      return txId;
+      
+    } catch (error) {
+      console.error('[AlgorandService] Error in sponsored payment:', error);
+      return null;
+    }
+  }
+
   async getConfioBalance(address?: string): Promise<number> {
     try {
       await this.ensureInitialized();

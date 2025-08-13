@@ -353,11 +353,12 @@ class AlgorandSponsorService:
             fee_payment_txn.fee = total_fee  # Sponsor pays all fees
             
             # Create atomic group
+            # IMPORTANT: Sponsor transaction must be first for proper fee payment
             if user_signed_txn:
                 # User already signed, we need to reconstruct the unsigned version for grouping
-                txn_group = [user_txn, fee_payment_txn]
+                txn_group = [fee_payment_txn, user_txn]
             else:
-                txn_group = [user_txn, fee_payment_txn]
+                txn_group = [fee_payment_txn, user_txn]
             
             # Assign group ID
             gid = calculate_group_id(txn_group)
@@ -670,7 +671,8 @@ class AlgorandSponsorService:
             fee_payment_txn.fee = total_fee  # Sponsor pays all fees
             
             # Create atomic group
-            txn_group = [opt_in_txn, fee_payment_txn]
+            # IMPORTANT: Sponsor transaction must be first for proper fee payment
+            txn_group = [fee_payment_txn, opt_in_txn]
             
             # Assign group ID
             gid = calculate_group_id(txn_group)
@@ -837,7 +839,8 @@ class AlgorandSponsorService:
             fee_payment_txn.fee = total_fee  # Sponsor pays all fees
             
             # Create atomic group
-            txn_group = [user_txn, fee_payment_txn]
+            # IMPORTANT: Sponsor transaction must be first for proper fee payment
+            txn_group = [fee_payment_txn, user_txn]
             
             # Assign group ID
             gid = calculate_group_id(txn_group)
@@ -955,7 +958,8 @@ class AlgorandSponsorService:
             fee_payment_txn.fee = total_fee  # Sponsor pays all fees
             
             # Create atomic group
-            txn_group = [user_txn, fee_payment_txn]
+            # IMPORTANT: Sponsor transaction must be first for proper fee payment
+            txn_group = [fee_payment_txn, user_txn]
             
             # Assign group ID
             gid = calculate_group_id(txn_group)

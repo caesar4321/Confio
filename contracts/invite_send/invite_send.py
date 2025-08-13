@@ -61,6 +61,12 @@ class InviteSendState:
         descr="Admin address"
     )
     
+    sponsor_address: Final[GlobalStateValue] = GlobalStateValue(
+        stack_type=TealType.bytes,
+        default=Bytes(""),
+        descr="Sponsor address allowed to send app calls on behalf of users"
+    )
+    
     is_paused: Final[GlobalStateValue] = GlobalStateValue(
         stack_type=TealType.uint64,
         default=Int(0),
@@ -200,10 +206,21 @@ def create_invitation(
     key_len = ScratchVar(TealType.uint64)
     value_len = ScratchVar(TealType.uint64)
     mbr_cost = ScratchVar(TealType.uint64)
-
     over = ScratchVar(TealType.uint64)
+    actual_inviter = ScratchVar(TealType.bytes)
     
     return Seq(
+        # Determine actual inviter (could be sponsor calling on behalf of user)
+        If(
+            And(
+                app.state.sponsor_address.get() != Bytes(""),
+                Txn.sender() == app.state.sponsor_address.get(),
+                Txn.accounts.length() > Int(0)
+            ),
+            actual_inviter.store(Txn.accounts[0]),  # User passed as account reference
+            actual_inviter.store(Txn.sender())  # Direct call from user
+        ),
+        
         # Check system state and asset configuration
         Assert(app.state.is_paused == Int(0)),
         Assert(Or(app.state.cusd_asset_id != Int(0), app.state.confio_asset_id != Int(0))),
@@ -226,7 +243,7 @@ def create_invitation(
         # ABI arg must reference a group AXFER that sends to the app FROM the inviter
         Assert(asset_transfer.get().asset_receiver() == Global.current_application_address()),
         Assert(asset_transfer.get().asset_amount() >= MIN_ASSET_AMOUNT),  # Min amount to prevent dust
-        Assert(asset_transfer.get().sender() == Txn.sender()),
+        Assert(asset_transfer.get().sender() == actual_inviter.load()),
         Assert(Or(
             asset_transfer.get().xfer_asset() == app.state.cusd_asset_id,
             asset_transfer.get().xfer_asset() == app.state.confio_asset_id
@@ -250,21 +267,21 @@ def create_invitation(
                 Assert(Gtxn[0].type_enum() == TxnType.Payment),
                 Assert(Gtxn[0].amount() >= Int(0)),  # Can be 0 if just covering fees
                 Assert(Or(
-                    Gtxn[0].receiver() == Txn.sender(),  # Payment to user
+                    Gtxn[0].receiver() == actual_inviter.load(),  # Payment to user
                     Gtxn[0].receiver() == Global.current_application_address()  # Payment to app
                 )),
                 Assert(no_rekey_close_pay(Int(0))),
                 
                 # MBR payment at index 1
                 Assert(Gtxn[1].type_enum() == TxnType.Payment),
-                Assert(Gtxn[1].sender() == Txn.sender()),
+                Assert(Gtxn[1].sender() == actual_inviter.load()),
                 Assert(Gtxn[1].receiver() == Global.current_application_address()),
                 Assert(no_rekey_close_pay(Int(1))),
                 
                 # AXFER at index 2
                 Assert(Gtxn[2].type_enum() == TxnType.AssetTransfer),
                 Assert(Gtxn[2].asset_receiver() == Global.current_application_address()),
-                Assert(Gtxn[2].sender() == Txn.sender()),
+                Assert(Gtxn[2].sender() == actual_inviter.load()),
                 Assert(Gtxn[2].xfer_asset() == asset_transfer.get().xfer_asset()),
                 Assert(Gtxn[2].asset_amount() == asset_transfer.get().asset_amount()),
                 Assert(no_rekey_close_axfer(Int(2))),
@@ -281,14 +298,14 @@ def create_invitation(
                 # Non-sponsored: original structure
                 # MBR payment at index 0
                 Assert(Gtxn[0].type_enum() == TxnType.Payment),
-                Assert(Gtxn[0].sender() == Txn.sender()),
+                Assert(Gtxn[0].sender() == actual_inviter.load()),
                 Assert(Gtxn[0].receiver() == Global.current_application_address()),
                 Assert(no_rekey_close_pay(Int(0))),
                 
                 # AXFER at index 1
                 Assert(Gtxn[1].type_enum() == TxnType.AssetTransfer),
                 Assert(Gtxn[1].asset_receiver() == Global.current_application_address()),
-                Assert(Gtxn[1].sender() == Txn.sender()),
+                Assert(Gtxn[1].sender() == actual_inviter.load()),
                 Assert(Gtxn[1].xfer_asset() == asset_transfer.get().xfer_asset()),
                 Assert(Gtxn[1].asset_amount() == asset_transfer.get().asset_amount()),
                 Assert(no_rekey_close_axfer(Int(1))),
@@ -316,13 +333,13 @@ def create_invitation(
             InnerTxnBuilder.Begin(),
             InnerTxnBuilder.SetFields({
                 TxnField.type_enum: TxnType.Payment,
-                TxnField.receiver: Txn.sender(),
+                TxnField.receiver: actual_inviter.load(),
                 TxnField.amount: over.load(),
                 TxnField.fee: Int(0)
             }),
             InnerTxnBuilder.Submit()
         )),
-        App.box_replace(invitation_id.get(), Int(0), Txn.sender()),
+        App.box_replace(invitation_id.get(), Int(0), actual_inviter.load()),
         App.box_replace(invitation_id.get(), Int(32), Itob(asset_transfer.get().asset_amount())),
         App.box_replace(invitation_id.get(), Int(40), Itob(asset_transfer.get().xfer_asset())),
         App.box_replace(invitation_id.get(), Int(48), Itob(Global.latest_timestamp())),
@@ -626,6 +643,16 @@ def unpause():
             )
         ),
         app.state.is_paused.set(Int(0)),
+        Approve()
+    )
+
+@app.external
+def set_sponsor(sponsor: abi.Address):
+    """Admin sets or updates the sponsor address for sponsored transactions"""
+    return Seq(
+        Assert(Txn.sender() == app.state.admin),
+        Assert(Txn.rekey_to() == Global.zero_address()),
+        app.state.sponsor_address.set(sponsor.get()),
         Approve()
     )
 
