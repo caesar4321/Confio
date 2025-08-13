@@ -277,7 +277,7 @@ export const TransactionProcessingScreen = () => {
         // Build variables based on what recipient info we have
         const variables: any = {
           amount: parseFloat(transactionData.amount),
-          assetType: transactionData.tokenType || transactionData.currency || 'CUSD',
+          assetType: (transactionData.tokenType || transactionData.currency || 'CUSD').toUpperCase(),
           note: transactionData.memo || undefined
         };
         

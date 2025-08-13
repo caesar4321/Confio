@@ -14,6 +14,11 @@ from .mutations import (
     AlgorandSponsoredOptInMutation,
     CheckSponsorHealthQuery
 )
+from .payment_mutations import (
+    CreateSponsoredPaymentMutation,
+    SubmitSponsoredPaymentMutation,
+    CreateDirectPaymentMutation
+)
 
 
 class Query(graphene.ObjectType):
@@ -38,6 +43,11 @@ class Mutation(graphene.ObjectType):
     algorand_sponsored_send = AlgorandSponsoredSendMutation.Field()
     algorand_sponsored_opt_in = AlgorandSponsoredOptInMutation.Field()
     submit_sponsored_group = SubmitSponsoredGroupMutation.Field()
+    
+    # Payment contract mutations
+    create_sponsored_payment = CreateSponsoredPaymentMutation.Field()
+    submit_sponsored_payment = SubmitSponsoredPaymentMutation.Field()
+    create_direct_payment = CreateDirectPaymentMutation.Field()
 
 
 __all__ = ['Query', 'Mutation']

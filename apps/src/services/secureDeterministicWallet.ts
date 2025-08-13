@@ -557,31 +557,13 @@ export class SecureDeterministicWalletService {
   private decodeTxn(bytes: Uint8Array): any {
     const algosdk = require('algosdk');
     
-    try {
-      // First try decodeUnsignedTransaction if available
-      if (typeof algosdk.decodeUnsignedTransaction === 'function') {
-        const txn = algosdk.decodeUnsignedTransaction(bytes);
-        if (txn && typeof txn.signTxn === 'function') {
-          return txn;
-        }
-      }
-    } catch (e) {
-      // Fall through to alternative method
-    }
-    
-    // Alternative: Decode the msgpack object and create Transaction from it
-    const decoded = algosdk.decodeObj(bytes);
-    
-    // Create a new Transaction object from the decoded fields
-    // This ensures we get a proper Transaction instance with signTxn method
-    const txn = algosdk.Transaction.from_obj_for_encoding(decoded);
+    // Use algosdk's decodeUnsignedTransaction which returns a proper Transaction instance
+    // This handles all the field mapping correctly
+    const txn = algosdk.decodeUnsignedTransaction(bytes);
     
     // Verify it has the signTxn method
-    if (typeof txn?.signTxn !== 'function') {
-      // Last resort: If still no signTxn, manually add it
-      txn.signTxn = function(sk: Uint8Array) {
-        return algosdk.signTransaction(this, sk).blob;
-      };
+    if (typeof txn.signTxn !== 'function') {
+      throw new Error('Decoded transaction does not have signTxn method');
     }
     
     return txn;

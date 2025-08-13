@@ -90,6 +90,19 @@
             "desc": "Admin updates the fee recipient address"
         },
         {
+            "name": "set_sponsor",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "sponsor"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Admin sets or updates the sponsor address for sponsored transactions"
+        },
+        {
             "name": "pause",
             "args": [],
             "returns": {

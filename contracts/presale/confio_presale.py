@@ -199,9 +199,23 @@ def confio_presale():
     # Buy CONFIO tokens (fully sponsored)
     @Subroutine(TealType.uint64)
     def buy_tokens():
+        # Determine actual buyer (could be sponsor calling on behalf of user)
+        actual_buyer = ScratchVar(TealType.bytes)
+        
         return Seq([
+            # Determine actual buyer
+            If(
+                And(
+                    App.globalGet(sponsor_address) != Bytes(""),
+                    Txn.sender() == App.globalGet(sponsor_address),
+                    Txn.accounts.length() > Int(0)
+                ),
+                actual_buyer.store(Txn.accounts[0]),  # User passed as account reference
+                actual_buyer.store(Txn.sender())  # Direct call from user
+            ),
+            
             # User must be opted into the app
-            Assert(App.optedIn(Txn.sender(), Global.current_application_id())),
+            Assert(App.optedIn(actual_buyer.load(), Global.current_application_id())),
             
             # Check presale is active
             If(App.globalGet(round_active) != Int(1),
@@ -233,7 +247,7 @@ def confio_presale():
             
             # Verify cUSD payment (with guardrails against clawback/close/rekey)
             Assert(Gtxn[1].type_enum() == TxnType.AssetTransfer),
-            Assert(Gtxn[1].sender() == Txn.sender()),
+            Assert(Gtxn[1].sender() == actual_buyer.load()),
             Assert(Gtxn[1].asset_receiver() == Global.current_application_address()),
             Assert(Gtxn[1].xfer_asset() == App.globalGet(cusd_asset_id)),
             Assert(Gtxn[1].asset_close_to() == Global.zero_address()),
@@ -250,18 +264,18 @@ def confio_presale():
             Assert(cusd_amount >= App.globalGet(min_buy_cusd)),
             
             # Check per-address cap for this round in cUSD
-            (user_prev_round := App.localGet(Txn.sender(), user_round)),
+            (user_prev_round := App.localGet(actual_buyer.load(), user_round)),
             If(user_prev_round != App.globalGet(current_round),
                 # New round for this user, reset their round counter
                 Seq([
-                    App.localPut(Txn.sender(), user_round, App.globalGet(current_round)),
-                    App.localPut(Txn.sender(), user_round_cusd, Int(0))
+                    App.localPut(actual_buyer.load(), user_round, App.globalGet(current_round)),
+                    App.localPut(actual_buyer.load(), user_round_cusd, Int(0))
                 ])
             ),
-            If(App.localGet(Txn.sender(), user_round_cusd) + cusd_amount > App.globalGet(max_buy_cusd_per_address),
+            If(App.localGet(actual_buyer.load(), user_round_cusd) + cusd_amount > App.globalGet(max_buy_cusd_per_address),
                 Log(Bytes("ERR|MAX_PER_ADDR"))
             ),
-            Assert(App.localGet(Txn.sender(), user_round_cusd) + cusd_amount 
+            Assert(App.localGet(actual_buyer.load(), user_round_cusd) + cusd_amount 
                    <= App.globalGet(max_buy_cusd_per_address)),
             
             # Check round cap not exceeded
@@ -282,7 +296,7 @@ def confio_presale():
             Assert(confio_balance.value() >= outstanding + confio_amount),
             
             # Track active participants (note: can be re-counted if user closes out and re-joins)
-            If(App.localGet(Txn.sender(), user_total_confio) == Int(0),
+            If(App.localGet(actual_buyer.load(), user_total_confio) == Int(0),
                 App.globalPut(total_participants, App.globalGet(total_participants) + Int(1))
             ),
             
@@ -292,12 +306,12 @@ def confio_presale():
             App.globalPut(total_cusd_raised, App.globalGet(total_cusd_raised) + cusd_amount),
             
             # Update user's local state
-            App.localPut(Txn.sender(), user_total_confio, 
-                App.localGet(Txn.sender(), user_total_confio) + confio_amount),
-            App.localPut(Txn.sender(), user_total_cusd,
-                App.localGet(Txn.sender(), user_total_cusd) + cusd_amount),
-            App.localPut(Txn.sender(), user_round_cusd,
-                App.localGet(Txn.sender(), user_round_cusd) + cusd_amount),
+            App.localPut(actual_buyer.load(), user_total_confio, 
+                App.localGet(actual_buyer.load(), user_total_confio) + confio_amount),
+            App.localPut(actual_buyer.load(), user_total_cusd,
+                App.localGet(actual_buyer.load(), user_total_cusd) + cusd_amount),
+            App.localPut(actual_buyer.load(), user_round_cusd,
+                App.localGet(actual_buyer.load(), user_round_cusd) + cusd_amount),
             
             # Log purchase for indexing
             Log(Concat(
@@ -310,7 +324,7 @@ def confio_presale():
                 Bytes("|"),
                 Itob(confio_amount),
                 Bytes("|"),
-                Txn.sender()
+                actual_buyer.load()
             )),
             
             # Auto-end round at cap

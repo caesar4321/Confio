@@ -250,16 +250,28 @@ def create_trade(
     mbr_cost = ScratchVar(TealType.uint64)
     mbr_payer = ScratchVar(TealType.bytes)
     delta = ScratchVar(TealType.uint64)
+    actual_seller = ScratchVar(TealType.bytes)
 
     return Seq(
         # Check system state and asset configuration
         Assert(app.state.is_paused == Int(0)),
         Assert(Or(app.state.cusd_asset_id != Int(0), app.state.confio_asset_id != Int(0))),
 
+        # Determine actual seller (could be sponsor calling on behalf of user)
+        If(
+            And(
+                app.state.sponsor_address.get() != Bytes(""),
+                Txn.sender() == app.state.sponsor_address.get(),
+                Txn.accounts.length() > Int(0)
+            ),
+            actual_seller.store(Txn.accounts[0]),  # User passed as account reference
+            actual_seller.store(Txn.sender())  # Direct call from user
+        ),
+
         # Bind the AXFER to the app call and verify
         Assert(asset_transfer.get().asset_receiver() == Global.current_application_address()),
         Assert(asset_transfer.get().asset_amount() > Int(0)),
-        Assert(asset_transfer.get().sender() == Txn.sender()),
+        Assert(asset_transfer.get().sender() == actual_seller.load()),
         Assert(Or(
             asset_transfer.get().xfer_asset() == app.state.cusd_asset_id,
             asset_transfer.get().xfer_asset() == app.state.confio_asset_id
@@ -292,7 +304,7 @@ def create_trade(
                 
                 # MBR payment at index 1
                 Assert(Gtxn[1].type_enum() == TxnType.Payment),
-                Assert(Gtxn[1].sender() == Txn.sender()),
+                Assert(Gtxn[1].sender() == actual_seller.load()),
                 Assert(Gtxn[1].receiver() == Global.current_application_address()),
                 Assert(no_rekey_close(Int(1))),
                 Assert(Gtxn[1].amount() >= mbr_cost.load()),
@@ -300,7 +312,7 @@ def create_trade(
                 # AXFER at index 2
                 Assert(Gtxn[2].type_enum() == TxnType.AssetTransfer),
                 Assert(Gtxn[2].asset_receiver() == Global.current_application_address()),
-                Assert(Gtxn[2].sender() == Txn.sender()),
+                Assert(Gtxn[2].sender() == actual_seller.load()),
                 Assert(Gtxn[2].xfer_asset() == asset_transfer.get().xfer_asset()),
                 Assert(Gtxn[2].asset_amount() == asset_transfer.get().asset_amount()),
                 Assert(no_rekey_close(Int(2))),
@@ -324,7 +336,7 @@ def create_trade(
                 # AXFER at index 1
                 Assert(Gtxn[1].type_enum() == TxnType.AssetTransfer),
                 Assert(Gtxn[1].asset_receiver() == Global.current_application_address()),
-                Assert(Gtxn[1].sender() == Txn.sender()),
+                Assert(Gtxn[1].sender() == actual_seller.load()),
                 Assert(Gtxn[1].xfer_asset() == asset_transfer.get().xfer_asset()),
                 Assert(Gtxn[1].asset_amount() == asset_transfer.get().asset_amount()),
                 Assert(no_rekey_close(Int(1))),
@@ -336,7 +348,7 @@ def create_trade(
                 # Record the real payer and restrict who it can be
                 Assert(Or(
                     Gtxn[0].sender() == app.state.sponsor_address,
-                    Gtxn[0].sender() == Txn.sender()
+                    Gtxn[0].sender() == actual_seller.load()
                 )),
                 mbr_payer.store(Gtxn[0].sender()),
                 delta.store(Gtxn[0].amount() - mbr_cost.load())
@@ -365,7 +377,7 @@ def create_trade(
         Assert(App.box_create(trade_id.get(), TRADE_VALUE_FIXED_LEN)),
 
         # Populate fixed-size trade record with zero bytes for buyer
-        App.box_replace(trade_id.get(), Int(0), Txn.sender()),                         # seller (32)
+        App.box_replace(trade_id.get(), Int(0), actual_seller.load()),                 # seller (32)
         App.box_replace(trade_id.get(), Int(32), Itob(asset_transfer.get().asset_amount())),  # amount (8)
         App.box_replace(trade_id.get(), Int(40), Itob(asset_transfer.get().xfer_asset())),    # asset_id (8)
         App.box_replace(trade_id.get(), Int(48), Itob(Global.latest_timestamp())),      # created_at (8)
@@ -395,8 +407,20 @@ def accept_trade(trade_id: abi.String):
     amount = ScratchVar(TealType.uint64)
     asset_id = ScratchVar(TealType.uint64)
     status = ScratchVar(TealType.bytes)
+    actual_buyer = ScratchVar(TealType.bytes)
     
     return Seq(
+        # Determine actual buyer (could be sponsor calling on behalf of user)
+        If(
+            And(
+                app.state.sponsor_address.get() != Bytes(""),
+                Txn.sender() == app.state.sponsor_address.get(),
+                Txn.accounts.length() > Int(0)
+            ),
+            actual_buyer.store(Txn.accounts[0]),  # User passed as account reference
+            actual_buyer.store(Txn.sender())  # Direct call from user
+        ),
+        
         # Verify rekey/close protection
         Assert(no_rekey_close(Int(0))),
         
@@ -414,20 +438,20 @@ def accept_trade(trade_id: abi.String):
             And(
                 app.state.is_paused == Int(0),
                 status.load() == Bytes("base16", "00"),  # PENDING
-                seller.load() != Txn.sender(),  # Can't self-trade
+                seller.load() != actual_buyer.load(),  # Can't self-trade
                 Extract(trade_data.value(), Int(65), Int(8)) == Itob(Int(0))  # Not previously accepted
             )
         ),
         
         # Ensure buyer is opted into the asset
-        (bal := AssetHolding.balance(Txn.sender(), asset_id.load())),
+        (bal := AssetHolding.balance(actual_buyer.load(), asset_id.load())),
         Assert(bal.hasValue()),
         
         # Update trade to ACTIVE and set expiry window NOW
         App.box_replace(trade_id.get(), Int(56), Itob(Global.latest_timestamp() + TRADE_WINDOW_SECONDS)),  # expires_at
         App.box_replace(trade_id.get(), Int(64), Bytes("base16", "01")),  # status = ACTIVE
         App.box_replace(trade_id.get(), Int(65), Itob(Global.latest_timestamp())),  # accepted_at
-        App.box_replace(trade_id.get(), Int(73), Txn.sender()),  # buyer
+        App.box_replace(trade_id.get(), Int(73), actual_buyer.load()),  # buyer
         
         # Event log for indexers
         Log(Concat(Bytes("ev:accept:"), trade_id.get())),
