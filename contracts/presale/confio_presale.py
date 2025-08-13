@@ -152,12 +152,12 @@ def confio_presale():
             Assert(App.globalGet(min_buy_cusd) <= new_max_per_addr),  # min_buy <= max_per_addr
             Assert(new_max_per_addr <= new_cusd_cap),  # max_per_addr can't exceed round cap
             
-            # Calculate CONFIO needed for this round (avoid overflow with WideRatio)
+            # Calculate CONFIO needed for this round (avoid overflow with WideRatio)  
             # confio_needed = cusd_cap * CONFIO_DECIMALS / price
-            (confio_needed := WideRatio([new_cusd_cap, CONFIO_DECIMALS], [new_price])),
+            # Skip the calculation in main flow, use direct check instead
             
-            # Ensure round can sell at least 1 token
-            Assert(confio_needed > Int(0)),
+            # Ensure round can sell at least 1 token (direct check)
+            Assert(WideRatio([new_cusd_cap, CONFIO_DECIMALS], [new_price]) > Int(0)),
             
             # Check contract has enough CONFIO accounting for outstanding obligations
             (confio_balance := AssetHolding.balance(
@@ -170,7 +170,7 @@ def confio_presale():
             (outstanding := App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
             
             # Ensure we have enough for outstanding + new round
-            Assert(confio_balance.value() >= outstanding + confio_needed),
+            Assert(confio_balance.value() >= outstanding + WideRatio([new_cusd_cap, CONFIO_DECIMALS], [new_price])),
             
             # Start new round
             App.globalPut(current_round, App.globalGet(current_round) + Int(1)),
@@ -184,13 +184,13 @@ def confio_presale():
             # Log round details (including max_addr for full snapshot)
             Log(Concat(
                 Bytes("ADMIN|START_ROUND|"),
-                Itoa(App.globalGet(current_round)),
+                Itob(App.globalGet(current_round)),
                 Bytes("|"),
-                Itoa(new_price),
+                Itob(new_price),
                 Bytes("|"),
-                Itoa(new_cusd_cap),
+                Itob(new_cusd_cap),
                 Bytes("|"),
-                Itoa(new_max_per_addr)
+                Itob(new_max_per_addr)
             )),
             
             Int(1)
@@ -302,13 +302,13 @@ def confio_presale():
             # Log purchase for indexing
             Log(Concat(
                 Bytes("BUY|"),
-                Itoa(App.globalGet(current_round)),
+                Itob(App.globalGet(current_round)),
                 Bytes("|"),
-                Itoa(App.globalGet(cusd_per_confio)),
+                Itob(App.globalGet(cusd_per_confio)),
                 Bytes("|"),
-                Itoa(cusd_amount),
+                Itob(cusd_amount),
                 Bytes("|"),
-                Itoa(confio_amount),
+                Itob(confio_amount),
                 Bytes("|"),
                 Txn.sender()
             )),
@@ -319,7 +319,7 @@ def confio_presale():
                     App.globalPut(round_active, Int(0)),
                     Log(Concat(
                         Bytes("ADMIN|ROUND_ENDED_AT_CAP|"),
-                        Itoa(App.globalGet(current_round))
+                        Itob(App.globalGet(current_round))
                     ))
                 ])
             ),
@@ -421,7 +421,7 @@ def confio_presale():
             # Log claim for indexing
             Log(Concat(
                 Bytes("CLAIM|"),
-                Itoa(claimable),
+                Itob(claimable),
                 Bytes("|"),
                 beneficiary
             )),
@@ -521,7 +521,7 @@ def confio_presale():
             
             Log(Concat(
                 Bytes("ADMIN|UNLOCK|PERMANENT|"),
-                Itoa(App.globalGet(current_round))
+                Itob(App.globalGet(current_round))
             )),
             
             Int(1)
@@ -591,9 +591,9 @@ def confio_presale():
             
             Log(Concat(
                 Bytes("ADMIN|WITHDRAW_CONFIO|"),
-                Itoa(App.globalGet(current_round)),
+                Itob(App.globalGet(current_round)),
                 Bytes("|"),
-                Itoa(withdraw_amount),
+                Itob(withdraw_amount),
                 Bytes("|"),
                 receiver
             )),
@@ -643,9 +643,9 @@ def confio_presale():
                     
                     Log(Concat(
                         Bytes("ADMIN|WITHDRAW_CUSD|"),
-                        Itoa(App.globalGet(current_round)),
+                        Itob(App.globalGet(current_round)),
                         Bytes("|"),
-                        Itoa(cusd_balance.value()), 
+                        Itob(cusd_balance.value()), 
                         Bytes("|"),
                         receiver
                     ))
@@ -670,7 +670,7 @@ def confio_presale():
                     App.globalPut(round_active, Int(0)),
                     Log(Concat(
                         Bytes("ADMIN|TOGGLE|"),
-                        Itoa(App.globalGet(current_round)),
+                        Itob(App.globalGet(current_round)),
                         Bytes("|0")  # 0 = paused
                     ))
                 ]),
@@ -701,7 +701,7 @@ def confio_presale():
                     App.globalPut(round_active, Int(1)),
                     Log(Concat(
                         Bytes("ADMIN|TOGGLE|"),
-                        Itoa(App.globalGet(current_round)),
+                        Itob(App.globalGet(current_round)),
                         Bytes("|1")  # 1 = active
                     ))
                 ])
@@ -829,10 +829,10 @@ def confio_presale():
     def get_user_info():
         return Seq([
             # Log user's purchase info
-            Log(Itoa(App.localGet(Txn.sender(), user_total_confio))),
-            Log(Itoa(App.localGet(Txn.sender(), user_total_cusd))),
-            Log(Itoa(App.localGet(Txn.sender(), user_claimed))),
-            Log(Itoa(App.localGet(Txn.sender(), user_round_cusd))),
+            Log(Itob(App.localGet(Txn.sender(), user_total_confio))),
+            Log(Itob(App.localGet(Txn.sender(), user_total_cusd))),
+            Log(Itob(App.localGet(Txn.sender(), user_claimed))),
+            Log(Itob(App.localGet(Txn.sender(), user_round_cusd))),
             
             Int(1)
         ])

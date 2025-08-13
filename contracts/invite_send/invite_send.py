@@ -4,7 +4,8 @@ Escrow-based invitation system with 7-day reclaim period
 Website: https://confio.lat
 
 Usage and group structures:
-- Create: [Payment(inviter→app, amount=box MBR), AXFER(inviter→app), AppCall(create_invitation)]
+- Create (non-sponsored): [Payment(inviter→app, amount=box MBR), AXFER(inviter→app), AppCall(create_invitation)]
+- Create (sponsored): [Payment(sponsor→user/app, fees), Payment(inviter→app, MBR), AXFER(inviter→app), AppCall(create_invitation)]
   The app calculates MBR dynamically from key/value sizes and requires the payment to cover it.
 - Claim: AppCall(claim_invitation) standalone, or grouped with a 0-amount pay-yourself Payment to add fee budget.
   Fee-bump format: [Payment(sender→sender, amount=0), AppCall(claim_invitation)]
@@ -231,27 +232,76 @@ def create_invitation(
             asset_transfer.get().xfer_asset() == app.state.confio_asset_id
         )),
 
-        # Group shape & funding: [Payment(inviter→app), AXFER, AppCall]
-        Assert(Global.group_size() == Int(3)),
-        Assert(Gtxn[0].type_enum() == TxnType.Payment),
-        Assert(Gtxn[0].sender() == Txn.sender()),
-        Assert(Gtxn[0].receiver() == Global.current_application_address()),
-        # No rekey/close on payment
-        Assert(no_rekey_close_pay(Int(0))),
-        
-        # Also assert the in-group AXFER matches the ABI arg
-        Assert(Gtxn[1].type_enum() == TxnType.AssetTransfer),
-        Assert(Gtxn[1].asset_receiver() == Global.current_application_address()),
-        Assert(Gtxn[1].sender() == Txn.sender()),
-        Assert(Gtxn[1].xfer_asset() == asset_transfer.get().xfer_asset()),
-        Assert(Gtxn[1].asset_amount() == asset_transfer.get().asset_amount()),
-        # No rekey/close/clawback on AXFER
-        Assert(no_rekey_close_axfer(Int(1))),
-
-        # Compute MBR and require funding; auto-refund overpay
+        # Compute box value length first
         value_len.store(Int(32 + 8 + 8 + 8 + 8 + 1 + 1 + 2) + msg_len.load()),
-        mbr_cost.store(box_mbr_cost(key_len.load(), value_len.load())),
-        Assert(Gtxn[0].amount() >= mbr_cost.load()),
+        
+        # Group shape & funding: Support both sponsored and non-sponsored
+        # Non-sponsored: [Payment(inviter→app), AXFER, AppCall]
+        # Sponsored: [Payment(sponsor→user/app), Payment(inviter→app), AXFER, AppCall]
+        Assert(Or(
+            Global.group_size() == Int(3),  # Non-sponsored
+            Global.group_size() == Int(4)   # Sponsored
+        )),
+        
+        # Determine indices based on group size
+        If(Global.group_size() == Int(4),
+            Seq(
+                # Sponsored: verify sponsor payment at index 0
+                Assert(Gtxn[0].type_enum() == TxnType.Payment),
+                Assert(Gtxn[0].amount() >= Int(0)),  # Can be 0 if just covering fees
+                Assert(Or(
+                    Gtxn[0].receiver() == Txn.sender(),  # Payment to user
+                    Gtxn[0].receiver() == Global.current_application_address()  # Payment to app
+                )),
+                Assert(no_rekey_close_pay(Int(0))),
+                
+                # MBR payment at index 1
+                Assert(Gtxn[1].type_enum() == TxnType.Payment),
+                Assert(Gtxn[1].sender() == Txn.sender()),
+                Assert(Gtxn[1].receiver() == Global.current_application_address()),
+                Assert(no_rekey_close_pay(Int(1))),
+                
+                # AXFER at index 2
+                Assert(Gtxn[2].type_enum() == TxnType.AssetTransfer),
+                Assert(Gtxn[2].asset_receiver() == Global.current_application_address()),
+                Assert(Gtxn[2].sender() == Txn.sender()),
+                Assert(Gtxn[2].xfer_asset() == asset_transfer.get().xfer_asset()),
+                Assert(Gtxn[2].asset_amount() == asset_transfer.get().asset_amount()),
+                Assert(no_rekey_close_axfer(Int(2))),
+                
+                # App call at index 3
+                Assert(Txn.group_index() == Int(3)),
+                
+                # Store MBR calculations
+                mbr_cost.store(box_mbr_cost(key_len.load(), value_len.load())),
+                Assert(Gtxn[1].amount() >= mbr_cost.load()),
+                over.store(Gtxn[1].amount() - mbr_cost.load())
+            ),
+            Seq(
+                # Non-sponsored: original structure
+                # MBR payment at index 0
+                Assert(Gtxn[0].type_enum() == TxnType.Payment),
+                Assert(Gtxn[0].sender() == Txn.sender()),
+                Assert(Gtxn[0].receiver() == Global.current_application_address()),
+                Assert(no_rekey_close_pay(Int(0))),
+                
+                # AXFER at index 1
+                Assert(Gtxn[1].type_enum() == TxnType.AssetTransfer),
+                Assert(Gtxn[1].asset_receiver() == Global.current_application_address()),
+                Assert(Gtxn[1].sender() == Txn.sender()),
+                Assert(Gtxn[1].xfer_asset() == asset_transfer.get().xfer_asset()),
+                Assert(Gtxn[1].asset_amount() == asset_transfer.get().asset_amount()),
+                Assert(no_rekey_close_axfer(Int(1))),
+                
+                # App call at index 2
+                Assert(Txn.group_index() == Int(2)),
+                
+                # Store MBR calculations
+                mbr_cost.store(box_mbr_cost(key_len.load(), value_len.load())),
+                Assert(Gtxn[0].amount() >= mbr_cost.load()),
+                over.store(Gtxn[0].amount() - mbr_cost.load())
+            )
+        ),
 
         # Invitation must be new
         (existing_box := App.box_get(invitation_id.get())),
@@ -261,7 +311,7 @@ def create_invitation(
         Assert(App.box_create(invitation_id.get(), value_len.load())),
         
         # Immediately refund any overpay (prevents trapped ALGO)
-        over.store(Gtxn[0].amount() - mbr_cost.load()),
+        # Note: over.store() is already set in the group validation above
         If(over.load() > Int(0)).Then(Seq(
             InnerTxnBuilder.Begin(),
             InnerTxnBuilder.SetFields({

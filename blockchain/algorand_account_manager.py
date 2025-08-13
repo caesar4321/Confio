@@ -31,6 +31,7 @@ class AlgorandAccountManager:
     CONFIO_ASSET_ID = settings.ALGORAND_CONFIO_ASSET_ID
     USDC_ASSET_ID = settings.ALGORAND_USDC_ASSET_ID
     CUSD_ASSET_ID = settings.ALGORAND_CUSD_ASSET_ID
+    CUSD_APP_ID = settings.ALGORAND_CUSD_APP_ID  # Application ID for cUSD smart contract
     
     # Sponsor account from settings
     SPONSOR_ADDRESS = settings.ALGORAND_SPONSOR_ADDRESS
@@ -70,6 +71,7 @@ class AlgorandAccountManager:
         logger.info(f"  Algod: {cls.ALGOD_ADDRESS}")
         logger.info(f"  CONFIO Asset ID: {cls.CONFIO_ASSET_ID}")
         logger.info(f"  cUSD Asset ID: {cls.CUSD_ASSET_ID}")
+        logger.info(f"  cUSD App ID: {cls.CUSD_APP_ID}")
         logger.info(f"  USDC Asset ID: {cls.USDC_ASSET_ID}")
         
         try:

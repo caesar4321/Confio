@@ -11,7 +11,7 @@ from decimal import Decimal
 from algosdk.v2client import algod
 from algosdk.kmd import KMDClient
 from algosdk import account, mnemonic, transaction, encoding
-from algosdk.transaction import PaymentTxn, AssetTransferTxn, Transaction, calculate_group_id
+from algosdk.transaction import PaymentTxn, AssetTransferTxn, Transaction, calculate_group_id, wait_for_confirmation
 from algosdk.atomic_transaction_composer import AtomicTransactionComposer, TransactionWithSigner, AccountTransactionSigner
 from django.conf import settings
 from django.core.cache import cache
@@ -45,12 +45,13 @@ class AlgorandSponsorService:
     MAX_FEE_PER_TX = 10000                # Max 0.01 ALGO per transaction
     
     def __init__(self):
-        # Algorand node configuration
-        self.algod_address = getattr(settings, 'ALGORAND_ALGOD_ADDRESS', 'https://testnet-api.algonode.cloud')
+        # Algorand node configuration - single source of truth
+        self.algod_address = settings.ALGORAND_ALGOD_ADDRESS
         self.algod_token = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '')
+        self.sponsor_mnemonic = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
         
-        # KMD configuration (for secure key management)
-        self.kmd_address = getattr(settings, 'ALGORAND_KMD_ADDRESS', 'http://localhost:4002')
+        # KMD configuration (for secure key management) - optional
+        self.kmd_address = getattr(settings, 'ALGORAND_KMD_ADDRESS', None)
         self.kmd_token = getattr(settings, 'ALGORAND_KMD_TOKEN', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
         self.kmd_wallet_name = getattr(settings, 'ALGORAND_KMD_WALLET_NAME', 'sponsor_wallet')
         self.kmd_wallet_password = getattr(settings, 'ALGORAND_KMD_WALLET_PASSWORD', 'sponsor_password')
@@ -395,6 +396,65 @@ class AlgorandSponsorService:
                 'error': str(e)
             }
     
+    async def submit_solo_transaction(
+        self,
+        signed_txn: str
+    ) -> Dict[str, Any]:
+        """
+        Submit a single signed transaction (not sponsored).
+        
+        Args:
+            signed_txn: Base64 encoded signed transaction
+            
+        Returns:
+            Dict with transaction result
+        """
+        try:
+            logger.info(f"Submitting solo transaction, length: {len(signed_txn)}")
+            
+            # Decode transaction from base64
+            try:
+                stxn = base64.b64decode(signed_txn)
+            except Exception as e:
+                logger.error(f"Failed to decode transaction: {e}")
+                return {
+                    'success': False,
+                    'error': f'Failed to decode transaction: {e}'
+                }
+            
+            logger.info(f"Transaction bytes length: {len(stxn)}")
+            
+            # Submit single transaction
+            try:
+                # Send raw transaction bytes
+                tx_id = self.algod.send_raw_transaction(stxn)
+                logger.info(f"Solo transaction submitted: {tx_id}")
+                
+                # Wait for confirmation
+                result = wait_for_confirmation(self.algod, tx_id, 4)
+                
+                return {
+                    'success': True,
+                    'tx_id': tx_id,
+                    'confirmed_round': result.get('confirmed-round', 0),
+                    'sponsored': False,
+                    'fees_saved': 0  # No fees saved since user pays
+                }
+                
+            except Exception as e:
+                logger.error(f"Failed to submit solo transaction: {e}")
+                return {
+                    'success': False,
+                    'error': f'Failed to submit transaction: {str(e)}'
+                }
+                
+        except Exception as e:
+            logger.error(f"Error submitting solo transaction: {e}")
+            return {
+                'success': False,
+                'error': str(e)
+            }
+    
     async def submit_sponsored_group(
         self,
         signed_user_txn: str,
@@ -402,9 +462,10 @@ class AlgorandSponsorService:
     ) -> Dict[str, Any]:
         """
         Submit a complete sponsored transaction group.
+        Sponsor transaction is always placed first to ensure proper fee payment and MBR funding.
         
         Args:
-            signed_user_txn: Base64 encoded signed user transaction
+            signed_user_txn: Base64 encoded signed user transaction(s)
             signed_sponsor_txn: Base64 encoded signed sponsor transaction
             
         Returns:
@@ -445,8 +506,9 @@ class AlgorandSponsorService:
             logger.info(f"Sponsor transaction bytes length: {len(sponsor_stxn)}")
             
             # Combine transactions for atomic group submission
-            # In Algorand, atomic groups are submitted by concatenating the signed transactions
-            combined_txns = user_stxn + sponsor_stxn
+            # ALWAYS put sponsor first to ensure proper fee payment and MBR funding
+            logger.info(f"Combining transactions with sponsor first (proper sponsorship pattern)")
+            combined_txns = sponsor_stxn + user_stxn
             logger.info(f"Combined transaction bytes length: {len(combined_txns)}")
             
             # Submit the atomic group to the network
@@ -924,6 +986,41 @@ class AlgorandSponsorService:
                 'success': False,
                 'error': str(e)
             }
+    
+    async def sign_sponsor_transaction(
+        self,
+        conversion_type: str,
+        amount: Decimal
+    ) -> Optional[bytes]:
+        """
+        Sign a sponsor transaction for cUSD conversion.
+        This is called when executing a conversion with client-signed transactions.
+        
+        Args:
+            conversion_type: Type of conversion ('usdc_to_cusd' or 'cusd_to_usdc')
+            amount: Amount being converted
+            
+        Returns:
+            Signed sponsor transaction bytes or None if failed
+        """
+        try:
+            # For now, return a mock signed transaction
+            # In production, this would:
+            # 1. Build the fee payment transaction
+            # 2. Sign with sponsor private key from KMD or secure storage
+            # 3. Return the signed transaction bytes
+            
+            logger.info(f"Signing sponsor transaction for {conversion_type} of {amount}")
+            
+            # TODO: Implement actual sponsor transaction signing
+            # This requires the pre-built transaction from the client
+            # For now, return None to indicate not implemented
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error signing sponsor transaction: {e}")
+            return None
     
     async def estimate_sponsorship_cost(
         self,

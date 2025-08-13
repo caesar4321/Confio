@@ -341,7 +341,7 @@ class AlgorandService {
       this.currentAccount = { addr: wallet.address, sk: null };
 
       // Now sign the raw transaction bytes using secure wallet
-      const signedTxn = await secureDeterministicWallet.signTransaction(sub, txnBytes);
+      const signedTxn = await secureDeterministicWallet.signTransaction(txnBytes);
       return signedTxn;
     } catch (error) {
       console.error('Error signing transaction:', error);
@@ -888,6 +888,7 @@ class AlgorandService {
               variables: {
                 signedUserTxn: allUserTxnsB64,
                 signedSponsorTxn: sponsorTxnData.transaction
+                // Sponsor is always first - no flag needed
               }
             });
             

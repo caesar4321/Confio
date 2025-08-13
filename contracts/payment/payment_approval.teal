@@ -1,5 +1,5 @@
 #pragma version 8
-intcblock 0 1 2 4 2500 10000
+intcblock 0 1 4 2 2500 10000
 bytecblock 0x 0x637573645f61737365745f6964 0x636f6e66696f5f61737365745f6964 0x69735f706175736564 0x637573645f666565735f62616c616e6365 0x636f6e66696f5f666565735f62616c616e6365 0x61646d696e 0x6665655f726563697069656e74 0x726563656970745f636f756e74 0x151f7c75 0x746f74616c5f637573645f766f6c756d65 0x746f74616c5f637573645f666565735f636f6c6c6563746564 0x746f74616c5f636f6e66696f5f766f6c756d65 0x746f74616c5f636f6e66696f5f666565735f636f6c6c6563746564 0x703a 0x3a
 txna ApplicationArgs 0
 pushbytes 0x4c5c61ba // "create()void"
@@ -76,7 +76,7 @@ intc_1 // 1
 return
 main_l17:
 txn OnCompletion
-intc_3 // UpdateApplication
+intc_2 // UpdateApplication
 ==
 txn ApplicationID
 intc_0 // 0
@@ -311,7 +311,7 @@ pushint 3 // 3
 >=
 assert
 global GroupSize
-intc_2 // 2
+intc_3 // 2
 ==
 assert
 txn GroupIndex
@@ -327,7 +327,7 @@ global CurrentApplicationAddress
 ==
 assert
 gtxn 0 Amount
-intc_2 // 2
+intc_3 // 2
 pushint 100000 // 100000
 *
 ==
@@ -347,7 +347,7 @@ bytec_2 // "confio_asset_id"
 frame_dig -1
 app_global_put
 itxn_begin
-intc_3 // axfer
+intc_2 // axfer
 itxn_field TypeEnum
 frame_dig -2
 itxn_field XferAsset
@@ -359,7 +359,7 @@ intc_0 // 0
 itxn_field Fee
 itxn_submit
 itxn_begin
-intc_3 // axfer
+intc_2 // axfer
 itxn_field TypeEnum
 frame_dig -1
 itxn_field XferAsset
@@ -398,16 +398,61 @@ store 10
 store 9
 load 10
 assert
+frame_dig -1
+extract 2 0
+len
+intc_0 // 0
+==
+global GroupSize
+intc_3 // 2
+==
+&&
 txn GroupIndex
+intc_1 // 1
+==
+&&
 frame_dig -1
 extract 2 0
 len
 intc_0 // 0
 >
-bnz paywithcusd_3_l8
-intc_1 // 1
-paywithcusd_3_l2:
+global GroupSize
+pushint 3 // 3
 ==
+&&
+txn GroupIndex
+intc_3 // 2
+==
+&&
+||
+frame_dig -1
+extract 2 0
+len
+intc_0 // 0
+==
+global GroupSize
+pushint 3 // 3
+==
+&&
+txn GroupIndex
+intc_3 // 2
+==
+&&
+||
+frame_dig -1
+extract 2 0
+len
+intc_0 // 0
+>
+global GroupSize
+intc_2 // 4
+==
+&&
+txn GroupIndex
+pushint 3 // 3
+==
+&&
+||
 assert
 txn GroupIndex
 intc_1 // 1
@@ -415,7 +460,7 @@ intc_1 // 1
 store 3
 load 3
 gtxns TypeEnum
-intc_3 // axfer
+intc_2 // axfer
 ==
 assert
 load 3
@@ -559,20 +604,37 @@ extract 2 0
 len
 intc_0 // 0
 >
-bnz paywithcusd_3_l7
-global GroupSize
-intc_2 // 2
-==
-assert
+bnz paywithcusd_3_l10
 txn Fee
 global MinTxnFee
-intc_2 // 2
+intc_3 // 2
 *
 >=
 assert
-paywithcusd_3_l4:
+paywithcusd_3_l2:
+frame_dig -1
+extract 2 0
+len
+intc_0 // 0
+==
+global GroupSize
+pushint 3 // 3
+==
+&&
+frame_dig -1
+extract 2 0
+len
+intc_0 // 0
+>
+global GroupSize
+intc_2 // 4
+==
+&&
+||
+bnz paywithcusd_3_l9
+paywithcusd_3_l3:
 itxn_begin
-intc_3 // axfer
+intc_2 // axfer
 itxn_field TypeEnum
 bytec_1 // "cusd_asset_id"
 app_global_get
@@ -607,13 +669,13 @@ extract 2 0
 len
 intc_0 // 0
 >
-bnz paywithcusd_3_l6
+bnz paywithcusd_3_l5
 global GroupSize
-intc_2 // 2
+intc_3 // 2
 ==
 assert
-b paywithcusd_3_l9
-paywithcusd_3_l6:
+b paywithcusd_3_l11
+paywithcusd_3_l5:
 bytec 14 // "p:"
 bytec_1 // "cusd_asset_id"
 app_global_get
@@ -631,38 +693,43 @@ len
 store 5
 pushint 96 // 96
 store 6
-global GroupSize
-pushint 3 // 3
-==
-assert
-gtxn 0 TypeEnum
-intc_1 // pay
-==
-assert
-gtxn 0 Sender
-txn Sender
-==
-assert
-gtxn 0 Receiver
-global CurrentApplicationAddress
-==
-assert
 load 5
 load 6
 callsub boxmbrcost_0
 store 7
-gtxn 0 Amount
+global GroupSize
+pushint 3 // 3
+==
+bnz paywithcusd_3_l8
+global GroupSize
+intc_2 // 4
+==
+assert
+gtxn 1 TypeEnum
+intc_1 // pay
+==
+assert
+gtxn 1 Sender
+txn Sender
+==
+assert
+gtxn 1 Receiver
+global CurrentApplicationAddress
+==
+assert
+gtxn 1 Amount
 load 7
 ==
 assert
-gtxn 0 CloseRemainderTo
+gtxn 1 CloseRemainderTo
 global ZeroAddress
 ==
 assert
-gtxn 0 RekeyTo
+gtxn 1 RekeyTo
 global ZeroAddress
 ==
 assert
+paywithcusd_3_l7:
 load 4
 box_get
 store 14
@@ -712,21 +779,70 @@ extract 2 0
 sha256
 concat
 log
-b paywithcusd_3_l9
-paywithcusd_3_l7:
+b paywithcusd_3_l11
+paywithcusd_3_l8:
+gtxn 0 TypeEnum
+intc_1 // pay
+==
+assert
+gtxn 0 Sender
+txn Sender
+==
+assert
+gtxn 0 Receiver
+global CurrentApplicationAddress
+==
+assert
+gtxn 0 Amount
+load 7
+==
+assert
+gtxn 0 CloseRemainderTo
+global ZeroAddress
+==
+assert
+gtxn 0 RekeyTo
+global ZeroAddress
+==
+assert
+b paywithcusd_3_l7
+paywithcusd_3_l9:
+gtxn 0 TypeEnum
+intc_1 // pay
+==
+assert
+gtxn 0 Amount
+intc_0 // 0
+>=
+assert
+gtxn 0 Receiver
+txn Sender
+==
+gtxn 0 Receiver
+global CurrentApplicationAddress
+==
+||
+assert
+gtxn 0 RekeyTo
+global ZeroAddress
+==
+assert
+gtxn 0 CloseRemainderTo
+global ZeroAddress
+==
+assert
+b paywithcusd_3_l3
+paywithcusd_3_l10:
 txn Fee
 global MinTxnFee
-intc_2 // 2
+intc_3 // 2
 *
 intc 4 // 2500
 +
 >=
 assert
-b paywithcusd_3_l4
-paywithcusd_3_l8:
-intc_2 // 2
 b paywithcusd_3_l2
-paywithcusd_3_l9:
+paywithcusd_3_l11:
 intc_1 // 1
 return
 
@@ -755,16 +871,61 @@ store 25
 store 24
 load 25
 assert
+frame_dig -1
+extract 2 0
+len
+intc_0 // 0
+==
+global GroupSize
+intc_3 // 2
+==
+&&
 txn GroupIndex
+intc_1 // 1
+==
+&&
 frame_dig -1
 extract 2 0
 len
 intc_0 // 0
 >
-bnz paywithconfio_4_l8
-intc_1 // 1
-paywithconfio_4_l2:
+global GroupSize
+pushint 3 // 3
 ==
+&&
+txn GroupIndex
+intc_3 // 2
+==
+&&
+||
+frame_dig -1
+extract 2 0
+len
+intc_0 // 0
+==
+global GroupSize
+pushint 3 // 3
+==
+&&
+txn GroupIndex
+intc_3 // 2
+==
+&&
+||
+frame_dig -1
+extract 2 0
+len
+intc_0 // 0
+>
+global GroupSize
+intc_2 // 4
+==
+&&
+txn GroupIndex
+pushint 3 // 3
+==
+&&
+||
 assert
 txn GroupIndex
 intc_1 // 1
@@ -772,7 +933,7 @@ intc_1 // 1
 store 18
 load 18
 gtxns TypeEnum
-intc_3 // axfer
+intc_2 // axfer
 ==
 assert
 load 18
@@ -916,20 +1077,37 @@ extract 2 0
 len
 intc_0 // 0
 >
-bnz paywithconfio_4_l7
-global GroupSize
-intc_2 // 2
-==
-assert
+bnz paywithconfio_4_l10
 txn Fee
 global MinTxnFee
-intc_2 // 2
+intc_3 // 2
 *
 >=
 assert
-paywithconfio_4_l4:
+paywithconfio_4_l2:
+frame_dig -1
+extract 2 0
+len
+intc_0 // 0
+==
+global GroupSize
+pushint 3 // 3
+==
+&&
+frame_dig -1
+extract 2 0
+len
+intc_0 // 0
+>
+global GroupSize
+intc_2 // 4
+==
+&&
+||
+bnz paywithconfio_4_l9
+paywithconfio_4_l3:
 itxn_begin
-intc_3 // axfer
+intc_2 // axfer
 itxn_field TypeEnum
 bytec_2 // "confio_asset_id"
 app_global_get
@@ -964,13 +1142,13 @@ extract 2 0
 len
 intc_0 // 0
 >
-bnz paywithconfio_4_l6
+bnz paywithconfio_4_l5
 global GroupSize
-intc_2 // 2
+intc_3 // 2
 ==
 assert
-b paywithconfio_4_l9
-paywithconfio_4_l6:
+b paywithconfio_4_l11
+paywithconfio_4_l5:
 bytec 14 // "p:"
 bytec_2 // "confio_asset_id"
 app_global_get
@@ -988,38 +1166,43 @@ len
 store 20
 pushint 96 // 96
 store 21
-global GroupSize
-pushint 3 // 3
-==
-assert
-gtxn 0 TypeEnum
-intc_1 // pay
-==
-assert
-gtxn 0 Sender
-txn Sender
-==
-assert
-gtxn 0 Receiver
-global CurrentApplicationAddress
-==
-assert
 load 20
 load 21
 callsub boxmbrcost_0
 store 22
-gtxn 0 Amount
+global GroupSize
+pushint 3 // 3
+==
+bnz paywithconfio_4_l8
+global GroupSize
+intc_2 // 4
+==
+assert
+gtxn 1 TypeEnum
+intc_1 // pay
+==
+assert
+gtxn 1 Sender
+txn Sender
+==
+assert
+gtxn 1 Receiver
+global CurrentApplicationAddress
+==
+assert
+gtxn 1 Amount
 load 22
 ==
 assert
-gtxn 0 CloseRemainderTo
+gtxn 1 CloseRemainderTo
 global ZeroAddress
 ==
 assert
-gtxn 0 RekeyTo
+gtxn 1 RekeyTo
 global ZeroAddress
 ==
 assert
+paywithconfio_4_l7:
 load 19
 box_get
 store 29
@@ -1069,21 +1252,70 @@ extract 2 0
 sha256
 concat
 log
-b paywithconfio_4_l9
-paywithconfio_4_l7:
+b paywithconfio_4_l11
+paywithconfio_4_l8:
+gtxn 0 TypeEnum
+intc_1 // pay
+==
+assert
+gtxn 0 Sender
+txn Sender
+==
+assert
+gtxn 0 Receiver
+global CurrentApplicationAddress
+==
+assert
+gtxn 0 Amount
+load 22
+==
+assert
+gtxn 0 CloseRemainderTo
+global ZeroAddress
+==
+assert
+gtxn 0 RekeyTo
+global ZeroAddress
+==
+assert
+b paywithconfio_4_l7
+paywithconfio_4_l9:
+gtxn 0 TypeEnum
+intc_1 // pay
+==
+assert
+gtxn 0 Amount
+intc_0 // 0
+>=
+assert
+gtxn 0 Receiver
+txn Sender
+==
+gtxn 0 Receiver
+global CurrentApplicationAddress
+==
+||
+assert
+gtxn 0 RekeyTo
+global ZeroAddress
+==
+assert
+gtxn 0 CloseRemainderTo
+global ZeroAddress
+==
+assert
+b paywithconfio_4_l3
+paywithconfio_4_l10:
 txn Fee
 global MinTxnFee
-intc_2 // 2
+intc_3 // 2
 *
 intc 4 // 2500
 +
 >=
 assert
-b paywithconfio_4_l4
-paywithconfio_4_l8:
-intc_2 // 2
 b paywithconfio_4_l2
-paywithconfio_4_l9:
+paywithconfio_4_l11:
 intc_1 // 1
 return
 
@@ -1164,7 +1396,7 @@ intc_0 // 0
 >
 bz withdrawfees_5_l14
 itxn_begin
-intc_3 // axfer
+intc_2 // axfer
 itxn_field TypeEnum
 bytec_2 // "confio_asset_id"
 app_global_get
@@ -1184,7 +1416,7 @@ app_global_put
 b withdrawfees_5_l14
 withdrawfees_5_l9:
 itxn_begin
-intc_3 // axfer
+intc_2 // axfer
 itxn_field TypeEnum
 bytec_1 // "cusd_asset_id"
 app_global_get
@@ -1490,7 +1722,7 @@ intc_1 // 1
 frame_bury 0
 frame_dig 0
 gtxns TypeEnum
-intc_3 // axfer
+intc_2 // axfer
 ==
 assert
 frame_dig 0
@@ -1515,7 +1747,7 @@ intc_1 // 1
 frame_bury 0
 frame_dig 0
 gtxns TypeEnum
-intc_3 // axfer
+intc_2 // axfer
 ==
 assert
 frame_dig 0

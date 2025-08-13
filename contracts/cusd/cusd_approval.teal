@@ -1,108 +1,112 @@
 #pragma version 8
 intcblock 0 1 4 2 1000000
-bytecblock 0x637573645f61737365745f6964 0x 0x61646d696e 0x69735f706175736564 0x726573657276655f61646472657373 0x757364635f61737365745f6964 0x637573645f63697263756c6174696e675f737570706c79 0x69735f66726f7a656e 0x746f74616c5f757364635f6c6f636b6564 0x7462696c6c735f6261636b65645f737570706c79 0x636f6c6c61746572616c5f726174696f 0x3a 0x746f74616c5f6d696e746564 0x746f74616c5f6275726e6564 0x151f7c75 0x69735f7661756c74 0x00
+bytecblock 0x637573645f61737365745f6964 0x 0x61646d696e 0x69735f706175736564 0x726573657276655f61646472657373 0x757364635f61737365745f6964 0x637573645f63697263756c6174696e675f737570706c79 0x69735f66726f7a656e 0x746f74616c5f757364635f6c6f636b6564 0x7462696c6c735f6261636b65645f737570706c79 0x636f6c6c61746572616c5f726174696f 0x3a 0x746f74616c5f6d696e746564 0x746f74616c5f6275726e6564 0x151f7c75 0x69735f7661756c74 0x73706f6e736f725f61646472657373 0x00
 txna ApplicationArgs 0
 pushbytes 0x4c5c61ba // "create()void"
 ==
-bnz main_l50
+bnz main_l52
+txna ApplicationArgs 0
+pushbytes 0xbe77aae6 // "set_sponsor_address(address)void"
+==
+bnz main_l51
 txna ApplicationArgs 0
 pushbytes 0x990af164 // "setup_assets(uint64,uint64)void"
 ==
-bnz main_l49
+bnz main_l50
 txna ApplicationArgs 0
 pushbytes 0x0178f94b // "pause()void"
 ==
-bnz main_l48
+bnz main_l49
 txna ApplicationArgs 0
 pushbytes 0x1b529de8 // "unpause()void"
 ==
-bnz main_l47
+bnz main_l48
 txna ApplicationArgs 0
 pushbytes 0x30c6d58a // "opt_in()void"
 ==
-bnz main_l46
+bnz main_l47
 txna ApplicationArgs 0
 pushbytes 0xfa1a6553 // "add_vault(address)void"
 ==
-bnz main_l45
+bnz main_l46
 txna ApplicationArgs 0
 pushbytes 0x8c1469e0 // "remove_vault(address)void"
 ==
-bnz main_l44
+bnz main_l45
 txna ApplicationArgs 0
 pushbytes 0x8153e58f // "freeze_address(address)void"
 ==
-bnz main_l43
+bnz main_l44
 txna ApplicationArgs 0
 pushbytes 0x6bd40555 // "unfreeze_address(address)void"
 ==
-bnz main_l42
+bnz main_l43
 txna ApplicationArgs 0
 pushbytes 0x5012fea2 // "mint_admin(uint64,address)void"
 ==
-bnz main_l41
+bnz main_l42
 txna ApplicationArgs 0
 pushbytes 0xf461c019 // "burn_admin(uint64)void"
 ==
-bnz main_l40
+bnz main_l41
 txna ApplicationArgs 0
 pushbytes 0x4266b1a6 // "mint_with_collateral()void"
 ==
-bnz main_l39
+bnz main_l40
 txna ApplicationArgs 0
 pushbytes 0x5ae1c528 // "burn_for_collateral()void"
 ==
-bnz main_l38
+bnz main_l39
 txna ApplicationArgs 0
 pushbytes 0x4fea9c05 // "transfer_cusd(axfer,address)void"
 ==
-bnz main_l37
+bnz main_l38
 txna ApplicationArgs 0
 pushbytes 0x4a165ee7 // "update_admin(address)void"
 ==
-bnz main_l36
+bnz main_l37
 txna ApplicationArgs 0
 pushbytes 0xaec80f9b // "update_collateral_ratio(uint64)void"
 ==
-bnz main_l35
+bnz main_l36
 txna ApplicationArgs 0
 pushbytes 0x253bf820 // "refresh_reserve()void"
 ==
-bnz main_l34
+bnz main_l35
 txna ApplicationArgs 0
 pushbytes 0x93583e8b // "withdraw_usdc(uint64,address)void"
 ==
-bnz main_l33
+bnz main_l34
 txna ApplicationArgs 0
 pushbytes 0xe67daf51 // "get_stats()(uint64,uint64)"
 ==
-bnz main_l32
+bnz main_l33
 txna ApplicationArgs 0
 pushbytes 0x3b188e0a // "get_reserves()(uint64,uint64,uint64,uint64,uint64)"
 ==
-bnz main_l31
+bnz main_l32
 txna ApplicationArgs 0
 pushbytes 0xf329cd98 // "verify_backing()(bool,uint64)"
 ==
-bnz main_l30
+bnz main_l31
 txna ApplicationArgs 0
 pushbytes 0xc3f597cc // "is_frozen(address)bool"
 ==
-bnz main_l29
+bnz main_l30
 txna ApplicationArgs 0
 pushbytes 0x4ed50852 // "is_vault(address)bool"
 ==
-bnz main_l28
+bnz main_l29
 txna ApplicationArgs 0
 pushbytes 0xa0e81872 // "update()void"
 ==
-bnz main_l27
+bnz main_l28
 txna ApplicationArgs 0
 pushbytes 0x24378d3c // "delete()void"
 ==
-bnz main_l26
+bnz main_l27
 err
-main_l26:
+main_l27:
 txn OnCompletion
 pushint 5 // DeleteApplication
 ==
@@ -111,10 +115,10 @@ intc_0 // 0
 !=
 &&
 assert
-callsub deletecaster_49
+callsub deletecaster_51
 intc_1 // 1
 return
-main_l27:
+main_l28:
 txn OnCompletion
 intc_2 // UpdateApplication
 ==
@@ -123,19 +127,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub updatecaster_48
-intc_1 // 1
-return
-main_l28:
-txn OnCompletion
-intc_0 // NoOp
-==
-txn ApplicationID
-intc_0 // 0
-!=
-&&
-assert
-callsub isvaultcaster_47
+callsub updatecaster_50
 intc_1 // 1
 return
 main_l29:
@@ -147,7 +139,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub isfrozencaster_46
+callsub isvaultcaster_49
 intc_1 // 1
 return
 main_l30:
@@ -159,7 +151,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub verifybackingcaster_45
+callsub isfrozencaster_48
 intc_1 // 1
 return
 main_l31:
@@ -171,7 +163,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub getreservescaster_44
+callsub verifybackingcaster_47
 intc_1 // 1
 return
 main_l32:
@@ -183,7 +175,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub getstatscaster_43
+callsub getreservescaster_46
 intc_1 // 1
 return
 main_l33:
@@ -195,7 +187,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub withdrawusdccaster_42
+callsub getstatscaster_45
 intc_1 // 1
 return
 main_l34:
@@ -207,7 +199,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub refreshreservecaster_41
+callsub withdrawusdccaster_44
 intc_1 // 1
 return
 main_l35:
@@ -219,7 +211,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub updatecollateralratiocaster_40
+callsub refreshreservecaster_43
 intc_1 // 1
 return
 main_l36:
@@ -231,7 +223,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub updateadmincaster_39
+callsub updatecollateralratiocaster_42
 intc_1 // 1
 return
 main_l37:
@@ -243,7 +235,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub transfercusdcaster_38
+callsub updateadmincaster_41
 intc_1 // 1
 return
 main_l38:
@@ -255,7 +247,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub burnforcollateralcaster_37
+callsub transfercusdcaster_40
 intc_1 // 1
 return
 main_l39:
@@ -267,7 +259,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub mintwithcollateralcaster_36
+callsub burnforcollateralcaster_39
 intc_1 // 1
 return
 main_l40:
@@ -279,7 +271,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub burnadmincaster_35
+callsub mintwithcollateralcaster_38
 intc_1 // 1
 return
 main_l41:
@@ -291,7 +283,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub mintadmincaster_34
+callsub burnadmincaster_37
 intc_1 // 1
 return
 main_l42:
@@ -303,7 +295,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub unfreezeaddresscaster_33
+callsub mintadmincaster_36
 intc_1 // 1
 return
 main_l43:
@@ -315,7 +307,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub freezeaddresscaster_32
+callsub unfreezeaddresscaster_35
 intc_1 // 1
 return
 main_l44:
@@ -327,7 +319,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub removevaultcaster_31
+callsub freezeaddresscaster_34
 intc_1 // 1
 return
 main_l45:
@@ -339,22 +331,10 @@ intc_0 // 0
 !=
 &&
 assert
-callsub addvaultcaster_30
+callsub removevaultcaster_33
 intc_1 // 1
 return
 main_l46:
-txn OnCompletion
-intc_1 // OptIn
-==
-txn ApplicationID
-intc_0 // 0
-!=
-&&
-assert
-callsub optincaster_29
-intc_1 // 1
-return
-main_l47:
 txn OnCompletion
 intc_0 // NoOp
 ==
@@ -363,7 +343,19 @@ intc_0 // 0
 !=
 &&
 assert
-callsub unpausecaster_28
+callsub addvaultcaster_32
+intc_1 // 1
+return
+main_l47:
+txn OnCompletion
+intc_1 // OptIn
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub optincaster_31
 intc_1 // 1
 return
 main_l48:
@@ -375,7 +367,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub pausecaster_27
+callsub unpausecaster_30
 intc_1 // 1
 return
 main_l49:
@@ -387,7 +379,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub setupassetscaster_26
+callsub pausecaster_29
 intc_1 // 1
 return
 main_l50:
@@ -396,10 +388,34 @@ intc_0 // NoOp
 ==
 txn ApplicationID
 intc_0 // 0
+!=
+&&
+assert
+callsub setupassetscaster_28
+intc_1 // 1
+return
+main_l51:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
+!=
+&&
+assert
+callsub setsponsoraddresscaster_27
+intc_1 // 1
+return
+main_l52:
+txn OnCompletion
+intc_0 // NoOp
+==
+txn ApplicationID
+intc_0 // 0
 ==
 &&
 assert
-callsub createcaster_25
+callsub createcaster_26
 intc_1 // 1
 return
 
@@ -422,8 +438,26 @@ app_global_put
 intc_1 // 1
 return
 
+// set_sponsor_address
+setsponsoraddress_1:
+proto 1 0
+txn Sender
+bytec_2 // "admin"
+app_global_get
+==
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+bytec 16 // "sponsor_address"
+frame_dig -1
+app_global_put
+intc_1 // 1
+return
+
 // setup_assets
-setupassets_1:
+setupassets_2:
 proto 2 0
 txn Sender
 bytec_2 // "admin"
@@ -575,7 +609,7 @@ intc_1 // 1
 return
 
 // pause
-pause_2:
+pause_3:
 proto 0 0
 txn Sender
 bytec_2 // "admin"
@@ -600,7 +634,7 @@ intc_1 // 1
 return
 
 // unpause
-unpause_3:
+unpause_4:
 proto 0 0
 txn Sender
 bytec_2 // "admin"
@@ -625,7 +659,7 @@ intc_1 // 1
 return
 
 // opt_in
-optin_4:
+optin_5:
 proto 0 0
 txn RekeyTo
 global ZeroAddress
@@ -643,7 +677,7 @@ intc_1 // 1
 return
 
 // add_vault
-addvault_5:
+addvault_6:
 proto 1 0
 txn Sender
 bytec_2 // "admin"
@@ -675,7 +709,7 @@ intc_1 // 1
 return
 
 // remove_vault
-removevault_6:
+removevault_7:
 proto 1 0
 txn Sender
 bytec_2 // "admin"
@@ -703,7 +737,7 @@ intc_1 // 1
 return
 
 // freeze_address
-freezeaddress_7:
+freezeaddress_8:
 proto 1 0
 txn Sender
 bytec_2 // "admin"
@@ -773,7 +807,7 @@ intc_1 // 1
 return
 
 // unfreeze_address
-unfreezeaddress_8:
+unfreezeaddress_9:
 proto 1 0
 txn Sender
 bytec_2 // "admin"
@@ -843,7 +877,7 @@ intc_1 // 1
 return
 
 // mint_admin
-mintadmin_9:
+mintadmin_10:
 proto 2 0
 txn Sender
 bytec_2 // "admin"
@@ -965,7 +999,7 @@ intc_1 // 1
 return
 
 // burn_admin
-burnadmin_10:
+burnadmin_11:
 proto 1 0
 txn Sender
 bytec_2 // "admin"
@@ -1082,7 +1116,7 @@ intc_1 // 1
 return
 
 // mint_with_collateral
-mintwithcollateral_11:
+mintwithcollateral_12:
 proto 0 0
 bytec_3 // "is_paused"
 app_global_get
@@ -1106,70 +1140,125 @@ assert
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetClawback
-store 31
-store 30
-load 31
+store 33
+store 32
+load 33
 assert
-load 30
+load 32
 global CurrentApplicationAddress
 ==
 assert
 global GroupSize
 intc_3 // 2
 ==
+global GroupSize
+pushint 3 // 3
+==
+||
 assert
+global GroupSize
+pushint 3 // 3
+==
+bnz mintwithcollateral_12_l2
+intc_0 // 0
+store 30
+intc_0 // 0
+store 31
 txn GroupIndex
 intc_1 // 1
 ==
 assert
-gtxn 0 Sender
-txn Sender
+b mintwithcollateral_12_l3
+mintwithcollateral_12_l2:
+intc_1 // 1
+store 30
+intc_1 // 1
+store 31
+txn GroupIndex
+intc_3 // 2
 ==
 assert
 gtxn 0 TypeEnum
+intc_1 // pay
+==
+assert
+gtxn 0 Amount
+intc_0 // 0
+>=
+assert
+gtxn 0 Receiver
+gtxn 1 Sender
+==
+gtxn 0 Receiver
+global CurrentApplicationAddress
+==
+||
+assert
+mintwithcollateral_12_l3:
+load 31
+gtxns Sender
+txn Sender
+==
+txn Sender
+bytec 16 // "sponsor_address"
+app_global_get
+==
+||
+assert
+load 31
+gtxns TypeEnum
 intc_2 // axfer
 ==
 assert
-gtxn 0 XferAsset
+load 31
+gtxns XferAsset
 bytec 5 // "usdc_asset_id"
 app_global_get
 ==
 assert
-gtxn 0 AssetReceiver
+load 31
+gtxns AssetReceiver
 global CurrentApplicationAddress
 ==
 assert
-gtxn 0 AssetAmount
+load 31
+gtxns AssetAmount
 intc_0 // 0
 >
 assert
-gtxn 0 RekeyTo
+load 31
+gtxns RekeyTo
 global ZeroAddress
 ==
 assert
-gtxn 0 AssetCloseTo
+load 31
+gtxns AssetCloseTo
 global ZeroAddress
 ==
 assert
-gtxn 0 AssetSender
+load 31
+gtxns AssetSender
 global ZeroAddress
 ==
 assert
-gtxn 0 Sender
+load 31
+gtxns Sender
 bytec 7 // "is_frozen"
 app_local_get
 intc_0 // 0
 ==
 assert
-gtxn 0 Sender
+load 31
+gtxns Sender
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 33
-store 32
-load 33
+store 35
+store 34
+load 35
 assert
-gtxn 0 AssetAmount
+load 31
+gtxns AssetAmount
 store 28
 txn Fee
 global MinTxnFee
@@ -1197,11 +1286,11 @@ assert
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetReserve
-store 35
-store 34
-load 35
+store 37
+store 36
+load 37
 assert
-load 34
+load 36
 bytec 4 // "reserve_address"
 app_global_get
 ==
@@ -1211,11 +1300,11 @@ app_global_get
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 37
-store 36
-load 37
+store 39
+store 38
+load 39
 assert
-load 36
+load 38
 load 29
 >=
 assert
@@ -1229,7 +1318,8 @@ app_global_get
 itxn_field XferAsset
 load 29
 itxn_field AssetAmount
-gtxn 0 Sender
+load 31
+gtxns Sender
 itxn_field AssetReceiver
 bytec 4 // "reserve_address"
 app_global_get
@@ -1259,14 +1349,15 @@ itob
 concat
 bytec 11 // ":"
 concat
-gtxn 0 Sender
+load 31
+gtxns Sender
 concat
 log
 intc_1 // 1
 return
 
 // burn_for_collateral
-burnforcollateral_12:
+burnforcollateral_13:
 proto 0 0
 bytec_3 // "is_paused"
 app_global_get
@@ -1290,70 +1381,124 @@ assert
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetClawback
-store 41
-store 40
-load 41
+store 45
+store 44
+load 45
 assert
-load 40
+load 44
 global CurrentApplicationAddress
 ==
 assert
 global GroupSize
 intc_3 // 2
 ==
+global GroupSize
+pushint 3 // 3
+==
+||
 assert
+global GroupSize
+pushint 3 // 3
+==
+bnz burnforcollateral_13_l2
+intc_0 // 0
+store 42
+intc_0 // 0
+store 43
 txn GroupIndex
 intc_1 // 1
 ==
 assert
-gtxn 0 Sender
-txn Sender
+b burnforcollateral_13_l3
+burnforcollateral_13_l2:
+intc_1 // 1
+store 42
+intc_1 // 1
+store 43
+txn GroupIndex
+intc_3 // 2
 ==
 assert
 gtxn 0 TypeEnum
+intc_1 // pay
+==
+assert
+gtxn 0 Amount
+intc_0 // 0
+>=
+assert
+gtxn 0 Receiver
+gtxn 1 Sender
+==
+gtxn 0 Receiver
+global CurrentApplicationAddress
+==
+||
+assert
+burnforcollateral_13_l3:
+load 43
+gtxns Sender
+txn Sender
+==
+txn Sender
+bytec 16 // "sponsor_address"
+app_global_get
+==
+||
+assert
+load 43
+gtxns TypeEnum
 intc_2 // axfer
 ==
 assert
-gtxn 0 XferAsset
+load 43
+gtxns XferAsset
 bytec_0 // "cusd_asset_id"
 app_global_get
 ==
 assert
-gtxn 0 AssetReceiver
+load 43
+gtxns AssetReceiver
 global CurrentApplicationAddress
 ==
 assert
-gtxn 0 AssetAmount
+load 43
+gtxns AssetAmount
 intc_0 // 0
 >
 assert
-gtxn 0 RekeyTo
+load 43
+gtxns RekeyTo
 global ZeroAddress
 ==
 assert
-gtxn 0 AssetCloseTo
+load 43
+gtxns AssetCloseTo
 global ZeroAddress
 ==
 assert
-gtxn 0 AssetSender
+load 43
+gtxns AssetSender
 global ZeroAddress
 ==
 assert
-gtxn 0 Sender
+load 43
+gtxns Sender
 bytec 7 // "is_frozen"
 app_local_get
 intc_0 // 0
 ==
 assert
-gtxn 0 AssetAmount
-store 38
+load 43
+gtxns AssetAmount
+store 40
 txn Fee
 global MinTxnFee
 pushint 3 // 3
 *
 >=
 assert
-load 38
+load 40
 bytec 10 // "collateral_ratio"
 app_global_get
 mulw
@@ -1365,8 +1510,8 @@ pop
 swap
 !
 assert
-store 39
-load 39
+store 41
+load 41
 intc_0 // 0
 >
 assert
@@ -1374,12 +1519,12 @@ global CurrentApplicationAddress
 bytec 5 // "usdc_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 43
-store 42
-load 43
+store 47
+store 46
+load 47
 assert
-load 42
-load 39
+load 46
+load 41
 >=
 assert
 itxn_begin
@@ -1390,19 +1535,20 @@ itxn_field TypeEnum
 bytec 5 // "usdc_asset_id"
 app_global_get
 itxn_field XferAsset
-load 39
+load 41
 itxn_field AssetAmount
-gtxn 0 Sender
+load 43
+gtxns Sender
 itxn_field AssetReceiver
 itxn_submit
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetReserve
-store 45
-store 44
-load 45
+store 49
+store 48
+load 49
 assert
-load 44
+load 48
 bytec 4 // "reserve_address"
 app_global_get
 ==
@@ -1415,7 +1561,7 @@ itxn_field TypeEnum
 bytec_0 // "cusd_asset_id"
 app_global_get
 itxn_field XferAsset
-load 38
+load 40
 itxn_field AssetAmount
 bytec 4 // "reserve_address"
 app_global_get
@@ -1425,46 +1571,47 @@ itxn_field AssetSender
 itxn_submit
 bytec 8 // "total_usdc_locked"
 app_global_get
-load 39
+load 41
 >=
 assert
 bytec 6 // "cusd_circulating_supply"
 app_global_get
-load 38
+load 40
 >=
 assert
 bytec 8 // "total_usdc_locked"
 bytec 8 // "total_usdc_locked"
 app_global_get
-load 39
+load 41
 -
 app_global_put
 bytec 13 // "total_burned"
 bytec 13 // "total_burned"
 app_global_get
-load 38
+load 40
 +
 app_global_put
 bytec 6 // "cusd_circulating_supply"
 bytec 6 // "cusd_circulating_supply"
 app_global_get
-load 38
+load 40
 -
 app_global_put
 pushbytes 0x6275726e3a // "burn:"
-load 38
+load 40
 itob
 concat
 bytec 11 // ":"
 concat
-gtxn 0 Sender
+load 43
+gtxns Sender
 concat
 log
 intc_1 // 1
 return
 
 // transfer_cusd
-transfercusd_13:
+transfercusd_14:
 proto 2 0
 frame_dig -2
 gtxns Sender
@@ -1523,7 +1670,7 @@ intc_1 // 1
 return
 
 // update_admin
-updateadmin_14:
+updateadmin_15:
 proto 1 0
 txn Sender
 bytec_2 // "admin"
@@ -1554,7 +1701,7 @@ intc_1 // 1
 return
 
 // update_collateral_ratio
-updatecollateralratio_15:
+updatecollateralratio_16:
 proto 1 0
 txn Sender
 bytec_2 // "admin"
@@ -1590,7 +1737,7 @@ intc_1 // 1
 return
 
 // refresh_reserve
-refreshreserve_16:
+refreshreserve_17:
 proto 0 0
 txn Sender
 bytec_2 // "admin"
@@ -1604,12 +1751,12 @@ assert
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetReserve
-store 47
-store 46
-load 47
+store 51
+store 50
+load 51
 assert
 bytec 4 // "reserve_address"
-load 46
+load 50
 app_global_put
 pushbytes 0x726573657276655f726566726573686564 // "reserve_refreshed"
 log
@@ -1617,7 +1764,7 @@ intc_1 // 1
 return
 
 // withdraw_usdc
-withdrawusdc_17:
+withdrawusdc_18:
 proto 2 0
 txn Sender
 bytec_2 // "admin"
@@ -1637,15 +1784,15 @@ global CurrentApplicationAddress
 bytec 5 // "usdc_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 49
-store 48
-load 49
+store 53
+store 52
+load 53
 assert
-load 48
+load 52
 frame_dig -2
 >=
 assert
-load 48
+load 52
 frame_dig -2
 -
 bytec 6 // "cusd_circulating_supply"
@@ -1705,7 +1852,7 @@ intc_1 // 1
 return
 
 // get_stats
-getstats_18:
+getstats_19:
 proto 0 1
 bytec_1 // ""
 intc_0 // 0
@@ -1727,7 +1874,7 @@ frame_bury 0
 retsub
 
 // get_reserves
-getreserves_19:
+getreserves_20:
 proto 0 1
 bytec_1 // ""
 intc_0 // 0
@@ -1770,7 +1917,7 @@ frame_bury 0
 retsub
 
 // verify_backing
-verifybacking_20:
+verifybacking_21:
 proto 0 1
 bytec_1 // ""
 intc_0 // 0
@@ -1781,13 +1928,13 @@ global CurrentApplicationAddress
 bytec 5 // "usdc_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 51
-store 50
-load 51
+store 55
+store 54
+load 55
 assert
-load 50
+load 54
 frame_bury 2
-load 50
+load 54
 intc 4 // 1000000
 mulw
 intc_0 // 0
@@ -1815,7 +1962,7 @@ assert
 !
 !
 frame_bury 1
-bytec 16 // 0x00
+bytec 17 // 0x00
 intc_0 // 0
 frame_dig 1
 setbit
@@ -1826,7 +1973,7 @@ frame_bury 0
 retsub
 
 // is_frozen
-isfrozen_21:
+isfrozen_22:
 proto 1 1
 intc_0 // 0
 frame_dig -1
@@ -1840,7 +1987,7 @@ frame_bury 0
 retsub
 
 // is_vault
-isvault_22:
+isvault_23:
 proto 1 1
 intc_0 // 0
 frame_dig -1
@@ -1854,7 +2001,7 @@ frame_bury 0
 retsub
 
 // update
-update_23:
+update_24:
 proto 0 0
 txn Sender
 bytec_2 // "admin"
@@ -1869,7 +2016,7 @@ intc_1 // 1
 return
 
 // delete
-delete_24:
+delete_25:
 proto 0 0
 txn Sender
 bytec_2 // "admin"
@@ -1899,70 +2046,70 @@ global CurrentApplicationAddress
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 53
-store 52
-load 53
+store 57
+store 56
+load 57
 assert
-load 52
+load 56
 intc_0 // 0
 ==
 assert
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetTotal
-store 55
-store 54
-load 55
-assert
-bytec_0 // "cusd_asset_id"
-app_global_get
-asset_params_get AssetReserve
-store 57
-store 56
-load 57
-assert
-load 56
-bytec_0 // "cusd_asset_id"
-app_global_get
-asset_holding_get AssetBalance
 store 59
 store 58
 load 59
 assert
+bytec_0 // "cusd_asset_id"
+app_global_get
+asset_params_get AssetReserve
+store 61
+store 60
+load 61
+assert
+load 60
+bytec_0 // "cusd_asset_id"
+app_global_get
+asset_holding_get AssetBalance
+store 63
+store 62
+load 63
+assert
+load 62
 load 58
-load 54
 ==
 assert
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetClawback
-store 61
-store 60
+store 65
+store 64
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetFreeze
-store 63
-store 62
+store 67
+store 66
 bytec_0 // "cusd_asset_id"
 app_global_get
 asset_params_get AssetManager
-store 65
-store 64
-load 61
-assert
-load 63
-assert
+store 69
+store 68
 load 65
 assert
-load 60
-global CurrentApplicationAddress
-!=
+load 67
 assert
-load 62
-global CurrentApplicationAddress
-!=
+load 69
 assert
 load 64
+global CurrentApplicationAddress
+!=
+assert
+load 66
+global CurrentApplicationAddress
+!=
+assert
+load 68
 global ZeroAddress
 ==
 assert
@@ -1970,13 +2117,23 @@ intc_1 // 1
 return
 
 // create_caster
-createcaster_25:
+createcaster_26:
 proto 0 0
 callsub create_0
 retsub
 
+// set_sponsor_address_caster
+setsponsoraddresscaster_27:
+proto 0 0
+bytec_1 // ""
+txna ApplicationArgs 1
+frame_bury 0
+frame_dig 0
+callsub setsponsoraddress_1
+retsub
+
 // setup_assets_caster
-setupassetscaster_26:
+setupassetscaster_28:
 proto 0 0
 intc_0 // 0
 dup
@@ -1988,69 +2145,69 @@ btoi
 frame_bury 1
 frame_dig 0
 frame_dig 1
-callsub setupassets_1
+callsub setupassets_2
 retsub
 
 // pause_caster
-pausecaster_27:
+pausecaster_29:
 proto 0 0
-callsub pause_2
+callsub pause_3
 retsub
 
 // unpause_caster
-unpausecaster_28:
+unpausecaster_30:
 proto 0 0
-callsub unpause_3
+callsub unpause_4
 retsub
 
 // opt_in_caster
-optincaster_29:
+optincaster_31:
 proto 0 0
-callsub optin_4
+callsub optin_5
 retsub
 
 // add_vault_caster
-addvaultcaster_30:
+addvaultcaster_32:
 proto 0 0
 bytec_1 // ""
 txna ApplicationArgs 1
 frame_bury 0
 frame_dig 0
-callsub addvault_5
+callsub addvault_6
 retsub
 
 // remove_vault_caster
-removevaultcaster_31:
+removevaultcaster_33:
 proto 0 0
 bytec_1 // ""
 txna ApplicationArgs 1
 frame_bury 0
 frame_dig 0
-callsub removevault_6
+callsub removevault_7
 retsub
 
 // freeze_address_caster
-freezeaddresscaster_32:
+freezeaddresscaster_34:
 proto 0 0
 bytec_1 // ""
 txna ApplicationArgs 1
 frame_bury 0
 frame_dig 0
-callsub freezeaddress_7
+callsub freezeaddress_8
 retsub
 
 // unfreeze_address_caster
-unfreezeaddresscaster_33:
+unfreezeaddresscaster_35:
 proto 0 0
 bytec_1 // ""
 txna ApplicationArgs 1
 frame_bury 0
 frame_dig 0
-callsub unfreezeaddress_8
+callsub unfreezeaddress_9
 retsub
 
 // mint_admin_caster
-mintadmincaster_34:
+mintadmincaster_36:
 proto 0 0
 intc_0 // 0
 bytec_1 // ""
@@ -2061,34 +2218,34 @@ txna ApplicationArgs 2
 frame_bury 1
 frame_dig 0
 frame_dig 1
-callsub mintadmin_9
+callsub mintadmin_10
 retsub
 
 // burn_admin_caster
-burnadmincaster_35:
+burnadmincaster_37:
 proto 0 0
 intc_0 // 0
 txna ApplicationArgs 1
 btoi
 frame_bury 0
 frame_dig 0
-callsub burnadmin_10
+callsub burnadmin_11
 retsub
 
 // mint_with_collateral_caster
-mintwithcollateralcaster_36:
+mintwithcollateralcaster_38:
 proto 0 0
-callsub mintwithcollateral_11
+callsub mintwithcollateral_12
 retsub
 
 // burn_for_collateral_caster
-burnforcollateralcaster_37:
+burnforcollateralcaster_39:
 proto 0 0
-callsub burnforcollateral_12
+callsub burnforcollateral_13
 retsub
 
 // transfer_cusd_caster
-transfercusdcaster_38:
+transfercusdcaster_40:
 proto 0 0
 intc_0 // 0
 bytec_1 // ""
@@ -2105,38 +2262,38 @@ intc_2 // axfer
 assert
 frame_dig 0
 frame_dig 1
-callsub transfercusd_13
+callsub transfercusd_14
 retsub
 
 // update_admin_caster
-updateadmincaster_39:
+updateadmincaster_41:
 proto 0 0
 bytec_1 // ""
 txna ApplicationArgs 1
 frame_bury 0
 frame_dig 0
-callsub updateadmin_14
+callsub updateadmin_15
 retsub
 
 // update_collateral_ratio_caster
-updatecollateralratiocaster_40:
+updatecollateralratiocaster_42:
 proto 0 0
 intc_0 // 0
 txna ApplicationArgs 1
 btoi
 frame_bury 0
 frame_dig 0
-callsub updatecollateralratio_15
+callsub updatecollateralratio_16
 retsub
 
 // refresh_reserve_caster
-refreshreservecaster_41:
+refreshreservecaster_43:
 proto 0 0
-callsub refreshreserve_16
+callsub refreshreserve_17
 retsub
 
 // withdraw_usdc_caster
-withdrawusdccaster_42:
+withdrawusdccaster_44:
 proto 0 0
 intc_0 // 0
 bytec_1 // ""
@@ -2147,14 +2304,14 @@ txna ApplicationArgs 2
 frame_bury 1
 frame_dig 0
 frame_dig 1
-callsub withdrawusdc_17
+callsub withdrawusdc_18
 retsub
 
 // get_stats_caster
-getstatscaster_43:
+getstatscaster_45:
 proto 0 0
 bytec_1 // ""
-callsub getstats_18
+callsub getstats_19
 frame_bury 0
 bytec 14 // 0x151f7c75
 frame_dig 0
@@ -2163,10 +2320,10 @@ log
 retsub
 
 // get_reserves_caster
-getreservescaster_44:
+getreservescaster_46:
 proto 0 0
 bytec_1 // ""
-callsub getreserves_19
+callsub getreserves_20
 frame_bury 0
 bytec 14 // 0x151f7c75
 frame_dig 0
@@ -2175,10 +2332,10 @@ log
 retsub
 
 // verify_backing_caster
-verifybackingcaster_45:
+verifybackingcaster_47:
 proto 0 0
 bytec_1 // ""
-callsub verifybacking_20
+callsub verifybacking_21
 frame_bury 0
 bytec 14 // 0x151f7c75
 frame_dig 0
@@ -2187,17 +2344,17 @@ log
 retsub
 
 // is_frozen_caster
-isfrozencaster_46:
+isfrozencaster_48:
 proto 0 0
 intc_0 // 0
 bytec_1 // ""
 txna ApplicationArgs 1
 frame_bury 1
 frame_dig 1
-callsub isfrozen_21
+callsub isfrozen_22
 frame_bury 0
 bytec 14 // 0x151f7c75
-bytec 16 // 0x00
+bytec 17 // 0x00
 intc_0 // 0
 frame_dig 0
 setbit
@@ -2206,17 +2363,17 @@ log
 retsub
 
 // is_vault_caster
-isvaultcaster_47:
+isvaultcaster_49:
 proto 0 0
 intc_0 // 0
 bytec_1 // ""
 txna ApplicationArgs 1
 frame_bury 1
 frame_dig 1
-callsub isvault_22
+callsub isvault_23
 frame_bury 0
 bytec 14 // 0x151f7c75
-bytec 16 // 0x00
+bytec 17 // 0x00
 intc_0 // 0
 frame_dig 0
 setbit
@@ -2225,13 +2382,13 @@ log
 retsub
 
 // update_caster
-updatecaster_48:
+updatecaster_50:
 proto 0 0
-callsub update_23
+callsub update_24
 retsub
 
 // delete_caster
-deletecaster_49:
+deletecaster_51:
 proto 0 0
-callsub delete_24
+callsub delete_25
 retsub

@@ -55,6 +55,11 @@ class ConvertUSDCToCUSD(graphene.Mutation):
     conversion = graphene.Field(ConversionType)
     success = graphene.Boolean()
     errors = graphene.List(graphene.String)
+    transactions_to_sign = graphene.List(graphene.JSONString, description="Unsigned transactions for client to sign")
+    sponsor_transactions = graphene.List(graphene.JSONString, description="Sponsor transactions (pre-signed)")
+    group_id = graphene.String(description="Transaction group ID")
+    requires_app_optin = graphene.Boolean(description="Whether user needs to opt into the app")
+    app_id = graphene.Int(description="Application ID for opt-in")
     
     @classmethod
     def mutate(cls, root, info, amount):
@@ -124,12 +129,12 @@ class ConvertUSDCToCUSD(graphene.Mutation):
                     errors=["Active account not found"]
                 )
             
-            # Check if account has Sui address
-            if not active_account.sui_address:
+            # Check if account has Algorand address (not Sui for this operation)
+            if not active_account.algorand_address:
                 return ConvertUSDCToCUSD(
                     conversion=None,
                     success=False,
-                    errors=["Account not initialized with Sui address"]
+                    errors=["Account not initialized with Algorand address"]
                 )
             
             # Determine actor fields
@@ -162,7 +167,7 @@ class ConvertUSDCToCUSD(graphene.Mutation):
                     actor_user=actor_user,
                     actor_business=actor_business,
                     actor_display_name=actor_display_name,
-                    actor_address=active_account.sui_address,
+                    actor_address=active_account.algorand_address,
                     # Conversion details
                     conversion_type='usdc_to_cusd',
                     from_amount=amount_decimal,
@@ -172,60 +177,102 @@ class ConvertUSDCToCUSD(graphene.Mutation):
                     status='PENDING'
                 )
                 
-                # TODO: Implement blockchain conversion logic
-                # For now, we'll simulate completion
-                # In production, this would be handled by a background task
-                import time
-                import uuid
-                time.sleep(0.1)  # Simulate processing
+                # Build blockchain transactions
+                from blockchain.cusd_service import CUSDService
+                from blockchain.cusd_transaction_builder import CUSDTransactionBuilder
+                from blockchain.algorand_client import AlgorandClient
+                import asyncio
                 
-                # Generate mock transaction hashes
-                conversion.from_transaction_hash = f"0x{uuid.uuid4().hex}"
-                conversion.to_transaction_hash = f"0x{uuid.uuid4().hex}"
-                conversion.mark_completed()
+                cusd_service = CUSDService()
+                tx_builder = CUSDTransactionBuilder()
+                algod_client = AlgorandClient().algod
                 
-                # Create notification for conversion completion
-                from notifications.utils import create_transaction_notification
-                notification_user = actor_user if actor_user else (actor_business.accounts.first().user if actor_business else None)
-                if notification_user:
-                    create_transaction_notification(
-                        transaction_type='conversion',
-                        sender_user=notification_user,
-                        business=actor_business,  # Pass business context for business accounts
-                        amount=str(amount_decimal),
-                        token_type='USDC',
-                        transaction_id=str(conversion.id),
-                        transaction_model='Conversion',
-                        additional_data={
-                            'from_amount': str(amount_decimal),
-                            'from_token': 'USDC',
-                            'to_amount': str(to_amount),
-                            'to_token': 'cUSD',
-                            'conversion_type': 'usdc_to_cusd',
-                            'exchange_rate': str(exchange_rate),
-                            'fee_amount': str(fee_amount),
-                            'timestamp': conversion.created_at.isoformat(),
-                            'transaction_hash': conversion.to_transaction_hash or conversion.from_transaction_hash or ''
-                        }
+                # Check if user has Algorand address
+                if not active_account.algorand_address:
+                    conversion.status = 'FAILED'
+                    conversion.save()
+                    return ConvertUSDCToCUSD(
+                        conversion=None,
+                        success=False,
+                        errors=["Account not initialized with Algorand address"]
                     )
-            
-            print(f"[CONVERSION] Conversion created successfully: {conversion.id}")
-            
-            # Verify the conversion was actually saved
-            saved_conversion = Conversion.objects.filter(id=conversion.id).first()
-            if not saved_conversion:
-                print(f"[CONVERSION] ERROR: Conversion {conversion.id} not found in database after save!")
-                return ConvertUSDCToCUSD(
-                    conversion=None,
-                    success=False,
-                    errors=["Conversion not saved to database"]
-                )
-            
-            return ConvertUSDCToCUSD(
-                conversion=conversion,
-                success=True,
-                errors=None
-            )
+                
+                try:
+                    # First check opt-in status
+                    opt_in_status = asyncio.run(cusd_service.check_opt_in_status(active_account.algorand_address))
+                    
+                    if not opt_in_status.get('usdc_opted_in') or not opt_in_status.get('cusd_opted_in'):
+                        conversion.status = 'FAILED'
+                        conversion.save()
+                        return ConvertUSDCToCUSD(
+                            conversion=None,
+                            success=False,
+                            errors=["Please opt-in to USDC and cUSD assets first"]
+                        )
+                    
+                    # Build the transaction group with sponsored fees
+                    tx_result = tx_builder.build_mint_transactions(
+                        user_address=active_account.algorand_address,
+                        usdc_amount=amount_decimal,
+                        algod_client=algod_client
+                    )
+                    
+                    if not tx_result.get('success'):
+                        # Check if it's an app opt-in issue
+                        if tx_result.get('requires_app_optin'):
+                            # Don't save as failed - frontend will handle opt-in automatically
+                            # No need to show error message since it's handled automatically
+                            return ConvertUSDCToCUSD(
+                                conversion=None,
+                                success=False,
+                                errors=[],  # Empty errors - frontend handles this
+                                requires_app_optin=True,
+                                app_id=tx_result.get('app_id')
+                            )
+                        conversion.status = 'FAILED'
+                        conversion.save()
+                        return ConvertUSDCToCUSD(
+                            conversion=None,
+                            success=False,
+                            errors=[tx_result.get('error', 'Failed to build transactions')]
+                        )
+                    
+                    # Mark conversion as pending signature
+                    conversion.status = 'PENDING_SIG'
+                    conversion.save()
+                    
+                    print(f"[CONVERSION] Conversion {conversion.id} transactions built, awaiting client signature")
+                    
+                    # Return the transactions for client to sign
+                    import sys
+                    
+                    # Handle new structure with sponsor_transactions array
+                    sponsor_txns = tx_result.get('sponsor_transactions', [])
+                    
+                    # For backward compatibility, also support old sponsor_transaction field
+                    if not sponsor_txns and tx_result.get('sponsor_transaction'):
+                        sponsor_txns = [tx_result.get('sponsor_transaction')]
+                    
+                    print(f"[CONVERSION] Returning {len(sponsor_txns)} sponsor transactions", file=sys.stderr)
+                    
+                    return ConvertUSDCToCUSD(
+                        conversion=conversion,
+                        success=True,
+                        errors=None,
+                        transactions_to_sign=tx_result.get('transactions_to_sign'),
+                        sponsor_transactions=sponsor_txns,  # Array of sponsor transactions
+                        group_id=tx_result.get('group_id')
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error during transaction building: {e}")
+                    conversion.status = 'FAILED'
+                    conversion.save()
+                    return ConvertUSDCToCUSD(
+                        conversion=None,
+                        success=False,
+                        errors=[f"Transaction building error: {str(e)}"]
+                    )
         
         except ValidationError as e:
             print(f"[CONVERSION] Validation error: {e}")
@@ -253,6 +300,11 @@ class ConvertCUSDToUSDC(graphene.Mutation):
     conversion = graphene.Field(ConversionType)
     success = graphene.Boolean()
     errors = graphene.List(graphene.String)
+    transactions_to_sign = graphene.List(graphene.JSONString, description="Unsigned transactions for client to sign")
+    sponsor_transactions = graphene.List(graphene.JSONString, description="Sponsor transactions (pre-signed)")
+    group_id = graphene.String(description="Transaction group ID")
+    requires_app_optin = graphene.Boolean(description="Whether user needs to opt into the app")
+    app_id = graphene.Int(description="Application ID for opt-in")
     
     @classmethod
     def mutate(cls, root, info, amount):
@@ -311,12 +363,12 @@ class ConvertCUSDToUSDC(graphene.Mutation):
                     errors=["Active account not found"]
                 )
             
-            # Check if account has Sui address
-            if not active_account.sui_address:
+            # Check if account has Algorand address (not Sui for this operation)
+            if not active_account.algorand_address:
                 return ConvertCUSDToUSDC(
                     conversion=None,
                     success=False,
-                    errors=["Account not initialized with Sui address"]
+                    errors=["Account not initialized with Algorand address"]
                 )
             
             # Determine actor fields
@@ -349,7 +401,7 @@ class ConvertCUSDToUSDC(graphene.Mutation):
                     actor_user=actor_user,
                     actor_business=actor_business,
                     actor_display_name=actor_display_name,
-                    actor_address=active_account.sui_address,
+                    actor_address=active_account.algorand_address,
                     # Conversion details
                     conversion_type='cusd_to_usdc',
                     from_amount=amount_decimal,
@@ -359,47 +411,98 @@ class ConvertCUSDToUSDC(graphene.Mutation):
                     status='PENDING'
                 )
                 
-                # TODO: Implement blockchain conversion logic
-                # For now, we'll simulate completion
-                import time
-                import uuid
-                time.sleep(0.1)  # Simulate processing
+                # Build blockchain transactions
+                from blockchain.cusd_service import CUSDService
+                from blockchain.cusd_transaction_builder import CUSDTransactionBuilder
+                from blockchain.algorand_client import AlgorandClient
+                import asyncio
                 
-                # Generate mock transaction hashes
-                conversion.from_transaction_hash = f"0x{uuid.uuid4().hex}"
-                conversion.to_transaction_hash = f"0x{uuid.uuid4().hex}"
-                conversion.mark_completed()
+                cusd_service = CUSDService()
+                tx_builder = CUSDTransactionBuilder()
+                algod_client = AlgorandClient().algod
                 
-                # Create notification for conversion completion
-                from notifications.utils import create_transaction_notification
-                notification_user = actor_user if actor_user else (actor_business.accounts.first().user if actor_business else None)
-                if notification_user:
-                    create_transaction_notification(
-                        transaction_type='conversion',
-                        sender_user=notification_user,
-                        business=actor_business,  # Pass business context for business accounts
-                        amount=str(amount_decimal),
-                        token_type='cUSD',
-                        transaction_id=str(conversion.id),
-                        transaction_model='Conversion',
-                        additional_data={
-                            'from_amount': str(amount_decimal),
-                            'from_token': 'cUSD',
-                            'to_amount': str(to_amount),
-                            'to_token': 'USDC',
-                            'conversion_type': 'cusd_to_usdc',
-                            'exchange_rate': str(exchange_rate),
-                            'fee_amount': str(fee_amount),
-                            'timestamp': conversion.created_at.isoformat(),
-                            'transaction_hash': conversion.to_transaction_hash or conversion.from_transaction_hash or ''
-                        }
+                # Check if user has Algorand address
+                if not active_account.algorand_address:
+                    conversion.status = 'FAILED'
+                    conversion.save()
+                    return ConvertCUSDToUSDC(
+                        conversion=None,
+                        success=False,
+                        errors=["Account not initialized with Algorand address"]
                     )
-            
-            return ConvertCUSDToUSDC(
-                conversion=conversion,
-                success=True,
-                errors=None
-            )
+                
+                try:
+                    # First check opt-in status
+                    opt_in_status = asyncio.run(cusd_service.check_opt_in_status(active_account.algorand_address))
+                    
+                    if not opt_in_status.get('usdc_opted_in') or not opt_in_status.get('cusd_opted_in'):
+                        conversion.status = 'FAILED'
+                        conversion.save()
+                        return ConvertCUSDToUSDC(
+                            conversion=None,
+                            success=False,
+                            errors=["Please opt-in to USDC and cUSD assets first"]
+                        )
+                    
+                    # Build the transaction group with sponsored fees
+                    tx_result = tx_builder.build_burn_transactions(
+                        user_address=active_account.algorand_address,
+                        cusd_amount=amount_decimal,
+                        algod_client=algod_client
+                    )
+                    
+                    if not tx_result.get('success'):
+                        # Check if it's an app opt-in issue
+                        if tx_result.get('requires_app_optin'):
+                            # Don't save as failed - frontend will handle opt-in automatically
+                            # No need to show error message since it's handled automatically
+                            return ConvertCUSDToUSDC(
+                                conversion=None,
+                                success=False,
+                                errors=[],  # Empty errors - frontend handles this
+                                requires_app_optin=True,
+                                app_id=tx_result.get('app_id')
+                            )
+                        conversion.status = 'FAILED'
+                        conversion.save()
+                        return ConvertCUSDToUSDC(
+                            conversion=None,
+                            success=False,
+                            errors=[tx_result.get('error', 'Failed to build transactions')]
+                        )
+                    
+                    # Mark conversion as pending signature
+                    conversion.status = 'PENDING_SIG'
+                    conversion.save()
+                    
+                    print(f"[CONVERSION] Conversion {conversion.id} transactions built, awaiting client signature")
+                    
+                    # Return the transactions for client to sign
+                    # Handle new structure with sponsor_transactions array
+                    sponsor_txns = tx_result.get('sponsor_transactions', [])
+                    
+                    # For backward compatibility, also support old sponsor_transaction field
+                    if not sponsor_txns and tx_result.get('sponsor_transaction'):
+                        sponsor_txns = [tx_result.get('sponsor_transaction')]
+                    
+                    return ConvertCUSDToUSDC(
+                        conversion=conversion,
+                        success=True,
+                        errors=None,
+                        transactions_to_sign=tx_result.get('transactions_to_sign'),
+                        sponsor_transactions=sponsor_txns,  # Array of sponsor transactions
+                        group_id=tx_result.get('group_id')
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error during transaction building: {e}")
+                    conversion.status = 'FAILED'
+                    conversion.save()
+                    return ConvertCUSDToUSDC(
+                        conversion=None,
+                        success=False,
+                        errors=[f"Transaction building error: {str(e)}"]
+                    )
         
         except ValidationError as e:
             return ConvertCUSDToUSDC(
@@ -513,8 +616,332 @@ class TestConversion(graphene.Mutation):
         logger.error("[TEST] TestConversion mutation called!")
         return TestConversion(success=True, message="Test conversion mutation works!")
 
+class ExecutePendingConversion(graphene.Mutation):
+    """Execute a pending conversion with user signature"""
+    class Arguments:
+        conversion_id = graphene.ID(required=True, description="ID of the pending conversion")
+        signed_transactions = graphene.String(required=True, description="Base64 encoded signed transactions")
+    
+    success = graphene.Boolean()
+    conversion = graphene.Field(ConversionType)
+    transaction_id = graphene.String()
+    errors = graphene.List(graphene.String)
+    
+    @classmethod
+    def mutate(cls, root, info, conversion_id, signed_transactions):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return ExecutePendingConversion(
+                success=False,
+                conversion=None,
+                transaction_id=None,
+                errors=["Authentication required"]
+            )
+        
+        try:
+            # Get the conversion (can be PENDING or PENDING_SIG)
+            conversion = Conversion.objects.get(
+                id=conversion_id,
+                status__in=['PENDING', 'PENDING_SIG']
+            )
+            
+            # Verify user owns this conversion
+            if conversion.actor_user != user:
+                if not (conversion.actor_business and 
+                       conversion.actor_business.accounts.filter(user=user).exists()):
+                    return ExecutePendingConversion(
+                        success=False,
+                        conversion=None,
+                        transaction_id=None,
+                        errors=["Not authorized to execute this conversion"]
+                    )
+            
+            # Import executor
+            from blockchain.conversion_executor import execute_signed_conversion_sync
+            
+            # Execute the conversion with signed transactions
+            result = execute_signed_conversion_sync(
+                conversion_id=conversion_id,
+                signed_transactions=signed_transactions
+            )
+            
+            if result.get('success'):
+                # Refresh the conversion from DB
+                conversion.refresh_from_db()
+                
+                return ExecutePendingConversion(
+                    success=True,
+                    conversion=conversion,
+                    transaction_id=result.get('transaction_id'),
+                    errors=None
+                )
+            else:
+                return ExecutePendingConversion(
+                    success=False,
+                    conversion=None,
+                    transaction_id=None,
+                    errors=[result.get('error', 'Execution failed')]
+                )
+                
+        except Conversion.DoesNotExist:
+            return ExecutePendingConversion(
+                success=False,
+                conversion=None,
+                transaction_id=None,
+                errors=["Conversion not found or not pending"]
+            )
+        except Exception as e:
+            logger.error(f"Error executing conversion: {e}")
+            return ExecutePendingConversion(
+                success=False,
+                conversion=None,
+                transaction_id=None,
+                errors=[str(e)]
+            )
+
+
+class GetConversionTransactions(graphene.Mutation):
+    """Get unsigned transactions for a pending conversion (for client-side signing)"""
+    class Arguments:
+        conversion_id = graphene.ID(required=True, description="ID of the pending conversion")
+    
+    success = graphene.Boolean()
+    transactions = graphene.List(graphene.String, description="Base64 encoded unsigned transactions")
+    errors = graphene.List(graphene.String)
+    
+    @classmethod
+    def mutate(cls, root, info, conversion_id):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return GetConversionTransactions(
+                success=False,
+                transactions=None,
+                errors=["Authentication required"]
+            )
+        
+        try:
+            # Get the conversion (can be PENDING or PENDING_SIG)
+            conversion = Conversion.objects.get(
+                id=conversion_id,
+                status__in=['PENDING', 'PENDING_SIG']
+            )
+            
+            # Verify user owns this conversion
+            if conversion.actor_user != user:
+                if not (conversion.actor_business and 
+                       conversion.actor_business.accounts.filter(user=user).exists()):
+                    return GetConversionTransactions(
+                        success=False,
+                        transactions=None,
+                        errors=["Not authorized to access this conversion"]
+                    )
+            
+            # TODO: Generate unsigned transactions for the conversion
+            # This would create the actual Algorand transactions
+            # that the client can sign with their private key
+            
+            # For now, return placeholder
+            return GetConversionTransactions(
+                success=True,
+                transactions=[],  # Would contain base64 encoded transactions
+                errors=None
+            )
+            
+        except Conversion.DoesNotExist:
+            return GetConversionTransactions(
+                success=False,
+                transactions=None,
+                errors=["Conversion not found or not pending"]
+            )
+        except Exception as e:
+            logger.error(f"Error getting conversion transactions: {e}")
+            return GetConversionTransactions(
+                success=False,
+                transactions=None,
+                errors=[str(e)]
+            )
+
+
+class OptInToCUSDApp(graphene.Mutation):
+    """Mutation to opt into the cUSD application with sponsorship"""
+    
+    success = graphene.Boolean()
+    errors = graphene.List(graphene.String)
+    transaction_to_sign = graphene.JSONString(description="Unsigned transaction for client to sign")
+    transactions_to_sign = graphene.List(graphene.JSONString, description="User transactions to sign")
+    sponsor_transactions = graphene.List(graphene.JSONString, description="Sponsor transactions (pre-signed)")
+    group_id = graphene.String(description="Transaction group ID")
+    total_fee = graphene.String(description="Total fees being sponsored")
+    funding_amount = graphene.String(description="Amount being funded to user")
+    
+    @classmethod
+    def mutate(cls, root, info):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return OptInToCUSDApp(
+                success=False,
+                errors=["Authentication required"]
+            )
+        
+        try:
+            # Get JWT context with validation
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            if not jwt_context:
+                return OptInToCUSDApp(
+                    success=False,
+                    errors=["No active account"]
+                )
+                
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
+            
+            # Get the user's active account
+            if account_type == 'business' and business_id:
+                from users.models import Account
+                active_account = Account.objects.filter(
+                    account_type='business',
+                    account_index=account_index,
+                    business_id=business_id
+                ).first()
+            else:
+                active_account = user.accounts.filter(
+                    account_type=account_type,
+                    account_index=account_index
+                ).first()
+            
+            if not active_account or not active_account.algorand_address:
+                return OptInToCUSDApp(
+                    success=False,
+                    errors=["Active account not found or not initialized"]
+                )
+            
+            # Check if account needs funding first
+            import logging
+            from blockchain.account_funding_service import account_funding_service
+            from blockchain.cusd_transaction_builder import CUSDTransactionBuilder
+            from blockchain.algorand_client import AlgorandClient
+            
+            logger = logging.getLogger(__name__)
+            algod_client = AlgorandClient().algod
+            
+            # Calculate and provide funding if needed
+            funding_result = account_funding_service.fund_account_for_optin(
+                active_account.algorand_address
+            )
+            
+            if not funding_result.get('success') and not funding_result.get('already_funded'):
+                # Funding failed
+                logger.error(f"Failed to fund account: {funding_result.get('error')}")
+                # Continue anyway - maybe user has just enough balance
+            elif funding_result.get('transaction_id'):
+                logger.info(f"Funded account with {funding_result.get('amount_funded_algo')} ALGO")
+            
+            # Build app opt-in transaction
+            tx_builder = CUSDTransactionBuilder()
+            
+            tx_result = tx_builder.build_app_optin_transaction(
+                user_address=active_account.algorand_address,
+                algod_client=algod_client
+            )
+            
+            if not tx_result.get('success'):
+                return OptInToCUSDApp(
+                    success=False,
+                    errors=[tx_result.get('error', 'Failed to build opt-in transaction')]
+                )
+            
+            # Handle both old and new formats
+            if 'transactions_to_sign' in tx_result:
+                # New sponsored format
+                return OptInToCUSDApp(
+                    success=True,
+                    transactions_to_sign=tx_result.get('transactions_to_sign'),
+                    sponsor_transactions=tx_result.get('sponsor_transactions'),
+                    group_id=tx_result.get('group_id'),
+                    total_fee=tx_result.get('total_fee'),
+                    funding_amount=tx_result.get('funding_amount')
+                )
+            else:
+                # Old format (backwards compatibility)
+                return OptInToCUSDApp(
+                    success=True,
+                    transaction_to_sign=tx_result.get('transaction')
+                )
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error during app opt-in: {e}")
+            return OptInToCUSDApp(
+                success=False,
+                errors=[str(e)]
+            )
+
+
+class ExecuteCUSDAppOptIn(graphene.Mutation):
+    """Execute a signed cUSD app opt-in transaction"""
+    
+    class Arguments:
+        signed_transaction = graphene.String(required=True, description="Base64 encoded signed transaction")
+    
+    success = graphene.Boolean()
+    transaction_id = graphene.String()
+    errors = graphene.List(graphene.String)
+    
+    @classmethod
+    def mutate(cls, root, info, signed_transaction):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return ExecuteCUSDAppOptIn(
+                success=False,
+                errors=["Authentication required"]
+            )
+        
+        try:
+            import base64
+            import logging
+            from blockchain.algorand_client import AlgorandClient
+            from algosdk.transaction import wait_for_confirmation
+            
+            logger = logging.getLogger(__name__)
+            
+            # Decode the signed transaction
+            signed_txn_bytes = base64.b64decode(signed_transaction)
+            
+            # Submit to network
+            algod_client = AlgorandClient().algod
+            tx_id = algod_client.send_raw_transaction(base64.b64encode(signed_txn_bytes).decode('utf-8'))
+            
+            # Wait for confirmation
+            confirmed_txn = wait_for_confirmation(algod_client, tx_id, 10)
+            
+            logger.info(f"App opt-in transaction {tx_id} confirmed in round {confirmed_txn.get('confirmed-round', 0)}")
+            
+            return ExecuteCUSDAppOptIn(
+                success=True,
+                transaction_id=tx_id,
+                errors=None
+            )
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error executing app opt-in: {e}")
+            return ExecuteCUSDAppOptIn(
+                success=False,
+                transaction_id=None,
+                errors=[str(e)]
+            )
+
+
 class Mutation(graphene.ObjectType):
     """Mutation definitions for conversions"""
     convert_usdc_to_cusd = ConvertUSDCToCUSD.Field()
     convert_cusd_to_usdc = ConvertCUSDToUSDC.Field()
+    execute_pending_conversion = ExecutePendingConversion.Field()
+    get_conversion_transactions = GetConversionTransactions.Field()
     test_conversion = TestConversion.Field()
+    opt_in_to_cusd_app = OptInToCUSDApp.Field()
+    execute_cusd_app_opt_in = ExecuteCUSDAppOptIn.Field()

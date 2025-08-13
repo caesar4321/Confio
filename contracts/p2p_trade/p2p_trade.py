@@ -4,7 +4,8 @@ Escrow-based peer-to-peer trading with dispute resolution
 Website: https://confio.lat
 
 Usage and group structures:
-- Create trade: [Payment(sponsor|seller→app, amount=box MBR), AXFER(seller→app, asset=cUSD/CONFIO), AppCall(create_trade)]
+- Create trade (non-sponsored): [Payment(seller→app, amount=box MBR), AXFER(seller→app, asset=cUSD/CONFIO), AppCall(create_trade)]
+- Create trade (sponsored): [Payment(sponsor→user, fees), Payment(seller→app, MBR), AXFER(seller→app, asset=cUSD/CONFIO), AppCall(create_trade)]
 - Accept: [AppCall(accept_trade)] - sets 15-minute window
 - Confirm received: [AppCall(confirm_payment_received)] - deletes box and refunds MBR via inner payment
 - Cancel: [AppCall(cancel_trade)] - deletes box and refunds MBR via inner payment
@@ -255,11 +256,6 @@ def create_trade(
         Assert(app.state.is_paused == Int(0)),
         Assert(Or(app.state.cusd_asset_id != Int(0), app.state.confio_asset_id != Int(0))),
 
-        # Verify rekey/close protection on all group transactions
-        Assert(no_rekey_close(Int(0))),  # Payment
-        Assert(no_rekey_close(Int(1))),  # AssetTransfer
-        Assert(no_rekey_close(Int(2))),  # AppCall
-
         # Bind the AXFER to the app call and verify
         Assert(asset_transfer.get().asset_receiver() == Global.current_application_address()),
         Assert(asset_transfer.get().asset_amount() > Int(0)),
@@ -269,26 +265,83 @@ def create_trade(
             asset_transfer.get().xfer_asset() == app.state.confio_asset_id
         )),
 
-        # Enforce group with MBR funding: [Payment, AXFER, AppCall]
-        Assert(Global.group_size() == Int(3)),
-        Assert(Gtxn[0].type_enum() == TxnType.Payment),
-        Assert(Gtxn[0].receiver() == Global.current_application_address()),
-
         # Bound trade_id length and compute MBR
         key_len.store(Len(trade_id.get())),
         Assert(And(key_len.load() > Int(0), key_len.load() <= MAX_TRADE_ID_LEN)),
         mbr_cost.store(box_mbr_cost(key_len.load(), TRADE_VALUE_FIXED_LEN)),
-        
-        # Record the real payer and restrict who it can be
+
+        # Support both sponsored and non-sponsored groups
+        # Non-sponsored: [Payment(seller→app), AXFER(seller→app), AppCall]
+        # Sponsored: [Payment(sponsor→user), Payment(seller→app), AXFER(seller→app), AppCall]
         Assert(Or(
-            Gtxn[0].sender() == app.state.sponsor_address,
-            Gtxn[0].sender() == Txn.sender()
+            Global.group_size() == Int(3),  # Non-sponsored
+            Global.group_size() == Int(4)   # Sponsored
         )),
-        mbr_payer.store(Gtxn[0].sender()),
-        
-        # Verify payment amount and refund overpayment
-        Assert(Gtxn[0].amount() >= mbr_cost.load()),
-        delta.store(Gtxn[0].amount() - mbr_cost.load()),
+
+        # Determine indices and validate based on group size
+        If(Global.group_size() == Int(4),
+            Seq(
+                # Sponsored: verify sponsor payment at index 0
+                Assert(Gtxn[0].type_enum() == TxnType.Payment),
+                Assert(Gtxn[0].amount() >= Int(0)),  # Can be 0 if just covering fees
+                Assert(Or(
+                    Gtxn[0].receiver() == Txn.sender(),  # Payment to user
+                    Gtxn[0].receiver() == Global.current_application_address()  # Payment to app
+                )),
+                Assert(no_rekey_close(Int(0))),
+                
+                # MBR payment at index 1
+                Assert(Gtxn[1].type_enum() == TxnType.Payment),
+                Assert(Gtxn[1].sender() == Txn.sender()),
+                Assert(Gtxn[1].receiver() == Global.current_application_address()),
+                Assert(no_rekey_close(Int(1))),
+                Assert(Gtxn[1].amount() >= mbr_cost.load()),
+                
+                # AXFER at index 2
+                Assert(Gtxn[2].type_enum() == TxnType.AssetTransfer),
+                Assert(Gtxn[2].asset_receiver() == Global.current_application_address()),
+                Assert(Gtxn[2].sender() == Txn.sender()),
+                Assert(Gtxn[2].xfer_asset() == asset_transfer.get().xfer_asset()),
+                Assert(Gtxn[2].asset_amount() == asset_transfer.get().asset_amount()),
+                Assert(no_rekey_close(Int(2))),
+                
+                # App call at index 3
+                Assert(Txn.group_index() == Int(3)),
+                Assert(no_rekey_close(Int(3))),
+                
+                # Store MBR payer and refund amount
+                mbr_payer.store(Gtxn[1].sender()),
+                delta.store(Gtxn[1].amount() - mbr_cost.load())
+            ),
+            Seq(
+                # Non-sponsored: original structure
+                # MBR payment at index 0
+                Assert(Gtxn[0].type_enum() == TxnType.Payment),
+                Assert(Gtxn[0].receiver() == Global.current_application_address()),
+                Assert(no_rekey_close(Int(0))),
+                Assert(Gtxn[0].amount() >= mbr_cost.load()),
+                
+                # AXFER at index 1
+                Assert(Gtxn[1].type_enum() == TxnType.AssetTransfer),
+                Assert(Gtxn[1].asset_receiver() == Global.current_application_address()),
+                Assert(Gtxn[1].sender() == Txn.sender()),
+                Assert(Gtxn[1].xfer_asset() == asset_transfer.get().xfer_asset()),
+                Assert(Gtxn[1].asset_amount() == asset_transfer.get().asset_amount()),
+                Assert(no_rekey_close(Int(1))),
+                
+                # App call at index 2
+                Assert(Txn.group_index() == Int(2)),
+                Assert(no_rekey_close(Int(2))),
+                
+                # Record the real payer and restrict who it can be
+                Assert(Or(
+                    Gtxn[0].sender() == app.state.sponsor_address,
+                    Gtxn[0].sender() == Txn.sender()
+                )),
+                mbr_payer.store(Gtxn[0].sender()),
+                delta.store(Gtxn[0].amount() - mbr_cost.load())
+            )
+        ),
         If(delta.load() > Int(0),
             Seq(
                 InnerTxnBuilder.Begin(),
@@ -884,7 +937,7 @@ def set_sponsor(sponsor: abi.Address):
 def get_trade(
     trade_id: abi.String,
     *,
-    output: abi.Tuple9[abi.Address, abi.Uint64, abi.Uint64, abi.Uint64, abi.Uint64, abi.Uint8, abi.Uint64, abi.Address, abi.Address]
+    output: abi.String
 ):
     """Get trade details: (seller, amount, asset_id, created_at, expires_at, status, accepted_at, buyer, mbr_payer)"""
     seller = abi.Address()
@@ -913,7 +966,7 @@ def get_trade(
         buyer.set(Extract(trade_data.value(), Int(73), Int(32))),
         mbr_payer.set(Extract(trade_data.value(), Int(105), Int(32))),
         
-        output.set(seller, amount, asset_id, created_at, expires_at, status, accepted_at, buyer, mbr_payer)
+        output.set(Concat(Bytes("trade_data:"), Itob(amount.get())))
     )
 
 @app.external(read_only=True)
