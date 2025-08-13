@@ -194,7 +194,22 @@ export const PaymentProcessingScreen = () => {
 
   // Process payment when screen loads
   useEffect(() => {
+    console.log('PaymentProcessingScreen: useEffect triggered', {
+      isValid,
+      hasInvoiceId: !!transactionData.invoiceId,
+      invoiceId: transactionData.invoiceId,
+      isProcessing,
+      hasProcessedRef: hasProcessedRef.current,
+      transactionData
+    });
+    
     if (!isValid || !transactionData.invoiceId || isProcessing || hasProcessedRef.current) {
+      console.log('PaymentProcessingScreen: Returning early from useEffect', {
+        reason: !isValid ? 'not valid' : 
+                !transactionData.invoiceId ? 'no invoiceId' : 
+                isProcessing ? 'already processing' : 
+                'already processed'
+      });
       return;
     }
 
@@ -210,17 +225,17 @@ export const PaymentProcessingScreen = () => {
       try {
         console.log('PaymentProcessingScreen: Starting payment processing for invoice:', transactionData.invoiceId);
         
-        // Debug: Check current active account context before payment
+        // Log current account context for debugging
         try {
           const accountManager = AccountManager.getInstance();
           const activeContext = await accountManager.getActiveAccountContext();
-          console.log('PaymentProcessingScreen - Active account context before payment:', {
+          console.log('PaymentProcessingScreen - Active account context:', {
             type: activeContext.type,
             index: activeContext.index,
             accountId: `${activeContext.type}_${activeContext.index}`
           });
         } catch (error) {
-          console.log('PaymentProcessingScreen - Could not get active account context:', error);
+          console.log('PaymentProcessingScreen - Could not get account context:', error);
         }
         
         // Step 1: Verifying transaction
@@ -255,32 +270,63 @@ export const PaymentProcessingScreen = () => {
           console.log('PaymentProcessingScreen: Blockchain data:', JSON.stringify(data.payInvoice.paymentTransaction.blockchainData, null, 2));
           
           try {
-            // Import AlgorandService
-            const { algorandService } = await import('../services/algorandService');
+            // Import AlgorandService using default import pattern that works
+            const algorandServiceModule = await import('../services/algorandService');
+            const algorandService = algorandServiceModule.default;
             const { apolloClient } = await import('../apollo/client');
             const { SUBMIT_SPONSORED_PAYMENT } = await import('../apollo/mutations');
             
-            const blockchainData = data.payInvoice.paymentTransaction.blockchainData;
+            // Parse blockchainData if it's a string (GraphQL returns it as JSON string)
+            let blockchainData = data.payInvoice.paymentTransaction.blockchainData;
+            if (typeof blockchainData === 'string') {
+              console.log('PaymentProcessingScreen: Parsing blockchainData JSON string');
+              blockchainData = JSON.parse(blockchainData);
+            }
+            
             const transactions = blockchainData.transactions;
             const userSigningIndexes = blockchainData.user_signing_indexes || blockchainData.userSigningIndexes;
             
             console.log('PaymentProcessingScreen: Signing transactions at indexes:', userSigningIndexes);
             
-            // Sign the transactions that require user signature
+            // Sign the transactions that require user signature (same pattern as TransactionProcessingScreen)
             const signedTransactions = [];
             for (let i = 0; i < transactions.length; i++) {
               const txn = transactions[i];
-              if (userSigningIndexes.includes(i) || txn.needs_signature) {
+              // Only sign if this index is in userSigningIndexes (server tells us which ones to sign)
+              if (userSigningIndexes.includes(i)) {
                 // User needs to sign this transaction
-                console.log(`PaymentProcessingScreen: Signing transaction ${i}`);
-                const txnBytes = Buffer.from(txn.transaction, 'base64');
-                const signedTxn = await algorandService.signTransactionBytes(txnBytes);
-                signedTransactions.push({
-                  index: i,
-                  transaction: Buffer.from(signedTxn).toString('base64')
-                });
+                console.log(`PaymentProcessingScreen: Signing transaction ${i} (type: ${txn.type})`);
+                
+                try {
+                  // Debug the transaction before signing
+                  console.log(`PaymentProcessingScreen: Transaction ${i} base64 preview: ${txn.transaction.substring(0, 50)}...`);
+                  
+                  // Decode transaction (base64 -> bytes) - exact pattern from TransactionProcessingScreen
+                  const txnBytes = Uint8Array.from(Buffer.from(txn.transaction, 'base64'));
+                  console.log(`PaymentProcessingScreen: Transaction ${i} decoded to ${txnBytes.length} bytes`);
+                  console.log(`PaymentProcessingScreen: First 10 bytes: ${Array.from(txnBytes.slice(0, 10)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`);
+                  
+                  // Check if this looks like a valid msgpack transaction
+                  const firstByte = txnBytes[0];
+                  if (firstByte < 0x80 || firstByte > 0x8f) {
+                    console.warn(`PaymentProcessingScreen: Transaction ${i} may not be a valid msgpack map (first byte: 0x${firstByte.toString(16)})`);
+                  }
+                  
+                  // Sign the transaction locally using deterministic wallet
+                  const signedTxnBytes = await algorandService.signTransactionBytes(txnBytes);
+                  const signedTxnB64 = Buffer.from(signedTxnBytes).toString('base64');
+                  
+                  signedTransactions.push({
+                    index: i,
+                    transaction: signedTxnB64
+                  });
+                } catch (signError) {
+                  console.error(`PaymentProcessingScreen: Failed to sign transaction ${i}:`, signError);
+                  throw new Error(`Failed to sign transaction ${i}: ${signError.message}`);
+                }
               } else {
-                // Already signed by sponsor
+                // Already signed by sponsor or not required to sign
+                console.log(`PaymentProcessingScreen: Transaction ${i} already signed by sponsor (type: ${txn.type})`);
                 signedTransactions.push({
                   index: i,
                   transaction: txn.transaction
@@ -289,8 +335,19 @@ export const PaymentProcessingScreen = () => {
             }
             
             console.log('PaymentProcessingScreen: Submitting signed transactions to blockchain');
+            console.log('PaymentProcessingScreen: Signed transactions to submit:', signedTransactions);
             
-            // Submit the signed transactions
+            // Verify all transactions have valid base64
+            for (const txn of signedTransactions) {
+              try {
+                const decoded = Buffer.from(txn.transaction, 'base64');
+                console.log(`PaymentProcessingScreen: Transaction ${txn.index} base64 is valid (${decoded.length} bytes)`);
+              } catch (e) {
+                console.error(`PaymentProcessingScreen: Transaction ${txn.index} has invalid base64:`, e);
+              }
+            }
+            
+            // Submit the signed transactions as JSON string
             const submitResult = await apolloClient.mutate({
               mutation: SUBMIT_SPONSORED_PAYMENT,
               variables: {
@@ -310,11 +367,12 @@ export const PaymentProcessingScreen = () => {
             } else {
               throw new Error(submitResult.data?.submitSponsoredPayment?.error || 'Failed to submit blockchain payment');
             }
-          } catch (blockchainError) {
+          } catch (blockchainError: any) {
             console.error('PaymentProcessingScreen: Blockchain payment failed:', blockchainError);
-            // Fall back to database-only payment (already marked as successful)
-            setIsComplete(true);
-            setPaymentResponse(data.payInvoice);
+            // Show error - opt-ins should have been handled during invoice generation
+            setPaymentError(`Error en el pago blockchain: ${blockchainError.message || 'Error desconocido'}`);
+            setIsComplete(false);
+            // Don't set payment response - payment failed
           }
         } else if (data?.payInvoice?.success) {
           // No blockchain data - database-only payment

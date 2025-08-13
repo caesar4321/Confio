@@ -301,18 +301,21 @@ export class AuthService {
         throw new Error('No auth tokens received from server');
       }
 
-      // Now that tokens are stored, process any required opt-ins (authenticated)
-      if (authData.needsOptIn && authData.needsOptIn.length > 0) {
-        console.log('Need to opt-in to assets:', authData.needsOptIn);
+      // Now that tokens are stored, process any required opt-ins for PERSONAL accounts only
+      // Business accounts handle opt-ins separately during payment flow
+      const accountManager = AccountManager.getInstance();
+      const activeContext = await accountManager.getActiveAccountContext();
+      if (activeContext.type === 'personal' && authData.needsOptIn && authData.needsOptIn.length > 0) {
+        console.log('Personal account needs to opt-in to assets:', authData.needsOptIn);
         if (authData.optInTransactions && authData.optInTransactions.length > 0) {
-          console.log('Processing opt-in transactions from backend (after storing tokens)...');
+          console.log('Processing opt-in transactions for personal account...');
           try {
             const optInTxns = typeof authData.optInTransactions === 'string'
               ? JSON.parse(authData.optInTransactions)
               : authData.optInTransactions;
             const ok = await algorandService.processSponsoredOptIn(optInTxns);
             if (ok) {
-              console.log('Successfully processed opt-in transactions');
+              console.log('Successfully processed opt-in transactions for personal account');
             } else {
               console.error('Opt-in transactions were not confirmed');
             }
@@ -479,11 +482,16 @@ export class AuthService {
         }
       }
 
-      // Check if we need to opt-in to assets (Apple Sign-In)
-      if (authData.needsOptIn && authData.needsOptIn.length > 0) {
-        console.log('Need to opt-in to assets (Apple):', authData.needsOptIn);
+      // Tokens already stored above for Apple flow
+
+      // Check if PERSONAL account needs to opt-in to assets (Apple Sign-In)
+      // Business accounts handle opt-ins separately during payment flow
+      const accountMgr = AccountManager.getInstance();
+      const activeCtx = await accountMgr.getActiveAccountContext();
+      if (activeCtx.type === 'personal' && authData.needsOptIn && authData.needsOptIn.length > 0) {
+        console.log('Personal account needs to opt-in to assets (Apple):', authData.needsOptIn);
         if (authData.optInTransactions && authData.optInTransactions.length > 0) {
-          console.log('Processing opt-in transactions from backend (Apple)...');
+          console.log('Processing opt-in transactions for personal account (Apple)...');
           try {
             // Parse the opt-in transactions (it's a JSONString from GraphQL)
             const optInTxns = typeof authData.optInTransactions === 'string' 
@@ -493,7 +501,7 @@ export class AuthService {
             // Process the opt-in transactions using the updated method
             const ok = await algorandService.processSponsoredOptIn(optInTxns);
             if (ok) {
-              console.log('Successfully processed opt-in transactions (Apple)');
+              console.log('Successfully processed opt-in transactions for personal account (Apple)');
             } else {
               console.error('Opt-in transactions were not confirmed (Apple)');
             }
@@ -503,8 +511,6 @@ export class AuthService {
           }
         }
       }
-      
-      // Tokens already stored above for Apple flow
 
       // Set default personal account context
       console.log('Setting default personal account context (Apple)...');
@@ -843,11 +849,20 @@ export class AuthService {
         console.error('Error clearing OAuth subject:', error);
       }
       
-      // 8. Clear local state
+      // 8. Clear business opt-in cache
+      try {
+        const businessOptInService = (await import('./businessOptInService')).default;
+        await businessOptInService.clearOptInStatus(); // Clear all businesses
+        console.log('Cleared business opt-in cache');
+      } catch (error) {
+        console.error('Error clearing business opt-in cache:', error);
+      }
+      
+      // 9. Clear local state
       this.firebaseIsInitialized = false;
       console.log('Local state cleared');
       
-      // 7. Clear all stored credentials from Keychain
+      // 10. Clear all stored credentials from Keychain
       try {
         // Check tokens before clearing
         const preReset = await Keychain.getGenericPassword({
@@ -1273,6 +1288,23 @@ export class AuthService {
         
         if (data?.switchAccountToken?.token) {
           console.log('AuthService - Got new JWT token with account context');
+          
+          // Store opt-in info for later processing (owners only)
+          if (data.switchAccountToken.optInRequired && data.switchAccountToken.optInTransactions) {
+            console.log('AuthService - Business account needs opt-in to assets (will process when wallet connects)');
+            
+            // Check if this is an owner switching to their business
+            const payload = data.switchAccountToken.payload;
+            const isOwner = !payload.is_employee || payload.employee_role === 'owner';
+            
+            if (isOwner) {
+              // Store opt-in transactions for processing when wallet connects
+              // This will be handled by the business account first-use logic
+              console.log('AuthService - Owner account detected, opt-in will be processed on first use');
+            } else {
+              console.log('AuthService - Employee account detected, skipping opt-in (no access to business private key)');
+            }
+          }
           
           // Get existing refresh token
           const credentials = await Keychain.getGenericPassword({

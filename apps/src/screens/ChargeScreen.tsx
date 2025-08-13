@@ -11,6 +11,8 @@ import {
   Image,
   Platform,
   Linking,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
@@ -59,6 +61,8 @@ const ChargeScreen = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'expired'>('pending');
   const [hasNavigatedToSuccess, setHasNavigatedToSuccess] = useState(false);
+  const [isOptingIn, setIsOptingIn] = useState(false);
+  const [optInMessage, setOptInMessage] = useState('Preparando cuenta empresarial...');
   
   // GraphQL mutations and queries
   const [createInvoice] = useMutation(CREATE_INVOICE);
@@ -160,6 +164,8 @@ const ChargeScreen = () => {
   };
 
   const handleGenerateQR = async () => {
+    console.log('ChargeScreen: handleGenerateQR called');
+    
     if (!amount || parseFloat(amount) <= 0) {
       Alert.alert('Error', 'Por favor ingresa un monto válido');
       return;
@@ -170,9 +176,66 @@ const ChargeScreen = () => {
       return;
     }
 
+    console.log('ChargeScreen: Active account:', {
+      id: activeAccount.id,
+      type: activeAccount.type,
+      name: activeAccount.name
+    });
+
     setIsLoading(true);
 
     try {
+      // For business accounts, ensure opt-ins are complete before generating invoice (blocking)
+      if (activeAccount.type === 'business') {
+        console.log('ChargeScreen: Business account detected, checking opt-ins...');
+        
+        try {
+          const businessOptInService = await import('../services/businessOptInService').then(m => m.default);
+          console.log('ChargeScreen: BusinessOptInService imported successfully');
+          
+          // Show opt-in modal
+          setIsOptingIn(true);
+          setOptInMessage('Preparando factura...');
+          
+          const optInSuccess = await businessOptInService.checkAndHandleOptIns(
+            // Progress callback to update modal message
+            (message: string) => {
+              setOptInMessage(message);
+            }
+          );
+          
+          console.log('ChargeScreen: Opt-in check result:', optInSuccess);
+          
+          // Hide opt-in modal
+          setIsOptingIn(false);
+          
+          if (!optInSuccess) {
+            console.error('ChargeScreen: Business opt-in failed, cannot generate invoice');
+            Alert.alert(
+              'Cuenta no preparada',
+              'Tu cuenta empresarial necesita ser configurada para recibir pagos. Por favor contacta soporte.',
+              [{ text: 'Entendido' }]
+            );
+            setIsLoading(false);
+            return;
+          }
+          console.log('ChargeScreen: Business opt-ins verified, proceeding with invoice generation');
+        } catch (optInError) {
+          console.error('ChargeScreen: Error during opt-in check:', optInError);
+          setIsOptingIn(false);
+          Alert.alert(
+            'Error',
+            'Error al verificar la cuenta. Por favor intenta de nuevo.',
+            [{ text: 'OK' }]
+          );
+          setIsLoading(false);
+          return;
+        }
+      } else {
+        console.log('ChargeScreen: Personal account, skipping opt-in check');
+      }
+      
+      console.log('ChargeScreen: Creating invoice...');
       const { data } = await createInvoice({
         variables: {
           input: {
@@ -253,9 +316,32 @@ const ChargeScreen = () => {
   const statusInfo = getStatusInfo();
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* Header */}
-      <View style={[
+    <>
+      {/* Opt-in Loading Modal */}
+      <Modal
+        transparent={true}
+        animationType="fade"
+        visible={isOptingIn}
+        onRequestClose={() => {}}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalIconContainer}>
+              <Icon name="file-text" size={48} color={colors.primary} />
+            </View>
+            <Text style={styles.modalTitle}>Generando Factura</Text>
+            <Text style={styles.modalMessage}>{optInMessage}</Text>
+            <ActivityIndicator size="large" color={colors.primary} style={styles.modalSpinner} />
+            <Text style={styles.modalNote}>
+              Por favor espera un momento...
+            </Text>
+          </View>
+        </View>
+      </Modal>
+
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        {/* Header */}
+        <View style={[
         styles.header,
         { backgroundColor: mode === 'cobrar' ? currentCurrency.color : colors.primary }
       ]}>
@@ -578,6 +664,7 @@ const ChargeScreen = () => {
         )}
       </View>
     </ScrollView>
+    </>
   );
 };
 
@@ -992,6 +1079,55 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  
+  // Opt-in Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 320,
+  },
+  modalIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: colors.dark,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  modalMessage: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
+  modalSpinner: {
+    marginBottom: 20,
+  },
+  modalNote: {
+    fontSize: 12,
+    color: '#9ca3af',
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });
 
