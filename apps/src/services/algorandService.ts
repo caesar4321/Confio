@@ -1090,19 +1090,17 @@ class AlgorandService {
     }
   }
 
-  async sponsoredPayment(
-    toAddress: string,
+  async sponsoredPaymentToBusiness(
     amount: number,
     assetType: 'CUSD' | 'CONFIO' = 'CUSD',
     options?: {
-      userId?: string;
-      phone?: string;
       note?: string;
       createReceipt?: boolean;
     }
   ): Promise<string | null> {
+    // Payment to business - recipient determined by JWT on server
     try {
-      console.log(`[AlgorandService] Initiating sponsored payment of ${amount} ${assetType} to ${toAddress || options?.userId || options?.phone}`);
+      console.log(`[AlgorandService] Initiating sponsored payment of ${amount} ${assetType} to business`);
       
       // Get auth token
       const { authStorage } = await import('./authStorageService');
@@ -1122,18 +1120,12 @@ class AlgorandService {
         body: JSON.stringify({
           query: `
             mutation CreateSponsoredPayment(
-              $recipientAddress: String
-              $recipientUserId: ID
-              $recipientPhone: String
               $amount: Float!
               $assetType: String
               $note: String
               $createReceipt: Boolean
             ) {
               createSponsoredPayment(
-                recipientAddress: $recipientAddress
-                recipientUserId: $recipientUserId
-                recipientPhone: $recipientPhone
                 amount: $amount
                 assetType: $assetType
                 note: $note
@@ -1152,9 +1144,6 @@ class AlgorandService {
             }
           `,
           variables: {
-            recipientAddress: toAddress,
-            recipientUserId: options?.userId,
-            recipientPhone: options?.phone,
             amount,
             assetType,
             note: options?.note,

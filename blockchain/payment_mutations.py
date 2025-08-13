@@ -26,15 +26,12 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
     """
     Create a sponsored payment through the payment contract.
     The sponsor pays fees on behalf of the user, and the contract deducts 0.9% fee.
+    Payments are always FROM personal/business accounts TO business accounts.
+    The recipient business is determined from JWT context.
     Returns unsigned user transactions and signed sponsor transaction for atomic group.
     """
     
     class Arguments:
-        # Recipient identification - provide ONE of these
-        recipient_address = graphene.String(required=False, description="Algorand address for external wallets")
-        recipient_user_id = graphene.ID(required=False, description="User ID for Confío recipients")
-        recipient_phone = graphene.String(required=False, description="Phone number for recipient lookup")
-        
         amount = graphene.Float(required=True, description="Amount to send (before fees)")
         asset_type = graphene.String(required=False, default_value='CUSD', description="CUSD or CONFIO")
         payment_id = graphene.String(required=False, description="Optional payment ID for tracking")
@@ -52,41 +49,42 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
     payment_id = graphene.String(description="Payment ID for tracking")
     
     @classmethod
-    def mutate(cls, root, info, amount, asset_type='CUSD', recipient_address=None, 
-              recipient_user_id=None, recipient_phone=None, payment_id=None, 
+    def mutate(cls, root, info, amount, asset_type='CUSD', payment_id=None, 
               note=None, create_receipt=False):
         try:
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
-            # Get JWT context for account determination
+            # Get JWT context for SENDER account determination
             from users.jwt_context import get_jwt_business_context_with_validation
-            jwt_context = get_jwt_business_context_with_validation(info, required_permission='send_funds')
-            if not jwt_context:
+            
+            # First get sender context (who is paying)
+            sender_jwt_context = get_jwt_business_context_with_validation(info, required_permission='send_funds')
+            if not sender_jwt_context:
                 return cls(success=False, error='No access or permission to send funds')
             
-            account_type = jwt_context['account_type']
-            account_index = jwt_context['account_index']
-            business_id = jwt_context.get('business_id')
+            sender_account_type = sender_jwt_context['account_type']
+            sender_account_index = sender_jwt_context['account_index']
+            sender_business_id = sender_jwt_context.get('business_id')
             
             # Get the sender's account based on JWT context
-            if account_type == 'business' and business_id:
+            if sender_account_type == 'business' and sender_business_id:
                 from users.models import Business
                 try:
-                    business = Business.objects.get(id=business_id)
+                    sender_business = Business.objects.get(id=sender_business_id)
                     sender_account = Account.objects.get(
-                        business=business,
+                        business=sender_business,
                         account_type='business'
                     )
                 except (Business.DoesNotExist, Account.DoesNotExist):
-                    return cls(success=False, error='Business account not found')
+                    return cls(success=False, error='Sender business account not found')
             else:
-                # Personal account
+                # Personal account sending
                 sender_account = Account.objects.filter(
                     user=user,
-                    account_type=account_type,
-                    account_index=account_index,
+                    account_type=sender_account_type,
+                    account_index=sender_account_index,
                     deleted_at__isnull=True
                 ).first()
             
@@ -97,56 +95,41 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
             if len(sender_account.algorand_address) != 58:
                 return cls(success=False, error='Invalid sender Algorand address format')
             
-            # Resolve recipient address
-            resolved_recipient_address = None
-            recipient_user = None
+            # Get RECIPIENT business from context
+            # For invoice payments, the recipient business comes from the invoice
+            # For direct payments, it would come from JWT or request headers
+            recipient_business_id = sender_jwt_context.get('recipient_business_id')
             
-            # Priority 1: User ID lookup
-            if recipient_user_id:
-                try:
-                    recipient_user = User.objects.get(id=recipient_user_id)
-                    recipient_account = recipient_user.accounts.filter(
-                        account_type='personal',
-                        account_index=0
-                    ).first()
-                    if recipient_account and recipient_account.algorand_address:
-                        resolved_recipient_address = recipient_account.algorand_address
-                        logger.info(f"Resolved recipient from user_id {recipient_user_id}: {resolved_recipient_address[:10]}...")
-                    else:
-                        return cls(success=False, error="Recipient's Algorand address not found")
-                except User.DoesNotExist:
-                    return cls(success=False, error='Recipient user not found')
+            # Try alternative sources for recipient business ID
+            if not recipient_business_id:
+                # Check request headers (set by PayInvoice mutation)
+                request = info.context
+                recipient_business_id = request.META.get('HTTP_X_RECIPIENT_BUSINESS_ID')
             
-            # Priority 2: Phone number lookup
-            elif recipient_phone:
-                cleaned_phone = ''.join(filter(str.isdigit, recipient_phone))
-                logger.info(f"Looking up user by phone: {cleaned_phone}")
+            if not recipient_business_id:
+                # For debugging - log available context
+                logger.warning(f"No recipient_business_id found in context. JWT context: {sender_jwt_context}")
+                logger.warning(f"Request META keys: {list(request.META.keys())}")
+                return cls(success=False, error='Recipient business not specified in payment context')
+            
+            # Get recipient business account
+            from users.models import Business
+            try:
+                recipient_business = Business.objects.get(id=recipient_business_id)
+                recipient_account = Account.objects.get(
+                    business=recipient_business,
+                    account_type='business'
+                )
+                if not recipient_account.algorand_address:
+                    return cls(success=False, error='Recipient business has no Algorand address')
                 
-                found_user = User.objects.filter(phone_number=cleaned_phone).first()
-                if found_user:
-                    recipient_user = found_user
-                    recipient_account = found_user.accounts.filter(
-                        account_type='personal',
-                        account_index=0
-                    ).first()
-                    if recipient_account and recipient_account.algorand_address:
-                        resolved_recipient_address = recipient_account.algorand_address
-                        logger.info(f"Resolved recipient from phone {recipient_phone}: {resolved_recipient_address[:10]}...")
-                    else:
-                        return cls(success=False, error="Recipient's Algorand address not found")
-                else:
-                    return cls(success=False, error='Phone number not registered. Please ask them to sign up first.')
-            
-            # Priority 3: Direct Algorand address
-            elif recipient_address:
-                import re
-                if len(recipient_address) != 58 or not re.match(r'^[A-Z2-7]{58}$', recipient_address):
-                    return cls(success=False, error='Invalid recipient Algorand address format')
-                resolved_recipient_address = recipient_address
-                logger.info(f"Using direct Algorand address: {resolved_recipient_address[:10]}...")
-            
-            else:
-                return cls(success=False, error='Recipient identification required (user_id, phone, or address)')
+                resolved_recipient_address = recipient_account.algorand_address
+                logger.info(f"Payment from {sender_account_type} to business {recipient_business.name}: {resolved_recipient_address[:10]}...")
+                
+            except Business.DoesNotExist:
+                return cls(success=False, error='Recipient business not found')
+            except Account.DoesNotExist:
+                return cls(success=False, error='Recipient business account not found')
             
             # Initialize payment transaction builder
             builder = PaymentTransactionBuilder(network=settings.ALGORAND_NETWORK)
@@ -159,6 +142,8 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
                 asset_id = builder.confio_asset_id
             else:
                 return cls(success=False, error=f'Unsupported asset type: {asset_type}')
+            
+            logger.info(f"Payment mutation: Using asset ID {asset_id} for {asset_type_upper}")
             
             if not asset_id:
                 return cls(success=False, error=f'{asset_type} not configured on this network')
@@ -202,13 +187,18 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
                 import uuid
                 payment_id = str(uuid.uuid4())
             
-            # Create payment record in database if internal transfer
+            # Create payment record in database for business payment
             payment_record = None
-            if recipient_user and payment_id:
+            if payment_id:
                 with db_transaction.atomic():
+                    # Get business owner for recipient tracking
+                    recipient_user = recipient_business.owner if hasattr(recipient_business, 'owner') else None
+                    
                     payment_record = Payment.objects.create(
                         sender=user,
-                        recipient=recipient_user,
+                        sender_business=sender_business if sender_account_type == 'business' else None,
+                        recipient=recipient_user,  # Business owner for tracking
+                        recipient_business=recipient_business,  # The actual business recipient
                         amount=Decimal(str(amount)),
                         currency=asset_type_upper,
                         payment_id=payment_id,
@@ -216,9 +206,11 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
                         blockchain_network='algorand',
                         sender_address=sender_account.algorand_address,
                         recipient_address=resolved_recipient_address,
-                        note=note
+                        note=note or f"Payment to {recipient_business.name}",
+                        fee_amount=Decimal(str(fee_amount_base / (10 ** decimals))),
+                        net_amount=Decimal(str(net_amount_base / (10 ** decimals)))
                     )
-                    logger.info(f"Created payment record {payment_id} for {amount} {asset_type}")
+                    logger.info(f"Created payment record {payment_id} for {amount} {asset_type} to business {recipient_business.name}")
             
             # Build sponsored payment transaction group
             try:

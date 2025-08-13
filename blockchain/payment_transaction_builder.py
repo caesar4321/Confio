@@ -110,8 +110,16 @@ class PaymentTransactionBuilder:
             user_signing_indexes.append(0)
         
         # Asset transfer transaction (user sends tokens to app)
-        asset_params = params.copy()
-        asset_params.fee = 0  # User pays no fee in sponsored mode
+        # Create new params for asset transfer with 0 fee
+        from algosdk.transaction import SuggestedParams
+        asset_params = SuggestedParams(
+            fee=0,  # User pays no fee in sponsored mode
+            first=params.first,
+            last=params.last,
+            gh=params.gh,
+            gen=params.gen,
+            flat_fee=True
+        )
         
         asset_transfer = transaction.AssetTransferTxn(
             sender=sender_address,
@@ -125,8 +133,15 @@ class PaymentTransactionBuilder:
         user_signing_indexes.append(len(transactions) - 1)
         
         # App call from sponsor
-        app_params = params.copy()
-        app_params.fee = 2000  # Sponsor covers fees for group + inner transaction
+        # Create new params for app call with sponsor paying fee
+        app_params = SuggestedParams(
+            fee=2000,  # Sponsor covers fees for group + inner transaction
+            first=params.first,
+            last=params.last,
+            gh=params.gh,
+            gen=params.gen,
+            flat_fee=True
+        )
         
         # Prepare method arguments
         method_args = [
@@ -252,8 +267,15 @@ class PaymentTransactionBuilder:
         user_signing_indexes.append(len(transactions) - 1)
         
         # App call from user
-        app_params = params.copy()
-        app_params.fee = 2000 if not needs_receipt else 4500  # Higher fee for box operations
+        # Create new params for app call
+        app_params = SuggestedParams(
+            fee=2000 if not needs_receipt else 4500,  # Higher fee for box operations
+            first=params.first,
+            last=params.last,
+            gh=params.gh,
+            gen=params.gen,
+            flat_fee=True
+        )
         
         # Prepare method arguments
         method_args = [

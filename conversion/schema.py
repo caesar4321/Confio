@@ -669,6 +669,41 @@ class ExecutePendingConversion(graphene.Mutation):
                 # Refresh the conversion from DB
                 conversion.refresh_from_db()
                 
+                # Create notification for successful conversion
+                try:
+                    from notifications.utils import create_transaction_notification
+                    
+                    # Determine the conversion direction for the notification
+                    if conversion.conversion_type == 'usdc_to_cusd':
+                        from_token = 'USDC'
+                        to_token = 'cUSD'
+                    else:
+                        from_token = 'cUSD'
+                        to_token = 'USDC'
+                    
+                    create_transaction_notification(
+                        transaction_type='conversion',
+                        sender_user=conversion.actor_user,
+                        business=conversion.actor_business,
+                        amount=str(conversion.to_amount),
+                        token_type=to_token,
+                        transaction_id=str(conversion.id),
+                        transaction_model='Conversion',
+                        additional_data={
+                            'from_amount': str(conversion.from_amount),
+                            'from_token': from_token,
+                            'to_amount': str(conversion.to_amount),
+                            'to_token': to_token,
+                            'transaction_hash': result.get('transaction_id', ''),
+                            'conversion_type': conversion.conversion_type
+                        }
+                    )
+                    print(f"[CONVERSION] Notification created for conversion {conversion.id}")
+                except Exception as e:
+                    logger.error(f"Failed to create conversion notification: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
                 return ExecutePendingConversion(
                     success=True,
                     conversion=conversion,
