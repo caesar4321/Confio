@@ -430,10 +430,22 @@ app_global_get
 ==
 ||
 assert
+pushint 68 // 68
+load 2
++
+store 4
 global GroupSize
 pushint 3 // 3
 ==
+global GroupSize
+intc_3 // 4
+==
+||
 assert
+global GroupSize
+intc_3 // 4
+==
+bnz createinvitation_5_l7
 gtxn 0 TypeEnum
 intc_1 // pay
 ==
@@ -474,10 +486,10 @@ assert
 intc_1 // 1
 callsub norekeycloseaxfer_2
 assert
-pushint 68 // 68
-load 2
-+
-store 4
+txn GroupIndex
+intc_2 // 2
+==
+assert
 load 3
 load 4
 callsub boxmbrcost_0
@@ -486,6 +498,11 @@ gtxn 0 Amount
 load 5
 >=
 assert
+gtxn 0 Amount
+load 5
+-
+store 6
+createinvitation_5_l2:
 frame_dig -3
 extract 2 0
 box_get
@@ -499,15 +516,11 @@ extract 2 0
 load 4
 box_create
 assert
-gtxn 0 Amount
-load 5
--
-store 6
 load 6
 intc_0 // 0
 >
-bnz createinvitation_5_l4
-createinvitation_5_l1:
+bnz createinvitation_5_l6
+createinvitation_5_l3:
 frame_dig -3
 extract 2 0
 intc_0 // 0
@@ -575,7 +588,7 @@ gtxns XferAsset
 bytec_1 // "cusd_asset_id"
 app_global_get
 ==
-bnz createinvitation_5_l3
+bnz createinvitation_5_l5
 bytec 5 // "total_confio_locked"
 bytec 5 // "total_confio_locked"
 app_global_get
@@ -583,8 +596,8 @@ frame_dig -2
 gtxns AssetAmount
 +
 app_global_put
-b createinvitation_5_l5
-createinvitation_5_l3:
+b createinvitation_5_l8
+createinvitation_5_l5:
 bytec 6 // "total_cusd_locked"
 bytec 6 // "total_cusd_locked"
 app_global_get
@@ -592,8 +605,8 @@ frame_dig -2
 gtxns AssetAmount
 +
 app_global_put
-b createinvitation_5_l5
-createinvitation_5_l4:
+b createinvitation_5_l8
+createinvitation_5_l6:
 itxn_begin
 intc_1 // pay
 itxn_field TypeEnum
@@ -604,8 +617,85 @@ itxn_field Amount
 intc_0 // 0
 itxn_field Fee
 itxn_submit
-b createinvitation_5_l1
-createinvitation_5_l5:
+b createinvitation_5_l3
+createinvitation_5_l7:
+gtxn 0 TypeEnum
+intc_1 // pay
+==
+assert
+gtxn 0 Amount
+intc_0 // 0
+>=
+assert
+gtxn 0 Receiver
+txn Sender
+==
+gtxn 0 Receiver
+global CurrentApplicationAddress
+==
+||
+assert
+intc_0 // 0
+callsub norekeyclosepay_1
+assert
+gtxn 1 TypeEnum
+intc_1 // pay
+==
+assert
+gtxn 1 Sender
+txn Sender
+==
+assert
+gtxn 1 Receiver
+global CurrentApplicationAddress
+==
+assert
+intc_1 // 1
+callsub norekeyclosepay_1
+assert
+gtxn 2 TypeEnum
+intc_3 // axfer
+==
+assert
+gtxn 2 AssetReceiver
+global CurrentApplicationAddress
+==
+assert
+gtxn 2 Sender
+txn Sender
+==
+assert
+gtxn 2 XferAsset
+frame_dig -2
+gtxns XferAsset
+==
+assert
+gtxn 2 AssetAmount
+frame_dig -2
+gtxns AssetAmount
+==
+assert
+intc_2 // 2
+callsub norekeycloseaxfer_2
+assert
+txn GroupIndex
+pushint 3 // 3
+==
+assert
+load 3
+load 4
+callsub boxmbrcost_0
+store 5
+gtxn 1 Amount
+load 5
+>=
+assert
+gtxn 1 Amount
+load 5
+-
+store 6
+b createinvitation_5_l2
+createinvitation_5_l8:
 intc_1 // 1
 return
 

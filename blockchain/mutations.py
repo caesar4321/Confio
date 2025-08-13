@@ -5,6 +5,7 @@ import graphene
 import logging
 from decimal import Decimal
 from typing import Optional
+from django.conf import settings
 from users.models import Account
 from .algorand_account_manager import AlgorandAccountManager
 from .algorand_sponsor_service import algorand_sponsor_service
@@ -85,13 +86,13 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
                 return cls(success=False, error='Not authenticated')
             
             # Get user's account
-            account = Account.objects.filter(
+            user_account = Account.objects.filter(
                 user=user,
                 account_type='personal',
                 deleted_at__isnull=True
             ).first()
             
-            if not account or not account.algorand_address:
+            if not user_account or not user_account.algorand_address:
                 return cls(success=False, error='No Algorand address found')
             
             # Generate unsigned transactions
@@ -106,7 +107,7 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             )
             
             # Check current opt-ins
-            account_info = algod_client.account_info(account.algorand_address)
+            account_info = algod_client.account_info(user_account.algorand_address)
             current_assets = [asset['asset-id'] for asset in account_info.get('assets', [])]
             
             # Default assets if not specified - only include assets user hasn't opted into
@@ -141,30 +142,56 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             # Create opt-in transactions with 0 fee for each asset
             for asset_id in assets_to_opt_in:
                 opt_in_txn = AssetTransferTxn(
-                    sender=account.algorand_address,
+                    sender=user_account.algorand_address,
                     sp=params,
-                    receiver=account.algorand_address,
+                    receiver=user_account.algorand_address,
                     amt=0,
                     index=asset_id
                 )
                 opt_in_txn.fee = 0  # User pays no fee
                 user_txns.append(opt_in_txn)
             
-            # Create sponsor fee payment transaction
+            # Create sponsor fee payment transaction with MBR funding
             from algosdk.transaction import PaymentTxn
-            total_fee = params.min_fee * (len(user_txns) + 1)  # Fee for all txns
+            
+            # Calculate minimum balance requirement increase
+            # Each asset opt-in increases MBR by 100,000 microAlgos (0.1 ALGO)
+            mbr_increase = 100_000 * len(user_txns)
+            
+            # Check user's current balance
+            current_balance = account_info.get('amount', 0)
+            min_balance = account_info.get('min-balance', 0)
+            
+            # Calculate new minimum balance after opt-ins
+            new_min_balance = min_balance + mbr_increase
+            
+            # Calculate total fees needed (sponsor pays for all transactions)
+            min_fee = getattr(params, 'min_fee', 1000) or 1000
+            total_fee = min_fee * (len(user_txns) + 1)  # +1 for sponsor payment itself
+            
+            # Calculate exact funding needed for MBR increase
+            # User needs exactly new_min_balance, nothing more (fees are sponsored)
+            funding_needed = 0
+            if current_balance < new_min_balance:
+                funding_needed = new_min_balance - current_balance
+                logger.info(f"User needs {funding_needed} microAlgos for {len(user_txns)} asset opt-ins MBR")
+            else:
+                logger.info(f"User has sufficient balance for {len(user_txns)} asset opt-ins")
+            
+            logger.info(f"Asset opt-in funding: balance={current_balance}, min={min_balance}, new_min={new_min_balance}, funding={funding_needed}")
             
             fee_payment_txn = PaymentTxn(
                 sender=AlgorandAccountManager.SPONSOR_ADDRESS,
                 sp=params,
-                receiver=account.algorand_address,
-                amt=0,  # No ALGO transfer, just paying fees
-                note=b"Multi opt-in fee sponsorship"
+                receiver=user_account.algorand_address,
+                amt=funding_needed,  # Fund exact MBR increase needed
+                note=b"Sponsored asset opt-ins with MBR funding"
             )
             fee_payment_txn.fee = total_fee  # Sponsor pays all fees
             
-            # Create atomic group
-            txn_group = user_txns + [fee_payment_txn]
+            # Create atomic group with sponsor payment FIRST
+            # This ensures user has funds before opt-in transactions are evaluated
+            txn_group = [fee_payment_txn] + user_txns
             group_id = calculate_group_id(txn_group)
             for txn in txn_group:
                 txn.group = group_id
@@ -174,7 +201,21 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             sponsor_private_key = mnemonic.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
             signed_fee_txn = fee_payment_txn.sign(sponsor_private_key)
             
-            # Encode transactions for frontend
+            # Add the signed sponsor transaction FIRST (it's first in the group)
+            sponsor_txn_encoded = base64.b64encode(
+                msgpack.packb(signed_fee_txn.dictify())
+            ).decode()
+            
+            transactions.append({
+                'assetId': 0,  # Not an asset transaction
+                'assetName': 'Sponsor Fee',
+                'transaction': sponsor_txn_encoded,
+                'type': 'sponsor',
+                'signed': True,  # This one is already signed
+                'index': 0  # First in group
+            })
+            
+            # Then add user transactions
             for i, (asset_id, user_txn) in enumerate(zip(assets_to_opt_in, user_txns)):
                 unsigned_txn = base64.b64encode(
                     msgpack.packb(user_txn.dictify())
@@ -193,21 +234,9 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
                     'assetId': asset_id,
                     'assetName': asset_name,
                     'transaction': unsigned_txn,
-                    'type': 'opt-in'
+                    'type': 'opt-in',
+                    'index': i + 1  # After sponsor in group
                 })
-            
-            # Add the signed sponsor transaction
-            sponsor_txn_encoded = base64.b64encode(
-                msgpack.packb(signed_fee_txn.dictify())
-            ).decode()
-            
-            transactions.append({
-                'assetId': 0,  # Not an asset transaction
-                'assetName': 'Sponsor Fee',
-                'transaction': sponsor_txn_encoded,
-                'type': 'sponsor',
-                'signed': True  # This one is already signed
-            })
             
             logger.info(f"Created atomic opt-in group for {len(assets_to_opt_in)} assets with group ID: {group_id}")
             
@@ -243,17 +272,17 @@ class OptInToAssetMutation(graphene.Mutation):
                 return cls(success=False, error='Not authenticated')
             
             # Get user's account
-            account = Account.objects.filter(
+            user_account = Account.objects.filter(
                 user=user,
                 account_type='personal',
                 deleted_at__isnull=True
             ).first()
             
-            if not account or not account.algorand_address:
+            if not user_account or not user_account.algorand_address:
                 return cls(success=False, error='No Algorand address found')
             
             # Validate it's an Algorand address
-            if len(account.algorand_address) != 58:
+            if len(user_account.algorand_address) != 58:
                 return cls(success=False, error='Invalid Algorand address format')
             
             # Check if already opted in
@@ -263,7 +292,7 @@ class OptInToAssetMutation(graphene.Mutation):
                 AlgorandAccountManager.ALGOD_ADDRESS
             )
             
-            account_info = algod_client.account_info(account.algorand_address)
+            account_info = algod_client.account_info(user_account.algorand_address)
             assets = account_info.get('assets', [])
             
             if any(asset['asset-id'] == asset_id for asset in assets):
@@ -280,9 +309,9 @@ class OptInToAssetMutation(graphene.Mutation):
             params = algod_client.suggested_params()
             
             opt_in_txn = AssetTransferTxn(
-                sender=account.algorand_address,
+                sender=user_account.algorand_address,
                 sp=params,
-                receiver=account.algorand_address,
+                receiver=user_account.algorand_address,
                 amt=0,
                 index=asset_id
             )
@@ -331,7 +360,7 @@ class CheckAssetOptInsQuery(graphene.ObjectType):
             deleted_at__isnull=True
         ).first()
         
-        return account.algorand_address if account else None
+        return user_account.algorand_address if account else None
     
     def resolve_opted_in_assets(self, info):
         address = self.resolve_algorand_address(info)
@@ -432,18 +461,18 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                     return cls(success=False, error='Business account not found')
             else:
                 # Personal account
-                account = Account.objects.filter(
+                user_account = Account.objects.filter(
                     user=user,
                     account_type=account_type,
                     account_index=account_index,
                     deleted_at__isnull=True
                 ).first()
             
-            if not account or not account.algorand_address:
+            if not user_account or not user_account.algorand_address:
                 return cls(success=False, error='Sender Algorand address not found')
             
             # Validate sender's address format
-            if len(account.algorand_address) != 58:
+            if len(user_account.algorand_address) != 58:
                 return cls(success=False, error='Invalid sender Algorand address format')
             
             # Resolve recipient address based on input type
@@ -461,8 +490,8 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                         account_type='personal',
                         account_index=0
                     ).first()
-                    if recipient_account and recipient_account.algorand_address:
-                        resolved_recipient_address = recipient_account.algorand_address
+                    if recipient_account and recipient_user_account.algorand_address:
+                        resolved_recipient_address = recipient_user_account.algorand_address
                         logger.info(f"Resolved recipient address from user_id {recipient_user_id}: {resolved_recipient_address[:10]}...")
                     else:
                         return cls(success=False, error="Recipient's Algorand address not found")
@@ -486,8 +515,8 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                         account_type='personal',
                         account_index=0
                     ).first()
-                    if recipient_account and recipient_account.algorand_address:
-                        resolved_recipient_address = recipient_account.algorand_address
+                    if recipient_account and recipient_user_account.algorand_address:
+                        resolved_recipient_address = recipient_user_account.algorand_address
                         logger.info(f"Resolved recipient address from phone {recipient_phone}: {resolved_recipient_address[:10]}...")
                     else:
                         return cls(success=False, error="Recipient's Algorand address not found")
@@ -529,7 +558,7 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                     AlgorandAccountManager.ALGOD_ADDRESS
                 )
                 
-                account_info = algod_client.account_info(account.algorand_address)
+                account_info = algod_client.account_info(user_account.algorand_address)
                 assets = account_info.get('assets', [])
                 
                 if not any(asset['asset-id'] == asset_id for asset in assets):
@@ -558,7 +587,7 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 # Create the sponsored transfer (returns unsigned user txn and signed sponsor txn)
                 result = loop.run_until_complete(
                     algorand_sponsor_service.create_sponsored_transfer(
-                        sender=account.algorand_address,
+                        sender=user_account.algorand_address,
                         recipient=resolved_recipient_address,  # Use the resolved address
                         amount=Decimal(str(amount)),
                         asset_id=asset_id,
@@ -575,7 +604,7 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             # The client will sign the user transaction and call SubmitSponsoredGroup
             logger.info(
                 f"Created sponsored {asset_type} transfer for user {user.id}: "
-                f"{amount} from {account.algorand_address[:10]}... to {resolved_recipient_address[:10]}... (awaiting client signature)"
+                f"{amount} from {user_account.algorand_address[:10]}... to {resolved_recipient_address[:10]}... (awaiting client signature)"
             )
             
             return cls(
@@ -595,11 +624,12 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
 class SubmitSponsoredGroupMutation(graphene.Mutation):
     """
     Submit a complete sponsored transaction group after client signing.
+    Sponsor transaction is always placed first in the group for proper fee payment.
     """
     
     class Arguments:
         signed_user_txn = graphene.String(required=True)  # Base64 encoded signed user transaction
-        signed_sponsor_txn = graphene.String(required=True)  # Base64 encoded signed sponsor transaction
+        signed_sponsor_txn = graphene.String(required=False)  # Base64 encoded signed sponsor transaction (optional for solo txns)
     
     success = graphene.Boolean()
     error = graphene.String()
@@ -608,32 +638,47 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
     fees_saved = graphene.Float()
     
     @classmethod
-    def mutate(cls, root, info, signed_user_txn, signed_sponsor_txn):
+    def mutate(cls, root, info, signed_user_txn, signed_sponsor_txn=None):
         try:
             logger.info(f"SubmitSponsoredGroupMutation called")
             logger.info(f"User transaction size: {len(signed_user_txn)} chars")
-            logger.info(f"Sponsor transaction size: {len(signed_sponsor_txn)} chars")
+            
+            if signed_sponsor_txn and signed_sponsor_txn.strip():
+                logger.info(f"Sponsor transaction size: {len(signed_sponsor_txn)} chars")
+                is_sponsored = True
+            else:
+                logger.info(f"No sponsor transaction - submitting solo transaction")
+                is_sponsored = False
             
             user = info.context.user
             if not user.is_authenticated:
-                logger.warning(f"Unauthenticated request to submit sponsored group")
+                logger.warning(f"Unauthenticated request to submit transaction")
                 return cls(success=False, error='Not authenticated')
             
-            logger.info(f"Submitting sponsored group for user {user.id}")
+            logger.info(f"Submitting {'sponsored group' if is_sponsored else 'solo transaction'} for user {user.id}")
             
-            # Submit the sponsored group using async function
+            # Submit the transaction(s) using async function
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
             try:
-                logger.info(f"Calling algorand_sponsor_service.submit_sponsored_group...")
-                result = loop.run_until_complete(
-                    algorand_sponsor_service.submit_sponsored_group(
-                        signed_user_txn=signed_user_txn,
-                        signed_sponsor_txn=signed_sponsor_txn
+                if is_sponsored:
+                    logger.info(f"Calling algorand_sponsor_service.submit_sponsored_group...")
+                    result = loop.run_until_complete(
+                        algorand_sponsor_service.submit_sponsored_group(
+                            signed_user_txn=signed_user_txn,
+                            signed_sponsor_txn=signed_sponsor_txn
+                        )
                     )
-                )
-                logger.info(f"submit_sponsored_group returned: {result}")
+                else:
+                    # Submit solo transaction
+                    logger.info(f"Submitting solo transaction...")
+                    result = loop.run_until_complete(
+                        algorand_sponsor_service.submit_solo_transaction(
+                            signed_txn=signed_user_txn
+                        )
+                    )
+                logger.info(f"Transaction submission returned: {result}")
             finally:
                 loop.close()
             
@@ -699,17 +744,17 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
                 return cls(success=False, error=f'{asset_type} not configured on this network')
             
             # Get user's account
-            account = Account.objects.filter(
+            user_account = Account.objects.filter(
                 user=user,
                 account_type='personal',
                 deleted_at__isnull=True
             ).first()
             
-            if not account or not account.algorand_address:
+            if not user_account or not user_account.algorand_address:
                 return cls(success=False, error='No Algorand address found')
             
             # Validate it's an Algorand address
-            if len(account.algorand_address) != 58:
+            if len(user_account.algorand_address) != 58:
                 return cls(success=False, error='Invalid Algorand address format')
             
             # Check if account needs additional funding for MBR
@@ -719,7 +764,7 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
                 AlgorandAccountManager.ALGOD_ADDRESS
             )
             
-            account_info = algod_client.account_info(account.algorand_address)
+            account_info = algod_client.account_info(user_account.algorand_address)
             current_balance = account_info['amount']  # in microAlgos
             num_assets = len(account_info.get('assets', []))
             
@@ -744,7 +789,7 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
                     # First fund the account
                     funding_result = loop.run_until_complete(
                         algorand_sponsor_service.fund_account(
-                            account.algorand_address,
+                            user_account.algorand_address,
                             funding_needed
                         )
                     )
@@ -758,7 +803,7 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
                     # Now execute the opt-in
                     result = loop.run_until_complete(
                         algorand_sponsor_service.execute_server_side_opt_in(
-                            user_address=account.algorand_address,
+                            user_address=user_account.algorand_address,
                             asset_id=asset_id
                         )
                     )
@@ -772,7 +817,7 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
                 try:
                     result = loop.run_until_complete(
                         algorand_sponsor_service.execute_server_side_opt_in(
-                            user_address=account.algorand_address,
+                            user_address=user_account.algorand_address,
                             asset_id=asset_id
                         )
                     )
@@ -785,7 +830,7 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
             # Log the opt-in request
             logger.info(
                 f"Created sponsored opt-in for user {user.id}: "
-                f"Asset {asset_type} (ID: {asset_id}), Address: {account.algorand_address[:10]}..."
+                f"Asset {asset_type} (ID: {asset_id}), Address: {user_account.algorand_address[:10]}..."
             )
             
             if result.get('already_opted_in'):
@@ -809,6 +854,173 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
             
         except Exception as e:
             logger.error(f'Error creating sponsored opt-in for {asset_type}: {str(e)}')
+            return cls(success=False, error=str(e))
+
+
+class GenerateAppOptInTransactionMutation(graphene.Mutation):
+    """
+    Generate a sponsored opt-in transaction for the cUSD application.
+    Returns unsigned user transaction and signed sponsor transaction for atomic group.
+    """
+    
+    class Arguments:
+        app_id = graphene.Int(required=False)  # Defaults to cUSD app
+    
+    success = graphene.Boolean()
+    error = graphene.String()
+    already_opted_in = graphene.Boolean()
+    user_transaction = graphene.String()  # Base64 encoded unsigned user transaction
+    sponsor_transaction = graphene.String()  # Base64 encoded signed sponsor transaction
+    group_id = graphene.String()
+    app_id = graphene.Int()
+    
+    @classmethod
+    def mutate(cls, root, info, app_id=None):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+            
+            # Get user's account
+            user_account = Account.objects.filter(
+                user=user,
+                account_type='personal',
+                deleted_at__isnull=True
+            ).first()
+            
+            if not user_account or not user_account.algorand_address:
+                return cls(success=False, error='No Algorand address found')
+            
+            # Default to cUSD app if not specified
+            if not app_id:
+                app_id = AlgorandAccountManager.CUSD_APP_ID
+                
+            if not app_id:
+                return cls(success=False, error='No app ID specified and cUSD app not configured')
+            
+            # Check if already opted in
+            from algosdk.v2client import algod
+            algod_client = algod.AlgodClient(
+                AlgorandAccountManager.ALGOD_TOKEN,
+                AlgorandAccountManager.ALGOD_ADDRESS
+            )
+            
+            account_info = algod_client.account_info(user_account.algorand_address)
+            apps_local_state = account_info.get('apps-local-state', [])
+            
+            if any(app['id'] == app_id for app in apps_local_state):
+                logger.info(f"User {user.id} already opted into app {app_id}")
+                return cls(
+                    success=True,
+                    already_opted_in=True,
+                    app_id=app_id
+                )
+            
+            # Check user's current balance and min balance requirement
+            current_balance = account_info.get('amount', 0)
+            min_balance_required = account_info.get('min-balance', 0)
+            
+            # After app opt-in, min balance will increase based on the app's local state schema
+            # cUSD app has 2 uint64 fields (is_frozen, is_vault) in local state
+            # Base opt-in: 100,000 microAlgos + (2 * 28,500) for the uint64 fields = 157,000 total
+            app_mbr_increase = 100_000 + (2 * 28_500)  # 157,000 microAlgos
+            min_balance_after_optin = min_balance_required + app_mbr_increase
+            
+            logger.info(f"User {user_account.algorand_address}: current_balance={current_balance}, "
+                       f"min_balance={min_balance_required}, min_after_optin={min_balance_after_optin}")
+            
+            # Create sponsored opt-in transaction group
+            from algosdk.transaction import ApplicationOptInTxn, PaymentTxn, calculate_group_id, SuggestedParams
+            from algosdk import mnemonic, account
+            import base64
+            import msgpack
+            
+            params = algod_client.suggested_params()
+            min_fee = getattr(params, 'min_fee', 1000) or 1000
+            
+            # Get sponsor credentials
+            sponsor_mnemonic = settings.ALGORAND_SPONSOR_MNEMONIC
+            sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
+            sponsor_address = account.address_from_private_key(sponsor_private_key)
+            
+            # Calculate funding needed for minimum balance increase
+            funding_needed = 0
+            if current_balance < min_balance_after_optin + min_fee:
+                funding_needed = min_balance_after_optin + min_fee - current_balance
+                logger.info(f"User needs {funding_needed} microAlgos for app opt-in MBR")
+            else:
+                logger.info(f"User has sufficient balance for app opt-in")
+            
+            # Transaction 0: Sponsor payment (FIRST for proper fee payment)
+            sponsor_params = SuggestedParams(
+                fee=2 * min_fee,  # Cover both transactions (sponsor payment + app opt-in)
+                first=params.first,
+                last=params.last,
+                gh=params.gh,
+                gen=params.gen,
+                flat_fee=True
+            )
+            
+            sponsor_payment = PaymentTxn(
+                sender=sponsor_address,
+                receiver=user_account.algorand_address,
+                amt=funding_needed,  # Fund the MBR increase + buffer for fees
+                sp=sponsor_params,
+                note=b"Sponsored app opt-in MBR funding"
+            )
+            
+            # Transaction 1: User app opt-in (0 fee)
+            opt_in_params = SuggestedParams(
+                fee=0,  # Sponsored by payment transaction
+                first=params.first,
+                last=params.last,
+                gh=params.gh,
+                gen=params.gen,
+                flat_fee=True
+            )
+            
+            # ApplicationOptInTxn automatically sets OnComplete to OptIn
+            # Beaker apps require the opt_in method selector
+            opt_in_selector = bytes.fromhex("30c6d58a")  # "opt_in()void"
+            
+            app_opt_in = ApplicationOptInTxn(
+                sender=user_account.algorand_address,
+                sp=opt_in_params,
+                index=app_id,
+                app_args=[opt_in_selector]  # Required for Beaker router
+            )
+            
+            # Group transactions - sponsor FIRST
+            txns = [sponsor_payment, app_opt_in]
+            group_id = calculate_group_id(txns)
+            
+            for txn in txns:
+                txn.group = group_id
+            
+            # Sign sponsor transaction
+            sponsor_signed = sponsor_payment.sign(sponsor_private_key)
+            sponsor_signed_encoded = base64.b64encode(
+                msgpack.packb(sponsor_signed.dictify())
+            ).decode()
+            
+            # Encode user transaction for frontend
+            from algosdk import encoding
+            user_txn_encoded = encoding.msgpack_encode(app_opt_in)
+            
+            logger.info(f"Created sponsored app opt-in transaction group for user {user.id}: App {app_id} (sponsor first)")
+            
+            # Return sponsored transaction group
+            return cls(
+                success=True,
+                already_opted_in=False,
+                user_transaction=user_txn_encoded,
+                sponsor_transaction=sponsor_signed_encoded,
+                group_id=base64.b64encode(group_id).decode(),
+                app_id=app_id
+            )
+            
+        except Exception as e:
+            logger.error(f'Error generating app opt-in transaction: {str(e)}')
             return cls(success=False, error=str(e))
 
 
@@ -839,17 +1051,17 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
                 return cls(success=False, error='Not authenticated')
             
             # Get user's account
-            account = Account.objects.filter(
+            user_account = Account.objects.filter(
                 user=user,
                 account_type='personal',
                 deleted_at__isnull=True
             ).first()
             
-            if not account or not account.algorand_address:
+            if not user_account or not user_account.algorand_address:
                 return cls(success=False, error='No Algorand address found')
             
             # Validate it's an Algorand address
-            if len(account.algorand_address) != 58:
+            if len(user_account.algorand_address) != 58:
                 return cls(success=False, error='Invalid Algorand address format')
             
             # Default to CONFIO if no asset specified
@@ -875,7 +1087,7 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
             try:
                 result = loop.run_until_complete(
                     algorand_sponsor_service.execute_server_side_opt_in(
-                        user_address=account.algorand_address,
+                        user_address=user_account.algorand_address,
                         asset_id=asset_id
                     )
                 )
@@ -888,7 +1100,7 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
             # Log the opt-in request
             logger.info(
                 f"Created sponsored opt-in for user {user.id}: "
-                f"Asset {asset_name} (ID: {asset_id}), Address: {account.algorand_address[:10]}..."
+                f"Asset {asset_name} (ID: {asset_id}), Address: {user_account.algorand_address[:10]}..."
             )
             
             if result.get('already_opted_in'):

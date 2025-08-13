@@ -18,6 +18,7 @@ class UnifiedTransactionTable(models.Model):
     
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
+        ('PENDING_SIG', 'Pending Signature'),
         ('SPONSORING', 'Sponsoring'),
         ('SIGNED', 'Signed'),
         ('SUBMITTED', 'Submitted'),
@@ -77,7 +78,7 @@ class UnifiedTransactionTable(models.Model):
     # Denormalized fields for quick access/filtering
     amount = models.CharField(max_length=32)
     token_type = models.CharField(max_length=10, choices=TOKEN_TYPES)
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES)
     transaction_hash = models.CharField(max_length=66, blank=True, default='')
     error_message = models.TextField(blank=True, default='')
     

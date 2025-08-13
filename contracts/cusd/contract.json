@@ -10,6 +10,19 @@
             "desc": "Initialize the Conf\u00edo Dollar contract"
         },
         {
+            "name": "set_sponsor_address",
+            "args": [
+                {
+                    "type": "address",
+                    "name": "sponsor"
+                }
+            ],
+            "returns": {
+                "type": "void"
+            },
+            "desc": "Set the sponsor address that can send app calls on behalf of users\nAdmin only"
+        },
+        {
             "name": "setup_assets",
             "args": [
                 {
@@ -138,7 +151,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Mint cUSD by depositing USDC (1:1 ratio)\nMust be called as part of atomic group with USDC transfer\nGroup structure: - Tx 0: USDC transfer from user to app - Tx 1: This app call"
+            "desc": "Mint cUSD by depositing USDC (1:1 ratio)\nMust be called as part of atomic group with USDC transfer\nSupports two group structures:\nNon-sponsored (2 transactions): - Tx 0: USDC transfer from user to app - Tx 1: This app call\nSponsored (3 transactions): - Tx 0: Payment from sponsor to user (or app) for fees - Tx 1: USDC transfer from user to app - Tx 2: This app call"
         },
         {
             "name": "burn_for_collateral",
@@ -146,7 +159,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Burn cUSD to redeem USDC (1:1 ratio)\nMust be called as part of atomic group with cUSD transfer\nGroup structure: - Tx 0: cUSD transfer from user to app - Tx 1: This app call"
+            "desc": "Burn cUSD to redeem USDC (1:1 ratio)\nMust be called as part of atomic group with cUSD transfer\nSupports two group structures:\nNon-sponsored (2 transactions): - Tx 0: cUSD transfer from user to app - Tx 1: This app call\nSponsored (3 transactions): - Tx 0: Payment from sponsor to user (or app) for fees - Tx 1: cUSD transfer from user to app - Tx 2: This app call"
         },
         {
             "name": "transfer_cusd",

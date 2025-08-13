@@ -15,6 +15,7 @@ class Conversion(models.Model):
     
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
+        ('PENDING_SIG', 'Pending Signature'),
         ('PROCESSING', 'Processing'),
         ('COMPLETED', 'Completed'),
         ('FAILED', 'Failed'),

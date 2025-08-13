@@ -550,115 +550,6 @@ export class SecureDeterministicWalletService {
     return null;
   }
 
-  // REMOVED: warmUpFromCache method - not used anywhere and referenced Firebase UID
-  // Keeping stub method to avoid breaking any potential references
-  async warmUpFromCache(
-    idToken: string,
-    firebaseUid: string,
-    provider: 'google' | 'apple',
-    accountType: 'personal' | 'business' = 'personal',
-    accountIndex: number = 0,
-    businessId?: string,
-    network: 'testnet' | 'mainnet' = 'mainnet',
-    oauthSubject?: string
-  ): Promise<boolean> {
-    console.warn('warmUpFromCache is deprecated and should not be used');
-    return false;
-    /* Original implementation removed - referenced Firebase UID
-    try {
-      // Use consistent scope generation (same as createOrRestoreWallet)
-      const subject = oauthSubject || firebaseUid;
-      const scope = makeScope(provider, subject, accountType, accountIndex, businessId);
-      const cacheKey = makeCacheKey(accountType, accountIndex, businessId);
-      
-      // Track this cache key for later cleanup (store username for identification)
-      const userKey = `${accountType}_${accountIndex}`;
-      if (!this.cacheKeysPerUser.has(userKey)) {
-        this.cacheKeysPerUser.set(userKey, new Set());
-      }
-      this.cacheKeysPerUser.get(userKey)!.add(cacheKey.username);
-      
-      const credentials = await Keychain.getInternetCredentials(cacheKey.server);
-      if (!credentials || credentials.username !== cacheKey.username || !credentials.password) {
-        return false;
-      }
-      
-      // Parse blob to get the pepper version it was encrypted with
-      const blobMeta = parseSeedBlob(credentials.password);
-      const storedPepperVersion = blobMeta.pepperVersion;
-      
-      // Get the pepper for the stored version (during grace period)
-      const { 
-        pepper: serverPepper, 
-        version: currentVersion,
-        isRotated 
-      } = await this.getServerPepper(storedPepperVersion);
-      
-      if (!serverPepper) {
-        console.error('Could not get pepper for version', storedPepperVersion);
-        console.error('Grace period may have expired. User needs to re-authenticate.');
-        // Clear the invalid cached seed
-        await Keychain.resetInternetCredentials({ server: cacheKey.server });
-        return false;
-      }
-      
-      // Derive KEK with the appropriate pepper version
-      const kek = deriveKEK(idToken, serverPepper, scope);
-      
-      // Decrypt the seed
-      const seed = unwrapSeed(credentials.password, kek);
-      const privSeedHex = bytesToHex(seed);
-      
-      // Store in memory
-      const memKey = `${accountType}_${accountIndex}_${businessId || ''}|${scope}`;
-      this.inMemSeeds.set(memKey, privSeedHex);
-      this.currentScope.set(`${accountType}_${accountIndex}`, scope);
-      
-      // If pepper was rotated, re-wrap with new version
-      if (isRotated && currentVersion !== storedPepperVersion) {
-        console.log(`Pepper rotated from v${storedPepperVersion} to v${currentVersion}, re-wrapping seed...`);
-        
-        // Get the latest pepper
-        const { pepper: newPepper, version: newVersion } = await this.getServerPepper();
-        
-        if (newPepper) {
-          // Derive new KEK with latest pepper
-          const newKek = deriveKEK(idToken, newPepper, scope);
-          
-          // Re-wrap the seed with new pepper
-          const newEncryptedBlob = wrapSeed(seed, newKek, newVersion);
-          
-          // Update cached encrypted seed
-          await Keychain.setInternetCredentials(
-            cacheKey.server,
-            cacheKey.username,
-            newEncryptedBlob
-          );
-          
-          console.log('Seed re-wrapped with new pepper version successfully');
-        }
-      }
-      
-      console.log('Wallet warmed up from cache for scope:', scope);
-      return true;
-    } catch (error) {
-      console.error('Error warming up from cache:', error);
-      
-      // If decryption failed due to pepper issues
-      if (error.message?.includes('Failed to decrypt seed')) {
-        console.error('Pepper may have been rotated after grace period. User needs to re-authenticate.');
-        // Clear the invalid cached seed
-        const subject = oauthSubject || firebaseUid;
-        const scope = makeScope(provider, subject, accountType, accountIndex, businessId);
-        const cacheKey = makeCacheKey(accountType, accountIndex, businessId);
-        await Keychain.resetInternetCredentials({ server: cacheKey.server });
-      }
-      
-      return false;
-    }
-    */
-  }
-
   /**
    * Decode transaction bytes to Transaction instance
    * Ensures we get a signable Transaction object
@@ -666,13 +557,31 @@ export class SecureDeterministicWalletService {
   private decodeTxn(bytes: Uint8Array): any {
     const algosdk = require('algosdk');
     
-    // Use algosdk's decodeUnsignedTransaction which returns a proper Transaction instance
-    // This handles all the field mapping correctly
-    const txn = algosdk.decodeUnsignedTransaction(bytes);
+    try {
+      // First try decodeUnsignedTransaction if available
+      if (typeof algosdk.decodeUnsignedTransaction === 'function') {
+        const txn = algosdk.decodeUnsignedTransaction(bytes);
+        if (txn && typeof txn.signTxn === 'function') {
+          return txn;
+        }
+      }
+    } catch (e) {
+      // Fall through to alternative method
+    }
+    
+    // Alternative: Decode the msgpack object and create Transaction from it
+    const decoded = algosdk.decodeObj(bytes);
+    
+    // Create a new Transaction object from the decoded fields
+    // This ensures we get a proper Transaction instance with signTxn method
+    const txn = algosdk.Transaction.from_obj_for_encoding(decoded);
     
     // Verify it has the signTxn method
-    if (typeof txn.signTxn !== 'function') {
-      throw new Error('Decoded transaction does not have signTxn method');
+    if (typeof txn?.signTxn !== 'function') {
+      // Last resort: If still no signTxn, manually add it
+      txn.signTxn = function(sk: Uint8Array) {
+        return algosdk.signTransaction(this, sk).blob;
+      };
     }
     
     return txn;
@@ -683,7 +592,6 @@ export class SecureDeterministicWalletService {
    * Handles both Transaction objects and raw msgpack bytes
    */
   async signTransaction(
-    firebaseUid: string,
     txnOrBytes: any // Transaction or Uint8Array
   ): Promise<Uint8Array> {
     try {

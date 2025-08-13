@@ -5,6 +5,7 @@ import graphene
 from .mutations import (
     EnsureAlgorandReadyMutation,
     GenerateOptInTransactionsMutation,
+    GenerateAppOptInTransactionMutation,
     OptInToAssetMutation,
     OptInToAssetByTypeMutation,
     CheckAssetOptInsQuery,
@@ -31,6 +32,7 @@ class Mutation(graphene.ObjectType):
     """Blockchain-related mutations"""
     ensure_algorand_ready = EnsureAlgorandReadyMutation.Field()
     generate_opt_in_transactions = GenerateOptInTransactionsMutation.Field()
+    generate_app_opt_in_transaction = GenerateAppOptInTransactionMutation.Field()
     opt_in_to_asset = OptInToAssetMutation.Field()
     opt_in_to_asset_by_type = OptInToAssetByTypeMutation.Field()
     algorand_sponsored_send = AlgorandSponsoredSendMutation.Field()

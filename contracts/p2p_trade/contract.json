@@ -41,7 +41,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Create a new P2P trade offer (seller deposits crypto)\nTrade data stored in box storage with payer tracking Note: fiat_amount and currency stored off-chain with trade_id"
+            "desc": "Create a new P2P trade offer (seller deposits crypto)\nTrade data stored in box storage with payer tracking Note: fiat_amount and currency stored off-chain with trade_id BOX REFS REQUIRED: trade_id"
         },
         {
             "name": "accept_trade",
@@ -54,7 +54,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Buyer accepts the trade - starts 15-minute window"
+            "desc": "Buyer accepts the trade - starts 15-minute window\nBOX REFS REQUIRED: trade_id"
         },
         {
             "name": "mark_as_paid",
@@ -71,7 +71,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Buyer marks trade as paid and can get one-time 10-minute extension"
+            "desc": "Buyer marks trade as paid and can get one-time 10-minute extension\nBOX REFS REQUIRED: trade_id, trade_id+\"_paid\" (will be created)"
         },
         {
             "name": "confirm_payment_received",
@@ -84,7 +84,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Seller confirms fiat payment received, releases crypto to buyer"
+            "desc": "Seller confirms fiat payment received, releases crypto to buyer\nBOX REFS REQUIRED: trade_id, trade_id+\"_paid\" (if exists)"
         },
         {
             "name": "cancel_trade",
@@ -97,7 +97,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Cancel trade (by seller if pending, or anyone if expired with grace period)"
+            "desc": "Cancel trade (by seller if pending, or anyone if expired with grace period)\nBOX REFS REQUIRED: trade_id, trade_id+\"_paid\" (if exists)"
         },
         {
             "name": "open_dispute",
@@ -114,7 +114,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Open dispute (by buyer or seller) - tracks payer for MBR refund"
+            "desc": "Open dispute (by buyer or seller) - tracks payer for MBR refund\nBOX REFS REQUIRED: trade_id, trade_id+\"_dispute\" (will be created)"
         },
         {
             "name": "resolve_dispute",
@@ -131,7 +131,7 @@
             "returns": {
                 "type": "void"
             },
-            "desc": "Admin resolves dispute - refunds both boxes"
+            "desc": "Admin resolves dispute - refunds both boxes\nBOX REFS REQUIRED: trade_id, trade_id+\"_dispute\", trade_id+\"_paid\" (if exists)"
         },
         {
             "name": "pause",
@@ -161,6 +161,19 @@
                 "type": "void"
             },
             "desc": "Admin sets or updates the optional sponsor address for MBR/fee funding"
+        },
+        {
+            "name": "get_trade",
+            "args": [
+                {
+                    "type": "string",
+                    "name": "trade_id"
+                }
+            ],
+            "returns": {
+                "type": "string"
+            },
+            "desc": "Get trade details: (seller, amount, asset_id, created_at, expires_at, status, accepted_at, buyer, mbr_payer)"
         },
         {
             "name": "get_stats",

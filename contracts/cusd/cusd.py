@@ -104,6 +104,13 @@ class CUSDState:
         descr="ASA reserve address for minting/burning"
     )
     
+    # Sponsor address for fee sponsorship
+    sponsor_address: Final[GlobalStateValue] = GlobalStateValue(
+        stack_type=TealType.bytes,
+        default=Bytes(""),
+        descr="Sponsor address allowed to send app calls on behalf of users"
+    )
+    
     # Local state for accounts
     is_frozen: Final[LocalStateValue] = LocalStateValue(
         stack_type=TealType.uint64,
@@ -127,6 +134,23 @@ def create():
         app.state.admin.set(Txn.sender()),
         app.state.is_paused.set(Int(0)),
         app.state.collateral_ratio.set(Int(1000000)),  # 1:1 ratio for user operations
+        Approve()
+    )
+
+@app.external
+def set_sponsor_address(sponsor: abi.Address):
+    """
+    Set the sponsor address that can send app calls on behalf of users
+    Admin only
+    """
+    return Seq(
+        # Admin only
+        Assert(Txn.sender() == app.state.admin),
+        Assert(Txn.rekey_to() == Global.zero_address()),
+        
+        # Set sponsor address
+        app.state.sponsor_address.set(sponsor.get()),
+        
         Approve()
     )
 
@@ -536,12 +560,21 @@ def mint_with_collateral():
     Mint cUSD by depositing USDC (1:1 ratio)
     Must be called as part of atomic group with USDC transfer
     
-    Group structure:
+    Supports two group structures:
+    
+    Non-sponsored (2 transactions):
     - Tx 0: USDC transfer from user to app
     - Tx 1: This app call
+    
+    Sponsored (3 transactions):
+    - Tx 0: Payment from sponsor to user (or app) for fees
+    - Tx 1: USDC transfer from user to app
+    - Tx 2: This app call
     """
     usdc_amount = ScratchVar(TealType.uint64)
     cusd_to_mint = ScratchVar(TealType.uint64)
+    is_sponsored = ScratchVar(TealType.uint64)
+    usdc_tx_index = ScratchVar(TealType.uint64)
     
     return Seq(
         # Verify system state
@@ -555,33 +588,60 @@ def mint_with_collateral():
         Assert(claw.hasValue()),
         Assert(claw.value() == Global.current_application_address()),
         
-        # Verify atomic group
-        Assert(Global.group_size() == Int(2)),
-        Assert(Txn.group_index() == Int(1)),
+        # Verify atomic group - support both 2-tx and 3-tx groups
+        Assert(Or(
+            Global.group_size() == Int(2),  # Non-sponsored
+            Global.group_size() == Int(3)   # Sponsored
+        )),
         
-        # Tie caller to depositor
-        Assert(Txn.sender() == Gtxn[0].sender()),
+        # Determine if sponsored and set indexes
+        If(Global.group_size() == Int(3),
+            Seq(
+                is_sponsored.store(Int(1)),
+                usdc_tx_index.store(Int(1)),  # USDC transfer is at index 1 in sponsored
+                Assert(Txn.group_index() == Int(2)),  # App call is at index 2
+                
+                # Verify sponsor payment (Tx 0)
+                Assert(Gtxn[0].type_enum() == TxnType.Payment),
+                Assert(Gtxn[0].amount() >= Int(0)),  # Can be 0 if just covering fees
+                Assert(Or(
+                    Gtxn[0].receiver() == Gtxn[1].sender(),  # Payment to asset sender (the user)
+                    Gtxn[0].receiver() == Global.current_application_address()  # Payment to app
+                )),
+            ),
+            Seq(
+                is_sponsored.store(Int(0)),
+                usdc_tx_index.store(Int(0)),  # USDC transfer is at index 0 in non-sponsored
+                Assert(Txn.group_index() == Int(1)),  # App call is at index 1
+            )
+        ),
         
-        # Verify USDC deposit (Tx 0)
-        Assert(Gtxn[0].type_enum() == TxnType.AssetTransfer),
-        Assert(Gtxn[0].xfer_asset() == app.state.usdc_asset_id),
-        Assert(Gtxn[0].asset_receiver() == Global.current_application_address()),
-        Assert(Gtxn[0].asset_amount() > Int(0)),
+        # Allow either the user (asset transfer sender) or sponsor to be the app call sender
+        Assert(Or(
+            Txn.sender() == Gtxn[usdc_tx_index.load()].sender(),  # User is sender
+            Txn.sender() == app.state.sponsor_address.get()  # Sponsor is sender - need .get()!
+        )),
+        
+        # Verify USDC deposit
+        Assert(Gtxn[usdc_tx_index.load()].type_enum() == TxnType.AssetTransfer),
+        Assert(Gtxn[usdc_tx_index.load()].xfer_asset() == app.state.usdc_asset_id),
+        Assert(Gtxn[usdc_tx_index.load()].asset_receiver() == Global.current_application_address()),
+        Assert(Gtxn[usdc_tx_index.load()].asset_amount() > Int(0)),
         
         # Harden deposit inputs
-        Assert(Gtxn[0].rekey_to() == Global.zero_address()),
-        Assert(Gtxn[0].asset_close_to() == Global.zero_address()),
-        Assert(Gtxn[0].asset_sender() == Global.zero_address()),
+        Assert(Gtxn[usdc_tx_index.load()].rekey_to() == Global.zero_address()),
+        Assert(Gtxn[usdc_tx_index.load()].asset_close_to() == Global.zero_address()),
+        Assert(Gtxn[usdc_tx_index.load()].asset_sender() == Global.zero_address()),
         
         # Verify sender is not frozen
-        Assert(app.state.is_frozen[Gtxn[0].sender()] == Int(0)),
+        Assert(app.state.is_frozen[Gtxn[usdc_tx_index.load()].sender()] == Int(0)),
         
         # Verify receiver has opted into cUSD
-        (h := AssetHolding.balance(Gtxn[0].sender(), app.state.cusd_asset_id)),
+        (h := AssetHolding.balance(Gtxn[usdc_tx_index.load()].sender(), app.state.cusd_asset_id)),
         Assert(h.hasValue()),
         
         # Store amounts
-        usdc_amount.store(Gtxn[0].asset_amount()),
+        usdc_amount.store(Gtxn[usdc_tx_index.load()].asset_amount()),
 
         # App call must fund inner asset transfer (app call + 1 inner)
         Assert(Txn.fee() >= Global.min_txn_fee() * Int(2)),
@@ -614,7 +674,7 @@ def mint_with_collateral():
             TxnField.type_enum: TxnType.AssetTransfer,
             TxnField.xfer_asset: app.state.cusd_asset_id,
             TxnField.asset_amount: cusd_to_mint.load(),
-            TxnField.asset_receiver: Gtxn[0].sender(),  # Send to original USDC depositor
+            TxnField.asset_receiver: Gtxn[usdc_tx_index.load()].sender(),  # Send to original USDC depositor
             TxnField.asset_sender: app.state.reserve_address  # Use stored reserve
         }),
         InnerTxnBuilder.Submit(),
@@ -635,7 +695,7 @@ def mint_with_collateral():
             Bytes("mint:"),
             Itob(cusd_to_mint.load()),
             Bytes(":"),
-            Gtxn[0].sender()
+            Gtxn[usdc_tx_index.load()].sender()
         )),
         
         Approve()
@@ -647,12 +707,21 @@ def burn_for_collateral():
     Burn cUSD to redeem USDC (1:1 ratio)
     Must be called as part of atomic group with cUSD transfer
     
-    Group structure:
+    Supports two group structures:
+    
+    Non-sponsored (2 transactions):
     - Tx 0: cUSD transfer from user to app
     - Tx 1: This app call
+    
+    Sponsored (3 transactions):
+    - Tx 0: Payment from sponsor to user (or app) for fees
+    - Tx 1: cUSD transfer from user to app
+    - Tx 2: This app call
     """
     cusd_amount = ScratchVar(TealType.uint64)
     usdc_to_redeem = ScratchVar(TealType.uint64)
+    is_sponsored = ScratchVar(TealType.uint64)
+    cusd_tx_index = ScratchVar(TealType.uint64)
     
     return Seq(
         # Verify system state
@@ -666,29 +735,56 @@ def burn_for_collateral():
         Assert(claw.hasValue()),
         Assert(claw.value() == Global.current_application_address()),
         
-        # Verify atomic group
-        Assert(Global.group_size() == Int(2)),
-        Assert(Txn.group_index() == Int(1)),
+        # Verify atomic group - support both 2-tx and 3-tx groups
+        Assert(Or(
+            Global.group_size() == Int(2),  # Non-sponsored
+            Global.group_size() == Int(3)   # Sponsored
+        )),
         
-        # Tie caller to redeemer
-        Assert(Txn.sender() == Gtxn[0].sender()),
+        # Determine if sponsored and set indexes
+        If(Global.group_size() == Int(3),
+            Seq(
+                is_sponsored.store(Int(1)),
+                cusd_tx_index.store(Int(1)),  # cUSD transfer is at index 1 in sponsored
+                Assert(Txn.group_index() == Int(2)),  # App call is at index 2
+                
+                # Verify sponsor payment (Tx 0)
+                Assert(Gtxn[0].type_enum() == TxnType.Payment),
+                Assert(Gtxn[0].amount() >= Int(0)),  # Can be 0 if just covering fees
+                Assert(Or(
+                    Gtxn[0].receiver() == Gtxn[1].sender(),  # Payment to asset sender (the user)
+                    Gtxn[0].receiver() == Global.current_application_address()  # Payment to app
+                )),
+            ),
+            Seq(
+                is_sponsored.store(Int(0)),
+                cusd_tx_index.store(Int(0)),  # cUSD transfer is at index 0 in non-sponsored
+                Assert(Txn.group_index() == Int(1)),  # App call is at index 1
+            )
+        ),
         
-        # Verify cUSD deposit (Tx 0)
-        Assert(Gtxn[0].type_enum() == TxnType.AssetTransfer),
-        Assert(Gtxn[0].xfer_asset() == app.state.cusd_asset_id),
-        Assert(Gtxn[0].asset_receiver() == Global.current_application_address()),
-        Assert(Gtxn[0].asset_amount() > Int(0)),
+        # Allow either the user (asset transfer sender) or sponsor to be the app call sender
+        Assert(Or(
+            Txn.sender() == Gtxn[cusd_tx_index.load()].sender(),  # User is sender
+            Txn.sender() == app.state.sponsor_address.get()  # Sponsor is sender - need .get()!
+        )),
+        
+        # Verify cUSD deposit
+        Assert(Gtxn[cusd_tx_index.load()].type_enum() == TxnType.AssetTransfer),
+        Assert(Gtxn[cusd_tx_index.load()].xfer_asset() == app.state.cusd_asset_id),
+        Assert(Gtxn[cusd_tx_index.load()].asset_receiver() == Global.current_application_address()),
+        Assert(Gtxn[cusd_tx_index.load()].asset_amount() > Int(0)),
         
         # Harden withdraw inputs
-        Assert(Gtxn[0].rekey_to() == Global.zero_address()),
-        Assert(Gtxn[0].asset_close_to() == Global.zero_address()),
-        Assert(Gtxn[0].asset_sender() == Global.zero_address()),
+        Assert(Gtxn[cusd_tx_index.load()].rekey_to() == Global.zero_address()),
+        Assert(Gtxn[cusd_tx_index.load()].asset_close_to() == Global.zero_address()),
+        Assert(Gtxn[cusd_tx_index.load()].asset_sender() == Global.zero_address()),
         
         # Verify sender is not frozen
-        Assert(app.state.is_frozen[Gtxn[0].sender()] == Int(0)),
+        Assert(app.state.is_frozen[Gtxn[cusd_tx_index.load()].sender()] == Int(0)),
         
         # Store amounts
-        cusd_amount.store(Gtxn[0].asset_amount()),
+        cusd_amount.store(Gtxn[cusd_tx_index.load()].asset_amount()),
 
         # App call must fund 2 inner transfers (USDC out + cUSD back to reserve)
         Assert(Txn.fee() >= Global.min_txn_fee() * Int(3)),
@@ -717,7 +813,7 @@ def burn_for_collateral():
             TxnField.type_enum: TxnType.AssetTransfer,
             TxnField.xfer_asset: app.state.usdc_asset_id,
             TxnField.asset_amount: usdc_to_redeem.load(),
-            TxnField.asset_receiver: Gtxn[0].sender()
+            TxnField.asset_receiver: Gtxn[cusd_tx_index.load()].sender()
         }),
         InnerTxnBuilder.Submit(),
         
@@ -756,7 +852,7 @@ def burn_for_collateral():
             Bytes("burn:"),
             Itob(cusd_amount.load()),
             Bytes(":"),
-            Gtxn[0].sender()
+            Gtxn[cusd_tx_index.load()].sender()
         )),
         
         Approve()

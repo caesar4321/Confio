@@ -22,10 +22,10 @@ class AlgorandClient:
     """
     
     def __init__(self):
-        # Get Algorand configuration from settings
-        self.algod_address = getattr(settings, 'ALGORAND_ALGOD_ADDRESS', 'https://testnet-api.algonode.cloud')
+        # Get Algorand configuration from settings - single source of truth
+        self.algod_address = settings.ALGORAND_ALGOD_ADDRESS
         self.algod_token = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '')
-        self.indexer_address = getattr(settings, 'ALGORAND_INDEXER_ADDRESS', 'https://testnet-idx.algonode.cloud')
+        self.indexer_address = settings.ALGORAND_INDEXER_ADDRESS
         self.indexer_token = getattr(settings, 'ALGORAND_INDEXER_TOKEN', '')
         
         # Initialize clients

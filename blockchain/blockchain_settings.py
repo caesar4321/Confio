@@ -31,10 +31,10 @@ except (ImportError, AttributeError):
 
     # RPC Endpoints
     if NETWORK == 'testnet':
-        # Algorand Testnet - Using Algonode free service
-        ALGORAND_ALGOD_ADDRESS = os.environ.get('ALGORAND_ALGOD_ADDRESS', 'https://testnet-api.algonode.cloud')
+        # Algorand Testnet - Must be configured in environment
+        ALGORAND_ALGOD_ADDRESS = os.environ['ALGORAND_ALGOD_ADDRESS']  # Required
         ALGORAND_ALGOD_TOKEN = os.environ.get('ALGORAND_ALGOD_TOKEN', '')  # Algonode doesn't require tokens
-        ALGORAND_INDEXER_ADDRESS = os.environ.get('ALGORAND_INDEXER_ADDRESS', 'https://testnet-idx.algonode.cloud')
+        ALGORAND_INDEXER_ADDRESS = os.environ['ALGORAND_INDEXER_ADDRESS']  # Required
         ALGORAND_INDEXER_TOKEN = os.environ.get('ALGORAND_INDEXER_TOKEN', '')
         
         # Testnet Asset IDs
@@ -69,10 +69,10 @@ except (ImportError, AttributeError):
         CONFIO_PACKAGE_ID = os.environ.get('CONFIO_PACKAGE_ID', None)
 
     else:
-        # Algorand Mainnet - Using Algonode or QuickNode
-        ALGORAND_ALGOD_ADDRESS = os.environ.get('ALGORAND_ALGOD_ADDRESS', 'https://mainnet-api.algonode.cloud')
+        # Algorand Mainnet - Must be configured in environment
+        ALGORAND_ALGOD_ADDRESS = os.environ['ALGORAND_ALGOD_ADDRESS']  # Required
         ALGORAND_ALGOD_TOKEN = os.environ.get('ALGORAND_ALGOD_TOKEN', '')
-        ALGORAND_INDEXER_ADDRESS = os.environ.get('ALGORAND_INDEXER_ADDRESS', 'https://mainnet-idx.algonode.cloud')
+        ALGORAND_INDEXER_ADDRESS = os.environ['ALGORAND_INDEXER_ADDRESS']  # Required
         ALGORAND_INDEXER_TOKEN = os.environ.get('ALGORAND_INDEXER_TOKEN', '')
         
         # Mainnet Asset IDs

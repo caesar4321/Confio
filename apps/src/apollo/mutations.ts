@@ -81,7 +81,7 @@ export const ALGORAND_SPONSORED_SEND = gql`
       success
       error
       userTransaction
-      sponsorTransaction
+      sponsorTransactions
       groupId
       totalFee
       feeInAlgo
@@ -97,7 +97,7 @@ export const ALGORAND_SPONSORED_OPT_IN = gql`
       alreadyOptedIn
       requiresUserSignature
       userTransaction
-      sponsorTransaction
+      sponsorTransactions
       groupId
       assetId
       assetName
@@ -153,9 +153,16 @@ export const CONVERT_USDC_TO_CUSD = gql`
         feeAmount
         status
         createdAt
+        fromTransactionHash
+        toTransactionHash
       }
       success
       errors
+      transactionsToSign
+      sponsorTransactions
+      groupId
+      requiresAppOptin
+      appId
     }
   }
 `;
@@ -173,9 +180,16 @@ export const CONVERT_CUSD_TO_USDC = gql`
         feeAmount
         status
         createdAt
+        fromTransactionHash
+        toTransactionHash
       }
       success
       errors
+      transactionsToSign
+      sponsorTransactions
+      groupId
+      requiresAppOptin
+      appId
     }
   }
 `;
@@ -333,6 +347,33 @@ export const UPDATE_NOTIFICATION_PREFERENCES = gql`
         inAppPromotions
         inAppAnnouncements
       }
+    }
+  }
+`;
+
+export const EXECUTE_PENDING_CONVERSION = gql`
+  mutation ExecutePendingConversion($conversionId: ID!, $signedTransactions: String!) {
+    executePendingConversion(conversionId: $conversionId, signedTransactions: $signedTransactions) {
+      success
+      conversion {
+        id
+        conversionId
+        status
+        fromTransactionHash
+        toTransactionHash
+      }
+      transactionId
+      errors
+    }
+  }
+`;
+
+export const GET_CONVERSION_TRANSACTIONS = gql`
+  mutation GetConversionTransactions($conversionId: ID!) {
+    getConversionTransactions(conversionId: $conversionId) {
+      success
+      transactions
+      errors
     }
   }
 `;

@@ -242,11 +242,31 @@ def pay_with_cusd(
         
         # Enforce strict group ordering
         # AppCall must be the last txn in the group
+        # Support sponsored and non-sponsored patterns
         Assert(
-            Txn.group_index() == If(
-                Len(payment_id.get()) > Int(0), 
-                Int(2),  # With receipt: [MBR Payment, AXFER, AppCall]
-                Int(1)   # No receipt: [AXFER, AppCall]
+            Or(
+                # Non-sponsored patterns
+                And(
+                    Len(payment_id.get()) == Int(0),  # No receipt
+                    Global.group_size() == Int(2),
+                    Txn.group_index() == Int(1)
+                ),
+                And(
+                    Len(payment_id.get()) > Int(0),   # With receipt
+                    Global.group_size() == Int(3),
+                    Txn.group_index() == Int(2)
+                ),
+                # Sponsored patterns
+                And(
+                    Len(payment_id.get()) == Int(0),  # No receipt, sponsored
+                    Global.group_size() == Int(3),
+                    Txn.group_index() == Int(2)
+                ),
+                And(
+                    Len(payment_id.get()) > Int(0),   # With receipt, sponsored
+                    Global.group_size() == Int(4),
+                    Txn.group_index() == Int(3)
+                )
             )
         ),
         
@@ -306,9 +326,25 @@ def pay_with_cusd(
             # Receipt path: needs box reference fee
             Assert(Txn.fee() >= Global.min_txn_fee() * Int(2) + BOX_REF_SURCHARGE),
             # No-receipt path: just base + 1 inner
+            Assert(Txn.fee() >= Global.min_txn_fee() * Int(2))
+        ),
+        
+        # Validate sponsorship payment if present
+        If(
+            Or(
+                And(Len(payment_id.get()) == Int(0), Global.group_size() == Int(3)),  # No receipt, sponsored
+                And(Len(payment_id.get()) > Int(0), Global.group_size() == Int(4))    # With receipt, sponsored
+            ),
             Seq(
-                Assert(Global.group_size() == Int(2)),
-                Assert(Txn.fee() >= Global.min_txn_fee() * Int(2))
+                # Verify sponsor payment at index 0
+                Assert(Gtxn[0].type_enum() == TxnType.Payment),
+                Assert(Gtxn[0].amount() >= Int(0)),  # Can be 0 if just covering fees
+                Assert(Or(
+                    Gtxn[0].receiver() == Txn.sender(),  # Payment to user
+                    Gtxn[0].receiver() == Global.current_application_address()  # Payment to app
+                )),
+                Assert(Gtxn[0].rekey_to() == Global.zero_address()),
+                Assert(Gtxn[0].close_remainder_to() == Global.zero_address())
             )
         ),
         
@@ -350,19 +386,31 @@ def pay_with_cusd(
                 # Fixed-size value: payer(32)|recipient(32)|amount(8)|fee(8)|ts(8)|asset_id(8) = 96
                 val_len.store(Int(96)),
                 
-                # If using a receipt, pin and validate the ALGO funding payment at index 0
-                Assert(Global.group_size() == Int(3)),
-                Assert(Gtxn[0].type_enum() == TxnType.Payment),
-                Assert(Gtxn[0].sender() == Txn.sender()),
-                Assert(Gtxn[0].receiver() == Global.current_application_address()),
-                
-                # Require EXACT MBR amount
+                # If using a receipt, pin and validate the ALGO funding payment
+                # Handle both sponsored and non-sponsored cases
                 mbr.store(box_mbr_cost(key_len.load(), val_len.load())),
-                Assert(Gtxn[0].amount() == mbr.load()),  # Exact, not >=
-                
-                # Require zeroed dangerous fields on MBR payment
-                Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
-                Assert(Gtxn[0].rekey_to() == Global.zero_address()),
+                If(
+                    Global.group_size() == Int(3),
+                    Seq(
+                        # Non-sponsored: MBR payment at index 0
+                        Assert(Gtxn[0].type_enum() == TxnType.Payment),
+                        Assert(Gtxn[0].sender() == Txn.sender()),
+                        Assert(Gtxn[0].receiver() == Global.current_application_address()),
+                        Assert(Gtxn[0].amount() == mbr.load()),  # Exact, not >=
+                        Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
+                        Assert(Gtxn[0].rekey_to() == Global.zero_address())
+                    ),
+                    Seq(
+                        # Sponsored: MBR payment at index 1 (index 0 is sponsor payment)
+                        Assert(Global.group_size() == Int(4)),
+                        Assert(Gtxn[1].type_enum() == TxnType.Payment),
+                        Assert(Gtxn[1].sender() == Txn.sender()),
+                        Assert(Gtxn[1].receiver() == Global.current_application_address()),
+                        Assert(Gtxn[1].amount() == mbr.load()),  # Exact, not >=
+                        Assert(Gtxn[1].close_remainder_to() == Global.zero_address()),
+                        Assert(Gtxn[1].rekey_to() == Global.zero_address())
+                    )
+                ),
                 
                 # Box existence check using hasValue()
                 (box_exists := App.box_get(key.load())),
@@ -436,11 +484,31 @@ def pay_with_confio(
         
         # Enforce strict group ordering
         # AppCall must be the last txn in the group
+        # Support sponsored and non-sponsored patterns
         Assert(
-            Txn.group_index() == If(
-                Len(payment_id.get()) > Int(0), 
-                Int(2),  # With receipt: [MBR Payment, AXFER, AppCall]
-                Int(1)   # No receipt: [AXFER, AppCall]
+            Or(
+                # Non-sponsored patterns
+                And(
+                    Len(payment_id.get()) == Int(0),  # No receipt
+                    Global.group_size() == Int(2),
+                    Txn.group_index() == Int(1)
+                ),
+                And(
+                    Len(payment_id.get()) > Int(0),   # With receipt
+                    Global.group_size() == Int(3),
+                    Txn.group_index() == Int(2)
+                ),
+                # Sponsored patterns
+                And(
+                    Len(payment_id.get()) == Int(0),  # No receipt, sponsored
+                    Global.group_size() == Int(3),
+                    Txn.group_index() == Int(2)
+                ),
+                And(
+                    Len(payment_id.get()) > Int(0),   # With receipt, sponsored
+                    Global.group_size() == Int(4),
+                    Txn.group_index() == Int(3)
+                )
             )
         ),
         
@@ -500,9 +568,25 @@ def pay_with_confio(
             # Receipt path: needs box reference fee
             Assert(Txn.fee() >= Global.min_txn_fee() * Int(2) + BOX_REF_SURCHARGE),
             # No-receipt path: just base + 1 inner
+            Assert(Txn.fee() >= Global.min_txn_fee() * Int(2))
+        ),
+        
+        # Validate sponsorship payment if present
+        If(
+            Or(
+                And(Len(payment_id.get()) == Int(0), Global.group_size() == Int(3)),  # No receipt, sponsored
+                And(Len(payment_id.get()) > Int(0), Global.group_size() == Int(4))    # With receipt, sponsored
+            ),
             Seq(
-                Assert(Global.group_size() == Int(2)),
-                Assert(Txn.fee() >= Global.min_txn_fee() * Int(2))
+                # Verify sponsor payment at index 0
+                Assert(Gtxn[0].type_enum() == TxnType.Payment),
+                Assert(Gtxn[0].amount() >= Int(0)),  # Can be 0 if just covering fees
+                Assert(Or(
+                    Gtxn[0].receiver() == Txn.sender(),  # Payment to user
+                    Gtxn[0].receiver() == Global.current_application_address()  # Payment to app
+                )),
+                Assert(Gtxn[0].rekey_to() == Global.zero_address()),
+                Assert(Gtxn[0].close_remainder_to() == Global.zero_address())
             )
         ),
         
@@ -544,19 +628,31 @@ def pay_with_confio(
                 # Fixed-size value: payer(32)|recipient(32)|amount(8)|fee(8)|ts(8)|asset_id(8) = 96
                 val_len.store(Int(96)),
                 
-                # If using a receipt, pin and validate the ALGO funding payment at index 0
-                Assert(Global.group_size() == Int(3)),
-                Assert(Gtxn[0].type_enum() == TxnType.Payment),
-                Assert(Gtxn[0].sender() == Txn.sender()),
-                Assert(Gtxn[0].receiver() == Global.current_application_address()),
-                
-                # Require EXACT MBR amount
+                # If using a receipt, pin and validate the ALGO funding payment
+                # Handle both sponsored and non-sponsored cases
                 mbr.store(box_mbr_cost(key_len.load(), val_len.load())),
-                Assert(Gtxn[0].amount() == mbr.load()),  # Exact, not >=
-                
-                # Require zeroed dangerous fields on MBR payment
-                Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
-                Assert(Gtxn[0].rekey_to() == Global.zero_address()),
+                If(
+                    Global.group_size() == Int(3),
+                    Seq(
+                        # Non-sponsored: MBR payment at index 0
+                        Assert(Gtxn[0].type_enum() == TxnType.Payment),
+                        Assert(Gtxn[0].sender() == Txn.sender()),
+                        Assert(Gtxn[0].receiver() == Global.current_application_address()),
+                        Assert(Gtxn[0].amount() == mbr.load()),  # Exact, not >=
+                        Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
+                        Assert(Gtxn[0].rekey_to() == Global.zero_address())
+                    ),
+                    Seq(
+                        # Sponsored: MBR payment at index 1 (index 0 is sponsor payment)
+                        Assert(Global.group_size() == Int(4)),
+                        Assert(Gtxn[1].type_enum() == TxnType.Payment),
+                        Assert(Gtxn[1].sender() == Txn.sender()),
+                        Assert(Gtxn[1].receiver() == Global.current_application_address()),
+                        Assert(Gtxn[1].amount() == mbr.load()),  # Exact, not >=
+                        Assert(Gtxn[1].close_remainder_to() == Global.zero_address()),
+                        Assert(Gtxn[1].rekey_to() == Global.zero_address())
+                    )
+                ),
                 
                 # Box existence check using hasValue()
                 (box_exists := App.box_get(key.load())),

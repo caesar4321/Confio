@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,10 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  Modal,
+  Animated,
+  Image,
+  Easing,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -17,8 +21,13 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
 import { MainStackParamList } from '../types/navigation';
 import { useAccount } from '../contexts/AccountContext';
-import { useMutation } from '@apollo/client';
-import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations';
+import { useMutation, useQuery } from '@apollo/client';
+import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC, EXECUTE_PENDING_CONVERSION, GET_CONVERSION_TRANSACTIONS } from '../apollo/mutations';
+import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
+import { conversionService } from '../services/conversionService';
+import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
+import { oauthStorage } from '../services/oauthStorageService';
+import { cusdAppOptInService } from '../services/cusdAppOptInService';
 
 const colors = {
   primary: '#34D399',
@@ -40,14 +49,56 @@ export const USDCConversionScreen = () => {
   const [amount, setAmount] = useState('');
   const [conversionDirection, setConversionDirection] = useState<'usdc_to_cusd' | 'cusd_to_usdc'>('usdc_to_cusd');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
+  
+  // Animation for loading spinner
+  const spinValue = useRef(new Animated.Value(0)).current;
+  
+  useEffect(() => {
+    if (loadingMessage) {
+      // Start spinning animation when loading
+      Animated.loop(
+        Animated.timing(spinValue, {
+          toValue: 1,
+          duration: 2000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      ).start();
+    } else {
+      // Reset animation when not loading
+      spinValue.setValue(0);
+    }
+  }, [loadingMessage]);
+  
+  const spin = spinValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   // GraphQL mutations
   const [convertUsdcToCusd] = useMutation(CONVERT_USDC_TO_CUSD);
   const [convertCusdToUsdc] = useMutation(CONVERT_CUSD_TO_USDC);
+  const [executePendingConversion] = useMutation(EXECUTE_PENDING_CONVERSION);
+  const [getConversionTransactions] = useMutation(GET_CONVERSION_TRANSACTIONS);
 
-  // Mock balances - in real app, fetch from API
-  const usdcBalance = 250.00;
-  const cusdBalance = 500.00;
+  // Fetch real balances from GraphQL
+  const { data: cusdBalanceData, loading: cusdLoading, refetch: refetchCusd } = useQuery(GET_ACCOUNT_BALANCE, {
+    variables: { tokenType: 'cUSD' },
+    pollInterval: 30000, // Poll every 30 seconds
+  });
+  
+  const { data: usdcBalanceData, loading: usdcLoading, refetch: refetchUsdc } = useQuery(GET_ACCOUNT_BALANCE, {
+    variables: { tokenType: 'USDC' },
+    pollInterval: 30000, // Poll every 30 seconds
+  });
+
+  // Parse balances from GraphQL data
+  const usdcBalance = parseFloat(usdcBalanceData?.accountBalance || '0');
+  const cusdBalance = parseFloat(cusdBalanceData?.accountBalance || '0');
+  
+  // Loading state for balances
+  const balancesLoading = cusdLoading || usdcLoading;
 
   const sourceBalance = conversionDirection === 'usdc_to_cusd' ? usdcBalance : cusdBalance;
   const sourceCurrency = conversionDirection === 'usdc_to_cusd' ? 'USDC' : 'cUSD';
@@ -91,16 +142,117 @@ export const USDCConversionScreen = () => {
     return true;
   };
 
+  const handleSignAndExecuteConversion = async (conversionId: string) => {
+    try {
+      setIsProcessing(true);
+      console.log('[USDCConversionScreen] Getting transactions for conversion:', conversionId);
+      
+      // First, get the unsigned transactions
+      const { data: txData } = await getConversionTransactions({
+        variables: { conversionId },
+      });
+      
+      if (!txData?.getConversionTransactions?.success) {
+        Alert.alert('Error', 'No se pudieron obtener las transacciones para firmar');
+        return;
+      }
+      
+      const transactions = txData.getConversionTransactions.transactions;
+      
+      // TODO: Implement actual signing with Web3Auth
+      // For now, we'll show a placeholder message
+      console.log('[USDCConversionScreen] Would sign transactions:', transactions);
+      
+      // In production, this would:
+      // 1. Use Web3Auth to get the user's private key
+      // 2. Sign the transactions
+      // 3. Execute the pending conversion
+      
+      // For demo purposes, show message
+      Alert.alert(
+        'Próximamente',
+        'La integración con Web3Auth para firmar transacciones se implementará próximamente.\n\nPor ahora, las conversiones requieren aprobación manual.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Navigate back to AccountDetail
+              navigation.navigate('AccountDetail' as never, {
+                accountType: 'cusd',
+                accountName: 'Confío Dollar',
+                accountSymbol: '$cUSD',
+                accountBalance: '0',
+                accountAddress: activeAccount?.algorandAddress || '',
+                refreshTimestamp: Date.now()
+              } as never);
+            },
+          },
+        ]
+      );
+      
+    } catch (error) {
+      console.error('[USDCConversionScreen] Error signing conversion:', error);
+      Alert.alert('Error', 'No se pudo completar la firma de la conversión');
+    } finally {
+      setIsProcessing(false);
+      setLoadingMessage('');
+    }
+  };
+
+  const handleConversionSuccess = async () => {
+    Alert.alert(
+      'Conversión exitosa',
+      `Has convertido ${amount} ${sourceCurrency} a ${amount} ${targetCurrency}`,
+      [
+        {
+          text: 'Ver historial',
+          onPress: () => {
+            // Navigate to USDC History screen
+            navigation.navigate('USDCHistory' as never);
+          },
+        },
+        {
+          text: 'OK',
+          onPress: () => {
+            // Clear amount and navigate back
+            setAmount('');
+            // Navigate back to AccountDetail with refresh
+            navigation.navigate('AccountDetail' as never, {
+              accountType: 'cusd',
+              accountName: 'Confío Dollar',
+              accountSymbol: '$cUSD',
+              accountBalance: '0', // AccountDetailScreen will fetch real balance
+              accountAddress: activeAccount?.algorandAddress || '',
+              refreshTimestamp: Date.now()
+            } as never);
+          },
+        },
+      ]
+    );
+  };
+
   const handleConvert = async () => {
     if (!validateAmount()) return;
+    
+    // Check if user has Algorand address
+    if (!activeAccount?.algorandAddress) {
+      Alert.alert(
+        'Cuenta no configurada',
+        'Tu cuenta necesita estar configurada con Algorand para realizar conversiones. Por favor, contacta soporte.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
 
     setIsProcessing(true);
+    setLoadingMessage('Preparando conversión...');
     console.log('[USDCConversionScreen] Starting conversion:', { amount, conversionDirection, sourceCurrency, targetCurrency });
     
     try {
       // Choose the appropriate mutation based on conversion direction
       const mutation = conversionDirection === 'usdc_to_cusd' ? convertUsdcToCusd : convertCusdToUsdc;
       
+      setLoadingMessage('Procesando conversión...');
       console.log('[USDCConversionScreen] Calling mutation with amount:', amount);
       const { data } = await mutation({
         variables: { amount },
@@ -114,45 +266,192 @@ export const USDCConversionScreen = () => {
         : data?.convertCusdToUsdc;
       
       if (mutationResult?.success) {
-        // Show success
-        Alert.alert(
-          'Conversión exitosa',
-          `Has convertido ${amount} ${sourceCurrency} a ${amount} ${targetCurrency}`,
-          [
-            {
-              text: 'Ver historial',
-              onPress: () => {
-                // Navigate to USDC History screen
-                navigation.navigate('USDCHistory' as never);
-              },
-            },
-            {
-              text: 'OK',
-              onPress: () => {
-                // Navigate back to AccountDetail with refresh
-                navigation.navigate('AccountDetail' as never, {
-                  accountType: 'cusd',
-                  accountName: 'Confío Dollar',
-                  accountSymbol: '$cUSD',
-                  accountBalance: '0', // AccountDetailScreen will fetch real balance
-                  accountAddress: activeAccount?.algorandAddress || '',
-                  refreshTimestamp: Date.now()
-                } as never);
-              },
-            },
-          ]
-        );
+        // Check if we have transactions to sign
+        const transactions = mutationResult.transactionsToSign;
+        const sponsorTransaction = mutationResult.sponsorTransaction;
+        const groupId = mutationResult.groupId;
+        
+        console.log('[USDCConversionScreen] Mutation result has sponsorTransaction:', !!sponsorTransaction);
+        
+        if (transactions && transactions.length > 0) {
+          // Automatically sign and submit transactions
+          console.log('[USDCConversionScreen] Processing conversion with transaction signing');
+          
+          try {
+            // Ensure wallet is initialized for the current account
+            setLoadingMessage('Preparando wallet...');
+            const oauthData = await oauthStorage.getOAuthSubject();
+            
+            if (oauthData && oauthData.subject && oauthData.provider) {
+              console.log('[USDCConversionScreen] Restoring wallet for signing');
+              
+              // Determine OAuth parameters based on provider
+              const GOOGLE_WEB_CLIENT_ID = '831051040123-d5tf8e1n66ae5rhs4lrtrsepckna8o21.apps.googleusercontent.com';
+              const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+              const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+              
+              // Restore wallet with the current account context
+              await secureDeterministicWallet.createOrRestoreWallet(
+                iss,
+                oauthData.subject,
+                aud,
+                oauthData.provider,
+                activeAccount?.type || 'personal',
+                activeAccount?.index || 0,
+                activeAccount?.id?.startsWith('business_') ? activeAccount.id.replace('business_', '') : undefined
+              );
+              
+              console.log('[USDCConversionScreen] Wallet restored, proceeding with signing');
+            } else {
+              console.log('[USDCConversionScreen] No OAuth data found, cannot restore wallet');
+            }
+            
+            // Use conversion service to sign and execute
+            setLoadingMessage('Firmando transacción...');
+            const result = await conversionService.processConversionResponse(
+              mutationResult,
+              mutationResult.conversion?.id,
+              activeAccount // Pass the current account to ensure wallet is initialized
+            );
+            
+            if (result.success) {
+              setLoadingMessage('Finalizando conversión...');
+              // Refresh balances
+              await refetchCusd();
+              await refetchUsdc();
+              
+              // Clear loading message before showing success
+              setLoadingMessage('');
+              // Show success
+              await handleConversionSuccess();
+            } else {
+              setLoadingMessage('');
+              Alert.alert('Error', result.error || 'No se pudo completar la conversión');
+            }
+            
+          } catch (error) {
+            console.error('[USDCConversionScreen] Error processing conversion:', error);
+            setLoadingMessage('');
+            Alert.alert('Error', 'No se pudo completar la conversión');
+          }
+        } else {
+          // Conversion completed successfully without needing signatures
+          setLoadingMessage('Finalizando conversión...');
+          // Refresh balances
+          await refetchCusd();
+          await refetchUsdc();
+          
+          // Clear loading message before showing success
+          setLoadingMessage('');
+          // Show success
+          await handleConversionSuccess();
+        }
       } else {
-        // Show error from mutation
-        const errorMessage = mutationResult?.errors?.join(', ') || 'Error desconocido';
-        console.error('[USDCConversionScreen] Conversion failed:', errorMessage);
-        Alert.alert('Error', `No se pudo completar la conversión: ${errorMessage}`);
+        // Check if it's an app opt-in issue
+        if (mutationResult?.requiresAppOptin) {
+          console.log('[USDCConversionScreen] App opt-in required, handling automatically...');
+          
+          try {
+            // Show loading modal for initial setup
+            setLoadingMessage('Configurando tu cuenta para cUSD...');
+            
+            // Ensure wallet is initialized first
+            setLoadingMessage('Preparando tu wallet...');
+            const oauthData = await oauthStorage.getOAuthSubject();
+            if (oauthData && oauthData.subject && oauthData.provider) {
+              const GOOGLE_WEB_CLIENT_ID = '831051040123-d5tf8e1n66ae5rhs4lrtrsepckna8o21.apps.googleusercontent.com';
+              const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+              const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+              
+              await secureDeterministicWallet.createOrRestoreWallet(
+                iss,
+                oauthData.subject,
+                aud,
+                oauthData.provider,
+                activeAccount?.type || 'personal',
+                activeAccount?.index || 0,
+                activeAccount?.id?.startsWith('business_') ? activeAccount.id.replace('business_', '') : undefined
+              );
+            }
+            
+            // Handle the app opt-in automatically
+            setLoadingMessage('Autorizando aplicación cUSD...');
+            const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
+            
+            if (optInResult.success) {
+              console.log('[USDCConversionScreen] App opt-in successful, retrying conversion...');
+              
+              // Retry the conversion automatically
+              setLoadingMessage('Procesando tu conversión...');
+              const mutation = conversionDirection === 'usdc_to_cusd' ? convertUsdcToCusd : convertCusdToUsdc;
+              const retryData = await mutation({
+                variables: { amount },
+              });
+              
+              const retryResult = conversionDirection === 'usdc_to_cusd' 
+                ? retryData.data?.convertUsdcToCusd 
+                : retryData.data?.convertCusdToUsdc;
+              
+              if (retryResult?.success && retryResult.transactionsToSign) {
+                // Process the conversion with signing
+                setLoadingMessage('Firmando transacción...');
+                const result = await conversionService.processConversionResponse(
+                  retryResult,
+                  retryResult.conversion?.id,
+                  activeAccount
+                );
+                
+                if (result.success) {
+                  // Clear loading message before showing success
+                  setLoadingMessage('');
+                  
+                  // Refresh balances
+                  await refetchCusd();
+                  await refetchUsdc();
+                  
+                  // Show success and navigate
+                  await handleConversionSuccess();
+                } else {
+                  setLoadingMessage('');
+                  Alert.alert('Error', result.error || 'No se pudo completar la conversión');
+                }
+              } else if (retryResult?.success) {
+                // Conversion succeeded without signing needed
+                setLoadingMessage('');
+                await refetchCusd();
+                await refetchUsdc();
+                await handleConversionSuccess();
+              } else {
+                setLoadingMessage('');
+                const errorMessage = retryResult?.errors?.join(', ') || 'No se pudo completar la conversión';
+                Alert.alert('Error', errorMessage);
+              }
+            } else {
+              // Opt-in failed, show error
+              setLoadingMessage('');
+              Alert.alert('Error', optInResult.error || 'No se pudo completar la configuración inicial');
+            }
+          } catch (error) {
+            console.error('[USDCConversionScreen] Error during automatic app opt-in:', error);
+            setLoadingMessage('');
+            Alert.alert('Error', 'No se pudo completar la configuración inicial');
+          }
+        } else {
+          // Show error from mutation only if there are actual errors
+          // Don't show error if it's just an app opt-in requirement (handled automatically above)
+          if (mutationResult?.errors && mutationResult.errors.length > 0) {
+            const errorMessage = mutationResult.errors.join(', ');
+            console.error('[USDCConversionScreen] Conversion failed:', errorMessage);
+            Alert.alert('Error', `No se pudo completar la conversión: ${errorMessage}`);
+          }
+        }
       }
     } catch (error) {
       console.error('[USDCConversionScreen] Conversion error:', error);
       Alert.alert('Error', 'No se pudo completar la conversión. Por favor intenta de nuevo.');
     } finally {
       setIsProcessing(false);
+      setLoadingMessage('');
     }
   };
 
@@ -184,9 +483,13 @@ export const USDCConversionScreen = () => {
               <View style={styles.currencyInfo}>
                 <View style={styles.currencyHeader}>
                   <Text style={styles.currencyName}>{sourceCurrency}</Text>
-                  <Text style={styles.balanceText}>
-                    Saldo: ${sourceBalance.toFixed(2)}
-                  </Text>
+                  {balancesLoading ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Text style={styles.balanceText}>
+                      Saldo: ${sourceBalance.toFixed(2)}
+                    </Text>
+                  )}
                 </View>
                 <View style={styles.inputContainer}>
                   <TextInput
@@ -287,6 +590,36 @@ export const USDCConversionScreen = () => {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+      
+      {/* Loading Modal */}
+      <Modal
+        visible={!!loadingMessage}
+        transparent={true}
+        animationType="fade"
+        statusBarTranslucent={true}
+      >
+        <View style={styles.loadingOverlay}>
+          <View style={styles.loadingCard}>
+            {/* Animated Confío Logo */}
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <Image
+                source={require('../assets/png/CONFIO.png')}
+                style={styles.loadingLogo}
+              />
+            </Animated.View>
+            
+            {/* Loading Message */}
+            <Text style={styles.loadingText}>{loadingMessage}</Text>
+            
+            {/* Progress Dots Animation */}
+            <View style={styles.dotsContainer}>
+              <View style={[styles.dot, { backgroundColor: colors.accent }]} />
+              <View style={[styles.dot, { backgroundColor: colors.accent, opacity: 0.6 }]} />
+              <View style={[styles.dot, { backgroundColor: colors.accent, opacity: 0.3 }]} />
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -482,5 +815,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  // Loading Modal Styles
+  loadingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 32,
+    alignItems: 'center',
+    minWidth: 280,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  loadingLogo: {
+    width: 80,
+    height: 80,
+    marginBottom: 24,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: colors.text,
+    marginBottom: 20,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  dotsContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
 });
