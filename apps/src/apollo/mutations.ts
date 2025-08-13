@@ -456,3 +456,23 @@ export const CREATE_DIRECT_PAYMENT = gql`
     }
   }
 `;
+
+export const CHECK_BUSINESS_OPT_IN = gql`
+  mutation CheckBusinessOptIn {
+    checkBusinessOptIn {
+      needsOptIn
+      assets
+      optInTransactions
+      error
+    }
+  }
+`;
+
+export const COMPLETE_BUSINESS_OPT_IN = gql`
+  mutation CompleteBusinessOptIn($txIds: [String!]!) {
+    completeBusinessOptIn(txIds: $txIds) {
+      success
+      error
+    }
+  }
+`;

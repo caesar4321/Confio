@@ -820,6 +820,97 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
             return cls(success=False, error=str(e))
 
 
+class SubmitBusinessOptInGroupMutation(graphene.Mutation):
+    """
+    Submit a complete sponsored opt-in group for a business account.
+    Expects all user opt-in transactions (signed by the business) and the pre-signed sponsor transaction.
+    The order must match the group created by CheckBusinessOptInMutation: [opt-in..., sponsor-fee].
+    """
+
+    class Arguments:
+        signed_transactions = graphene.JSONString(
+            required=True,
+            description="Array of base64-encoded signed transactions in group order (opt-ins first, sponsor last)"
+        )
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    transaction_id = graphene.String()
+    confirmed_round = graphene.Int()
+
+    @classmethod
+    def mutate(cls, root, info, signed_transactions):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+
+            logger.info('SubmitBusinessOptInGroupMutation: submitting opt-in group')
+
+            # Parse input JSON if passed as a string
+            import json
+            import base64
+            import msgpack
+            from algosdk.v2client import algod
+            
+            if isinstance(signed_transactions, str):
+                try:
+                    signed_transactions = json.loads(signed_transactions)
+                except json.JSONDecodeError as e:
+                    logger.error(f'Invalid JSON for signed_transactions: {e}')
+                    return cls(success=False, error='Invalid transaction format')
+
+            if not isinstance(signed_transactions, list) or not signed_transactions:
+                return cls(success=False, error='No transactions provided')
+
+            # Decode signed transactions
+            signed_txn_objects = []
+            for i, txn_b64 in enumerate(signed_transactions):
+                try:
+                    if isinstance(txn_b64, dict):
+                        # Defensive: accept object with 'transaction' field
+                        txn_b64 = txn_b64.get('transaction')
+                    if not isinstance(txn_b64, str):
+                        raise ValueError('Each transaction must be a base64 string')
+
+                    # Add padding if needed
+                    missing_padding = len(txn_b64) % 4
+                    if missing_padding:
+                        txn_b64 += '=' * (4 - missing_padding)
+
+                    decoded = base64.b64decode(txn_b64)
+                    signed_txn = msgpack.unpackb(decoded, raw=False)
+                    signed_txn_objects.append(signed_txn)
+                    logger.info(f'  Opt-in group txn {i}: decoded successfully')
+                except Exception as e:
+                    logger.error(f'Failed to decode signed transaction {i}: {e}')
+                    return cls(success=False, error='Failed to decode signed transactions')
+
+            # Submit group
+            algod_client = algod.AlgodClient(
+                AlgorandAccountManager.ALGOD_TOKEN,
+                AlgorandAccountManager.ALGOD_ADDRESS
+            )
+
+            logger.info(f'Submitting business opt-in group of {len(signed_txn_objects)} txns')
+            tx_id = algod_client.send_transactions(signed_txn_objects)
+            
+            from algosdk.transaction import wait_for_confirmation
+            confirmed = wait_for_confirmation(algod_client, tx_id, 10)
+            confirmed_round = confirmed.get('confirmed-round', 0)
+
+            logger.info(f'Business opt-in group submitted: txid={tx_id}, round={confirmed_round}')
+
+            return cls(
+                success=True,
+                transaction_id=tx_id,
+                confirmed_round=confirmed_round
+            )
+
+        except Exception as e:
+            logger.error(f'Error submitting business opt-in group: {str(e)}')
+            return cls(success=False, error=str(e))
+
 
 class OptInToAssetByTypeMutation(graphene.Mutation):
     """
@@ -1291,3 +1382,322 @@ class CheckSponsorHealthQuery(graphene.ObjectType):
             return None
         finally:
             loop.close()
+
+
+class CheckBusinessOptInMutation(graphene.Mutation):
+    """
+    Check if business account needs opt-ins for CONFIO and cUSD assets
+    Only for business owners, not employees
+    """
+    
+    class Arguments:
+        pass  # No arguments needed, uses JWT context
+    
+    needs_opt_in = graphene.Boolean()
+    assets = graphene.List(graphene.String)
+    # Keep existing field name style
+    opt_in_transactions = graphene.JSONString()
+    # Explicit camelCase alias expected by some clients
+    optInTransactions = graphene.JSONString()
+    # Personal-flow alias
+    transactions = graphene.JSONString()
+    # Convenience boolean for clients that only check presence
+    hasTransactions = graphene.Boolean()
+    error = graphene.String()
+    
+    @classmethod
+    def mutate(cls, root, info):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                logger.error('CheckBusinessOptIn: User not authenticated')
+                return cls(error='User not authenticated')
+            
+            # Get JWT context properly
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info)
+            
+            # If no context, extract manually from JWT
+            if not jwt_context:
+                # Try to extract JWT claims directly
+                request = info.context
+                auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+                if auth_header.startswith('JWT '):
+                    from jwt import decode as jwt_decode
+                    from django.conf import settings
+                    token = auth_header[4:]
+                    try:
+                        jwt_claims = jwt_decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+                    except:
+                        jwt_claims = {}
+                else:
+                    jwt_claims = {}
+            else:
+                jwt_claims = jwt_context
+            
+            logger.info(f'CheckBusinessOptIn: JWT claims: {jwt_claims}')
+            
+            # Check if this is a business account
+            account_type = jwt_claims.get('account_type')
+            if account_type != 'business':
+                logger.info(f'CheckBusinessOptIn: Not a business account (type={account_type})')
+                return cls(needs_opt_in=False, assets=[])
+            
+            # Check if user is owner (not employee)
+            if jwt_claims.get('business_employee_role'):
+                logger.info('CheckBusinessOptIn: User is employee, not owner')
+                return cls(needs_opt_in=False, assets=[], error='Only business owners can opt-in')
+            
+            # Get business account address
+            business_id = jwt_claims.get('business_id')
+            if not business_id:
+                logger.error('CheckBusinessOptIn: No business ID in JWT')
+                return cls(error='No business ID in JWT')
+            
+            from users.models import Account
+            try:
+                business_account = Account.objects.get(
+                    business_id=business_id,
+                    account_type='business'
+                )
+                logger.info(f'CheckBusinessOptIn: Found business account {business_id} with address {business_account.algorand_address}')
+            except Account.DoesNotExist:
+                logger.error(f'CheckBusinessOptIn: Business account not found for business_id={business_id}')
+                return cls(error='Business account not found')
+            
+            if not business_account.algorand_address:
+                logger.error(f'CheckBusinessOptIn: Business account {business_id} has no Algorand address')
+                return cls(error='Business account has no Algorand address')
+            
+            # Check opt-in status
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                # Check if opted into CONFIO and cUSD
+                from algosdk.v2client import algod
+                algod_client = algod.AlgodClient('', 'https://testnet-api.algonode.cloud')
+                
+                account_info = algod_client.account_info(business_account.algorand_address)
+                assets = account_info.get('assets', [])
+                
+                logger.info(f'CheckBusinessOptIn: Account has {len(assets)} assets')
+                
+                CONFIO_ID = 744150851
+                CUSD_ID = 744192921
+                
+                has_confio = any(a['asset-id'] == CONFIO_ID for a in assets)
+                has_cusd = any(a['asset-id'] == CUSD_ID for a in assets)
+                
+                logger.info(f'CheckBusinessOptIn: has_confio={has_confio}, has_cusd={has_cusd}')
+                
+                needed_assets = []
+                if not has_confio:
+                    needed_assets.append('CONFIO')
+                if not has_cusd:
+                    needed_assets.append('cUSD')
+                
+                logger.info(f'CheckBusinessOptIn: Needed assets: {needed_assets}')
+                
+                if not needed_assets:
+                    logger.info('CheckBusinessOptIn: Account already opted into all assets')
+                    return cls(needs_opt_in=False, assets=[])
+                
+                # Create a single group transaction for all opt-ins
+                try:
+                    from algosdk.transaction import AssetTransferTxn, PaymentTxn, assign_group_id
+                    from algosdk import encoding
+                    import base64
+                except ImportError as e:
+                    logger.error(f'CheckBusinessOptIn: Import error: {e}')
+                    return cls(error=f"Import error: {str(e)}")
+                
+                # Get suggested params
+                params = algod_client.suggested_params()
+                
+                # Create all transactions for the group
+                transactions = []
+                asset_ids = []
+                
+                for asset_name in needed_assets:
+                    asset_id = CONFIO_ID if asset_name == 'CONFIO' else CUSD_ID
+                    asset_ids.append(asset_id)
+                    
+                    # Create opt-in transaction (0 amount transfer to self) with 0 fee
+                    opt_in_txn = AssetTransferTxn(
+                        sender=business_account.algorand_address,
+                        sp=params,
+                        receiver=business_account.algorand_address,
+                        amt=0,
+                        index=asset_id
+                    )
+                    opt_in_txn.fee = 0  # User doesn't pay fees
+                    transactions.append(opt_in_txn)
+                
+                # Get sponsor address from configuration
+                sponsor_address = algorand_sponsor_service.sponsor_address
+                
+                # Use the funding service to calculate MBR increase for asset opt-ins
+                from .account_funding_service import AccountFundingService
+                funding_service = AccountFundingService()
+                
+                # Calculate MBR increase for asset opt-ins
+                # Each asset opt-in increases MBR by 100,000 microAlgos (0.1 ALGO)
+                mbr_increase = len(needed_assets) * 100_000
+                
+                # Check current balance and calculate funding needed
+                try:
+                    account_info = algod_client.account_info(business_account.algorand_address)
+                    current_balance = account_info.get('amount', 0)
+                    current_min_balance = account_info.get('min-balance', 0)
+                    new_min_balance = current_min_balance + mbr_increase
+                    
+                    # Calculate exact funding needed for MBR
+                    funding_needed = 0
+                    if current_balance < new_min_balance:
+                        funding_needed = new_min_balance - current_balance
+                        logger.info(f"Business needs {funding_needed} microAlgos for {len(needed_assets)} asset opt-ins")
+                    else:
+                        logger.info(f"Business has sufficient balance for asset opt-ins")
+                        
+                except Exception as e:
+                    logger.error(f"Error checking account balance: {e}")
+                    # Default funding for asset opt-ins
+                    funding_needed = mbr_increase
+                
+                # Create sponsor fee payment transaction with MBR funding
+                # Group has: N opt-ins + 1 sponsor payment = N+1 total transactions
+                total_transactions = len(transactions) + 1  # +1 for the sponsor payment itself
+                total_fee = total_transactions * 1000  # 1000 microAlgos per transaction
+                
+                fee_payment_txn = PaymentTxn(
+                    sender=sponsor_address,
+                    sp=params,
+                    receiver=business_account.algorand_address,  # Fund the business account
+                    amt=funding_needed  # Provide exact MBR funding needed
+                )
+                fee_payment_txn.fee = total_fee  # Sponsor pays all fees
+                transactions.append(fee_payment_txn)
+                
+                # Assign group ID to all transactions
+                group_id = assign_group_id(transactions)
+                
+                # Sign the sponsor transaction
+                from algosdk import mnemonic, account
+                try:
+                    # Ensure mnemonic is a string
+                    sponsor_mnemonic = algorand_sponsor_service.sponsor_mnemonic
+                    if not sponsor_mnemonic:
+                        raise ValueError("No sponsor mnemonic configured")
+                    
+                    # Convert mnemonic to private key
+                    sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
+                    
+                    # Sign the transaction
+                    signed_sponsor_txn = transactions[-1].sign(sponsor_private_key)
+                    
+                except Exception as sign_error:
+                    logger.error(f'CheckBusinessOptIn: Error signing sponsor transaction: {sign_error}')
+                    logger.error(f'CheckBusinessOptIn: Sponsor mnemonic type: {type(algorand_sponsor_service.sponsor_mnemonic)}')
+                    return cls(error=f"Failed to sign sponsor transaction: {str(sign_error)}")
+                
+                # Prepare transaction data for frontend (mirror personal flow encoding)
+                import msgpack
+                user_transactions = []
+                for txn in transactions[:-1]:  # All except the sponsor fee payment
+                    user_transactions.append(
+                        base64.b64encode(msgpack.packb(txn.dictify())).decode('utf-8')
+                    )
+                
+                # Sponsor transaction is already signed - encode the SignedTransaction dict
+                sponsor_transaction = base64.b64encode(
+                    msgpack.packb(signed_sponsor_txn.dictify())
+                ).decode('utf-8')
+                
+                # Format the transactions like personal opt-ins do
+                # This matches what processSponsoredOptIn expects
+                transactions_data = []
+                
+                # Add each opt-in transaction
+                for i, txn in enumerate(user_transactions):
+                    asset_id = asset_ids[i]
+                    asset_name = needed_assets[i]
+                    transactions_data.append({
+                        'type': 'opt-in',
+                        'assetId': asset_id,
+                        'assetName': asset_name,
+                        'transaction': txn,
+                        'signed': False
+                    })
+                
+                # Add the sponsor transaction (pre-signed)
+                transactions_data.append({
+                    'type': 'sponsor',
+                    'transaction': sponsor_transaction,
+                    'signed': True
+                })
+                
+                # For GraphQL JSONString, pass the Python list; Graphene will JSON-encode it
+                opt_in_data = transactions_data
+                
+                logger.info(f'CheckBusinessOptIn: Created group transaction for {len(needed_assets)} assets')
+                
+                import json
+                has_tx = len(transactions_data) > 0
+                # Keep camelCase fields as JSON strings for backward compatibility with clients
+                tx_list = transactions_data
+                tx_string = json.dumps(tx_list)
+                return cls(
+                    needs_opt_in=True,
+                    assets=needed_assets,
+                    # snake_case legacy alias (string)
+                    opt_in_transactions=tx_string,
+                    # camelCase expected by mobile (string)
+                    optInTransactions=tx_string,
+                    # personal-flow style alias (array)
+                    transactions=tx_list,
+                    hasTransactions=has_tx
+                )
+                
+            finally:
+                loop.close()
+                
+        except Exception as e:
+            logger.error(f'Error checking business opt-in: {str(e)}')
+            return cls(error=str(e))
+
+
+class CompleteBusinessOptInMutation(graphene.Mutation):
+    """
+    Mark business opt-ins as complete after successful transactions
+    """
+    
+    class Arguments:
+        tx_ids = graphene.List(graphene.String, required=True)
+    
+    success = graphene.Boolean()
+    error = graphene.String()
+    
+    @classmethod
+    def mutate(cls, root, info, tx_ids):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='User not authenticated')
+            
+            # Verify transactions on blockchain
+            from algosdk.v2client import algod
+            algod_client = algod.AlgodClient('', 'https://testnet-api.algonode.cloud')
+            
+            for tx_id in tx_ids:
+                try:
+                    algod_client.pending_transaction_info(tx_id)
+                    logger.info(f'Verified opt-in transaction: {tx_id}')
+                except Exception as e:
+                    logger.warning(f'Could not verify transaction {tx_id}: {e}')
+            
+            return cls(success=True)
+            
+        except Exception as e:
+            logger.error(f'Error completing business opt-in: {str(e)}')
+            return cls(success=False, error=str(e))
