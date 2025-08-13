@@ -156,12 +156,31 @@ class Payment(models.Model):
         on_delete=models.PROTECT,
         related_name='payments_sent'
     )
+    sender_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.PROTECT,
+        related_name='payments_sent',
+        null=True,
+        blank=True,
+        help_text="Business account that sent the payment (if from business)"
+    )
+    
+    # Recipients - always businesses in payment contract flow
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name='payments_received',
         null=True,
-        blank=True
+        blank=True,
+        help_text="Business owner (for tracking)"
+    )
+    recipient_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.PROTECT,
+        related_name='payments_received',
+        null=True,
+        blank=True,
+        help_text="Business that received the payment"
     )
     
     # Payment details

@@ -757,7 +757,7 @@ scalar DateTime
 type AccountType {
   id: ID!
   createdAt: DateTime!
-  user: UserType!
+  user: Web3AuthUserType!
 
   """Type of account (personal or business)"""
   accountType: UsersAccountAccountTypeChoices!
@@ -767,9 +767,6 @@ type AccountType {
 
   """Associated business for business accounts"""
   business: BusinessType
-
-  """Last‑computed Sui address for this account"""
-  suiAddress: String
   lastLoginAt: DateTime
   accountId: String
   displayName: String
@@ -778,6 +775,18 @@ type AccountType {
   employeeRole: String
   employeePermissions: EmployeePermissionsType
   employeeRecordId: ID
+}
+
+type Web3AuthUserType {
+  id: ID!
+
+  """Required. 150 characters or fewer. Letters, digits and @/./+/-/_ only."""
+  username: String!
+  firstName: String!
+  lastName: String!
+  email: String!
+  algorandAddress: String
+  isPhoneVerified: Boolean
 }
 
 """An enumeration."""
@@ -944,7 +953,7 @@ type UserAchievementType {
   id: ID!
   createdAt: DateTime!
   updatedAt: DateTime!
-  user: UserType!
+  user: Web3AuthUserType!
   achievementType: AchievementTypeType!
   status: AchievementsUserAchievementStatusChoices!
 
@@ -994,13 +1003,13 @@ type InfluencerReferralType {
   id: ID!
   createdAt: DateTime!
   updatedAt: DateTime!
-  referredUser: UserType!
+  referredUser: Web3AuthUserType!
 
   """Identifier of the referrer (@username, code, etc.)"""
   referrerIdentifier: String!
 
   """Actual user who made the referral (if registered)"""
-  influencerUser: UserType
+  influencerUser: Web3AuthUserType
   status: AchievementsInfluencerReferralStatusChoices!
 
   """When the referred user made their first transaction"""
@@ -1038,7 +1047,7 @@ type TikTokViralShareType {
   id: ID!
   createdAt: DateTime!
   updatedAt: DateTime!
-  user: UserType!
+  user: Web3AuthUserType!
 
   """Achievement being shared (if applicable)"""
   achievement: UserAchievementType
@@ -1071,7 +1080,7 @@ type TikTokViralShareType {
 
   """Total CONFIO awarded for this share"""
   totalConfioAwarded: Decimal!
-  verifiedBy: UserType
+  verifiedBy: Web3AuthUserType
   verifiedAt: DateTime
 
   """Admin notes about verification"""
@@ -1130,12 +1139,12 @@ type UnifiedTransactionType {
 
   """Transaction hash on blockchain"""
   transactionHash: String
-  senderUser: UserType
+  senderUser: Web3AuthUserType
   senderBusiness: BusinessType
   senderType: UsersUnifiedTransactionTableSenderTypeChoices!
   senderDisplayName: String!
   senderAddress: String!
-  counterpartyUser: UserType
+  counterpartyUser: Web3AuthUserType
   counterpartyBusiness: BusinessType
   counterpartyType: UsersUnifiedTransactionTableCounterpartyTypeChoices!
   counterpartyDisplayName: String!
@@ -1228,6 +1237,9 @@ enum UsersUnifiedTransactionTableStatusChoices {
   """Pending"""
   PENDING
 
+  """Pending Signature"""
+  PENDING_SIG
+
   """Sponsoring"""
   SPONSORING
 
@@ -1278,8 +1290,8 @@ type SendTransactionType {
   updatedAt: DateTime!
 
   """User who sent the transaction (null for external deposits)"""
-  senderUser: UserType
-  recipientUser: UserType
+  senderUser: Web3AuthUserType
+  recipientUser: Web3AuthUserType
 
   """Business that sent the transaction (if sent by business)"""
   senderBusiness: BusinessType
@@ -1312,16 +1324,10 @@ type SendTransactionType {
   status: SendSendTransactionStatusChoices!
 
   """Sui transaction digest (0x + 32 bytes, 66 hex characters total)"""
-  transactionHash: String!
+  transactionHash: String
 
-  """True if this transaction includes an invitation to join Confío"""
-  isInvitation: Boolean!
-
-  """True if the invitation was claimed by the recipient"""
-  invitationClaimed: Boolean!
-
-  """True if the invitation expired and funds were returned to sender"""
-  invitationReverted: Boolean!
+  """Optional key to prevent duplicate transactions"""
+  idempotencyKey: String
 
   """When the invitation expires (7 days after creation)"""
   invitationExpiresAt: DateTime
@@ -1395,7 +1401,7 @@ type InvoiceType {
   invoiceId: String!
 
   """User who created this invoice (business owner or cashier)"""
-  createdByUser: UserType!
+  createdByUser: Web3AuthUserType!
 
   """Business entity that is the actual merchant"""
   merchantBusiness: BusinessType!
@@ -1410,7 +1416,7 @@ type InvoiceType {
   tokenType: PaymentsInvoiceTokenTypeChoices!
   description: String!
   status: PaymentsInvoiceStatusChoices!
-  paidByUser: UserType
+  paidByUser: Web3AuthUserType
 
   """Business that paid the invoice (if payer is business)"""
   paidByBusiness: BusinessType
@@ -1465,10 +1471,10 @@ type PaymentTransactionType {
   paymentTransactionId: String!
 
   """User who initiated the payment"""
-  payerUser: UserType!
+  payerUser: Web3AuthUserType!
 
   """User associated with the merchant business (owner or cashier)"""
-  merchantAccountUser: UserType
+  merchantAccountUser: Web3AuthUserType
 
   """Business that made the payment (if payer is business account)"""
   payerBusiness: BusinessType
@@ -1499,9 +1505,12 @@ type PaymentTransactionType {
   description: String!
   status: PaymentsPaymentTransactionStatusChoices!
 
-  """Sui transaction digest (0x + 32 bytes, 66 hex characters total)"""
+  """Blockchain transaction hash"""
   transactionHash: String!
   errorMessage: String!
+
+  """Unsigned blockchain transactions for client signing"""
+  blockchainData: JSONString
   invoice: InvoiceType!
 }
 
@@ -1540,6 +1549,9 @@ enum PaymentsPaymentTransactionStatusChoices {
   """Pending"""
   PENDING
 
+  """Pending Blockchain"""
+  PENDING_BLOCKCHAIN
+
   """Sponsoring"""
   SPONSORING
 
@@ -1562,13 +1574,13 @@ type P2POfferType {
   updatedAt: DateTime!
 
   """DEPRECATED: Use offer_user or offer_business instead"""
-  user: UserType
+  user: Web3AuthUserType
 
   """DEPRECATED: Use offer_user or offer_business instead"""
   account: AccountType
 
   """User creating this offer (for personal offers)"""
-  offerUser: UserType
+  offerUser: Web3AuthUserType
 
   """Business creating this offer (for business offers)"""
   offerBusiness: BusinessType
@@ -1636,10 +1648,10 @@ type P2PTradeType {
   offer: P2POfferType
 
   """DEPRECATED: Use buyer_user or buyer_business instead"""
-  buyer: UserType
+  buyer: Web3AuthUserType
 
   """DEPRECATED: Use seller_user or seller_business instead"""
-  seller: UserType
+  seller: Web3AuthUserType
 
   """DEPRECATED: Use buyer_user or buyer_business instead"""
   buyerAccount: AccountType
@@ -1648,13 +1660,13 @@ type P2PTradeType {
   sellerAccount: AccountType
 
   """User who is buying (for personal trades)"""
-  buyerUser: UserType
+  buyerUser: Web3AuthUserType
 
   """Business that is buying (for business trades)"""
   buyerBusiness: BusinessType
 
   """User who is selling (for personal trades)"""
-  sellerUser: UserType
+  sellerUser: Web3AuthUserType
 
   """Business that is selling (for business trades)"""
   sellerBusiness: BusinessType
@@ -1771,7 +1783,7 @@ enum P2PExchangeP2PEscrowReleaseTypeChoices {
 type P2PDisputeType {
   id: ID!
   trade: P2PTradeType!
-  initiatorUser: UserType
+  initiatorUser: Web3AuthUserType
   initiatorBusiness: BusinessType
 
   """Initial reason for dispute"""
@@ -1789,7 +1801,7 @@ type P2PDisputeType {
   resolutionType: P2PExchangeP2PDisputeResolutionTypeChoices
   resolutionAmount: Decimal
   resolutionNotes: String!
-  resolvedBy: UserType
+  resolvedBy: Web3AuthUserType
   openedAt: DateTime!
   resolvedAt: DateTime
   lastUpdated: DateTime!
@@ -1832,9 +1844,9 @@ enum P2PExchangeP2PDisputeResolutionTypeChoices {
 type P2PTradeRatingType {
   id: ID!
   trade: P2PTradeType!
-  raterUser: UserType
+  raterUser: Web3AuthUserType
   raterBusiness: BusinessType
-  rateeUser: UserType
+  rateeUser: Web3AuthUserType
   rateeBusiness: BusinessType
   overallRating: Int!
   communicationRating: Int
@@ -1856,7 +1868,7 @@ type P2PTradeConfirmationType {
   updatedAt: DateTime!
   trade: P2PTradeType!
   confirmationType: P2PExchangeP2PTradeConfirmationConfirmationTypeChoices!
-  confirmerUser: UserType
+  confirmerUser: Web3AuthUserType
   confirmerBusiness: BusinessType
   reference: String!
   notes: String!
@@ -1896,10 +1908,10 @@ type P2PMessageType {
   trade: P2PTradeType!
 
   """DEPRECATED: Use sender_user or sender_business instead"""
-  sender: UserType
+  sender: Web3AuthUserType
 
   """User sending this message (for personal messages)"""
-  senderUser: UserType
+  senderUser: Web3AuthUserType
 
   """Business sending this message (for business messages)"""
   senderBusiness: BusinessType
@@ -2016,10 +2028,10 @@ type P2PUserStatsType {
   id: ID!
 
   """DEPRECATED: Use stats_user or stats_business instead"""
-  user: UserType
+  user: Web3AuthUserType
 
   """User these stats belong to (for personal account stats)"""
-  statsUser: UserType
+  statsUser: Web3AuthUserType
 
   """Business these stats belong to (for business account stats)"""
   statsBusiness: BusinessType
@@ -2104,7 +2116,7 @@ type ConversionType {
   conversionId: UUID!
 
   """User who initiated the conversion (if personal account)"""
-  actorUser: UserType
+  actorUser: Web3AuthUserType
 
   """Business that initiated the conversion (if business account)"""
   actorBusiness: BusinessType
@@ -2162,6 +2174,9 @@ enum ConversionConversionStatusChoices {
   """Pending"""
   PENDING
 
+  """Pending Signature"""
+  PENDING_SIG
+
   """Processing"""
   PROCESSING
 
@@ -2178,7 +2193,7 @@ type USDCDepositType {
   depositId: UUID!
 
   """User who made the deposit (if personal account)"""
-  actorUser: UserType
+  actorUser: Web3AuthUserType
 
   """Business that made the deposit (if business account)"""
   actorBusiness: BusinessType
@@ -2237,7 +2252,7 @@ type USDCWithdrawalType {
   withdrawalId: UUID!
 
   """User who made the withdrawal (if personal account)"""
-  actorUser: UserType
+  actorUser: Web3AuthUserType
 
   """Business that made the withdrawal (if business account)"""
   actorBusiness: BusinessType
@@ -2300,7 +2315,7 @@ type UnifiedUSDCTransactionType {
   transactionType: UsdcTransactionsUnifiedUSDCTransactionTableTransactionTypeChoices!
 
   """User associated with the transaction"""
-  actorUser: UserType
+  actorUser: Web3AuthUserType
 
   """Business associated with the transaction"""
   actorBusiness: BusinessType
@@ -2333,6 +2348,8 @@ type UnifiedUSDCTransactionType {
   network: String!
   status: UsdcTransactionsUnifiedUSDCTransactionTableStatusChoices!
   errorMessage: String
+
+  """When the transaction was created"""
   createdAt: DateTime!
   updatedAt: DateTime!
   completedAt: DateTime
@@ -2507,7 +2524,7 @@ type PresalePhaseType {
 
 type PresalePurchaseType {
   id: ID!
-  user: UserType!
+  user: Web3AuthUserType!
   phase: PresalePhaseType!
   cusdAmount: Decimal!
   confioAmount: Decimal!
@@ -2554,17 +2571,22 @@ type PresaleStatsType {
 
 type UserPresaleLimitType {
   id: ID!
-  user: UserType!
+  user: Web3AuthUserType!
   phase: PresalePhaseType!
   totalPurchased: Decimal!
   lastPurchaseAt: DateTime
 }
 
 type Query {
+  algorandBalance(address: String): Float
+  algorandTransactions(limit: Int): [JSONString]
+  checkAssetOptIns: CheckAssetOptInsQuery
+  checkSponsorHealth: CheckSponsorHealthQuery
   notifications(notificationType: NotificationTypeEnum, isRead: Boolean, accountId: String, businessId: String, before: String, after: String, first: Int, last: Int): NotificationConnection
   notification(id: ID!): NotificationType
   notificationPreferences: NotificationPreferenceType
   unreadNotificationCount: Int
+  fcmDeviceTokens: [FCMDeviceTokenType]
   isPresaleActive: Boolean
   activePresalePhase: PresalePhaseType
   allPresalePhases: [PresalePhaseType]
@@ -2595,7 +2617,6 @@ type Query {
   sendTransactions: [SendTransactionType]
   sendTransaction(id: ID!): SendTransactionType
   sendTransactionsWithFriend(friendUserId: ID, friendPhone: String, limit: Int): [SendTransactionType]
-  allSendTransactions(limit: Int): [SendTransactionType]
 
   """Get unified transactions for a specific account"""
   unifiedTransactions(accountType: String!, accountIndex: Int!, limit: Int = 50, offset: Int = 0, tokenTypes: [String]): [UnifiedTransactionType]
@@ -2663,6 +2684,21 @@ type Query {
   userTiktokShares(status: String): [TikTokViralShareType]
 }
 
+"""Query to check which assets a user is opted into"""
+type CheckAssetOptInsQuery {
+  algorandAddress: String
+  optedInAssets: [Int]
+  assetDetails: JSONString
+}
+
+"""Query to check sponsor service health and availability"""
+type CheckSponsorHealthQuery {
+  sponsorAvailable: Boolean
+  sponsorBalance: Float
+  estimatedTransactions: Int
+  warningMessage: String
+}
+
 """Pagination connection for notifications"""
 type NotificationConnection {
   """Pagination data for this connection."""
@@ -2703,7 +2739,7 @@ type NotificationEdge {
 """GraphQL type for Notification model"""
 type NotificationType {
   id: ID!
-  user: UserType
+  user: Web3AuthUserType
   account: AccountType
   business: BusinessType
   isBroadcast: Boolean!
@@ -2724,6 +2760,9 @@ type NotificationType {
   pushSent: Boolean!
   pushSentAt: DateTime
   isRead: Boolean
+  relatedSendTransaction: SendTransactionType
+  relatedP2pTrade: P2PTradeType
+  relatedPaymentTransaction: PaymentTransactionType
 }
 
 """GraphQL enum for notification types"""
@@ -2763,6 +2802,7 @@ enum NotificationTypeEnum {
   PROMOTION
   SYSTEM
   ANNOUNCEMENT
+  ACHIEVEMENT_EARNED
 }
 
 """GraphQL type for NotificationPreference model"""
@@ -2783,6 +2823,35 @@ type NotificationPreferenceType {
   updatedAt: DateTime!
 }
 
+"""GraphQL type for FCMDeviceToken model"""
+type FCMDeviceTokenType {
+  id: ID!
+  deviceType: NotificationsFCMDeviceTokenDeviceTypeChoices!
+
+  """Unique device identifier"""
+  deviceId: String!
+
+  """Device model/name"""
+  deviceName: String!
+  appVersion: String!
+  isActive: Boolean!
+  lastUsed: DateTime!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+"""An enumeration."""
+enum NotificationsFCMDeviceTokenDeviceTypeChoices {
+  """iOS"""
+  IOS
+
+  """Android"""
+  ANDROID
+
+  """Web"""
+  WEB
+}
+
 """Represents a business where user is employed"""
 type EmployerBusinessType {
   business: BusinessType
@@ -2799,7 +2868,7 @@ type BusinessEmployeeType {
   business: BusinessType!
 
   """The user who is an employee"""
-  user: UserType!
+  user: Web3AuthUserType!
 
   """Employee role determining base permissions"""
   role: UsersBusinessEmployeeRoleChoices!
@@ -2811,13 +2880,13 @@ type BusinessEmployeeType {
   hiredAt: DateTime!
 
   """User who added this employee"""
-  hiredBy: UserType
+  hiredBy: Web3AuthUserType
 
   """When the employee was deactivated"""
   deactivatedAt: DateTime
 
   """User who deactivated this employee"""
-  deactivatedBy: UserType
+  deactivatedBy: Web3AuthUserType
 
   """Daily shift start time"""
   shiftStartTime: Time
@@ -2873,12 +2942,12 @@ type EmployeeInvitationType {
   """Name of the invited employee (optional)"""
   employeeName: String!
   role: UsersEmployeeInvitationRoleChoices!
-  invitedBy: UserType
+  invitedBy: Web3AuthUserType
   status: UsersEmployeeInvitationStatusChoices!
 
   """When the invitation expires"""
   expiresAt: DateTime!
-  acceptedBy: UserType
+  acceptedBy: Web3AuthUserType
   acceptedAt: DateTime
 
   """Optional message to include with the invitation"""
@@ -2921,7 +2990,7 @@ enum UsersEmployeeInvitationStatusChoices {
 type EmployeeActivityLogType {
   id: ID!
   business: BusinessType!
-  employee: UserType!
+  employee: Web3AuthUserType!
   action: UsersEmployeeActivityLogActionChoices!
   timestamp: DateTime!
 
@@ -3036,14 +3105,14 @@ type UserByPhoneType {
   lastName: String
   isOnConfio: Boolean
   activeAccountId: ID
-  activeAccountSuiAddress: String
+  activeAccountAlgorandAddress: String
 }
 
 """Ambassador profile with tier and performance metrics"""
 type InfluencerAmbassadorType {
   id: ID!
   createdAt: DateTime!
-  user: UserType!
+  user: Web3AuthUserType!
   tier: AchievementsInfluencerAmbassadorTierChoices!
   status: AchievementsInfluencerAmbassadorStatusChoices!
 
@@ -3169,7 +3238,7 @@ type ConfioBalanceType {
   id: ID!
   createdAt: DateTime!
   updatedAt: DateTime!
-  user: UserType!
+  user: Web3AuthUserType!
   totalEarned: Float
   totalLocked: Float
   totalUnlocked: Float
@@ -3190,7 +3259,7 @@ type ConfioBalanceType {
 type ConfioRewardTransactionType {
   id: ID!
   createdAt: DateTime!
-  user: UserType!
+  user: Web3AuthUserType!
   transactionType: AchievementsConfioRewardTransactionTransactionTypeChoices!
   amount: Float
   balanceAfter: Float
@@ -3224,10 +3293,171 @@ enum AchievementsConfioRewardTransactionTransactionTypeChoices {
 }
 
 type Mutation {
+  """
+  Web3Auth authentication mutation.
+  Creates/updates user data AND generates JWT tokens using the existing JWT system.
+  """
+  web3AuthLogin(algorandAddress: String!, deviceFingerprint: JSONString, firebaseIdToken: String!): Web3AuthLoginMutation
+
+  """
+  Add Algorand wallet to an existing Firebase-authenticated user.
+  This is called after the user has already signed in with Firebase
+  and Web3Auth has generated their Algorand wallet.
+  
+  Automatically opts the wallet into CONFIO and future cUSD tokens.
+  """
+  addAlgorandWallet(algorandAddress: String!, provider: String, web3authId: String): AddAlgorandWalletMutation
+  updateAlgorandAddress(algorandAddress: String!): UpdateAlgorandAddressMutation
+  verifyAlgorandOwnership(message: String!, signature: String!): VerifyAlgorandOwnershipMutation
+  createAlgorandTransaction(amount: Float!, note: String, to: String!): CreateAlgorandTransactionMutation
+
+  """
+  Get or create a server pepper for wallet key derivation.
+  Pepper is per-account (derived from JWT context: user_id + account_type + account_index + business_id).
+  During grace period after rotation, can optionally return previous pepper.
+  """
+  getServerPepper(requestVersion: Int): GetServerPepperMutation
+
+  """
+  Rotate the server pepper for an account.
+  This will increment the version and generate a new pepper.
+  Client must re-wrap (re-encrypt) the seed with the new pepper.
+  Pepper is per-account based on JWT context.
+  """
+  rotateServerPepper: RotateServerPepperMutation
+
+  """
+  Opt-in the user's Algorand account to USDC asset for trading.
+  This is called when a trader navigates to the Deposit USDC screen.
+  """
+  optInToUsdc: OptInToUSDCMutation
+
+  """
+  Ensures the current user's Algorand account is ready with proper opt-ins.
+  This can be called anytime to ensure the user is ready for CONFIO/cUSD operations.
+  """
+  ensureAlgorandReady: EnsureAlgorandReadyMutation
+
+  """
+  Generate unsigned opt-in transactions for multiple assets.
+  Used by frontend after Web3Auth login to opt-in to CONFIO and cUSD.
+  """
+  generateOptInTransactions(assetIds: [Int]): GenerateOptInTransactionsMutation
+
+  """
+  Generate a sponsored opt-in transaction for the cUSD application.
+  Returns unsigned user transaction and signed sponsor transaction for atomic group.
+  """
+  generateAppOptInTransaction(appId: Int): GenerateAppOptInTransactionMutation
+
+  """
+  Request opt-in to a specific asset (like USDC for traders).
+  Note: This generates an unsigned transaction that the user must sign.
+  """
+  optInToAsset(assetId: Int!): OptInToAssetMutation
+
+  """
+  Create a sponsored opt-in transaction for an asset by type name (USDC, CONFIO, CUSD).
+  Returns unsigned user transaction and signed sponsor transaction for atomic group.
+  """
+  optInToAssetByType(assetType: String!): OptInToAssetByTypeMutation
+
+  """
+  Create a sponsored send transaction where the server pays for fees.
+  Returns unsigned user transaction and signed sponsor transaction for atomic group.
+  Handles recipient resolution from user_id, phone, or direct address.
+  """
+  algorandSponsoredSend(
+    amount: Float!
+    assetType: String = "CUSD"
+    note: String
+
+    """Algorand address (58 chars) for external wallets"""
+    recipientAddress: String
+
+    """Phone number for any recipient"""
+    recipientPhone: String
+
+    """User ID for Confío recipients"""
+    recipientUserId: ID
+  ): AlgorandSponsoredSendMutation
+
+  """
+  Create a sponsored opt-in transaction for an asset.
+  Returns unsigned user transaction and signed sponsor transaction for atomic group.
+  """
+  algorandSponsoredOptIn(assetId: Int): AlgorandSponsoredOptInMutation
+
+  """
+  Submit a complete sponsored transaction group after client signing.
+  Sponsor transaction is always placed first in the group for proper fee payment.
+  """
+  submitSponsoredGroup(signedSponsorTxn: String, signedUserTxn: String!): SubmitSponsoredGroupMutation
+
+  """
+  Create a sponsored payment through the payment contract.
+  The sponsor pays fees on behalf of the user, and the contract deducts 0.9% fee.
+  Payments are always FROM personal/business accounts TO business accounts.
+  The recipient business is determined from JWT context.
+  Returns unsigned user transactions and signed sponsor transaction for atomic group.
+  """
+  createSponsoredPayment(
+    """Amount to send (before fees)"""
+    amount: Float!
+
+    """CUSD or CONFIO"""
+    assetType: String = "CUSD"
+
+    """Store payment receipt on-chain"""
+    createReceipt: Boolean = false
+
+    """Optional transaction note"""
+    note: String
+
+    """Optional payment ID for tracking"""
+    paymentId: String
+  ): CreateSponsoredPaymentMutation
+
+  """
+  Submit a complete sponsored payment transaction group after client signing.
+  Accepts the full transaction group with user signatures.
+  """
+  submitSponsoredPayment(
+    """Payment ID for database update"""
+    paymentId: String
+
+    """Array of base64 encoded signed transactions in group order"""
+    signedTransactions: JSONString!
+  ): SubmitSponsoredPaymentMutation
+
+  """
+  Create a direct (non-sponsored) payment through the payment contract.
+  User pays all fees themselves.
+  """
+  createDirectPayment(
+    """Amount to send (before fees)"""
+    amount: Float!
+
+    """CUSD or CONFIO"""
+    assetType: String = "CUSD"
+
+    """Store payment receipt on-chain"""
+    createReceipt: Boolean = false
+
+    """Optional transaction note"""
+    note: String
+
+    """Optional payment ID for tracking"""
+    paymentId: String
+
+    """Algorand address of recipient"""
+    recipientAddress: String!
+  ): CreateDirectPaymentMutation
+
   """Mark a notification as read"""
   markNotificationRead(notificationId: ID!): MarkNotificationRead
 
-  """Mark all notifications as read for the user"""
+  """Mark all notifications as read for the user in current account context"""
   markAllNotificationsRead: MarkAllNotificationsRead
 
   """Update user's notification preferences"""
@@ -3236,14 +3466,17 @@ type Mutation {
   """Create a test notification (for development/testing)"""
   createTestNotification(broadcastTarget: String, isBroadcast: Boolean, message: String!, notificationType: NotificationTypeEnum!, title: String!): CreateTestNotification
 
+  """Register an FCM device token for push notifications"""
+  registerFcmToken(appVersion: String, deviceId: String!, deviceName: String, deviceType: String!, token: String!): RegisterFCMToken
+
+  """Unregister an FCM device token"""
+  unregisterFcmToken(deviceId: String!): UnregisterFCMToken
+
+  """Send a test push notification to the current user"""
+  sendTestPushNotification: SendTestPushNotification
+
   """Mutation to purchase CONFIO tokens during presale"""
   purchasePresaleTokens(cusdAmount: Decimal!, phaseNumber: Int): PurchasePresaleTokens
-
-  """Mark a device as trusted after verification"""
-  trustDevice(deviceFingerprint: JSONString!, trustReason: String, verificationCode: String!): TrustDevice
-
-  """Request a verification code to trust a device"""
-  requestDeviceTrust(deviceFingerprint: JSONString!, method: String = "email"): RequestDeviceTrust
 
   """Check KYC status for current user"""
   checkKycStatus(amount: Decimal, operationType: String!): CheckKYCStatus
@@ -3266,8 +3499,34 @@ type Mutation {
     amount: String!
   ): ConvertCUSDToUSDC
 
+  """Execute a pending conversion with user signature"""
+  executePendingConversion(
+    """ID of the pending conversion"""
+    conversionId: ID!
+
+    """Base64 encoded signed transactions"""
+    signedTransactions: String!
+  ): ExecutePendingConversion
+
+  """
+  Get unsigned transactions for a pending conversion (for client-side signing)
+  """
+  getConversionTransactions(
+    """ID of the pending conversion"""
+    conversionId: ID!
+  ): GetConversionTransactions
+
   """Simple test mutation"""
   testConversion: TestConversion
+
+  """Mutation to opt into the cUSD application with sponsorship"""
+  optInToCusdApp: OptInToCUSDApp
+
+  """Execute a signed cUSD app opt-in transaction"""
+  executeCusdAppOptIn(
+    """Base64 encoded signed transaction"""
+    signedTransaction: String!
+  ): ExecuteCUSDAppOptIn
 
   """Mutation to manually trigger exchange rate refresh"""
   refreshExchangeRates: RefreshExchangeRates
@@ -3302,23 +3561,8 @@ type Mutation {
     idempotencyKey: String
     invoiceId: String!
   ): PayInvoice
-
-  """Mutation for creating a new send transaction"""
-  createSendTransaction(input: SendTransactionInput!): CreateSendTransaction
-
-  """Initiate Telegram verification process"""
   initiateTelegramVerification(countryCode: String!, phoneNumber: String!): InitiateTelegramVerification
   verifyTelegramCode(code: String!, countryCode: String!, phoneNumber: String!): VerifyTelegramCode
-
-  """Initialize zkLogin process"""
-  initializeZkLogin(
-    """Device fingerprint data"""
-    deviceFingerprint: JSONString
-    firebaseToken: String!
-    provider: String!
-    providerToken: String!
-  ): InitializeZkLogin
-  finalizeZkLogin(input: FinalizeZkLoginInput!): FinalizeZkLoginPayload
   addBusinessEmployee(input: AddBusinessEmployeeInput!): AddBusinessEmployee
   updateBusinessEmployee(input: UpdateBusinessEmployeeInput!): UpdateBusinessEmployee
   removeBusinessEmployee(input: RemoveBusinessEmployeeInput!): RemoveBusinessEmployee
@@ -3338,11 +3582,14 @@ type Mutation {
   rejectIdentityVerification(reason: String!, verificationId: ID!): RejectIdentityVerification
   createBusiness(address: String, businessRegistrationNumber: String, category: String!, description: String, name: String!): CreateBusiness
   updateBusiness(address: String, businessId: ID!, businessRegistrationNumber: String, category: String!, description: String, name: String!): UpdateBusiness
-  updateAccountSuiAddress(suiAddress: String!): UpdateAccountSuiAddress
+  updateAccountAlgorandAddress(algorandAddress: String!): UpdateAccountAlgorandAddress
   createBankInfo(accountHolderName: String!, accountNumber: String, accountType: String, email: String, identificationNumber: String, isDefault: Boolean, paymentMethodId: ID!, phoneNumber: String, username: String): CreateBankInfo
   updateBankInfo(accountHolderName: String!, accountNumber: String!, accountType: String!, bankInfoId: ID!, identificationNumber: String, isDefault: Boolean): UpdateBankInfo
   deleteBankInfo(bankInfoId: ID!): DeleteBankInfo
   setDefaultBankInfo(bankInfoId: ID!): SetDefaultBankInfo
+
+  """Force refresh balance from blockchain"""
+  refreshAccountBalance: RefreshAccountBalance
 
   """
   Test mutation to create users based on phone numbers - FOR TESTING ONLY
@@ -3374,13 +3621,282 @@ type Mutation {
   checkReferralStatus: CheckReferralStatus
 }
 
+"""
+Web3Auth authentication mutation.
+Creates/updates user data AND generates JWT tokens using the existing JWT system.
+"""
+type Web3AuthLoginMutation {
+  success: Boolean
+  error: String
+  accessToken: String
+  refreshToken: String
+  user: Web3AuthUserType
+  needsOptIn: [Int]
+  optInTransactions: JSONString
+}
+
+"""
+Add Algorand wallet to an existing Firebase-authenticated user.
+This is called after the user has already signed in with Firebase
+and Web3Auth has generated their Algorand wallet.
+
+Automatically opts the wallet into CONFIO and future cUSD tokens.
+"""
+type AddAlgorandWalletMutation {
+  success: Boolean
+  error: String
+  user: Web3AuthUserType
+  isNewWallet: Boolean
+  optedInAssets: [Int]
+  optInErrors: [String]
+  needsOptIn: [Int]
+  algoBalance: Float
+}
+
+type UpdateAlgorandAddressMutation {
+  success: Boolean
+  error: String
+  user: Web3AuthUserType
+}
+
+type VerifyAlgorandOwnershipMutation {
+  success: Boolean
+  error: String
+  verified: Boolean
+}
+
+type CreateAlgorandTransactionMutation {
+  success: Boolean
+  error: String
+  transactionId: String
+  status: String
+}
+
+"""
+Get or create a server pepper for wallet key derivation.
+Pepper is per-account (derived from JWT context: user_id + account_type + account_index + business_id).
+During grace period after rotation, can optionally return previous pepper.
+"""
+type GetServerPepperMutation {
+  success: Boolean
+  pepper: String
+  version: Int
+  isRotated: Boolean
+  gracePeriodUntil: String
+  error: String
+}
+
+"""
+Rotate the server pepper for an account.
+This will increment the version and generate a new pepper.
+Client must re-wrap (re-encrypt) the seed with the new pepper.
+Pepper is per-account based on JWT context.
+"""
+type RotateServerPepperMutation {
+  success: Boolean
+  pepper: String
+  version: Int
+  oldVersion: Int
+  error: String
+}
+
+"""
+Opt-in the user's Algorand account to USDC asset for trading.
+This is called when a trader navigates to the Deposit USDC screen.
+"""
+type OptInToUSDCMutation {
+  success: Boolean
+  alreadyOptedIn: Boolean
+  error: String
+}
+
+"""
+Ensures the current user's Algorand account is ready with proper opt-ins.
+This can be called anytime to ensure the user is ready for CONFIO/cUSD operations.
+"""
+type EnsureAlgorandReadyMutation {
+  success: Boolean
+  error: String
+  algorandAddress: String
+  optedInAssets: [Int]
+  newlyOptedIn: [Int]
+  errors: [String]
+}
+
+"""
+Generate unsigned opt-in transactions for multiple assets.
+Used by frontend after Web3Auth login to opt-in to CONFIO and cUSD.
+"""
+type GenerateOptInTransactionsMutation {
+  success: Boolean
+  error: String
+  transactions: JSONString
+}
+
+"""
+Generate a sponsored opt-in transaction for the cUSD application.
+Returns unsigned user transaction and signed sponsor transaction for atomic group.
+"""
+type GenerateAppOptInTransactionMutation {
+  success: Boolean
+  error: String
+  alreadyOptedIn: Boolean
+  userTransaction: String
+  sponsorTransaction: String
+  groupId: String
+  appId: Int
+}
+
+"""
+Request opt-in to a specific asset (like USDC for traders).
+Note: This generates an unsigned transaction that the user must sign.
+"""
+type OptInToAssetMutation {
+  success: Boolean
+  error: String
+  unsignedTransaction: String
+  message: String
+}
+
+"""
+Create a sponsored opt-in transaction for an asset by type name (USDC, CONFIO, CUSD).
+Returns unsigned user transaction and signed sponsor transaction for atomic group.
+"""
+type OptInToAssetByTypeMutation {
+  success: Boolean
+  error: String
+  alreadyOptedIn: Boolean
+  requiresUserSignature: Boolean
+  userTransaction: String
+  sponsorTransaction: String
+  groupId: String
+  assetId: Int
+  assetName: String
+}
+
+"""
+Create a sponsored send transaction where the server pays for fees.
+Returns unsigned user transaction and signed sponsor transaction for atomic group.
+Handles recipient resolution from user_id, phone, or direct address.
+"""
+type AlgorandSponsoredSendMutation {
+  success: Boolean
+  error: String
+  userTransaction: String
+  sponsorTransaction: String
+  groupId: String
+  totalFee: Int
+  feeInAlgo: Float
+  transactionId: String
+}
+
+"""
+Create a sponsored opt-in transaction for an asset.
+Returns unsigned user transaction and signed sponsor transaction for atomic group.
+"""
+type AlgorandSponsoredOptInMutation {
+  success: Boolean
+  error: String
+  alreadyOptedIn: Boolean
+  requiresUserSignature: Boolean
+  userTransaction: String
+  sponsorTransaction: String
+  groupId: String
+  assetId: Int
+  assetName: String
+}
+
+"""
+Submit a complete sponsored transaction group after client signing.
+Sponsor transaction is always placed first in the group for proper fee payment.
+"""
+type SubmitSponsoredGroupMutation {
+  success: Boolean
+  error: String
+  transactionId: String
+  confirmedRound: Int
+  feesSaved: Float
+}
+
+"""
+Create a sponsored payment through the payment contract.
+The sponsor pays fees on behalf of the user, and the contract deducts 0.9% fee.
+Payments are always FROM personal/business accounts TO business accounts.
+The recipient business is determined from JWT context.
+Returns unsigned user transactions and signed sponsor transaction for atomic group.
+"""
+type CreateSponsoredPaymentMutation {
+  success: Boolean
+  error: String
+
+  """Array of transaction objects to sign"""
+  transactions: JSONString
+
+  """Indexes of transactions user must sign"""
+  userSigningIndexes: [Int]
+  groupId: String
+
+  """Amount user pays"""
+  grossAmount: Float
+
+  """Amount recipient receives after 0.9% fee"""
+  netAmount: Float
+
+  """0.9% fee deducted by contract"""
+  feeAmount: Float
+
+  """Payment ID for tracking"""
+  paymentId: String
+}
+
+"""
+Submit a complete sponsored payment transaction group after client signing.
+Accepts the full transaction group with user signatures.
+"""
+type SubmitSponsoredPaymentMutation {
+  success: Boolean
+  error: String
+  transactionId: String
+  confirmedRound: Int
+  netAmount: Float
+  feeAmount: Float
+}
+
+"""
+Create a direct (non-sponsored) payment through the payment contract.
+User pays all fees themselves.
+"""
+type CreateDirectPaymentMutation {
+  success: Boolean
+  error: String
+
+  """Array of unsigned transactions"""
+  transactions: JSONString
+
+  """All transaction indexes (user signs all)"""
+  userSigningIndexes: [Int]
+  groupId: String
+
+  """Amount user pays"""
+  grossAmount: Float
+
+  """Amount recipient receives after 0.9% fee"""
+  netAmount: Float
+
+  """0.9% fee deducted by contract"""
+  feeAmount: Float
+
+  """Total Algorand transaction fees in ALGO"""
+  totalTransactionFee: Float
+}
+
 """Mark a notification as read"""
 type MarkNotificationRead {
   success: Boolean
   notification: NotificationType
 }
 
-"""Mark all notifications as read for the user"""
+"""Mark all notifications as read for the user in current account context"""
 type MarkAllNotificationsRead {
   success: Boolean
   markedCount: Int
@@ -3398,25 +3914,29 @@ type CreateTestNotification {
   notification: NotificationType
 }
 
+"""Register an FCM device token for push notifications"""
+type RegisterFCMToken {
+  success: Boolean
+  deviceToken: FCMDeviceTokenType
+}
+
+"""Unregister an FCM device token"""
+type UnregisterFCMToken {
+  success: Boolean
+}
+
+"""Send a test push notification to the current user"""
+type SendTestPushNotification {
+  success: Boolean
+  sentCount: Int
+  failedCount: Int
+}
+
 """Mutation to purchase CONFIO tokens during presale"""
 type PurchasePresaleTokens {
   success: Boolean
   message: String
   purchase: PresalePurchaseType
-}
-
-"""Mark a device as trusted after verification"""
-type TrustDevice {
-  success: Boolean
-  error: String
-  device: UserDeviceType
-}
-
-"""Request a verification code to trust a device"""
-type RequestDeviceTrust {
-  success: Boolean
-  error: String
-  message: String
 }
 
 """Check KYC status for current user"""
@@ -3466,6 +3986,21 @@ type ConvertUSDCToCUSD {
   conversion: ConversionType
   success: Boolean
   errors: [String]
+
+  """Unsigned transactions for client to sign"""
+  transactionsToSign: [JSONString]
+
+  """Sponsor transactions (pre-signed)"""
+  sponsorTransactions: [JSONString]
+
+  """Transaction group ID"""
+  groupId: String
+
+  """Whether user needs to opt into the app"""
+  requiresAppOptin: Boolean
+
+  """Application ID for opt-in"""
+  appId: Int
 }
 
 """Mutation to convert cUSD to USDC"""
@@ -3473,12 +4008,77 @@ type ConvertCUSDToUSDC {
   conversion: ConversionType
   success: Boolean
   errors: [String]
+
+  """Unsigned transactions for client to sign"""
+  transactionsToSign: [JSONString]
+
+  """Sponsor transactions (pre-signed)"""
+  sponsorTransactions: [JSONString]
+
+  """Transaction group ID"""
+  groupId: String
+
+  """Whether user needs to opt into the app"""
+  requiresAppOptin: Boolean
+
+  """Application ID for opt-in"""
+  appId: Int
+}
+
+"""Execute a pending conversion with user signature"""
+type ExecutePendingConversion {
+  success: Boolean
+  conversion: ConversionType
+  transactionId: String
+  errors: [String]
+}
+
+"""
+Get unsigned transactions for a pending conversion (for client-side signing)
+"""
+type GetConversionTransactions {
+  success: Boolean
+
+  """Base64 encoded unsigned transactions"""
+  transactions: [String]
+  errors: [String]
 }
 
 """Simple test mutation"""
 type TestConversion {
   success: Boolean
   message: String
+}
+
+"""Mutation to opt into the cUSD application with sponsorship"""
+type OptInToCUSDApp {
+  success: Boolean
+  errors: [String]
+
+  """Unsigned transaction for client to sign"""
+  transactionToSign: JSONString
+
+  """User transactions to sign"""
+  transactionsToSign: [JSONString]
+
+  """Sponsor transactions (pre-signed)"""
+  sponsorTransactions: [JSONString]
+
+  """Transaction group ID"""
+  groupId: String
+
+  """Total fees being sponsored"""
+  totalFee: String
+
+  """Amount being funded to user"""
+  fundingAmount: String
+}
+
+"""Execute a signed cUSD app opt-in transaction"""
+type ExecuteCUSDAppOptIn {
+  success: Boolean
+  transactionId: String
+  errors: [String]
 }
 
 """Mutation to manually trigger exchange rate refresh"""
@@ -3655,41 +4255,6 @@ type PayInvoice {
   errors: [String]
 }
 
-"""Mutation for creating a new send transaction"""
-type CreateSendTransaction {
-  sendTransaction: SendTransactionType
-  success: Boolean
-  errors: [String]
-}
-
-"""Input type for creating a send transaction"""
-input SendTransactionInput {
-  """User ID of the recipient (for Confío users)"""
-  recipientUserId: ID
-
-  """Phone number of the recipient (for any user)"""
-  recipientPhone: String
-
-  """Sui address of the recipient (DEPRECATED - use phone or user ID)"""
-  recipientAddress: String
-
-  """Amount to send (e.g., '10.50')"""
-  amount: String!
-
-  """Type of token to send (e.g., 'cUSD', 'CONFIO')"""
-  tokenType: String!
-
-  """Optional memo for the transaction"""
-  memo: String
-
-  """Optional idempotency key to prevent duplicate sends"""
-  idempotencyKey: String
-
-  """Display name for the recipient (for UI)"""
-  recipientDisplayName: String
-}
-
-"""Initiate Telegram verification process"""
 type InitiateTelegramVerification {
   success: Boolean
   error: String
@@ -3698,47 +4263,6 @@ type InitiateTelegramVerification {
 type VerifyTelegramCode {
   success: Boolean
   error: String
-}
-
-"""Initialize zkLogin process"""
-type InitializeZkLogin {
-  success: Boolean
-  error: String
-  maxEpoch: String
-  randomness: String
-  authAccessToken: String
-  authRefreshToken: String
-}
-
-type FinalizeZkLoginPayload {
-  success: Boolean
-  zkProof: ProofPointsType
-  suiAddress: String
-  error: String
-  isPhoneVerified: Boolean
-}
-
-type ProofPointsType {
-  a: [String]
-  b: [[String]]
-  c: [String]
-}
-
-input FinalizeZkLoginInput {
-  maxEpoch: String!
-  randomness: String!
-  extendedEphemeralPublicKey: String!
-  userSignature: String!
-  jwt: String!
-  keyClaimName: String!
-  audience: String!
-  firebaseToken: String!
-  salt: String!
-  accountType: String!
-  accountIndex: Int!
-
-  """Device fingerprint data"""
-  deviceFingerprint: JSONString
 }
 
 type AddBusinessEmployee {
@@ -3891,7 +4415,7 @@ type UpdateBusiness {
   business: BusinessType
 }
 
-type UpdateAccountSuiAddress {
+type UpdateAccountAlgorandAddress {
   success: Boolean
   error: String
   account: AccountType
@@ -3918,6 +4442,21 @@ type SetDefaultBankInfo {
   success: Boolean
   error: String
   bankInfo: BankInfoType
+}
+
+"""Force refresh balance from blockchain for the current account"""
+type RefreshAccountBalance {
+  success: Boolean
+  errors: String
+  balances: BalancesType
+  lastSynced: DateTime
+}
+
+"""Token balances object"""
+type BalancesType {
+  cusd: String
+  confio: String
+  usdc: String
 }
 
 """

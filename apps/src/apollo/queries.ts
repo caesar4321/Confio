@@ -335,6 +335,7 @@ export const PAY_INVOICE = gql`
         description
         status
         transactionHash
+        blockchainData
         createdAt
       }
       success

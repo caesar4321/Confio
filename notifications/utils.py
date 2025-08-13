@@ -48,13 +48,15 @@ def create_notification(
     Returns:
         Created Notification instance
     """
+    logger.info(f"create_notification called with user={user}, type={notification_type}, title={title}")
+    
     if not is_broadcast and not user:
         raise ValueError("User is required for personal notifications")
     
     if is_broadcast and user:
         raise ValueError("User should not be set for broadcast notifications")
     
-    logger.info(f"Creating notification with type: {notification_type}, user: {user.id if user else 'None'}")
+    logger.info(f"Creating notification with type: {notification_type}, user: {user.id if user else 'None'}, user_username: {user.username if user else 'None'}")
     
     notification = Notification.objects.create(
         user=user,

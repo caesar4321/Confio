@@ -17,6 +17,7 @@ class PaymentTransaction(SoftDeleteModel):
     """Model for storing payment transaction data (specific to invoice payments)"""
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
+        ('PENDING_BLOCKCHAIN', 'Pending Blockchain'),
         ('SPONSORING', 'Sponsoring'),
         ('SIGNED', 'Signed'),
         ('SUBMITTED', 'Submitted'),
@@ -130,14 +131,21 @@ class PaymentTransaction(SoftDeleteModel):
     amount = models.DecimalField(max_digits=19, decimal_places=6)  # Support up to 9,999,999,999,999.999999
     token_type = models.CharField(max_length=10, choices=TOKEN_TYPES)
     description = models.TextField(blank=True)
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     transaction_hash = models.CharField(
         max_length=66, 
         blank=True,
         unique=True,
-        help_text="Sui transaction digest (0x + 32 bytes, 66 hex characters total)"
+        help_text="Blockchain transaction hash"
     )
     error_message = models.TextField(blank=True)
+    
+    # Blockchain transaction data for client signing
+    blockchain_data = models.JSONField(
+        blank=True,
+        null=True,
+        help_text="Unsigned blockchain transactions for client signing"
+    )
     
     # Idempotency key for preventing duplicate payments
     idempotency_key = models.CharField(
@@ -248,7 +256,7 @@ class Invoice(SoftDeleteModel):
     amount = models.DecimalField(max_digits=19, decimal_places=6)  # Support up to 9,999,999,999,999.999999
     token_type = models.CharField(max_length=10, choices=TOKEN_TYPES)
     description = models.TextField(blank=True)
-    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='PENDING')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
 
     # Payment completion details
     paid_by_user = models.ForeignKey(

@@ -378,12 +378,10 @@ export const GET_CONVERSION_TRANSACTIONS = gql`
   }
 `;
 
-// Payment contract mutations for seamless sponsored payments
+// Payment contract mutations for seamless sponsored payments to businesses
+// Note: Recipient business is determined from JWT context on server side
 export const CREATE_SPONSORED_PAYMENT = gql`
   mutation CreateSponsoredPayment(
-    $recipientAddress: String
-    $recipientUserId: ID
-    $recipientPhone: String
     $amount: Float!
     $assetType: String
     $paymentId: String
@@ -391,9 +389,6 @@ export const CREATE_SPONSORED_PAYMENT = gql`
     $createReceipt: Boolean
   ) {
     createSponsoredPayment(
-      recipientAddress: $recipientAddress
-      recipientUserId: $recipientUserId
-      recipientPhone: $recipientPhone
       amount: $amount
       assetType: $assetType
       paymentId: $paymentId

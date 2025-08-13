@@ -245,17 +245,87 @@ export const PaymentProcessingScreen = () => {
           }
         });
 
-        console.log('PaymentProcessingScreen: Mutation response:', data);
+        console.log('PaymentProcessingScreen: Mutation response:', JSON.stringify(data, null, 2));
+        console.log('PaymentProcessingScreen: Payment transaction status:', data?.payInvoice?.paymentTransaction?.status);
+        console.log('PaymentProcessingScreen: Has blockchain data:', !!data?.payInvoice?.paymentTransaction?.blockchainData);
 
-        if (data?.payInvoice?.success) {
-          console.log('PaymentProcessingScreen: Payment successful:', data.payInvoice);
+        // Check if we have blockchain transactions to sign
+        if (data?.payInvoice?.paymentTransaction?.blockchainData) {
+          console.log('PaymentProcessingScreen: Blockchain transactions detected, proceeding with signing');
+          console.log('PaymentProcessingScreen: Blockchain data:', JSON.stringify(data.payInvoice.paymentTransaction.blockchainData, null, 2));
+          
+          try {
+            // Import AlgorandService
+            const { algorandService } = await import('../services/algorandService');
+            const { apolloClient } = await import('../apollo/client');
+            const { SUBMIT_SPONSORED_PAYMENT } = await import('../apollo/mutations');
+            
+            const blockchainData = data.payInvoice.paymentTransaction.blockchainData;
+            const transactions = blockchainData.transactions;
+            const userSigningIndexes = blockchainData.user_signing_indexes || blockchainData.userSigningIndexes;
+            
+            console.log('PaymentProcessingScreen: Signing transactions at indexes:', userSigningIndexes);
+            
+            // Sign the transactions that require user signature
+            const signedTransactions = [];
+            for (let i = 0; i < transactions.length; i++) {
+              const txn = transactions[i];
+              if (userSigningIndexes.includes(i) || txn.needs_signature) {
+                // User needs to sign this transaction
+                console.log(`PaymentProcessingScreen: Signing transaction ${i}`);
+                const txnBytes = Buffer.from(txn.transaction, 'base64');
+                const signedTxn = await algorandService.signTransactionBytes(txnBytes);
+                signedTransactions.push({
+                  index: i,
+                  transaction: Buffer.from(signedTxn).toString('base64')
+                });
+              } else {
+                // Already signed by sponsor
+                signedTransactions.push({
+                  index: i,
+                  transaction: txn.transaction
+                });
+              }
+            }
+            
+            console.log('PaymentProcessingScreen: Submitting signed transactions to blockchain');
+            
+            // Submit the signed transactions
+            const submitResult = await apolloClient.mutate({
+              mutation: SUBMIT_SPONSORED_PAYMENT,
+              variables: {
+                signedTransactions: JSON.stringify(signedTransactions),
+                paymentId: data.payInvoice.paymentTransaction.paymentTransactionId
+              }
+            });
+            
+            if (submitResult.data?.submitSponsoredPayment?.success) {
+              console.log('PaymentProcessingScreen: Blockchain payment confirmed:', submitResult.data.submitSponsoredPayment);
+              setIsComplete(true);
+              setPaymentResponse({
+                ...data.payInvoice,
+                blockchainTxId: submitResult.data.submitSponsoredPayment.transactionId,
+                blockchainRound: submitResult.data.submitSponsoredPayment.confirmedRound
+              });
+            } else {
+              throw new Error(submitResult.data?.submitSponsoredPayment?.error || 'Failed to submit blockchain payment');
+            }
+          } catch (blockchainError) {
+            console.error('PaymentProcessingScreen: Blockchain payment failed:', blockchainError);
+            // Fall back to database-only payment (already marked as successful)
+            setIsComplete(true);
+            setPaymentResponse(data.payInvoice);
+          }
+        } else if (data?.payInvoice?.success) {
+          // No blockchain data - database-only payment
+          console.log('PaymentProcessingScreen: Database payment successful (no blockchain):', data.payInvoice);
           setIsComplete(true);
-          setPaymentResponse(data.payInvoice); // Store payment response
+          setPaymentResponse(data.payInvoice);
         } else if (data?.payInvoice) {
           // Payment might have succeeded but with a different response format
           console.log('PaymentProcessingScreen: Payment response received:', data.payInvoice);
           setIsComplete(true);
-          setPaymentResponse(data.payInvoice); // Store payment response
+          setPaymentResponse(data.payInvoice);
         } else {
           const errors = data?.payInvoice?.errors || ['Error desconocido'];
           console.error('PaymentProcessingScreen: Payment failed:', errors);
