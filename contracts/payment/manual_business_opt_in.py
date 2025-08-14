@@ -16,20 +16,19 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 import django
 django.setup()
 
-from algosdk import mnemonic, account, encoding
+from algosdk import mnemonic, account
 from algosdk.v2client import algod
 from algosdk.transaction import AssetTransferTxn, PaymentTxn, assign_group_id, wait_for_confirmation
-from blockchain.algorand_sponsor_service import algorand_sponsor_service
-import base64
+from django.conf import settings
 
-# Setup
-ALGOD_ADDRESS = 'https://testnet-api.algonode.cloud'
-ALGOD_TOKEN = ''
-CONFIO_ID = 744150851
-CUSD_ID = 744192921
+# Network/IDs from Django settings (.env)
+ALGOD_ADDRESS = settings.ALGORAND_ALGOD_ADDRESS
+ALGOD_TOKEN = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '') or ''
+CONFIO_ID = settings.ALGORAND_CONFIO_ASSET_ID
+CUSD_ID = settings.ALGORAND_CUSD_ASSET_ID
 
-# Business account that needs opt-in
-business_address = 'YCV25L4FIZ66N3ZTAWKLREEMOFBBIB3CCV7BJIVBLDJZI2EM6VK6Z4MPEU'
+# Business account (override via env BUSINESS_ADDRESS)
+business_address = os.environ.get('BUSINESS_ADDRESS', 'YCV25L4FIZ66N3ZTAWKLREEMOFBBIB3CCV7BJIVBLDJZI2EM6VK6Z4MPEU')
 
 async def manual_opt_in():
     """Manually opt-in a business account using sponsored transactions"""
@@ -39,7 +38,9 @@ async def manual_opt_in():
     print()
     
     # Initialize algod client
-    algod_client = algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS)
+    # Default LocalNet token if not provided
+    algod_token = ALGOD_TOKEN or ('a' * 64 if ('localhost' in ALGOD_ADDRESS or '127.0.0.1' in ALGOD_ADDRESS) else '')
+    algod_client = algod.AlgodClient(algod_token, ALGOD_ADDRESS)
     
     # Check current opt-in status
     try:
@@ -100,6 +101,7 @@ async def manual_opt_in():
     
     # Get suggested params
     params = algod_client.suggested_params()
+    params.flat_fee = True
     
     # Process CONFIO opt-in if needed
     if not has_confio:
@@ -113,7 +115,7 @@ async def manual_opt_in():
             amt=0,
             index=CONFIO_ID
         )
-        opt_in_txn.fee = 0  # Business pays no fee
+        opt_in_txn.fee = 0  # Business pays no fee (fee pooling in group)
         
         # Create fee payment transaction from sponsor
         fee_payment_txn = PaymentTxn(
@@ -123,7 +125,7 @@ async def manual_opt_in():
             amt=0,  # No ALGO transfer, just paying fees
             note=b"CONFIO opt-in sponsorship"
         )
-        fee_payment_txn.fee = params.min_fee * 2  # Sponsor pays all fees
+        fee_payment_txn.fee = params.min_fee * 2  # Sponsor covers both tx fees
         
         # Create atomic group
         txn_group = [fee_payment_txn, opt_in_txn]
@@ -150,7 +152,7 @@ async def manual_opt_in():
             return
     
     # Process cUSD opt-in if needed
-    if not has_cusd:
+    if CUSD_ID and not has_cusd:
         print('Creating sponsored opt-in for cUSD...')
         
         # Create opt-in transaction (0 amount transfer to self) with 0 fee
@@ -161,7 +163,7 @@ async def manual_opt_in():
             amt=0,
             index=CUSD_ID
         )
-        opt_in_txn.fee = 0  # Business pays no fee
+        opt_in_txn.fee = 0  # Business pays no fee (fee pooling)
         
         # Create fee payment transaction from sponsor
         fee_payment_txn = PaymentTxn(
@@ -171,7 +173,7 @@ async def manual_opt_in():
             amt=0,  # No ALGO transfer, just paying fees
             note=b"cUSD opt-in sponsorship"
         )
-        fee_payment_txn.fee = params.min_fee * 2  # Sponsor pays all fees
+        fee_payment_txn.fee = params.min_fee * 2  # Sponsor covers both fees
         
         # Create atomic group
         txn_group = [fee_payment_txn, opt_in_txn]

@@ -22,8 +22,9 @@ from algosdk.transaction import (
 from algosdk.abi import Method, Returns, Argument
 from algosdk.encoding import decode_address
 
-# Add parent directory to path for imports
+# Add payment dir and project root to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from payment import app as payment_app
 
@@ -40,13 +41,33 @@ else:  # localnet
     ALGOD_ADDRESS = "http://localhost:4001"
     ALGOD_TOKEN = "a" * 64
 
-# Asset IDs from environment
+# Asset IDs from environment (with LocalNet fallbacks)
 CUSD_ASSET_ID = int(os.environ.get('ALGORAND_CUSD_ASSET_ID', '0'))
 CONFIO_ASSET_ID = int(os.environ.get('ALGORAND_CONFIO_ASSET_ID', '0'))
+if NETWORK == 'localnet':
+    if CUSD_ASSET_ID == 0:
+        try:
+            from contracts.config.localnet_assets import CUSD_ASSET_ID as LN_CUSD
+            CUSD_ASSET_ID = LN_CUSD
+            print(f"Using LocalNet cUSD asset id from config: {CUSD_ASSET_ID}")
+        except Exception:
+            pass
+    if CONFIO_ASSET_ID == 0:
+        # Allow override via env var until we add a localnet config file for CONFIO
+        CONFIO_ASSET_ID = int(os.environ.get('LOCALNET_CONFIO_ASSET_ID', '0'))
+        if CONFIO_ASSET_ID:
+            print(f"Using LocalNet CONFIO asset id from env: {CONFIO_ASSET_ID}")
 
 def get_admin_account():
     """Get admin account from environment"""
     admin_mnemonic = os.environ.get('ALGORAND_ADMIN_MNEMONIC')
+    if not admin_mnemonic and NETWORK == 'localnet':
+        try:
+            from contracts.config.localnet_accounts import ADMIN_MNEMONIC as LN_ADMIN
+            admin_mnemonic = LN_ADMIN
+            print("Using LocalNet admin mnemonic from config.")
+        except Exception:
+            pass
     if not admin_mnemonic:
         print("Error: ALGORAND_ADMIN_MNEMONIC not set in environment")
         sys.exit(1)
@@ -90,8 +111,41 @@ def deploy_payment_contract():
     print(f"Admin balance: {balance:.6f} ALGO")
     
     if balance < 1.0:
-        print("Error: Admin account needs at least 1 ALGO for deployment")
-        sys.exit(1)
+        if NETWORK == 'localnet':
+            import subprocess
+            print("Admin underfunded; attempting faucet dispense...")
+            # Try explicit faucet mnemonic first
+            faucet_mn = os.getenv("LOCALNET_FAUCET_MNEMONIC")
+            if faucet_mn:
+                try:
+                    from algosdk import mnemonic as _mn, account as _acct
+                    fk = _mn.to_private_key(faucet_mn)
+                    faddr = _acct.address_from_private_key(fk)
+                    params = algod_client.suggested_params()
+                    ptxn = PaymentTxn(sender=faddr, sp=params, receiver=admin_address, amt=5_000_000)
+                    stx = ptxn.sign(fk)
+                    txid = algod_client.send_transaction(stx)
+                    wait_for_confirmation(algod_client, txid, 4)
+                    account_info = algod_client.account_info(admin_address)
+                    balance = account_info['amount'] / 1_000_000
+                    print(f"Admin balance after faucet transfer: {balance:.6f} ALGO")
+                except Exception as e:
+                    print(f"Faucet mnemonic funding failed: {e}")
+            if balance < 1.0:
+                print("Attempting Algokit localnet dispense...")
+                try:
+                    res = subprocess.run(["algokit", "localnet", "dispense", "-a", admin_address], capture_output=True, text=True)
+                    if res.returncode == 0:
+                        account_info = algod_client.account_info(admin_address)
+                        balance = account_info['amount'] / 1_000_000
+                        print(f"Admin balance after dispense: {balance:.6f} ALGO")
+                    else:
+                        print(f"Algokit dispense failed (rc={res.returncode}): {res.stderr.strip()}")
+                except Exception as e:
+                    print(f"Algokit not available: {e}")
+        if balance < 1.0:
+            print("Error: Admin account needs at least 1 ALGO for deployment")
+            sys.exit(1)
     
     # Build the contract
     print("\nBuilding contract...")

@@ -1,0 +1,34 @@
+
+============================================================
+CONFÍO DOLLAR (cUSD) - LOCALNET DEPLOYMENT
+============================================================
+
+No ALGORAND_SPONSOR_MNEMONIC found. Creating new account...
+============================================================
+NEW ACCOUNT CREATED
+============================================================
+Address: OFF2XVG7AUX4XI7PNH33UGMATOJ2E6B7KTYL3DSDK4V33X7JY5AO2NKRBM
+Mnemonic: end mixture bundle fiscal nose shrimp hunt output thought long drive oil hobby lobster woman attitude candy system custom guitar diesel one produce abstract school
+============================================================
+
+⚠️  SAVE THIS MNEMONIC SECURELY! ⚠️
+Algokit dispense failed (rc=2): Usage: algokit localnet [OPTIONS] COMMAND [ARGS]...
+Try 'algokit localnet -h' for help.
+
+Error: No such command 'dispense'.
+Warning: LocalNet auto-funding failed: TransactionPool.Remember: transaction GAXK6OWFODTRWPTAO6SPVL3VHE7TAUHVC7XORG2HFBGR2XUNXPCQ: overspend (account DGTVIK4MNQGNZWIQHSSIWV56UPTOELAF3UOASW42M5NOWIJ3YECZ6IKKQU, data {AccountBaseData:{Status:Offline MicroAlgos:{Raw:0} RewardsBase:0 RewardedMicroAlgos:{Raw:0} AuthAddr:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ IncentiveEligible:false TotalAppSchema:{_struct:{} NumUint:0 NumByteSlice:0} TotalExtraAppPages:0 TotalAppParams:0 TotalAppLocalStates:0 TotalAssetParams:0 TotalAssets:0 TotalBoxes:0 TotalBoxBytes:0 LastProposed:0 LastHeartbeat:0} VotingData:{VoteID:[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] SelectionID:[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] StateProofID:[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] VoteFirstValid:0 VoteLastValid:0 VoteKeyDilution:0}}, tried to spend {1000})
+Account balance: 0.000000 ALGO
+
+Account underfunded; attempting auto-funding...
+Algokit dispense failed (rc=2): Usage: algokit localnet [OPTIONS] COMMAND [ARGS]...
+Try 'algokit localnet -h' for help.
+
+Error: No such command 'dispense'.
+Warning: LocalNet auto-funding failed: TransactionPool.Remember: transaction GAXK6OWFODTRWPTAO6SPVL3VHE7TAUHVC7XORG2HFBGR2XUNXPCQ: overspend (account DGTVIK4MNQGNZWIQHSSIWV56UPTOELAF3UOASW42M5NOWIJ3YECZ6IKKQU, data {AccountBaseData:{Status:Offline MicroAlgos:{Raw:0} RewardsBase:0 RewardedMicroAlgos:{Raw:0} AuthAddr:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ IncentiveEligible:false TotalAppSchema:{_struct:{} NumUint:0 NumByteSlice:0} TotalExtraAppPages:0 TotalAppParams:0 TotalAppLocalStates:0 TotalAssetParams:0 TotalAssets:0 TotalBoxes:0 TotalBoxBytes:0 LastProposed:0 LastHeartbeat:0} VotingData:{VoteID:[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] SelectionID:[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] StateProofID:[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] VoteFirstValid:0 VoteLastValid:0 VoteKeyDilution:0}}, tried to spend {1000})
+Account balance: 0.000000 ALGO
+
+❌ Insufficient balance. Please fund the account
+Address: OFF2XVG7AUX4XI7PNH33UGMATOJ2E6B7KTYL3DSDK4V33X7JY5AO2NKRBM
+
+Tip: Use Algokit to fund on LocalNet:
+algokit localnet dispense -a OFF2XVG7AUX4XI7PNH33UGMATOJ2E6B7KTYL3DSDK4V33X7JY5AO2NKRBM

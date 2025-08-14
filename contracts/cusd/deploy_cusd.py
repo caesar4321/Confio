@@ -7,6 +7,9 @@ Website: https://confio.lat
 import os
 import json
 import sys
+import subprocess
+# Ensure project root is on sys.path for `contracts.*` imports when run from subdir
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from algosdk import account, mnemonic
 from algosdk.v2client import algod
 from algosdk.transaction import ApplicationCreateTxn, ApplicationUpdateTxn, OnComplete, StateSchema, wait_for_confirmation
@@ -17,9 +20,16 @@ from algosdk.abi import Contract
 from algosdk.transaction import ApplicationCallTxn
 import base64
 
-# Testnet configuration
-ALGOD_ADDRESS = "https://testnet-api.algonode.cloud"
-ALGOD_TOKEN = ""  # No token needed for AlgoNode
+NETWORK = os.environ.get("ALGORAND_NETWORK", "testnet")
+
+# Network configuration
+if NETWORK == "localnet":
+    ALGOD_ADDRESS = "http://localhost:4001"
+    ALGOD_TOKEN = "a" * 64
+else:
+    # Default to testnet if not specified
+    ALGOD_ADDRESS = "https://testnet-api.algonode.cloud"
+    ALGOD_TOKEN = ""  # No token needed for AlgoNode
 
 # Initialize Algod client
 algod_client = algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS)
@@ -36,11 +46,12 @@ def create_account():
     print(f"Mnemonic: {mn}")
     print("=" * 60)
     print("\n⚠️  SAVE THIS MNEMONIC SECURELY! ⚠️")
-    print("\nFund this account with testnet ALGO from:")
-    print("https://testnet.algoexplorer.io/dispenser")
-    print("or")
-    print("https://bank.testnet.algorand.network/")
-    print("\nYou'll need at least 2 ALGO for deployment")
+    if NETWORK != "localnet":
+        print("\nFund this account with testnet ALGO from:")
+        print("https://testnet.algoexplorer.io/dispenser")
+        print("or")
+        print("https://bank.testnet.algorand.network/")
+        print("\nYou'll need at least 2 ALGO for deployment")
     
     return private_key, address, mn
 
@@ -50,6 +61,51 @@ def check_balance(address):
     balance = account_info.get('amount') / 1000000  # Convert microAlgos to Algos
     print(f"Account balance: {balance:.6f} ALGO")
     return balance
+
+def _localnet_autofund(address, amount_microalgos=5_000_000):
+    """Fund a freshly-created account on LocalNet using the dispenser."""
+    if NETWORK != "localnet":
+        return
+    try:
+        # Try explicit faucet mnemonic first (if provided)
+        faucet_mn = os.getenv("LOCALNET_FAUCET_MNEMONIC")
+        if faucet_mn:
+            from algosdk import mnemonic as _mn
+            fk = _mn.to_private_key(faucet_mn)
+            from algosdk import account as _acct
+            faddr = _acct.address_from_private_key(fk)
+            params = algod_client.suggested_params()
+            ptxn = PaymentTxn(sender=faddr, sp=params, receiver=address, amt=amount_microalgos)
+            stx = ptxn.sign(fk)
+            txid = algod_client.send_transaction(stx)
+            print(f"LocalNet funding from faucet account: {txid}")
+            wait_for_confirmation(algod_client, txid, 4)
+            return
+        
+        # Prefer Algokit faucet (no keys needed)
+        result = subprocess.run([
+            "algokit", "localnet", "dispense", "-a", address
+        ], capture_output=True, text=True)
+        if result.returncode == 0:
+            print("LocalNet faucet dispense succeeded via Algokit.")
+            return
+        else:
+            print(f"Algokit dispense failed (rc={result.returncode}): {result.stderr.strip()}")
+            # Fallback to sending from configured dispenser if present
+            from contracts.config.localnet_accounts import DISPENSER_ADDRESS, DISPENSER_PRIVATE_KEY
+            params = algod_client.suggested_params()
+            ptxn = PaymentTxn(
+                sender=DISPENSER_ADDRESS,
+                sp=params,
+                receiver=address,
+                amt=amount_microalgos,
+            )
+            stx = ptxn.sign(DISPENSER_PRIVATE_KEY)
+            txid = algod_client.send_transaction(stx)
+            print(f"LocalNet funding TX: {txid}")
+            wait_for_confirmation(algod_client, txid, 4)
+    except Exception as e:
+        print(f"Warning: LocalNet auto-funding failed: {e}")
 
 def compile_program(client, source_code):
     """Compile TEAL program"""
@@ -348,7 +404,7 @@ def main():
         print("="*60)
     else:
         print("\n" + "="*60)
-        print("CONFÍO DOLLAR (cUSD) - TESTNET DEPLOYMENT")
+        print(f"CONFÍO DOLLAR (cUSD) - {NETWORK.upper()} DEPLOYMENT")
         print("="*60)
     
     # Check if we have existing credentials
@@ -364,16 +420,26 @@ def main():
             return
         print("\nNo ALGORAND_SPONSOR_MNEMONIC found. Creating new account...")
         private_key, address, mnemonic_phrase = create_account()
-        
-        print("\nPress Enter after funding the account to continue...")
-        input()
+        if NETWORK == "localnet":
+            _localnet_autofund(address)
+        else:
+            print("\nPress Enter after funding the account to continue...")
+            input()
     
     # Check balance
     balance = check_balance(address)
     if balance < 0.1:
-        print(f"\n❌ Insufficient balance. Please fund the account")
-        print(f"Address: {address}")
-        return
+        print(f"\nAccount underfunded; attempting auto-funding...")
+        if NETWORK == "localnet":
+            _localnet_autofund(address)
+            balance = check_balance(address)
+        if balance < 0.1:
+            print(f"\n❌ Insufficient balance. Please fund the account")
+            print(f"Address: {address}")
+            if NETWORK == "localnet":
+                print("\nTip: Use Algokit to fund on LocalNet:")
+                print(f"algokit localnet dispense -a {address}")
+            return
     
     try:
         if update_mode:
@@ -399,7 +465,17 @@ def main():
         cusd_asset_id = create_cusd_asset(private_key, address, app_address)
         
         # Step 3: Setup assets in the contract
-        usdc_asset_id = 10458941  # Testnet USDC
+        if NETWORK == "localnet":
+            try:
+                from contracts.config.localnet_assets import TEST_USDC_ID as usdc_asset_id
+            except Exception:
+                # Fallback env override
+                usdc_asset_id = int(os.environ.get("LOCALNET_TEST_USDC_ID", "0"))
+                if usdc_asset_id == 0:
+                    print("\n❌ No LocalNet USDC asset id configured. Set LOCALNET_TEST_USDC_ID or create localnet assets.")
+                    return
+        else:
+            usdc_asset_id = 10458941  # Testnet USDC
         setup_result = setup_assets(app_id, app_address, cusd_asset_id, usdc_asset_id, private_key, address)
         
         # Step 4: Transfer ALL cUSD to the contract (security critical!)

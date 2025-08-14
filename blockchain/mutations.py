@@ -596,7 +596,8 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                     )
                 )
             finally:
-                loop.close()
+                # No event loop used in this path
+                pass
             
             if not result['success']:
                 return cls(success=False, error=result.get('error', 'Failed to create sponsored transaction'))
@@ -795,7 +796,11 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                     )
                 logger.info(f"Transaction submission returned: {result}")
             finally:
-                loop.close()
+                # No event loop in this path; keep cleanup safe
+                try:
+                    loop.close()  # Only if it exists from older paths
+                except NameError:
+                    pass
             
             if not result['success']:
                 return cls(success=False, error=result.get('error', 'Failed to submit transaction'))
@@ -885,6 +890,18 @@ class SubmitBusinessOptInGroupMutation(graphene.Mutation):
                 except Exception as e:
                     logger.error(f'Failed to decode signed transaction {i}: {e}')
                     return cls(success=False, error='Failed to decode signed transactions')
+
+            # Reorder if needed: sponsor Payment must be first so MBR lands before opt-ins
+            try:
+                sponsor_index = next(i for i, stx in enumerate(signed_txn_objects)
+                                     if isinstance(stx, dict) and isinstance(stx.get('txn'), dict)
+                                     and stx['txn'].get('type') == 'pay')
+                if sponsor_index != 0:
+                    sponsor = signed_txn_objects.pop(sponsor_index)
+                    signed_txn_objects = [sponsor] + signed_txn_objects
+                    logger.info('SubmitBusinessOptInGroupMutation: reordered group to put sponsor first')
+            except StopIteration:
+                logger.warning('SubmitBusinessOptInGroupMutation: no sponsor payment found in group; submitting as-is')
 
             # Submit group
             algod_client = algod.AlgodClient(
@@ -1301,7 +1318,11 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
                     )
                 )
             finally:
-                loop.close()
+                # Guard against missing loop in this path
+                try:
+                    loop.close()
+                except NameError:
+                    pass
             
             if not result['success']:
                 return cls(success=False, error=result.get('error', 'Failed to create opt-in transaction'))
@@ -1424,7 +1445,6 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                 auth_header = request.META.get('HTTP_AUTHORIZATION', '')
                 if auth_header.startswith('JWT '):
                     from jwt import decode as jwt_decode
-                    from django.conf import settings
                     token = auth_header[4:]
                     try:
                         jwt_claims = jwt_decode(token, settings.SECRET_KEY, algorithms=['HS256'])
@@ -1469,32 +1489,31 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                 logger.error(f'CheckBusinessOptIn: Business account {business_id} has no Algorand address')
                 return cls(error='Business account has no Algorand address')
             
-            # Check opt-in status
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
+            # Check opt-in status against configured network
+            from algosdk.v2client import algod
+            algod_address = settings.ALGORAND_ALGOD_ADDRESS
+            algod_token = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '') or ''
+            if not algod_token and ('localhost' in algod_address or '127.0.0.1' in algod_address):
+                algod_token = 'a' * 64
+            algod_client = algod.AlgodClient(algod_token, algod_address)
+
             try:
-                # Check if opted into CONFIO and cUSD
-                from algosdk.v2client import algod
-                algod_client = algod.AlgodClient('', 'https://testnet-api.algonode.cloud')
-                
                 account_info = algod_client.account_info(business_account.algorand_address)
                 assets = account_info.get('assets', [])
-                
                 logger.info(f'CheckBusinessOptIn: Account has {len(assets)} assets')
-                
-                CONFIO_ID = 744150851
-                CUSD_ID = 744192921
-                
-                has_confio = any(a['asset-id'] == CONFIO_ID for a in assets)
-                has_cusd = any(a['asset-id'] == CUSD_ID for a in assets)
+
+                CONFIO_ID = getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', None)
+                CUSD_ID = getattr(settings, 'ALGORAND_CUSD_ASSET_ID', None)
+
+                has_confio = bool(CONFIO_ID) and any(a['asset-id'] == CONFIO_ID for a in assets)
+                has_cusd = bool(CUSD_ID) and any(a['asset-id'] == CUSD_ID for a in assets)
                 
                 logger.info(f'CheckBusinessOptIn: has_confio={has_confio}, has_cusd={has_cusd}')
                 
                 needed_assets = []
-                if not has_confio:
+                if CONFIO_ID and not has_confio:
                     needed_assets.append('CONFIO')
-                if not has_cusd:
+                if CUSD_ID and not has_cusd:
                     needed_assets.append('cUSD')
                 
                 logger.info(f'CheckBusinessOptIn: Needed assets: {needed_assets}')
@@ -1536,8 +1555,7 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                 
                 # Get sponsor address from configuration
                 sponsor_address = algorand_sponsor_service.sponsor_address
-                
-                # Use the funding service to calculate MBR increase for asset opt-ins
+                # Use funding service (configured to this network)
                 from .account_funding_service import AccountFundingService
                 funding_service = AccountFundingService()
                 
@@ -1566,10 +1584,16 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                     funding_needed = mbr_increase
                 
                 # Create sponsor fee payment transaction with MBR funding
-                # Group has: N opt-ins + 1 sponsor payment = N+1 total transactions
+                # Group has: sponsor payment FIRST, then N opt-ins (total N+1)
                 total_transactions = len(transactions) + 1  # +1 for the sponsor payment itself
                 total_fee = total_transactions * 1000  # 1000 microAlgos per transaction
-                
+
+                # Ensure flat fee so our explicit fee is respected
+                try:
+                    params.flat_fee = True
+                except Exception:
+                    pass
+
                 fee_payment_txn = PaymentTxn(
                     sender=sponsor_address,
                     sp=params,
@@ -1577,12 +1601,14 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                     amt=funding_needed  # Provide exact MBR funding needed
                 )
                 fee_payment_txn.fee = total_fee  # Sponsor pays all fees
-                transactions.append(fee_payment_txn)
-                
+
+                # Sponsor payment MUST be first in the group
+                transactions = [fee_payment_txn] + transactions
+
                 # Assign group ID to all transactions
                 group_id = assign_group_id(transactions)
                 
-                # Sign the sponsor transaction
+                # Sign the sponsor transaction (now at index 0)
                 from algosdk import mnemonic, account
                 try:
                     # Ensure mnemonic is a string
@@ -1594,7 +1620,7 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                     sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
                     
                     # Sign the transaction
-                    signed_sponsor_txn = transactions[-1].sign(sponsor_private_key)
+                    signed_sponsor_txn = transactions[0].sign(sponsor_private_key)
                     
                 except Exception as sign_error:
                     logger.error(f'CheckBusinessOptIn: Error signing sponsor transaction: {sign_error}')
@@ -1604,7 +1630,7 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                 # Prepare transaction data for frontend (mirror personal flow encoding)
                 import msgpack
                 user_transactions = []
-                for txn in transactions[:-1]:  # All except the sponsor fee payment
+                for txn in transactions[1:]:  # All except the sponsor fee payment at index 0
                     user_transactions.append(
                         base64.b64encode(msgpack.packb(txn.dictify())).decode('utf-8')
                     )
@@ -1614,11 +1640,18 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                     msgpack.packb(signed_sponsor_txn.dictify())
                 ).decode('utf-8')
                 
-                # Format the transactions like personal opt-ins do
-                # This matches what processSponsoredOptIn expects
+                # Format the transactions for the client with sponsor FIRST
+                # This ensures the wallet submits the funding payment before the asset opt-ins
                 transactions_data = []
-                
-                # Add each opt-in transaction
+
+                # Add the sponsor transaction (pre-signed) FIRST
+                transactions_data.append({
+                    'type': 'sponsor',
+                    'transaction': sponsor_transaction,
+                    'signed': True
+                })
+
+                # Then add each opt-in transaction
                 for i, txn in enumerate(user_transactions):
                     asset_id = asset_ids[i]
                     asset_name = needed_assets[i]
@@ -1629,13 +1662,6 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                         'transaction': txn,
                         'signed': False
                     })
-                
-                # Add the sponsor transaction (pre-signed)
-                transactions_data.append({
-                    'type': 'sponsor',
-                    'transaction': sponsor_transaction,
-                    'signed': True
-                })
                 
                 # For GraphQL JSONString, pass the Python list; Graphene will JSON-encode it
                 opt_in_data = transactions_data
@@ -1658,9 +1684,9 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                     transactions=tx_list,
                     hasTransactions=has_tx
                 )
-                
-            finally:
-                loop.close()
+            except Exception as e:
+                logger.error(f'CheckBusinessOptIn: Error getting account info: {str(e)}')
+                return cls(error=f'Error checking opt-in status: {str(e)}')
                 
         except Exception as e:
             logger.error(f'Error checking business opt-in: {str(e)}')
@@ -1685,9 +1711,13 @@ class CompleteBusinessOptInMutation(graphene.Mutation):
             if not user.is_authenticated:
                 return cls(success=False, error='User not authenticated')
             
-            # Verify transactions on blockchain
+            # Verify transactions on configured network
             from algosdk.v2client import algod
-            algod_client = algod.AlgodClient('', 'https://testnet-api.algonode.cloud')
+            algod_address = settings.ALGORAND_ALGOD_ADDRESS
+            algod_token = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '') or ''
+            if not algod_token and ('localhost' in algod_address or '127.0.0.1' in algod_address):
+                algod_token = 'a' * 64
+            algod_client = algod.AlgodClient(algod_token, algod_address)
             
             for tx_id in tx_ids:
                 try:

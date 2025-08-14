@@ -189,14 +189,17 @@ def setup_assets(cusd_id: abi.Uint64, confio_id: abi.Uint64):
 
 @app.external
 def pay_with_cusd(
-    payment: abi.AssetTransferTransaction,
-    fee_payment: abi.AssetTransferTransaction,
     recipient: abi.Address,
     payment_id: abi.String  # Kept for compatibility but not used
 ):
     """
     Process a Confío Dollar payment with 0.9% fee
     Requires two asset transfers: one to merchant, one for fees
+    Transaction group structure:
+    [0] Payment(sponsor→user)
+    [1] AssetTransfer(user→merchant) 
+    [2] AssetTransfer(user→fee_recipient)
+    [3] AppCall(sponsor) - this transaction
     """
     payment_amount = ScratchVar(TealType.uint64)
     fee_amount = ScratchVar(TealType.uint64)
@@ -227,34 +230,37 @@ def pay_with_cusd(
         Assert(Global.group_size() == Int(4)),
         Assert(Txn.group_index() == Int(3)),  # AppCall is always last
         
-        # Verify the payment AXFER (to merchant)
-        Assert(payment.get().type_enum() == TxnType.AssetTransfer),
-        Assert(payment.get().xfer_asset() == app.state.cusd_asset_id),
-        Assert(payment.get().sender() == actual_payer.load()),
-        Assert(payment.get().asset_receiver() == recipient.get()),  # Direct to merchant
-        Assert(payment.get().asset_close_to() == Global.zero_address()),
-        Assert(payment.get().asset_sender() == Global.zero_address()),
-        Assert(payment.get().rekey_to() == Global.zero_address()),
+        # Verify the payment AXFER (to merchant) at index 1
+        Assert(Gtxn[1].type_enum() == TxnType.AssetTransfer),
+        Assert(Gtxn[1].xfer_asset() == app.state.cusd_asset_id),
+        Assert(Gtxn[1].sender() == actual_payer.load()),
+        Assert(Gtxn[1].asset_receiver() == recipient.get()),  # Direct to merchant
+        Assert(Gtxn[1].asset_close_to() == Global.zero_address()),
+        Assert(Gtxn[1].asset_sender() == Global.zero_address()),
+        Assert(Gtxn[1].rekey_to() == Global.zero_address()),
         
-        # Verify the fee AXFER (to fee recipient)
-        Assert(fee_payment.get().type_enum() == TxnType.AssetTransfer),
-        Assert(fee_payment.get().xfer_asset() == app.state.cusd_asset_id),
-        Assert(fee_payment.get().sender() == actual_payer.load()),
-        Assert(fee_payment.get().asset_receiver() == app.state.fee_recipient),  # To fee recipient
-        Assert(fee_payment.get().asset_close_to() == Global.zero_address()),
-        Assert(fee_payment.get().asset_sender() == Global.zero_address()),
-        Assert(fee_payment.get().rekey_to() == Global.zero_address()),
+        # Verify the fee AXFER (to fee recipient) at index 2
+        Assert(Gtxn[2].type_enum() == TxnType.AssetTransfer),
+        Assert(Gtxn[2].xfer_asset() == app.state.cusd_asset_id),
+        Assert(Gtxn[2].sender() == actual_payer.load()),
+        Assert(Gtxn[2].asset_receiver() == app.state.fee_recipient),  # To fee recipient
+        Assert(Gtxn[2].asset_close_to() == Global.zero_address()),
+        Assert(Gtxn[2].asset_sender() == Global.zero_address()),
+        Assert(Gtxn[2].rekey_to() == Global.zero_address()),
         
         # Calculate and verify the fee split (0.9% = 90 basis points)
-        payment_amount.store(payment.get().asset_amount()),
-        fee_amount.store(fee_payment.get().asset_amount()),
+        payment_amount.store(Gtxn[1].asset_amount()),
+        fee_amount.store(Gtxn[2].asset_amount()),
         total_amount.store(payment_amount.load() + fee_amount.load()),
         
         # Calculate expected fee: ceil(total * 90 / 10000)
         fee_calculated.store(WideRatio([total_amount.load(), FEE_BPS], [BASIS_POINTS])),
         
-        # Verify fee amount matches calculation
-        Assert(fee_amount.load() == fee_calculated.load()),
+        # Verify fee amount matches calculation (allow +1 tolerance for rounding)
+        Assert(Or(
+            fee_amount.load() == fee_calculated.load(),
+            fee_amount.load() == fee_calculated.load() + Int(1)
+        )),
         
         # Ensure amounts are positive
         Assert(payment_amount.load() > Int(0)),
@@ -302,14 +308,17 @@ def pay_with_cusd(
 
 @app.external
 def pay_with_confio(
-    payment: abi.AssetTransferTransaction,
-    fee_payment: abi.AssetTransferTransaction,
     recipient: abi.Address,
     payment_id: abi.String  # Kept for compatibility but not used
 ):
     """
     Process a CONFIO payment with 0.9% fee
     Requires two asset transfers: one to merchant, one for fees
+    Transaction group structure:
+    [0] Payment(sponsor→user)
+    [1] AssetTransfer(user→merchant) 
+    [2] AssetTransfer(user→fee_recipient)
+    [3] AppCall(sponsor) - this transaction
     """
     payment_amount = ScratchVar(TealType.uint64)
     fee_amount = ScratchVar(TealType.uint64)
@@ -322,6 +331,7 @@ def pay_with_confio(
         Assert(Txn.sender() == app.state.sponsor_address.get()),
         Assert(Txn.accounts.length() >= Int(2)),
         actual_payer.store(Txn.accounts[0]),  # User passed as account reference
+        Log(Bytes("PWC:START")),
         
         # Basic validation
         Assert(
@@ -339,35 +349,40 @@ def pay_with_confio(
         # [Payment(sponsor→user), AssetTransfer(user→merchant), AssetTransfer(user→fee_recipient), AppCall(sponsor)]
         Assert(Global.group_size() == Int(4)),
         Assert(Txn.group_index() == Int(3)),  # AppCall is always last
-        
-        # Verify the payment AXFER (to merchant)
-        Assert(payment.get().type_enum() == TxnType.AssetTransfer),
-        Assert(payment.get().xfer_asset() == app.state.confio_asset_id),
-        Assert(payment.get().sender() == actual_payer.load()),
-        Assert(payment.get().asset_receiver() == recipient.get()),  # Direct to merchant
-        Assert(payment.get().asset_close_to() == Global.zero_address()),
-        Assert(payment.get().asset_sender() == Global.zero_address()),
-        Assert(payment.get().rekey_to() == Global.zero_address()),
-        
-        # Verify the fee AXFER (to fee recipient)
-        Assert(fee_payment.get().type_enum() == TxnType.AssetTransfer),
-        Assert(fee_payment.get().xfer_asset() == app.state.confio_asset_id),
-        Assert(fee_payment.get().sender() == actual_payer.load()),
-        Assert(fee_payment.get().asset_receiver() == app.state.fee_recipient),  # To fee recipient
-        Assert(fee_payment.get().asset_close_to() == Global.zero_address()),
-        Assert(fee_payment.get().asset_sender() == Global.zero_address()),
-        Assert(fee_payment.get().rekey_to() == Global.zero_address()),
+
+        # Verify the payment AXFER (to merchant) at index 1
+        Log(Bytes("PWC:A1")),
+        Assert(Gtxn[1].type_enum() == TxnType.AssetTransfer),
+        Assert(Gtxn[1].xfer_asset() == app.state.confio_asset_id),
+        Assert(Gtxn[1].sender() == actual_payer.load()),
+        Assert(Gtxn[1].asset_receiver() == recipient.get()),  # Direct to merchant
+        Assert(Gtxn[1].asset_close_to() == Global.zero_address()),
+        Assert(Gtxn[1].asset_sender() == Global.zero_address()),
+        Assert(Gtxn[1].rekey_to() == Global.zero_address()),
+
+        # Verify the fee AXFER (to fee recipient) at index 2
+        Log(Bytes("PWC:A2")),
+        Assert(Gtxn[2].type_enum() == TxnType.AssetTransfer),
+        Assert(Gtxn[2].xfer_asset() == app.state.confio_asset_id),
+        Assert(Gtxn[2].sender() == actual_payer.load()),
+        Assert(Gtxn[2].asset_receiver() == app.state.fee_recipient),  # To fee recipient
+        Assert(Gtxn[2].asset_close_to() == Global.zero_address()),
+        Assert(Gtxn[2].asset_sender() == Global.zero_address()),
+        Assert(Gtxn[2].rekey_to() == Global.zero_address()),
         
         # Calculate and verify the fee split (0.9% = 90 basis points)
-        payment_amount.store(payment.get().asset_amount()),
-        fee_amount.store(fee_payment.get().asset_amount()),
+        payment_amount.store(Gtxn[1].asset_amount()),
+        fee_amount.store(Gtxn[2].asset_amount()),
         total_amount.store(payment_amount.load() + fee_amount.load()),
         
         # Calculate expected fee: ceil(total * 90 / 10000)
         fee_calculated.store(WideRatio([total_amount.load(), FEE_BPS], [BASIS_POINTS])),
         
-        # Verify fee amount matches calculation
-        Assert(fee_amount.load() == fee_calculated.load()),
+        # Verify fee amount matches calculation (allow +1 tolerance for rounding)
+        Assert(Or(
+            fee_amount.load() == fee_calculated.load(),
+            fee_amount.load() == fee_calculated.load() + Int(1)
+        )),
         
         # Ensure amounts are positive
         Assert(payment_amount.load() > Int(0)),
@@ -376,6 +391,7 @@ def pay_with_confio(
         # Make AssetHolding.balance check reliable for recipient
         # Recipient MUST be in foreign accounts array (slot 1)
         Assert(Txn.accounts.length() >= Int(2)),
+        Log(Bytes("PWC:ACC1")),
         Assert(Txn.accounts[1] == recipient.get()),
         (rec_bal := AssetHolding.balance(Txn.accounts[1], app.state.confio_asset_id)),
         Assert(rec_bal.hasValue()),
@@ -391,6 +407,7 @@ def pay_with_confio(
         Assert(Txn.fee() >= Global.min_txn_fee()),
         
         # Validate sponsor payment at index 0
+        Log(Bytes("PWC:SP0")),
         Assert(Gtxn[0].type_enum() == TxnType.Payment),
         Assert(Gtxn[0].sender() == app.state.sponsor_address.get()),
         Assert(Gtxn[0].receiver() == actual_payer.load()),  # Payment to payer
@@ -408,7 +425,8 @@ def pay_with_confio(
         # Update statistics
         app.state.total_confio_volume.set(app.state.total_confio_volume.get() + total_amount.load()),
         app.state.total_confio_fees_collected.set(app.state.total_confio_fees_collected.get() + fee_amount.load()),
-        
+        Log(Bytes("PWC:END")),
+
         
         Approve()
     )

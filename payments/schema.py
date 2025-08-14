@@ -538,8 +538,9 @@ class PayInvoice(graphene.Mutation):
                         payment_transaction.transaction_hash = f"pending_blockchain_{payment_transaction.id}_{microsecond_timestamp}_{unique_id}"
                         
                         # Store transaction data for client signing
+                        # Use transactions_to_sign for new 4-txn format (only user transactions)
                         payment_transaction.blockchain_data = {
-                            'transactions': json.loads(create_result.transactions) if isinstance(create_result.transactions, str) else create_result.transactions,
+                            'transactions_to_sign': json.loads(create_result.transactions) if isinstance(create_result.transactions, str) else create_result.transactions,
                             'user_signing_indexes': create_result.user_signing_indexes,
                             'group_id': create_result.group_id,
                             'gross_amount': float(create_result.gross_amount),

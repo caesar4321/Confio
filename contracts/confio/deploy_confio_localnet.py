@@ -8,13 +8,48 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from algosdk import account
+import subprocess
 from algosdk.v2client import algod
 from algosdk.transaction import AssetConfigTxn, wait_for_confirmation, PaymentTxn
 from contracts.config.algorand_localnet_config import ALGORAND_NODE, ALGORAND_TOKEN
 from contracts.config.localnet_accounts import ADMIN_ADDRESS, ADMIN_PRIVATE_KEY
+from algosdk import mnemonic
 
 # Initialize client
 algod_client = algod.AlgodClient(ALGORAND_TOKEN, ALGORAND_NODE)
+
+def ensure_funded(address, min_algo=2_000_000):
+    try:
+        info = algod_client.account_info(address)
+        if info.get("amount", 0) >= min_algo:
+            return
+    except Exception:
+        pass
+    try:
+        # Try environment-provided faucet mnemonic first
+        faucet_mn = os.getenv("LOCALNET_FAUCET_MNEMONIC")
+        if faucet_mn:
+            from algosdk import mnemonic as _mn
+            from algosdk import account as _acct
+            fk = _mn.to_private_key(faucet_mn)
+            faddr = _acct.address_from_private_key(fk)
+            params = algod_client.suggested_params()
+            ptxn = PaymentTxn(sender=faddr, sp=params, receiver=address, amt=max(min_algo, 5_000_000))
+            stx = ptxn.sign(fk)
+            txid = algod_client.send_transaction(stx)
+            wait_for_confirmation(algod_client, txid, 4)
+            print("Dispensed from configured faucet mnemonic.")
+            return
+        
+        # Use Algokit faucet if available
+        res = subprocess.run(["algokit", "localnet", "dispense", "-a", address], capture_output=True, text=True)
+        if res.returncode == 0:
+            print("Dispensed via Algokit faucet for admin account.")
+            return
+        else:
+            print(f"Algokit faucet failed (rc={res.returncode}): {res.stderr.strip()}")
+    except Exception as e:
+        print(f"Algokit faucet not available: {e}")
 
 def main():
     print("=" * 60)
@@ -32,21 +67,42 @@ def main():
     else:
         print("  Private Key: [REDACTED] (set ALLOW_PRINT_PRIVATE_KEYS=1 to print)")
     
-    # Fund the account
+    # Fund the account using sponsor account which has funds
     print("\nFunding creator account...")
     params = algod_client.suggested_params()
     
-    funding_txn = PaymentTxn(
-        sender=ADMIN_ADDRESS,
-        sp=params,
-        receiver=address,
-        amt=10_000_000  # 10 ALGO
-    )
-    
-    signed_funding = funding_txn.sign(ADMIN_PRIVATE_KEY)
-    txid = algod_client.send_transaction(signed_funding)
-    wait_for_confirmation(algod_client, txid, 4)
-    print(f"  Funded with 10 ALGO")
+    # Use sponsor account from environment
+    sponsor_mnemonic = os.environ.get('ALGORAND_SPONSOR_MNEMONIC')
+    if sponsor_mnemonic:
+        sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
+        sponsor_address = account.address_from_private_key(sponsor_private_key)
+        
+        funding_txn = PaymentTxn(
+            sender=sponsor_address,
+            sp=params,
+            receiver=address,
+            amt=10_000_000  # 10 ALGO
+        )
+        
+        signed_funding = funding_txn.sign(sponsor_private_key)
+        txid = algod_client.send_transaction(signed_funding)
+        wait_for_confirmation(algod_client, txid, 4)
+        print(f"  Funded with 10 ALGO from sponsor account")
+    else:
+        # Fallback to admin account
+        funding_txn = PaymentTxn(
+            sender=ADMIN_ADDRESS,
+            sp=params,
+            receiver=address,
+            amt=10_000_000  # 10 ALGO
+        )
+        
+        # Ensure admin has funds to cover this
+        ensure_funded(ADMIN_ADDRESS)
+        signed_funding = funding_txn.sign(ADMIN_PRIVATE_KEY)
+        txid = algod_client.send_transaction(signed_funding)
+        wait_for_confirmation(algod_client, txid, 4)
+        print(f"  Funded with 10 ALGO")
     
     # Create CONFIO token with CORRECT parameters from the spec
     print("\nCreating CONFIO token...")
@@ -61,12 +117,13 @@ def main():
         unit_name="CONFIO",
         asset_name="Confío",
         manager=address,  # Temporarily, should be finalized to ZERO_ADDR
-        reserve=None,  # None becomes ZERO_ADDR on-chain
-        freeze=None,   # None becomes ZERO_ADDR on-chain
-        clawback=None, # None becomes ZERO_ADDR on-chain
+        reserve="",  # Empty string for ZERO_ADDR
+        freeze="",   # Empty string for ZERO_ADDR
+        clawback="", # Empty string for ZERO_ADDR
         decimals=6,
         url="https://confio.lat",
-        metadata_hash=None
+        metadata_hash=None,
+        strict_empty_address_check=False
     )
     
     signed_txn = txn.sign(private_key)
@@ -90,10 +147,11 @@ def main():
         sender=address,
         sp=params,
         index=asset_id,
-        manager=None,    # ZERO_ADDR - immutable forever
-        reserve=None,    # ZERO_ADDR
-        freeze=None,     # ZERO_ADDR
-        clawback=None    # ZERO_ADDR
+        manager="",    # ZERO_ADDR - immutable forever
+        reserve="",    # ZERO_ADDR
+        freeze="",     # ZERO_ADDR
+        clawback="",   # ZERO_ADDR
+        strict_empty_address_check=False
     )
     
     signed_lock = lock_txn.sign(private_key)
