@@ -186,15 +186,50 @@ def deploy_payment_contract():
         print(f"  cUSD Asset ID: {CUSD_ASSET_ID}")
         print(f"  CONFIO Asset ID: {CONFIO_ASSET_ID}")
         
-        # Fund the app for asset opt-ins (0.2 ALGO for 2 assets)
+        # Use funding service to calculate proper MBR needed
+        import sys
+        sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        from blockchain.account_funding_service import AccountFundingService
+        
+        # Create funding service instance
+        funding_service = AccountFundingService(network=NETWORK)
+        
+        # Calculate how much funding is needed for the app
+        # The app needs MBR for: base account + 2 asset opt-ins
+        app_info = algod_client.account_info(app_address)
+        current_balance = app_info.get('amount', 0)
+        min_balance = app_info.get('min-balance', 0)
+        
+        # Check if assets are already opted in
+        assets = app_info.get('assets', [])
+        opted_in_assets = [asset['asset-id'] for asset in assets]
+        
+        # Calculate target balance based on what's needed
+        # Base: 100,000 microAlgos
+        # Per asset opt-in: 100,000 microAlgos each
+        target_balance = 100_000  # Base MBR
+        
+        if CUSD_ASSET_ID not in opted_in_assets:
+            target_balance += 100_000  # Need to opt-in to cUSD
+        
+        if CONFIO_ASSET_ID not in opted_in_assets:
+            target_balance += 100_000  # Need to opt-in to CONFIO
+        
+        funding_needed = max(0, target_balance - current_balance)
+        
+        if funding_needed > 0:
+            print(f"App needs {funding_needed} microAlgos (current: {current_balance}, target: {target_balance})")
+        else:
+            print(f"App already funded (balance: {current_balance} microAlgos)")
+        
         params = algod_client.suggested_params()
         
-        # Payment to fund app
+        # Payment to fund app with calculated amount
         fund_txn = PaymentTxn(
             sender=admin_address,
             sp=params,
             receiver=app_address,
-            amt=200_000  # 0.2 ALGO for 2 asset opt-ins
+            amt=funding_needed if funding_needed > 0 else 100_000  # At least 0.1 ALGO for setup transaction
         )
         
         # Setup assets call
@@ -298,6 +333,36 @@ def deploy_payment_contract():
     print(f"Set fee recipient transaction sent: {tx_id}")
     wait_for_confirmation(algod_client, tx_id, 10)
     print("✅ Fee recipient set")
+    
+    # Final check: Ensure app has sufficient balance for operations
+    print(f"\nFinal balance check...")
+    final_app_info = algod_client.account_info(app_address)
+    final_balance = final_app_info.get('amount', 0)
+    final_min_balance = final_app_info.get('min-balance', 0)
+    
+    print(f"App final balance: {final_balance} microAlgos")
+    print(f"App minimum balance required: {final_min_balance} microAlgos")
+    
+    if final_balance < final_min_balance:
+        # Emergency funding if still insufficient
+        emergency_fund = final_min_balance - final_balance + 100_000  # Add 0.1 ALGO buffer
+        print(f"⚠️ App still needs {emergency_fund} microAlgos, funding...")
+        
+        params = algod_client.suggested_params()
+        emergency_txn = PaymentTxn(
+            sender=admin_address,
+            sp=params,
+            receiver=app_address,
+            amt=emergency_fund
+        )
+        
+        signed_emergency = emergency_txn.sign(admin_private_key)
+        tx_id = algod_client.send_transaction(signed_emergency)
+        print(f"Emergency funding transaction sent: {tx_id}")
+        wait_for_confirmation(algod_client, tx_id, 10)
+        print("✅ Emergency funding complete")
+    else:
+        print(f"✅ App has sufficient balance ({final_balance - final_min_balance} microAlgos above minimum)")
     
     # Write deployment info to file
     deployment_info = {

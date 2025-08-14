@@ -1,6 +1,6 @@
 #pragma version 8
-intcblock 0 1 4 2 2500 10000
-bytecblock 0x 0x637573645f61737365745f6964 0x636f6e66696f5f61737365745f6964 0x69735f706175736564 0x637573645f666565735f62616c616e6365 0x636f6e66696f5f666565735f62616c616e6365 0x61646d696e 0x6665655f726563697069656e74 0x73706f6e736f725f61646472657373 0x726563656970745f636f756e74 0x151f7c75 0x746f74616c5f637573645f766f6c756d65 0x746f74616c5f637573645f666565735f636f6c6c6563746564 0x746f74616c5f636f6e66696f5f766f6c756d65 0x746f74616c5f636f6e66696f5f666565735f636f6c6c6563746564 0x703a 0x3a
+intcblock 0 1 4 2 100000 10000
+bytecblock 0x 0x69735f706175736564 0x637573645f61737365745f6964 0x636f6e66696f5f61737365745f6964 0x637573645f666565735f62616c616e6365 0x636f6e66696f5f666565735f62616c616e6365 0x61646d696e 0x6665655f726563697069656e74 0x73706f6e736f725f61646472657373 0x151f7c75 0x746f74616c5f637573645f766f6c756d65 0x746f74616c5f637573645f666565735f636f6c6c6563746564 0x746f74616c5f636f6e66696f5f766f6c756d65 0x746f74616c5f636f6e66696f5f666565735f636f6c6c6563746564
 txna ApplicationArgs 0
 pushbytes 0x4c5c61ba // "create()void"
 ==
@@ -10,11 +10,11 @@ pushbytes 0x990af164 // "setup_assets(uint64,uint64)void"
 ==
 bnz main_l31
 txna ApplicationArgs 0
-pushbytes 0x92fe5c87 // "pay_with_cusd(axfer,address,string)void"
+pushbytes 0x263c934c // "pay_with_cusd(axfer,axfer,address,string)void"
 ==
 bnz main_l30
 txna ApplicationArgs 0
-pushbytes 0x4c2b9118 // "pay_with_confio(axfer,address,string)void"
+pushbytes 0x31c7afa1 // "pay_with_confio(axfer,axfer,address,string)void"
 ==
 bnz main_l29
 txna ApplicationArgs 0
@@ -75,7 +75,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub deletecaster_32
+callsub deletecaster_31
 intc_1 // 1
 return
 main_l18:
@@ -87,7 +87,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub updatecaster_31
+callsub updatecaster_30
 intc_1 // 1
 return
 main_l19:
@@ -99,7 +99,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub ispausedcaster_30
+callsub ispausedcaster_29
 intc_1 // 1
 return
 main_l20:
@@ -111,7 +111,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub getfeerecipientcaster_29
+callsub getfeerecipientcaster_28
 intc_1 // 1
 return
 main_l21:
@@ -123,7 +123,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub gettotalfeescollectedcaster_28
+callsub gettotalfeescollectedcaster_27
 intc_1 // 1
 return
 main_l22:
@@ -135,7 +135,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub gettotalvolumecaster_27
+callsub gettotalvolumecaster_26
 intc_1 // 1
 return
 main_l23:
@@ -147,7 +147,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub getfeebalancescaster_26
+callsub getfeebalancescaster_25
 intc_1 // 1
 return
 main_l24:
@@ -159,7 +159,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub unpausecaster_25
+callsub unpausecaster_24
 intc_1 // 1
 return
 main_l25:
@@ -171,7 +171,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub pausecaster_24
+callsub pausecaster_23
 intc_1 // 1
 return
 main_l26:
@@ -183,7 +183,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub setsponsorcaster_23
+callsub setsponsorcaster_22
 intc_1 // 1
 return
 main_l27:
@@ -195,7 +195,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub updatefeerecipientcaster_22
+callsub updatefeerecipientcaster_21
 intc_1 // 1
 return
 main_l28:
@@ -207,7 +207,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub withdrawfeescaster_21
+callsub withdrawfeescaster_20
 intc_1 // 1
 return
 main_l29:
@@ -219,7 +219,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub paywithconfiocaster_20
+callsub paywithconfiocaster_19
 intc_1 // 1
 return
 main_l30:
@@ -231,7 +231,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub paywithcusdcaster_19
+callsub paywithcusdcaster_18
 intc_1 // 1
 return
 main_l31:
@@ -243,7 +243,7 @@ intc_0 // 0
 !=
 &&
 assert
-callsub setupassetscaster_18
+callsub setupassetscaster_17
 intc_1 // 1
 return
 main_l32:
@@ -255,24 +255,12 @@ intc_0 // 0
 ==
 &&
 assert
-callsub createcaster_17
+callsub createcaster_16
 intc_1 // 1
 return
 
-// box_mbr_cost
-boxmbrcost_0:
-proto 2 1
-intc 4 // 2500
-pushint 400 // 400
-frame_dig -2
-frame_dig -1
-+
-*
-+
-retsub
-
 // create
-create_1:
+create_0:
 proto 0 0
 bytec 6 // "admin"
 txn Sender
@@ -280,25 +268,37 @@ app_global_put
 bytec 7 // "fee_recipient"
 txn Sender
 app_global_put
-bytec_3 // "is_paused"
+bytec_1 // "is_paused"
+intc_0 // 0
+app_global_put
+bytec_2 // "cusd_asset_id"
+intc_0 // 0
+app_global_put
+bytec_3 // "confio_asset_id"
+intc_0 // 0
+app_global_put
+bytec 4 // "cusd_fees_balance"
+intc_0 // 0
+app_global_put
+bytec 5 // "confio_fees_balance"
 intc_0 // 0
 app_global_put
 intc_1 // 1
 return
 
 // setup_assets
-setupassets_2:
+setupassets_1:
 proto 2 0
 txn Sender
 bytec 6 // "admin"
 app_global_get
 ==
-bytec_1 // "cusd_asset_id"
+bytec_2 // "cusd_asset_id"
 app_global_get
 intc_0 // 0
 ==
 &&
-bytec_2 // "confio_asset_id"
+bytec_3 // "confio_asset_id"
 app_global_get
 intc_0 // 0
 ==
@@ -344,7 +344,7 @@ global CurrentApplicationAddress
 assert
 gtxn 0 Amount
 intc_3 // 2
-pushint 100000 // 100000
+intc 4 // 100000
 *
 ==
 assert
@@ -356,10 +356,10 @@ gtxn 0 RekeyTo
 global ZeroAddress
 ==
 assert
-bytec_1 // "cusd_asset_id"
+bytec_2 // "cusd_asset_id"
 frame_dig -2
 app_global_put
-bytec_2 // "confio_asset_id"
+bytec_3 // "confio_asset_id"
 frame_dig -1
 app_global_put
 itxn_begin
@@ -390,32 +390,31 @@ intc_1 // 1
 return
 
 // pay_with_cusd
-paywithcusd_3:
-proto 3 0
+paywithcusd_2:
+proto 4 0
+txn Sender
 bytec 8 // "sponsor_address"
+app_global_get
+==
+assert
+txn NumAccounts
+intc_3 // 2
+>=
+assert
+txna Accounts 0
+store 4
+bytec_1 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+bytec_2 // "cusd_asset_id"
+app_global_get
+intc_0 // 0
+!=
+&&
+bytec 7 // "fee_recipient"
 app_global_get
 bytec_0 // ""
-!=
-txn Sender
-bytec 8 // "sponsor_address"
-app_global_get
-==
-&&
-txn NumAccounts
-intc_0 // 0
->
-&&
-bnz paywithcusd_3_l13
-txn Sender
-store 9
-paywithcusd_3_l2:
-bytec_3 // "is_paused"
-app_global_get
-intc_0 // 0
-==
-bytec_1 // "cusd_asset_id"
-app_global_get
-intc_0 // 0
 !=
 &&
 assert
@@ -423,131 +422,70 @@ txn RekeyTo
 global ZeroAddress
 ==
 assert
-global CurrentApplicationAddress
-bytec_1 // "cusd_asset_id"
-app_global_get
-asset_holding_get AssetBalance
-store 11
-store 10
-load 11
-assert
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
-==
-global GroupSize
-intc_3 // 2
-==
-&&
-txn GroupIndex
-intc_1 // 1
-==
-&&
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
->
-global GroupSize
-pushint 3 // 3
-==
-&&
-txn GroupIndex
-intc_3 // 2
-==
-&&
-||
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
-==
-global GroupSize
-pushint 3 // 3
-==
-&&
-txn GroupIndex
-intc_3 // 2
-==
-&&
-||
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
->
 global GroupSize
 intc_2 // 4
 ==
-&&
+assert
 txn GroupIndex
 pushint 3 // 3
 ==
-&&
-||
 assert
-txn GroupIndex
-intc_1 // 1
--
-store 3
-load 3
+frame_dig -4
 gtxns TypeEnum
 intc_2 // axfer
 ==
 assert
-load 3
-gtxns AssetReceiver
-global CurrentApplicationAddress
-==
-assert
-load 3
+frame_dig -4
 gtxns XferAsset
-bytec_1 // "cusd_asset_id"
+bytec_2 // "cusd_asset_id"
 app_global_get
 ==
 assert
-load 3
+frame_dig -4
 gtxns Sender
-load 9
+load 4
 ==
 assert
-load 3
+frame_dig -4
+gtxns AssetReceiver
+frame_dig -2
+==
+assert
+frame_dig -4
 gtxns AssetCloseTo
 global ZeroAddress
 ==
 assert
-load 3
+frame_dig -4
 gtxns AssetSender
 global ZeroAddress
 ==
 assert
-load 3
+frame_dig -4
 gtxns RekeyTo
 global ZeroAddress
 ==
 assert
 frame_dig -3
+gtxns TypeEnum
+intc_2 // axfer
+==
+assert
+frame_dig -3
+gtxns XferAsset
+bytec_2 // "cusd_asset_id"
+app_global_get
+==
+assert
+frame_dig -3
 gtxns Sender
-load 9
-==
-assert
-frame_dig -3
-gtxns XferAsset
-load 3
-gtxns XferAsset
+load 4
 ==
 assert
 frame_dig -3
 gtxns AssetReceiver
-load 3
-gtxns AssetReceiver
-==
-assert
-frame_dig -3
-gtxns AssetAmount
-load 3
-gtxns AssetAmount
+bytec 7 // "fee_recipient"
+app_global_get
 ==
 assert
 frame_dig -3
@@ -565,24 +503,42 @@ gtxns RekeyTo
 global ZeroAddress
 ==
 assert
-frame_dig -3
-gtxns XferAsset
-bytec_1 // "cusd_asset_id"
-app_global_get
-==
-assert
-frame_dig -3
-gtxns AssetReceiver
-global CurrentApplicationAddress
-==
-assert
+frame_dig -4
+gtxns AssetAmount
+store 0
 frame_dig -3
 gtxns AssetAmount
+store 1
+load 0
+load 1
++
+store 2
+load 2
+pushint 90 // 90
+mulw
+intc_0 // 0
+intc 5 // 10000
+divmodw
+pop
+pop
+swap
+!
+assert
+store 3
+load 1
+load 3
+==
+assert
+load 0
+intc_0 // 0
+>
+assert
+load 1
 intc_0 // 0
 >
 assert
 txn NumAccounts
-intc_1 // 1
+intc_3 // 2
 >=
 assert
 txna Accounts 1
@@ -590,7 +546,233 @@ frame_dig -2
 ==
 assert
 txna Accounts 1
-bytec_1 // "cusd_asset_id"
+bytec_2 // "cusd_asset_id"
+app_global_get
+asset_holding_get AssetBalance
+store 6
+store 5
+load 6
+assert
+frame_dig -2
+global ZeroAddress
+!=
+assert
+frame_dig -2
+global CurrentApplicationAddress
+!=
+assert
+load 4
+frame_dig -2
+!=
+assert
+txn Fee
+global MinTxnFee
+>=
+assert
+gtxn 0 TypeEnum
+intc_1 // pay
+==
+assert
+gtxn 0 Sender
+bytec 8 // "sponsor_address"
+app_global_get
+==
+assert
+gtxn 0 Receiver
+load 4
+==
+assert
+gtxn 0 Amount
+intc 4 // 100000
+<=
+assert
+gtxn 0 RekeyTo
+global ZeroAddress
+==
+assert
+gtxn 0 CloseRemainderTo
+global ZeroAddress
+==
+assert
+bytec 4 // "cusd_fees_balance"
+bytec 4 // "cusd_fees_balance"
+app_global_get
+load 1
++
+app_global_put
+bytec 10 // "total_cusd_volume"
+bytec 10 // "total_cusd_volume"
+app_global_get
+load 2
++
+app_global_put
+bytec 11 // "total_cusd_fees_collected"
+bytec 11 // "total_cusd_fees_collected"
+app_global_get
+load 1
++
+app_global_put
+intc_1 // 1
+return
+
+// pay_with_confio
+paywithconfio_3:
+proto 4 0
+txn Sender
+bytec 8 // "sponsor_address"
+app_global_get
+==
+assert
+txn NumAccounts
+intc_3 // 2
+>=
+assert
+txna Accounts 0
+store 11
+bytec_1 // "is_paused"
+app_global_get
+intc_0 // 0
+==
+bytec_3 // "confio_asset_id"
+app_global_get
+intc_0 // 0
+!=
+&&
+bytec 7 // "fee_recipient"
+app_global_get
+bytec_0 // ""
+!=
+&&
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+global GroupSize
+intc_2 // 4
+==
+assert
+txn GroupIndex
+pushint 3 // 3
+==
+assert
+frame_dig -4
+gtxns TypeEnum
+intc_2 // axfer
+==
+assert
+frame_dig -4
+gtxns XferAsset
+bytec_3 // "confio_asset_id"
+app_global_get
+==
+assert
+frame_dig -4
+gtxns Sender
+load 11
+==
+assert
+frame_dig -4
+gtxns AssetReceiver
+frame_dig -2
+==
+assert
+frame_dig -4
+gtxns AssetCloseTo
+global ZeroAddress
+==
+assert
+frame_dig -4
+gtxns AssetSender
+global ZeroAddress
+==
+assert
+frame_dig -4
+gtxns RekeyTo
+global ZeroAddress
+==
+assert
+frame_dig -3
+gtxns TypeEnum
+intc_2 // axfer
+==
+assert
+frame_dig -3
+gtxns XferAsset
+bytec_3 // "confio_asset_id"
+app_global_get
+==
+assert
+frame_dig -3
+gtxns Sender
+load 11
+==
+assert
+frame_dig -3
+gtxns AssetReceiver
+bytec 7 // "fee_recipient"
+app_global_get
+==
+assert
+frame_dig -3
+gtxns AssetCloseTo
+global ZeroAddress
+==
+assert
+frame_dig -3
+gtxns AssetSender
+global ZeroAddress
+==
+assert
+frame_dig -3
+gtxns RekeyTo
+global ZeroAddress
+==
+assert
+frame_dig -4
+gtxns AssetAmount
+store 7
+frame_dig -3
+gtxns AssetAmount
+store 8
+load 7
+load 8
++
+store 9
+load 9
+pushint 90 // 90
+mulw
+intc_0 // 0
+intc 5 // 10000
+divmodw
+pop
+pop
+swap
+!
+assert
+store 10
+load 8
+load 10
+==
+assert
+load 7
+intc_0 // 0
+>
+assert
+load 8
+intc_0 // 0
+>
+assert
+txn NumAccounts
+intc_3 // 2
+>=
+assert
+txna Accounts 1
+frame_dig -2
+==
+assert
+txna Accounts 1
+bytec_3 // "confio_asset_id"
 app_global_get
 asset_holding_get AssetBalance
 store 13
@@ -605,750 +787,30 @@ frame_dig -2
 global CurrentApplicationAddress
 !=
 assert
-load 9
+load 11
 frame_dig -2
 !=
 assert
-frame_dig -3
-gtxns AssetAmount
-store 0
-load 0
-pushint 90 // 90
-mulw
-intc_0 // 0
-intc 5 // 10000
-divmodw
-pop
-pop
-swap
-!
-assert
-store 1
-load 0
-load 1
--
-store 2
-load 2
-intc_0 // 0
->
-assert
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
->
-bnz paywithcusd_3_l12
 txn Fee
 global MinTxnFee
-intc_3 // 2
-*
 >=
 assert
-paywithcusd_3_l4:
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
-==
-global GroupSize
-pushint 3 // 3
-==
-&&
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
->
-global GroupSize
-intc_2 // 4
-==
-&&
-||
-bnz paywithcusd_3_l11
-paywithcusd_3_l5:
-itxn_begin
-intc_2 // axfer
-itxn_field TypeEnum
-bytec_1 // "cusd_asset_id"
-app_global_get
-itxn_field XferAsset
-frame_dig -2
-itxn_field AssetReceiver
-load 2
-itxn_field AssetAmount
-intc_0 // 0
-itxn_field Fee
-itxn_submit
-bytec 4 // "cusd_fees_balance"
-bytec 4 // "cusd_fees_balance"
-app_global_get
-load 1
-+
-app_global_put
-bytec 11 // "total_cusd_volume"
-bytec 11 // "total_cusd_volume"
-app_global_get
-load 0
-+
-app_global_put
-bytec 12 // "total_cusd_fees_collected"
-bytec 12 // "total_cusd_fees_collected"
-app_global_get
-load 1
-+
-app_global_put
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
->
-bnz paywithcusd_3_l7
-global GroupSize
-intc_3 // 2
-==
-assert
-b paywithcusd_3_l14
-paywithcusd_3_l7:
-bytec 15 // "p:"
-bytec_1 // "cusd_asset_id"
-app_global_get
-itob
-concat
-bytec 16 // ":"
-concat
-frame_dig -1
-extract 2 0
-sha256
-concat
-store 4
-load 4
-len
-store 5
-pushint 96 // 96
-store 6
-load 5
-load 6
-callsub boxmbrcost_0
-store 7
-global GroupSize
-pushint 3 // 3
-==
-bnz paywithcusd_3_l10
-global GroupSize
-intc_2 // 4
-==
-assert
-gtxn 1 TypeEnum
-intc_1 // pay
-==
-assert
-gtxn 1 Sender
-load 9
-==
-assert
-gtxn 1 Receiver
-global CurrentApplicationAddress
-==
-assert
-gtxn 1 Amount
-load 7
-==
-assert
-gtxn 1 CloseRemainderTo
-global ZeroAddress
-==
-assert
-gtxn 1 RekeyTo
-global ZeroAddress
-==
-assert
-paywithcusd_3_l9:
-load 4
-box_get
-store 15
-store 14
-load 15
-!
-assert
-load 4
-load 6
-box_create
-assert
-load 9
-frame_dig -2
-concat
-load 0
-itob
-concat
-load 1
-itob
-concat
-global LatestTimestamp
-itob
-concat
-bytec_1 // "cusd_asset_id"
-app_global_get
-itob
-concat
-store 8
-load 8
-len
-pushint 96 // 96
-==
-assert
-load 4
-intc_0 // 0
-load 8
-box_replace
-bytec 9 // "receipt_count"
-bytec 9 // "receipt_count"
-app_global_get
-intc_1 // 1
-+
-app_global_put
-pushbytes 0x706169643a637573643a // "paid:cusd:"
-frame_dig -1
-extract 2 0
-sha256
-concat
-log
-b paywithcusd_3_l14
-paywithcusd_3_l10:
 gtxn 0 TypeEnum
 intc_1 // pay
 ==
 assert
 gtxn 0 Sender
-load 9
-==
-assert
-gtxn 0 Receiver
-global CurrentApplicationAddress
-==
-assert
-gtxn 0 Amount
-load 7
-==
-assert
-gtxn 0 CloseRemainderTo
-global ZeroAddress
-==
-assert
-gtxn 0 RekeyTo
-global ZeroAddress
-==
-assert
-b paywithcusd_3_l9
-paywithcusd_3_l11:
-gtxn 0 TypeEnum
-intc_1 // pay
-==
-assert
-gtxn 0 Amount
-intc_0 // 0
->=
-assert
-gtxn 0 Receiver
-load 9
-==
-gtxn 0 Receiver
-global CurrentApplicationAddress
-==
-||
-assert
-gtxn 0 RekeyTo
-global ZeroAddress
-==
-assert
-gtxn 0 CloseRemainderTo
-global ZeroAddress
-==
-assert
-b paywithcusd_3_l5
-paywithcusd_3_l12:
-txn Fee
-global MinTxnFee
-intc_3 // 2
-*
-intc 4 // 2500
-+
->=
-assert
-b paywithcusd_3_l4
-paywithcusd_3_l13:
-txna Accounts 0
-store 9
-b paywithcusd_3_l2
-paywithcusd_3_l14:
-intc_1 // 1
-return
-
-// pay_with_confio
-paywithconfio_4:
-proto 3 0
-bytec 8 // "sponsor_address"
-app_global_get
-bytec_0 // ""
-!=
-txn Sender
 bytec 8 // "sponsor_address"
 app_global_get
 ==
-&&
-txn NumAccounts
-intc_0 // 0
->
-&&
-bnz paywithconfio_4_l13
-txn Sender
-store 25
-paywithconfio_4_l2:
-bytec_3 // "is_paused"
-app_global_get
-intc_0 // 0
-==
-bytec_2 // "confio_asset_id"
-app_global_get
-intc_0 // 0
-!=
-&&
-assert
-txn RekeyTo
-global ZeroAddress
-==
-assert
-global CurrentApplicationAddress
-bytec_2 // "confio_asset_id"
-app_global_get
-asset_holding_get AssetBalance
-store 27
-store 26
-load 27
-assert
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
-==
-global GroupSize
-intc_3 // 2
-==
-&&
-txn GroupIndex
-intc_1 // 1
-==
-&&
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
->
-global GroupSize
-pushint 3 // 3
-==
-&&
-txn GroupIndex
-intc_3 // 2
-==
-&&
-||
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
-==
-global GroupSize
-pushint 3 // 3
-==
-&&
-txn GroupIndex
-intc_3 // 2
-==
-&&
-||
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
->
-global GroupSize
-intc_2 // 4
-==
-&&
-txn GroupIndex
-pushint 3 // 3
-==
-&&
-||
-assert
-txn GroupIndex
-intc_1 // 1
--
-store 19
-load 19
-gtxns TypeEnum
-intc_2 // axfer
-==
-assert
-load 19
-gtxns AssetReceiver
-global CurrentApplicationAddress
-==
-assert
-load 19
-gtxns XferAsset
-bytec_2 // "confio_asset_id"
-app_global_get
-==
-assert
-load 19
-gtxns Sender
-load 25
-==
-assert
-load 19
-gtxns AssetCloseTo
-global ZeroAddress
-==
-assert
-load 19
-gtxns AssetSender
-global ZeroAddress
-==
-assert
-load 19
-gtxns RekeyTo
-global ZeroAddress
-==
-assert
-frame_dig -3
-gtxns Sender
-load 25
-==
-assert
-frame_dig -3
-gtxns XferAsset
-load 19
-gtxns XferAsset
-==
-assert
-frame_dig -3
-gtxns AssetReceiver
-load 19
-gtxns AssetReceiver
-==
-assert
-frame_dig -3
-gtxns AssetAmount
-load 19
-gtxns AssetAmount
-==
-assert
-frame_dig -3
-gtxns AssetCloseTo
-global ZeroAddress
-==
-assert
-frame_dig -3
-gtxns AssetSender
-global ZeroAddress
-==
-assert
-frame_dig -3
-gtxns RekeyTo
-global ZeroAddress
-==
-assert
-frame_dig -3
-gtxns XferAsset
-bytec_2 // "confio_asset_id"
-app_global_get
-==
-assert
-frame_dig -3
-gtxns AssetReceiver
-global CurrentApplicationAddress
-==
-assert
-frame_dig -3
-gtxns AssetAmount
-intc_0 // 0
->
-assert
-txn NumAccounts
-intc_1 // 1
->=
-assert
-txna Accounts 1
-frame_dig -2
-==
-assert
-txna Accounts 1
-bytec_2 // "confio_asset_id"
-app_global_get
-asset_holding_get AssetBalance
-store 29
-store 28
-load 29
-assert
-frame_dig -2
-global ZeroAddress
-!=
-assert
-frame_dig -2
-global CurrentApplicationAddress
-!=
-assert
-load 25
-frame_dig -2
-!=
-assert
-frame_dig -3
-gtxns AssetAmount
-store 16
-load 16
-pushint 90 // 90
-mulw
-intc_0 // 0
-intc 5 // 10000
-divmodw
-pop
-pop
-swap
-!
-assert
-store 17
-load 16
-load 17
--
-store 18
-load 18
-intc_0 // 0
->
-assert
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
->
-bnz paywithconfio_4_l12
-txn Fee
-global MinTxnFee
-intc_3 // 2
-*
->=
-assert
-paywithconfio_4_l4:
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
-==
-global GroupSize
-pushint 3 // 3
-==
-&&
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
->
-global GroupSize
-intc_2 // 4
-==
-&&
-||
-bnz paywithconfio_4_l11
-paywithconfio_4_l5:
-itxn_begin
-intc_2 // axfer
-itxn_field TypeEnum
-bytec_2 // "confio_asset_id"
-app_global_get
-itxn_field XferAsset
-frame_dig -2
-itxn_field AssetReceiver
-load 18
-itxn_field AssetAmount
-intc_0 // 0
-itxn_field Fee
-itxn_submit
-bytec 5 // "confio_fees_balance"
-bytec 5 // "confio_fees_balance"
-app_global_get
-load 17
-+
-app_global_put
-bytec 13 // "total_confio_volume"
-bytec 13 // "total_confio_volume"
-app_global_get
-load 16
-+
-app_global_put
-bytec 14 // "total_confio_fees_collected"
-bytec 14 // "total_confio_fees_collected"
-app_global_get
-load 17
-+
-app_global_put
-frame_dig -1
-extract 2 0
-len
-intc_0 // 0
->
-bnz paywithconfio_4_l7
-global GroupSize
-intc_3 // 2
-==
-assert
-b paywithconfio_4_l14
-paywithconfio_4_l7:
-bytec 15 // "p:"
-bytec_2 // "confio_asset_id"
-app_global_get
-itob
-concat
-bytec 16 // ":"
-concat
-frame_dig -1
-extract 2 0
-sha256
-concat
-store 20
-load 20
-len
-store 21
-pushint 96 // 96
-store 22
-load 21
-load 22
-callsub boxmbrcost_0
-store 23
-global GroupSize
-pushint 3 // 3
-==
-bnz paywithconfio_4_l10
-global GroupSize
-intc_2 // 4
-==
-assert
-gtxn 1 TypeEnum
-intc_1 // pay
-==
-assert
-gtxn 1 Sender
-load 25
-==
-assert
-gtxn 1 Receiver
-global CurrentApplicationAddress
-==
-assert
-gtxn 1 Amount
-load 23
-==
-assert
-gtxn 1 CloseRemainderTo
-global ZeroAddress
-==
-assert
-gtxn 1 RekeyTo
-global ZeroAddress
-==
-assert
-paywithconfio_4_l9:
-load 20
-box_get
-store 31
-store 30
-load 31
-!
-assert
-load 20
-load 22
-box_create
-assert
-load 25
-frame_dig -2
-concat
-load 16
-itob
-concat
-load 17
-itob
-concat
-global LatestTimestamp
-itob
-concat
-bytec_2 // "confio_asset_id"
-app_global_get
-itob
-concat
-store 24
-load 24
-len
-pushint 96 // 96
-==
-assert
-load 20
-intc_0 // 0
-load 24
-box_replace
-bytec 9 // "receipt_count"
-bytec 9 // "receipt_count"
-app_global_get
-intc_1 // 1
-+
-app_global_put
-pushbytes 0x706169643a636f6e66696f3a // "paid:confio:"
-frame_dig -1
-extract 2 0
-sha256
-concat
-log
-b paywithconfio_4_l14
-paywithconfio_4_l10:
-gtxn 0 TypeEnum
-intc_1 // pay
-==
-assert
-gtxn 0 Sender
-load 25
-==
 assert
 gtxn 0 Receiver
-global CurrentApplicationAddress
+load 11
 ==
 assert
 gtxn 0 Amount
-load 23
-==
-assert
-gtxn 0 CloseRemainderTo
-global ZeroAddress
-==
-assert
-gtxn 0 RekeyTo
-global ZeroAddress
-==
-assert
-b paywithconfio_4_l9
-paywithconfio_4_l11:
-gtxn 0 TypeEnum
-intc_1 // pay
-==
-assert
-gtxn 0 Amount
-intc_0 // 0
->=
-assert
-gtxn 0 Receiver
-load 25
-==
-gtxn 0 Receiver
-global CurrentApplicationAddress
-==
-||
+intc 4 // 100000
+<=
 assert
 gtxn 0 RekeyTo
 global ZeroAddress
@@ -1358,33 +820,35 @@ gtxn 0 CloseRemainderTo
 global ZeroAddress
 ==
 assert
-b paywithconfio_4_l5
-paywithconfio_4_l12:
-txn Fee
-global MinTxnFee
-intc_3 // 2
-*
-intc 4 // 2500
+bytec 5 // "confio_fees_balance"
+bytec 5 // "confio_fees_balance"
+app_global_get
+load 8
 +
->=
-assert
-b paywithconfio_4_l4
-paywithconfio_4_l13:
-txna Accounts 0
-store 25
-b paywithconfio_4_l2
-paywithconfio_4_l14:
+app_global_put
+bytec 12 // "total_confio_volume"
+bytec 12 // "total_confio_volume"
+app_global_get
+load 9
++
+app_global_put
+bytec 13 // "total_confio_fees_collected"
+bytec 13 // "total_confio_fees_collected"
+app_global_get
+load 8
++
+app_global_put
 intc_1 // 1
 return
 
 // withdraw_fees
-withdrawfees_5:
+withdrawfees_4:
 proto 0 0
 txn Sender
 bytec 6 // "admin"
 app_global_get
 ==
-bytec_3 // "is_paused"
+bytec_1 // "is_paused"
 app_global_get
 intc_0 // 0
 ==
@@ -1398,65 +862,65 @@ bytec 4 // "cusd_fees_balance"
 app_global_get
 intc_0 // 0
 >
-bnz withdrawfees_5_l13
+bnz withdrawfees_4_l13
 intc_0 // 0
-withdrawfees_5_l2:
+withdrawfees_4_l2:
 bytec 5 // "confio_fees_balance"
 app_global_get
 intc_0 // 0
 >
-bnz withdrawfees_5_l12
+bnz withdrawfees_4_l12
 intc_0 // 0
-withdrawfees_5_l4:
+withdrawfees_4_l4:
 +
-store 32
+store 14
 txn Fee
 global MinTxnFee
 intc_1 // 1
-load 32
+load 14
 +
 *
 >=
 assert
 global CurrentApplicationAddress
-bytec_1 // "cusd_asset_id"
+bytec_2 // "cusd_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 34
-store 33
+store 16
+store 15
 global CurrentApplicationAddress
-bytec_2 // "confio_asset_id"
+bytec_3 // "confio_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 36
-store 35
+store 18
+store 17
 bytec 4 // "cusd_fees_balance"
 app_global_get
 intc_0 // 0
 >
-bnz withdrawfees_5_l11
-withdrawfees_5_l5:
+bnz withdrawfees_4_l11
+withdrawfees_4_l5:
 bytec 5 // "confio_fees_balance"
 app_global_get
 intc_0 // 0
 >
-bnz withdrawfees_5_l10
-withdrawfees_5_l6:
+bnz withdrawfees_4_l10
+withdrawfees_4_l6:
 bytec 4 // "cusd_fees_balance"
 app_global_get
 intc_0 // 0
 >
-bnz withdrawfees_5_l9
-withdrawfees_5_l7:
+bnz withdrawfees_4_l9
+withdrawfees_4_l7:
 bytec 5 // "confio_fees_balance"
 app_global_get
 intc_0 // 0
 >
-bz withdrawfees_5_l14
+bz withdrawfees_4_l14
 itxn_begin
 intc_2 // axfer
 itxn_field TypeEnum
-bytec_2 // "confio_asset_id"
+bytec_3 // "confio_asset_id"
 app_global_get
 itxn_field XferAsset
 bytec 7 // "fee_recipient"
@@ -1471,12 +935,12 @@ itxn_submit
 bytec 5 // "confio_fees_balance"
 intc_0 // 0
 app_global_put
-b withdrawfees_5_l14
-withdrawfees_5_l9:
+b withdrawfees_4_l14
+withdrawfees_4_l9:
 itxn_begin
 intc_2 // axfer
 itxn_field TypeEnum
-bytec_1 // "cusd_asset_id"
+bytec_2 // "cusd_asset_id"
 app_global_get
 itxn_field XferAsset
 bytec 7 // "fee_recipient"
@@ -1491,43 +955,43 @@ itxn_submit
 bytec 4 // "cusd_fees_balance"
 intc_0 // 0
 app_global_put
-b withdrawfees_5_l7
-withdrawfees_5_l10:
-load 36
-load 35
+b withdrawfees_4_l7
+withdrawfees_4_l10:
+load 18
+load 17
 bytec 5 // "confio_fees_balance"
 app_global_get
 >=
 &&
 assert
-b withdrawfees_5_l6
-withdrawfees_5_l11:
-load 34
-load 33
+b withdrawfees_4_l6
+withdrawfees_4_l11:
+load 16
+load 15
 bytec 4 // "cusd_fees_balance"
 app_global_get
 >=
 &&
 assert
-b withdrawfees_5_l5
-withdrawfees_5_l12:
+b withdrawfees_4_l5
+withdrawfees_4_l12:
 intc_1 // 1
-b withdrawfees_5_l4
-withdrawfees_5_l13:
+b withdrawfees_4_l4
+withdrawfees_4_l13:
 intc_1 // 1
-b withdrawfees_5_l2
-withdrawfees_5_l14:
+b withdrawfees_4_l2
+withdrawfees_4_l14:
 intc_1 // 1
 return
 
 // update_fee_recipient
-updatefeerecipient_6:
+updatefeerecipient_5:
 proto 1 0
 txn Sender
 bytec 6 // "admin"
 app_global_get
 ==
-bytec_3 // "is_paused"
+bytec_1 // "is_paused"
 app_global_get
 intc_0 // 0
 ==
@@ -1552,7 +1016,7 @@ intc_1 // 1
 return
 
 // set_sponsor
-setsponsor_7:
+setsponsor_6:
 proto 1 0
 txn Sender
 bytec 6 // "admin"
@@ -1570,13 +1034,13 @@ intc_1 // 1
 return
 
 // pause
-pause_8:
+pause_7:
 proto 0 0
 txn Sender
 bytec 6 // "admin"
 app_global_get
 ==
-bytec_3 // "is_paused"
+bytec_1 // "is_paused"
 app_global_get
 intc_0 // 0
 ==
@@ -1586,20 +1050,20 @@ txn RekeyTo
 global ZeroAddress
 ==
 assert
-bytec_3 // "is_paused"
+bytec_1 // "is_paused"
 intc_1 // 1
 app_global_put
 intc_1 // 1
 return
 
 // unpause
-unpause_9:
+unpause_8:
 proto 0 0
 txn Sender
 bytec 6 // "admin"
 app_global_get
 ==
-bytec_3 // "is_paused"
+bytec_1 // "is_paused"
 app_global_get
 intc_1 // 1
 ==
@@ -1609,14 +1073,14 @@ txn RekeyTo
 global ZeroAddress
 ==
 assert
-bytec_3 // "is_paused"
+bytec_1 // "is_paused"
 intc_0 // 0
 app_global_put
 intc_1 // 1
 return
 
 // get_fee_balances
-getfeebalances_10:
+getfeebalances_9:
 proto 0 1
 bytec_0 // ""
 intc_0 // 0
@@ -1638,17 +1102,17 @@ frame_bury 0
 retsub
 
 // get_total_volume
-gettotalvolume_11:
+gettotalvolume_10:
 proto 0 1
 bytec_0 // ""
 intc_0 // 0
 dupn 3
 bytec_0 // ""
 dup
-bytec 11 // "total_cusd_volume"
+bytec 10 // "total_cusd_volume"
 app_global_get
 frame_bury 1
-bytec 13 // "total_confio_volume"
+bytec 12 // "total_confio_volume"
 app_global_get
 frame_bury 2
 frame_dig 1
@@ -1660,17 +1124,17 @@ frame_bury 0
 retsub
 
 // get_total_fees_collected
-gettotalfeescollected_12:
+gettotalfeescollected_11:
 proto 0 1
 bytec_0 // ""
 intc_0 // 0
 dupn 3
 bytec_0 // ""
 dup
-bytec 12 // "total_cusd_fees_collected"
+bytec 11 // "total_cusd_fees_collected"
 app_global_get
 frame_bury 1
-bytec 14 // "total_confio_fees_collected"
+bytec 13 // "total_confio_fees_collected"
 app_global_get
 frame_bury 2
 frame_dig 1
@@ -1682,7 +1146,7 @@ frame_bury 0
 retsub
 
 // get_fee_recipient
-getfeerecipient_13:
+getfeerecipient_12:
 proto 0 1
 bytec_0 // ""
 bytec 7 // "fee_recipient"
@@ -1696,10 +1160,10 @@ assert
 retsub
 
 // is_paused
-ispaused_14:
+ispaused_13:
 proto 0 1
 intc_0 // 0
-bytec_3 // "is_paused"
+bytec_1 // "is_paused"
 app_global_get
 intc_1 // 1
 ==
@@ -1709,13 +1173,18 @@ frame_bury 0
 retsub
 
 // update
-update_15:
+update_14:
 proto 0 0
-intc_0 // 0
+txn Sender
+bytec 6 // "admin"
+app_global_get
+==
+assert
+intc_1 // 1
 return
 
 // delete
-delete_16:
+delete_15:
 proto 0 0
 txn Sender
 bytec 6 // "admin"
@@ -1727,47 +1196,42 @@ global ZeroAddress
 ==
 assert
 global CurrentApplicationAddress
-bytec_1 // "cusd_asset_id"
+bytec_2 // "cusd_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 38
-store 37
+store 20
+store 19
 global CurrentApplicationAddress
-bytec_2 // "confio_asset_id"
+bytec_3 // "confio_asset_id"
 app_global_get
 asset_holding_get AssetBalance
-store 40
-store 39
-load 38
+store 22
+store 21
+load 20
 !
-load 37
+load 19
 intc_0 // 0
 ==
 ||
 assert
-load 40
+load 22
 !
-load 39
+load 21
 intc_0 // 0
 ==
 ||
-assert
-bytec 9 // "receipt_count"
-app_global_get
-intc_0 // 0
-==
 assert
 intc_1 // 1
 return
 
 // create_caster
-createcaster_17:
+createcaster_16:
 proto 0 0
-callsub create_1
+callsub create_0
 retsub
 
 // setup_assets_caster
-setupassetscaster_18:
+setupassetscaster_17:
 proto 0 0
 intc_0 // 0
 dup
@@ -1779,21 +1243,22 @@ btoi
 frame_bury 1
 frame_dig 0
 frame_dig 1
-callsub setupassets_2
+callsub setupassets_1
 retsub
 
 // pay_with_cusd_caster
-paywithcusdcaster_19:
+paywithcusdcaster_18:
 proto 0 0
 intc_0 // 0
+dup
 bytec_0 // ""
 dup
 txna ApplicationArgs 1
-frame_bury 1
-txna ApplicationArgs 2
 frame_bury 2
+txna ApplicationArgs 2
+frame_bury 3
 txn GroupIndex
-intc_1 // 1
+intc_3 // 2
 -
 frame_bury 0
 frame_dig 0
@@ -1801,24 +1266,35 @@ gtxns TypeEnum
 intc_2 // axfer
 ==
 assert
+txn GroupIndex
+intc_1 // 1
+-
+frame_bury 1
+frame_dig 1
+gtxns TypeEnum
+intc_2 // axfer
+==
+assert
 frame_dig 0
 frame_dig 1
 frame_dig 2
-callsub paywithcusd_3
+frame_dig 3
+callsub paywithcusd_2
 retsub
 
 // pay_with_confio_caster
-paywithconfiocaster_20:
+paywithconfiocaster_19:
 proto 0 0
 intc_0 // 0
+dup
 bytec_0 // ""
 dup
 txna ApplicationArgs 1
-frame_bury 1
-txna ApplicationArgs 2
 frame_bury 2
+txna ApplicationArgs 2
+frame_bury 3
 txn GroupIndex
-intc_1 // 1
+intc_3 // 2
 -
 frame_bury 0
 frame_dig 0
@@ -1826,105 +1302,115 @@ gtxns TypeEnum
 intc_2 // axfer
 ==
 assert
+txn GroupIndex
+intc_1 // 1
+-
+frame_bury 1
+frame_dig 1
+gtxns TypeEnum
+intc_2 // axfer
+==
+assert
 frame_dig 0
 frame_dig 1
 frame_dig 2
-callsub paywithconfio_4
+frame_dig 3
+callsub paywithconfio_3
 retsub
 
 // withdraw_fees_caster
-withdrawfeescaster_21:
+withdrawfeescaster_20:
 proto 0 0
-callsub withdrawfees_5
+callsub withdrawfees_4
 retsub
 
 // update_fee_recipient_caster
-updatefeerecipientcaster_22:
+updatefeerecipientcaster_21:
 proto 0 0
 bytec_0 // ""
 txna ApplicationArgs 1
 frame_bury 0
 frame_dig 0
-callsub updatefeerecipient_6
+callsub updatefeerecipient_5
 retsub
 
 // set_sponsor_caster
-setsponsorcaster_23:
+setsponsorcaster_22:
 proto 0 0
 bytec_0 // ""
 txna ApplicationArgs 1
 frame_bury 0
 frame_dig 0
-callsub setsponsor_7
+callsub setsponsor_6
 retsub
 
 // pause_caster
-pausecaster_24:
+pausecaster_23:
 proto 0 0
-callsub pause_8
+callsub pause_7
 retsub
 
 // unpause_caster
-unpausecaster_25:
+unpausecaster_24:
 proto 0 0
-callsub unpause_9
+callsub unpause_8
 retsub
 
 // get_fee_balances_caster
-getfeebalancescaster_26:
+getfeebalancescaster_25:
 proto 0 0
 bytec_0 // ""
-callsub getfeebalances_10
+callsub getfeebalances_9
 frame_bury 0
-bytec 10 // 0x151f7c75
+bytec 9 // 0x151f7c75
 frame_dig 0
 concat
 log
 retsub
 
 // get_total_volume_caster
-gettotalvolumecaster_27:
+gettotalvolumecaster_26:
 proto 0 0
 bytec_0 // ""
-callsub gettotalvolume_11
+callsub gettotalvolume_10
 frame_bury 0
-bytec 10 // 0x151f7c75
+bytec 9 // 0x151f7c75
 frame_dig 0
 concat
 log
 retsub
 
 // get_total_fees_collected_caster
-gettotalfeescollectedcaster_28:
+gettotalfeescollectedcaster_27:
 proto 0 0
 bytec_0 // ""
-callsub gettotalfeescollected_12
+callsub gettotalfeescollected_11
 frame_bury 0
-bytec 10 // 0x151f7c75
+bytec 9 // 0x151f7c75
 frame_dig 0
 concat
 log
 retsub
 
 // get_fee_recipient_caster
-getfeerecipientcaster_29:
+getfeerecipientcaster_28:
 proto 0 0
 bytec_0 // ""
-callsub getfeerecipient_13
+callsub getfeerecipient_12
 frame_bury 0
-bytec 10 // 0x151f7c75
+bytec 9 // 0x151f7c75
 frame_dig 0
 concat
 log
 retsub
 
 // is_paused_caster
-ispausedcaster_30:
+ispausedcaster_29:
 proto 0 0
 intc_0 // 0
-callsub ispaused_14
+callsub ispaused_13
 frame_bury 0
-bytec 10 // 0x151f7c75
+bytec 9 // 0x151f7c75
 pushbytes 0x00 // 0x00
 intc_0 // 0
 frame_dig 0
@@ -1934,13 +1420,13 @@ log
 retsub
 
 // update_caster
-updatecaster_31:
+updatecaster_30:
 proto 0 0
-callsub update_15
+callsub update_14
 retsub
 
 // delete_caster
-deletecaster_32:
+deletecaster_31:
 proto 0 0
-callsub delete_16
+callsub delete_15
 retsub

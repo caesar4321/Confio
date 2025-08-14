@@ -1725,6 +1725,9 @@ class SwitchAccountToken(graphene.Mutation):
 	
 	token = graphene.String()
 	payload = graphene.JSONString()
+	# Opt-in transactions if needed (for automatic background signing)
+	opt_in_required = graphene.Boolean()
+	opt_in_transactions = graphene.JSONString()  # Array of opt-in transaction groups to sign
 	
 	@classmethod
 	def mutate(cls, root, info, account_type, account_index, business_id=None):
@@ -1773,6 +1776,81 @@ class SwitchAccountToken(graphene.Mutation):
 				if account_type == 'business' and not business_id and hasattr(account, 'business') and account.business:
 					business_id = str(account.business.id)
 					logger.info(f"SwitchAccountToken - Retrieved business_id from owned account: {business_id}")
+			
+			# Initialize opt-in transaction list
+			opt_in_transactions = []
+			opt_in_required = False
+			
+			# If switching to a business account, check if it needs opt-ins
+			if account_type == 'business' and business_id:
+				from blockchain.algorand_account_manager import AlgorandAccountManager
+				from blockchain.algorand_sponsor_service import algorand_sponsor_service
+				import asyncio
+				
+				# Get the business's Algorand address
+				business_algorand_address = Account.objects.filter(
+					business_id=business_id,
+					account_type='business',
+					deleted_at__isnull=True
+				).values_list('algorand_address', flat=True).first()
+				
+				if business_algorand_address:
+					logger.info(f"SwitchAccountToken - Checking opt-ins for business account: {business_algorand_address}")
+					
+					try:
+						# Check current opt-ins
+						opted_in_assets = AlgorandAccountManager._check_opt_ins(business_algorand_address)
+						
+						# List of required assets
+						required_assets = []
+						asset_names = {}
+						if AlgorandAccountManager.CONFIO_ASSET_ID:
+							required_assets.append(AlgorandAccountManager.CONFIO_ASSET_ID)
+							asset_names[AlgorandAccountManager.CONFIO_ASSET_ID] = "CONFIO"
+						if AlgorandAccountManager.CUSD_ASSET_ID:
+							required_assets.append(AlgorandAccountManager.CUSD_ASSET_ID)
+							asset_names[AlgorandAccountManager.CUSD_ASSET_ID] = "cUSD"
+						
+						# Create sponsored opt-in transactions for missing assets
+						for asset_id in required_assets:
+							if asset_id not in opted_in_assets:
+								logger.info(f"SwitchAccountToken - Business account needs opt-in to asset {asset_id}")
+								
+								# Create sponsored opt-in transaction
+								loop = asyncio.new_event_loop()
+								asyncio.set_event_loop(loop)
+								
+								try:
+									result = loop.run_until_complete(
+										algorand_sponsor_service.create_sponsored_opt_in(
+											user_address=business_algorand_address,
+											asset_id=asset_id
+										)
+									)
+								finally:
+									loop.close()
+								
+								if result.get('success'):
+									# Add to opt-in transactions list
+									opt_in_transactions.append({
+										'asset_id': asset_id,
+										'asset_name': asset_names.get(asset_id, 'Unknown'),
+										'user_transaction': result.get('user_transaction'),
+										'sponsor_transaction': result.get('sponsor_transaction'),
+										'group_id': result.get('group_id')
+									})
+									opt_in_required = True
+									logger.info(f"SwitchAccountToken - Created sponsored opt-in for asset {asset_id}")
+								else:
+									logger.warning(f"SwitchAccountToken - Failed to create opt-in for asset {asset_id}: {result.get('error')}")
+							else:
+								logger.info(f"SwitchAccountToken - Business account already opted into asset {asset_id}")
+					
+					except Exception as e:
+						# Don't fail the switch, just log the error
+						logger.error(f"SwitchAccountToken - Error checking/creating opt-ins: {e}")
+				else:
+					logger.info(f"SwitchAccountToken - Business account has no Algorand address yet")
 			
 			# Generate new token with account context
 			from users.jwt import refresh_token_payload_handler

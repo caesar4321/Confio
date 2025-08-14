@@ -200,6 +200,7 @@ class Payment(models.Model):
     status = models.CharField(max_length=20, choices=PAYMENT_STATUS, default='pending')
     note = models.TextField(blank=True)
     error_message = models.TextField(blank=True)
+    blockchain_data = models.JSONField(null=True, blank=True, help_text="Store sponsor transactions and other blockchain data")
     
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)

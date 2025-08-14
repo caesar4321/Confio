@@ -19,6 +19,7 @@ class UnifiedTransactionTable(models.Model):
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
         ('PENDING_SIG', 'Pending Signature'),
+        ('PENDING_BLOCKCHAIN', 'Pending Blockchain'),
         ('SPONSORING', 'Sponsoring'),
         ('SIGNED', 'Signed'),
         ('SUBMITTED', 'Submitted'),
