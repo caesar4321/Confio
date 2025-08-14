@@ -275,6 +275,13 @@ export const PaymentProcessingScreen = () => {
             const algorandService = algorandServiceModule.default;
             const { apolloClient } = await import('../apollo/client');
             const { SUBMIT_SPONSORED_PAYMENT } = await import('../apollo/mutations');
+            // Ensure OAuth subject exists (from Keychain). No external fallback here.
+            try {
+              const { oauthStorage } = await import('../services/oauthStorageService');
+              await oauthStorage.getOAuthSubject();
+            } catch (oauthCheckErr) {
+              console.log('PaymentProcessingScreen: OAuth pre-check failed (non-fatal):', oauthCheckErr);
+            }
             
             // Parse blockchainData if it's a string (GraphQL returns it as JSON string)
             let blockchainData = data.payInvoice.paymentTransaction.blockchainData;

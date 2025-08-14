@@ -16,8 +16,16 @@ class AccountFundingService:
     """Handle automatic funding of user accounts for minimum balance requirements"""
     
     def __init__(self):
-        # Get the Algorand node URL from settings
-        self.algod_client = algod.AlgodClient("", settings.ALGORAND_ALGOD_ADDRESS)
+        # Get the Algorand node URL and token from settings
+        algod_address = settings.ALGORAND_ALGOD_ADDRESS
+        configured_token = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '') or ''
+        # Safe default for LocalNet if token not provided
+        if not configured_token and (
+            'localhost' in algod_address or '127.0.0.1' in algod_address
+        ):
+            configured_token = 'a' * 64
+
+        self.algod_client = algod.AlgodClient(configured_token, algod_address)
         self.sponsor_address = settings.ALGORAND_SPONSOR_ADDRESS
         # Get sponsor mnemonic from Django settings (which loads from .env)
         self.sponsor_mnemonic = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)

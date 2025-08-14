@@ -133,15 +133,12 @@ class PaymentTransactionBuilder:
                     "If recipient is not opted-in, the on-chain inner transfer will fail."
                 )
             
-            # Create method selector for 4-txn group with fee split
-            # The deployed contract expects the 4-arg ABI signature with transaction references
-            # The caster will compute transaction references automatically from group structure
+            # Create method selector for simplified 2-arg signature
+            # The new contract accesses transactions directly by group index
             from algosdk.abi import Method, Returns, Argument
             method = Method(
                 name=method_name,
                 args=[
-                    Argument(arg_type="axfer", name="payment"),      # Merchant payment transaction
-                    Argument(arg_type="axfer", name="fee_payment"),  # Fee payment transaction
                     Argument(arg_type="address", name="recipient"),
                     Argument(arg_type="string", name="payment_id")
                 ],
@@ -262,6 +259,14 @@ class PaymentTransactionBuilder:
             logger.info(f"Total amount: {amount}, Net: {net_amount}, Fee: {fee_amount}")
             logger.info(f"===============================================")
             
+            # Properly ABI-encode the arguments
+            from algosdk.abi import ABIType
+            string_type = ABIType.from_string("string")
+            
+            # Encode the arguments
+            recipient_arg = encoding.decode_address(recipient_address)  # Address is just 32 bytes
+            payment_id_arg = string_type.encode(payment_id if payment_id else "")  # String needs ABI encoding
+            
             # SPONSOR sends the app call (true sponsorship)
             # The deployed contract's caster reads recipient from app_args[1] and payment_id from app_args[2]
             # Transaction references are computed automatically by the caster from group structure
@@ -273,8 +278,8 @@ class PaymentTransactionBuilder:
                 # The caster expects only recipient and payment_id, no transaction references
                 app_args=[
                     selector,
-                    encoding.decode_address(recipient_address),  # Recipient address at app_args[1]
-                    (payment_id.encode() if payment_id else b"")  # Payment ID at app_args[2]
+                    recipient_arg,  # Recipient address at app_args[1] (32 bytes)
+                    payment_id_arg  # ABI-encoded payment ID at app_args[2]
                 ],
                 accounts=[sender_address, recipient_address],  # Pass user and recipient as account references
                 foreign_assets=[asset_id]
@@ -346,6 +351,92 @@ class PaymentTransactionBuilder:
                 'success': False,
                 'error': str(e)
             }
+
+    def validate_payment_app(self, asset_id: int) -> dict:
+        """Preflight checks for payment app compatibility and configuration.
+
+        Returns a dict: {success: bool, error?: str, info?: dict}
+        """
+        try:
+            app_info = self.algod_client.application_info(self.payment_app_id)
+            params = app_info.get('params', {})
+            # Decode global state to a readable map
+            import base64, hashlib
+            def decode_key(b64k: str) -> str:
+                try:
+                    return base64.b64decode(b64k).decode('utf-8')
+                except Exception:
+                    return ''
+            gstate = params.get('global-state', [])
+            state_map = {decode_key(e.get('key', '')): e.get('value', {}) for e in gstate}
+
+            def get_uint(name: str) -> int:
+                v = state_map.get(name)
+                if isinstance(v, dict) and v.get('type') == 2:
+                    return int(v.get('uint', 0))
+                return 0
+
+            def get_addr_from_bytes(name: str) -> str:
+                from algosdk import encoding
+                v = state_map.get(name)
+                if isinstance(v, dict) and v.get('type') == 1:  # bytes
+                    b = base64.b64decode(v.get('bytes', ''))
+                    if len(b) == 32:
+                        return encoding.encode_address(b)
+                return ''
+
+            confio_id = get_uint('confio_asset_id')
+            cusd_id = get_uint('cusd_asset_id')
+            fee_recipient = get_addr_from_bytes('fee_recipient')
+            onchain_sponsor = get_addr_from_bytes('sponsor_address')
+
+            # Basic sanity checks
+            if not onchain_sponsor:
+                return {'success': False, 'error': f'Payment app {self.payment_app_id} has no sponsor configured'}
+            if onchain_sponsor != self.sponsor_address:
+                return {
+                    'success': False,
+                    'error': (
+                        f'Payment app sponsor mismatch: on-chain={onchain_sponsor}, '
+                        f'backend={self.sponsor_address}. Run set_sponsor for app {self.payment_app_id}.'
+                    )
+                }
+            if not fee_recipient:
+                return {'success': False, 'error': f'Payment app {self.payment_app_id} has no fee_recipient configured'}
+            if confio_id == 0 and cusd_id == 0:
+                return {'success': False, 'error': 'Payment app has no assets configured (run setup_assets)'}
+            if asset_id not in (confio_id, cusd_id):
+                return {'success': False, 'error': f'Asset {asset_id} not configured in payment app (confio={confio_id}, cusd={cusd_id})'}
+
+            # App must be opted-in to the asset
+            try:
+                _ = self.algod_client.account_asset_info(self.app_address, asset_id)
+            except Exception as e:
+                return {'success': False, 'error': f'Payment app not opted-in to asset {asset_id}: {e}'}
+
+            # Hash approval program for diagnostics
+            approval_b64 = params.get('approval-program')
+            approval_sha256 = ''
+            if approval_b64:
+                try:
+                    ab = base64.b64decode(approval_b64)
+                    approval_sha256 = hashlib.sha256(ab).hexdigest()
+                except Exception:
+                    pass
+
+            return {
+                'success': True,
+                'info': {
+                    'app_id': self.payment_app_id,
+                    'confio_asset_id': confio_id,
+                    'cusd_asset_id': cusd_id,
+                    'fee_recipient': fee_recipient,
+                    'sponsor_address': onchain_sponsor,
+                    'approval_sha256': approval_sha256,
+                }
+            }
+        except Exception as e:
+            return {'success': False, 'error': f'Failed to validate payment app: {e}'}
     
     def build_direct_payment(
         self,

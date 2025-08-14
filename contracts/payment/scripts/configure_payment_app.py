@@ -47,6 +47,7 @@ def main():
     cusd_id_s = os.environ.get('ALGORAND_CUSD_ASSET_ID')
     confio_id_s = os.environ.get('ALGORAND_CONFIO_ASSET_ID')
     sponsor_addr = os.environ.get('ALGORAND_SPONSOR_ADDRESS', '')
+    fee_recipient_addr = os.environ.get('ALGORAND_FEE_RECIPIENT_ADDRESS', '')
 
     if not app_id_s or not admin_mn:
         print("Error: ALGORAND_PAYMENT_APP_ID and ALGORAND_ADMIN_MNEMONIC must be set")
@@ -197,9 +198,35 @@ def main():
     else:
         print("Skipping set_sponsor (missing ALGORAND_SPONSOR_ADDRESS)")
 
+    # Update fee recipient (default to admin if not provided)
+    try:
+        from algosdk.encoding import decode_address
+        fee_recipient = fee_recipient_addr or admin_addr
+        print(f"Setting fee recipient: {fee_recipient}")
+        params = algod_client.suggested_params()
+        method_fee = Method(
+            name="update_fee_recipient",
+            args=[Argument(arg_type="address", name="new_recipient")],
+            returns=Returns("void"),
+        )
+        fee_bytes = decode_address(fee_recipient)
+        fee_txn = ApplicationCallTxn(
+            sender=admin_addr,
+            sp=params,
+            index=app_id,
+            on_complete=OnComplete.NoOpOC,
+            app_args=[method_fee.get_selector(), fee_bytes],
+        )
+        signed_fee = fee_txn.sign(admin_sk)
+        txid = algod_client.send_transaction(signed_fee)
+        print(f"update_fee_recipient sent: {txid}")
+        wait_for_confirmation(algod_client, txid, 10)
+        print("✅ update_fee_recipient confirmed")
+    except Exception as e:
+        print(f"Warning: Could not update fee recipient: {e}")
+
     print("All done.")
 
 
 if __name__ == '__main__':
     main()
-
