@@ -130,10 +130,10 @@ class CreateInvoice(graphene.Mutation):
             business_id = jwt_context.get('business_id')
             
             # Get the user's active account using JWT context
+            from users.models import Account
             if account_type == 'business' and business_id:
                 # For business accounts, find by business_id from JWT
                 # This will find the business account regardless of who owns it
-                from users.models import Account
                 active_account = Account.objects.filter(
                     account_type='business',
                     account_index=account_index,
@@ -150,7 +150,7 @@ class CreateInvoice(graphene.Mutation):
                 return CreateInvoice(
                     invoice=None,
                     success=False,
-                    errors=["Active account not found"]
+                    errors=["Cuenta activa no encontrada"]
                 )
 
             # Set expiration time (default 24 hours)
@@ -158,14 +158,22 @@ class CreateInvoice(graphene.Mutation):
             expires_at = timezone.now() + timedelta(hours=expires_in_hours)
 
             # Only businesses can create invoices
-            if active_account.account_type != 'business' or not active_account.business:
+            if account_type != 'business' or not business_id:
                 return CreateInvoice(
                     invoice=None,
                     success=False,
-                    errors=["Only business accounts can create invoices"]
+                    errors=["Solo las cuentas de negocio pueden crear facturas"]
                 )
-                
-            merchant_business = active_account.business
+            
+            # Get the business directly using the business_id from JWT
+            from users.models import Business
+            merchant_business = Business.objects.filter(id=business_id).first()
+            if not merchant_business:
+                return CreateInvoice(
+                    invoice=None,
+                    success=False,
+                    errors=["Negocio no encontrado"]
+                )
             merchant_type = 'business'
             merchant_display_name = merchant_business.name
 

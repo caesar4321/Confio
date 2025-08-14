@@ -134,12 +134,14 @@ class PaymentTransactionBuilder:
                 )
             
             # Create method selector for 4-txn group with fee split
-            # The deployed contract's caster expects only non-tx-ref arguments
-            # It will compute transaction references automatically from group structure
+            # The deployed contract expects the 4-arg ABI signature with transaction references
+            # The caster will compute transaction references automatically from group structure
             from algosdk.abi import Method, Returns, Argument
             method = Method(
                 name=method_name,
                 args=[
+                    Argument(arg_type="axfer", name="payment"),      # Merchant payment transaction
+                    Argument(arg_type="axfer", name="fee_payment"),  # Fee payment transaction
                     Argument(arg_type="address", name="recipient"),
                     Argument(arg_type="string", name="payment_id")
                 ],
@@ -261,18 +263,18 @@ class PaymentTransactionBuilder:
             logger.info(f"===============================================")
             
             # SPONSOR sends the app call (true sponsorship)
-            # The deployed contract expects only recipient and payment_id in app_args
-            # The caster will automatically infer transaction references from group positions
+            # The deployed contract's caster reads recipient from app_args[1] and payment_id from app_args[2]
+            # Transaction references are computed automatically by the caster from group structure
             app_call = transaction.ApplicationCallTxn(
                 sender=self.sponsor_address,  # SPONSOR is sender!
                 sp=app_params,
                 index=self.payment_app_id,
                 on_complete=transaction.OnComplete.NoOpOC,
-                # Match the 3-arg ABI that the deployed contract expects
+                # The caster expects only recipient and payment_id, no transaction references
                 app_args=[
                     selector,
-                    encoding.decode_address(recipient_address),  # ApplicationArgs[1] = recipient
-                    (payment_id.encode() if payment_id else b"")  # ApplicationArgs[2] = payment_id (empty string OK)
+                    encoding.decode_address(recipient_address),  # Recipient address at app_args[1]
+                    (payment_id.encode() if payment_id else b"")  # Payment ID at app_args[2]
                 ],
                 accounts=[sender_address, recipient_address],  # Pass user and recipient as account references
                 foreign_assets=[asset_id]
