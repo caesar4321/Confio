@@ -858,13 +858,14 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     pay_amount = pay_txn['txn'].get('amt', -1) if pay_txn else -1
                     
                     # Extract app args (ABI encoding)
-                    # New format: [selector, recipient_address, payment_id]
-                    # Transaction references are computed by the caster, not in app args
+                    # For 4-txn group: [selector, tx_ref_1, tx_ref_2, recipient_address, payment_id]
                     apaa = appl_txn['txn'].get('apaa', [])
                     abi_selector = apaa[0].hex() if len(apaa) > 0 and isinstance(apaa[0], bytes) else 'missing'
-                    # No more tx refs in app args - caster computes them
-                    abi_tx_ref = 'caster-computed'  
-                    abi_recipient = addr32(apaa[1]) if len(apaa) > 1 and isinstance(apaa[1], bytes) and len(apaa[1]) == 32 else 'missing'
+                    # Transaction references at positions 1 and 2
+                    abi_tx_ref_1 = apaa[1][0] if len(apaa) > 1 and isinstance(apaa[1], bytes) and len(apaa[1]) == 1 else 'missing'
+                    abi_tx_ref_2 = apaa[2][0] if len(apaa) > 2 and isinstance(apaa[2], bytes) and len(apaa[2]) == 1 else 'missing'
+                    # Recipient at position 3 (after tx refs)
+                    abi_recipient = addr32(apaa[3]) if len(apaa) > 3 and isinstance(apaa[3], bytes) and len(apaa[3]) == 32 else 'missing'
                     
                     # Extract foreign assets (THIS IS THE KEY CHECK!)
                     apas = appl_txn['txn'].get('apas', [])
@@ -878,50 +879,81 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     accounts_0 = addr32(apat[0]) if len(apat) > 0 else 'missing'
                     accounts_1 = addr32(apat[1]) if len(apat) > 1 else 'missing'
                     
-                    # Log all critical payer binding fields
-                    logger.info("=== PAYER BINDING DEBUG (pc=1330) ===")
+                    # Log all critical payer binding fields  
+                    # Detect if we have a 4-txn group (new format) or 3-txn group (old format)
+                    is_4txn_group = len(decoded_txns) == 4
+                    
+                    logger.info(f"=== PAYER BINDING DEBUG ({len(decoded_txns)}-TXN GROUP) ===")
                     logger.info(f"Group structure:")
-                    logger.info(f"  Txn[0] (pay): sender={pay_sender[:10]}..., receiver={pay_receiver[:10]}..., amount={pay_amount}")
-                    logger.info(f"  Txn[1] (axfer): sender={axfer_sender[:10]}..., receiver={axfer_receiver[:10]}...")
-                    logger.info(f"  Txn[2] (appl): sender={appl_sender[:10]}...")
+                    
+                    if is_4txn_group:
+                        # 4-txn group: [Payment(sponsor→user), AXFER(user→merchant), AXFER(user→fee), AppCall(sponsor)]
+                        merchant_axfer = decoded_txns[1] if len(decoded_txns) > 1 else None
+                        fee_axfer = decoded_txns[2] if len(decoded_txns) > 2 else None
+                        
+                        # Get merchant AXFER details
+                        merchant_sender = addr32(merchant_axfer['txn'].get('snd', b'')) if merchant_axfer else 'missing'
+                        merchant_receiver = addr32(merchant_axfer['txn'].get('arcv', b'')) if merchant_axfer else 'missing'
+                        merchant_amount = merchant_axfer['txn'].get('aamt', 0) if merchant_axfer else 0
+                        
+                        # Get fee AXFER details  
+                        fee_sender = addr32(fee_axfer['txn'].get('snd', b'')) if fee_axfer else 'missing'
+                        fee_receiver = addr32(fee_axfer['txn'].get('arcv', b'')) if fee_axfer else 'missing'
+                        fee_amount = fee_axfer['txn'].get('aamt', 0) if fee_axfer else 0
+                        
+                        logger.info(f"  Txn[0] (pay): sender={pay_sender[:10]}..., receiver={pay_receiver[:10]}..., amount={pay_amount}")
+                        logger.info(f"  Txn[1] (merchant axfer): sender={merchant_sender[:10]}..., receiver={merchant_receiver[:10]}..., amount={merchant_amount}")
+                        logger.info(f"  Txn[2] (fee axfer): sender={fee_sender[:10]}..., receiver={fee_receiver[:10]}..., amount={fee_amount}")
+                        logger.info(f"  Txn[3] (appl): sender={appl_sender[:10]}...")
+                    else:
+                        # 3-txn group (old format)
+                        logger.info(f"  Txn[0] (pay): sender={pay_sender[:10]}..., receiver={pay_receiver[:10]}..., amount={pay_amount}")
+                        logger.info(f"  Txn[1] (axfer): sender={axfer_sender[:10]}..., receiver={axfer_receiver[:10]}...")
+                        logger.info(f"  Txn[2] (appl): sender={appl_sender[:10]}...")
+                    
                     logger.info(f"AppCall details:")
                     logger.info(f"  ABI selector: {abi_selector}")
-                    logger.info(f"  ABI tx-ref index: {abi_tx_ref}")
-                    logger.info(f"  ABI recipient: {abi_recipient[:10]}..." if abi_recipient != 'missing' else "  ABI recipient: missing")
+                    logger.info(f"  ABI tx-ref 1 (merchant): {abi_tx_ref_1}")
+                    logger.info(f"  ABI tx-ref 2 (fee): {abi_tx_ref_2}")
+                    logger.info(f"  ABI recipient (at app_args[3]): {abi_recipient[:10]}..." if abi_recipient != 'missing' else "  ABI recipient: missing")
                     logger.info(f"  Accounts[0] (payer): {accounts_0[:10]}..." if accounts_0 != 'missing' else "  Accounts[0]: missing")
                     logger.info(f"  Accounts[1] (recipient): {accounts_1[:10]}..." if accounts_1 != 'missing' else "  Accounts[1]: missing")
                     
-                    # Log the actual transaction details for debugging
-                    if len(decoded_txns) >= 3:
-                        # Get the fee AXFER (index 2)
-                        fee_axfer = decoded_txns[2] if len(decoded_txns) > 2 else None
-                        if fee_axfer and fee_axfer['txn'].get('type') == 'axfer':
-                            fee_sender = addr32(fee_axfer['txn'].get('snd', b''))
-                            logger.info(f"Fee AXFER sender: {fee_sender[:10]}...")
-                            logger.info(f"Expected (Accounts[0]): {accounts_0[:10]}...")
-                            logger.info(f"Match: {fee_sender == accounts_0}")
-                    
                     # Critical assertions the contract will check
-                    logger.info("Contract assertions (pc=1264 - fee payment sender check):")
-                    logger.info(f"  1. Gtxn[1].sender == Txn.accounts[0]?")
-                    logger.info(f"     {axfer_sender[:10]}... == {accounts_0[:10]}...? {axfer_sender == accounts_0}")
-                    logger.info(f"  2. payment.get().sender == Txn.accounts[0]? (Caster computes tx-ref)")
-                    logger.info(f"     Caster will compute index 1 for merchant AXFER, index 2 for fee AXFER")
-                    logger.info(f"  3. Gtxn[0].receiver == Txn.accounts[0]?")
-                    logger.info(f"     {pay_receiver[:10]}... == {accounts_0[:10]}...? {pay_receiver == accounts_0}")
-                    logger.info("=====================================")
+                    if is_4txn_group:
+                        logger.info("Contract assertions for 4-txn group:")
+                        logger.info(f"  1. Merchant AXFER sender == Txn.accounts[0]?")
+                        logger.info(f"     {merchant_sender[:10]}... == {accounts_0[:10]}...? {merchant_sender == accounts_0}")
+                        logger.info(f"  2. Fee AXFER sender == Txn.accounts[0]?")
+                        logger.info(f"     {fee_sender[:10]}... == {accounts_0[:10]}...? {fee_sender == accounts_0}")
+                        logger.info(f"  3. Gtxn[0].receiver == Txn.accounts[0]?")
+                        logger.info(f"     {pay_receiver[:10]}... == {accounts_0[:10]}...? {pay_receiver == accounts_0}")
+                        logger.info(f"  4. Caster will compute tx refs: index 1 for merchant, index 2 for fee")
+                        
+                        # Validation warnings for 4-txn group
+                        if merchant_sender != accounts_0:
+                            logger.error(f"CRITICAL: Merchant AXFER sender ({merchant_sender}) != accounts[0] ({accounts_0})")
+                        if fee_sender != accounts_0:
+                            logger.error(f"CRITICAL: Fee AXFER sender ({fee_sender}) != accounts[0] ({accounts_0})")
+                    else:
+                        logger.info("Contract assertions for 3-txn group:")
+                        logger.info(f"  1. Gtxn[1].sender == Txn.accounts[0]?")
+                        logger.info(f"     {axfer_sender[:10]}... == {accounts_0[:10]}...? {axfer_sender == accounts_0}")
+                        logger.info(f"  2. Gtxn[0].receiver == Txn.accounts[0]?")
+                        logger.info(f"     {pay_receiver[:10]}... == {accounts_0[:10]}...? {pay_receiver == accounts_0}")
+                        
+                        # Validation warnings for 3-txn group
+                        if axfer_sender != accounts_0:
+                            logger.error(f"CRITICAL: AXFER sender ({axfer_sender}) != accounts[0] ({accounts_0})")
                     
-                    # Additional validation warnings
-                    if axfer_sender != accounts_0:
-                        logger.error(f"CRITICAL: AXFER sender ({axfer_sender}) != accounts[0] ({accounts_0})")
-                        logger.error("This will fail assertion at pc=1330")
                     if pay_receiver != accounts_0:
                         logger.error(f"CRITICAL: Payment receiver ({pay_receiver}) != accounts[0] ({accounts_0})")
-                        logger.error("This will fail assertion at pc=1330")
-                    # With new format, no tx refs in app args
+                    
+                    logger.info("=====================================")
+                    # Check that app_args are correctly formatted
                     if abi_recipient == 'missing':
-                        logger.error(f"CRITICAL: Recipient address missing from app args")
-                        logger.error("App args should be: [selector, recipient_address, payment_id]")
+                        logger.error(f"CRITICAL: Recipient address missing from app_args[3]")
+                        logger.error("App args should be: [selector, tx_ref_1, tx_ref_2, recipient_address, payment_id]")
                     
                     # Require recipient in accounts[1]
                     if len(apat) < 2 or not isinstance(apat[1], (bytes, bytearray)):

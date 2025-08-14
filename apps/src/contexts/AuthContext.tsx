@@ -194,6 +194,58 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           
           console.log('AuthContext - Loading profile for account type:', accountContext.type);
           
+          // CRITICAL: Sync JWT token with stored active account context on app startup
+          // This ensures the JWT has the correct business context after app restart
+          if (accountContext.type === 'business' && accountContext.businessId) {
+            console.log('AuthContext - Business account detected on startup, syncing JWT token...');
+            try {
+              const { SWITCH_ACCOUNT_TOKEN } = await import('../apollo/queries');
+              const { data } = await apolloClient.mutate({
+                mutation: SWITCH_ACCOUNT_TOKEN,
+                variables: {
+                  accountType: accountContext.type,
+                  accountIndex: accountContext.index,
+                  businessId: accountContext.businessId
+                }
+              });
+              
+              if (data?.switchAccountToken?.token) {
+                console.log('AuthContext - JWT token synced with business context on startup');
+                // Update stored tokens with the new JWT that has business context
+                const Keychain = await import('react-native-keychain');
+                const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
+                const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
+                
+                // Get existing refresh token
+                const credentials = await Keychain.getGenericPassword({
+                  service: AUTH_KEYCHAIN_SERVICE,
+                  username: AUTH_KEYCHAIN_USERNAME
+                });
+                
+                if (credentials) {
+                  const tokens = JSON.parse(credentials.password);
+                  // Update with new access token while keeping refresh token
+                  await Keychain.setGenericPassword(
+                    AUTH_KEYCHAIN_USERNAME,
+                    JSON.stringify({
+                      accessToken: data.switchAccountToken.token,
+                      refreshToken: tokens.refreshToken
+                    }),
+                    {
+                      service: AUTH_KEYCHAIN_SERVICE,
+                      username: AUTH_KEYCHAIN_USERNAME,
+                      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+                    }
+                  );
+                  console.log('AuthContext - Stored updated JWT token with business context');
+                }
+              }
+            } catch (syncError) {
+              console.error('AuthContext - Error syncing JWT token on startup:', syncError);
+              // Don't fail the app startup, but operations requiring business context may fail
+            }
+          }
+          
           if (accountContext.type === 'business') {
             // For business accounts, we need to get the business ID from the server
             // We'll load the personal profile first, then the business profile will be loaded
