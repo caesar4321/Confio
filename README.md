@@ -54,14 +54,28 @@ We host all infrastructure in **AWS eu-central-2 (Zurich)** region for optimal d
 - **AWS over Exoscale**: While Swiss providers like Exoscale exist, AWS provides the scalability needed for Confío's projected growth across Latin America
 - **Compliance**: Swiss hosting helps meet international compliance requirements for financial services
 
-## 🔒 What Confío Is Not
+## 🔒 Security Architecture
 
-- ❌ Not a custodial wallet — we never store user funds or signing keys
-- ❌ No backend "tricks" — money logic lives entirely on-chain
-- ❌ No crypto knowledge required — users sign in with Google or Apple
-- ❌ No server-side private keys — all signing happens on the client
+### Non-Custodial Wallet Design
+- **Deterministic Key Derivation**: Keys are derived from OAuth claims + server pepper using HKDF-SHA256
+- **Client-Side Only**: Private keys never leave the device, all signing happens locally
+- **Recovery**: Users can recover wallets on any device with OAuth login + pepper
+- **Multi-Layer Security**: Neither OAuth provider nor server alone can compute keys
+
+### Key Features
+- ❌ **Not custodial** — we never store user funds or private keys
+- ❌ **No backend tricks** — money logic lives entirely on-chain
+- ❌ **No crypto knowledge required** — users sign in with Google or Apple
+- ✅ **Sponsored transactions** — users never pay gas fees
+- ✅ **Secure key storage** — using react-native-keychain with hardware encryption
 
 ## 🔄 Recent Updates (August 2025)
+
+### Security Enhancements
+- ✅ **Deterministic Wallet System** - Secure key derivation with HKDF-SHA256
+- ✅ **Multi-Chain Architecture** - Extensible chain adapter interface for future networks
+- ✅ **Hardware-Backed Storage** - Keys stored with `WHEN_UNLOCKED_THIS_DEVICE_ONLY`
+- ✅ **Sponsored Transactions** - Users never pay fees, all costs covered by sponsor
 
 ### Blockchain Migration Complete
 - ✅ **Migrated from Aptos/Move to Algorand** - All smart contracts now use PyTeal/TEAL
@@ -229,8 +243,11 @@ This is a **monolithic repository** containing the full Confío stack:
 │   │   │   ├── HomeScreen.tsx        # Main app screen
 │   │   │   └── CreateBusinessScreen.tsx     # Business account creation
 │   │   ├── services/      # API and business logic services
-│   │   │   ├── authService.ts    # Authentication service with deterministic wallet
-│   │   │   ├── enhancedAuthService.ts # Enhanced auth with device fingerprinting
+│   │   │   ├── authService.ts    # Authentication service
+│   │   │   ├── secureDeterministicWallet.ts # Non-custodial wallet generation
+│   │   │   ├── derivationSpec.ts # Frozen derivation path constants
+│   │   │   ├── chainAdapters.ts  # Multi-chain address derivation
+│   │   │   ├── algorandService.ts # Algorand blockchain integration
 │   │   │   └── ...        # Other services
 │   │   ├── types/         # TypeScript type definitions
 │   │   ├── utils/         # Utility functions

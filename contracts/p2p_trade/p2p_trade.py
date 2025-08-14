@@ -302,9 +302,9 @@ def create_trade(
                 )),
                 Assert(no_rekey_close(Int(0))),
                 
-                # MBR payment at index 1
+                # MBR payment at index 1 from sponsor
                 Assert(Gtxn[1].type_enum() == TxnType.Payment),
-                Assert(Gtxn[1].sender() == actual_seller.load()),
+                Assert(Gtxn[1].sender() == app.state.sponsor_address),  # Sponsor pays MBR
                 Assert(Gtxn[1].receiver() == Global.current_application_address()),
                 Assert(no_rekey_close(Int(1))),
                 Assert(Gtxn[1].amount() >= mbr_cost.load()),
@@ -321,8 +321,8 @@ def create_trade(
                 Assert(Txn.group_index() == Int(3)),
                 Assert(no_rekey_close(Int(3))),
                 
-                # Store MBR payer and refund amount
-                mbr_payer.store(Gtxn[1].sender()),
+                # Store MBR payer (sponsor) and refund amount
+                mbr_payer.store(app.state.sponsor_address),  # Track sponsor as MBR payer
                 delta.store(Gtxn[1].amount() - mbr_cost.load())
             ),
             Seq(
@@ -506,7 +506,7 @@ def mark_as_paid(trade_id: abi.String, payment_ref: abi.String):
         Assert(Gtxn[0].receiver() == Global.current_application_address()),
         paid_mbr.store(box_mbr_cost(Len(paid_box_key.load()), PAID_VALUE_LEN)),
         Assert(Gtxn[0].amount() >= paid_mbr.load()),
-        Assert(Gtxn[0].sender() == Txn.sender()),  # Buyer pays for paid box
+        Assert(Gtxn[0].sender() == app.state.sponsor_address),  # Sponsor pays for paid box
         
         # Refund overpayment
         delta.store(Gtxn[0].amount() - paid_mbr.load()),

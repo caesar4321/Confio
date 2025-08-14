@@ -4,8 +4,7 @@ Escrow-based invitation system with 7-day reclaim period
 Website: https://confio.lat
 
 Usage and group structures:
-- Create (non-sponsored): [Payment(inviter→app, amount=box MBR), AXFER(inviter→app), AppCall(create_invitation)]
-- Create (sponsored): [Payment(sponsor→user/app, fees), Payment(inviter→app, MBR), AXFER(inviter→app), AppCall(create_invitation)]
+- Create: [Payment(sponsor→app, amount=box MBR), AXFER(inviter→app), AppCall(sponsor)]
   The app calculates MBR dynamically from key/value sizes and requires the payment to cover it.
 - Claim: AppCall(claim_invitation) standalone, or grouped with a 0-amount pay-yourself Payment to add fee budget.
   Fee-bump format: [Payment(sender→sender, amount=0), AppCall(claim_invitation)]
@@ -272,9 +271,9 @@ def create_invitation(
                 )),
                 Assert(no_rekey_close_pay(Int(0))),
                 
-                # MBR payment at index 1
+                # MBR payment at index 1 from sponsor
                 Assert(Gtxn[1].type_enum() == TxnType.Payment),
-                Assert(Gtxn[1].sender() == actual_inviter.load()),
+                Assert(Gtxn[1].sender() == app.state.sponsor_address.get()),  # Sponsor pays MBR
                 Assert(Gtxn[1].receiver() == Global.current_application_address()),
                 Assert(no_rekey_close_pay(Int(1))),
                 
@@ -298,7 +297,7 @@ def create_invitation(
                 # Non-sponsored: original structure
                 # MBR payment at index 0
                 Assert(Gtxn[0].type_enum() == TxnType.Payment),
-                Assert(Gtxn[0].sender() == actual_inviter.load()),
+                Assert(Gtxn[0].sender() == app.state.sponsor_address.get()),  # Sponsor pays MBR
                 Assert(Gtxn[0].receiver() == Global.current_application_address()),
                 Assert(no_rekey_close_pay(Int(0))),
                 

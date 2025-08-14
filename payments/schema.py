@@ -426,6 +426,13 @@ class PayInvoice(graphene.Mutation):
                 merchant_type = 'business'  # Always business for payments
                 merchant_display_name = merchant_business.name if merchant_business else ''
 
+                # Generate a temporary unique transaction hash to avoid constraint violations
+                import time
+                import uuid
+                microsecond_timestamp = int(time.time() * 1000000)
+                unique_id = str(uuid.uuid4())[:8]
+                temp_transaction_hash = f"temp_{invoice.invoice_id}_{microsecond_timestamp}_{unique_id}"
+                
                 # Create the payment transaction
                 payment_transaction = PaymentTransaction.objects.create(
                     payer_user=user,
@@ -445,16 +452,18 @@ class PayInvoice(graphene.Mutation):
                     token_type=invoice.token_type,
                     description=invoice.description,
                     status='PENDING',
+                    transaction_hash=temp_transaction_hash,  # Set temporary hash to avoid unique constraint violation
                     invoice=invoice,
                     idempotency_key=idempotency_key
                 )
 
-                # Update invoice with proper paid_by fields
-                invoice.status = 'PAID'
-                invoice.paid_by_user = user
-                invoice.paid_by_business = payer_business  # Set if payer is business
-                invoice.paid_at = timezone.now()
-                invoice.save()
+                # Don't mark invoice as PAID yet - wait for blockchain confirmation
+                # Store the payment info for later use
+                invoice_payment_info = {
+                    'paid_by_user': user,
+                    'paid_by_business': payer_business,
+                    'paid_at': timezone.now()
+                }
 
                 # Execute blockchain payment through sponsored payment contract
                 # The recipient business is already determined from the invoice
@@ -531,6 +540,10 @@ class PayInvoice(graphene.Mutation):
                         }
                         payment_transaction.save()
                         
+                        # DON'T mark invoice as PAID yet - wait for blockchain confirmation
+                        # The invoice will be marked as PAID in SubmitSponsoredPayment mutation
+                        print(f"PayInvoice: Payment created with blockchain data, waiting for client signing")
+                        
                         blockchain_success = True
                         print(f"PayInvoice: Payment ready for client signing")
                     else:
@@ -543,140 +556,22 @@ class PayInvoice(graphene.Mutation):
                     import traceback
                     traceback.print_exc()
                 
-                # For backwards compatibility, still mark as CONFIRMED even if blockchain fails
-                # This allows the app to continue working while we implement client signing
+                # If blockchain was attempted but failed, the entire payment should fail
                 if not blockchain_success:
-                    print(f"PayInvoice: Falling back to database-only payment")
-                    payment_transaction.status = 'CONFIRMED'
-                    # Generate a temporary transaction hash
-                    import time
-                    import uuid
-                    microsecond_timestamp = int(time.time() * 1000000)
-                    unique_id = str(uuid.uuid4())[:8]
-                    payment_transaction.transaction_hash = f"test_pay_tx_{payment_transaction.id}_{microsecond_timestamp}_{unique_id}"
-                    payment_transaction.error_message = blockchain_error
-                    payment_transaction.save()
-                
-                # Create notifications for both payer and merchant
-                try:
-                    print(f"PayInvoice: Creating notifications for payment {payment_transaction.id}")
-                    from notifications.models import Notification, NotificationType
-                    from decimal import Decimal
-                    
-                    # Convert amount to string for display with 2 decimal places
-                    amount_decimal = Decimal(str(payment_transaction.amount))
-                    amount_str = f"{amount_decimal:.2f}"
-                    print(f"PayInvoice: Amount string: {amount_str}")
-                    
-                    # Create notification for payer (sender)
-                    payer_notification = Notification.objects.create(
-                        user=user,
-                        account=payer_account,
-                        business=payer_business,
-                        notification_type=NotificationType.PAYMENT_SENT,
-                        title="Pago enviado",
-                        message=f"Pagaste {amount_str} {payment_transaction.token_type} a {merchant_display_name}",
-                        data={
-                            'transaction_type': 'payment',
-                            'amount': f'-{amount_str}',  # Negative for sent
-                            'token_type': payment_transaction.token_type,
-                            'currency': payment_transaction.token_type,
-                            'transaction_id': str(payment_transaction.id),
-                            'payment_transaction_id': payment_transaction.payment_transaction_id,
-                            'merchant_name': merchant_display_name,
-                            'merchant_address': payment_transaction.merchant_address,
-                            'payer_name': payer_display_name,
-                            'payer_phone': payer_phone,
-                            'payer_address': payment_transaction.payer_address,
-                            'status': payment_transaction.status.lower(),
-                            'created_at': payment_transaction.created_at.isoformat(),
-                            'description': payment_transaction.description or '',
-                            'transaction_hash': payment_transaction.transaction_hash,
-                            'invoice_id': invoice.invoice_id,
-                            # For TransactionDetailScreen
-                            'type': 'sent',
-                            'to': merchant_display_name,
-                            'toAddress': payment_transaction.merchant_address,
-                            'from': payer_display_name,
-                            'fromAddress': payment_transaction.payer_address,
-                            'date': payment_transaction.created_at.strftime('%Y-%m-%d'),
-                            'time': payment_transaction.created_at.strftime('%H:%M'),
-                            'hash': payment_transaction.transaction_hash,
-                        },
-                        related_object_type='payment',
-                        related_object_id=payment_transaction.id,
-                        action_url=f'confio://transaction/{payment_transaction.id}'
-                    )
-                    
-                    # Create notification for merchant (receiver)
-                    merchant_notification = Notification.objects.create(
-                        user=invoice.created_by_user,
-                        account=invoice.merchant_account,
-                        business=merchant_business,
-                        notification_type=NotificationType.PAYMENT_RECEIVED,
-                        title="Pago recibido",
-                        message=f"Recibiste {amount_str} {payment_transaction.token_type} de {payer_display_name}",
-                        data={
-                            'transaction_type': 'payment',
-                            'amount': f'+{amount_str}',  # Positive for received
-                            'token_type': payment_transaction.token_type,
-                            'currency': payment_transaction.token_type,
-                            'transaction_id': str(payment_transaction.id),
-                            'payment_transaction_id': payment_transaction.payment_transaction_id,
-                            'payer_name': payer_display_name,
-                            'payer_phone': payer_phone,
-                            'payer_address': payment_transaction.payer_address,
-                            'merchant_name': merchant_display_name,
-                            'merchant_address': payment_transaction.merchant_address,
-                            'status': payment_transaction.status.lower(),
-                            'created_at': payment_transaction.created_at.isoformat(),
-                            'description': payment_transaction.description or '',
-                            'transaction_hash': payment_transaction.transaction_hash,
-                            'invoice_id': invoice.invoice_id,
-                            # For TransactionDetailScreen
-                            'type': 'received',
-                            'from': payer_display_name,
-                            'fromAddress': payment_transaction.payer_address,
-                            'to': merchant_display_name,
-                            'toAddress': payment_transaction.merchant_address,
-                            'date': payment_transaction.created_at.strftime('%Y-%m-%d'),
-                            'time': payment_transaction.created_at.strftime('%H:%M'),
-                            'hash': payment_transaction.transaction_hash,
-                        },
-                        related_object_type='payment',
-                        related_object_id=payment_transaction.id,
-                        action_url=f'confio://transaction/{payment_transaction.id}'
+                    print(f"PayInvoice: Blockchain payment failed, rolling back")
+                    # Delete the payment transaction - it failed
+                    payment_transaction.delete()
+                    # Don't mark invoice as paid
+                    return PayInvoice(
+                        invoice=None,
+                        payment_transaction=None,
+                        success=False,
+                        errors=[f"Blockchain payment failed: {blockchain_error}"]
                     )
                 
-                    # Send push notifications
-                    from notifications.fcm_service import send_push_notification
-                    
-                    # Send to payer
-                    print(f"PayInvoice: Sending push notification to payer {user.id}")
-                    payer_push_result = send_push_notification(
-                        notification=payer_notification,
-                        additional_data={
-                            'type': 'payment',
-                            'transactionType': 'payment'
-                        }
-                    )
-                    print(f"PayInvoice: Payer push result: {payer_push_result}")
-                    
-                    # Send to merchant
-                    print(f"PayInvoice: Sending push notification to merchant {invoice.created_by_user.id}")
-                    merchant_push_result = send_push_notification(
-                        notification=merchant_notification,
-                        additional_data={
-                            'type': 'payment',
-                            'transactionType': 'payment'
-                        }
-                    )
-                    print(f"PayInvoice: Merchant push result: {merchant_push_result}")
-                except Exception as e:
-                    # Log the error but don't fail the payment
-                    print(f"Error creating payment notifications: {e}")
-                    import traceback
-                    traceback.print_exc()
+                # DON'T create notifications here - wait for blockchain confirmation
+                # Notifications will be created in SubmitSponsoredPayment after blockchain success
+                print(f"PayInvoice: Skipping notifications - will be sent after blockchain confirmation")
                 
                 # Log activity if merchant is an employee accepting payment
                 from users.models_employee import BusinessEmployee, EmployeeActivityLog

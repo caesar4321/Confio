@@ -779,9 +779,46 @@ class AlgorandService {
     try {
       await this.ensureInitialized();
       
+      // Ensure a wallet is available for the active account context (personal/business)
       if (!this.currentAccount) {
-        console.error('[AlgorandService] No account available for opt-in');
-        return false;
+        try {
+          // Try loading a previously stored wallet address first
+          const loaded = await this.loadStoredWallet();
+          if (!loaded) {
+            // Fall back to creating/restoring from active context + OAuth subject
+            const { AuthService } = await import('./authService');
+            const authService = AuthService.getInstance();
+            const accountContext = await authService.getActiveAccountContext();
+
+            const { oauthStorage } = await import('./oauthStorageService');
+            const oauthData = await oauthStorage.getOAuthSubject();
+            if (!oauthData || !oauthData.subject || !oauthData.provider) {
+              throw new Error('Missing OAuth subject/provider for wallet context');
+            }
+
+            const provider: 'google' | 'apple' = oauthData.provider;
+            const sub: string = oauthData.subject;
+            const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+            const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+            const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+            const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+
+            // Create/restore deterministic wallet for the active context
+            const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+              iss,
+              sub,
+              aud,
+              provider,
+              accountContext.type,
+              accountContext.index,
+              accountContext.businessId
+            );
+            this.currentAccount = { addr: wallet.address, sk: null };
+          }
+        } catch (e) {
+          console.error('[AlgorandService] Failed to initialize wallet context for opt-in:', e);
+          return false;
+        }
       }
 
       // Check if we received an array of transactions from backend
@@ -1270,6 +1307,59 @@ class AlgorandService {
     } catch (error) {
       console.error('[AlgorandService] Error in getConfioBalance:', error);
       return 0;
+    }
+  }
+
+  /**
+   * Sign and submit a sponsored opt-in transaction
+   * @param userTransaction - The unsigned opt-in transaction for the user to sign
+   * @param sponsorTransaction - The already-signed sponsor transaction
+   * @param groupId - The group ID for the transaction group
+   * @returns Success status and transaction ID or error
+   */
+  async signAndSubmitSponsoredOptIn(
+    userTransaction: string,
+    sponsorTransaction: string, 
+    groupId: string
+  ): Promise<{ success: boolean; txId?: string; error?: string }> {
+    try {
+      console.log('[AlgorandService] Processing sponsored opt-in transaction');
+      
+      // Ensure wallet is initialized
+      if (!this.currentAccount?.addr) {
+        console.log('[AlgorandService] Wallet not initialized, skipping opt-in');
+        return { success: false, error: 'Wallet not initialized' };
+      }
+      
+      // Decode the user transaction
+      const userTxnBytes = Buffer.from(userTransaction, 'base64');
+      
+      // Sign the user transaction
+      const signedUserTxn = await this.signTransactionBytes(userTxnBytes);
+      
+      // Decode the sponsor transaction (already signed)
+      const sponsorTxnBytes = Buffer.from(sponsorTransaction, 'base64');
+      
+      // Create the transaction group array
+      const signedGroup = [sponsorTxnBytes, signedUserTxn];
+      
+      // Submit the transaction group
+      console.log('[AlgorandService] Submitting sponsored opt-in transaction group');
+      const { txId } = await this.algodClient.sendRawTransaction(signedGroup).do();
+      
+      // Wait for confirmation
+      const waitForConfirmation = this.getSdkFn('waitForConfirmation');
+      await waitForConfirmation(this.algodClient, txId, 4);
+      
+      console.log(`[AlgorandService] Sponsored opt-in confirmed: ${txId}`);
+      return { success: true, txId };
+      
+    } catch (error) {
+      console.error('[AlgorandService] Error in signAndSubmitSponsoredOptIn:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      };
     }
   }
 }

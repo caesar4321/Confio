@@ -54,6 +54,12 @@
 13. **Custom Admin Site**: This project uses a custom admin site `confio_admin_site` defined in `/config/admin_dashboard.py`. All models must be registered with this custom admin site, NOT the default Django admin. When adding new models, import their admin classes and register them in `admin_dashboard.py`.
 14. **Standardized Hashtags**: Always use exactly these 5 hashtags for all social media sharing throughout the app: #Confio #RetoConfio #LogroConfio #AppDeDolares #DolarDigital. Never suggest additional hashtags to avoid user confusion.
 15. **zkLogin Circuit Requirements**: BOTH Google AND Apple Sign-In are failing with nonce length errors. DO NOT suggest alternatives, hybrid approaches, or custodial solutions. FIX THE CIRCUIT to accept variable-length nonces (27-64 chars). Circuit compilation takes only 10 minutes on t3.2xlarge.
+16. **Algorand Sponsored Payment Transaction Structure**: Payment contracts expect EXACT transaction structures:
+   - **Without receipts (3 txns)**: [Payment(sponsor→app, amt=0), AXFER(user→app), AppCall(sponsor)]
+   - **With receipts (3 txns)**: [Payment(sponsor→app, MBR), AXFER(user→app), AppCall(sponsor)]
+   - **CRITICAL**: User NEVER pays fees or MBR - only sponsor pays everything
+   - Contract validates group size, transaction order, and sender addresses at specific indices
+   - ABI transaction reference always points to AXFER at index 1
 
 ### Development Environment
 - **Python Virtual Environment**: Always use `myvenv/bin/python` for Python commands
@@ -95,6 +101,7 @@ We've been working on:
 - **Major Security Overhaul**: Replaced client-controlled account parameters with JWT-based context
 - **Permission System**: Implemented role-based access control with negative-check validation
 - **UI Permission Blocks**: Added feature hiding for employees based on permissions (balance, P2P, payments)
+- **Algorand Smart Contract Deployment**: Payment contract implementation with sponsored transactions
 
 ### Recent Fixes
 - **FlatList in AddBankInfoModal**: Converted ScrollView to FlatList for payment method and country pickers to handle large lists properly. Added pagination settings: initialNumToRender=20, maxToRenderPerBatch=10, windowSize=21, and getItemLayout for optimal performance.
@@ -103,5 +110,28 @@ We've been working on:
 - **Employee Permission System**: Implemented comprehensive role-based permissions with both UI blocking (hiding features) and API validation (blocking operations).
 - **GraphQL Field Types**: Fixed "Field 'employeePermissions' must not have a selection" error by creating proper EmployeePermissionsType GraphQL object instead of JSONString.
 - **Account Lookup Logic**: Fixed "Active account not found" errors for employees by changing user.accounts.filter() to Account.objects.filter() for business account lookups.
+- **Algorand Payment Contract State Initialization**: CRITICAL - Beaker's GlobalStateValue MUST be explicitly initialized in the @app.create method. If uint64 values are not set to Int(0) during creation, they will be stored as empty bytes, causing type mismatches and assertion failures when accessed. Always initialize ALL global state values in the create method, even if they have defaults.
+
+### Known Issues & Solutions
+
+#### Algorand Smart Contract Global State Initialization
+**Problem**: GlobalStateValue fields with TealType.uint64 may be stored as empty bytes instead of uint64(0) if not explicitly initialized in the @app.create method.
+
+**Symptoms**:
+- Assert failures when checking `app.state.some_value == Int(0)`
+- Global state shows empty bytes for uint64 fields
+- Logic eval errors at assertions involving uninitialized state
+
+**Solution**: Always explicitly initialize ALL global state values in the @app.create method:
+```python
+@app.create
+def create():
+    return Seq(
+        app.state.admin.set(Txn.sender()),
+        app.state.some_uint.set(Int(0)),  # MUST explicitly set even if default is Int(0)
+        app.state.another_uint.set(Int(0)),
+        Approve()
+    )
+```
 
 Always reference the project structure and conventions described in README.md when making changes.

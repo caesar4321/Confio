@@ -21,6 +21,7 @@ import { apolloClient, AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../
 import { gql } from '@apollo/client';
 import { randomBytes } from '@noble/hashes/utils';
 import { Buffer } from 'buffer'; // RN polyfill for base64
+import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
 
 // GraphQL mutations for server pepper (per-account, derived from JWT context)
 const GET_SERVER_PEPPER = gql`
@@ -109,10 +110,10 @@ function deriveKEK(
   ));
   
   // Salt includes server pepper for 2-of-2 security
-  const salt = sha256(utf8ToBytes(`confio/kek-salt/v1|${serverPepper ?? ''}`));
+  const salt = sha256(utf8ToBytes(`${CONFIO_DERIVATION_SPEC.kekSalt}|${serverPepper ?? ''}`));
   
   // Info includes scope for domain separation
-  const info = utf8ToBytes(`confio/kek-info/v1|${scope}`);
+  const info = utf8ToBytes(`${CONFIO_DERIVATION_SPEC.kekInfo}|${scope}`);
   
   return hkdf(sha256, x_c, salt, info, 32);
 }
@@ -233,21 +234,21 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
   // Create input key material
   // Since clientSalt already contains the hash of OAuth claims, we'll use it as part of the IKM
   // This ensures deterministic derivation based on the OAuth provider
-  const ikmString = `confio-wallet-v1|${clientSalt}`;
+  const ikmString = `${CONFIO_DERIVATION_SPEC.root}|${clientSalt}`;
   const ikm = sha256(utf8ToBytes(ikmString));
 
   // CRITICAL: Extract salt uses ONLY client-side stable values
   // Do NOT include serverPepper here - it would change the wallet address!
   // Pepper is used ONLY for KEK derivation (encryption key), not seed derivation
   const extractSalt = sha256(utf8ToBytes(
-    `confio/extract/v1|${clientSalt}`
+    `${CONFIO_DERIVATION_SPEC.extract}|${clientSalt}`
   ));
 
   // Domain separation and versioning
   // This ensures different keys for different contexts
   // Removed network to keep salt consistent across environments
   const info = utf8ToBytes(
-    `confio/algo/v1|${provider}|${accountType}|${accountIndex}|${businessId ?? ''}`
+    `${CONFIO_DERIVATION_SPEC.algoInfoPrefix}|${provider}|${accountType}|${accountIndex}|${businessId ?? ''}`
   );
 
   // Derive 32-byte ed25519 seed using HKDF
@@ -453,7 +454,14 @@ export class SecureDeterministicWalletService {
           if (needsReWrap) {
             console.log(`Re-wrapping seed with new pepper v${pepperVersion}...`);
             const newEncryptedBlob = wrapSeed(seed, kek, pepperVersion);
-            await Keychain.setInternetCredentials(cacheKey.server, cacheKey.username, newEncryptedBlob);
+            await Keychain.setInternetCredentials(
+              cacheKey.server, 
+              cacheKey.username, 
+              newEncryptedBlob,
+              {
+                accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY
+              }
+            );
             console.log('Seed re-wrapped successfully');
           }
         }
@@ -523,7 +531,10 @@ export class SecureDeterministicWalletService {
         await Keychain.setInternetCredentials(
           cacheKey.server,
           cacheKey.username,
-          encryptedBlob
+          encryptedBlob,
+          {
+            accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY
+          }
         );
         
         console.log('Encrypted seed cached for fast future access');
@@ -557,16 +568,25 @@ export class SecureDeterministicWalletService {
   private decodeTxn(bytes: Uint8Array): any {
     const algosdk = require('algosdk');
     
-    // Use algosdk's decodeUnsignedTransaction which returns a proper Transaction instance
-    // This handles all the field mapping correctly
-    const txn = algosdk.decodeUnsignedTransaction(bytes);
+    console.log(`[SecureDeterministicWallet] Decoding transaction of ${bytes.length} bytes`);
+    console.log(`[SecureDeterministicWallet] First 10 bytes: ${Array.from(bytes.slice(0, 10)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`);
     
-    // Verify it has the signTxn method
-    if (typeof txn.signTxn !== 'function') {
-      throw new Error('Decoded transaction does not have signTxn method');
+    try {
+      // Use algosdk's decodeUnsignedTransaction which returns a proper Transaction instance
+      // This handles all the field mapping correctly
+      const txn = algosdk.decodeUnsignedTransaction(bytes);
+      
+      // Verify it has the signTxn method
+      if (typeof txn.signTxn !== 'function') {
+        throw new Error('Decoded transaction does not have signTxn method');
+      }
+      
+      return txn;
+    } catch (error) {
+      console.error('[SecureDeterministicWallet] Failed to decode transaction:', error);
+      console.error('[SecureDeterministicWallet] Bytes that failed:', bytes);
+      throw error;
     }
-    
-    return txn;
   }
 
   /**

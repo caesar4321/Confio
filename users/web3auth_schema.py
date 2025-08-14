@@ -253,7 +253,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     logger.info(f"  Current assets on account: {num_assets}")
                     logger.info(f"  Current min-balance: {current_min_balance} microAlgos ({current_min_balance/1000000} ALGO)")
                     logger.info(f"  Assets to opt into: {len(assets_to_opt_in)}")
-                    logger.info(f"  App opt-in needed: {needs_app_optin}")
+                    logger.info(f"  App opt-in needed: {needs_cusd_app_optin}")
                     logger.info(f"  New min-balance after opt-ins: {new_min_balance} microAlgos ({new_min_balance/1000000} ALGO)")
                     logger.info(f"  Current balance: {balance} microAlgos ({balance/1000000} ALGO)")
                     
@@ -512,12 +512,23 @@ class VerifyAlgorandOwnershipMutation(graphene.Mutation):
             if not account or not account.algorand_address:
                 return cls(success=False, error='No Algorand address found')
             
-            # TODO: Implement actual Algorand signature verification
-            # For now, we'll just return success for testing
-            # In production, you would verify the signature against the message
-            # using the Algorand SDK
+            # Verify the signature using Algorand SDK
+            from algosdk import util
+            from algosdk.encoding import decode_address
+            import base64
             
-            verified = True  # Placeholder
+            try:
+                # Get the public key from the address
+                public_key = decode_address(account.algorand_address)
+                
+                # Decode the base64 signature
+                signature_bytes = base64.b64decode(signature)
+                
+                # Verify the signature
+                verified = util.verify_bytes(message.encode('utf-8'), signature_bytes, public_key)
+            except Exception as verify_error:
+                logger.error(f"Signature verification failed: {verify_error}")
+                verified = False
             
             if verified:
                 # TODO: Implement account verification when needed

@@ -84,8 +84,12 @@ class AlgorandSponsorService:
             self._kmd_client = KMDClient(self.kmd_token, self.kmd_address)
         return self._kmd_client
     
-    async def get_wallet_handle(self) -> str:
+    async def get_wallet_handle(self) -> Optional[str]:
         """Get or create KMD wallet handle"""
+        # Skip KMD if mnemonic is available (production mode)
+        if self.sponsor_mnemonic:
+            return None
+            
         # Check cache first
         cached_handle = cache.get(self.KMD_HANDLE_KEY)
         if cached_handle:
@@ -572,7 +576,17 @@ class AlgorandSponsorService:
             Base64 encoded signed transaction or None if failed
         """
         try:
-            # Try KMD first
+            # In production, always use mnemonic (KMD not available)
+            if self.sponsor_mnemonic:
+                private_key = mnemonic.to_private_key(self.sponsor_mnemonic)
+                signed_txn = txn.sign(private_key)
+                # The sign method returns a SignedTransaction object
+                # Use encoding.msgpack_encode to get the properly formatted bytes
+                signed_bytes = encoding.msgpack_encode(signed_txn)
+                # msgpack_encode returns base64, so just return it
+                return signed_bytes
+            
+            # Try KMD only if no mnemonic (development mode)
             wallet_handle = await self.get_wallet_handle()
             if wallet_handle:
                 try:
@@ -584,17 +598,7 @@ class AlgorandSponsorService:
                     )
                     return base64.b64encode(signed).decode('utf-8')
                 except Exception as e:
-                    logger.warning(f"KMD signing failed, falling back to mnemonic: {e}")
-            
-            # Fallback to mnemonic if KMD unavailable
-            if self.sponsor_mnemonic:
-                private_key = mnemonic.to_private_key(self.sponsor_mnemonic)
-                signed_txn = txn.sign(private_key)
-                # The sign method returns a SignedTransaction object
-                # Use encoding.msgpack_encode to get the properly formatted bytes
-                signed_bytes = encoding.msgpack_encode(signed_txn)
-                # msgpack_encode returns base64, so just return it
-                return signed_bytes
+                    logger.warning(f"KMD signing failed: {e}")
             
             logger.error("No signing method available")
             return None

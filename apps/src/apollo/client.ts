@@ -425,9 +425,9 @@ const authLink = setContext(async (operation, previousContext) => {
       
       // Log the token payload to verify account context
       console.log('Token contains account context:', {
-        account_type: decoded.account_type || 'not present',
-        account_index: decoded.account_index || 'not present',
-        business_id: decoded.business_id || 'not present'
+        account_type: decoded.account_type ?? 'not present',
+        account_index: decoded.account_index ?? 'not present',
+        business_id: decoded.business_id ?? 'not present'
       });
       
       return {

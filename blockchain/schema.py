@@ -12,7 +12,10 @@ from .mutations import (
     AlgorandSponsoredSendMutation,
     SubmitSponsoredGroupMutation,
     AlgorandSponsoredOptInMutation,
-    CheckSponsorHealthQuery
+    CheckSponsorHealthQuery,
+    CheckBusinessOptInMutation,
+    CompleteBusinessOptInMutation,
+    SubmitBusinessOptInGroupMutation
 )
 from .payment_mutations import (
     CreateSponsoredPaymentMutation,
@@ -43,6 +46,11 @@ class Mutation(graphene.ObjectType):
     algorand_sponsored_send = AlgorandSponsoredSendMutation.Field()
     algorand_sponsored_opt_in = AlgorandSponsoredOptInMutation.Field()
     submit_sponsored_group = SubmitSponsoredGroupMutation.Field()
+    
+    # Business opt-in mutations
+    check_business_opt_in = CheckBusinessOptInMutation.Field()
+    complete_business_opt_in = CompleteBusinessOptInMutation.Field()
+    submit_business_opt_in_group = SubmitBusinessOptInGroupMutation.Field()
     
     # Payment contract mutations
     create_sponsored_payment = CreateSponsoredPaymentMutation.Field()
