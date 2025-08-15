@@ -132,13 +132,11 @@ class CreateInvoice(graphene.Mutation):
             # Get the user's active account using JWT context
             from users.models import Account
             if account_type == 'business' and business_id:
-                # For business accounts, find by business_id from JWT
-                # This will find the business account regardless of who owns it
+                # For business accounts, find by business_id from JWT (ignore index; employees may have index mismatch)
                 active_account = Account.objects.filter(
                     account_type='business',
-                    account_index=account_index,
                     business_id=business_id
-                ).first()
+                ).order_by('account_index').first()
             else:
                 # For personal accounts
                 active_account = user.accounts.filter(
@@ -380,14 +378,12 @@ class PayInvoice(graphene.Mutation):
                 
                 # Get the payer's active account using JWT context
                 if account_type == 'business' and business_id:
-                    # For business accounts, find by business_id from JWT
-                    # This will find the business account regardless of who owns it
+                    # For business accounts, find by business_id from JWT (ignore index; employees may have index mismatch)
                     from users.models import Account
                     payer_account = Account.objects.filter(
                         account_type='business',
-                        account_index=account_index,
                         business_id=business_id
-                    ).first()
+                    ).order_by('account_index').first()
                 else:
                     # For personal accounts
                     payer_account = user.accounts.filter(

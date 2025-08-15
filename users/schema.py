@@ -1671,12 +1671,13 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
 			
 			# Get the account using JWT context
 			if account_type == 'business' and business_id:
-				# For business accounts, find the account by business_id
-				account = Account.objects.get(
+				# For business accounts, find the account by business_id (ignore index to support employee JWT index)
+				account = Account.objects.filter(
 					business_id=business_id,
-					account_type='business',
-					account_index=account_index
-				)
+					account_type='business'
+				).order_by('account_index').first()
+				if not account:
+					return UpdateAccountAlgorandAddress(success=False, error="Cuenta no encontrada")
 				
 				# IMPORTANT: Only the business owner can update the business account's Algorand address
 				# The address is derived from the owner's OAuth credentials, not the employee's
