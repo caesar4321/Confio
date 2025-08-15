@@ -120,9 +120,11 @@ class BusinessOptInService {
       // Check if this is a business account
       if (decoded.account_type !== 'business') return false;
       
-      // Check if user is owner (not employee)
+      // Check if user is owner
       // In JWT, business_employee_role would be set for employees
-      return !decoded.business_employee_role;
+      // But 'owner' role is still considered an owner
+      const role = decoded.business_employee_role;
+      return !role || role === 'owner';
     } catch (error) {
       console.error('Error checking if user is business owner:', error);
       return false;
@@ -163,8 +165,10 @@ class BusinessOptInService {
       // 1. Check if current user is a business owner
       const isOwner = await this.isBusinessOwner();
       if (!isOwner) {
-        console.log('BusinessOptInService - User is not a business owner, skipping opt-in check');
-        return true; // Not needed for employees
+        console.log('BusinessOptInService - User is not a business owner (non-owner employee), skipping opt-in check');
+        // Non-owner employees cannot opt-in business accounts as they don't have the owner's OAuth credentials
+        // The business account's Algorand address was derived from the owner's OAuth sub
+        return true; // Skip opt-in for non-owner employees - they can't sign for the business
       }
 
       // 2. Get business ID
@@ -207,6 +211,16 @@ class BusinessOptInService {
 
       if (data.checkBusinessOptIn.error) {
         console.error('BusinessOptInService - Backend error:', data.checkBusinessOptIn.error);
+        
+        // If the error is about employee permissions, handle it gracefully
+        if (data.checkBusinessOptIn.error.includes('empleados') || 
+            data.checkBusinessOptIn.error.includes('employee') ||
+            data.checkBusinessOptIn.error.includes('dueño')) {
+          console.log('BusinessOptInService - Employee cannot opt-in, continuing without opt-in');
+          progressCallback?.('Continuando sin opt-in...');
+          return true; // Allow employee to continue without opt-in
+        }
+        
         return false;
       }
 
@@ -216,7 +230,15 @@ class BusinessOptInService {
         return true;
       }
 
-      // 5. Opt-ins are needed
+      // 5. Opt-ins are needed - but double-check we're not an employee
+      // This should never happen because server checks, but be defensive
+      const doubleCheckOwner = await this.isBusinessOwner();
+      if (!doubleCheckOwner) {
+        console.error('BusinessOptInService - CRITICAL: Employee reached opt-in signing stage! This should not happen.');
+        progressCallback?.('Error: Solo el dueño puede configurar la cuenta');
+        return false;
+      }
+      
       const { assets, optInTransactions } = data.checkBusinessOptIn;
       console.log('BusinessOptInService - Opt-ins needed for assets:', assets);
       

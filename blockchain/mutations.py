@@ -1458,10 +1458,16 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                 logger.info(f'CheckBusinessOptIn: Not a business account (type={account_type})')
                 return cls(needs_opt_in=False, assets=[])
             
-            # Check if user is owner (not employee)
-            if jwt_claims.get('business_employee_role'):
-                logger.info('CheckBusinessOptIn: User is employee, not owner')
-                return cls(needs_opt_in=False, assets=[], error='Only business owners can opt-in')
+            # Check if user is owner (not just a regular employee)
+            employee_role = jwt_claims.get('business_employee_role')
+            if employee_role and employee_role != 'owner':
+                # Only non-owner employees are blocked
+                logger.warning(f'CheckBusinessOptIn: Non-owner employee (role={employee_role}) attempted opt-in for business {business_id}')
+                return cls(
+                    needs_opt_in=False, 
+                    assets=[], 
+                    error='Solo el dueño del negocio puede realizar opt-ins. Los empleados no tienen permisos para esta acción.'
+                )
             
             # Get business account address
             business_id = jwt_claims.get('business_id')
