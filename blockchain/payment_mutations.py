@@ -1175,8 +1175,9 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     d = _mp.unpackb(b, raw=False)
                     _txn.SignedTransaction.undictify(d)
 
-                # Submit as list of raw signed transaction bytes; SDK handles concatenation
-                tx_id = algod_client.send_raw_transaction(tx_bytes_list)
+                # Submit as concatenated raw signed transaction bytes
+                combined_bytes = b"".join(tx_bytes_list)
+                tx_id = algod_client.send_raw_transaction(combined_bytes)
                 logger.info(f"Payment transaction sent: {tx_id}")
             except Exception as e_send:
                 # Attempt a TEAL dryrun for detailed diagnostics in DEBUG mode
