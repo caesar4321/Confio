@@ -1674,6 +1674,7 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                 
                 logger.info(f'CheckBusinessOptIn: Sponsor transaction base64 length: {len(sponsor_transaction)}')
                 logger.info(f'CheckBusinessOptIn: Sponsor transaction first 100 chars: {sponsor_transaction[:100]}')
+                logger.info(f'CheckBusinessOptIn: Full sponsor transaction: {sponsor_transaction}')
                 
                 # Format the transactions for the client with sponsor FIRST
                 # This ensures the wallet submits the funding payment before the asset opt-ins
@@ -1708,6 +1709,13 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                 # Keep camelCase fields as JSON strings for backward compatibility with clients
                 tx_list = transactions_data
                 tx_string = json.dumps(tx_list)
+                
+                # Debug: Check if sponsor transaction is intact in JSON
+                parsed_check = json.loads(tx_string)
+                sponsor_in_json = next((t for t in parsed_check if t.get('type') == 'sponsor'), None)
+                if sponsor_in_json:
+                    logger.info(f'CheckBusinessOptIn: Sponsor in JSON has length: {len(sponsor_in_json.get("transaction", ""))}')
+                
                 return cls(
                     needs_opt_in=True,
                     assets=needed_assets,
