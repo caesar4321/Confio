@@ -940,8 +940,19 @@ class SubmitBusinessOptInGroupMutation(graphene.Mutation):
 
             submit_bytes = [b for (b, _) in signed_pairs]
             logger.info(f'Submitting business opt-in group of {len(submit_bytes)} txns')
-            # Submit as concatenated raw bytes (not base64 encoded)
+            
+            # Log what we're submitting for debugging
+            for i, raw_bytes in enumerate(submit_bytes):
+                logger.info(f'Transaction {i} size: {len(raw_bytes)} bytes')
+                # Log first few bytes to verify it's msgpack
+                logger.info(f'Transaction {i} first bytes: {raw_bytes[:10].hex()}')
+            
+            # Submit as concatenated msgpack-encoded signed transactions
+            # The transactions are already msgpack-encoded, we just concatenate them
             combined = b''.join(submit_bytes)
+            logger.info(f'Submitting concatenated group of {len(combined)} total bytes')
+            
+            # send_raw_transaction expects raw bytes (not base64)
             tx_id = algod_client.send_raw_transaction(combined)
             
             from algosdk.transaction import wait_for_confirmation
