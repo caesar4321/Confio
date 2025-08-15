@@ -1678,20 +1678,25 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
 					account_index=account_index
 				)
 				
-				# Verify user has access to this business account
-				# Check if user owns this business
+				# IMPORTANT: Only the business owner can update the business account's Algorand address
+				# The address is derived from the owner's OAuth credentials, not the employee's
 				if not Account.objects.filter(user=user, business_id=business_id, account_type='business').exists():
-					# Check if user is an employee with permission
+					# Check if user is an owner-employee (owner role in BusinessEmployee table)
 					from .models_employee import BusinessEmployee
 					employee_record = BusinessEmployee.objects.filter(
 						user=user,
 						business_id=business_id,
+						role='owner',
 						is_active=True,
 						deleted_at__isnull=True
 					).first()
 					
 					if not employee_record:
-						return UpdateAccountAlgorandAddress(success=False, error="No tienes acceso a esta cuenta de negocio")
+						# Non-owner employees CANNOT update the business Algorand address
+						return UpdateAccountAlgorandAddress(
+							success=False, 
+							error="Solo el dueño del negocio puede actualizar la dirección de Algorand. Los empleados no pueden cambiar esta configuración."
+						)
 			else:
 				# For personal accounts
 				account = Account.objects.get(

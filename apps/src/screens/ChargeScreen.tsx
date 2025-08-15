@@ -23,6 +23,9 @@ import { useMutation, useQuery } from '@apollo/client';
 import { CREATE_INVOICE, GET_INVOICES, GET_INVOICE } from '../apollo/queries';
 import QRCode from 'react-native-qrcode-svg';
 import { Clipboard } from 'react-native';
+import { jwtDecode } from 'jwt-decode';
+import authService from '../services/authService';
+import businessOptInService from '../services/businessOptInService';
 
 // Import currency icons
 const cUSDIcon = require('../assets/png/cUSD.png');
@@ -211,11 +214,25 @@ const ChargeScreen = () => {
           
           if (!optInSuccess) {
             console.error('ChargeScreen: Business opt-in failed, cannot generate invoice');
-            Alert.alert(
-              'Cuenta no preparada',
-              'Tu cuenta empresarial necesita ser configurada para recibir pagos. Por favor contacta soporte.',
-              [{ text: 'Entendido' }]
-            );
+            
+            // Check if this is a non-owner employee who can't opt-in
+            const token = await authService.getToken();
+            const decoded: any = token ? jwtDecode(token) : {};
+            const isNonOwnerEmployee = decoded.business_employee_role && decoded.business_employee_role !== 'owner';
+            
+            if (isNonOwnerEmployee) {
+              Alert.alert(
+                'Acción requerida del dueño',
+                'La cuenta del negocio necesita ser configurada por el dueño. Por favor pide al dueño del negocio que inicie sesión y genere una factura para completar la configuración.',
+                [{ text: 'Entendido' }]
+              );
+            } else {
+              Alert.alert(
+                'Cuenta no preparada',
+                'Tu cuenta empresarial necesita ser configurada para recibir pagos. Por favor intenta de nuevo.',
+                [{ text: 'Entendido' }]
+              );
+            }
             setIsLoading(false);
             return;
           }
