@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Deploy script for Payment Contract
-Deploys the payment contract to Algorand network and sets up assets
+Deploy/Update script for Payment Contract
+Builds and deploys a fresh payment app, configures assets/sponsor/fee recipient,
+and can also update an existing app's approval/clear programs (merge of update_contract.py).
 """
 
 import os
@@ -31,15 +32,20 @@ from payment import app as payment_app
 # Network configuration
 NETWORK = os.environ.get('ALGORAND_NETWORK', 'testnet')
 
-if NETWORK == 'testnet':
-    ALGOD_ADDRESS = "https://testnet-api.algonode.cloud"
-    ALGOD_TOKEN = ""
-elif NETWORK == 'mainnet':
-    ALGOD_ADDRESS = "https://mainnet-api.algonode.cloud"
-    ALGOD_TOKEN = ""
-else:  # localnet
-    ALGOD_ADDRESS = "http://localhost:4001"
-    ALGOD_TOKEN = "a" * 64
+# Prefer explicit environment overrides for Algod endpoint/token
+ALGOD_ADDRESS = os.environ.get('ALGORAND_ALGOD_ADDRESS')
+ALGOD_TOKEN = os.environ.get('ALGORAND_ALGOD_TOKEN', '')
+
+if not ALGOD_ADDRESS:
+    if NETWORK == 'testnet':
+        ALGOD_ADDRESS = "https://testnet-api.algonode.cloud"
+        ALGOD_TOKEN = ""
+    elif NETWORK == 'mainnet':
+        ALGOD_ADDRESS = "https://mainnet-api.algonode.cloud"
+        ALGOD_TOKEN = ""
+    else:  # localnet
+        ALGOD_ADDRESS = "http://localhost:4001"
+        ALGOD_TOKEN = "a" * 64
 
 # Asset IDs from environment (with LocalNet fallbacks)
 CUSD_ASSET_ID = int(os.environ.get('ALGORAND_CUSD_ASSET_ID', '0'))
@@ -148,7 +154,7 @@ def deploy_payment_contract():
             sys.exit(1)
     
     # Build the contract
-    print("\nBuilding contract...")
+    print("\nBuilding contract (approval + clear)...")
     app_spec = payment_app.build()
     
     # Compile the programs
@@ -240,14 +246,6 @@ def deploy_payment_contract():
         print(f"  cUSD Asset ID: {CUSD_ASSET_ID}")
         print(f"  CONFIO Asset ID: {CONFIO_ASSET_ID}")
         
-        # Use funding service to calculate proper MBR needed
-        import sys
-        sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        from blockchain.account_funding_service import AccountFundingService
-        
-        # Create funding service instance
-        funding_service = AccountFundingService(network=NETWORK)
-        
         # Calculate how much funding is needed for the app
         # The app needs MBR for: base account + 2 asset opt-ins
         app_info = algod_client.account_info(app_address)
@@ -278,12 +276,12 @@ def deploy_payment_contract():
         
         params = algod_client.suggested_params()
         
-        # Payment to fund app with calculated amount
+        # Payment to fund app with exact amount required by setup_assets (2 * 0.1 ALGO)
         fund_txn = PaymentTxn(
             sender=admin_address,
             sp=params,
             receiver=app_address,
-            amt=funding_needed if funding_needed > 0 else 100_000  # At least 0.1 ALGO for setup transaction
+            amt=300_000  # Base (0.1) + 2 ASA opt-ins (0.2) = 0.3 ALGO
         )
         
         # Setup assets call
@@ -297,7 +295,7 @@ def deploy_payment_contract():
             returns=Returns(arg_type="void")
         )
         
-        params.fee = 2000  # Cover inner transactions
+        params.fee = 3000  # Base + 2 inner transactions
         setup_txn = ApplicationCallTxn(
             sender=admin_address,
             sp=params,
@@ -465,6 +463,171 @@ def deploy_payment_contract():
     print(f"   App Address: {app_address}")
     
     return app_id, app_address
+
+
+def update_payment_contract(app_id: int):
+    """Update an existing payment app with freshly built approval/clear programs.
+
+    Mirrors the functionality previously in update_contract.py.
+    """
+    print(f"Updating Payment Contract app_id={app_id} on {NETWORK}...")
+
+    admin_address, admin_private_key = get_admin_account()
+    algod_client = algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS)
+
+    # Build and compile latest programs
+    print("Building latest approval/clear TEAL...")
+    app_spec = payment_app.build()
+    approval_result = algod_client.compile(app_spec.approval_program)
+    approval_program = base64.b64decode(approval_result['result'])
+    clear_result = algod_client.compile(app_spec.clear_program)
+    clear_program = base64.b64decode(clear_result['result'])
+    print(f"Approval size: {len(approval_program)} bytes, Clear size: {len(clear_program)} bytes")
+
+    # Suggested params
+    params = algod_client.suggested_params()
+
+    # Beaker update() method selector (update()void)
+    update_selector = bytes.fromhex("1d04d61a")  # update()void
+
+    # Create UpdateApplication transaction with selector
+    update_txn = ApplicationCallTxn(
+        sender=admin_address,
+        sp=params,
+        index=app_id,
+        on_complete=OnComplete.UpdateApplicationOC,
+        approval_program=approval_program,
+        clear_program=clear_program,
+        app_args=[update_selector],
+    )
+
+    signed_update = update_txn.sign(admin_private_key)
+    tx_id = algod_client.send_transaction(signed_update)
+    print(f"Update transaction sent: {tx_id}")
+    confirmed_txn = wait_for_confirmation(algod_client, tx_id, 10)
+    print(f"✅ Contract updated in round {confirmed_txn.get('confirmed-round', 0)}")
+
+    return app_id
+
+
+def configure_payment_app(app_id: int):
+    """Run idempotent configuration steps (assets opt-in, sponsor, fee recipient)."""
+    admin_address, admin_private_key = get_admin_account()
+    sponsor_address, _ = get_sponsor_account()
+    algod_client = algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS)
+
+    app_address = logic.get_application_address(app_id)
+
+    # Assets setup if IDs are provided
+    if CUSD_ASSET_ID and CONFIO_ASSET_ID:
+        print("\n[Configure] Ensuring app is funded and opted-in to assets...")
+        app_info = algod_client.account_info(app_address)
+        current_balance = app_info.get('amount', 0)
+        assets = app_info.get('assets', [])
+        opted_in_assets = {a.get('asset-id') for a in assets}
+
+        # Minimal funding + two opt-ins (0.3 ALGO) if needed
+        params = algod_client.suggested_params()
+        fund_amt = 0
+        if CUSD_ASSET_ID not in opted_in_assets or CONFIO_ASSET_ID not in opted_in_assets:
+            fund_amt = 300_000
+        if fund_amt:
+            fund_txn = PaymentTxn(sender=admin_address, sp=params, receiver=app_address, amt=fund_amt)
+            stx = fund_txn.sign(admin_private_key)
+            txid = algod_client.send_transaction(stx)
+            wait_for_confirmation(algod_client, txid, 10)
+
+        # Call setup_assets (idempotent in contract)
+        params = algod_client.suggested_params()
+        method = Method(
+            name="setup_assets",
+            args=[Argument(arg_type="uint64", name="cusd_id"), Argument(arg_type="uint64", name="confio_id")],
+            returns=Returns(arg_type="void"),
+        )
+        params.fee = 3000
+        setup_txn = ApplicationCallTxn(
+            sender=admin_address,
+            sp=params,
+            index=app_id,
+            on_complete=OnComplete.NoOpOC,
+            app_args=[method.get_selector(), CUSD_ASSET_ID.to_bytes(8, 'big'), CONFIO_ASSET_ID.to_bytes(8, 'big')],
+            foreign_assets=[CUSD_ASSET_ID, CONFIO_ASSET_ID],
+        )
+        stx = setup_txn.sign(admin_private_key)
+        txid = algod_client.send_transaction(stx)
+        wait_for_confirmation(algod_client, txid, 10)
+        print("✅ Assets configured")
+
+    # Sponsor address (optional)
+    if sponsor_address:
+        print("\n[Configure] Ensuring sponsor address is set...")
+        method = Method(
+            name="set_sponsor",
+            args=[Argument(arg_type="address", name="sponsor")],
+            returns=Returns(arg_type="void"),
+        )
+        params = algod_client.suggested_params()
+        sponsor_txn = ApplicationCallTxn(
+            sender=admin_address,
+            sp=params,
+            index=app_id,
+            on_complete=OnComplete.NoOpOC,
+            app_args=[method.get_selector(), decode_address(sponsor_address)],
+        )
+        stx = sponsor_txn.sign(admin_private_key)
+        txid = algod_client.send_transaction(stx)
+        wait_for_confirmation(algod_client, txid, 10)
+        print("✅ Sponsor configured")
+
+    # Fee recipient (default to admin)
+    print("\n[Configure] Ensuring fee recipient is set...")
+    method = Method(
+        name="update_fee_recipient",
+        args=[Argument(arg_type="address", name="new_recipient")],
+        returns=Returns(arg_type="void"),
+    )
+    params = algod_client.suggested_params()
+    fee_txn = ApplicationCallTxn(
+        sender=admin_address,
+        sp=params,
+        index=app_id,
+        on_complete=OnComplete.NoOpOC,
+        app_args=[method.get_selector(), decode_address(admin_address)],
+    )
+    stx = fee_txn.sign(admin_private_key)
+    txid = algod_client.send_transaction(stx)
+    wait_for_confirmation(algod_client, txid, 10)
+    print("✅ Fee recipient configured")
+
+    return app_id
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Deploy or update the Payment contract")
+    sub = parser.add_subparsers(dest="command")
+
+    sub.add_parser("deploy", help="Deploy a new app and configure it (default)")
+    up = sub.add_parser("update", help="Update an existing app's approval/clear and reconfigure")
+    up.add_argument("--app-id", type=int, default=int(os.environ.get('ALGORAND_PAYMENT_APP_ID', '0')), help="Existing app id (or env ALGORAND_PAYMENT_APP_ID)")
+
+    args = parser.parse_args()
+
+    cmd = args.command or "deploy"
+    if cmd == "deploy":
+        app_id, app_addr = deploy_payment_contract()
+        # Re-run configuration idempotently to be safe
+        configure_payment_app(app_id)
+        print(f"\nDone. App ID: {app_id}, Address: {app_addr}")
+    elif cmd == "update":
+        if not args.app_id:
+            print("--app-id is required (or set ALGORAND_PAYMENT_APP_ID)")
+            sys.exit(1)
+        app_id = update_payment_contract(args.app_id)
+        configure_payment_app(app_id)
+        print(f"\nDone updating app {app_id}.")
+    else:
+        parser.print_help()
 
 if __name__ == "__main__":
     deploy_payment_contract()
