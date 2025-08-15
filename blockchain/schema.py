@@ -22,18 +22,37 @@ from .payment_mutations import (
     SubmitSponsoredPaymentMutation,
     CreateDirectPaymentMutation
 )
+from .invite_send_mutations import (
+    PrepareInviteForPhone,
+    SubmitInviteForPhone,
+    ClaimInviteForPhoneField,
+    InviteReceiptType,
+    get_invite_receipt_for_phone,
+)
 
 
 class Query(graphene.ObjectType):
     """Blockchain-related queries"""
     check_asset_opt_ins = graphene.Field(CheckAssetOptInsQuery)
     check_sponsor_health = graphene.Field(CheckSponsorHealthQuery)
+    invite_receipt_for_phone = graphene.Field(
+        InviteReceiptType,
+        phone=graphene.String(required=True),
+        phone_country=graphene.String(required=False)
+    )
     
     def resolve_check_asset_opt_ins(self, info):
         return CheckAssetOptInsQuery()
     
     def resolve_check_sponsor_health(self, info):
         return CheckSponsorHealthQuery()
+
+    def resolve_invite_receipt_for_phone(self, info, phone, phone_country=None):
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            return None
+        res = get_invite_receipt_for_phone(phone, phone_country)
+        return InviteReceiptType(**res) if res else None
 
 
 class Mutation(graphene.ObjectType):
@@ -56,6 +75,11 @@ class Mutation(graphene.ObjectType):
     create_sponsored_payment = CreateSponsoredPaymentMutation.Field()
     submit_sponsored_payment = SubmitSponsoredPaymentMutation.Field()
     create_direct_payment = CreateDirectPaymentMutation.Field()
+
+    # Invite & Send contract mutations
+    prepare_invite_for_phone = PrepareInviteForPhone.Field()
+    submit_invite_for_phone = SubmitInviteForPhone.Field()
+    claim_invite_for_phone = ClaimInviteForPhoneField
 
 
 __all__ = ['Query', 'Mutation']

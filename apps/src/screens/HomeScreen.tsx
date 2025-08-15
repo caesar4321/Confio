@@ -39,6 +39,7 @@ import { GET_ACCOUNT_BALANCE, GET_PRESALE_STATUS } from '../apollo/queries';
 import { useCountry } from '../contexts/CountryContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
+import { inviteSendService } from '../services/inviteSendService';
 
 const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
@@ -112,6 +113,7 @@ export const HomeScreen = () => {
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showBalance, setShowBalance] = useState(true);
+  const [inviteNotice, setInviteNotice] = useState<{ exists: boolean; amount?: number; assetId?: number; timestamp?: number } | null>(null);
   
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -150,6 +152,7 @@ export const HomeScreen = () => {
     fetchPolicy: 'cache-and-network',
   });
   const isPresaleActive = presaleStatusData?.isPresaleActive === true;
+  const [presaleDismissed, setPresaleDismissed] = useState(false);
   
   // Refetch balances when active account changes
   useEffect(() => {
@@ -466,6 +469,16 @@ export const HomeScreen = () => {
         
         const address = await authService.getAlgorandAddress();
         setAlgorandAddress(address);
+
+        // Check for invite receipt notice (surprise banner)
+        try {
+          if (userProfile?.phoneNumber) {
+            const r = await inviteSendService.getInviteReceiptNotice(userProfile.phoneNumber, userProfile.phoneCountry);
+            setInviteNotice(r);
+          }
+        } catch (e) {
+          console.log('HomeScreen: invite receipt check skipped');
+        }
         
       } catch (error) {
         console.error('HomeScreen - Error during initialization:', error);
@@ -487,6 +500,21 @@ export const HomeScreen = () => {
       mounted = false;
     };
   }, []);
+
+  // One-time optional trigger via route param after verification
+  useEffect(() => {
+    (async () => {
+      try {
+        const anyRoute: any = route as any;
+        if (anyRoute?.params?.checkInviteReceipt && userProfile?.phoneNumber) {
+          const r = await inviteSendService.getInviteReceiptNotice(userProfile.phoneNumber, userProfile.phoneCountry);
+          setInviteNotice(r);
+          // Clear the param to avoid rechecks
+          try { (navigation as any).setParams({ checkInviteReceipt: undefined }); } catch {}
+        }
+      } catch {}
+    })();
+  }, [route, userProfile?.phoneNumber, userProfile?.phoneCountry]);
 
   // Update header when account changes or user profile updates
   useEffect(() => {
@@ -747,8 +775,8 @@ export const HomeScreen = () => {
           </Animated.View>
         </Animated.View>
         
-        {/* CONFIO Presale Banner - Only show if presale is active */}
-        {isPresaleActive && (
+        {/* CONFIO Presale Banner - Only show if presale is active and not dismissed */}
+        {isPresaleActive && !presaleDismissed && (
           <Animated.View 
           style={[
             styles.presaleBanner,
@@ -765,11 +793,7 @@ export const HomeScreen = () => {
             }
           ]}
         >
-          <TouchableOpacity 
-            style={styles.presaleBannerContent}
-            onPress={() => navigation.navigate('ConfioPresale')}
-            activeOpacity={0.9}
-          >
+          <View style={styles.presaleBannerContent}>
             <View style={styles.presaleBannerLeft}>
               <View style={styles.presaleBadge}>
                 <Text style={styles.presaleBadgeText}>🚀 PREVENTA</Text>
@@ -778,12 +802,24 @@ export const HomeScreen = () => {
               <Text style={styles.presaleBannerSubtitle}>
                 Sé de los primeros en obtener monedas $CONFIO antes del lanzamiento público
               </Text>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('ConfioPresale')}
+                activeOpacity={0.7}
+                style={{ marginTop: 8 }}
+              >
+                <Text style={styles.presaleDetailsLink}>Ver detalles</Text>
+              </TouchableOpacity>
             </View>
             <View style={styles.presaleBannerRight}>
-              <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
-              <Icon name="chevron-right" size={20} color="#8b5cf6" />
+              <TouchableOpacity onPress={() => setPresaleDismissed(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ position: 'absolute', top: -6, right: -6 }}>
+                <Icon name="x" size={18} color="#8b5cf6" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => navigation.navigate('ConfioPresale')} activeOpacity={0.9} style={{ alignItems: 'center' }}>
+                <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
+                <Icon name="chevron-right" size={20} color="#8b5cf6" />
+              </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+          </View>
         </Animated.View>
         )}
         
@@ -936,6 +972,41 @@ export const HomeScreen = () => {
           )}
         </View>
       </ScrollView>
+
+      {/* Invite receipt notice banner */}
+      {inviteNotice?.exists && (
+        <View style={{ position: 'absolute', left: 20, right: 20, bottom: 110 }}>
+          <View style={{ backgroundColor: '#ecfeff', borderColor: '#06b6d4', borderWidth: 1, borderRadius: 14, padding: 14, shadowColor: '#06b6d4', shadowOpacity: 0.2, shadowRadius: 10 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={{ color: '#0e7490', fontWeight: '700' }}>
+                ¡Sorpresa! Recibiste una invitación
+              </Text>
+              <TouchableOpacity onPress={() => setInviteNotice(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                <Icon name="x" size={18} color="#0e7490" />
+              </TouchableOpacity>
+            </View>
+            <Text style={{ color: '#0e7490', marginTop: 6 }}>
+              {`Monto: ${((inviteNotice.amount || 0)/1_000_000).toFixed(2)} ${inviteNotice.assetId === 744151197 ? 'cUSD' : inviteNotice.assetId === 744150851 ? 'CONFIO' : 'ASA'}`}
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                if (inviteNotice.assetId === 744151197) {
+                  navigateToCUSDAccount();
+                } else if (inviteNotice.assetId === 744150851) {
+                  navigateToConfioAccount();
+                } else {
+                  navigateToCUSDAccount();
+                }
+                setInviteNotice(null);
+              }}
+              activeOpacity={0.7}
+              style={{ alignSelf: 'flex-start', marginTop: 8 }}
+            >
+              <Text style={{ color: '#0891b2', fontWeight: '600' }}>Ver detalles</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
 
       {/* Profile Menu */}
       <ProfileMenu
@@ -1230,6 +1301,11 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
+  },
+  presaleDetailsLink: {
+    color: '#8b5cf6',
+    fontWeight: '600',
+    fontSize: 13,
   },
   // Legacy styles kept for compatibility
   content: {

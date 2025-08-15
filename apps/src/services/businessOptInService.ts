@@ -14,6 +14,7 @@ import { AccountManager } from '../utils/accountManager';
 import authService from './authService';
 import { jwtDecode } from 'jwt-decode';
 import { CHECK_BUSINESS_OPT_IN, COMPLETE_BUSINESS_OPT_IN, SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
+import { UPDATE_ACCOUNT_ALGORAND_ADDRESS } from '../apollo/queries';
 
 class BusinessOptInService {
   private static instance: BusinessOptInService;
@@ -189,7 +190,7 @@ class BusinessOptInService {
       // 4. Check with backend if opt-ins are needed
       console.log('BusinessOptInService - Checking with backend for opt-in status...');
       progressCallback?.('Preparando factura...');
-      
+
       const { data } = await apolloClient.mutate({
         mutation: CHECK_BUSINESS_OPT_IN
       });
@@ -210,18 +211,96 @@ class BusinessOptInService {
       }
 
       if (data.checkBusinessOptIn.error) {
-        console.error('BusinessOptInService - Backend error:', data.checkBusinessOptIn.error);
-        
+        const backendError: string = data.checkBusinessOptIn.error || '';
+        console.error('BusinessOptInService - Backend error:', backendError);
+
         // If the error is about employee permissions, handle it gracefully
-        if (data.checkBusinessOptIn.error.includes('empleados') || 
-            data.checkBusinessOptIn.error.includes('employee') ||
-            data.checkBusinessOptIn.error.includes('dueño')) {
-          console.log('BusinessOptInService - Employee cannot opt-in, continuing without opt-in');
-          progressCallback?.('Continuando sin opt-in...');
-          return true; // Allow employee to continue without opt-in
+        if (backendError.includes('empleados') || 
+            backendError.includes('employee') ||
+            backendError.includes('dueño')) {
+          console.log('BusinessOptInService - Employee cannot opt-in; blocking until owner configures');
+          return false; // Block employees here
         }
-        
-        return false;
+
+        // If the business has no Algorand address, try to generate and push it, then retry once
+        if (backendError.toLowerCase().includes('no algorand address')) {
+          const isOwner = await this.isBusinessOwner();
+          const accountManager = AccountManager.getInstance();
+          const ctx = await accountManager.getActiveAccountContext();
+
+          // Employees cannot fix this; block and surface owner-required message upstream
+          if (!isOwner) {
+            console.log('BusinessOptInService - Non-owner employee on missing address; blocking');
+            return false;
+          }
+
+          if (ctx.type === 'business' && ctx.businessId) {
+            try {
+              progressCallback?.('Configurando cuenta...');
+
+              // Load OAuth subject/provider to derive deterministic business address
+              const { oauthStorage } = await import('./oauthStorageService');
+              const oauth = await oauthStorage.getOAuthSubject();
+              if (!oauth?.subject || !oauth?.provider) {
+                console.warn('BusinessOptInService - Missing OAuth subject; cannot derive business address');
+                return false;
+              }
+
+              const provider: 'google' | 'apple' = oauth.provider === 'apple' ? 'apple' : 'google';
+              const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+              const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+              const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+              const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+
+              const { SecureDeterministicWalletService } = await import('./secureDeterministicWallet');
+              const sdw = SecureDeterministicWalletService.getInstance();
+              const wallet = await sdw.createOrRestoreWallet(
+                iss,
+                oauth.subject,
+                aud,
+                provider,
+                'business',
+                ctx.index || 0,
+                ctx.businessId
+              );
+
+              if (wallet?.address) {
+                console.log('BusinessOptInService - Derived business address, updating backend');
+                const upd2 = await apolloClient.mutate({
+                  mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
+                  variables: { algorandAddress: wallet.address }
+                });
+                const ok2 = upd2?.data?.updateAccountAlgorandAddress?.success;
+                const err2 = upd2?.data?.updateAccountAlgorandAddress?.error;
+                console.log('BusinessOptInService - Address update result:', { ok: ok2, error: err2 });
+
+                // Retry the opt-in check once after updating address
+                const retry = await apolloClient.mutate({ mutation: CHECK_BUSINESS_OPT_IN });
+                const retryErr = retry?.data?.checkBusinessOptIn?.error as string | undefined;
+                if (!retryErr) {
+                  // Continue with the now-updated response object
+                  data.checkBusinessOptIn = retry.data.checkBusinessOptIn;
+                  console.log('BusinessOptInService - Retry succeeded after address update');
+                } else {
+                  console.warn('BusinessOptInService - Retry still failing:', retryErr);
+                  return false;
+                }
+              } else {
+                console.warn('BusinessOptInService - Could not derive business address');
+                return false;
+              }
+            } catch (deriveError) {
+              console.error('BusinessOptInService - Error deriving/updating business address:', deriveError);
+              return false;
+            }
+          } else {
+            console.warn('BusinessOptInService - Not in a business context while handling address error');
+            return false;
+          }
+        } else {
+          // Unknown backend error; block to avoid partial/incorrect setup
+          return false;
+        }
       }
 
       if (!data.checkBusinessOptIn.needsOptIn) {
@@ -319,8 +398,9 @@ class BusinessOptInService {
         const optInTransactions = transactions.filter(t => t.type === 'opt-in');
         console.log(`BusinessOptInService - Found ${optInTransactions.length} opt-in transactions to sign`);
         
-        // Sign each opt-in transaction
-        const signedTransactions = [];
+        // Start group with the sponsor transaction FIRST to fund fees/MBR
+        // Then append each signed opt-in transaction
+        const signedTransactions: string[] = [];
         
         for (const optInData of optInTransactions) {
           try {
@@ -339,7 +419,7 @@ class BusinessOptInService {
           }
         }
         
-        // Add the pre-signed sponsor transaction at the end
+        // Add the pre-signed sponsor transaction at the BEGINNING
         console.log('BusinessOptInService - Sponsor transaction type:', typeof sponsorTxnData.transaction);
         console.log('BusinessOptInService - Sponsor transaction length:', sponsorTxnData.transaction?.length);
         console.log('BusinessOptInService - Sponsor transaction first 100 chars:', sponsorTxnData.transaction?.substring(0, 100));
@@ -363,7 +443,8 @@ class BusinessOptInService {
           }
         }
         
-        signedTransactions.push(sponsorTxn);
+        // Place sponsor first so funding lands before opt-ins are validated
+        signedTransactions.unshift(sponsorTxn);
         
         // Submit the group transaction
         // For group transactions with multiple opt-ins, we need a different approach
