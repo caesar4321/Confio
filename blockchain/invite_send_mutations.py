@@ -161,10 +161,15 @@ class SubmitInviteForPhone(graphene.Mutation):
         stx_pay1 = pay1.sign(sk)
         stx_app = app_call.sign(sk)
 
-        # Submit group
+        # Submit group (concatenate raw signed bytes explicitly to tolerate mixed inputs)
         try:
-            txids = algod_client.send_transactions([stx_pay0, stx_pay1, algo_encoding.msgpack_decode(user_signed), stx_app])
-            # Wait for confirmation (short timeout)
+            group_bytes = b"".join([
+                algo_encoding.msgpack_encode(stx_pay0),
+                user_signed,
+                algo_encoding.msgpack_encode(stx_pay1),
+                algo_encoding.msgpack_encode(stx_app),
+            ])
+            txid = algod_client.send_raw_transaction(group_bytes)
             transaction.wait_for_confirmation(algod_client, stx_app.get_txid(), 8)
             return cls(success=True, txid=stx_app.get_txid())
         except Exception as e:
