@@ -10,92 +10,8 @@ from users.models import Account
 from .algorand_account_manager import AlgorandAccountManager
 from .algorand_sponsor_service import algorand_sponsor_service
 import asyncio
-import json
-import base64
-import msgpack
-from algosdk.transaction import SignedTransaction
 
 logger = logging.getLogger(__name__)
-
-
-def normalize_signed_transactions(signed_transactions):
-    """
-    Normalize and validate signed transactions input.
-    
-    Handles:
-    - JSON string input containing list
-    - List of base64 strings
-    - List of {index, transaction} dicts
-    
-    Returns list of raw transaction bytes ready for submission.
-    Validates that each transaction is a proper SignedTransaction.
-    """
-    # 1) If string, parse as JSON
-    if isinstance(signed_transactions, str):
-        try:
-            signed_transactions = json.loads(signed_transactions)
-            logger.info(f"Parsed JSON string to list of {len(signed_transactions)} transactions")
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON in signedTransactions: {e}")
-    
-    # 2) If dict format with index/transaction, extract and sort
-    if (isinstance(signed_transactions, list) and signed_transactions 
-        and isinstance(signed_transactions[0], dict) and 'transaction' in signed_transactions[0]):
-        logger.info("Converting dict format transactions to base64 list")
-        signed_transactions = [
-            d['transaction'] 
-            for d in sorted(signed_transactions, key=lambda x: x.get('index', 0))
-        ]
-    
-    if not isinstance(signed_transactions, list):
-        raise ValueError("signedTransactions must be a list of base64 strings or {index,transaction} dicts")
-    
-    stx_bytes = []
-    for i, s in enumerate(signed_transactions):
-        if not isinstance(s, str):
-            raise ValueError(f"signedTransactions[{i}] is not a base64 string")
-        
-        # Normalize base64 (handle URL-safe, remove whitespace, add padding)
-        s = s.strip().replace('\n', '').replace('\r', '').replace(' ', '')
-        s = s.replace('-', '+').replace('_', '/')
-        padding_needed = (-len(s)) % 4
-        if padding_needed:
-            s += '=' * padding_needed
-            logger.debug(f"Transaction {i}: Added {padding_needed} padding chars")
-        
-        try:
-            b = base64.b64decode(s)
-        except Exception as e:
-            raise ValueError(f"Transaction {i}: Invalid base64 encoding: {e}")
-        
-        # 3) Validate it's a proper SignedTransaction structure
-        try:
-            d = msgpack.unpackb(b, raw=False)
-            SignedTransaction.undictify(d)  # Will raise if invalid structure
-            logger.debug(f"Transaction {i}: Valid SignedTransaction ({len(b)} bytes)")
-        except Exception as e:
-            raise ValueError(f"Transaction {i}: Not a valid SignedTransaction: {e}")
-        
-        stx_bytes.append(b)
-    
-    # 4) Verify group ID consistency if this is a group
-    if len(stx_bytes) > 1:
-        group_ids = []
-        for i, b in enumerate(stx_bytes):
-            d = msgpack.unpackb(b, raw=False)
-            grp = d.get('txn', {}).get('grp')
-            group_ids.append(grp)
-            if grp:
-                logger.debug(f"Transaction {i}: Group ID {grp.hex()[:8]}...")
-        
-        unique_groups = set(g for g in group_ids if g is not None)
-        if len(unique_groups) > 1:
-            grp_strs = [g.hex()[:8] if g else 'None' for g in group_ids]
-            raise ValueError(f"Group ID mismatch: transactions have different group IDs: {grp_strs}")
-        elif len(unique_groups) == 1:
-            logger.info(f"Group ID verified: all {len(stx_bytes)} transactions share same group")
-    
-    return stx_bytes
 
 
 class EnsureAlgorandReadyMutation(graphene.Mutation):
@@ -937,36 +853,55 @@ class SubmitBusinessOptInGroupMutation(graphene.Mutation):
             logger.info('SubmitBusinessOptInGroupMutation: submitting opt-in group')
 
             # Parse input JSON if passed as a string
+            import json
+            import base64
+            import msgpack
             from algosdk.v2client import algod
             
-            # Use the new normalized validation utility
-            try:
-                stx_bytes = normalize_signed_transactions(signed_transactions)
-                logger.info(f'SubmitBusinessOptInGroupMutation: Normalized {len(stx_bytes)} transactions')
-            except ValueError as e:
-                logger.error(f'Transaction validation failed: {e}')
-                return cls(success=False, error=str(e))
-            
-            # Don't reorder transactions - the group ID is already set for the specific order
-            # The sponsor transaction should already be first if that's required
-            
+            if isinstance(signed_transactions, str):
+                try:
+                    signed_transactions = json.loads(signed_transactions)
+                except json.JSONDecodeError as e:
+                    logger.error(f'Invalid JSON for signed_transactions: {e}')
+                    return cls(success=False, error='Invalid transaction format')
+
+            if not isinstance(signed_transactions, list) or not signed_transactions:
+                return cls(success=False, error='No transactions provided')
+
+            # Decode signed transactions
+            submit_bytes = []
+            for i, txn_b64 in enumerate(signed_transactions):
+                try:
+                    if isinstance(txn_b64, dict):
+                        # Accept object with 'transaction' field
+                        txn_b64 = txn_b64.get('transaction')
+                    if not isinstance(txn_b64, str):
+                        raise ValueError('Each transaction must be a base64 string')
+
+                    # Simple base64 decode without extra normalization
+                    decoded = base64.b64decode(txn_b64)
+                    submit_bytes.append(decoded)
+                    logger.info(f'Transaction {i}: decoded {len(decoded)} bytes')
+                except Exception as e:
+                    logger.error(f'Failed to decode transaction {i}: {e}')
+                    return cls(success=False, error=f'Failed to decode transaction {i}: {str(e)}')
+
             # Submit group
             algod_client = algod.AlgodClient(
                 AlgorandAccountManager.ALGOD_TOKEN,
                 AlgorandAccountManager.ALGOD_ADDRESS
             )
 
-            logger.info(f'Submitting business opt-in group of {len(stx_bytes)} txns')
+            logger.info(f'Submitting business opt-in group of {len(submit_bytes)} txns')
             
             # Log what we're submitting for debugging
-            for i, raw_bytes in enumerate(stx_bytes):
+            for i, raw_bytes in enumerate(submit_bytes):
                 logger.info(f'Transaction {i} size: {len(raw_bytes)} bytes')
                 # Log first few bytes to verify it's msgpack
                 logger.info(f'Transaction {i} first bytes: {raw_bytes[:10].hex()}')
             
             # Submit as base64-encoded concatenated bytes
-            # The SDK accepts both raw bytes and base64, but in this context expects base64
-            combined = b''.join(stx_bytes)
+            combined = b''.join(submit_bytes)
             combined_b64 = base64.b64encode(combined).decode('ascii')
 
             logger.info(f'Submitting concatenated group of {len(combined)} total bytes')
