@@ -194,6 +194,49 @@ export const CONVERT_CUSD_TO_USDC = gql`
   }
 `;
 
+// Invite & Send — prepare invite for phone
+export const PREPARE_INVITE_FOR_PHONE = gql`
+  mutation PrepareInviteForPhone(
+    $phone: String!,
+    $phoneCountry: String,
+    $amount: Float!,
+    $assetType: String,
+    $message: String
+  ) {
+    prepareInviteForPhone(
+      phone: $phone,
+      phoneCountry: $phoneCountry,
+      amount: $amount,
+      assetType: $assetType,
+      message: $message
+    ) {
+      success
+      error
+      transactions
+      sponsorTransactions
+      groupId
+      invitationId
+    }
+  }
+`;
+
+// Invite & Send — submit invite group
+export const SUBMIT_INVITE_FOR_PHONE = gql`
+  mutation SubmitInviteForPhone(
+    $signedAxferB64: String!,
+    $sponsorUnsigned: [String!]!
+  ) {
+    submitInviteForPhone(
+      signedAxferB64: $signedAxferB64,
+      sponsorUnsigned: $sponsorUnsigned
+    ) {
+      success
+      error
+      txid
+    }
+  }
+`;
+
 export const GET_CONVERSIONS = gql`
   query GetConversions($limit: Int, $status: String) {
     conversions(limit: $limit, status: $status) {

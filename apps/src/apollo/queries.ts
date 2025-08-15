@@ -2777,3 +2777,14 @@ export const PURCHASE_PRESALE_TOKENS = gql`
     }
   }
 `;
+export const INVITE_RECEIPT_FOR_PHONE = gql`
+  query InviteReceiptForPhone($phone: String!, $phoneCountry: String) {
+    inviteReceiptForPhone(phone: $phone, phoneCountry: $phoneCountry) {
+      exists
+      statusCode
+      assetId
+      amount
+      timestamp
+    }
+  }
+`;

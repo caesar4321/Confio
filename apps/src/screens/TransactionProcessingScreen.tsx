@@ -9,6 +9,7 @@ import { PAY_INVOICE } from '../apollo/queries';
 import { ALGORAND_SPONSORED_SEND, SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
 import { AccountManager } from '../utils/accountManager';
 import algorandService from '../services/algorandService';
+import { inviteSendService } from '../services/inviteSendService';
 import * as nacl from 'tweetnacl';
 import * as msgpack from 'algorand-msgpack';
 import { Buffer } from 'buffer';
@@ -388,16 +389,55 @@ export const TransactionProcessingScreen = () => {
       }
     };
 
+    const processInviteSend = async () => {
+      try {
+        // Step 1: Verifying
+        setCurrentStep(0);
+        await new Promise(resolve => setTimeout(resolve, 600));
+
+        // Step 2: Processing on blockchain (invite escrow)
+        setCurrentStep(1);
+        const assetType = (transactionData.tokenType || transactionData.currency || 'CUSD').toUpperCase() as 'CUSD' | 'CONFIO';
+        const amountNum = parseFloat(transactionData.amount);
+        const phone = transactionData.recipientPhone as string;
+        const message = transactionData.memo || undefined;
+
+        const res = await inviteSendService.createInviteForPhone(phone, undefined, amountNum, assetType, message);
+        if (!res.success) {
+          setTransactionError(res.error || 'No se pudo crear la invitación');
+          setIsComplete(true);
+          return;
+        }
+
+        // Step 3: Confirming
+        setCurrentStep(2);
+        if (res.txid) {
+          (transactionData as any).transactionId = res.txid;
+        }
+        setTransactionSuccess(true);
+        setIsComplete(true);
+      } catch (error) {
+        console.error('TransactionProcessingScreen: Error processing invite send:', error);
+        setTransactionError('Error al procesar la invitación. Inténtalo de nuevo.');
+        setIsComplete(true);
+      }
+    };
+
     const processUnifiedSend = async () => {
       try {
         // Step 1: Verifying transaction
         setCurrentStep(0);
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // For Algorand blockchain, always use sponsored send
-        // This handles all cases: recipientUserId, recipientPhone, or recipientAddress
-        console.log('TransactionProcessingScreen: Processing Algorand sponsored send...');
-        await processAlgorandSponsoredSend();
+        // If recipient is not on Confío and we have a phone, route to Invite flow
+        if (transactionData.isOnConfio === false && transactionData.recipientPhone) {
+          console.log('TransactionProcessingScreen: Processing InviteSend flow for non-Confío friend');
+          await processInviteSend();
+        } else {
+          // Sponsored direct send for Confío friends or direct address
+          console.log('TransactionProcessingScreen: Processing Algorand sponsored send...');
+          await processAlgorandSponsoredSend();
+        }
       } catch (error) {
         console.error('TransactionProcessingScreen: Error processing send:', error);
         console.error('TransactionProcessingScreen: Error details:', {

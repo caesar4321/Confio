@@ -158,6 +158,10 @@ const PhoneVerificationScreen = () => {
             // Auth flow - complete phone verification and authenticate
             Alert.alert('Success', 'Phone number verified!');
             await completePhoneVerification();
+            // Navigate to Home and trigger one-time invite receipt check
+            try {
+              navigation.navigate('BottomTabs', { screen: 'Home', params: { checkInviteReceipt: true } } as any);
+            } catch (e) {}
           }
         } else {
           Alert.alert('Error', data.verifyTelegramCode.error || 'Verification failed');
