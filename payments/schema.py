@@ -537,17 +537,25 @@ class PayInvoice(graphene.Mutation):
                         unique_id = str(uuid.uuid4())[:8]
                         payment_transaction.transaction_hash = f"pending_blockchain_{payment_transaction.id}_{microsecond_timestamp}_{unique_id}"
                         
-                        # Store transaction data for client signing
-                        # Use transactions_to_sign for new 4-txn format (only user transactions)
+                        # Solution 1: Server creates ALL 4 transactions at once, sends to client
+                        # No need to store transactions in DB - client will sign and return them immediately
+                        all_txns = json.loads(create_result.transactions) if isinstance(create_result.transactions, str) else create_result.transactions
+                        
+                        # Save minimal tracking info to DB (no transactions)
                         payment_transaction.blockchain_data = {
-                            'transactions_to_sign': json.loads(create_result.transactions) if isinstance(create_result.transactions, str) else create_result.transactions,
-                            'user_signing_indexes': create_result.user_signing_indexes,
+                            'payment_id': payment_transaction.payment_transaction_id,
+                            'status': 'pending_signature'
+                        }
+                        payment_transaction.save()
+                        
+                        # After saving, add transactions to the response only (not persisted)
+                        payment_transaction.blockchain_data = {
+                            'transactions': all_txns,  # ALL 4 transactions for client to sign
                             'group_id': create_result.group_id,
                             'gross_amount': float(create_result.gross_amount),
                             'net_amount': float(create_result.net_amount),
-                            'fee_amount': float(create_result.fee_amount)
+                            'fee_amount': float(create_result.fee_amount),
                         }
-                        payment_transaction.save()
                         
                         # DON'T mark invoice as PAID yet - wait for blockchain confirmation
                         # The invoice will be marked as PAID in SubmitSponsoredPayment mutation

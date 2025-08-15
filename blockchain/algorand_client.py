@@ -208,7 +208,7 @@ class AlgorandClient:
             
             # Get transaction bytes and ID
             import msgpack
-            tx_bytes = msgpack.packb(txn.dictify())  # Serialize transaction
+            tx_bytes = msgpack.packb(txn.dictify(), use_bin_type=True)  # Serialize transaction
             tx_id = txn.get_txid()
             
             return tx_bytes, tx_id
@@ -283,7 +283,7 @@ class AlgorandClient:
             
             # Return serialized group
             import msgpack
-            return b''.join([msgpack.packb(txn.dictify()) for txn in txn_list])
+            return b''.join([msgpack.packb(txn.dictify(), use_bin_type=True) for txn in txn_list])
             
         except Exception as e:
             logger.error(f"Error building sponsored transaction: {e}")

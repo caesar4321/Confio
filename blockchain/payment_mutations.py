@@ -292,48 +292,34 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
                 f"fee: {fee_amount_base / (10 ** decimals)})"
             )
             
-            # Store sponsor transactions for later reconstruction (in both Payment and PaymentTransaction if available)
-            # Only return user transactions to frontend (the 2 AXFERs for 4-txn group)
-            sponsor_data = {
-                'sponsor_transactions': [
-                    {
-                        'index': st['index'],
-                        'txn': st['signed'] if st.get('signed') else st['txn'],
-                        'signed': True
-                    } for st in tx_result.get('sponsor_transactions', [])
-                ],
-                'group_id': tx_result.get('group_id')
-            }
+            # SOLUTION 1: Return ALL 4 transactions to frontend (sponsor ones pre-signed)
+            # This ensures all transactions use the SAME chain parameters
             
-            if payment_record:
-                # Store sponsor transactions in blockchain_data for SubmitSponsoredPayment to use
-                payment_record.blockchain_data = json.dumps(sponsor_data)
-                payment_record.save()
-                logger.info(f"Stored sponsor transactions in payment record {payment_id}")
-            
-            # Also store in PaymentTransaction if it exists (for invoice payments)
-            try:
-                from payments.models import PaymentTransaction
-                payment_transaction = PaymentTransaction.objects.filter(payment_transaction_id=payment_id).first()
-                if payment_transaction:
-                    # Update blockchain_data to include sponsor transactions
-                    existing_data = payment_transaction.blockchain_data or {}
-                    existing_data.update(sponsor_data)
-                    payment_transaction.blockchain_data = existing_data
-                    payment_transaction.save()
-                    logger.info(f"Stored sponsor transactions in PaymentTransaction {payment_id}")
-            except Exception as e:
-                logger.warning(f"Could not store sponsor transactions in PaymentTransaction: {e}")
-            
-            # Only return user transactions (the 2 AXFERs) to frontend
-            # Frontend should NOT receive sponsor transactions
             transaction_data = []
-            user_txns = tx_result.get('transactions_to_sign', [])
             
-            # For 4-txn group, we have 2 user transactions (merchant and fee AXFERs)
+            # Add sponsor transactions (already signed if mnemonic available)
+            sponsor_txns = tx_result.get('sponsor_transactions', [])
+            for sp_txn in sponsor_txns:
+                idx = sp_txn['index']
+                # Use signed version if available, otherwise use unsigned
+                # Both are base64 encoded from msgpack_encode
+                txn_data = sp_txn['signed'] if sp_txn['signed'] else sp_txn['txn']
+                is_signed = bool(sp_txn['signed'])
+                
+                transaction_data.append({
+                    'index': idx,
+                    'type': 'payment' if idx == 0 else 'application',
+                    'transaction': txn_data,
+                    'signed': is_signed,  # True only if actually signed
+                    'needs_signature': not is_signed,  # Need signature if not signed
+                    'message': 'Sponsor payment' if idx == 0 else 'App call'
+                })
+            
+            # Add user transactions (need signing)
+            user_txns = tx_result.get('transactions_to_sign', [])
             for i, user_txn in enumerate(user_txns):
                 transaction_data.append({
-                    'index': i,  # Client will use 0 and 1 for the two AXFERs
+                    'index': i + 1,  # User transactions at index 1 and 2
                     'type': 'asset_transfer',
                     'transaction': base64.b64encode(user_txn['txn']).decode() if isinstance(user_txn['txn'], bytes) else user_txn['txn'],
                     'signed': False,
@@ -343,8 +329,8 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
             
             return cls(
                 success=True,
-                transactions=transaction_data,  # Only user transactions (2 AXFERs)
-                user_signing_indexes=[0, 1],  # User signs both AXFERs
+                transactions=transaction_data,  # ALL 4 transactions (sponsor pre-signed)
+                user_signing_indexes=[1, 2],  # User signs transactions at index 1 and 2
                 group_id=tx_result.get('group_id'),
                 gross_amount=amount_in_base / (10 ** decimals),
                 net_amount=net_amount_base / (10 ** decimals),
@@ -354,406 +340,6 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
             
         except Exception as e:
             logger.error(f'Error creating sponsored payment: {str(e)}', exc_info=True)
-            return cls(success=False, error=str(e))
-
-
-class SubmitSponsoredPaymentCUSDStyleMutation(graphene.Mutation):
-    """
-    Submit a sponsored payment using the cUSD conversion pattern.
-    Handles transactions_to_sign and sponsor_transactions separately.
-    """
-    
-    class Arguments:
-        signed_transactions = graphene.JSONString(
-            required=True,
-            description="JSON with userSignedTxns array and groupId"
-        )
-        payment_id = graphene.String(required=False, description="Payment ID for database update")
-    
-    success = graphene.Boolean()
-    error = graphene.String()
-    transaction_id = graphene.String()
-    confirmed_round = graphene.Int()
-    
-    @classmethod  
-    def mutate(cls, root, info, signed_transactions, payment_id=None):
-        try:
-            user = info.context.user
-            if not user.is_authenticated:
-                return cls(success=False, error='Not authenticated')
-            
-            logger.info(f"Submitting cUSD-style sponsored payment group for user {user.id}")
-            
-            # Parse the signed_transactions - should be JSON like cUSD conversion
-            import json
-            if isinstance(signed_transactions, str):
-                try:
-                    tx_data = json.loads(signed_transactions)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse signed_transactions JSON: {e}")
-                    return cls(success=False, error='Invalid transaction format')
-            else:
-                tx_data = signed_transactions
-                
-            # Check if this is the new format with index/transaction objects
-            # or the old format with just transaction strings
-            if isinstance(signed_transactions, list) and len(signed_transactions) > 0:
-                if isinstance(signed_transactions[0], dict) and 'transaction' in signed_transactions[0]:
-                    # New format: [{"index": 0, "transaction": "..."}, ...]
-                    logger.info(f"Detected new format with index/transaction objects")
-                    # Sort by index to ensure correct order
-                    sorted_txns = sorted(signed_transactions, key=lambda x: x.get('index', 0))
-                    user_signed_txns = [txn['transaction'] for txn in sorted_txns]
-                else:
-                    # Direct array of transaction strings
-                    user_signed_txns = signed_transactions
-            else:
-                # Old format with userSignedTxns
-                user_signed_txns = tx_data.get('userSignedTxns', [])
-            
-            group_id_b64 = tx_data.get('groupId')
-            
-            if not user_signed_txns:
-                return cls(success=False, error='No signed transactions provided')
-            
-            logger.info(f"Received {len(user_signed_txns)} user-signed transactions")
-            
-            # Get sponsor transactions from the backend - these should already be signed
-            # In cUSD style, sponsor transactions are pre-signed and stored or recreated
-            from blockchain.algorand_sponsor_service import AlgorandSponsorService
-            
-            sponsor_service = AlgorandSponsorService()
-            
-            # For payment transactions, we need to recreate the sponsor transactions
-            # This is different from cUSD where they're pre-built and stored
-            # We'll need to reconstruct the group and get the sponsor parts
-            
-            # Decode user signed transactions to get transaction details
-            decoded_user_txns = []
-            for txn_b64 in user_signed_txns:
-                decoded = base64.b64decode(txn_b64)
-                decoded_user_txns.append(decoded)
-            
-            # For payments following the new 4-transaction pattern:
-            # [Payment(sponsor→user), AssetTransfer(user→merchant), AssetTransfer(user→fee_recipient), AppCall(sponsor)]
-            # User signs the two AssetTransfers (indices 1 and 2)
-            # Sponsor signs Payment (index 0) and AppCall (index 3)
-            
-            # Recreate sponsor transactions based on the group ID and user transactions
-            # This requires parsing the user transactions to extract group context
-            
-            import msgpack
-            
-            # Verify we have exactly 2 user transactions for the 4-txn pattern
-            if len(decoded_user_txns) != 2:
-                return cls(success=False, error=f'Expected 2 user-signed transactions, got {len(decoded_user_txns)}')
-            
-            logger.info(f"=== USER TRANSACTION ORDER DEBUG ===")
-            for i, txn_bytes in enumerate(decoded_user_txns):
-                txn_data = msgpack.unpackb(txn_bytes, raw=False)
-                if 'txn' in txn_data:
-                    txn = txn_data['txn']
-                    sender = encoding.encode_address(txn.get('snd', b''))
-                    if txn.get('type') == 'axfer' or txn.get('arcv'):
-                        receiver = encoding.encode_address(txn.get('arcv', b''))
-                        amount = txn.get('aamt', 0)
-                        logger.info(f"User txn[{i}]: AXFER from {sender[:10]}... to {receiver[:10]}..., amount={amount}")
-                    else:
-                        logger.info(f"User txn[{i}]: Type={txn.get('type')}, Sender={sender[:10]}...")
-            
-            # Parse the merchant transfer (first user transaction)
-            user_txn_msgpack = msgpack.unpackb(decoded_user_txns[0], raw=False)
-            
-            if 'txn' not in user_txn_msgpack:
-                return cls(success=False, error='Invalid merchant transaction format')
-                
-            merchant_txn_data = user_txn_msgpack['txn']
-            
-            # Debug user transaction details
-            logger.info(f"=== USER TRANSACTION DEBUG ===")
-            logger.info(f"Transaction type: {merchant_txn_data.get('type')}")
-            
-            # Get sender from the transaction
-            sender_bytes = merchant_txn_data.get('snd')
-            if sender_bytes:
-                try:
-                    sender_addr = encoding.encode_address(sender_bytes)
-                    logger.info(f"Transaction sender: {sender_addr}")
-                except Exception as e:
-                    logger.error(f"Failed to encode sender address: {e}")
-            
-            # Get receiver from the transaction
-            receiver_bytes = merchant_txn_data.get('arcv')
-            if receiver_bytes:
-                try:
-                    receiver_addr = encoding.encode_address(receiver_bytes)
-                    logger.info(f"Transaction receiver: {receiver_addr}")
-                except Exception as e:
-                    logger.error(f"Failed to encode receiver address: {e}")
-            
-            # Parse the fee transfer (second user transaction)
-            fee_txn_msgpack = msgpack.unpackb(decoded_user_txns[1], raw=False)
-            if 'txn' not in fee_txn_msgpack:
-                return cls(success=False, error='Invalid fee transaction format')
-            
-            fee_txn_data = fee_txn_msgpack['txn']
-            
-            # Get group ID from either transaction
-            group_id_bytes = merchant_txn_data.get('grp') or fee_txn_data.get('grp')
-            
-            if not group_id_bytes:
-                return cls(success=False, error='User transactions missing group ID')
-            
-            # Extract transaction details from both transfers
-            user_address = encoding.encode_address(merchant_txn_data.get('snd', b''))
-            recipient_address_from_txn = encoding.encode_address(merchant_txn_data.get('arcv', b''))  # From user's transaction
-            fee_recipient = encoding.encode_address(fee_txn_data.get('arcv', b''))
-            asset_id = merchant_txn_data.get('xaid', 0)
-            net_amount = merchant_txn_data.get('aamt', 0)
-            fee_amount = fee_txn_data.get('aamt', 0)
-            
-            # For invoice payments, use the recipient address from the database
-            # This ensures we send to the business's actual blockchain address, not what the client thinks
-            recipient_address = recipient_address_from_txn  # Default to transaction value
-            if payment_id:
-                from payments.models import Payment
-                try:
-                    payment_record = Payment.objects.get(payment_id=payment_id)
-                    if payment_record.recipient_address:
-                        recipient_address = payment_record.recipient_address
-                        logger.info(f"Got recipient address from payment record: {recipient_address[:10]}...")
-                except Payment.DoesNotExist:
-                    logger.warning(f"Payment record {payment_id} not found, using address from transaction")
-            
-            logger.info(f"=== EXTRACTED ADDRESSES FROM USER TXNS ===")
-            logger.info(f"User (sender): {user_address}")
-            logger.info(f"Recipient from txn: {recipient_address_from_txn}")
-            logger.info(f"Recipient (final): {recipient_address}")
-            logger.info(f"Fee recipient: {fee_recipient}")
-            
-            # Total amount is net + fee
-            amount = net_amount + fee_amount
-            
-            # Payment ID is optional for the 4-transaction pattern
-            # We already have all the needed info from the transactions themselves
-            
-            # Recreate the sponsor transactions for 4-transaction pattern
-            builder = PaymentTransactionBuilder(network=settings.ALGORAND_NETWORK)
-            
-            # Get suggested parameters
-            params = builder.algod_client.suggested_params()
-            min_fee = getattr(params, 'min_fee', 1000) or 1000
-            
-            # Check if user needs MBR top-up
-            mbr_topup = 0
-            try:
-                account_info = builder.algod_client.account_info(user_address)
-                current_balance = account_info.get('amount', 0)
-                min_balance_required = account_info.get('min-balance', 0)
-                if current_balance < min_balance_required:
-                    mbr_topup = min(min_balance_required - current_balance, 100_000)  # Cap at 0.1 ALGO
-            except:
-                pass  # Skip MBR check on error
-            
-            # Transaction 0: Sponsor payment to user (MBR top-up or 0)
-            sponsor_payment_fee = min_fee * 3  # Pays for itself + 2 user AXFERs
-            sponsor_params = SuggestedParams(
-                fee=sponsor_payment_fee,
-                first=params.first,
-                last=params.last,
-                gh=params.gh,
-                gen=params.gen,
-                flat_fee=True
-            )
-            
-            sponsor_payment = transaction.PaymentTxn(
-                sender=builder.sponsor_address,
-                sp=sponsor_params,
-                receiver=user_address,
-                amt=mbr_topup,  # MBR top-up or 0
-                note=b"Sponsored payment with MBR" if mbr_topup > 0 else b"Sponsored payment"
-            )
-            sponsor_payment.group = group_id_bytes
-            
-            # Transaction 3: App call from sponsor (last in 4-txn group)
-            app_call_fee = min_fee  # App call pays its own fee
-            app_params = SuggestedParams(
-                fee=app_call_fee,
-                first=params.first,
-                last=params.last,
-                gh=params.gh,
-                gen=params.gen,
-                flat_fee=True
-            )
-            
-            # Determine method based on asset
-            if asset_id == builder.cusd_asset_id:
-                method_name = "pay_with_cusd"
-            elif asset_id == builder.confio_asset_id:
-                method_name = "pay_with_confio"
-            else:
-                return cls(success=False, error=f'Unknown asset ID: {asset_id}')
-            
-            # Use simplified 2-arg method signature (contract accesses transactions directly)
-            method = Method(
-                name=method_name,
-                args=[
-                    Argument(arg_type="address", name="recipient"),
-                    Argument(arg_type="string", name="payment_id")
-                ],
-                returns=Returns(arg_type="void")
-            )
-            
-            # Properly ABI-encode the arguments
-            from algosdk.abi import ABIType
-            address_type = ABIType.from_string("address")
-            string_type = ABIType.from_string("string")
-            
-            # Debug addresses before encoding
-            logger.info(f"=== ADDRESS VALIDATION DEBUG ===")
-            logger.info(f"User address: {user_address}")
-            logger.info(f"Recipient address: {recipient_address}")
-            
-            # Validate addresses
-            try:
-                user_decoded = encoding.decode_address(user_address)
-                logger.info(f"✓ User address is valid: {user_address}")
-            except Exception as e:
-                logger.error(f"✗ User address is INVALID: {user_address} - Error: {e}")
-                return cls(success=False, error=f'Invalid user address: {user_address}')
-            
-            try:
-                recipient_decoded = encoding.decode_address(recipient_address)
-                logger.info(f"✓ Recipient address is valid: {recipient_address}")
-            except Exception as e:
-                logger.error(f"✗ Recipient address is INVALID: {recipient_address} - Error: {e}")
-                return cls(success=False, error=f'Invalid recipient address: {recipient_address}')
-            
-            # Encode the arguments
-            recipient_arg = encoding.decode_address(recipient_address)  # Address is just 32 bytes
-            payment_id_arg = string_type.encode(payment_id if payment_id else "")  # String needs ABI encoding
-            
-            # Log accounts array before creating app call
-            logger.info(f"=== APP CALL ACCOUNTS ARRAY ===")
-            logger.info(f"accounts[0] = {user_address}")
-            logger.info(f"accounts[1] = {recipient_address}")
-            logger.info(f"Expected: gtxn[1].Sender ({user_address}) == accounts[0] ({user_address})")
-            
-            app_call = transaction.ApplicationCallTxn(
-                sender=builder.sponsor_address,
-                sp=app_params,
-                index=builder.payment_app_id,
-                on_complete=transaction.OnComplete.NoOpOC,
-                app_args=[
-                    method.get_selector(),
-                    recipient_arg,  # 32-byte address
-                    payment_id_arg  # ABI-encoded string with length prefix
-                ],
-                accounts=[user_address, recipient_address],  # Pass user and recipient as account references
-                foreign_assets=[asset_id]
-            )
-            app_call.group = group_id_bytes
-            
-            # Sign sponsor transactions
-            sponsor_mnemonic = settings.ALGORAND_SPONSOR_MNEMONIC
-            sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
-            
-            signed_sponsor_payment = sponsor_payment.sign(sponsor_private_key)
-            signed_app_call = app_call.sign(sponsor_private_key)
-            
-            # Combine all transactions in correct 4-txn order: 
-            # [sponsor_payment, user_merchant_transfer, user_fee_transfer, sponsor_app_call]
-            all_transactions = [
-                msgpack.packb(signed_sponsor_payment.dictify()),  # Index 0: Sponsor payment
-                decoded_user_txns[0],                              # Index 1: User's merchant transfer (already msgpack)
-                decoded_user_txns[1],                              # Index 2: User's fee transfer (already msgpack)
-                msgpack.packb(signed_app_call.dictify())          # Index 3: Sponsor app call
-            ]
-            
-            # Submit to Algorand network
-            algod_client = algod.AlgodClient(
-                AlgorandAccountManager.ALGOD_TOKEN,
-                AlgorandAccountManager.ALGOD_ADDRESS
-            )
-            
-            logger.info(f"Submitting 4-transaction payment group: sponsor_payment, merchant_transfer, fee_transfer, app_call")
-            logger.info(f"Net amount to merchant: {net_amount}, Fee: {fee_amount}, Total: {amount}")
-            
-            # Send the transaction array as base64 (SDK decodes internally)
-            combined_txns = b''.join(all_transactions)
-            tx_id = algod_client.send_raw_transaction(base64.b64encode(combined_txns).decode('utf-8'))
-            logger.info(f"Payment transaction sent: {tx_id}")
-            
-            # Wait for confirmation
-            from algosdk.transaction import wait_for_confirmation
-            confirmed_txn = wait_for_confirmation(algod_client, tx_id, 10)
-            confirmed_round = confirmed_txn.get('confirmed-round', 0)
-            
-            # Update payment record if exists
-            if payment_id:
-                # First try to update PaymentTransaction (for invoice payments)
-                try:
-                    from payments.models import PaymentTransaction, Invoice
-                    from django.utils import timezone
-                    
-                    payment_transaction = PaymentTransaction.objects.get(payment_transaction_id=payment_id)
-                    payment_transaction.status = 'CONFIRMED'
-                    payment_transaction.transaction_hash = tx_id
-                    payment_transaction.save()
-                    
-                    # If this payment has an associated invoice, mark it as PAID
-                    if payment_transaction.invoice:
-                        invoice = payment_transaction.invoice
-                        if invoice.status != 'PAID':
-                            invoice.status = 'PAID'
-                            invoice.paid_at = timezone.now()
-                            invoice.paid_by_user = payment_transaction.payer_user
-                            invoice.paid_by_business = payment_transaction.payer_business
-                            invoice.save()
-                            logger.info(f"Marked invoice {invoice.invoice_id} as PAID after blockchain confirmation")
-                    
-                    logger.info(f"Updated PaymentTransaction {payment_id} as confirmed with tx {tx_id}")
-                    
-                    # Create notifications (same logic as before)
-                    # ... notification code can be added here if needed
-                    
-                except:
-                    # Fall back to Payment model if PaymentTransaction doesn't exist
-                    try:
-                        payment_record = Payment.objects.get(payment_id=payment_id)
-                        payment_record.status = 'completed'
-                        payment_record.transaction_hash = tx_id
-                        payment_record.confirmed_at_block = confirmed_round
-                        payment_record.save()
-                        
-                        logger.info(f"Updated payment record {payment_id} as completed")
-                    except Payment.DoesNotExist:
-                        logger.warning(f"Payment record {payment_id} not found for update")
-            
-            logger.info(
-                f"Sponsored payment confirmed for user {user.id}: "
-                f"TxID: {tx_id}, Round: {confirmed_round}"
-            )
-            
-            return cls(
-                success=True,
-                transaction_id=tx_id,
-                confirmed_round=confirmed_round
-            )
-            
-        except Exception as e:
-            logger.error(f'Error submitting cUSD-style sponsored payment: {str(e)}', exc_info=True)
-            
-            # Update payment record as failed if exists
-            if payment_id:
-                try:
-                    payment_record = Payment.objects.get(payment_id=payment_id)
-                    payment_record.status = 'failed'
-                    payment_record.error_message = str(e)
-                    payment_record.save()
-                except Payment.DoesNotExist:
-                    pass
-            
             return cls(success=False, error=str(e))
 
 
@@ -805,26 +391,51 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     return cls(success=False, error='Invalid transaction format')
             
             # Extract transactions from the format sent by frontend
-            # Frontend sends: [{"index": 1, "transaction": "..."}, {"index": 2, "transaction": "..."}] for 4-txn groups
-            # Or [{"index": 0, "transaction": "..."}, {"index": 1, "transaction": "..."}] for 3-txn groups
+            # Frontend sends: list of dicts with {index, transaction}
+            sorted_txn_dicts = None
             if isinstance(signed_transactions, list) and len(signed_transactions) > 0:
                 if isinstance(signed_transactions[0], dict) and 'transaction' in signed_transactions[0]:
                     logger.info(f"Extracting transactions from index/transaction format")
                     # Sort by index to ensure correct order
-                    sorted_txns = sorted(signed_transactions, key=lambda x: x.get('index', 0))
+                    sorted_txn_dicts = sorted(signed_transactions, key=lambda x: x.get('index', 0))
                     # Log the indices we received
-                    received_indices = [txn.get('index', -1) for txn in sorted_txns]
+                    received_indices = [txn.get('index', -1) for txn in sorted_txn_dicts]
                     logger.info(f"Received transactions with indices: {received_indices}")
-                    # Extract just the transaction strings
-                    signed_transactions = [txn['transaction'] for txn in sorted_txns]
-                    logger.info(f"Extracted {len(signed_transactions)} transaction strings")
+                    # Also create a simple list of strings for legacy 2-txn path
+                    signed_transactions = [txn['transaction'] for txn in sorted_txn_dicts]
+                    logger.info(f"Prepared {len(signed_transactions)} transaction strings for legacy path")
             
-            # Check if we're dealing with a 4-txn group (new format with 2 user transactions)
-            # In the new format, we only get the 2 user-signed AXFERs
-            if len(signed_transactions) == 2:
-                logger.info("Detected 4-txn payment group; will load stored sponsor transactions")
-                if not payment_id:
-                    return cls(success=False, error='Payment ID required for 4-txn sponsored submission')
+            # SOLUTION 1: Accept all 4 transactions from client (sponsor ones already signed)
+            # This ensures all transactions have the SAME chain parameters
+            
+            dict_count = len(sorted_txn_dicts) if isinstance(sorted_txn_dicts, list) else 0
+            logger.info(f"Transaction count (dicts): {dict_count} | (strings): {len(signed_transactions) if isinstance(signed_transactions, list) else 'n/a'}")
+            
+            # Check if we received all 4 transactions (new approach)
+            if isinstance(sorted_txn_dicts, list) and len(sorted_txn_dicts) == 4:
+                logger.info("Received complete 4-txn payment group (sponsor pre-signed)")
+                # Extract raw bytes from each transaction
+                signed_txn_objects = []
+                for i, txn_data in enumerate(sorted_txn_dicts):
+                    txn_b64 = txn_data.get('transaction')
+                    
+                    try:
+                        # Decode base64 to get raw bytes
+                        decoded_bytes = base64.b64decode(txn_b64)
+                        signed_txn_objects.append(decoded_bytes)
+                        logger.info(f"  Transaction {i}: decoded successfully")
+                    except Exception as e:
+                        logger.error(f"Failed to decode transaction {i}: {e}")
+                        raise
+                
+                logger.info("All 4 transactions ready for submission")
+                
+            elif len(signed_transactions) == 2:
+                logger.error("Received only 2 transactions - this is no longer supported!")
+                return cls(success=False, error='Invalid transaction count. Expected 4 transactions for payment group, received 2.')
+                
+                # ===== OPTION B: DETERMINISTIC REBUILD OF SPONSOR TRANSACTIONS =====
+                # Recipe: Extract ALL parameters from user txns to rebuild exact same group
                 # Decode user transactions to inspect payer + group id
                 decoded_user_txns = []
                 for txn_b64 in signed_transactions:
@@ -858,175 +469,354 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                 logger.info(f"=== GROUP ID DEBUG ===")
                 logger.info(f"Group ID from user txn: {base64.b64encode(group_id_bytes).decode() if group_id_bytes else 'None'}")
 
-                # Prefer stored sponsor transactions from creation time to preserve exact group hash
-                sponsor_b64_by_index = {}
-                try:
-                    from payments.models import PaymentTransaction
-                    pt = PaymentTransaction.objects.filter(payment_transaction_id=payment_id).first()
-                    if pt and pt.blockchain_data:
-                        bd = pt.blockchain_data
-                        if isinstance(bd, str):
-                            bd = json.loads(bd)
-                        for st in bd.get('sponsor_transactions', []):
-                            sponsor_b64_by_index[st.get('index')] = st.get('txn')
-                except Exception as e:
-                    logger.warning(f"PaymentTransaction lookup/parse failed: {e}")
-                if not sponsor_b64_by_index:
-                    try:
-                        pay = Payment.objects.get(payment_id=payment_id)
-                        if pay.blockchain_data:
-                            bd = pay.blockchain_data
-                            if isinstance(bd, str):
-                                bd = json.loads(bd)
-                            for st in bd.get('sponsor_transactions', []):
-                                sponsor_b64_by_index[st.get('index')] = st.get('txn')
-                    except Exception as e:
-                        logger.warning(f"Payment record lookup/parse failed: {e}")
+                # Rebuild and re-sign sponsor transactions deterministically (Option B)
+                # Extract fields from user AXFER[0]
+                asset_id = user_txn.get('xaid', 0)
+                recipient_bytes = user_txn.get('arcv', b'')
+                if not isinstance(recipient_bytes, (bytes, bytearray)) or len(recipient_bytes) != 32:
+                    return cls(success=False, error='Invalid recipient in user transaction')
+                recipient_address = encoding.encode_address(recipient_bytes)
 
-                # Prefer stored sponsor transactions created at build-time to guarantee
-                # byte-for-byte consistency with the user's group and avoid group drift.
-                sponsor0 = sponsor_b64_by_index.get(0)
-                sponsor3 = sponsor_b64_by_index.get(3)
-                if sponsor0 and sponsor3:
-                    # Validate stored sponsor txns belong to the same group id
-                    try:
-                        sp0 = msgpack.unpackb(base64.b64decode(sponsor0), raw=False)
-                        sp3 = msgpack.unpackb(base64.b64decode(sponsor3), raw=False)
-                        grp0 = sp0.get('txn', {}).get('grp')
-                        grp3 = sp3.get('txn', {}).get('grp')
-                        if grp0 != group_id_bytes or grp3 != group_id_bytes:
-                            logger.warning("Stored sponsor transactions have a different group id than user-signed txns. Falling back to rebuild.")
-                            sponsor0 = sponsor3 = None
-                    except Exception as e:
-                        logger.warning(f"Failed to validate stored sponsor transactions: {e}. Falling back to rebuild.")
-                        sponsor0 = sponsor3 = None
-
-                if sponsor0 and sponsor3:
-                    signed_txn_objects = [
-                        sponsor0,
-                        signed_transactions[0],
-                        signed_transactions[1],
-                        sponsor3,
-                    ]
-                    logger.info("Using stored sponsor transactions for 4-txn group")
+                builder = PaymentTransactionBuilder(network=settings.ALGORAND_NETWORK)
+                # Preflight app compatibility with the asset_id derived from user txn
+                preflight = builder.validate_payment_app(asset_id)
+                if not preflight.get('success'):
+                    logger.error(f"Payment app preflight (submit) failed: {preflight.get('error')}")
+                    return cls(success=False, error=f"Payment app is not compatible/ready: {preflight.get('error')}")
                 else:
-                    # Rebuild and re-sign sponsor transactions as a fallback path
-                    # Extract fields from user AXFER[0]
-                    asset_id = user_txn.get('xaid', 0)
-                    recipient_bytes = user_txn.get('arcv', b'')
-                    if not isinstance(recipient_bytes, (bytes, bytearray)) or len(recipient_bytes) != 32:
-                        return cls(success=False, error='Invalid recipient in user transaction')
-                    recipient_address = encoding.encode_address(recipient_bytes)
-
-                    builder = PaymentTransactionBuilder(network=settings.ALGORAND_NETWORK)
-                    # Preflight app compatibility with the asset_id derived from user txn
-                    preflight = builder.validate_payment_app(asset_id)
-                    if not preflight.get('success'):
-                        logger.error(f"Payment app preflight (submit) failed: {preflight.get('error')}")
-                        return cls(success=False, error=f"Payment app is not compatible/ready: {preflight.get('error')}")
-                    else:
-                        info_map = preflight.get('info') or {}
-                        logger.info(
-                            f"Payment app preflight (submit) OK: app={info_map.get('app_id')}, "
-                            f"confio={info_map.get('confio_asset_id')}, cusd={info_map.get('cusd_asset_id')}, "
-                            f"fee_recipient={info_map.get('fee_recipient')}, sponsor={info_map.get('sponsor_address')}, "
-                            f"approval_sha256={info_map.get('approval_sha256')}"
-                        )
-
-                    # Determine method selector
-                    if asset_id == builder.cusd_asset_id:
-                        method_name = "pay_with_cusd"
-                    elif asset_id == builder.confio_asset_id:
-                        method_name = "pay_with_confio"
-                    else:
-                        return cls(success=False, error=f'Unknown asset ID: {asset_id}')
-
-                    from algosdk.abi import Method, Argument, Returns, ABIType
-                    from algosdk.transaction import SuggestedParams
-                    method = Method(
-                        name=method_name,
-                        args=[
-                            Argument(arg_type="address", name="recipient"),
-                            Argument(arg_type="string", name="payment_id")
-                        ],
-                        returns=Returns(arg_type="void")
+                    info_map = preflight.get('info') or {}
+                    logger.info(
+                        f"Payment app preflight (submit) OK: app={info_map.get('app_id')}, "
+                        f"confio={info_map.get('confio_asset_id')}, cusd={info_map.get('cusd_asset_id')}, "
+                        f"fee_recipient={info_map.get('fee_recipient')}, sponsor={info_map.get('sponsor_address')}, "
+                        f"approval_sha256={info_map.get('approval_sha256')}"
                     )
 
-                    # Use round/genesis parameters from user txn to minimize drift
-                    first = user_txn.get('fv')
-                    last = user_txn.get('lv')
-                    gh = user_txn.get('gh')
-                    gen = user_txn.get('gen')
-                    live_params = builder.algod_client.suggested_params()
-                    params = SuggestedParams(
-                        fee=getattr(live_params, 'min_fee', 1000) or 1000,
-                        first=first or live_params.first,
-                        last=last or live_params.last,
-                        gh=gh or live_params.gh,
-                        gen=gen or live_params.gen,
-                        flat_fee=True
-                    )
+                # Determine method selector
+                if asset_id == builder.cusd_asset_id:
+                    method_name = "pay_with_cusd"
+                elif asset_id == builder.confio_asset_id:
+                    method_name = "pay_with_confio"
+                else:
+                    return cls(success=False, error=f'Unknown asset ID: {asset_id}')
 
-                    # Compute optional MBR top-up (capped), but allow 0
-                    account_info = builder.algod_client.account_info(user_address)
-                    current_balance = account_info.get('amount', 0)
-                    min_balance_required = account_info.get('min-balance', 0)
-                    mbr_topup = 0
-                    if current_balance < min_balance_required:
-                        mbr_topup = min(min_balance_required - current_balance, 100_000)
+                from algosdk.abi import Method, Argument, Returns, ABIType
+                from algosdk.transaction import SuggestedParams
+                method = Method(
+                    name=method_name,
+                    args=[
+                        Argument(arg_type="address", name="recipient"),
+                        Argument(arg_type="string", name="payment_id")
+                    ],
+                    returns=Returns(arg_type="void")
+                )
 
-                    min_fee = getattr(live_params, 'min_fee', 1000) or 1000
-                    sponsor_payment_fee = min_fee * 3
-                    app_call_fee = min_fee
+                # Use round/genesis parameters from user txn to guarantee byte-level match
+                first = user_txn.get('fv')
+                last = user_txn.get('lv')
+                gh = user_txn.get('gh')
+                # Use empty string when user txn omitted genesis_id to avoid altering bytes
+                gen = user_txn.get('gen') or ""
+                # Clone Exactly: use fv/lv/gh/gen from user AXFER to avoid drift
+                params = SuggestedParams(
+                    fee=1000,  # placeholder; we set explicit fees on each txn
+                    first=first,
+                    last=last,
+                    gh=gh,
+                    gen=gen,
+                    flat_fee=True
+                )
+                # Deterministic sponsor payment: no variable MBR top-up
+                mbr_topup = 0
 
-                    sponsor_payment = transaction.PaymentTxn(
-                        sender=builder.sponsor_address,
-                        sp=params,
-                        receiver=user_address,
-                        amt=mbr_topup,
-                        note=b"Sponsored payment" if mbr_topup == 0 else b"Sponsored payment with MBR"
-                    )
-                    sponsor_payment.fee = sponsor_payment_fee
-                    sponsor_payment.group = group_id_bytes
-
-                    # ABI-encode args
-                    string_type = ABIType.from_string("string")
-                    recipient_arg = encoding.decode_address(recipient_address)
-                    payment_id_arg = string_type.encode(payment_id if payment_id else "")
-
-                    app_call = transaction.ApplicationCallTxn(
-                        sender=builder.sponsor_address,
-                        sp=params,
-                        index=builder.payment_app_id,
-                        on_complete=transaction.OnComplete.NoOpOC,
-                        app_args=[
-                            method.get_selector(),
-                            recipient_arg,
-                            payment_id_arg
-                        ],
-                        accounts=[user_address, recipient_address],
-                        foreign_assets=[asset_id]
-                    )
-                    app_call.fee = app_call_fee
-                    app_call.group = group_id_bytes
-
-                    sponsor_mnemonic = settings.ALGORAND_SPONSOR_MNEMONIC
-                    if not sponsor_mnemonic:
-                        return cls(success=False, error='Sponsor mnemonic not configured')
-                    sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
-
-                    from algosdk import encoding as algo_encoding
-                    sponsor_payment_b64 = algo_encoding.msgpack_encode(sponsor_payment.sign(sponsor_private_key))
-                    app_call_b64 = algo_encoding.msgpack_encode(app_call.sign(sponsor_private_key))
-
-                    signed_txn_objects = [
-                        sponsor_payment_b64,
-                        signed_transactions[0],
-                        signed_transactions[1],
-                        app_call_b64,
-                    ]
-                    logger.info("Rebuilt and re-signed sponsor transactions for 4-txn group (fallback path)")
+                # Fixed fees to match builder policy and guarantee deterministic bytes
+                sponsor_payment_fee = 3000
+                app_call_fee = 2000
                 
+                # Extract exact parameters from user's first transaction to ensure consistency
+                # We need to decode one user transaction to get the exact params they used
+                import msgpack as _mp
+                user_txn_dict = _mp.unpackb(base64.b64decode(signed_transactions[0]), raw=False)
+                user_first = user_txn_dict.get('txn', {}).get('fv', params.first)
+                user_last = user_txn_dict.get('txn', {}).get('lv', params.last)
+                user_gh = user_txn_dict.get('txn', {}).get('gh', params.gh)
+                user_gen = user_txn_dict.get('txn', {}).get('gen', params.gen)
+
+                # Build with exact same parameters as user transactions
+                sp_pay = SuggestedParams(
+                    fee=sponsor_payment_fee,
+                    first=user_first,
+                    last=user_last,
+                    gh=user_gh,
+                    gen=user_gen,
+                    flat_fee=True
+                )
+                sponsor_payment = transaction.PaymentTxn(
+                    sender=builder.sponsor_address,
+                    sp=sp_pay,
+                    receiver=user_address,
+                    amt=mbr_topup,
+                    note=b"Sponsored payment"  # Must match creation exactly
+                )
+                sponsor_payment.group = group_id_bytes
+
+                # ABI-encode args (recipient is fixed; payment_id may be empty depending on creation)
+                string_type = ABIType.from_string("string")
+                recipient_arg = encoding.decode_address(recipient_address)
+                # CRITICAL: Use the actual payment_id if provided, otherwise empty string
+                # This must match what was used during creation
+                pid_from_submit = str(payment_id) if payment_id is not None else ""
+                payment_id_arg = string_type.encode(pid_from_submit)
+                logger.info(f"Rebuilding app call with payment_id: '{pid_from_submit}' (length: {len(pid_from_submit)})")
+
+                sp_app = SuggestedParams(
+                    fee=app_call_fee,
+                    first=user_first,
+                    last=user_last,
+                    gh=user_gh,
+                    gen=user_gen,
+                    flat_fee=True
+                )
+                app_call = transaction.ApplicationCallTxn(
+                    sender=builder.sponsor_address,
+                    sp=sp_app,
+                    index=builder.payment_app_id,
+                    on_complete=transaction.OnComplete.NoOpOC,
+                    app_args=[
+                        method.get_selector(),
+                        recipient_arg,
+                        payment_id_arg
+                    ],
+                    accounts=[user_address, recipient_address],
+                    foreign_assets=[asset_id]
+                )
+                app_call.group = group_id_bytes
+
+                # Self-check: recompute expected group id from rebuilt sponsor txns + user txns
+                try:
+                    # Define helper before using it
+                    def _b64(b: bytes) -> str:
+                        try:
+                            return base64.b64encode(b or b"").decode()
+                        except Exception:
+                            return ""
+
+                    from algosdk import transaction as _tx
+                    from algosdk import encoding as _enc
+                    # Load user txns as Transaction objects from signed msgpack using SignedTransaction decoder
+                    # This preserves exact field defaults (e.g., missing fee -> 0) to avoid gid drift
+                    def _load_user_txn_precise(b64: str):
+                        b = base64.b64decode(b64)
+                        # Decode into SignedTransaction, then extract the inner Transaction object
+                        stx = _enc.msgpack_decode(b)
+                        if not hasattr(stx, 'txn'):
+                            raise ValueError('Decoded object is not a SignedTransaction')
+                        # Also keep the raw txn dict for diagnostics
+                        raw = msgpack.unpackb(b, raw=False)
+                        raw_txn = raw.get('txn') if isinstance(raw, dict) else None
+                        return stx.txn, (raw_txn if isinstance(raw_txn, dict) else {})
+
+                    user_txn1_obj, user_txn1_raw = _load_user_txn_precise(signed_transactions[0])
+                    user_txn2_obj, user_txn2_raw = _load_user_txn_precise(signed_transactions[1])
+
+                    # Compute gid with fixed fees/policy for empty vs provided pid
+                    def _compute_gid_fixed(pid_str: str):
+                        # User transactions in sponsored payments ALWAYS have fee=0
+                        # SignedTransaction decoding preserves this; no adjustment needed
+                        sp_for_gid = SuggestedParams(
+                            fee=sponsor_payment_fee, first=user_first, last=user_last, gh=user_gh, gen=user_gen, flat_fee=True
+                        )
+                        app_for_gid = SuggestedParams(
+                            fee=app_call_fee, first=user_first, last=user_last, gh=user_gh, gen=user_gen, flat_fee=True
+                        )
+                        pay_tmp = transaction.PaymentTxn(
+                            sender=builder.sponsor_address,
+                            sp=sp_for_gid,
+                            receiver=user_address,
+                            amt=0,
+                            note=b"Sponsored payment"
+                        )
+                        pid_bytes = string_type.encode(pid_str or "")
+                        app_tmp = transaction.ApplicationCallTxn(
+                            sender=builder.sponsor_address,
+                            sp=app_for_gid,
+                            index=builder.payment_app_id,
+                            on_complete=transaction.OnComplete.NoOpOC,
+                            app_args=[method.get_selector(), recipient_arg, pid_bytes],
+                            accounts=[user_address, recipient_address],
+                            foreign_assets=[asset_id]
+                        )
+                        gid_local = _tx.calculate_group_id([pay_tmp, user_txn1_obj, user_txn2_obj, app_tmp])
+                        return gid_local, pay_tmp, app_tmp
+
+                    # Always use the payment_id that was passed (matching creation)
+                    expected_gid_pid, pay_p, app_p = _compute_gid_fixed(pid_from_submit)
+                    
+                    # Also compute without payment_id for comparison
+                    expected_gid_empty, pay_e, app_e = _compute_gid_fixed("")
+                    
+                    # Check which one matches
+                    if expected_gid_pid == group_id_bytes:
+                        logger.info(f"✓ Group hash matches with payment_id='{pid_from_submit}'")
+                        sponsor_payment = pay_p
+                        app_call = app_p
+                        expected_gid = expected_gid_pid
+                    elif expected_gid_empty == group_id_bytes:
+                        logger.info("✓ Group hash matches with empty payment_id")
+                        sponsor_payment = pay_e
+                        app_call = app_e
+                        expected_gid = expected_gid_empty
+                    else:
+                        logger.warning("Group hash mismatch during Option B rebuild - investigating")
+                        # Provide additional diagnostics
+                        def _fv_lv_gh_gen(tx):
+                            return tx.get('fv'), tx.get('lv'), _b64(tx.get('gh', b'')), tx.get('gen', '')
+                        fv1, lv1, gh1, gen1 = _fv_lv_gh_gen(user_txn1_raw)
+                        fv2, lv2, gh2, gen2 = _fv_lv_gh_gen(user_txn2_raw)
+                        logger.warning(f"user_txn1: fv={fv1}, lv={lv1}, gh={gh1}, gen='{gen1}' fee={user_txn1_raw.get('fee')}")
+                        logger.warning(f"user_txn2: fv={fv2}, lv={lv2}, gh={gh2}, gen='{gen2}' fee={user_txn2_raw.get('fee')}")
+                        logger.warning(f"sponsor_pay_fee_fixed={sponsor_payment_fee}, app_call_fee_fixed={app_call_fee}")
+                        
+                        # More detailed debugging
+                        logger.error("=== GROUP HASH MISMATCH DEBUG ===")
+                        logger.error(f"User group ID: {_b64(group_id_bytes)[:20]}...")
+                        logger.error(f"Empty pid GID: {_b64(expected_gid_empty)[:20]}...")
+                        logger.error(f"With pid GID: {_b64(expected_gid_pid)[:20]}...")
+                        logger.error(f"Payment ID used: '{pid_from_submit}'")
+                        logger.error(f"User txn1 fee (obj): {user_txn1_obj.fee if hasattr(user_txn1_obj, 'fee') else 'N/A'}")
+                        logger.error(f"User txn2 fee (obj): {user_txn2_obj.fee if hasattr(user_txn2_obj, 'fee') else 'N/A'}")
+                        logger.error(f"App call with pid app_args: {[_b64(arg)[:20] if isinstance(arg, bytes) else str(arg)[:20] for arg in app_p.app_args]}")
+                        logger.error(f"App call empty app_args: {[_b64(arg)[:20] if isinstance(arg, bytes) else str(arg)[:20] for arg in app_e.app_args]}")
+
+                        # Deterministic variant search (no storage) to find a gid match
+                        from itertools import product
+                        variant_matched = False
+                        variants_tried = 0
+                        user_orders = [
+                            (user_txn1_obj, user_txn2_obj),
+                            (user_txn2_obj, user_txn1_obj)
+                        ]
+                        accounts_variants = [
+                            (user_address, recipient_address),
+                            (recipient_address, user_address)
+                        ]
+                        fee_pairs = [
+                            (sponsor_payment_fee, app_call_fee),
+                            (app_call_fee, sponsor_payment_fee)
+                        ]
+                        notes = [b"Sponsored payment", None]
+                        pids = [pid_from_submit, ""]
+                        for (u1, u2), (acc0, acc1), (fee0, fee3), note_bytes, pid_opt in product(user_orders, accounts_variants, fee_pairs, notes, pids):
+                            variants_tried += 1
+                            sp_for_gid = SuggestedParams(
+                                fee=fee0, first=user_first, last=user_last, gh=user_gh, gen=user_gen, flat_fee=True
+                            )
+                            app_for_gid = SuggestedParams(
+                                fee=fee3, first=user_first, last=user_last, gh=user_gh, gen=user_gen, flat_fee=True
+                            )
+                            pay_tmp = transaction.PaymentTxn(
+                                sender=builder.sponsor_address,
+                                sp=sp_for_gid,
+                                receiver=user_address,
+                                amt=0,
+                                note=note_bytes if note_bytes is not None else None
+                            )
+                            pid_bytes = string_type.encode(pid_opt or "")
+                            app_tmp = transaction.ApplicationCallTxn(
+                                sender=builder.sponsor_address,
+                                sp=app_for_gid,
+                                index=builder.payment_app_id,
+                                on_complete=transaction.OnComplete.NoOpOC,
+                                app_args=[method.get_selector(), recipient_arg, pid_bytes],
+                                accounts=[acc0, acc1],
+                                foreign_assets=[asset_id]
+                            )
+                            gid_local = _tx.calculate_group_id([pay_tmp, u1, u2, app_tmp])
+                            if gid_local == group_id_bytes:
+                                sponsor_payment = pay_tmp
+                                app_call = app_tmp
+                                expected_gid = gid_local
+                                logger.info(
+                                    f"✓ Variant matched gid. order={'12' if (u1 is user_txn1_obj) else '21'}, "
+                                    f"accounts={'payer_first' if (acc0==user_address) else 'recipient_first'}, "
+                                    f"fees=({fee0},{fee3}), note={'present' if note_bytes else 'absent'}, pid={'present' if pid_opt else 'empty'}"
+                                )
+                                variant_matched = True
+                                break
+                        if not variant_matched:
+                            logger.warning(f"Tried {variants_tried} variants; none matched gid. Proceeding will fail.")
+                            # Use the payment_id version anyway since that's what was created
+                            logger.warning("Proceeding with payment_id version despite mismatch")
+                            sponsor_payment = pay_p
+                            app_call = app_p
+                            expected_gid = expected_gid_pid
+                except Exception as ghe:
+                    logger.warning(f"Group-hash self-check skipped due to parsing error: {ghe}")
+
+                sponsor_mnemonic = settings.ALGORAND_SPONSOR_MNEMONIC
+                if not sponsor_mnemonic:
+                    return cls(success=False, error='Sponsor mnemonic not configured')
+                sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
+                
+                # CRITICAL: Final verification before signing
+                # Ensure the rebuilt group matches what the user signed
+                try:
+                    from algosdk.transaction import calculate_group_id
+                    # Parse user transactions as Transaction objects
+                    import msgpack as _mp
+                    u1_dict = _mp.unpackb(base64.b64decode(signed_transactions[0]), raw=False)
+                    u2_dict = _mp.unpackb(base64.b64decode(signed_transactions[1]), raw=False)
+                    u1_txn = transaction.Transaction.undictify(u1_dict['txn'])
+                    u2_txn = transaction.Transaction.undictify(u2_dict['txn'])
+                    
+                    # Calculate what group ID we would get with our rebuilt txns
+                    final_group_id = calculate_group_id([sponsor_payment, u1_txn, u2_txn, app_call])
+                    
+                    if final_group_id != group_id_bytes:
+                        logger.error("CRITICAL: Rebuilt group ID doesn't match user's group!")
+                        logger.error(f"Rebuilt: {base64.b64encode(final_group_id).decode()[:20]}...")
+                        logger.error(f"User's:  {base64.b64encode(group_id_bytes).decode()[:20]}...")
+                        
+                        # Debug: Log the exact parameters being used
+                        logger.error(f"Sponsor payment: amt={sponsor_payment.amt}, note={sponsor_payment.note}")
+                        logger.error(f"App call: app_args count={len(app_call.app_args)}, accounts={app_call.accounts}")
+                        logger.error(f"App call foreign_assets={app_call.foreign_assets}")
+                        
+                        # Try to identify what's different
+                        test_txns = [sponsor_payment, u1_txn, u2_txn, app_call]
+                        for i, txn in enumerate(test_txns):
+                            logger.error(f"Txn[{i}]: fv={txn.first_valid_round}, lv={txn.last_valid_round}, fee={txn.fee}")
+                        
+                        return cls(success=False, error='Cannot rebuild matching transaction group - please retry payment')
+                    
+                    logger.info("✓ Group ID verification passed - signing sponsor transactions")
+                except Exception as e:
+                    logger.warning(f"Could not verify group ID: {e}")
+                    # Continue anyway but log warning
+
+                # Sign sponsor transactions and prepare bytes
+                stx0 = sponsor_payment.sign(sponsor_private_key)
+                stx3 = app_call.sign(sponsor_private_key)
+                
+                # Debug: Log the sponsor transaction details
+                logger.info(f"Sponsor payment txn: fv={sponsor_payment.first_valid_round}, lv={sponsor_payment.last_valid_round}, fee={sponsor_payment.fee}")
+                logger.info(f"Sponsor app call: fv={app_call.first_valid_round}, lv={app_call.last_valid_round}, fee={app_call.fee}")
+
+                # Keep exact user-signed bytes; do not re-encode as objects
+                user_bytes_1 = base64.b64decode(signed_transactions[0])
+                user_bytes_2 = base64.b64decode(signed_transactions[1])
+
+                # Encode signed transactions using SDK canonical msgpack (returns base64 string)
+                from algosdk import encoding as algo_encoding
+                sponsor_b64_0 = algo_encoding.msgpack_encode(stx0)  # Returns base64 string
+                sponsor_b64_3 = algo_encoding.msgpack_encode(stx3)  # Returns base64 string
+                # Decode to get raw bytes
+                sponsor_bytes_0 = base64.b64decode(sponsor_b64_0)
+                sponsor_bytes_3 = base64.b64decode(sponsor_b64_3)
+
+                # Strict order [0 pay, 1 user→merchant, 2 user→fee, 3 app]
+                signed_txn_objects = [sponsor_bytes_0, user_bytes_1, user_bytes_2, sponsor_bytes_3]
+                logger.info("Rebuilt sponsor txns and prepared raw bytes for 4-txn group")
             else:
                 # Old format or already complete group
                 logger.info(f"Processing {len(signed_transactions)} transactions as complete group")
@@ -1047,9 +837,9 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                         if missing_padding:
                             txn_b64 += '=' * (4 - missing_padding)
                         
-                        # Test decode to validate
-                        _ = base64.b64decode(txn_b64)
-                        signed_txn_objects.append(txn_b64)
+                        # Decode to bytes and append
+                        decoded_bytes = base64.b64decode(txn_b64)
+                        signed_txn_objects.append(decoded_bytes)
                         logger.info(f"  Transaction {i}: validated successfully")
                     except Exception as e:
                         logger.error(f"Failed to validate transaction {i}: {e}")
@@ -1066,12 +856,18 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
             
             # Debug: Log transaction structure before sending
             logger.info(f"=== SUBMITTING TRANSACTION GROUP ===")
-            for i, txn_b64 in enumerate(signed_txn_objects):
-                # Decode base64 to inspect transaction
+            for i, item in enumerate(signed_txn_objects):
+                # Support SignedTransaction, raw bytes, or base64 strings for logging
                 try:
                     import msgpack
-                    txn_bytes = base64.b64decode(txn_b64)
-                    txn_dict = msgpack.unpackb(txn_bytes, raw=False)
+                    if hasattr(item, 'dictify'):
+                        txn_dict = item.dictify()
+                    else:
+                        if isinstance(item, (bytes, bytearray)):
+                            txn_bytes = item
+                        else:
+                            txn_bytes = base64.b64decode(item)
+                        txn_dict = msgpack.unpackb(txn_bytes, raw=False)
                     
                     # Log transaction details
                     if isinstance(txn_dict, dict) and 'txn' in txn_dict:
@@ -1113,12 +909,20 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
             try:
                 # Decode transactions for validation
                 decoded_txns = []
-                for txn_b64 in signed_txn_objects:
+                for item in signed_txn_objects:
                     try:
-                        txn_bytes = base64.b64decode(txn_b64)
+                        if hasattr(item, 'dictify'):
+                            from algosdk import encoding as _enc
+                            txn_bytes = _enc.msgpack_encode(item)
+                        elif isinstance(item, (bytes, bytearray)):
+                            txn_bytes = item
+                        elif isinstance(item, str):
+                            txn_bytes = base64.b64decode(item)
+                        else:
+                            txn_bytes = b''
                         txn_dict = msgpack.unpackb(txn_bytes, raw=False)
                         decoded_txns.append(txn_dict)
-                    except:
+                    except Exception:
                         decoded_txns.append(None)
                 
                 appl_txn = next((t for t in decoded_txns if isinstance(t, dict) and t.get('txn', {}).get('type') == 'appl'), None)
@@ -1333,10 +1137,42 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                 logger.warning(f"Pre-submit validation skipped due to error: {ve}")
 
             # Send the grouped transactions
-            # Combine all transactions and send as base64 string (SDK decodes)
-            combined_txns = b''.join([base64.b64decode(t) for t in signed_txn_objects])
+            # Normalize to a list of SignedTransaction bytes and submit as list (preferred)
             try:
-                tx_id = algod_client.send_raw_transaction(base64.b64encode(combined_txns).decode('utf-8'))
+                from algosdk import transaction as _txn
+                import msgpack as _mp
+                import base64 as _b64
+
+                def ensure_stx_bytes(x) -> bytes:
+                    if isinstance(x, (bytes, bytearray)):
+                        d = _mp.unpackb(x, raw=False)
+                        _txn.SignedTransaction.undictify(d)
+                        return bytes(x)
+                    if isinstance(x, str):
+                        b = _b64.b64decode(x)
+                        d = _mp.unpackb(b, raw=False)
+                        _txn.SignedTransaction.undictify(d)
+                        return b
+                    if hasattr(x, 'dictify') and hasattr(x, 'txn'):
+                        from algosdk import encoding as _enc
+                        b64_str = _enc.msgpack_encode(x)  # Returns base64 string
+                        b = _b64.b64decode(b64_str)  # Decode to raw bytes
+                        d = _mp.unpackb(b, raw=False)
+                        _txn.SignedTransaction.undictify(d)
+                        return b
+                    raise TypeError('Unsupported transaction element; expected SignedTransaction bytes/base64 or object')
+
+                tx_bytes_list = [ensure_stx_bytes(x) for x in signed_txn_objects]
+
+                # Final validation
+                for i, b in enumerate(tx_bytes_list):
+                    d = _mp.unpackb(b, raw=False)
+                    _txn.SignedTransaction.undictify(d)
+
+                # Submit as base64-encoded string (SDK expects base64 input, will decode internally)
+                combined_bytes = b"".join(tx_bytes_list)
+                combined_b64 = base64.b64encode(combined_bytes).decode('utf-8')
+                tx_id = algod_client.send_raw_transaction(combined_b64)
                 logger.info(f"Payment transaction sent: {tx_id}")
             except Exception as e_send:
                 # Attempt a TEAL dryrun for detailed diagnostics in DEBUG mode
@@ -1345,9 +1181,9 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                 from algosdk.error import AlgodHTTPError
                 if isinstance(e_send, AlgodHTTPError) and 'logic eval error' in err_text and getattr(dj_settings, 'DEBUG', False):
                     try:
-                        # Build a dryrun request body that's compatible across SDK versions
-                        # Expecting: {"txns": [ base64-encoded signed txn msgpacks ]}
-                        dr_body = {"txns": signed_txn_objects}
+                        # Build a dryrun request body: list of base64-encoded signed txn msgpacks
+                        dr_b64 = [base64.b64encode(tx).decode('utf-8') if isinstance(tx, (bytes, bytearray)) else tx for tx in signed_txn_objects]
+                        dr_body = {"txns": dr_b64}
                         dr_resp = None
                         # Prefer a separate dryrun Algod if configured (e.g., localnet)
                         from algosdk.v2client.algod import AlgodClient as _AlgodClient
@@ -1698,7 +1534,7 @@ class CreateDirectPaymentMutation(graphene.Mutation):
             transaction_data = []
             for i, txn in enumerate(transactions):
                 encoded_txn = base64.b64encode(
-                    msgpack.packb(txn.dictify())
+                    msgpack.packb(txn.dictify(), use_bin_type=True)
                 ).decode()
                 
                 transaction_data.append({

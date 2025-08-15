@@ -203,7 +203,7 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             
             # Add the signed sponsor transaction FIRST (it's first in the group)
             sponsor_txn_encoded = base64.b64encode(
-                msgpack.packb(signed_fee_txn.dictify())
+                msgpack.packb(signed_fee_txn.dictify(), use_bin_type=True)
             ).decode()
             
             transactions.append({
@@ -218,7 +218,7 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             # Then add user transactions
             for i, (asset_id, user_txn) in enumerate(zip(assets_to_opt_in, user_txns)):
                 unsigned_txn = base64.b64encode(
-                    msgpack.packb(user_txn.dictify())
+                    msgpack.packb(user_txn.dictify(), use_bin_type=True)
                 ).decode()
                 
                 # Determine asset name
@@ -318,7 +318,7 @@ class OptInToAssetMutation(graphene.Mutation):
             
             # Encode transaction for client
             unsigned_txn = base64.b64encode(
-                msgpack.packb(opt_in_txn.dictify())
+                msgpack.packb(opt_in_txn.dictify(), use_bin_type=True)
             ).decode()
             
             # Determine asset name
@@ -868,8 +868,8 @@ class SubmitBusinessOptInGroupMutation(graphene.Mutation):
             if not isinstance(signed_transactions, list) or not signed_transactions:
                 return cls(success=False, error='No transactions provided')
 
-            # Decode signed transactions
-            signed_txn_objects = []
+            # Decode signed transactions (keep exact bytes and parsed dict for inspection)
+            signed_pairs: list = []  # [(bytes, dict)]
             for i, txn_b64 in enumerate(signed_transactions):
                 try:
                     if isinstance(txn_b64, dict):
@@ -885,7 +885,7 @@ class SubmitBusinessOptInGroupMutation(graphene.Mutation):
 
                     decoded = base64.b64decode(txn_b64)
                     signed_txn = msgpack.unpackb(decoded, raw=False)
-                    signed_txn_objects.append(signed_txn)
+                    signed_pairs.append((decoded, signed_txn))
                     logger.info(f'  Opt-in group txn {i}: decoded successfully')
                 except Exception as e:
                     logger.error(f'Failed to decode signed transaction {i}: {e}')
@@ -893,12 +893,12 @@ class SubmitBusinessOptInGroupMutation(graphene.Mutation):
 
             # Reorder if needed: sponsor Payment must be first so MBR lands before opt-ins
             try:
-                sponsor_index = next(i for i, stx in enumerate(signed_txn_objects)
-                                     if isinstance(stx, dict) and isinstance(stx.get('txn'), dict)
-                                     and stx['txn'].get('type') == 'pay')
+                sponsor_index = next(i for i, pair in enumerate(signed_pairs)
+                                     if isinstance(pair[1], dict) and isinstance(pair[1].get('txn'), dict)
+                                     and pair[1]['txn'].get('type') == 'pay')
                 if sponsor_index != 0:
-                    sponsor = signed_txn_objects.pop(sponsor_index)
-                    signed_txn_objects = [sponsor] + signed_txn_objects
+                    sponsor = signed_pairs.pop(sponsor_index)
+                    signed_pairs = [sponsor] + signed_pairs
                     logger.info('SubmitBusinessOptInGroupMutation: reordered group to put sponsor first')
             except StopIteration:
                 logger.warning('SubmitBusinessOptInGroupMutation: no sponsor payment found in group; submitting as-is')
@@ -909,8 +909,11 @@ class SubmitBusinessOptInGroupMutation(graphene.Mutation):
                 AlgorandAccountManager.ALGOD_ADDRESS
             )
 
-            logger.info(f'Submitting business opt-in group of {len(signed_txn_objects)} txns')
-            tx_id = algod_client.send_transactions(signed_txn_objects)
+            submit_bytes = [b for (b, _) in signed_pairs]
+            logger.info(f'Submitting business opt-in group of {len(submit_bytes)} txns')
+            # Submit as concatenated raw bytes (not base64 encoded)
+            combined = b''.join(submit_bytes)
+            tx_id = algod_client.send_raw_transaction(combined)
             
             from algosdk.transaction import wait_for_confirmation
             confirmed = wait_for_confirmation(algod_client, tx_id, 10)
@@ -1226,7 +1229,7 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
             # Sign sponsor transaction
             sponsor_signed = sponsor_payment.sign(sponsor_private_key)
             sponsor_signed_encoded = base64.b64encode(
-                msgpack.packb(sponsor_signed.dictify())
+                msgpack.packb(sponsor_signed.dictify(), use_bin_type=True)
             ).decode()
             
             # Encode user transaction for frontend
@@ -1632,12 +1635,12 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                 user_transactions = []
                 for txn in transactions[1:]:  # All except the sponsor fee payment at index 0
                     user_transactions.append(
-                        base64.b64encode(msgpack.packb(txn.dictify())).decode('utf-8')
+                        base64.b64encode(msgpack.packb(txn.dictify(), use_bin_type=True)).decode('utf-8')
                     )
                 
                 # Sponsor transaction is already signed - encode the SignedTransaction dict
                 sponsor_transaction = base64.b64encode(
-                    msgpack.packb(signed_sponsor_txn.dictify())
+                    msgpack.packb(signed_sponsor_txn.dictify(), use_bin_type=True)
                 ).decode('utf-8')
                 
                 # Format the transactions for the client with sponsor FIRST
