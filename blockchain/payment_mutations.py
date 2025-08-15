@@ -420,8 +420,14 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     txn_b64 = txn_data.get('transaction')
                     
                     try:
+                        # Normalize base64: strip whitespace, handle URL-safe, and pad
+                        s = (txn_b64 or '').strip().replace('\n', '').replace('\r', '')
+                        s = s.replace('-', '+').replace('_', '/')
+                        missing_padding = (-len(s)) % 4
+                        if missing_padding:
+                            s += '=' * missing_padding
                         # Decode base64 to get raw bytes
-                        decoded_bytes = base64.b64decode(txn_b64)
+                        decoded_bytes = base64.b64decode(s)
                         signed_txn_objects.append(decoded_bytes)
                         logger.info(f"  Transaction {i}: decoded successfully")
                     except Exception as e:

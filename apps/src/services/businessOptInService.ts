@@ -318,11 +318,36 @@ class BusinessOptInService {
         }
         
         // Add the pre-signed sponsor transaction at the end
-        signedTransactions.push(sponsorTxnData.transaction);
+        console.log('BusinessOptInService - Sponsor transaction type:', typeof sponsorTxnData.transaction);
+        console.log('BusinessOptInService - Sponsor transaction length:', sponsorTxnData.transaction?.length);
+        console.log('BusinessOptInService - Sponsor transaction first 100 chars:', sponsorTxnData.transaction?.substring(0, 100));
+        
+        // Ensure the sponsor transaction is properly padded
+        let sponsorTxn = sponsorTxnData.transaction;
+        if (typeof sponsorTxn === 'string') {
+          // Add base64 padding if needed
+          const padding = sponsorTxn.length % 4;
+          if (padding) {
+            sponsorTxn += '='.repeat(4 - padding);
+            console.log(`BusinessOptInService - Added ${4 - padding} padding chars to sponsor transaction`);
+          }
+          
+          // Validate it's valid base64
+          try {
+            const decoded = Buffer.from(sponsorTxn, 'base64');
+            console.log(`BusinessOptInService - Sponsor transaction decodes to ${decoded.length} bytes`);
+          } catch (e) {
+            console.error('BusinessOptInService - Invalid base64 in sponsor transaction:', e);
+          }
+        }
+        
+        signedTransactions.push(sponsorTxn);
         
         // Submit the group transaction
         // For group transactions with multiple opt-ins, we need a different approach
         console.log('BusinessOptInService - Submitting group transaction...');
+        console.log('BusinessOptInService - Total transactions:', signedTransactions.length);
+        console.log('BusinessOptInService - Transaction types:', signedTransactions.map(t => typeof t));
         
         // Import the mutation for submitting business opt-in group
         const SUBMIT_BUSINESS_OPT_IN_GROUP = gql`

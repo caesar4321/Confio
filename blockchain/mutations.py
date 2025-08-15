@@ -878,18 +878,35 @@ class SubmitBusinessOptInGroupMutation(graphene.Mutation):
                     if not isinstance(txn_b64, str):
                         raise ValueError('Each transaction must be a base64 string')
 
+                    # Normalize base64: strip whitespace, handle URL-safe, and pad
+                    s = txn_b64.strip().replace('\n', '').replace('\r', '').replace(' ', '')
+                    s = s.replace('-', '+').replace('_', '/')
+                    
                     # Add padding if needed
-                    missing_padding = len(txn_b64) % 4
-                    if missing_padding:
-                        txn_b64 += '=' * (4 - missing_padding)
+                    padding_needed = (4 - len(s) % 4) % 4
+                    if padding_needed:
+                        s += '=' * padding_needed
+                        logger.info(f'Transaction {i}: Added {padding_needed} padding chars to base64')
+                    
+                    logger.info(f'Transaction {i}: base64 length after padding: {len(s)}, first 50 chars: {s[:50]}')
 
-                    decoded = base64.b64decode(txn_b64)
+                    decoded = base64.b64decode(s)
                     signed_txn = msgpack.unpackb(decoded, raw=False)
                     signed_pairs.append((decoded, signed_txn))
                     logger.info(f'  Opt-in group txn {i}: decoded successfully')
+                except msgpack.exceptions.ExtraData as e:
+                    logger.error(f'Transaction {i} has extra data after valid msgpack: {e}')
+                    return cls(success=False, error=f'Transaction {i} has invalid format')
+                except msgpack.exceptions.UnpackException as e:
+                    logger.error(f'Transaction {i} is not valid msgpack: {e}')
+                    logger.error(f'Transaction {i} base64 (with padding): {txn_b64[:50]}...')
+                    logger.error(f'Transaction {i} decoded bytes length: {len(decoded) if "decoded" in locals() else "failed to decode"}')
+                    return cls(success=False, error=f'Transaction {i} is not a valid signed transaction')
                 except Exception as e:
                     logger.error(f'Failed to decode signed transaction {i}: {e}')
-                    return cls(success=False, error='Failed to decode signed transactions')
+                    logger.error(f'Transaction {i} type: {type(txn_b64)}')
+                    logger.error(f'Transaction {i} preview: {str(txn_b64)[:64] if txn_b64 else "None"}')
+                    return cls(success=False, error=f'Failed to decode transaction {i}: {str(e)}')
 
             # Reorder if needed: sponsor Payment must be first so MBR lands before opt-ins
             try:
@@ -1642,6 +1659,9 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                 sponsor_transaction = base64.b64encode(
                     msgpack.packb(signed_sponsor_txn.dictify(), use_bin_type=True)
                 ).decode('utf-8')
+                
+                logger.info(f'CheckBusinessOptIn: Sponsor transaction base64 length: {len(sponsor_transaction)}')
+                logger.info(f'CheckBusinessOptIn: Sponsor transaction first 100 chars: {sponsor_transaction[:100]}')
                 
                 # Format the transactions for the client with sponsor FIRST
                 # This ensures the wallet submits the funding payment before the asset opt-ins
