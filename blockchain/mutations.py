@@ -868,8 +868,8 @@ class SubmitBusinessOptInGroupMutation(graphene.Mutation):
             if not isinstance(signed_transactions, list) or not signed_transactions:
                 return cls(success=False, error='No transactions provided')
 
-            # Decode signed transactions (keep exact bytes and parsed dict for inspection)
-            signed_pairs: list = []  # [(bytes, dict)]
+            # Decode signed transactions (keep exact bytes and best-effort parsed dict for inspection)
+            signed_pairs: list = []  # [(bytes, Optional[dict])]
             for i, txn_b64 in enumerate(signed_transactions):
                 try:
                     if isinstance(txn_b64, dict):
@@ -891,17 +891,27 @@ class SubmitBusinessOptInGroupMutation(graphene.Mutation):
                     logger.info(f'Transaction {i}: base64 length after padding: {len(s)}, first 50 chars: {s[:50]}')
 
                     decoded = base64.b64decode(s)
-                    signed_txn = msgpack.unpackb(decoded, raw=False)
+                    try:
+                        signed_txn = msgpack.unpackb(decoded, raw=False)
+                        logger.info(f'  Opt-in group txn {i}: msgpack parsed')
+                    except Exception as pe:
+                        signed_txn = None
+                        logger.warning(f'  Opt-in group txn {i}: msgpack parse skipped: {pe}')
                     signed_pairs.append((decoded, signed_txn))
-                    logger.info(f'  Opt-in group txn {i}: decoded successfully')
+                    logger.info(f'  Opt-in group txn {i}: decoded base64 length={len(decoded)}')
                 except msgpack.exceptions.ExtraData as e:
-                    logger.error(f'Transaction {i} has extra data after valid msgpack: {e}')
-                    return cls(success=False, error=f'Transaction {i} has invalid format')
+                    logger.warning(f'Transaction {i} has extra data after valid msgpack: {e}')
+                    # Keep raw bytes if available
+                    try:
+                        signed_pairs.append((decoded, None))  # type: ignore[name-defined]
+                    except Exception:
+                        pass
                 except msgpack.exceptions.UnpackException as e:
-                    logger.error(f'Transaction {i} is not valid msgpack: {e}')
-                    logger.error(f'Transaction {i} base64 (with padding): {txn_b64[:50]}...')
-                    logger.error(f'Transaction {i} decoded bytes length: {len(decoded) if "decoded" in locals() else "failed to decode"}')
-                    return cls(success=False, error=f'Transaction {i} is not a valid signed transaction')
+                    logger.warning(f'Transaction {i} is not valid msgpack: {e}. Proceeding with raw bytes.')
+                    try:
+                        signed_pairs.append((decoded, None))  # type: ignore[name-defined]
+                    except Exception:
+                        return cls(success=False, error=f'Transaction {i} could not be decoded')
                 except Exception as e:
                     logger.error(f'Failed to decode signed transaction {i}: {e}')
                     logger.error(f'Transaction {i} type: {type(txn_b64)}')
@@ -909,16 +919,18 @@ class SubmitBusinessOptInGroupMutation(graphene.Mutation):
                     return cls(success=False, error=f'Failed to decode transaction {i}: {str(e)}')
 
             # Reorder if needed: sponsor Payment must be first so MBR lands before opt-ins
-            try:
-                sponsor_index = next(i for i, pair in enumerate(signed_pairs)
-                                     if isinstance(pair[1], dict) and isinstance(pair[1].get('txn'), dict)
-                                     and pair[1]['txn'].get('type') == 'pay')
-                if sponsor_index != 0:
-                    sponsor = signed_pairs.pop(sponsor_index)
-                    signed_pairs = [sponsor] + signed_pairs
-                    logger.info('SubmitBusinessOptInGroupMutation: reordered group to put sponsor first')
-            except StopIteration:
-                logger.warning('SubmitBusinessOptInGroupMutation: no sponsor payment found in group; submitting as-is')
+            # Reorder sponsor first if we can identify it from parsed dict
+            sponsor_index = None
+            for i, (_, parsed) in enumerate(signed_pairs):
+                if isinstance(parsed, dict) and isinstance(parsed.get('txn'), dict) and parsed['txn'].get('type') == 'pay':
+                    sponsor_index = i
+                    break
+            if sponsor_index is not None and sponsor_index != 0:
+                sponsor = signed_pairs.pop(sponsor_index)
+                signed_pairs = [sponsor] + signed_pairs
+                logger.info('SubmitBusinessOptInGroupMutation: reordered group to put sponsor first')
+            elif sponsor_index is None:
+                logger.warning('SubmitBusinessOptInGroupMutation: could not parse sponsor; submitting in provided order')
 
             # Submit group
             algod_client = algod.AlgodClient(
@@ -1652,12 +1664,12 @@ class CheckBusinessOptInMutation(graphene.Mutation):
                 user_transactions = []
                 for txn in transactions[1:]:  # All except the sponsor fee payment at index 0
                     user_transactions.append(
-                        base64.b64encode(msgpack.packb(txn.dictify(), use_bin_type=True)).decode('utf-8')
+                        base64.b64encode(msgpack.packb(txn.dictify())).decode('utf-8')
                     )
                 
                 # Sponsor transaction is already signed - encode the SignedTransaction dict
                 sponsor_transaction = base64.b64encode(
-                    msgpack.packb(signed_sponsor_txn.dictify(), use_bin_type=True)
+                    msgpack.packb(signed_sponsor_txn.dictify())
                 ).decode('utf-8')
                 
                 logger.info(f'CheckBusinessOptIn: Sponsor transaction base64 length: {len(sponsor_transaction)}')
