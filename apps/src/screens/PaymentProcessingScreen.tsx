@@ -290,117 +290,81 @@ export const PaymentProcessingScreen = () => {
               blockchainData = JSON.parse(blockchainData);
             }
             
-            // Handle new 4-txn group structure for payments
-            const transactions = blockchainData.transactions || blockchainData.transactions_to_sign;
-            const userSigningIndexes = blockchainData.user_signing_indexes || blockchainData.userSigningIndexes || [1, 2]; // Default to signing txns 1 and 2
+            // Handle Solution 1: Server provides ALL 4 transactions
+            const transactions = blockchainData.transactions || [];
             
-            console.log('PaymentProcessingScreen: Signing transactions at indexes:', userSigningIndexes);
-            console.log('PaymentProcessingScreen: Total transactions:', transactions?.length);
+            console.log('PaymentProcessingScreen: Received transactions from server:', transactions.length);
+            console.log('PaymentProcessingScreen: Transaction structure:', transactions.map((t, i) => ({
+              index: i,
+              needsSignature: t.needs_signature || t.needsSignature,
+              signed: t.signed,
+              type: t.type
+            })));
             
-            // Sign the transactions that require user signature (same pattern as TransactionProcessingScreen)
+            // Sign the transactions that require user signature
             const signedTransactions = [];
             
-            // Handle both old format (all transactions) and new format (only user transactions)
-            if (blockchainData.transactions_to_sign) {
-              // New format: only user transactions to sign
-              console.log('PaymentProcessingScreen: Using new format with transactions_to_sign');
-              for (let i = 0; i < blockchainData.transactions_to_sign.length; i++) {
-                const txn = blockchainData.transactions_to_sign[i];
-                console.log(`PaymentProcessingScreen: Signing user transaction ${i}`);
-                
-                try {
-                  // Get the actual transaction data
-                  const txnData = txn.txn || txn.transaction || txn;
-                  
-                  // Debug the transaction before signing
-                  console.log(`PaymentProcessingScreen: Transaction ${i} base64 preview: ${txnData.substring(0, 50)}...`);
-                  
-                  // Decode transaction (base64 -> bytes) - exact pattern from TransactionProcessingScreen
-                  const txnBytes = Uint8Array.from(Buffer.from(txnData, 'base64'));
-                  console.log(`PaymentProcessingScreen: Transaction ${i} decoded to ${txnBytes.length} bytes`);
-                  console.log(`PaymentProcessingScreen: First 10 bytes: ${Array.from(txnBytes.slice(0, 10)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`);
-                  
-                  // Check if this looks like a valid msgpack transaction
-                  const firstByte = txnBytes[0];
-                  if (firstByte < 0x80 || firstByte > 0x8f) {
-                    console.warn(`PaymentProcessingScreen: Transaction ${i} may not be a valid msgpack map (first byte: 0x${firstByte.toString(16)})`);
-                  }
-                  
-                  // Sign the transaction locally using deterministic wallet
-                  const signedTxnBytes = await algorandService.signTransactionBytes(txnBytes);
-                  const signedTxnB64 = Buffer.from(signedTxnBytes).toString('base64');
-                  
-                  // For new format, indexes are 1 and 2 (the two AXFERs)
-                  signedTransactions.push({
-                    index: i + 1,  // Add 1 because user transactions are at index 1 and 2 in group
-                    transaction: signedTxnB64
-                  });
-                } catch (signError) {
-                  console.error(`PaymentProcessingScreen: Failed to sign transaction ${i}:`, signError);
-                  throw new Error(`Failed to sign transaction ${i}: ${signError.message}`);
-                }
-              }
+            // Solution 1: Process all 4 transactions from server
+            if (transactions.length === 4) {
+              console.log('PaymentProcessingScreen: Using Solution 1 - all 4 transactions from server');
               
-              // Don't add sponsor transactions - backend will reconstruct them
-              // The 4-txn group mutation expects only the 2 user-signed AXFERs
-              // and will reconstruct the sponsor transactions on the backend
-              /*
-              if (blockchainData.sponsor_transactions) {
-                console.log('PaymentProcessingScreen: Adding sponsor transactions');
-                for (const sponsorTxn of blockchainData.sponsor_transactions) {
-                  signedTransactions.push({
-                    index: sponsorTxn.index,
-                    transaction: sponsorTxn.signed || sponsorTxn.transaction
-                  });
-                }
-              }
-              */
-            } else {
-              // Old format: all transactions provided
-              console.log('PaymentProcessingScreen: Using old format with full transaction array');
               for (let i = 0; i < transactions.length; i++) {
                 const txn = transactions[i];
-                // Only sign if this index is in userSigningIndexes (server tells us which ones to sign)
-                if (userSigningIndexes.includes(i)) {
-                  // User needs to sign this transaction
-                  console.log(`PaymentProcessingScreen: Signing transaction ${i} (type: ${txn.type})`);
+                const needsSignature = txn.needs_signature || txn.needsSignature || false;
+                const isSigned = txn.signed || false;
+                const txnIndex = txn.index !== undefined ? txn.index : i;
+                
+                console.log(`PaymentProcessingScreen: Transaction ${txnIndex} - type: ${txn.type}, needsSignature: ${needsSignature}, signed: ${isSigned}`);
+                
+                if (needsSignature && !isSigned) {
+                  // User needs to sign this transaction (indexes 1 and 2)
+                  console.log(`PaymentProcessingScreen: Signing transaction at index ${txnIndex} (type: ${txn.type})`);
                   
                   try {
+                    // Get the actual transaction data
+                    const txnData = txn.transaction;
+                    
                     // Debug the transaction before signing
-                    console.log(`PaymentProcessingScreen: Transaction ${i} base64 preview: ${txn.transaction.substring(0, 50)}...`);
+                    console.log(`PaymentProcessingScreen: Transaction ${txnIndex} base64 preview: ${txnData.substring(0, 50)}...`);
                     
-                    // Decode transaction (base64 -> bytes) - exact pattern from TransactionProcessingScreen
-                    const txnBytes = Uint8Array.from(Buffer.from(txn.transaction, 'base64'));
-                    console.log(`PaymentProcessingScreen: Transaction ${i} decoded to ${txnBytes.length} bytes`);
-                    console.log(`PaymentProcessingScreen: First 10 bytes: ${Array.from(txnBytes.slice(0, 10)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`);
-                    
-                    // Check if this looks like a valid msgpack transaction
-                    const firstByte = txnBytes[0];
-                    if (firstByte < 0x80 || firstByte > 0x8f) {
-                      console.warn(`PaymentProcessingScreen: Transaction ${i} may not be a valid msgpack map (first byte: 0x${firstByte.toString(16)})`);
-                    }
+                    // Decode transaction (base64 -> bytes)
+                    const txnBytes = Uint8Array.from(Buffer.from(txnData, 'base64'));
+                    console.log(`PaymentProcessingScreen: Transaction ${txnIndex} decoded to ${txnBytes.length} bytes`);
                     
                     // Sign the transaction locally using deterministic wallet
                     const signedTxnBytes = await algorandService.signTransactionBytes(txnBytes);
                     const signedTxnB64 = Buffer.from(signedTxnBytes).toString('base64');
                     
                     signedTransactions.push({
-                      index: i,
+                      index: txnIndex,
                       transaction: signedTxnB64
                     });
                   } catch (signError) {
-                    console.error(`PaymentProcessingScreen: Failed to sign transaction ${i}:`, signError);
-                    throw new Error(`Failed to sign transaction ${i}: ${signError.message}`);
+                    console.error(`PaymentProcessingScreen: Failed to sign transaction ${txnIndex}:`, signError);
+                    throw new Error(`Failed to sign transaction ${txnIndex}: ${signError.message}`);
                   }
                 } else {
-                  // Already signed by sponsor or not required to sign
-                  console.log(`PaymentProcessingScreen: Transaction ${i} already signed by sponsor (type: ${txn.type})`);
+                  // Already signed by sponsor (indexes 0 and 3) or doesn't need signature
+                  console.log(`PaymentProcessingScreen: Transaction ${txnIndex} already signed or doesn't need signature (type: ${txn.type}, signed: ${isSigned})`);
+                  
+                  // The transaction data might already be the signed transaction bytes
+                  // Check if it's already base64 or if it's raw bytes that need encoding
+                  let txnData = txn.transaction;
+                  
+                  // If the transaction is already base64, use it as-is
+                  // Otherwise it should be encoded properly by the server
+                  console.log(`PaymentProcessingScreen: Using pre-signed transaction data for index ${txnIndex}`);
+                  
                   signedTransactions.push({
-                    index: i,
-                    transaction: txn.transaction
+                    index: txnIndex,
+                    transaction: txnData
                   });
                 }
               }
+            } else {
+              // No 4-transaction group received
+              console.error('PaymentProcessingScreen: Invalid transaction count - expected 4 transactions');
+              throw new Error(`Invalid transaction format: Expected 4 transactions, received ${transactions.length}`);
             }
             
             console.log('PaymentProcessingScreen: Submitting signed transactions to blockchain');

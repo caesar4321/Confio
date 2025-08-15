@@ -65,7 +65,7 @@ class PaymentTransactionBuilder:
             recipient_address: Recipient's Algorand address (merchant)
             amount: Total amount to send in base units (6 decimals for cUSD/CONFIO)
             asset_id: Asset ID (cUSD or CONFIO)
-            payment_id: Not used (kept for compatibility)
+            payment_id: Optional payment ID for receipt tracking (passed to app call)
             note: Optional transaction note
         
         Returns:
@@ -172,22 +172,15 @@ class PaymentTransactionBuilder:
             fee_recipient = encoding.encode_address(base64.b64decode(fee_recipient_b64))
             logger.info(f"Fee recipient: {fee_recipient}")
             
-            # Get current balances and check MBR requirement
-            account_info = self.algod_client.account_info(sender_address)
-            current_balance = account_info.get('amount', 0)
-            min_balance_required = account_info.get('min-balance', 0)
-            
-            # Calculate MBR top-up needed (atomic with payment for security)
+            # Option B: deterministic sponsor funding
+            # To guarantee byte-for-byte reproducibility at submit time,
+            # do not include variable MBR top-ups in the sponsor payment.
+            # Always use 0 ALGO transfer; rely on user funding separately if needed.
             mbr_topup = 0
-            if current_balance < min_balance_required:
-                mbr_topup = min(min_balance_required - current_balance, 100_000)  # Cap at 0.1 ALGO
-                logger.info(f"MBR top-up needed: {mbr_topup} microAlgos")
             
-            # Fee planning
-            min_fee = getattr(params, 'min_fee', 1000) or 1000
-            sponsor_payment_fee = min_fee * 3   # Pays for itself + 2 user AXFERs
-            # Some deployed approvals may require extra budget; use 2x min fee
-            app_call_fee = min_fee * 2           # App call funds base + headroom
+            # Fee planning (fixed constants to enable deterministic rebuilds later)
+            sponsor_payment_fee = 3000  # 3 x 1000
+            app_call_fee = 2000         # 2 x 1000
             
             # Transaction 0: Sponsor payment (MUST be first per contract requirements)
             sponsor_params = SuggestedParams(
@@ -203,8 +196,8 @@ class PaymentTransactionBuilder:
                 sender=self.sponsor_address,
                 sp=sponsor_params,
                 receiver=sender_address,
-                amt=mbr_topup,  # 0 or MBR top-up (max 0.1 ALGO per contract)
-                note=b"Sponsored payment with MBR" if mbr_topup > 0 else b"Sponsored payment"
+                amt=mbr_topup,
+                note=b"Sponsored payment"
             )
             
             # Transaction 1: Asset transfer from user to MERCHANT (0 fee - sponsored)
@@ -264,7 +257,9 @@ class PaymentTransactionBuilder:
             
             # Encode the arguments
             recipient_arg = encoding.decode_address(recipient_address)  # Address is just 32 bytes
-            payment_id_arg = string_type.encode(payment_id if payment_id else "")  # String needs ABI encoding
+            payment_id_str = payment_id if payment_id else ""
+            payment_id_arg = string_type.encode(payment_id_str)  # String needs ABI encoding
+            logger.info(f"Creating app call with payment_id: '{payment_id_str}' (length: {len(payment_id_str)})")
             
             # SPONSOR sends the app call (true sponsorship)
             # The deployed contract's caster reads recipient from app_args[1] and payment_id from app_args[2]
@@ -337,7 +332,14 @@ class PaymentTransactionBuilder:
                 'total_fee': str(sponsor_payment_fee + app_call_fee),  # Total fees (4 * min_fee)
                 'payment_amount': str(amount),
                 'net_amount': str(net_amount),
-                'fee_amount': str(fee_amount)
+                'fee_amount': str(fee_amount),
+                'chain_params': {
+                    'first': params.first,
+                    'last': params.last,
+                    'gh': base64.b64encode(params.gh).decode('utf-8') if isinstance(params.gh, (bytes, bytearray)) else '',
+                    'gen': params.gen,
+                    'min_fee': getattr(params, 'min_fee', 1000)
+                }
             }
             
         except Exception as e:

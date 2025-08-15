@@ -695,7 +695,7 @@ class AlgorandSponsorService:
             # Return transaction data for client signing or server execution
             # Encode the user transaction as base64 for client
             import msgpack
-            user_txn_bytes = msgpack.packb(opt_in_txn.dictify())
+            user_txn_bytes = msgpack.packb(opt_in_txn.dictify(), use_bin_type=True)
             user_txn_b64 = base64.b64encode(user_txn_bytes).decode('utf-8')
             
             return {
@@ -863,7 +863,7 @@ class AlgorandSponsorService:
             # Return transaction data for client signing
             # Encode the user transaction as base64 for client
             import msgpack
-            user_txn_bytes = msgpack.packb(user_txn.dictify())
+            user_txn_bytes = msgpack.packb(user_txn.dictify(), use_bin_type=True)
             user_txn_b64 = base64.b64encode(user_txn_bytes).decode('utf-8')
             
             return {
