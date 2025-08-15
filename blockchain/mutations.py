@@ -947,32 +947,12 @@ class SubmitBusinessOptInGroupMutation(graphene.Mutation):
                 # Log first few bytes to verify it's msgpack
                 logger.info(f'Transaction {i} first bytes: {raw_bytes[:10].hex()}')
             
-            # For group transactions, we need to ensure they're properly formatted
-            # Try different submission methods
+            # Submit as base64-encoded concatenated bytes
+            # The Algorand SDK's send_raw_transaction expects base64-encoded data
             import base64
-            
-            try:
-                # Method 1: Submit as base64-encoded concatenated bytes
-                combined = b''.join(submit_bytes)
-                logger.info(f'Submitting concatenated group of {len(combined)} total bytes')
-                tx_id = algod_client.send_raw_transaction(base64.b64encode(combined).decode('ascii'))
-                logger.info(f'Successfully submitted with base64 encoding')
-            except Exception as e1:
-                logger.warning(f'Base64 submission failed: {e1}')
-                try:
-                    # Method 2: Submit raw bytes directly
-                    combined = b''.join(submit_bytes)
-                    tx_id = algod_client.send_raw_transaction(combined)
-                    logger.info(f'Successfully submitted raw bytes')
-                except Exception as e2:
-                    logger.error(f'Raw bytes submission also failed: {e2}')
-                    # Method 3: Try submitting just the first transaction to see if format is OK
-                    try:
-                        tx_id = algod_client.send_raw_transaction(submit_bytes[0])
-                        logger.warning(f'Only first transaction submitted (not a group): {tx_id}')
-                    except Exception as e3:
-                        logger.error(f'Even single transaction failed: {e3}')
-                        raise Exception(f'All submission methods failed. Base64: {e1}, Raw: {e2}, Single: {e3}')
+            combined = b''.join(submit_bytes)
+            logger.info(f'Submitting concatenated group of {len(combined)} total bytes')
+            tx_id = algod_client.send_raw_transaction(base64.b64encode(combined).decode('ascii'))
             
             from algosdk.transaction import wait_for_confirmation
             confirmed = wait_for_confirmation(algod_client, tx_id, 10)
