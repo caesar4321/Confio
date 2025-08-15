@@ -420,14 +420,8 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     txn_b64 = txn_data.get('transaction')
                     
                     try:
-                        # Normalize base64: strip whitespace, handle URL-safe, and pad
-                        s = (txn_b64 or '').strip().replace('\n', '').replace('\r', '')
-                        s = s.replace('-', '+').replace('_', '/')
-                        missing_padding = (-len(s)) % 4
-                        if missing_padding:
-                            s += '=' * missing_padding
                         # Decode base64 to get raw bytes
-                        decoded_bytes = base64.b64decode(s)
+                        decoded_bytes = base64.b64decode(txn_b64)
                         signed_txn_objects.append(decoded_bytes)
                         logger.info(f"  Transaction {i}: decoded successfully")
                     except Exception as e:
@@ -1175,9 +1169,10 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     d = _mp.unpackb(b, raw=False)
                     _txn.SignedTransaction.undictify(d)
 
-                # Submit as concatenated raw signed transaction bytes
+                # Submit as base64-encoded string (SDK expects base64 input, will decode internally)
                 combined_bytes = b"".join(tx_bytes_list)
-                tx_id = algod_client.send_raw_transaction(combined_bytes)
+                combined_b64 = base64.b64encode(combined_bytes).decode('utf-8')
+                tx_id = algod_client.send_raw_transaction(combined_b64)
                 logger.info(f"Payment transaction sent: {tx_id}")
             except Exception as e_send:
                 # Attempt a TEAL dryrun for detailed diagnostics in DEBUG mode
