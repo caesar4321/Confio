@@ -28,6 +28,7 @@ from typing import Final
 FEE_BPS = Int(90)  # 0.9% = 90 basis points
 BASIS_POINTS = Int(10000)  # 100% = 10000 basis points
 ASA_OPT_IN_MBR = Int(100000)  # 0.1 ALGO per ASA opt-in
+BASE_ACCOUNT_MBR = Int(100000)  # 0.1 ALGO base for holding any asset
 
 class PaymentState:
     """Global state for payment processing"""
@@ -150,13 +151,13 @@ def setup_assets(cusd_id: abi.Uint64, confio_id: abi.Uint64):
         # Fee budget for two inner opt-ins (base + 2 inners)
         Assert(Txn.fee() >= Global.min_txn_fee() * Int(3)),
         
-        # Require exact sponsor funding for MBR
-        # Group structure: [Payment(sponsor→app, amount == 2*ASA_OPT_IN_MBR), AppCall]
+        # Require sponsor funding for MBR (base + 2 asset opt-ins)
+        # Group structure: [Payment(sponsor→app, amount >= BASE + 2*ASA_OPT_IN_MBR), AppCall]
         Assert(Global.group_size() == Int(2)),
         Assert(Txn.group_index() == Int(1)),
         Assert(Gtxn[0].type_enum() == TxnType.Payment),
         Assert(Gtxn[0].receiver() == Global.current_application_address()),
-        Assert(Gtxn[0].amount() == Int(2) * ASA_OPT_IN_MBR),  # Exactly 0.2 ALGO
+        Assert(Gtxn[0].amount() >= BASE_ACCOUNT_MBR + (Int(2) * ASA_OPT_IN_MBR)),  # >= 0.3 ALGO
         Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
         Assert(Gtxn[0].rekey_to() == Global.zero_address()),
         
@@ -211,7 +212,7 @@ def pay_with_cusd(
         # Enforce sponsored call - must be fully sponsored
         Assert(Txn.sender() == app.state.sponsor_address.get()),
         Assert(Txn.accounts.length() >= Int(2)),
-        actual_payer.store(Txn.accounts[0]),  # User passed as account reference
+        actual_payer.store(Gtxn[1].sender()),  # User passed as account reference
         
         # Basic validation
         Assert(
@@ -268,9 +269,8 @@ def pay_with_cusd(
         
         # Make AssetHolding.balance check reliable for recipient
         # Recipient MUST be in foreign accounts array (slot 1)
-        Assert(Txn.accounts.length() >= Int(2)),
-        Assert(Txn.accounts[1] == recipient.get()),
-        (rec_bal := AssetHolding.balance(Txn.accounts[1], app.state.cusd_asset_id)),
+        Assert(Txn.accounts.length() >= Int(1)),
+        (rec_bal := AssetHolding.balance(recipient.get(), app.state.cusd_asset_id)),
         Assert(rec_bal.hasValue()),
         
         # Recipient sanity checks
@@ -330,7 +330,7 @@ def pay_with_confio(
         # Enforce sponsored call - must be fully sponsored
         Assert(Txn.sender() == app.state.sponsor_address.get()),
         Assert(Txn.accounts.length() >= Int(2)),
-        actual_payer.store(Txn.accounts[0]),  # User passed as account reference
+        actual_payer.store(Gtxn[1].sender()),  # User passed as account reference
         Log(Bytes("PWC:START")),
         
         # Basic validation
@@ -390,10 +390,9 @@ def pay_with_confio(
         
         # Make AssetHolding.balance check reliable for recipient
         # Recipient MUST be in foreign accounts array (slot 1)
-        Assert(Txn.accounts.length() >= Int(2)),
+        Assert(Txn.accounts.length() >= Int(1)),
         Log(Bytes("PWC:ACC1")),
-        Assert(Txn.accounts[1] == recipient.get()),
-        (rec_bal := AssetHolding.balance(Txn.accounts[1], app.state.confio_asset_id)),
+        (rec_bal := AssetHolding.balance(recipient.get(), app.state.confio_asset_id)),
         Assert(rec_bal.hasValue()),
         
         # Recipient sanity checks

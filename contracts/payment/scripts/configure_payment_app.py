@@ -116,8 +116,8 @@ def main():
         
         params = algod_client.suggested_params()
         
-        # Transaction 0: Payment for MBR (0.2 ALGO for 2 asset opt-ins)
-        mbr_amount = 200_000  # 0.2 ALGO in microAlgos
+        # Transaction 0: Payment for MBR (0.3 ALGO: base 0.1 + 2*0.1 for asset opt-ins)
+        mbr_amount = 300_000  # 0.3 ALGO in microAlgos
         payment_txn = PaymentTxn(
             sender=admin_addr,
             sp=params,

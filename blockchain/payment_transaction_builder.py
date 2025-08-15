@@ -18,13 +18,10 @@ class PaymentTransactionBuilder:
     def __init__(self, network: str = 'testnet'):
         self.network = network
         
-        # Network configuration
-        if network == 'testnet':
-            self.algod_address = "https://testnet-api.algonode.cloud"
-            self.algod_token = ""
-        else:  # localnet
-            self.algod_address = "http://localhost:4001"
-            self.algod_token = "a" * 64
+        # Always use Django settings for Algod configuration
+        # This allows switching providers (e.g., Nodely, Algonode, localnet)
+        self.algod_address = settings.ALGORAND_ALGOD_ADDRESS
+        self.algod_token = settings.ALGORAND_ALGOD_TOKEN
         
         # Initialize Algod client
         self.algod_client = algod.AlgodClient(self.algod_token, self.algod_address)
@@ -43,6 +40,7 @@ class PaymentTransactionBuilder:
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"PaymentTransactionBuilder initialized with sponsor address: {self.sponsor_address}")
+        logger.info(f"Algod endpoint: {self.algod_address}")
         
         # Get app address
         self.app_address = logic.get_application_address(self.payment_app_id)
@@ -188,7 +186,8 @@ class PaymentTransactionBuilder:
             # Fee planning
             min_fee = getattr(params, 'min_fee', 1000) or 1000
             sponsor_payment_fee = min_fee * 3   # Pays for itself + 2 user AXFERs
-            app_call_fee = min_fee               # App call pays its own fee
+            # Some deployed approvals may require extra budget; use 2x min fee
+            app_call_fee = min_fee * 2           # App call funds base + headroom
             
             # Transaction 0: Sponsor payment (MUST be first per contract requirements)
             sponsor_params = SuggestedParams(

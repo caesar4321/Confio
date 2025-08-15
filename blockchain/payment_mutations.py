@@ -679,7 +679,7 @@ class SubmitSponsoredPaymentCUSDStyleMutation(graphene.Mutation):
             logger.info(f"Submitting 4-transaction payment group: sponsor_payment, merchant_transfer, fee_transfer, app_call")
             logger.info(f"Net amount to merchant: {net_amount}, Fee: {fee_amount}, Total: {amount}")
             
-            # Send the transaction array as raw bytes
+            # Send the transaction array as base64 (SDK decodes internally)
             combined_txns = b''.join(all_transactions)
             tx_id = algod_client.send_raw_transaction(base64.b64encode(combined_txns).decode('utf-8'))
             logger.info(f"Payment transaction sent: {tx_id}")
@@ -883,20 +883,34 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     except Exception as e:
                         logger.warning(f"Payment record lookup/parse failed: {e}")
 
-                used_stored_sponsors = False
-                if 0 in sponsor_b64_by_index and 3 in sponsor_b64_by_index:
-                    # Assemble exact group with stored sponsor transactions
+                # Prefer stored sponsor transactions created at build-time to guarantee
+                # byte-for-byte consistency with the user's group and avoid group drift.
+                sponsor0 = sponsor_b64_by_index.get(0)
+                sponsor3 = sponsor_b64_by_index.get(3)
+                if sponsor0 and sponsor3:
+                    # Validate stored sponsor txns belong to the same group id
+                    try:
+                        sp0 = msgpack.unpackb(base64.b64decode(sponsor0), raw=False)
+                        sp3 = msgpack.unpackb(base64.b64decode(sponsor3), raw=False)
+                        grp0 = sp0.get('txn', {}).get('grp')
+                        grp3 = sp3.get('txn', {}).get('grp')
+                        if grp0 != group_id_bytes or grp3 != group_id_bytes:
+                            logger.warning("Stored sponsor transactions have a different group id than user-signed txns. Falling back to rebuild.")
+                            sponsor0 = sponsor3 = None
+                    except Exception as e:
+                        logger.warning(f"Failed to validate stored sponsor transactions: {e}. Falling back to rebuild.")
+                        sponsor0 = sponsor3 = None
+
+                if sponsor0 and sponsor3:
                     signed_txn_objects = [
-                        sponsor_b64_by_index[0],
+                        sponsor0,
                         signed_transactions[0],
                         signed_transactions[1],
-                        sponsor_b64_by_index[3],
+                        sponsor3,
                     ]
-                    used_stored_sponsors = True
                     logger.info("Using stored sponsor transactions for 4-txn group")
-
-                if not used_stored_sponsors:
-                    # Rebuild and re-sign sponsor transactions from the live user-signed group
+                else:
+                    # Rebuild and re-sign sponsor transactions as a fallback path
                     # Extract fields from user AXFER[0]
                     asset_id = user_txn.get('xaid', 0)
                     recipient_bytes = user_txn.get('arcv', b'')
@@ -904,26 +918,7 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                         return cls(success=False, error='Invalid recipient in user transaction')
                     recipient_address = encoding.encode_address(recipient_bytes)
 
-                    # Build using builder (for IDs and sponsor address)
                     builder = PaymentTransactionBuilder(network=settings.ALGORAND_NETWORK)
-                    # Reuse the user's transaction suggested params to keep group hash consistent
-                    user_params_txn = user_txn  # dict under 'txn'
-                    fv = user_params_txn.get('fv')
-                    lv = user_params_txn.get('lv')
-                    gh = user_params_txn.get('gh')
-                    gen = user_params_txn.get('gen')
-                    # Fallback to live suggested params if any missing
-                    live_params = builder.algod_client.suggested_params()
-                    from algosdk.transaction import SuggestedParams
-                    params = SuggestedParams(
-                        fee=getattr(live_params, 'min_fee', 1000) or 1000,
-                        first=fv if isinstance(fv, int) else live_params.first,
-                        last=lv if isinstance(lv, int) else live_params.last,
-                        gh=gh if isinstance(gh, (bytes, bytearray)) else live_params.gh,
-                        gen=gen if isinstance(gen, str) else live_params.gen,
-                        flat_fee=True
-                    )
-
                     # Preflight app compatibility with the asset_id derived from user txn
                     preflight = builder.validate_payment_app(asset_id)
                     if not preflight.get('success'):
@@ -938,7 +933,7 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                             f"approval_sha256={info_map.get('approval_sha256')}"
                         )
 
-                    # Determine method selector (used only for consistency in app args composition)
+                    # Determine method selector
                     if asset_id == builder.cusd_asset_id:
                         method_name = "pay_with_cusd"
                     elif asset_id == builder.confio_asset_id:
@@ -946,7 +941,8 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     else:
                         return cls(success=False, error=f'Unknown asset ID: {asset_id}')
 
-                    from algosdk.abi import Method, Argument, Returns
+                    from algosdk.abi import Method, Argument, Returns, ABIType
+                    from algosdk.transaction import SuggestedParams
                     method = Method(
                         name=method_name,
                         args=[
@@ -954,6 +950,21 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                             Argument(arg_type="string", name="payment_id")
                         ],
                         returns=Returns(arg_type="void")
+                    )
+
+                    # Use round/genesis parameters from user txn to minimize drift
+                    first = user_txn.get('fv')
+                    last = user_txn.get('lv')
+                    gh = user_txn.get('gh')
+                    gen = user_txn.get('gen')
+                    live_params = builder.algod_client.suggested_params()
+                    params = SuggestedParams(
+                        fee=getattr(live_params, 'min_fee', 1000) or 1000,
+                        first=first or live_params.first,
+                        last=last or live_params.last,
+                        gh=gh or live_params.gh,
+                        gen=gen or live_params.gen,
+                        flat_fee=True
                     )
 
                     # Compute optional MBR top-up (capped), but allow 0
@@ -964,48 +975,28 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     if current_balance < min_balance_required:
                         mbr_topup = min(min_balance_required - current_balance, 100_000)
 
-                    # Fees: sponsor pays for itself + 2 user AXFERs; app call pays own min fee
-                    sponsor_payment_fee = (getattr(params, 'min_fee', 1000) or 1000) * 3
-                    app_call_fee = getattr(params, 'min_fee', 1000) or 1000
+                    min_fee = getattr(live_params, 'min_fee', 1000) or 1000
+                    sponsor_payment_fee = min_fee * 3
+                    app_call_fee = min_fee
 
-                    from algosdk import transaction
-
-                    sponsor_params = SuggestedParams(
-                        fee=sponsor_payment_fee,
-                        first=params.first,
-                        last=params.last,
-                        gh=params.gh,
-                        gen=params.gen,
-                        flat_fee=True
-                    )
                     sponsor_payment = transaction.PaymentTxn(
                         sender=builder.sponsor_address,
-                        sp=sponsor_params,
+                        sp=params,
                         receiver=user_address,
                         amt=mbr_topup,
                         note=b"Sponsored payment" if mbr_topup == 0 else b"Sponsored payment with MBR"
                     )
+                    sponsor_payment.fee = sponsor_payment_fee
                     sponsor_payment.group = group_id_bytes
 
-                    # Build sponsor app call with strict fields
-                    app_params = SuggestedParams(
-                        fee=app_call_fee,
-                        first=params.first,
-                        last=params.last,
-                        gh=params.gh,
-                        gen=params.gen,
-                        flat_fee=True
-                    )
-
                     # ABI-encode args
-                    from algosdk.abi import ABIType
                     string_type = ABIType.from_string("string")
                     recipient_arg = encoding.decode_address(recipient_address)
                     payment_id_arg = string_type.encode(payment_id if payment_id else "")
 
                     app_call = transaction.ApplicationCallTxn(
                         sender=builder.sponsor_address,
-                        sp=app_params,
+                        sp=params,
                         index=builder.payment_app_id,
                         on_complete=transaction.OnComplete.NoOpOC,
                         app_args=[
@@ -1016,9 +1007,9 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                         accounts=[user_address, recipient_address],
                         foreign_assets=[asset_id]
                     )
+                    app_call.fee = app_call_fee
                     app_call.group = group_id_bytes
 
-                    # Sign sponsor transactions
                     sponsor_mnemonic = settings.ALGORAND_SPONSOR_MNEMONIC
                     if not sponsor_mnemonic:
                         return cls(success=False, error='Sponsor mnemonic not configured')
@@ -1028,15 +1019,13 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     sponsor_payment_b64 = algo_encoding.msgpack_encode(sponsor_payment.sign(sponsor_private_key))
                     app_call_b64 = algo_encoding.msgpack_encode(app_call.sign(sponsor_private_key))
 
-                    # Combine transactions in strict order [0..3]
                     signed_txn_objects = [
                         sponsor_payment_b64,
                         signed_transactions[0],
                         signed_transactions[1],
                         app_call_b64,
                     ]
-
-                    logger.info("Rebuilt and re-signed sponsor transactions for 4-txn group (fallback)")
+                    logger.info("Rebuilt and re-signed sponsor transactions for 4-txn group (fallback path)")
                 
             else:
                 # Old format or already complete group
@@ -1344,7 +1333,7 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                 logger.warning(f"Pre-submit validation skipped due to error: {ve}")
 
             # Send the grouped transactions
-            # Combine all transactions and send as a single base64 string
+            # Combine all transactions and send as base64 string (SDK decodes)
             combined_txns = b''.join([base64.b64decode(t) for t in signed_txn_objects])
             try:
                 tx_id = algod_client.send_raw_transaction(base64.b64encode(combined_txns).decode('utf-8'))
@@ -1371,13 +1360,32 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                             # Use the same Algod client if no separate dryrun endpoint is configured
                             dryrun_client = algod_client
                         try:
+                            logger.error(f"[DRYRUN] Using algod at: {dr_addr or getattr(dj_settings, 'ALGORAND_ALGOD_ADDRESS', 'same-as-submit')}")
+                        except Exception:
+                            pass
+                        try:
                             # Some SDKs accept dict directly
                             dr_resp = dryrun_client.dryrun(dr_body)
                         except Exception:
                             # Fallback to raw JSON request
                             import json as _json
                             dr_bytes = _json.dumps(dr_body).encode('utf-8')
-                            dr_resp = dryrun_client.algod_request("POST", "/v2/teal/dryrun", data=dr_bytes)
+                            try:
+                                dr_resp = dryrun_client.algod_request("POST", "/v2/teal/dryrun", data=dr_bytes)
+                            except Exception as dr404:
+                                # If dryrun endpoint is unavailable (404), attempt simulate as a fallback
+                                try:
+                                    sim_body = {
+                                        "txn-groups": [
+                                            {"txns": signed_txn_objects}
+                                        ]
+                                    }
+                                    sim_bytes = _json.dumps(sim_body).encode('utf-8')
+                                    sim_resp = dryrun_client.algod_request("POST", "/v2/transactions/simulate", data=sim_bytes)
+                                    logger.error(f"[SIMULATE] response (truncated): {_json.dumps(sim_resp, default=str)[:4000]}")
+                                except Exception as sim_e:
+                                    logger.error(f"[SIMULATE] Failed to execute simulate: {sim_e}")
+                                    raise dr404
                         # Log a compact view of the dryrun trace
                         import json as _json
                         dr_json = _json.dumps(dr_resp, default=str)
