@@ -19,6 +19,9 @@ from algosdk.atomic_transaction_composer import AtomicTransactionComposer, Trans
 from algosdk.abi import Contract
 from algosdk.transaction import ApplicationCallTxn
 import base64
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
 
 NETWORK = os.environ.get("ALGORAND_NETWORK", "testnet")
 
@@ -116,10 +119,10 @@ def deploy_cusd_contract(deployer_private_key, deployer_address):
     """Deploy the cUSD contract"""
     
     # Read compiled TEAL programs
-    with open("cusd_approval.teal", "r") as f:
+    with open(BASE_DIR / "cusd_approval.teal", "r") as f:
         approval_source = f.read()
     
-    with open("cusd_clear.teal", "r") as f:
+    with open(BASE_DIR / "cusd_clear.teal", "r") as f:
         clear_source = f.read()
     
     print("\nCompiling TEAL programs...")
@@ -182,10 +185,10 @@ def update_cusd_contract(app_id, admin_private_key, admin_address):
     """Update an existing cUSD contract"""
     
     # Read compiled TEAL programs
-    with open("cusd_approval.teal", "r") as f:
+    with open(BASE_DIR / "cusd_approval.teal", "r") as f:
         approval_source = f.read()
     
-    with open("cusd_clear.teal", "r") as f:
+    with open(BASE_DIR / "cusd_clear.teal", "r") as f:
         clear_source = f.read()
     
     print("\nCompiling TEAL programs for update...")
@@ -229,6 +232,32 @@ def update_cusd_contract(app_id, admin_private_key, admin_address):
     print(f"Update confirmed in round: {confirmed_txn.get('confirmed-round', 0)}")
     
     return True
+
+def verify_post_deploy(app_id: int, app_address: str, expected_cusd: int, expected_usdc: int, expected_sponsor: str) -> None:
+    """Verify global-state values and app opt-ins match expectations."""
+    import base64
+    # Verify global state
+    app_info = algod_client.application_info(app_id)
+    g = {base64.b64decode(kv['key']).decode('utf-8','ignore'): kv['value'] for kv in app_info.get('params',{}).get('global-state',[])}
+    cusd_id = int(g.get('cusd_asset_id',{}).get('uint', 0))
+    usdc_id = int(g.get('usdc_asset_id',{}).get('uint', 0))
+    sponsor_b = g.get('sponsor_address')
+    sponsor_addr = None
+    if sponsor_b and sponsor_b.get('type') == 1:
+        raw = base64.b64decode(sponsor_b.get('bytes',''))
+        from algosdk import encoding as e
+        sponsor_addr = e.encode_address(raw)
+    if cusd_id != expected_cusd or usdc_id != expected_usdc:
+        raise SystemExit(f"Verification failed: global asset IDs mismatch (got cUSD={cusd_id},USDC={usdc_id}; expected {expected_cusd},{expected_usdc})")
+    if sponsor_addr and expected_sponsor and sponsor_addr != expected_sponsor:
+        raise SystemExit(f"Verification failed: sponsor_address mismatch (got {sponsor_addr}, expected {expected_sponsor})")
+    # Verify app is opted-in to both assets
+    acct = algod_client.account_info(app_address)
+    aset_ids = {a.get('asset-id') for a in acct.get('assets', [])}
+    missing = [aid for aid in (expected_cusd, expected_usdc) if aid not in aset_ids]
+    if missing:
+        raise SystemExit(f"Verification failed: app not opted in to assets {missing}")
+    print("✓ Post-deploy verification passed for cUSD app")
 
 def set_sponsor_address(app_id, admin_private_key, admin_address, sponsor_address=None):
     """Set the sponsor address in the contract"""
@@ -274,6 +303,32 @@ def set_sponsor_address(app_id, admin_private_key, admin_address, sponsor_addres
     print(f"✅ Sponsor address set successfully in round {confirmed_txn.get('confirmed-round', 0)}")
     
     return True
+
+def verify_post_deploy(app_id: int, app_address: str, expected_cusd: int, expected_usdc: int, expected_sponsor: str) -> None:
+    """Verify global-state values and app opt-ins match expectations."""
+    import base64
+    # Verify global state
+    app_info = algod_client.application_info(app_id)
+    g = {base64.b64decode(kv['key']).decode('utf-8','ignore'): kv['value'] for kv in app_info.get('params',{}).get('global-state',[])}
+    cusd_id = int(g.get('cusd_asset_id',{}).get('uint', 0))
+    usdc_id = int(g.get('usdc_asset_id',{}).get('uint', 0))
+    sponsor_b = g.get('sponsor_address')
+    sponsor_addr = None
+    if sponsor_b and sponsor_b.get('type') == 1:
+        raw = base64.b64decode(sponsor_b.get('bytes',''))
+        from algosdk import encoding as e
+        sponsor_addr = e.encode_address(raw)
+    if cusd_id != expected_cusd or usdc_id != expected_usdc:
+        raise SystemExit(f"Verification failed: global asset IDs mismatch (got cUSD={cusd_id},USDC={usdc_id}; expected {expected_cusd},{expected_usdc})")
+    if sponsor_addr and expected_sponsor and sponsor_addr != expected_sponsor:
+        raise SystemExit(f"Verification failed: sponsor_address mismatch (got {sponsor_addr}, expected {expected_sponsor})")
+    # Verify app is opted-in to both assets
+    acct = algod_client.account_info(app_address)
+    aset_ids = {a.get('asset-id') for a in acct.get('assets', [])}
+    missing = [aid for aid in (expected_cusd, expected_usdc) if aid not in aset_ids]
+    if missing:
+        raise SystemExit(f"Verification failed: app not opted in to assets {missing}")
+    print("✓ Post-deploy verification passed for cUSD app")
 
 def create_cusd_asset(creator_private_key, creator_address, app_address):
     """Create the cUSD asset (ASA) with app holding all reserve"""
@@ -336,7 +391,7 @@ def setup_assets(app_id, app_address, cusd_asset_id, usdc_asset_id, admin_privat
     print("\nSetting up assets in contract...")
     
     # Load ABI
-    with open("cusd.json", "r") as f:
+    with open(BASE_DIR / "cusd.json", "r") as f:
         abi_json = json.load(f)
     
     # Create contract interface
@@ -478,6 +533,13 @@ def main():
             usdc_asset_id = 10458941  # Testnet USDC
         setup_result = setup_assets(app_id, app_address, cusd_asset_id, usdc_asset_id, private_key, address)
         
+        # Step 3b: Set sponsor address (required for sponsored flows)
+        sponsor_address = os.environ.get("ALGORAND_SPONSOR_ADDRESS", "")
+        if not sponsor_address:
+            print("❌ ALGORAND_SPONSOR_ADDRESS not set. Set it to enable sponsored flows.")
+        else:
+            set_sponsor_address(app_id, private_key, address, sponsor_address)
+
         # Step 4: Transfer ALL cUSD to the contract (security critical!)
         print("\n" + "="*60)
         print("STEP 4: SECURING RESERVE")

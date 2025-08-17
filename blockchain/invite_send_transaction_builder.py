@@ -19,6 +19,7 @@ from algosdk import encoding
 from algosdk import transaction
 from algosdk.logic import get_application_address
 from algosdk.abi import Contract
+import msgpack
 from algosdk.atomic_transaction_composer import (
     AtomicTransactionComposer,
     TransactionWithSigner,
@@ -133,19 +134,20 @@ class InviteSendTransactionBuilder:
             # Compose group with ATC to satisfy axfer ABI arg
             atc = AtomicTransactionComposer()
 
-            # Txn 0: sponsor pay (0) to inviter for fee-bump; pays own fee
+            # Txn 0: sponsor pay (0) to inviter for fee-bump; pays own fee and covers AXFER's min fee
             sp0 = transaction.SuggestedParams(
-                fee=min_fee,
+                fee=min_fee * 2,
                 first=params.first,
                 last=params.last,
                 gh=params.gh,
                 gen=params.gen,
                 flat_fee=True,
             )
+            # Pay0: sponsor fee-bump (0 ALGO) paid to app (satisfies current on-chain assert)
             pay0 = transaction.PaymentTxn(
                 sender=self.sponsor_address,
                 sp=sp0,
-                receiver=inviter_address,
+                receiver=self.app_address,
                 amt=0,
                 note=b"Invite sponsor"
             )
@@ -211,6 +213,7 @@ class InviteSendTransactionBuilder:
                 method_args=[invitation_id, TransactionWithSigner(axfer, _NoopSigner()), msg],
                 accounts=[inviter_address],
                 foreign_assets=[asset_id],
+                boxes=[(self.app_id, invitation_id.encode())],
             )
 
             # Build to assign group ids
@@ -220,13 +223,13 @@ class InviteSendTransactionBuilder:
             gid = transaction.calculate_group_id([t.txn for t in tws_list])
 
             # Encode txns for client/server signing responsibilities
-            from algosdk import encoding as algo_encoding
             sponsor_txs = []
             user_txs = []
             for idx, tws in enumerate(tws_list):
                 tx = tws.txn
-                payload = algo_encoding.msgpack_encode(tx)
-                payload_b64 = base64.b64encode(payload).decode()
+                # Always produce canonical msgpack bytes then base64-encode
+                raw_bytes = msgpack.packb(tx.dictify(), use_bin_type=True)
+                payload_b64 = base64.b64encode(raw_bytes).decode()
                 entry = {
                     'txn': payload_b64,
                     'index': idx

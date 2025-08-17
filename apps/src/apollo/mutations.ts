@@ -212,8 +212,8 @@ export const PREPARE_INVITE_FOR_PHONE = gql`
     ) {
       success
       error
-      transactions
-      sponsorTransactions
+      userTransaction { txn groupId first last gh gen }
+      sponsorTransactions { txn index }
       groupId
       invitationId
     }
@@ -223,12 +223,16 @@ export const PREPARE_INVITE_FOR_PHONE = gql`
 // Invite & Send — submit invite group
 export const SUBMIT_INVITE_FOR_PHONE = gql`
   mutation SubmitInviteForPhone(
-    $signedAxferB64: String!,
-    $sponsorUnsigned: [String!]!
+    $signedUserTxn: String!,
+    $sponsorTransactions: [JSONString!]!,
+    $invitationId: String!,
+    $message: String
   ) {
     submitInviteForPhone(
-      signedAxferB64: $signedAxferB64,
-      sponsorUnsigned: $sponsorUnsigned
+      signedUserTxn: $signedUserTxn,
+      sponsorTransactions: $sponsorTransactions,
+      invitationId: $invitationId,
+      message: $message
     ) {
       success
       error

@@ -280,13 +280,13 @@ ALGORAND_PAYMENT_APP_ID=744210766
 ALGORAND_CUSD_ASSET_ID=744192921
 ALGORAND_CONFIO_ASSET_ID=744150851
 ALGORAND_SPONSOR_ADDRESS=PFFGG74A3BTBMPOJSTJALIIF4PO3JQJCS3WKYYXDQQ73J35EG2QOSCQRSY
+ALGORAND_ADMIN_MNEMONIC="your 25 words..."
 ```
 
 ### Test Payment Flow
 ```bash
-# 1. Deploy/setup contract
-cd contracts/payment
-python deploy_payment.py
+# 1. Deploy/setup contract (strict + verified)
+make deploy-payment
 
 # 2. Test server-side
 python manage.py shell

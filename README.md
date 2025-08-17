@@ -1914,6 +1914,37 @@ make shell
 make test
 ```
 
+### Algorand Deploy (Make targets)
+
+Use strict, one-command deploys for on-chain apps:
+
+```bash
+# Required env (example for TestNet)
+export ALGORAND_NETWORK=testnet
+export ALGORAND_ALGOD_ADDRESS=https://testnet-api.algonode.cloud
+export ALGORAND_ALGOD_TOKEN=""            # empty for Algonode
+
+# cUSD deploy (uses sponsor as deployer)
+export ALGORAND_SPONSOR_MNEMONIC="your 25 words..."
+export ALGORAND_SPONSOR_ADDRESS=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ
+make deploy-cusd
+
+# Payment deploy (admin deploys, requires assets + sponsor address)
+export ALGORAND_ADMIN_MNEMONIC="your 25 words..."
+export ALGORAND_CUSD_ASSET_ID=123456
+export ALGORAND_CONFIO_ASSET_ID=654321
+export ALGORAND_SPONSOR_ADDRESS=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ
+make deploy-payment
+
+# Invite & Send deploy (already strict)
+export ALGORAND_ADMIN_MNEMONIC="your 25 words..."
+make deploy-invite-send
+```
+
+Notes:
+- Deploy scripts are strict: they configure assets/sponsor and verify post-deploy (global state + app opt-ins). 
+- Old configure scripts were removed; use these `make` targets instead.
+
 ### Prerequisites
 
 1. **Python Virtual Environment**
