@@ -2,8 +2,9 @@ from django.contrib import admin
 from django.contrib import messages
 from django.utils.html import format_html
 from django.db.models import Q
+from django.utils import timezone
 from config.admin_mixins import EnhancedAdminMixin
-from .models import SendTransaction
+from .models import SendTransaction, PhoneInvite
 
 class SendTypeFilter(admin.SimpleListFilter):
     title = 'Send Type'
@@ -79,7 +80,7 @@ class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
     date_hierarchy = 'created_at'
     ordering = ['-created_at']
     
-    actions = ['retry_failed_transactions', 'mark_as_confirmed', 'mark_as_failed']
+    actions = ['retry_failed_transactions', 'mark_as_confirmed', 'mark_as_failed', 'clear_selected_invitations']
     
     fieldsets = (
         ('Transaction Information', {
@@ -232,6 +233,81 @@ class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         updated = queryset.filter(status='PENDING').update(status='FAILED')
         self.message_user(request, f"{updated} send transactions marked as failed.")
     mark_as_failed.short_description = "Mark as failed"
+
+    def clear_selected_invitations(self, request, queryset):
+        """Soft-delete selected invitation SendTransaction records to unblock resends"""
+        now = timezone.now()
+        qs_invites = queryset.filter(is_invitation=True, deleted_at__isnull=True)
+        count = 0
+        for tx in qs_invites:
+            tx.deleted_at = now
+            tx.save(update_fields=['deleted_at'])
+            count += 1
+        self.message_user(request, f"Cleared {count} invitation transaction(s) (soft-deleted)", level=messages.SUCCESS)
+    clear_selected_invitations.short_description = "Clear selected invitation records (soft-delete)"
+    mark_as_failed.short_description = "Mark as failed"
+
+
+@admin.register(PhoneInvite)
+class PhoneInviteAdmin(EnhancedAdminMixin, admin.ModelAdmin):
+    list_display = (
+        'invitation_id', 'phone_key', 'amount', 'token_type', 'status', 'inviter', 'claimed_by', 'claimed_txid_short', 'send_transaction', 'claimed_at', 'expires_at', 'created_at'
+    )
+    search_fields = ('invitation_id', 'phone_key', 'phone_number', 'inviter_user__username')
+    list_filter = ('status', 'token_type', 'created_at')
+    readonly_fields = ('created_at', 'updated_at')
+    actions = ['clear_db_invitation']
+
+    def inviter(self, obj):
+        return obj.inviter_user and (obj.inviter_user.get_full_name() or obj.inviter_user.username)
+
+    def claimed_txid_short(self, obj):
+        if obj.claimed_txid:
+            return f"{obj.claimed_txid[:8]}...{obj.claimed_txid[-8:]}"
+        return '-'
+    claimed_txid_short.short_description = 'Claim TXID'
+
+    def clear_db_invitation(self, request, queryset):
+        """Soft-delete PhoneInvite and related SendTransaction invitation rows for the phone"""
+        now = timezone.now()
+        cleared_tx = 0
+        cleared_inv = 0
+        for inv in queryset:
+            # Clear matching SendTransaction rows
+            digits = ''.join(ch for ch in (inv.phone_number or '') if ch.isdigit())
+            tx_qs = SendTransaction.objects.filter(
+                is_invitation=True,
+                deleted_at__isnull=True
+            ).filter(Q(recipient_phone=digits) | Q(recipient_display_name=digits))
+            for tx in tx_qs:
+                tx.deleted_at = now
+                tx.save(update_fields=['deleted_at'])
+                cleared_tx += 1
+            # Soft-delete the PhoneInvite row
+            if inv.deleted_at is None:
+                inv.deleted_at = now
+                if getattr(inv, 'status', None) == 'pending':
+                    inv.status = 'reclaimed'
+                inv.save(update_fields=['deleted_at', 'status', 'updated_at'])
+                cleared_inv += 1
+        self.message_user(request, f"Cleared {cleared_tx} invitation transactions and {cleared_inv} phone invite(s)", level=messages.SUCCESS)
+    clear_db_invitation.short_description = "Clear DB invite for selected phone(s)"
+
+    # Make visible and viewable to any staff user (read-only)
+    def has_module_permission(self, request):
+        return bool(getattr(request.user, 'is_staff', False))
+
+    def has_view_permission(self, request, obj=None):
+        return bool(getattr(request.user, 'is_staff', False))
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
     
     def get_queryset(self, request):
         """Show only non-deleted transactions by default"""

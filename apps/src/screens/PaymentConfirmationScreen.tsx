@@ -145,6 +145,23 @@ export const PaymentConfirmationScreen = () => {
   const fallbackBalance = balanceError ? mockBalances[invoiceData.tokenType] || '0' : realBalance;
   const hasEnoughBalance = parseFloat(fallbackBalance) >= parseFloat(currentPayment.amount);
 
+  // Prevent overstatement: floor-based formatting with tiny-balance label
+  const floorToDecimals = (value: number, decimals: number) => {
+    if (!isFinite(value)) return 0;
+    const m = Math.pow(10, decimals);
+    return Math.floor(value * m) / m;
+  };
+  const formatFixedFloor = (value: number, decimals = 2) => {
+    const floored = floorToDecimals(value, decimals);
+    return floored.toLocaleString('es-ES', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  };
+  const formatBalanceDisplay = (valueStr: string | number) => {
+    const v = typeof valueStr === 'string' ? parseFloat(valueStr) : valueStr;
+    if (!isFinite(v) || v <= 0) return '0.00';
+    if (v < 0.01) return '< 0.01';
+    return formatFixedFloor(v, 2);
+  };
+
   // Debug logging
   console.log('PaymentConfirmationScreen - Balance Debug:', {
     balanceData,
@@ -171,7 +188,7 @@ export const PaymentConfirmationScreen = () => {
     name: currentPayment.currency === 'cUSD' ? 'Confío Dollar' : 
           currentPayment.currency === 'CONFIO' ? 'Confío' : 
           currentPayment.currency === 'USDC' ? 'USD Coin' : currentPayment.currency,
-    balance: fallbackBalance,
+    balance: formatBalanceDisplay(fallbackBalance),
     color: currentPayment.currency === 'cUSD' ? colors.primary : 
            currentPayment.currency === 'CONFIO' ? colors.secondary : 
            currentPayment.currency === 'USDC' ? colors.accent : colors.primary,

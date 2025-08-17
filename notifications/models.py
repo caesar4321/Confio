@@ -10,6 +10,7 @@ class NotificationType(models.TextChoices):
     # Send transactions
     SEND_RECEIVED = 'SEND_RECEIVED', 'Send Received'
     SEND_SENT = 'SEND_SENT', 'Send Sent'
+    INVITE_RECEIVED = 'INVITE_RECEIVED', 'Invite Received'
     SEND_INVITATION_SENT = 'SEND_INVITATION_SENT', 'Send Invitation Sent'
     SEND_INVITATION_CLAIMED = 'SEND_INVITATION_CLAIMED', 'Send Invitation Claimed'
     SEND_INVITATION_EXPIRED = 'SEND_INVITATION_EXPIRED', 'Send Invitation Expired'

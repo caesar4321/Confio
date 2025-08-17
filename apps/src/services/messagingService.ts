@@ -755,6 +755,13 @@ class MessagingService {
         
         // Determine transaction type
         let transactionType = transactionData?.transaction_type || 'send';
+        const notifType = transactionData?.notification_type;
+        // Force receiver perspective for invitation received
+        if (notifType === 'INVITE_RECEIVED' || notifType === 'SEND_RECEIVED') {
+          transactionType = 'received';
+          navData.transaction_type = 'received';
+          navData.type = 'received';
+        }
         if (type === 'PaymentTransaction' || type === 'payment') {
           transactionType = 'payment';
         }

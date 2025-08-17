@@ -26,6 +26,11 @@ from algosdk.atomic_transaction_composer import (
     AccountTransactionSigner,
     TransactionSigner,
 )
+from users.country_codes import COUNTRY_CODES
+from users.phone_utils import (
+    normalize_phone as _normalize_phone,
+    normalize_any_phone as _normalize_any_phone,
+)
 
 
 def _abi_contract() -> Contract:
@@ -76,10 +81,29 @@ class InviteSendTransactionBuilder:
 
     @staticmethod
     def normalize_phone(phone_number: str, country: Optional[str]) -> str:
-        """Normalize phone to E.164-ish key material without '+'; fallback to raw."""
-        digits = ''.join(ch for ch in (phone_number or '') if ch.isdigit())
-        cc = (country or '').strip().replace('+', '')
-        return f"{cc}:{digits}" if cc else digits
+        """Strict canonical phone key: "cc:digits" only.
+
+        Rules:
+        - If `country` is provided (ISO alpha-2 or calling code), use it to produce
+          "cc:digits" via `_normalize_phone`.
+        - Else, if `phone_number` is in E.164 form (starts with '+') and contains a
+          valid calling code, derive "cc:digits" via `normalize_any_phone`.
+        - Otherwise, return an empty string to signal inability to canonicalize.
+        """
+        # Attempt ISO/calling-code driven normalization first
+        key = _normalize_phone(phone_number, country)
+        if key and ':' in key:
+            return key
+        # Next, allow E.164 parsing from the phone string itself
+        if (phone_number or '').strip().startswith('+'):
+            try:
+                alt = _normalize_any_phone(phone_number)
+                if alt and ':' in alt:
+                    return alt
+            except Exception:
+                pass
+        # Could not canonicalize to cc:digits
+        return ''
 
     @staticmethod
     def make_invitation_id(phone_key: str) -> str:
@@ -113,7 +137,8 @@ class InviteSendTransactionBuilder:
         amount: int,
         phone_number: str,
         phone_country: Optional[str] = None,
-        message: Optional[str] = ''
+        message: Optional[str] = '',
+        invitation_id_override: Optional[str] = None,
     ) -> InviteBuildResult:
         try:
             if asset_id not in (self.cusd_asset_id, self.confio_asset_id):
@@ -124,7 +149,7 @@ class InviteSendTransactionBuilder:
                 return InviteBuildResult(False, error=err)
 
             phone_key = self.normalize_phone(phone_number, phone_country)
-            invitation_id = self.make_invitation_id(phone_key)
+            invitation_id = invitation_id_override or self.make_invitation_id(phone_key)
             msg = (message or '')[:256]
             mbr = self._box_mbr_cost(len(invitation_id.encode()), len(msg.encode()))
 
@@ -213,7 +238,8 @@ class InviteSendTransactionBuilder:
                 method_args=[invitation_id, TransactionWithSigner(axfer, _NoopSigner()), msg],
                 accounts=[inviter_address],
                 foreign_assets=[asset_id],
-                boxes=[(self.app_id, invitation_id.encode())],
+                # Use app index 0 to reference boxes on the current application
+                boxes=[(0, invitation_id.encode())],
             )
 
             # Build to assign group ids

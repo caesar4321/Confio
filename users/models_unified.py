@@ -29,7 +29,7 @@ class UnifiedTransactionTable(models.Model):
     ]
 
     TOKEN_TYPES = [
-        ('cUSD', 'Confío Dollar'),
+        ('CUSD', 'Confío Dollar'),
         ('CONFIO', 'Confío Token'),
         ('USDC', 'USD Coin')
     ]
