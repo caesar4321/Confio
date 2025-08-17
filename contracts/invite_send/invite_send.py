@@ -209,16 +209,9 @@ def create_invitation(
     actual_inviter = ScratchVar(TealType.bytes)
     
     return Seq(
-        # Determine actual inviter (could be sponsor calling on behalf of user)
-        If(
-            And(
-                app.state.sponsor_address.get() != Bytes(""),
-                Txn.sender() == app.state.sponsor_address.get(),
-                Txn.accounts.length() > Int(0)
-            ),
-            actual_inviter.store(Txn.accounts[0]),  # User passed as account reference
-            actual_inviter.store(Txn.sender())  # Direct call from user
-        ),
+        # Determine actual inviter directly from the referenced AXFER
+        # This is canonical and avoids ambiguity around Txn.accounts
+        actual_inviter.store(asset_transfer.get().sender()),
         
         # Check system state and asset configuration
         Assert(app.state.is_paused == Int(0)),
@@ -262,12 +255,14 @@ def create_invitation(
         # Determine indices based on group size
         If(Global.group_size() == Int(4),
             Seq(
-                # Sponsored: verify sponsor payment at index 0
+                # Sponsored: verify sponsor fee-bump payment at index 0
                 Assert(Gtxn[0].type_enum() == TxnType.Payment),
-                Assert(Gtxn[0].amount() >= Int(0)),  # Can be 0 if just covering fees
+                Assert(Gtxn[0].sender() == app.state.sponsor_address.get()),
+                Assert(Gtxn[0].amount() == Int(0)),  # pure fee-bump, no deposit
                 Assert(Or(
-                    Gtxn[0].receiver() == actual_inviter.load(),  # Payment to user
-                    Gtxn[0].receiver() == Global.current_application_address()  # Payment to app
+                    Gtxn[0].receiver() == Gtxn[0].sender(),  # pay-to-self (canonical fee-bump)
+                    Gtxn[0].receiver() == Global.current_application_address(),  # or to app
+                    Gtxn[0].receiver() == actual_inviter.load(),  # or to inviter (legacy)
                 )),
                 Assert(no_rekey_close_pay(Int(0))),
                 

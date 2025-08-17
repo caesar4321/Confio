@@ -54,7 +54,8 @@ from algosdk.atomic_transaction_composer import (
 from algosdk.abi import Contract, Method, Argument, Returns
 
 
-ROOT = Path(__file__).resolve().parents[1]
+# When located under contracts/invite_send/, repo root is two levels up
+ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_DIR = ROOT / "contracts" / "invite_send"
 ARTIFACTS_DIR = CONTRACT_DIR / "artifacts"
 
@@ -167,8 +168,7 @@ def try_set_sponsor(
     sponsor_address: Optional[str],
 ) -> None:
     if not sponsor_address:
-        print("Skipping set_sponsor: ALGORAND_SPONSOR_ADDRESS not provided")
-        return
+        raise SystemExit("ALGORAND_SPONSOR_ADDRESS is required for strict deploy")
 
     method = next((m for m in abi_contract.methods if m.name == "set_sponsor"), None)
     if method is None:
@@ -211,8 +211,7 @@ def try_setup_assets(
     confio_id: Optional[int],
 ) -> None:
     if not (cusd_id and confio_id):
-        print("Skipping setup_assets: asset IDs not fully provided")
-        return
+        raise SystemExit("ALGORAND_CUSD_ASSET_ID and ALGORAND_CONFIO_ASSET_ID are required for strict deploy")
 
     method = next((m for m in abi_contract.methods if m.name == "setup_assets"), None)
     if method is None:
@@ -275,6 +274,13 @@ def try_setup_assets(
     print(f"Calling setup_assets with CUSD={cusd_id}, CONFIO={confio_id}...")
     result = atc.execute(client, 10)
     print(f"✓ setup_assets confirmed in round {result.confirmed_round}")
+    # Verify app opt-ins
+    app_addr = logic.get_application_address(app_id)
+    acct = client.account_info(app_addr)
+    aset_ids = {a.get('asset-id') for a in acct.get('assets', [])}
+    missing = [aid for aid in (cusd_id, confio_id) if aid not in aset_ids]
+    if missing:
+        raise SystemExit(f"Post-setup verification failed: app missing opt-ins for assets {missing}")
 
 
 def save_deployment(app_id: int, app_address: str, network: str) -> None:

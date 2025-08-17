@@ -1,6 +1,6 @@
 #pragma version 8
 intcblock 0 1 2 4 100000
-bytecblock 0x 0x61646d696e 0x637573645f61737365745f6964 0x69735f706175736564 0x00 0x746f74616c5f636f6e66696f5f6c6f636b6564 0x746f74616c5f637573645f6c6f636b6564 0x636f6e66696f5f61737365745f6964 0x73706f6e736f725f61646472657373 0x723a 0x746f74616c5f696e7669746174696f6e735f63726561746564 0x746f74616c5f696e7669746174696f6e735f636c61696d6564 0x746f74616c5f696e7669746174696f6e735f7265636c61696d6564 0x151f7c75
+bytecblock 0x 0x61646d696e 0x637573645f61737365745f6964 0x69735f706175736564 0x00 0x746f74616c5f636f6e66696f5f6c6f636b6564 0x746f74616c5f637573645f6c6f636b6564 0x636f6e66696f5f61737365745f6964 0x723a 0x73706f6e736f725f61646472657373 0x746f74616c5f696e7669746174696f6e735f63726561746564 0x746f74616c5f696e7669746174696f6e735f636c61696d6564 0x746f74616c5f696e7669746174696f6e735f7265636c61696d6564 0x151f7c75
 txna ApplicationArgs 0
 pushbytes 0x4c5c61ba // "create()void"
 ==
@@ -370,23 +370,9 @@ return
 // create_invitation
 createinvitation_5:
 proto 3 0
-bytec 8 // "sponsor_address"
-app_global_get
-bytec_0 // ""
-!=
-txn Sender
-bytec 8 // "sponsor_address"
-app_global_get
-==
-&&
-txn NumAccounts
-intc_0 // 0
->
-&&
-bnz createinvitation_5_l10
-txn Sender
+frame_dig -2
+gtxns Sender
 store 7
-createinvitation_5_l2:
 bytec_3 // "is_paused"
 app_global_get
 intc_0 // 0
@@ -432,7 +418,7 @@ intc_2 // 2
 frame_dig -3
 extract 2 0
 extract 0 2
-bytec 9 // "r:"
+bytec 8 // "r:"
 !=
 ||
 assert
@@ -478,13 +464,13 @@ assert
 global GroupSize
 intc_3 // 4
 ==
-bnz createinvitation_5_l9
+bnz createinvitation_5_l7
 gtxn 0 TypeEnum
 intc_1 // pay
 ==
 assert
 gtxn 0 Sender
-bytec 8 // "sponsor_address"
+bytec 9 // "sponsor_address"
 app_global_get
 ==
 assert
@@ -536,7 +522,7 @@ gtxn 0 Amount
 load 5
 -
 store 6
-createinvitation_5_l4:
+createinvitation_5_l2:
 frame_dig -3
 extract 2 0
 box_get
@@ -553,8 +539,8 @@ assert
 load 6
 intc_0 // 0
 >
-bnz createinvitation_5_l8
-createinvitation_5_l5:
+bnz createinvitation_5_l6
+createinvitation_5_l3:
 frame_dig -3
 extract 2 0
 intc_0 // 0
@@ -622,7 +608,7 @@ gtxns XferAsset
 bytec_2 // "cusd_asset_id"
 app_global_get
 ==
-bnz createinvitation_5_l7
+bnz createinvitation_5_l5
 bytec 5 // "total_confio_locked"
 bytec 5 // "total_confio_locked"
 app_global_get
@@ -630,8 +616,8 @@ frame_dig -2
 gtxns AssetAmount
 +
 app_global_put
-b createinvitation_5_l11
-createinvitation_5_l7:
+b createinvitation_5_l8
+createinvitation_5_l5:
 bytec 6 // "total_cusd_locked"
 bytec 6 // "total_cusd_locked"
 app_global_get
@@ -639,8 +625,8 @@ frame_dig -2
 gtxns AssetAmount
 +
 app_global_put
-b createinvitation_5_l11
-createinvitation_5_l8:
+b createinvitation_5_l8
+createinvitation_5_l6:
 itxn_begin
 intc_1 // pay
 itxn_field TypeEnum
@@ -651,21 +637,30 @@ itxn_field Amount
 intc_0 // 0
 itxn_field Fee
 itxn_submit
-b createinvitation_5_l5
-createinvitation_5_l9:
+b createinvitation_5_l3
+createinvitation_5_l7:
 gtxn 0 TypeEnum
 intc_1 // pay
 ==
 assert
+gtxn 0 Sender
+bytec 9 // "sponsor_address"
+app_global_get
+==
+assert
 gtxn 0 Amount
 intc_0 // 0
->=
+==
 assert
 gtxn 0 Receiver
-load 7
+gtxn 0 Sender
 ==
 gtxn 0 Receiver
 global CurrentApplicationAddress
+==
+||
+gtxn 0 Receiver
+load 7
 ==
 ||
 assert
@@ -677,7 +672,7 @@ intc_1 // pay
 ==
 assert
 gtxn 1 Sender
-bytec 8 // "sponsor_address"
+bytec 9 // "sponsor_address"
 app_global_get
 ==
 assert
@@ -729,12 +724,8 @@ gtxn 1 Amount
 load 5
 -
 store 6
-b createinvitation_5_l4
-createinvitation_5_l10:
-txna Accounts 0
-store 7
 b createinvitation_5_l2
-createinvitation_5_l11:
+createinvitation_5_l8:
 intc_1 // 1
 return
 
@@ -881,7 +872,7 @@ frame_dig -2
 extract 2 0
 box_del
 assert
-bytec 9 // "r:"
+bytec 8 // "r:"
 frame_dig -2
 extract 2 0
 concat
@@ -1100,7 +1091,7 @@ frame_dig -1
 extract 2 0
 box_del
 assert
-bytec 9 // "r:"
+bytec 8 // "r:"
 frame_dig -1
 extract 2 0
 concat
@@ -1246,7 +1237,7 @@ txn RekeyTo
 global ZeroAddress
 ==
 assert
-bytec 8 // "sponsor_address"
+bytec 9 // "sponsor_address"
 frame_dig -1
 app_global_put
 intc_1 // 1
@@ -1267,7 +1258,7 @@ store 53
 store 52
 load 53
 bnz getinvitationstatus_11_l4
-bytec 9 // "r:"
+bytec 8 // "r:"
 frame_dig -1
 extract 2 0
 concat
@@ -1337,7 +1328,7 @@ intc_0 // 0
 dupn 6
 bytec_0 // ""
 dup
-bytec 9 // "r:"
+bytec 8 // "r:"
 frame_dig -1
 extract 2 0
 concat

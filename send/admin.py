@@ -38,6 +38,8 @@ class SendTransactionAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         'recipient_display', 
         'amount_display', 
         'token_type', 
+        'is_invitation',
+        'invitation_expires_at',
         'status', 
         'created_at',
         'transaction_hash_display'

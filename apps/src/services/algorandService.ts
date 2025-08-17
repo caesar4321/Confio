@@ -313,35 +313,34 @@ class AlgorandService {
       const provider: 'google' | 'apple' = oauthData.provider;
       const sub: string = oauthData.subject;
 
-      // ALWAYS initialize wallet to ensure scope is set, even if address is already loaded
       // Get active account context (type/index/businessId)
       const { AuthService } = await import('./authService');
       const authService = AuthService.getInstance();
       const accountContext = await authService.getActiveAccountContext();
 
-      // Determine issuer/audience consistently with derivation
-      const { GOOGLE_CLIENT_IDS } = await import('../config/env');
-      const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
-      const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
-      const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+      // Try fast-path signing using in-memory seed/scope. If missing, initialize once.
+      let signedTxn: Uint8Array | null = null;
+      try {
+        signedTxn = await secureDeterministicWallet.signTransaction(txnBytes);
+      } catch (e: any) {
+        // Initialize scope + cache only if needed
+        const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+        const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+        const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+        const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
 
-      // Create/restore wallet to ensure in-memory seed and scope are set
-      // This is idempotent - if wallet is already initialized with correct scope, it's fast
-      const wallet = await secureDeterministicWallet.createOrRestoreWallet(
-        iss,
-        sub,
-        aud,
-        provider,
-        accountContext.type,
-        accountContext.index,
-        accountContext.businessId
-      );
-
-      // Update currentAccount with wallet address
-      this.currentAccount = { addr: wallet.address, sk: null };
-
-      // Now sign the raw transaction bytes using secure wallet
-      const signedTxn = await secureDeterministicWallet.signTransaction(txnBytes);
+        const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+          iss,
+          sub,
+          aud,
+          provider,
+          accountContext.type,
+          accountContext.index,
+          accountContext.businessId
+        );
+        this.currentAccount = { addr: wallet.address, sk: null };
+        signedTxn = await secureDeterministicWallet.signTransaction(txnBytes);
+      }
       return signedTxn;
     } catch (error) {
       console.error('Error signing transaction:', error);

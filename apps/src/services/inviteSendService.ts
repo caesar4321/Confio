@@ -4,10 +4,11 @@ import { PREPARE_INVITE_FOR_PHONE, SUBMIT_INVITE_FOR_PHONE } from '../apollo/mut
 import { INVITE_RECEIPT_FOR_PHONE } from '../apollo/queries'
 import algorandService from './algorandService'
 
+type SponsorTxn = { txn: string; index: number }
 type PreparedInvite = {
-  transactions: { txn: string; index?: number }[]
-  sponsorTransactions: { txn: string; index: number }[]
-  groupId: string
+  userTransaction: { txn: string; groupId?: string; first?: number; last?: number; gh?: string; gen?: string }
+  sponsorTransactions: SponsorTxn[]
+  groupId?: string
   invitationId: string
 }
 
@@ -24,18 +25,14 @@ class InviteSendService {
       variables: { phone, phoneCountry, amount, assetType, message },
     })
     const res = data?.prepareInviteForPhone
-    if (!res?.success) return { success: false, error: res?.error || 'Failed to prepare invite' }
+    if (!res?.success) {
+      console.error('[InviteSend] prepareInvite failed', res);
+      return { success: false, error: res?.error || 'Failed to prepare invite' }
+    }
 
-    // Normalize: backend returns JSON strings for arrays
-    const txsRaw = res.transactions
-    const sponsorsRaw = res.sponsorTransactions
-    const transactions = typeof txsRaw === 'string' ? JSON.parse(txsRaw) : (txsRaw || [])
-    const sponsorTransactionsArr = typeof sponsorsRaw === 'string' ? JSON.parse(sponsorsRaw) : (sponsorsRaw || [])
-
-    // Normalize to typed structure
     const prepared: PreparedInvite = {
-      transactions,
-      sponsorTransactions: sponsorTransactionsArr.sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0)),
+      userTransaction: res.userTransaction,
+      sponsorTransactions: res.sponsorTransactions || [],
       groupId: res.groupId,
       invitationId: res.invitationId,
     }
@@ -43,8 +40,8 @@ class InviteSendService {
   }
 
   async submitPreparedInvite(prepared: PreparedInvite): Promise<{ success: boolean; error?: string; txid?: string }> {
-    // Expect exactly one user txn to sign (the AXFER)
-    const user = prepared.transactions?.[0]
+    // Expect one user txn to sign (the AXFER)
+    const user = prepared.userTransaction
     if (!user?.txn) return { success: false, error: 'Missing user transaction to sign' }
 
     const userTxnBytes = Buffer.from(user.txn, 'base64')
@@ -52,15 +49,44 @@ class InviteSendService {
     const signedUserTxn = await algorandService.signTransactionBytes(userTxnBytes)
     const signedAxferB64 = Buffer.from(signedUserTxn).toString('base64')
 
-    // Map sponsor txns to unsigned base64 in correct order
-    const sponsorUnsigned = prepared.sponsorTransactions.map((t) => t.txn)
+    // Normalize base64 strings to prevent padding/urlsafe issues
+    const normalizeB64 = (s: string) => {
+      let t = (s || '').trim().replace(/\r|\n/g, '').replace(/-/g, '+').replace(/_/g, '/')
+      const pad = (4 - (t.length % 4)) % 4
+      if (pad) t = t + '='.repeat(pad)
+      return t
+    }
+
+    const signedAxferB64Norm = normalizeB64(signedAxferB64)
+
+    // Debug lengths to track padding issues
+    try {
+      console.log('[InviteSend] lengths', {
+        signed: signedAxferB64Norm.length,
+        s0: sponsorUnsigned[0]?.length,
+        s1: sponsorUnsigned[1]?.length,
+        s2: sponsorUnsigned[2]?.length,
+        mod4: {
+          signed: signedAxferB64Norm.length % 4,
+          s0: sponsorUnsigned[0]?.length % 4,
+          s1: sponsorUnsigned[1]?.length % 4,
+          s2: sponsorUnsigned[2]?.length % 4,
+        }
+      })
+    } catch {}
+
+    // Echo sponsor transactions back exactly as provided by server (no mutation)
+    const sponsorTransactionsPayload = (prepared.sponsorTransactions || []).map(stx => JSON.stringify(stx))
 
     const { data } = await apolloClient.mutate({
       mutation: SUBMIT_INVITE_FOR_PHONE,
-      variables: { signedAxferB64, sponsorUnsigned },
+      variables: { signedUserTxn: signedAxferB64Norm, sponsorTransactions: sponsorTransactionsPayload, invitationId: prepared.invitationId },
     })
     const res = data?.submitInviteForPhone
-    if (!res?.success) return { success: false, error: res?.error || 'Invite submission failed' }
+    if (!res?.success) {
+      console.error('[InviteSend] submitInvite failed', res);
+      return { success: false, error: res?.error || 'Invite submission failed' }
+    }
     return { success: true, txid: res.txid }
   }
 

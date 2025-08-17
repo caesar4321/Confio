@@ -2,6 +2,25 @@
 
 Complete step-by-step guide for deploying Confío Dollar (cUSD) on Algorand.
 
+## Quick Deploy (recommended)
+
+Use the Make target for a strict, verified deployment:
+
+```bash
+export ALGORAND_NETWORK=testnet
+export ALGORAND_ALGOD_ADDRESS=https://testnet-api.algonode.cloud
+export ALGORAND_ALGOD_TOKEN=""  # empty ok for Algonode
+export ALGORAND_SPONSOR_MNEMONIC="your 25 words..."
+export ALGORAND_SPONSOR_ADDRESS=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAY5HFKQ
+
+make deploy-cusd
+```
+
+This does:
+- Deploys the app and creates the cUSD ASA
+- Calls `setup_assets` and sets `sponsor_address`
+- Verifies global-state asset IDs, sponsor, and app opt-ins
+
 ## Prerequisites
 
 ### 1. Environment Setup
@@ -25,8 +44,8 @@ python deploy_cusd.py
 
 #### Option B: Use Existing Account
 ```bash
-# Set your mnemonic as environment variable
-export ALGORAND_MNEMONIC="your twenty five word mnemonic phrase here..."
+# Set your sponsor mnemonic as environment variable
+export ALGORAND_SPONSOR_MNEMONIC="your twenty five word mnemonic phrase here..."
 python deploy_cusd.py
 ```
 
