@@ -160,8 +160,17 @@ const PhoneVerificationScreen = () => {
             await completePhoneVerification();
             // Navigate to Home and trigger one-time invite receipt check
             try {
-              navigation.navigate('BottomTabs', { screen: 'Home', params: { checkInviteReceipt: true } } as any);
-            } catch (e) {}
+              // Prefer nested route when available
+              const state: any = (navigation as any).getState?.();
+              const hasBottomTabs = Array.isArray(state?.routeNames) && state.routeNames.includes('BottomTabs');
+              if (hasBottomTabs) {
+                (navigation as any).navigate('BottomTabs', { screen: 'Home', params: { checkInviteReceipt: true } });
+              } else {
+                (navigation as any).navigate('Main' as never, { screen: 'Home', params: { checkInviteReceipt: true } } as never);
+              }
+            } catch (e) {
+              try { (navigation as any).navigate('Main' as never); } catch {}
+            }
           }
         } else {
           Alert.alert('Error', data.verifyTelegramCode.error || 'Verification failed');

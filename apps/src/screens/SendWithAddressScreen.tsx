@@ -80,6 +80,18 @@ export const SendWithAddressScreen = () => {
     return balance;
   }, [balanceData]);
 
+  // Prevent overstatement: floor display to 2 decimals
+  const floorToDecimals = React.useCallback((value: number, decimals: number) => {
+    if (!isFinite(value)) return 0;
+    const m = Math.pow(10, decimals);
+    return Math.floor(value * m) / m;
+  }, []);
+
+  const formatFixedFloor = React.useCallback((value: number, decimals = 2) => {
+    const floored = floorToDecimals(value, decimals);
+    return floored.toLocaleString('es-ES', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  }, [floorToDecimals]);
+
   const handleQuickAmount = (val: string) => setAmount(val);
 
   const handleSend = async () => {
@@ -188,7 +200,7 @@ export const SendWithAddressScreen = () => {
             <ActivityIndicator size="small" color={config.color} style={{ marginVertical: 8 }} />
           ) : (
             <Text style={styles.balanceAmount}>
-              {formatNumber(availableBalance)} {config.name}
+              {formatFixedFloor(availableBalance, 2)} {config.name}
             </Text>
           )}
           <Text style={styles.balanceMin}>Mínimo para enviar: {config.minSend} {config.name}</Text>

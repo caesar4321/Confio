@@ -293,6 +293,13 @@ class EmployeeInvitation(SoftDeleteModel):
         max_length=2,
         help_text="ISO country code for the phone number"
     )
+    # Canonical normalized phone key for the invitee
+    employee_phone_key = models.CharField(
+        max_length=32,
+        blank=True,
+        null=True,
+        help_text="Canonical phone key (callingcode:digits) for the invited employee"
+    )
     
     employee_name = models.CharField(
         max_length=255,
@@ -357,12 +364,18 @@ class EmployeeInvitation(SoftDeleteModel):
             models.Index(fields=['employee_phone', 'status']),
             models.Index(fields=['expires_at']),
             models.Index(fields=['employee_phone', 'employee_phone_country', 'status'], name='idx_invitation_phone_status'),
+            models.Index(fields=['employee_phone_key', 'status'], name='idx_invitation_phonekey_status'),
         ]
         constraints = [
             models.UniqueConstraint(
                 fields=['business', 'employee_phone', 'employee_phone_country'],
                 condition=models.Q(status='pending') & models.Q(deleted_at__isnull=True),
                 name='unique_pending_invitation_per_phone'
+            ),
+            models.UniqueConstraint(
+                fields=['business', 'employee_phone_key'],
+                condition=models.Q(status='pending') & models.Q(employee_phone_key__isnull=False) & models.Q(deleted_at__isnull=True),
+                name='unique_pending_invitation_per_phonekey'
             ),
         ]
         # Note: Additional database-level constraints are enforced via triggers:
@@ -422,6 +435,16 @@ class EmployeeInvitation(SoftDeleteModel):
         
         self.status = 'cancelled'
         self.save()
+
+    def save(self, *args, **kwargs):
+        # Maintain normalized phone key automatically
+        try:
+            if self.employee_phone:
+                from .phone_utils import normalize_phone
+                self.employee_phone_key = normalize_phone(self.employee_phone or '', self.employee_phone_country or '')
+        except Exception:
+            pass
+        super().save(*args, **kwargs)
     
     @classmethod
     def cleanup_expired(cls):

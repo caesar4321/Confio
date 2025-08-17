@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { 
+import {
   View, 
   Text, 
   StyleSheet, 
@@ -12,7 +12,8 @@ import {
   StatusBar,
   Image,
   Clipboard,
-  ActivityIndicator
+  ActivityIndicator,
+  Share,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -1088,6 +1089,8 @@ export const TransactionDetailScreen = () => {
     }
   );
 
+  // No secondary friend query here to avoid backend filter issues
+
   // Sample transaction data - in real app, this would come from props or API
   const transactions = {
     received: {
@@ -1187,34 +1190,44 @@ export const TransactionDetailScreen = () => {
   });
   
   // Transform fetched data to match the expected format
-  let txData = transactionData;
+  // We'll build txData from the most reliable source in order:
+  // 1) Server-fetched details (when available)
+  // 2) Normalized notification payload (camelCased + mapped fields)
+  // 3) Raw notification payload (last resort)
+  let txData: any = undefined;
   if (fetchedData?.sendTransaction && needsFetch) {
     const tx = fetchedData.sendTransaction;
-    const isSent = tx.senderUser?.id === tx.recipientUser?.id; // This needs proper user context
+    // Resolve direction primarily from route params; fallback to simple heuristic
+    const routeTypeRaw = (route.params?.transactionType || transactionData?.transaction_type || '').toString().toLowerCase();
+    const resolvedType = routeTypeRaw === 'sent' || routeTypeRaw === 'send'
+      ? 'sent'
+      : routeTypeRaw === 'received' ? 'received' : 'received';
     
     console.log('[TransactionDetailScreen] Transforming fetched data:', {
       tx,
-      isSent,
+      resolvedType,
       amount: tx.amount,
       tokenType: tx.tokenType,
     });
     
     txData = {
-      ...transactionData,
-      type: isSent ? 'sent' : 'received',
+      ...(transactionData || {}),
+      type: resolvedType,
       from: tx.senderDisplayName || tx.senderUser?.firstName || 'Usuario',
       fromAddress: tx.senderAddress,
       to: tx.recipientDisplayName || tx.recipientUser?.firstName || 'Usuario',
       toAddress: tx.recipientAddress,
-      amount: isSent ? `-${tx.amount}` : `+${tx.amount}`,
-      currency: tx.tokenType,
+      amount: resolvedType === 'sent' ? `-${tx.amount}` : `+${tx.amount}`,
+      currency: tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType,
       date: moment.utc(tx.createdAt).local().format('YYYY-MM-DD'),
       time: moment.utc(tx.createdAt).local().format('HH:mm'),
       status: tx.status?.toLowerCase() || 'completed',
       hash: tx.transactionHash || '',
       note: tx.memo || '',
-      avatar: (isSent ? tx.recipientDisplayName : tx.senderDisplayName)?.[0] || 'U',
+      avatar: (resolvedType === 'sent' ? tx.recipientDisplayName : tx.senderDisplayName)?.[0] || 'U',
       isInvitedFriend: !!tx.invitationExpiresAt,
+      invitationExpiresAt: tx.invitationExpiresAt,
+      invitationClaimed: !!(tx.recipientUser && tx.recipientUser.id),
       transaction_type: 'send',
       // Add phone numbers from fetched data
       sender_phone: tx.senderUser?.phoneCountry && tx.senderUser?.phoneNumber ? 
@@ -1226,6 +1239,10 @@ export const TransactionDetailScreen = () => {
       recipientPhone: tx.recipientUser?.phoneCountry && tx.recipientUser?.phoneNumber ? 
         `${tx.recipientUser.phoneCountry}${tx.recipientUser.phoneNumber}` : tx.recipientPhone,
     };
+    // If opened via an invite-received notification, force receiver perspective
+    if (transactionData?.notification_type === 'INVITE_RECEIVED') {
+      txData.type = 'received';
+    }
   }
   
   // If transactionData exists and has content, normalize it
@@ -1254,13 +1271,16 @@ export const TransactionDetailScreen = () => {
       is_external_address: transactionData.is_external_address,
       is_invited_friend: transactionData.is_invited_friend,
       isInvitedFriend: transactionData.is_invited_friend || transactionData.isInvitedFriend,
+      invitationClaimed: (transactionData as any).invitationClaimed || (transactionData as any).invitation_claimed,
+      invitationReverted: (transactionData as any).invitationReverted || (transactionData as any).invitation_reverted,
+      invitationExpiresAt: (transactionData as any).invitationExpiresAt || (transactionData as any).invitation_expires_at,
       recipient_phone: transactionData.recipient_phone || transactionData.recipientPhone,
       recipient_address: transactionData.recipient_address || transactionData.recipientAddress,
       senderName: transactionData.sender_name || transactionData.senderName,
       senderPhone: transactionData.sender_phone || transactionData.senderPhone,
       senderAddress: transactionData.sender_address || transactionData.senderAddress,
       transactionHash: transactionData.transaction_hash || transactionData.transactionHash,
-      hash: transactionData.transaction_hash || transactionData.transactionHash || transactionData.hash,
+      hash: transactionData.transaction_hash || transactionData.transactionHash || transactionData.hash || transactionData.txid,
       is_invited_friend: transactionData.is_invited_friend,
       is_external_address: transactionData.is_external_address,
       // Override 'to' and 'from' if they contain truncated addresses
@@ -1291,11 +1311,56 @@ export const TransactionDetailScreen = () => {
       destinationAddress: transactionData.destination_address || transactionData.destinationAddress,
       toAddress: transactionData.destination_address || transactionData.destinationAddress || transactionData.toAddress,
     };
+
+    // If opened via an invite-received notification, force receiver perspective
+    if (transactionData?.notification_type === 'INVITE_RECEIVED') {
+      normalizedTransactionData.type = 'received';
+    }
+
+    // Normalize currency symbol casing and cUSD mapping
+    if (typeof normalizedTransactionData.currency === 'string') {
+      const cur = (normalizedTransactionData.currency as string).toUpperCase();
+      if (cur === 'CUSD') normalizedTransactionData.currency = 'cUSD';
+    }
+
+    // Fallback timestamp if missing
+    if (!normalizedTransactionData.createdAt && !normalizedTransactionData.timestamp) {
+      const now = Date.now();
+      (normalizedTransactionData as any).timestamp = now;
+      (normalizedTransactionData as any).date = moment(now).format('YYYY-MM-DD');
+      (normalizedTransactionData as any).time = moment(now).format('HH:mm');
+    }
+    
+    // Provide from/to fallback names from sender/recipient_name
+    if (!normalizedTransactionData.from && normalizedTransactionData.senderName) {
+      (normalizedTransactionData as any).from = normalizedTransactionData.senderName;
+    }
+    if (!normalizedTransactionData.to && normalizedTransactionData.recipientName) {
+      (normalizedTransactionData as any).to = normalizedTransactionData.recipientName;
+    }
+    
+    // Provide addresses mapping if missing
+    if (!normalizedTransactionData.fromAddress && normalizedTransactionData.senderAddress) {
+      (normalizedTransactionData as any).fromAddress = normalizedTransactionData.senderAddress;
+    }
+    if (!normalizedTransactionData.toAddress && normalizedTransactionData.recipientAddress) {
+      (normalizedTransactionData as any).toAddress = normalizedTransactionData.recipientAddress;
+    }
   }
   
-  const currentTx = (normalizedTransactionData && Object.keys(normalizedTransactionData).length > 1) 
-    ? normalizedTransactionData 
-    : (txData || transactions[transactionType]);
+  // If we couldn't build txData from server, prefer the normalized payload
+  if (!txData) {
+    if (normalizedTransactionData && Object.keys(normalizedTransactionData).length > 1) {
+      txData = normalizedTransactionData;
+    } else if (transactionData) {
+      txData = transactionData;
+    }
+  }
+  
+  // Keep txData as-is; invitationClaimed inferred from recipientUser presence when fetched
+
+  // Prefer server-fetched data when available; otherwise fall back to normalized notification payload
+  const currentTx = txData || transactions[transactionType];
   
   console.log('[TransactionDetailScreen] currentTx selection:', {
     hasTransactionData: !!(transactionData && Object.keys(transactionData).length > 1),
@@ -1407,17 +1472,31 @@ export const TransactionDetailScreen = () => {
   
   const isInvitedFriend = currentTx?.isInvitedFriend || currentTx?.is_invited_friend || false;
   const isExternalAddress = currentTx?.is_external_address || false;
+  const invitationClaimed = currentTx?.invitationClaimed || currentTx?.invitation_claimed || false;
+  const invitationReverted = currentTx?.invitationReverted || currentTx?.invitation_reverted || false;
+  const invitationExpiresAt = currentTx?.invitationExpiresAt || currentTx?.invitation_expires_at;
+  const isInvitationExpired = invitationExpiresAt ? moment(invitationExpiresAt).isBefore(moment()) : false;
+  const showInvitationWarning = isInvitedFriend 
+    && !isExternalAddress 
+    && (currentTx?.type === 'send' || currentTx?.type === 'sent') 
+    && !invitationClaimed 
+    && !invitationReverted 
+    && !isInvitationExpired;
   
   // Debug invitation status
   console.log('[TransactionDetailScreen] Invitation status:', {
     isInvitedFriend,
     isExternalAddress,
+    invitationClaimed,
+    invitationReverted,
+    invitationExpiresAt,
+    isInvitationExpired,
     isInvitedFriend_camelCase: currentTx?.isInvitedFriend,
     is_invited_friend_snake_case: currentTx?.is_invited_friend,
     is_external_address: currentTx?.is_external_address,
     type: currentTx?.type,
     recipient_phone: currentTx?.recipient_phone,
-    willShowInvitationCard: isInvitedFriend && !isExternalAddress && (currentTx?.type === 'send' || currentTx?.type === 'sent'),
+    willShowInvitationCard: showInvitationWarning,
   });
   
   // Debug phone numbers
@@ -1606,10 +1685,16 @@ export const TransactionDetailScreen = () => {
               </Text>
             </View>
             
-            {isInvitedFriend && !isExternalAddress && currentTx.type === 'send' && (
+            {showInvitationWarning && (
               <View style={styles.invitationNotice}>
                 <Icon name="alert-triangle" size={16} color="#fff" style={{ marginRight: 6 }} />
                 <Text style={styles.invitationText}>Tu amigo tiene 7 días para reclamar</Text>
+              </View>
+            )}
+            {!showInvitationWarning && invitationClaimed && (currentTx.type === 'send' || currentTx.type === 'sent') && (
+              <View style={[styles.invitationNotice, { backgroundColor: '#10b981' }]}> 
+                <Icon name="check-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
+                <Text style={styles.invitationText}>Invitación reclamada</Text>
               </View>
             )}
           </View>
@@ -1890,10 +1975,15 @@ export const TransactionDetailScreen = () => {
                   <Text style={styles.infoTitle}>
                     {(() => {
                       // Prioritize createdAt if it exists (from notifications)
-                      if (currentTx.createdAt && currentTx.createdAt.includes('T')) {
-                        // Parse ISO timestamp using native Date to ensure proper timezone handling
-                        const date = new Date(currentTx.createdAt);
-                        return `${moment(date).format('DD/MM/YYYY')} • ${moment(date).format('HH:mm')}`;
+                      if (currentTx.createdAt) {
+                        if (typeof currentTx.createdAt === 'string') {
+                          const isoLike = currentTx.createdAt.includes('T');
+                          const date = isoLike ? new Date(currentTx.createdAt) : moment(currentTx.createdAt).toDate();
+                          return `${moment(date).format('DD/MM/YYYY')} • ${moment(date).format('HH:mm')}`;
+                        } else if (typeof currentTx.createdAt === 'number' || currentTx.createdAt instanceof Date) {
+                          const date = new Date(currentTx.createdAt as any);
+                          return `${moment(date).format('DD/MM/YYYY')} • ${moment(date).format('HH:mm')}`;
+                        }
                       } else if (currentTx.date && currentTx.time) {
                         // Already formatted date and time from AccountDetailScreen
                         return `${moment(currentTx.date, 'YYYY-MM-DD').format('DD/MM/YYYY')} • ${currentTx.time}`;
@@ -1903,18 +1993,26 @@ export const TransactionDetailScreen = () => {
                   </Text>
                   <Text style={styles.infoSubtitle}>
                     {(() => {
-                      // If we have a raw ISO timestamp (from notifications)
-                      if (currentTx.createdAt && currentTx.createdAt.includes('T')) {
-                        const date = new Date(currentTx.createdAt);
-                        return moment(date).locale('es').fromNow();
-                      }
-                      // If we have a timestamp field, it might be an ISO string or a date string
-                      else if (currentTx.timestamp) {
-                        if (currentTx.timestamp.includes('T')) {
-                          const date = new Date(currentTx.timestamp);
+                      // If we have a createdAt timestamp
+                      if (currentTx.createdAt) {
+                        if (typeof currentTx.createdAt === 'string') {
+                          const isoLike = currentTx.createdAt.includes('T');
+                          const date = isoLike ? new Date(currentTx.createdAt) : moment(currentTx.createdAt).toDate();
                           return moment(date).locale('es').fromNow();
-                        } else {
+                        } else if (typeof currentTx.createdAt === 'number' || currentTx.createdAt instanceof Date) {
+                          return moment(new Date(currentTx.createdAt as any)).locale('es').fromNow();
+                        }
+                      }
+                      // If we have a generic timestamp field
+                      else if (currentTx.timestamp) {
+                        if (typeof currentTx.timestamp === 'string') {
+                          if (currentTx.timestamp.includes('T')) {
+                            const date = new Date(currentTx.timestamp);
+                            return moment(date).locale('es').fromNow();
+                          }
                           return moment(currentTx.timestamp).locale('es').fromNow();
+                        } else if (typeof currentTx.timestamp === 'number' || currentTx.timestamp instanceof Date) {
+                          return moment(new Date(currentTx.timestamp as any)).locale('es').fromNow();
                         }
                       }
                       // If we only have date (already formatted), combine with time if available
@@ -2021,7 +2119,7 @@ export const TransactionDetailScreen = () => {
           </View>
 
           {/* Invitation Info Card for non-Confío friends */}
-          {isInvitedFriend && !isExternalAddress && currentTx.type === 'send' && (
+          {showInvitationWarning && (
             <View style={[styles.card, styles.invitationCard]}>
               <View style={styles.invitationHeader}>
                 <Icon name="alert-circle" size={24} color="#ef4444" />
@@ -2050,51 +2148,88 @@ export const TransactionDetailScreen = () => {
                 onPress={async () => {
                   try {
                     console.log('[WhatsApp Share] Starting share process...');
-                    const recipientName = currentTx.recipient_display_name || 'amigo';
-                    const phone = recipientPhone || currentTx.recipient_phone;
+                    const phoneRaw = recipientPhone || currentTx.recipient_phone;
+                    const cleanPhone = phoneRaw ? String(phoneRaw).replace(/[^\d]/g, '') : '';
                     const amount = formatAmount(currentTx.amount);
                     const currency = currentTx.currency || 'cUSD';
-                    
-                    console.log('[WhatsApp Share] Data:', { recipientName, phone, amount, currency });
-                    
-                    // Create the invitation message
                     const message = `¡Hola! Te envié ${amount} ${currency} por Confío. 🎉\n\nTienes 7 días para reclamarlo. Descarga la app y crea tu cuenta:\n\n📲 ${SHARE_LINKS.campaigns.beta}\n\n¡Es gratis y en segundos recibes tu dinero!`;
-                    
-                    // Encode the message for WhatsApp
                     const encodedMessage = encodeURIComponent(message);
-                    
-                    // Create WhatsApp URL with pre-filled message
-                    let whatsappUrl = '';
-                    if (phone) {
-                      // If we have the recipient's phone, send directly to them
-                      const cleanPhone = phone.replace(/[^\d]/g, '');
-                      whatsappUrl = `whatsapp://send?phone=${cleanPhone}&text=${encodedMessage}`;
-                    } else {
-                      // Otherwise, just open WhatsApp with the message
-                      whatsappUrl = `whatsapp://send?text=${encodedMessage}`;
-                    }
-                    
-                    console.log('[WhatsApp Share] URL:', whatsappUrl);
-                    
-                    try {
-                      // Try to open WhatsApp directly
-                      await Linking.openURL(whatsappUrl);
-                    } catch (error) {
-                      console.log('[WhatsApp Share] WhatsApp app not installed, trying web...', error);
-                      // Fallback to web WhatsApp
-                      const webWhatsappUrl = phone 
-                        ? `https://wa.me/${phone.replace(/[^\d]/g, '')}?text=${encodedMessage}`
+
+                    if (Platform.OS === 'android') {
+                      // Android: api.whatsapp.com tends to preserve prefilled text more reliably
+                      const apiUrl = cleanPhone
+                        ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`
+                        : `https://api.whatsapp.com/send?text=${encodedMessage}`;
+                      try {
+                        await Linking.openURL(apiUrl);
+                        return;
+                      } catch (e) {
+                        console.log('[WhatsApp Share][Android] API URL failed, trying scheme...', e);
+                      }
+
+                      // Try whatsapp:// scheme
+                      const schemeUrl = cleanPhone
+                        ? `whatsapp://send?phone=${cleanPhone}&text=${encodedMessage}`
+                        : `whatsapp://send?text=${encodedMessage}`;
+                      const canOpenScheme = await Linking.canOpenURL(schemeUrl);
+                      if (canOpenScheme) {
+                        await Linking.openURL(schemeUrl);
+                        return;
+                      }
+
+                      // Try Intent (some devices require it)
+                      const intentUrl = `intent://send?text=${encodedMessage}#Intent;scheme=whatsapp;package=com.whatsapp;end`;
+                      try {
+                        await Linking.openURL(intentUrl);
+                        return;
+                      } catch (e) {
+                        console.log('[WhatsApp Share][Android] Intent also failed, trying wa.me...', e);
+                      }
+
+                      // Try wa.me
+                      const webUrl = cleanPhone
+                        ? `https://wa.me/${cleanPhone}?text=${encodedMessage}`
                         : `https://wa.me/?text=${encodedMessage}`;
-                      
-                      await Linking.openURL(webWhatsappUrl);
+                      const canOpenWeb = await Linking.canOpenURL(webUrl);
+                      if (canOpenWeb) {
+                        await Linking.openURL(webUrl);
+                        return;
+                      }
+
+                      // Last resort: Play Store or share sheet
+                      try {
+                        await Linking.openURL('market://details?id=com.whatsapp');
+                        return;
+                      } catch (_) {}
+                      await Share.share({ message });
+                      return;
+                    } else {
+                      // iOS path: scheme first
+                      const schemeUrl = cleanPhone
+                        ? `whatsapp://send?phone=${cleanPhone}&text=${encodedMessage}`
+                        : `whatsapp://send?text=${encodedMessage}`;
+                      const canOpen = await Linking.canOpenURL(schemeUrl);
+                      if (canOpen) {
+                        await Linking.openURL(schemeUrl);
+                        return;
+                      }
+                      // Web fallback
+                      const webUrl = cleanPhone
+                        ? `https://wa.me/${cleanPhone}?text=${encodedMessage}`
+                        : `https://wa.me/?text=${encodedMessage}`;
+                      const canOpenWeb = await Linking.canOpenURL(webUrl);
+                      if (canOpenWeb) {
+                        await Linking.openURL(webUrl);
+                        return;
+                      }
+                      await Share.share({ message });
                     }
                   } catch (error) {
                     console.error('[WhatsApp Share] Error:', error);
-                    Alert.alert(
-                      'Error',
-                      'No se pudo abrir WhatsApp. Por favor, asegúrate de tener WhatsApp instalado.',
-                      [{ text: 'OK' }]
-                    );
+                    try {
+                      await Share.share({ message: `Te envié dinero por Confío. ${SHARE_LINKS.campaigns.beta}` });
+                    } catch (_) {}
+                    Alert.alert('Error', 'No se pudo abrir WhatsApp.');
                   }
                 }}
               >

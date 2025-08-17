@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer'
 import { apolloClient } from '../apollo/client'
-import { PREPARE_INVITE_FOR_PHONE, SUBMIT_INVITE_FOR_PHONE } from '../apollo/mutations'
+import { PREPARE_INVITE_FOR_PHONE, SUBMIT_INVITE_FOR_PHONE, CLAIM_INVITE_FOR_PHONE } from '../apollo/mutations'
 import { INVITE_RECEIPT_FOR_PHONE } from '../apollo/queries'
 import algorandService from './algorandService'
 
@@ -115,6 +115,20 @@ class InviteSendService {
     const r = data?.inviteReceiptForPhone
     if (!r?.exists) return { exists: false }
     return { exists: true, amount: r.amount, assetId: r.assetId, timestamp: r.timestamp }
+  }
+
+  async claimInviteForPhone(phone: string | undefined, phoneCountry: string | undefined, recipientAddress: string, invitationId?: string): Promise<{ success: boolean; error?: string; txid?: string }> {
+    try {
+      const { data } = await apolloClient.mutate({
+        mutation: CLAIM_INVITE_FOR_PHONE,
+        variables: { recipientAddress, invitationId, phone, phoneCountry },
+      })
+      const res = data?.claimInviteForPhone
+      if (!res?.success) return { success: false, error: res?.error || 'No se pudo reclamar la invitación' }
+      return { success: true, txid: res.txid }
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Error de red al reclamar la invitación' }
+    }
   }
 }
 

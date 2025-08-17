@@ -213,6 +213,7 @@ export function FriendDetailScreen() {
       // Determine transaction direction from current user perspective
       const isCurrentUserSender = tx.direction === 'sent';
       
+      const uiCurrency = (tx.tokenType || '').toUpperCase() === 'CUSD' ? 'cUSD' : (tx.tokenType || 'CONFIO');
       allTransactions.push({
         id: tx.id,
         type: transactionType === 'exchange' ? 'exchange' : 
@@ -221,7 +222,7 @@ export function FriendDetailScreen() {
         from: isCurrentUserSender ? undefined : friend.name,
         to: isCurrentUserSender ? friend.name : undefined,
         amount: tx.displayAmount || tx.amount,
-        currency: tx.tokenType?.toUpperCase() || 'CONFIO',
+        currency: uiCurrency,
         date: new Date(tx.createdAt).toISOString().split('T')[0],
         time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
         status: tx.status === 'CONFIRMED' ? 'completed' : 'pending',
@@ -372,8 +373,9 @@ export function FriendDetailScreen() {
   }, []);
 
   const TransactionItem = memo(({ transaction, onPress }: { transaction: Transaction; onPress: () => void }) => {
-    // Use the isInvitation field from the transaction
-    const isInvitationTransaction = transaction.isInvitation || false;
+    // Only treat as an active invitation if not claimed, not reverted, and not expired
+    const isExpired = transaction.invitationExpiresAt ? moment(transaction.invitationExpiresAt).isBefore(moment()) : false;
+    const isInvitationTransaction = !!transaction.isInvitation && !transaction.invitationClaimed && !transaction.invitationReverted && !isExpired;
     
     // Debug logging
     if (transaction.type === 'sent') {
@@ -674,6 +676,9 @@ export function FriendDetailScreen() {
                                 `Pago a ${friend.name}`,
                           avatar: friend.avatar,
                           isInvitedFriend: transaction.isInvitation || false, // Use transaction's invitation status
+                          invitationClaimed: transaction.invitationClaimed || false,
+                          invitationReverted: transaction.invitationReverted || false,
+                          invitationExpiresAt: transaction.invitationExpiresAt,
                         }
                       };
                       // @ts-ignore - Navigation type mismatch, but works at runtime

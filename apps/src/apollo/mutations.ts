@@ -105,6 +105,7 @@ export const ALGORAND_SPONSORED_OPT_IN = gql`
   }
 `;
 
+
 export const SUBMIT_SPONSORED_GROUP = gql`
   mutation SubmitSponsoredGroup(
     $signedUserTxn: String!
@@ -234,6 +235,17 @@ export const SUBMIT_INVITE_FOR_PHONE = gql`
       invitationId: $invitationId,
       message: $message
     ) {
+      success
+      error
+      txid
+    }
+  }
+`;
+
+// Invite & Send — claim invite for phone
+export const CLAIM_INVITE_FOR_PHONE = gql`
+  mutation ClaimInviteForPhone($recipientAddress: String!, $invitationId: String, $phone: String, $phoneCountry: String) {
+    claimInviteForPhone(recipientAddress: $recipientAddress, invitationId: $invitationId, phone: $phone, phoneCountry: $phoneCountry) {
       success
       error
       txid

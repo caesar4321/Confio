@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from datetime import timedelta
 import logging
 import uuid
+from .phone_utils import normalize_phone
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,8 @@ class User(AbstractUser, SoftDeleteModel):
         help_text="User's country ISO code for phone number"
     )
     phone_number = models.CharField(max_length=15, blank=True, null=True, help_text="User's phone number without country code")
+    # Canonical normalized phone key: "callingcode:digits" (e.g., "1:9293993619")
+    phone_key = models.CharField(max_length=32, blank=True, null=True, help_text="Canonical phone key for uniqueness across ISO variations")
     auth_token_version = models.IntegerField(default=1, help_text="Version number for JWT tokens. Incrementing this invalidates all existing tokens.")
     groups = models.ManyToManyField(
         'auth.Group',
@@ -101,6 +104,19 @@ class User(AbstractUser, SoftDeleteModel):
     
     def __str__(self):
         return self.username or self.email or self.firebase_uid
+
+    def save(self, *args, **kwargs):
+        # Auto-maintain canonical phone key for uniqueness
+        try:
+            if self.phone_number:
+                # Accept either ISO or calling code; we have ISO here
+                # If admin passes a calling code into phone_country by mistake, still tolerant
+                self.phone_key = normalize_phone(self.phone_number or '', self.phone_country or '')
+            else:
+                self.phone_key = None
+        except Exception:
+            pass
+        super().save(*args, **kwargs)
 
     @property
     def phone_country_code(self):

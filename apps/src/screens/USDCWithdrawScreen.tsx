@@ -51,6 +51,21 @@ export const USDCWithdrawScreen = () => {
   });
   
   const usdcBalance = balanceData?.accountBalance ? parseFloat(balanceData.accountBalance) : 0;
+  // Floor-based display helpers with tiny-balance label
+  const floorToDecimals = (value: number, decimals: number) => {
+    if (!isFinite(value)) return 0;
+    const m = Math.pow(10, decimals);
+    return Math.floor(value * m) / m;
+  };
+  const formatFixedFloor = (value: number, decimals = 2) => {
+    const floored = floorToDecimals(value, decimals);
+    return floored.toLocaleString('es-ES', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  };
+  const formatBalanceDisplay = (v: number) => {
+    if (!isFinite(v) || v <= 0) return '0.00';
+    if (v < 0.01) return '< 0.01';
+    return formatFixedFloor(v, 2);
+  };
   const networkFee = 0; // Network fee is covered by Confío
   
   // Create withdrawal mutation
@@ -162,7 +177,7 @@ export const USDCWithdrawScreen = () => {
           {balanceLoading ? (
             <ActivityIndicator size="small" color={colors.accent} style={{ marginVertical: 8 }} />
           ) : (
-            <Text style={styles.balanceAmount}>{usdcBalance.toFixed(2)} USDC</Text>
+            <Text style={styles.balanceAmount}>{formatBalanceDisplay(usdcBalance)} USDC</Text>
           )}
           <Text style={styles.balanceNote}>En la red de Algorand</Text>
         </View>
@@ -193,7 +208,7 @@ export const USDCWithdrawScreen = () => {
               />
               <TouchableOpacity
                 style={styles.maxButton}
-                onPress={() => setWithdrawAmount(usdcBalance.toFixed(2))}
+                onPress={() => setWithdrawAmount(formatFixedFloor(usdcBalance, 2))}
                 disabled={balanceLoading || usdcBalance === 0}
               >
                 <Text style={styles.maxButtonText}>MAX</Text>

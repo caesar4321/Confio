@@ -6,6 +6,7 @@ import graphene
 from graphql import GraphQLError
 from django.db import transaction as db_transaction
 from .models import User
+from .phone_utils import normalize_any_phone
 from achievements.models import InfluencerReferral, UserAchievement, AchievementType
 from .decorators import rate_limit, check_suspicious_activity
 import re
@@ -83,43 +84,11 @@ class SetReferrer(graphene.Mutation):
             if referral_type == 'friend':
                 # Detect if it's a phone number
                 if identifier.startswith('+') and len(identifier) >= 10:
-                    # Phone number lookup
-                    # Remove all non-digit characters except the leading +
+                    # Canonical lookup by phone_key
                     clean_phone = '+' + ''.join(filter(str.isdigit, identifier))
-                    
-                    # Extract country code - try common LATAM lengths
-                    country_code = None
-                    phone_number = None
-                    
-                    # Try different country code lengths (2-4 digits)
-                    for cc_length in [2, 3, 4]:
-                        potential_cc = clean_phone[:cc_length+1]  # +1 for the + sign
-                        potential_number = clean_phone[cc_length+1:]
-                        
-                        # Check if this country code exists in our system
-                        if User.objects.filter(
-                            phone_country=potential_cc,
-                            phone_number=potential_number
-                        ).exists():
-                            country_code = potential_cc
-                            phone_number = potential_number
-                            break
-                    
-                    if country_code and phone_number:
-                        referrer = User.objects.filter(
-                            phone_country=country_code,
-                            phone_number=phone_number
-                        ).first()
-                    else:
-                        # Fallback: try to match just the phone number part (last 9-10 digits)
-                        phone_digits = ''.join(filter(str.isdigit, identifier))
-                        if len(phone_digits) >= 9:
-                            referrer = User.objects.filter(
-                                phone_number__endswith=phone_digits[-9:]
-                            ).first()
-                        else:
-                            referrer = None
-                    
+                    key = normalize_any_phone(clean_phone)
+                    if key:
+                        referrer = User.objects.filter(phone_key=key).first()
                     if not referrer:
                         return SetReferrer(
                             success=False,

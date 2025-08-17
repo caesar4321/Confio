@@ -23,6 +23,7 @@ import { useHeader } from '../contexts/HeaderContext';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import Icon from 'react-native-vector-icons/Feather';
+import InviteClaimBanner from '../components/InviteClaimBanner';
 import * as Keychain from 'react-native-keychain';
 import { getApiUrl } from '../config/env';
 import { jwtDecode } from 'jwt-decode';
@@ -45,6 +46,8 @@ const AUTH_KEYCHAIN_SERVICE = 'com.confio.auth';
 const AUTH_KEYCHAIN_USERNAME = 'auth_tokens';
 const PREFERENCES_KEYCHAIN_SERVICE = 'com.confio.preferences';
 const BALANCE_VISIBILITY_KEY = 'balance_visibility';
+const INVITE_TS_SERVICE = 'com.confio.preferences.invite';
+const INVITE_TS_KEY = 'invite_banner_last_ts';
 
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
   if (!phoneNumber) return '';
@@ -206,6 +209,19 @@ export const HomeScreen = () => {
     parseFloat(confioBalanceData?.accountBalance || '0'), 
     [confioBalanceData?.accountBalance]
   );
+
+  // Display helpers to avoid overstating balances (flooring instead of rounding)
+  const floorToDecimals = React.useCallback((value: number, decimals: number) => {
+    if (!isFinite(value)) return 0;
+    const m = Math.pow(10, decimals);
+    return Math.floor(value * m) / m;
+  }, []);
+
+  const formatFixedFloor = React.useCallback((value: number, decimals = 2) => {
+    const floored = floorToDecimals(value, decimals);
+    // Use toLocaleString for grouping but preserve exact decimals
+    return floored.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  }, [floorToDecimals]);
   
   // Calculate portfolio value - Only include cUSD for now
   // CONFIO value is not determined yet
@@ -239,11 +255,10 @@ export const HomeScreen = () => {
     })
   });
   
-  // Track initialization state
+  // Track initialization state (one-time) to avoid flicker
   const [isInitialized, setIsInitialized] = useState(false);
-  
-  // Only show loading on very first load
-  const isLoading = !isInitialized && accountsLoading;
+  // Only show loading during the initial pass; do not toggle back after first render
+  const isLoading = !isInitialized;
   
   // No more mock accounts - we fetch from server
 
@@ -285,6 +300,31 @@ export const HomeScreen = () => {
     } catch (error) {
       // No saved preference, default to showing balance
       console.log('No saved balance visibility preference, using default');
+    }
+  };
+
+  // Load last shown invite timestamp
+  const loadLastInviteTimestamp = async (): Promise<number | null> => {
+    try {
+      const creds = await Keychain.getInternetCredentials(INVITE_TS_SERVICE);
+      if (creds && creds.username === INVITE_TS_KEY && creds.password) {
+        const ts = parseInt(creds.password, 10);
+        return isNaN(ts) ? null : ts;
+      }
+    } catch {}
+    return null;
+  };
+
+  // Save last shown invite timestamp
+  const saveLastInviteTimestamp = async (ts: number) => {
+    try {
+      await Keychain.setInternetCredentials(
+        INVITE_TS_SERVICE,
+        INVITE_TS_KEY,
+        ts.toString()
+      );
+    } catch (e) {
+      console.log('Failed to persist invite banner timestamp');
     }
   };
 
@@ -456,6 +496,8 @@ export const HomeScreen = () => {
     
     const initializeHomeScreen = async () => {
       if (!mounted) return;
+      // Mark initialized immediately to avoid long blocking loading screens
+      setIsInitialized(true);
       
       try {
         // Load balance visibility preference first
@@ -474,7 +516,12 @@ export const HomeScreen = () => {
         try {
           if (userProfile?.phoneNumber) {
             const r = await inviteSendService.getInviteReceiptNotice(userProfile.phoneNumber, userProfile.phoneCountry);
-            setInviteNotice(r);
+            if (r?.exists) {
+              const lastTs = await loadLastInviteTimestamp();
+              if (!lastTs || r.timestamp > lastTs) {
+                setInviteNotice(r);
+              }
+            }
           }
         } catch (e) {
           console.log('HomeScreen: invite receipt check skipped');
@@ -483,14 +530,7 @@ export const HomeScreen = () => {
       } catch (error) {
         console.error('HomeScreen - Error during initialization:', error);
       } finally {
-        if (mounted) {
-          // Mark as initialized after a small delay to prevent flash
-          setTimeout(() => {
-            if (mounted) {
-              setIsInitialized(true);
-            }
-          }, 100);
-        }
+        // No-op: already marked initialized at start
       }
     };
 
@@ -507,8 +547,22 @@ export const HomeScreen = () => {
       try {
         const anyRoute: any = route as any;
         if (anyRoute?.params?.checkInviteReceipt && userProfile?.phoneNumber) {
+          // Attempt to claim invitation first (best effort), then fetch receipt
+          try {
+            const authService = AuthService.getInstance();
+            const address = await authService.getAlgorandAddress();
+            if (address) {
+              // Do NOT pass phone so backend resolves the latest PhoneInvite or uses invitation_id when provided via deep link later
+              await inviteSendService.claimInviteForPhone(undefined, undefined, address);
+            }
+          } catch {}
           const r = await inviteSendService.getInviteReceiptNotice(userProfile.phoneNumber, userProfile.phoneCountry);
-          setInviteNotice(r);
+          if (r?.exists) {
+            const lastTs = await loadLastInviteTimestamp();
+            if (!lastTs || r.timestamp > lastTs) {
+              setInviteNotice(r);
+            }
+          }
           // Clear the param to avoid rechecks
           try { (navigation as any).setParams({ checkInviteReceipt: undefined }); } catch {}
         }
@@ -763,11 +817,8 @@ export const HomeScreen = () => {
                   ? '••••••'
                   : showBalance 
                   ? (showLocalCurrency 
-                      ? formatAmount.plain(totalLocalValue)
-                      : totalUSDValue.toLocaleString('en-US', { 
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2 
-                        })
+                      ? formatAmount.plain(floorToDecimals(totalLocalValue, 2))
+                      : formatFixedFloor(totalUSDValue, 2)
                     )
                   : '••••••';
               })()}
@@ -934,7 +985,7 @@ export const HomeScreen = () => {
                       {/* Hide balance for employees without viewBalance permission */}
                       {(activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
                         ? '••••'
-                        : showBalance ? `$${cUSDBalance.toFixed(2)}` : '••••'}
+                        : showBalance ? `$${formatFixedFloor(cUSDBalance, 2)}` : '••••'}
                     </Text>
                     <Icon name="chevron-right" size={20} color="#9ca3af" />
                   </View>
@@ -962,7 +1013,7 @@ export const HomeScreen = () => {
                       {/* Hide balance for employees without viewBalance permission */}
                       {(activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
                         ? '••••'
-                        : showBalance ? confioBalance.toFixed(2) : '••••'}
+                        : showBalance ? formatFixedFloor(confioBalance, 2) : '••••'}
                     </Text>
                     <Icon name="chevron-right" size={20} color="#9ca3af" />
                   </View>
@@ -975,37 +1026,26 @@ export const HomeScreen = () => {
 
       {/* Invite receipt notice banner */}
       {inviteNotice?.exists && (
-        <View style={{ position: 'absolute', left: 20, right: 20, bottom: 110 }}>
-          <View style={{ backgroundColor: '#ecfeff', borderColor: '#06b6d4', borderWidth: 1, borderRadius: 14, padding: 14, shadowColor: '#06b6d4', shadowOpacity: 0.2, shadowRadius: 10 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={{ color: '#0e7490', fontWeight: '700' }}>
-                ¡Sorpresa! Recibiste una invitación
-              </Text>
-              <TouchableOpacity onPress={() => setInviteNotice(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                <Icon name="x" size={18} color="#0e7490" />
-              </TouchableOpacity>
-            </View>
-            <Text style={{ color: '#0e7490', marginTop: 6 }}>
-              {`Monto: ${((inviteNotice.amount || 0)/1_000_000).toFixed(2)} ${inviteNotice.assetId === 744151197 ? 'cUSD' : inviteNotice.assetId === 744150851 ? 'CONFIO' : 'ASA'}`}
-            </Text>
-            <TouchableOpacity
-              onPress={() => {
-                if (inviteNotice.assetId === 744151197) {
-                  navigateToCUSDAccount();
-                } else if (inviteNotice.assetId === 744150851) {
-                  navigateToConfioAccount();
-                } else {
-                  navigateToCUSDAccount();
-                }
-                setInviteNotice(null);
-              }}
-              activeOpacity={0.7}
-              style={{ alignSelf: 'flex-start', marginTop: 8 }}
-            >
-              <Text style={{ color: '#0891b2', fontWeight: '600' }}>Ver detalles</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <InviteClaimBanner
+          amountMicros={inviteNotice.amount || 0}
+          assetId={inviteNotice.assetId || 0}
+          onPressDetails={async () => {
+            // Known cUSD asset IDs on current network
+            if ([744151197, 744368179].includes(inviteNotice.assetId || 0)) {
+              navigateToCUSDAccount();
+            } else if ([744150851].includes(inviteNotice.assetId || 0)) {
+              navigateToConfioAccount();
+            } else {
+              navigateToCUSDAccount();
+            }
+            if (inviteNotice.timestamp) await saveLastInviteTimestamp(inviteNotice.timestamp);
+            setInviteNotice(null);
+          }}
+          onDismiss={async () => {
+            if (inviteNotice.timestamp) await saveLastInviteTimestamp(inviteNotice.timestamp);
+            setInviteNotice(null);
+          }}
+        />
       )}
 
       {/* Profile Menu */}

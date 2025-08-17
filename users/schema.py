@@ -10,6 +10,8 @@ from achievements.models import (
     ConfioRewardBalance, ConfioRewardTransaction, InfluencerAmbassador, AmbassadorActivity
 )
 from .country_codes import COUNTRY_CODES
+from .phone_utils import normalize_any_phone
+from .phone_utils import normalize_phone
 from graphql_jwt.utils import jwt_encode, jwt_decode
 from graphql_jwt.shortcuts import create_refresh_token
 from datetime import datetime, timedelta
@@ -829,8 +831,14 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			
 			print(f"AccountBalance resolver - Got balance data for {normalized_token_type}: {balance_data}")
 			
-			# Format balance as string with 2 decimal places
-			balance = f"{balance_data['amount']:.2f}"
+			# Format balance as string with asset precision, rounding DOWN to avoid overstating balance
+			from decimal import Decimal, ROUND_DOWN
+			asset_decimals = 6  # Algorand ASA standard used for cUSD/CONFIO/USDC in this app
+			amt = Decimal(str(balance_data['amount']))
+			quant = Decimal('1').scaleb(-asset_decimals)  # e.g., 0.000001
+			safe_amt = amt.quantize(quant, rounding=ROUND_DOWN)
+			# Return fixed precision to ensure client comparisons are accurate
+			balance = f"{safe_amt:.6f}"
 			
 			print(f"AccountBalance resolver - Real blockchain balance: {balance} {normalized_token_type}")
 			print(f"AccountBalance resolver - Is stale: {balance_data['is_stale']}, Last synced: {balance_data['last_synced']}")
@@ -1019,14 +1027,16 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		
 		# Clean and normalize phone numbers
 		for phone in phone_numbers:
-			# Clean the phone number - remove all non-digits (normalized format)
-			cleaned_phone = ''.join(filter(str.isdigit, phone))
-			
-			if not cleaned_phone:
-				continue
-			
-			# Exact match only - phones should be stored normalized (digits only, with country code)
-			found_user = User.objects.filter(phone_number=cleaned_phone).first()
+			# Prefer canonical phone key matching across ISO variants
+			key = normalize_any_phone(phone)
+			found_user = None
+			if key:
+				found_user = User.objects.filter(phone_key=key).first()
+			else:
+				# Fallback: digits-only direct match
+				cleaned_phone = ''.join(filter(str.isdigit, phone))
+				if cleaned_phone:
+					found_user = User.objects.filter(phone_number=cleaned_phone).first()
 			
 			if found_user:
 				# Get the user's active account
@@ -1285,14 +1295,15 @@ class UpdatePhoneNumber(graphene.Mutation):
 		if not iso_country_code:
 			return UpdatePhoneNumber(success=False, error="Invalid country code")
 
-		# Update user's phone number
-		try:
-			user.phone_country = iso_country_code  # Store ISO code
-			user.phone_number = phone_number
-			user.save()
-			return UpdatePhoneNumber(success=True, error=None)
-		except Exception as e:
-			return UpdatePhoneNumber(success=False, error=str(e))
+			# Update user's phone number and canonical phone key
+			try:
+				user.phone_country = iso_country_code  # Store ISO code
+				user.phone_number = phone_number
+				user.phone_key = normalize_phone(phone_number, country_code)
+				user.save()
+				return UpdatePhoneNumber(success=True, error=None)
+			except Exception as e:
+				return UpdatePhoneNumber(success=False, error=str(e))
 
 class UpdateUsername(graphene.Mutation):
 	class Arguments:

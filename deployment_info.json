@@ -1,0 +1,9 @@
+{
+  "network": "testnet",
+  "deployer_address": "PFFGG74A3BTBMPOJSTJALIIF4PO3JQJCS3WKYYXDQQ73J35EG2QOSCQRSY",
+  "app_id": 744368177,
+  "app_address": "EPD4G2IO5GWKX73CHTUUWPK5K6MCN5C3CU6YNRCUYEPHYWJ7HO27IHQDBQ",
+  "cusd_asset_id": 744368179,
+  "usdc_asset_id": 10458941,
+  "deployment_status": "Complete - Contract deployed and configured"
+}

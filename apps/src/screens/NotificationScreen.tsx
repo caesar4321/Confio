@@ -96,23 +96,92 @@ export const NotificationScreen = () => {
         // Navigate to offer details or trade confirmation
       } else if (url.includes('transaction/')) {
         const transactionId = url.split('transaction/')[1];
-        // Use the complete transaction data stored in the notification
-        const transactionData = notification.data;
-        
-        console.log('[NotificationScreen] Navigating to transaction:', {
+        // Prefer server fetch for full fidelity; pass minimal payload with id and type hint
+        const notifType = notification.notificationType;
+        let txnType: any = 'send';
+        if (notifType === 'INVITE_RECEIVED' || notifType === 'SEND_RECEIVED') txnType = 'received';
+        if (notifType === 'PAYMENT_RECEIVED') txnType = 'payment';
+        if (notifType === 'SEND_SENT') txnType = 'sent';
+
+        // Parse notification.data if it's a JSON string to avoid spreading characters
+        let fullData: any = notification.data;
+        if (typeof fullData === 'string') {
+          try { fullData = JSON.parse(fullData); } catch { fullData = {}; }
+        }
+        if (fullData == null || typeof fullData !== 'object') {
+          fullData = {};
+        }
+
+        // Derive invitation flags and normalize common fields for a better fallback
+        const invitationClaimed = fullData.invitation_claimed ?? fullData.invitationClaimed ?? (notifType === 'SEND_INVITATION_CLAIMED');
+        const invitationReverted = fullData.invitation_reverted ?? fullData.invitationReverted ?? (notifType === 'SEND_INVITATION_EXPIRED');
+        const isInvitedFriend = fullData.is_invited_friend ?? fullData.isInvitedFriend ?? (
+          notifType === 'INVITE_RECEIVED' ||
+          notifType === 'SEND_INVITATION_SENT' ||
+          notifType === 'SEND_INVITATION_CLAIMED' ||
+          notifType === 'SEND_INVITATION_EXPIRED'
+        );
+
+        // Normalize phones and names
+        const recipientPhone = fullData.recipient_phone ?? fullData.recipientPhone;
+        const senderPhone = fullData.sender_phone ?? fullData.senderPhone;
+        const recipientName = fullData.recipient_name ?? fullData.recipientName ?? fullData.recipient_display_name;
+        const senderName = fullData.sender_name ?? fullData.senderName ?? fullData.sender_display_name;
+
+        // Normalize addresses
+        const toAddress = fullData.toAddress ?? fullData.recipient_address;
+        const fromAddress = fullData.fromAddress ?? fullData.sender_address;
+
+        // Normalize currency for UI (cUSD)
+        const currency = (fullData.currency ?? fullData.token_type ?? fullData.tokenType);
+        const uiCurrency = (typeof currency === 'string' && currency.toUpperCase() === 'CUSD') ? 'cUSD' : currency;
+
+        // Include notification timestamp as createdAt fallback if transaction lacks it
+        const createdAt = notification.createdAt;
+
+        // Build a richer fallback payload
+        const fallbackTx = {
+          id: transactionId,
+          notification_type: notifType,
+          transaction_type: txnType,
+          // names and phones
+          recipient_name: recipientName,
+          recipientPhone,
+          recipient_phone: recipientPhone,
+          sender_name: senderName,
+          senderPhone,
+          sender_phone: senderPhone,
+          // addresses
+          toAddress,
+          recipient_address: toAddress,
+          fromAddress,
+          sender_address: fromAddress,
+          // currency
+          currency: uiCurrency,
+          token_type: currency,
+          // invitation flags
+          is_invited_friend: isInvitedFriend,
+          isInvitedFriend: isInvitedFriend,
+          invitation_claimed: invitationClaimed,
+          invitationClaimed,
+          invitation_reverted: invitationReverted,
+          invitationReverted,
+          invitation_expires_at: fullData.invitation_expires_at ?? fullData.invitationExpiresAt,
+          invitationExpiresAt: fullData.invitation_expires_at ?? fullData.invitationExpiresAt,
+          // timestamp fallback
+          createdAt,
+        };
+
+        console.log('[NotificationScreen] Navigating to transaction via fetch:', {
           transactionId,
-          notificationType: notification.notificationType,
-          hasData: !!transactionData,
-          dataType: typeof transactionData,
-          dataKeys: transactionData ? Object.keys(transactionData) : [],
-          data: transactionData
+          notifType,
+          txnType
         });
-        
-        // Navigate to TransactionDetail with complete data
-        // The data field now contains all necessary fields for TransactionDetailScreen
+
         navigation.navigate('TransactionDetail', { 
-          transactionType: transactionData?.transaction_type || 'send',
-          transactionData: transactionData || { id: transactionId }
+          transactionType: txnType,
+          // Pass full notification data as fallback plus id
+          transactionData: { id: transactionId, notification_type: notifType, ...fullData, ...fallbackTx }
         });
       } else if (url.includes('business/')) {
         const businessId = url.split('business/')[1];
@@ -163,6 +232,7 @@ export const NotificationScreen = () => {
       SEND_SENT: { icon: 'send', color: '#3B82F6' },
       SEND_INVITATION_SENT: { icon: 'user-plus', color: '#8B5CF6' },
       SEND_INVITATION_CLAIMED: { icon: 'user-check', color: '#10B981' },
+      INVITE_RECEIVED: { icon: 'gift', color: '#10B981' },
       SEND_INVITATION_EXPIRED: { icon: 'user-x', color: '#EF4444' },
       SEND_FROM_EXTERNAL: { icon: 'download', color: '#06B6D4' },
       
