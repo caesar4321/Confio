@@ -23,6 +23,28 @@ from algosdk.transaction import (
 from algosdk.abi import Method, Returns, Argument
 from algosdk.encoding import decode_address
 
+# Strict verification helper placed before runtime use
+def verify_post_deploy(algod_client, app_id: int, app_address: str, expected_cusd: int, expected_confio: int, expected_sponsor: str):
+    import base64
+    app = algod_client.application_info(app_id)
+    gs = {base64.b64decode(kv['key']).decode('utf-8','ignore'): kv['value'] for kv in app.get('params',{}).get('global-state',[])}
+    def get_uint(k):
+        v=gs.get(k)
+        return int(v.get('uint',0)) if v and v.get('type')==2 else 0
+    cusd_id=get_uint('cusd_asset_id'); confio_id=get_uint('confio_asset_id')
+    sp=gs.get('sponsor_address'); addr=None
+    if sp and sp.get('type')==1:
+        from algosdk import encoding as e
+        addr=e.encode_address(base64.b64decode(sp.get('bytes','')))
+    if cusd_id!=expected_cusd or confio_id!=expected_confio:
+        raise SystemExit(f"Verification failed: asset IDs mismatch (got {cusd_id}/{confio_id}, expected {expected_cusd}/{expected_confio})")
+    if addr!=expected_sponsor:
+        raise SystemExit(f"Verification failed: sponsor mismatch (got {addr}, expected {expected_sponsor})")
+    aset_ids={a.get('asset-id') for a in algod_client.account_info(app_address).get('assets',[])}
+    missing=[aid for aid in (expected_cusd, expected_confio) if aid not in aset_ids]
+    if missing:
+        raise SystemExit(f"Verification failed: app not opted into assets {missing}")
+    print('✓ Payment app verification passed')
 # Add payment dir and project root to path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -83,17 +105,13 @@ def get_admin_account():
     
     return admin_address, admin_private_key
 
-def get_sponsor_account():
-    """Get sponsor account from environment"""
-    sponsor_mnemonic = os.environ.get('ALGORAND_SPONSOR_MNEMONIC')
-    if not sponsor_mnemonic:
-        print("Warning: ALGORAND_SPONSOR_MNEMONIC not set - sponsor features will be disabled")
-        return None, None
-    
-    sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
-    sponsor_address = account.address_from_private_key(sponsor_private_key)
-    
-    return sponsor_address, sponsor_private_key
+def get_required_sponsor_address():
+    """Read required sponsor address (no private key needed)."""
+    sponsor_address = os.environ.get('ALGORAND_SPONSOR_ADDRESS', '').strip()
+    if not sponsor_address:
+        print("Error: ALGORAND_SPONSOR_ADDRESS not set in environment")
+        sys.exit(1)
+    return sponsor_address
 
 def deploy_payment_contract():
     """Deploy the payment contract"""
@@ -102,7 +120,7 @@ def deploy_payment_contract():
     
     # Get accounts
     admin_address, admin_private_key = get_admin_account()
-    sponsor_address, sponsor_private_key = get_sponsor_account()
+    sponsor_address = get_required_sponsor_address()
     
     print(f"Admin address: {admin_address}")
     if sponsor_address:
@@ -325,36 +343,29 @@ def deploy_payment_contract():
         wait_for_confirmation(algod_client, tx_id, 10)
         print("✅ Assets setup complete")
     
-    # Set sponsor if available
-    if sponsor_address:
-        print(f"\nSetting sponsor address...")
-        
-        # Create method selector for set_sponsor
-        method = Method(
-            name="set_sponsor",
-            args=[Argument(arg_type="address", name="sponsor")],
-            returns=Returns(arg_type="void")
-        )
-        
-        params = algod_client.suggested_params()
-        sponsor_txn = ApplicationCallTxn(
-            sender=admin_address,
-            sp=params,
-            index=app_id,
-            on_complete=OnComplete.NoOpOC,
-            app_args=[
-                method.get_selector(),
-                decode_address(sponsor_address)
-            ]
-        )
-        
-        # Sign and send
-        signed_txn = sponsor_txn.sign(admin_private_key)
-        tx_id = algod_client.send_transaction(signed_txn)
-        
-        print(f"Set sponsor transaction sent: {tx_id}")
-        wait_for_confirmation(algod_client, tx_id, 10)
-        print("✅ Sponsor address set")
+    # Set sponsor (required)
+    print(f"\nSetting sponsor address...")
+    method = Method(
+        name="set_sponsor",
+        args=[Argument(arg_type="address", name="sponsor")],
+        returns=Returns(arg_type="void")
+    )
+    params = algod_client.suggested_params()
+    sponsor_txn = ApplicationCallTxn(
+        sender=admin_address,
+        sp=params,
+        index=app_id,
+        on_complete=OnComplete.NoOpOC,
+        app_args=[
+            method.get_selector(),
+            decode_address(sponsor_address)
+        ]
+    )
+    signed_txn = sponsor_txn.sign(admin_private_key)
+    tx_id = algod_client.send_transaction(signed_txn)
+    print(f"Set sponsor transaction sent: {tx_id}")
+    wait_for_confirmation(algod_client, tx_id, 10)
+    print("✅ Sponsor address set")
     
     # Set fee recipient (use admin as default)
     print(f"\nSetting fee recipient...")
@@ -458,6 +469,7 @@ def deploy_payment_contract():
         
         print("✅ .env file updated")
     
+    verify_post_deploy(algod_client, app_id, app_address, CUSD_ASSET_ID, CONFIO_ASSET_ID, sponsor_address)
     print(f"\n🎉 Payment contract deployed successfully!")
     print(f"   App ID: {app_id}")
     print(f"   App Address: {app_address}")
@@ -616,18 +628,14 @@ if __name__ == "__main__":
     cmd = args.command or "deploy"
     if cmd == "deploy":
         app_id, app_addr = deploy_payment_contract()
-        # Re-run configuration idempotently to be safe
-        configure_payment_app(app_id)
         print(f"\nDone. App ID: {app_id}, Address: {app_addr}")
     elif cmd == "update":
         if not args.app_id:
             print("--app-id is required (or set ALGORAND_PAYMENT_APP_ID)")
             sys.exit(1)
         app_id = update_payment_contract(args.app_id)
-        configure_payment_app(app_id)
         print(f"\nDone updating app {app_id}.")
     else:
         parser.print_help()
 
-if __name__ == "__main__":
-    deploy_payment_contract()
+# (verify_post_deploy defined above)

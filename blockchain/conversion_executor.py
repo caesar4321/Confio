@@ -157,20 +157,54 @@ def execute_signed_conversion_sync(conversion_id: str, signed_transactions: str)
         
         logger.info(f"Executing conversion {conversion_id} with {len(user_signed_txns)} signed transactions")
         
-        # Decode user signed transactions to bytes
-        user_bytes_list = [base64.b64decode(txn_b64) for txn_b64 in user_signed_txns]
-        
-        # Log transaction details for debugging
-        logger.info(f"Number of transactions to submit: {len(user_bytes_list)}")
-        
-        # The proper way to submit an atomic group is to send all transactions together
-        # The Algorand SDK's send_raw_transaction can handle concatenated signed transactions
-        # BUT we need to ensure they're properly formatted
-        
+        # Decode and log details
+        import msgpack
+        decoded_pairs = []  # [(dict, raw_bytes)]
+        for txn_b64 in user_signed_txns:
+            raw = base64.b64decode(txn_b64)
+            try:
+                d = msgpack.unpackb(raw, raw=False)
+            except Exception:
+                d = None
+            decoded_pairs.append((d, raw))
+
+        user_bytes_list = []
+        types = []
+        from algosdk.encoding import encode_address
+        dbg = []
+        idx = 0
+        for d, raw in decoded_pairs:
+            user_bytes_list.append(raw)
+            if isinstance(d, dict):
+                td = d.get('txn', {})
+                t = td.get('type')
+                types.append(t)
+                if t == 'pay':
+                    snd = encode_address(td.get('snd')) if td.get('snd') else 'na'
+                    rcv = encode_address(td.get('rcv')) if td.get('rcv') else 'na'
+                    amt = td.get('amt')
+                    fee = td.get('fee')
+                    dbg.append(f"pay[i={idx}] snd={snd} rcv={rcv} amt={amt} fee={fee}")
+                elif t == 'axfer':
+                    snd = encode_address(td.get('snd')) if td.get('snd') else 'na'
+                    arcv = encode_address(td.get('arcv')) if td.get('arcv') else 'na'
+                    xaid = td.get('xaid')
+                    aamt = td.get('aamt')
+                    fee = td.get('fee')
+                    dbg.append(f"axfer[i={idx}] snd={snd} arcv={arcv} xaid={xaid} aamt={aamt} fee={fee}")
+                elif t == 'appl':
+                    snd = encode_address(td.get('snd')) if td.get('snd') else 'na'
+                    apid = td.get('apid')
+                    fee = td.get('fee')
+                    dbg.append(f"appl[i={idx}] snd={snd} apid={apid} fee={fee}")
+            idx += 1
+        if types:
+            logger.info(f"Submitting atomic group of {len(user_bytes_list)} transactions in order: {types}")
+        if dbg:
+            logger.info("[ConversionExecutor] Txn details: " + " | ".join(dbg))
+
         # Concatenate the raw transaction bytes
-        combined_txns = b''
-        for user_bytes in user_bytes_list:
-            combined_txns += user_bytes
+        combined_txns = b''.join(user_bytes_list)
         
         # Encode to base64 for submission
         combined_b64 = base64.b64encode(combined_txns).decode('utf-8')
@@ -208,6 +242,35 @@ def execute_signed_conversion_sync(conversion_id: str, signed_transactions: str)
         }
     except Exception as e:
         logger.error(f"Error executing signed conversion (sync): {e}")
+        # Attempt a dryrun to capture failing pc/stack for debugging
+        try:
+            import json as _json
+            from algosdk.v2client import algod as _algod
+            algod_client = AlgorandClient()
+            # Reuse the same signed transactions from above scope
+            tx_data = _json.loads(signed_transactions)
+            user_signed_txns = tx_data.get('userSignedTxns', [])
+            # Dryrun with the exact signed blobs
+            payload = {
+                'txns': user_signed_txns
+            }
+            resp = algod_client.algod.algod_request("POST", "/v2/teal/dryrun", data=_json.dumps(payload))
+            # Log summarized dryrun results
+            dr = resp
+            results = dr.get('results', [])
+            for i, r in enumerate(results):
+                err = r.get('error')
+                msg = r.get('app-call-messages') or []
+                trace = r.get('trace') or []
+                logger.error(f"[Dryrun] tx[{i}] error={err} msgs={msg}")
+                # Log last few trace steps if present
+                for step in trace[-5:]:
+                    pc = step.get('pc')
+                    op = step.get('op')
+                    stk = step.get('stack', [])
+                    logger.error(f"[Dryrun] pc={pc} op={op} stack={stk}")
+        except Exception as _de:
+            logger.error(f"Dryrun attempt failed: {_de}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return {
