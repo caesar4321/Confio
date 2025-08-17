@@ -16,7 +16,7 @@ def create_unified_transaction_from_send(send_transaction):
             defaults={
                 'transaction_type': 'send',
                 'amount': send_transaction.amount,
-                'token_type': send_transaction.token_type,
+                'token_type': (send_transaction.token_type or '').upper(),
                 'status': send_transaction.status,
                 'transaction_hash': send_transaction.transaction_hash or '',
                 'error_message': send_transaction.error_message or '',

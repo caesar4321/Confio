@@ -9,6 +9,10 @@ from users.country_codes import COUNTRY_CODES
 import logging
 import re
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
+from users.phone_utils import normalize_phone
+from users.models import Account
+from blockchain.invite_send_mutations import ClaimInviteForPhone
 import time
 
 logger = logging.getLogger(__name__)
@@ -270,16 +274,64 @@ class VerifyTelegramCode(graphene.Mutation):
                 # Only return success if the code is explicitly valid
                 if status == 'code_valid':
                     logger.info('Code verification successful')
-                    verification.is_verified = True
-                    verification.save()
-                    
-                    # Update user's phone number and country code
+                    # Before changing user phone, check for duplicates using canonical key
                     user = info.context.user
-                    user.phone_number = phone_number  # Store without country code
-                    user.phone_country = country_code  # Store ISO country code
-                    user.save()
-                    
-                    return VerifyTelegramCode(success=True, error=None)
+                    phone_key = normalize_phone(phone_number, country_code)
+                    from users.models import User as UserModel
+                    duplicate_exists = UserModel.objects.filter(
+                        phone_key=phone_key,
+                        deleted_at__isnull=True
+                    ).exclude(id=user.id).exists()
+                    if duplicate_exists:
+                        logger.error('Phone already in use by another account: %s', phone_key)
+                        return VerifyTelegramCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+
+                    # Update user's phone number and country code
+                    try:
+                        user.phone_number = phone_number  # Store without country code
+                        user.phone_country = country_code  # Store ISO country code
+                        user.save()
+                        # Mark verification consumed only after successful save
+                        verification.is_verified = True
+                        verification.save(update_fields=['is_verified'])
+
+                        # Auto-claim any existing invitation for this phone (best-effort)
+                        try:
+                            res = None
+                            acct = Account.objects.filter(user=user, account_type='personal', account_index=0, deleted_at__isnull=True).first()
+                            recipient_addr = getattr(acct, 'algorand_address', None)
+                            if recipient_addr:
+                                # Resolve the latest PhoneInvite for this canonical phone and claim by invitation_id
+                                try:
+                                    from send.models import PhoneInvite
+                                    pk = normalize_phone(phone_number, country_code)
+                                    inv = PhoneInvite.objects.filter(
+                                        phone_key=pk,
+                                        status='pending',
+                                        deleted_at__isnull=True
+                                    ).order_by('-created_at').first()
+                                    if inv:
+                                        res = ClaimInviteForPhone.mutate(None, info, recipient_address=recipient_addr, invitation_id=inv.invitation_id)
+                                    else:
+                                        logger.info('Auto-claim skipped: no pending PhoneInvite found for phone_key=%s', pk)
+                                except Exception:
+                                    logger.info('Auto-claim skipped due to DB lookup failure; will not attempt fallback claim')
+                                if res is not None:
+                                    ok = getattr(res, 'success', False)
+                                    err = getattr(res, 'error', None)
+                                    logger.info('Auto-claim invite result: success=%s error=%s', ok, err)
+                            else:
+                                logger.info('Auto-claim skipped: no personal account address found')
+                        except Exception as ce:
+                            logger.exception('Auto-claim invite failed: %s', ce)
+
+                        return VerifyTelegramCode(success=True, error=None)
+                    except IntegrityError as e:
+                        logger.exception('Phone save failed due to uniqueness: %s', e)
+                        return VerifyTelegramCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+                    except Exception as e:
+                        logger.exception('Unexpected error saving phone: %s', e)
+                        return VerifyTelegramCode(success=False, error="Ocurrió un error al guardar tu número. Inténtalo de nuevo.")
                 elif status == 'code_invalid':
                     logger.info('Code verification failed: invalid code')
                     return VerifyTelegramCode(success=False, error="Invalid verification code")

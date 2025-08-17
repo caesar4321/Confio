@@ -17,7 +17,7 @@ class SendTransaction(SoftDeleteModel):
     ]
 
     TOKEN_TYPES = [
-        ('cUSD', 'Confío Dollar'),
+        ('CUSD', 'Confío Dollar'),
         ('CONFIO', 'Confío Token'),
         ('USDC', 'USD Coin')
     ]
@@ -168,3 +168,65 @@ class SendTransaction(SoftDeleteModel):
 
     def __str__(self):
         return f"SEND-{self.transaction_hash or 'pending'}: {self.token_type} {self.amount} from {self.sender_user} to {self.recipient_user or self.recipient_address}"
+
+
+class PhoneInvite(SoftDeleteModel):
+    """Track phone-based invites for non-Confío friends (off-chain index)."""
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('claimed', 'Claimed'),
+        ('reclaimed', 'Reclaimed'),
+    ]
+
+    # Deterministic invitation id used on-chain (derived from phone_key)
+    invitation_id = models.CharField(max_length=64, unique=True)
+
+    # Canonical phone key and raw inputs for audit
+    phone_key = models.CharField(max_length=32, db_index=True)
+    phone_country = models.CharField(max_length=2, blank=True)
+    phone_number = models.CharField(max_length=20)
+
+    inviter_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='phone_invites_sent'
+    )
+
+    # Optional reference to the persisted send transaction row
+    send_transaction = models.ForeignKey(
+        'send.SendTransaction',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='phone_invite'
+    )
+
+    amount = models.DecimalField(max_digits=19, decimal_places=6)
+    token_type = models.CharField(max_length=10, choices=SendTransaction.TOKEN_TYPES)
+    message = models.CharField(max_length=256, blank=True)
+
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='pending')
+    claimed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='phone_invites_claimed'
+    )
+    claimed_at = models.DateTimeField(null=True, blank=True)
+    claimed_txid = models.CharField(max_length=66, blank=True)
+
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['phone_key', 'status']),
+            models.Index(fields=['invitation_id']),
+        ]
+        ordering = ['-created_at']
+        verbose_name = 'Phone invite'
+        verbose_name_plural = 'Phone invites'
+
+    def __str__(self):
+        return f"Invite {self.invitation_id} to {self.phone_key} {self.amount} {self.token_type} ({self.status})"

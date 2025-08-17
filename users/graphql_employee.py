@@ -7,6 +7,7 @@ from datetime import timedelta
 from .models_employee import BusinessEmployee, EmployeeInvitation, EmployeeActivityLog
 from .models import Business, User, Account
 from .jwt_context import require_business_context, get_jwt_business_context_with_validation
+from .phone_utils import normalize_phone
 
 
 def get_account_from_context(context, user=None):
@@ -384,10 +385,12 @@ class InviteEmployee(graphene.Mutation):
                 user.phone_country == input.employee_phone_country):
                 return cls(success=False, errors=["You cannot invite yourself as an employee. You are already the owner."])
             
-            # Check if user already exists with this phone number
+            # Compute canonical phone key
+            phone_key = normalize_phone(input.employee_phone, input.employee_phone_country)
+
+            # Check if user already exists with this phone number (normalized)
             existing_user = User.objects.filter(
-                phone_number=input.employee_phone,
-                phone_country=input.employee_phone_country
+                phone_key=phone_key
             ).first()
             
             if existing_user:
@@ -407,8 +410,7 @@ class InviteEmployee(graphene.Mutation):
             # Check for pending invitations
             pending_invitation = EmployeeInvitation.objects.filter(
                 business=business,
-                employee_phone=input.employee_phone,
-                employee_phone_country=input.employee_phone_country,
+                employee_phone_key=phone_key,
                 status='pending'
             ).first()
             
@@ -420,6 +422,7 @@ class InviteEmployee(graphene.Mutation):
                 business=business,
                 employee_phone=input.employee_phone,
                 employee_phone_country=input.employee_phone_country,
+                employee_phone_key=phone_key,
                 employee_name=input.employee_name or '',
                 role=input.role,
                 permissions=input.custom_permissions or {},  # Default to empty dict if None
@@ -457,9 +460,8 @@ class AcceptInvitation(graphene.Mutation):
                 invitation_code=invitation_code
             )
             
-            # Verify phone number matches
-            if (invitation.employee_phone != user.phone_number or 
-                invitation.employee_phone_country != user.phone_country):
+            # Verify phone number matches (normalized)
+            if not user.phone_key or invitation.employee_phone_key != user.phone_key:
                 return cls(success=False, errors=["This invitation is not for your phone number"])
             
             # Accept the invitation

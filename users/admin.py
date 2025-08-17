@@ -12,7 +12,7 @@ from .models_employee import BusinessEmployee, EmployeeInvitation
 
 @admin.register(User)
 class UserAdmin(admin.ModelAdmin):
-    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'verification_status_display', 'accounts_count', 'employment_status', 'is_staff', 'created_at')
+    list_display = ('username', 'email', 'firebase_uid', 'phone_display', 'phone_key', 'verification_status_display', 'accounts_count', 'employment_status', 'is_staff', 'created_at')
     list_filter = ('is_staff', 'is_superuser', 'phone_country', 'created_at')
     search_fields = ('username', 'email', 'firebase_uid', 'first_name', 'last_name')
     readonly_fields = ('firebase_uid', 'auth_token_version', 'created_at', 'updated_at')
@@ -22,7 +22,7 @@ class UserAdmin(admin.ModelAdmin):
             'fields': ('username', 'email', 'first_name', 'last_name', 'firebase_uid')
         }),
         ('Contact Information', {
-            'fields': ('phone_country', 'phone_number')
+            'fields': ('phone_country', 'phone_number', 'phone_key')
         }),
         ('Permissions', {
             'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions'),

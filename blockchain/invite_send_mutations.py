@@ -20,6 +20,12 @@ import json
 import base64 as _b64
 
 from .invite_send_transaction_builder import InviteSendTransactionBuilder
+from algosdk.atomic_transaction_composer import (
+    AtomicTransactionComposer,
+    TransactionWithSigner,
+    AccountTransactionSigner,
+)
+from algosdk import transaction as _txn
 from send.models import SendTransaction
 from django.utils import timezone
 from decimal import Decimal
@@ -82,25 +88,52 @@ class PrepareInviteForPhone(graphene.Mutation):
         else:
             return cls(success=False, error='Unsupported asset type')
 
-        # Prevent duplicate active invitations: check if a box already exists
-        try:
-            phone_key = builder.normalize_phone(phone, phone_country)
-            invitation_id_pre = builder.make_invitation_id(phone_key)
-            client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
-            # Will raise if not found
-            _ = client.application_box_by_name(builder.app_id, invitation_id_pre.encode())
-            return cls(success=False, error='Ya existe una invitación activa para este número. Espera a que se reclame o se revoque antes de crear otra.')
-        except Exception:
-            pass
+        # Normalize phone for DB persistence; do not enforce single-invite per phone on-chain
+        client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        phone_key_canonical = builder.normalize_phone(phone, phone_country)
+        if not phone_key_canonical or ':' not in phone_key_canonical:
+            return cls(success=False, error='Proporciona un número en formato internacional (+CC ...) o un país válido para normalizar el teléfono.')
 
         amount_u = int(amount * 1_000_000)
+
+        # Insufficient balance check for inviter before building
+        try:
+            client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            asset_info = client.asset_info(asset_id)
+            decimals = int(asset_info.get('params', {}).get('decimals', 6) or 6)
+            acct_info = client.account_asset_info(acct.algorand_address, asset_id)
+            current_amount = int(acct_info.get('asset-holding', {}).get('amount', 0))
+            if current_amount < amount_u:
+                available = current_amount / (10 ** decimals)
+                needed = amount_u / (10 ** decimals)
+                return cls(success=False, error=f'Saldo insuficiente de {asset_type}. Disponible: {available:.6f}, requerido: {needed:.6f}')
+        except Exception:
+            # If balance lookup fails, continue; on-chain will enforce at submit
+            pass
+        # Generate a unique invitation id by adding a short random suffix
+        try:
+            import secrets
+            base_id = builder.make_invitation_id(phone_key_canonical)
+            suffix = secrets.token_hex(4)  # 8 chars
+            # Ensure both invitation_id and receipt key "r:"+invitation_id fit in Algorand box key (<=64 bytes)
+            # => len(invitation_id) must be <= 62
+            max_inv_id_len = 62
+            trim_len = max_inv_id_len - (1 + len(suffix))
+            if trim_len < 1:
+                trim_len = 1
+            safe_base = base_id[:trim_len]
+            unique_id = f"{safe_base}:{suffix}"
+        except Exception:
+            unique_id = builder.make_invitation_id(phone_key_canonical)
+
         res = builder.build_create_invitation(
             inviter_address=acct.algorand_address,
             asset_id=asset_id,
             amount=amount_u,
             phone_number=phone,
             phone_country=phone_country,
-            message=message or ''
+            message=message or '',
+            invitation_id_override=unique_id
         )
         if not res.success:
             return cls(success=False, error=res.error)
@@ -138,7 +171,7 @@ class PrepareInviteForPhone(graphene.Mutation):
             from algosdk.logic import get_application_address
             app_addr = get_application_address(builder.app_id)
             token = 'CUSD' if asset_id == builder.cusd_asset_id else 'CONFIO'
-            SendTransaction.objects.update_or_create(
+            stx, _ = SendTransaction.objects.update_or_create(
                 idempotency_key=res.invitation_id,
                 defaults={
                     'sender_user': user,
@@ -159,8 +192,56 @@ class PrepareInviteForPhone(graphene.Mutation):
                     'invitation_expires_at': timezone.now() + timezone.timedelta(days=7),
                 }
             )
+            # Also persist PhoneInvite for easier ops/admin tracking
+            try:
+                from send.models import PhoneInvite
+                # Persist canonical phone key derived by builder (handles ISO or E.164)
+                phone_key = phone_key_canonical
+                PhoneInvite.objects.update_or_create(
+                    invitation_id=res.invitation_id,
+                    defaults={
+                        'phone_key': phone_key,
+                        'phone_country': (phone_country or '')[:2],
+                        'phone_number': ''.join(ch for ch in (phone or '') if ch.isdigit()),
+                        'inviter_user': user,
+                        'send_transaction': stx,
+                        'amount': Decimal(str(amount)),
+                        'token_type': token,
+                        'message': message or '',
+                        'status': 'pending',
+                        'expires_at': timezone.now() + timezone.timedelta(days=7),
+                    }
+                )
+            except Exception as e:
+                logger.warning(f'[InviteSend] Could not persist PhoneInvite: {e}')
         except Exception as e:
             logger.warning(f'[InviteSend] Could not persist SendTransaction invitation: {e}')
+
+        # Notify inviter that invitation was created/sent
+        try:
+            from notifications.utils import create_notification
+            from notifications.models import NotificationType as NotificationTypeChoices
+            display_amount = f"{amount} {asset_type}"
+            create_notification(
+                user=user,
+                notification_type=NotificationTypeChoices.SEND_INVITATION_SENT,
+                title='Invitación enviada',
+                message=f"Tu invitación para {phone} está activa por {display_amount}",
+                data={
+                    'transaction_type': 'send',
+                    'amount': f'-{amount}',
+                    'token_type': asset_type,
+                    'recipient_phone': phone,
+                    'invitation_id': res.invitation_id,
+                    'status': 'pending',
+                    'isInvitedFriend': True,
+                },
+                related_object_type='SendTransaction',
+                related_object_id=str(stx.id) if 'stx' in locals() and stx else None,
+                action_url=f"confio://transaction/{stx.id}" if 'stx' in locals() and stx else None
+            )
+        except Exception as e:
+            logger.warning(f'[InviteSend] Could not create invitation sent notification: {e}')
 
         return cls(
             success=True,
@@ -362,24 +443,27 @@ class InviteSendMutations(graphene.ObjectType):
 
 class ClaimInviteForPhone(graphene.Mutation):
     class Arguments:
-        phone = graphene.String(required=True)
-        phone_country = graphene.String(required=False)
         recipient_address = graphene.String(required=True)
+        # Backward-compatible: phone and phone_country are optional now
+        phone = graphene.String(required=False)
+        phone_country = graphene.String(required=False)
+        # New optional argument: allow direct claim by invitation id
+        invitation_id = graphene.String(required=False)
 
     success = graphene.Boolean()
     error = graphene.String()
     txid = graphene.String()
 
     @classmethod
-    def mutate(cls, root, info, phone, recipient_address, phone_country=None):
+    def mutate(cls, root, info, recipient_address, phone=None, phone_country=None, invitation_id=None):
         user = info.context.user
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
 
+        # Contract requires Txn.sender == app.state.admin for claim_invitation.
+        # Use admin mnemonic; only fall back to sponsor if sponsor == admin on-chain.
         admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None)
-        if not admin_mn:
-            return cls(success=False, error='Server missing ALGORAND_ADMIN_MNEMONIC')
-
+        sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
         algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
         builder = InviteSendTransactionBuilder()
         contract = builder.contract
@@ -387,42 +471,322 @@ class ClaimInviteForPhone(graphene.Mutation):
         if method is None:
             return cls(success=False, error='ABI method claim_invitation not found')
 
-        # Recreate invitation id from phone
-        key = builder.normalize_phone(phone, phone_country)
-        invitation_id = builder.make_invitation_id(key)
+        # Read on-chain admin and sponsor addresses for validation
+        onchain_admin_addr = None
+        onchain_sponsor_addr = None
+        try:
+            app_info = algod_client.application_info(builder.app_id)
+            gstate = app_info.get('params', {}).get('global-state', [])
+            import base64 as _b
+            from algosdk.encoding import encode_address
+            def _get_bytes(key: str):
+                for kv in gstate:
+                    try:
+                        if _b.b64decode(kv.get('key')).decode() == key:
+                            v = kv.get('value', {})
+                            if v.get('type') == 1:
+                                return _b.b64decode(v.get('bytes'))
+                    except Exception:
+                        continue
+                return None
+            admin_b = _get_bytes('admin')
+            sponsor_b = _get_bytes('sponsor_address')
+            if admin_b:
+                onchain_admin_addr = encode_address(admin_b)
+            if sponsor_b:
+                onchain_sponsor_addr = encode_address(sponsor_b)
+            logger.info('[ClaimInviteForPhone] On-chain admin=%s sponsor=%s', onchain_admin_addr, onchain_sponsor_addr)
+        except Exception as e:
+            logger.warning('[ClaimInviteForPhone] Could not read app globals: %s', e)
+
+        # Choose operator key with strict validation
+        operator_mn = None
+        operator_label = 'none'
+        operator_addr = None
+        try:
+            from algosdk import account as _acct
+            if admin_mn:
+                admin_sk = mnemonic.to_private_key(admin_mn)
+                operator_addr = _acct.address_from_private_key(admin_sk)
+                operator_mn = admin_mn
+                operator_label = 'admin'
+                if onchain_admin_addr and operator_addr != onchain_admin_addr:
+                    logger.warning('[ClaimInviteForPhone] Provided ALGORAND_ADMIN_MNEMONIC address %s does not match on-chain admin %s', operator_addr, onchain_admin_addr)
+            elif sponsor_mn:
+                # Only use sponsor if it matches on-chain admin (some envs set admin==sponsor)
+                sponsor_sk = mnemonic.to_private_key(sponsor_mn)
+                sponsor_addr = _acct.address_from_private_key(sponsor_sk)
+                if onchain_admin_addr and sponsor_addr != onchain_admin_addr:
+                    err = 'Server missing ALGORAND_ADMIN_MNEMONIC. Contract admin is %s; set this mnemonic to enable claiming.' % (onchain_admin_addr or 'unknown')
+                    logger.warning('[ClaimInviteForPhone] %s', err)
+                    return cls(success=False, error=err)
+                operator_mn = sponsor_mn
+                operator_label = 'sponsor'
+                operator_addr = sponsor_addr
+            else:
+                logger.warning('[ClaimInviteForPhone] Missing ALGORAND_ADMIN_MNEMONIC and ALGORAND_SPONSOR_MNEMONIC; cannot claim invitation')
+                return cls(success=False, error='Server missing admin mnemonic for claiming invitation')
+        except Exception as e:
+            logger.exception('[ClaimInviteForPhone] Failed to derive operator key: %s', e)
+            return cls(success=False, error='Failed to derive operator key for claim')
+
+        # Determine the invitation id to claim
+        if not invitation_id:
+            # If phone provided, derive from normalized phone (legacy behavior)
+            if phone:
+                canonical_key = builder.normalize_phone(phone, phone_country)
+                if not canonical_key or ':' not in canonical_key:
+                    return cls(success=False, error='Proporciona un número en formato internacional (+CC ...) o un país válido para normalizar el teléfono.')
+                invitation_id = builder.make_invitation_id(canonical_key)
+            else:
+                # Resolve invitation for current user's phone strictly via PhoneInvite pending row.
+                try:
+                    from users.phone_utils import normalize_phone as _norm
+                    u = info.context.user
+                    user_phone = getattr(u, 'phone_number', None)
+                    user_country = getattr(u, 'phone_country', None)
+                    phone_key = _norm(user_phone or '', user_country or '')
+                    if not phone_key or ':' not in phone_key:
+                        return cls(success=False, error='No se pudo resolver tu número de teléfono para reclamar la invitación.')
+                    from send.models import PhoneInvite
+                    # Support legacy phone_key that duplicated calling code in digits
+                    try:
+                        cc, local = phone_key.split(':', 1)
+                        alt_phone_key = f"{cc}:{cc}{local}"
+                    except Exception:
+                        alt_phone_key = phone_key
+                    inv = PhoneInvite.objects.filter(
+                        phone_key=phone_key,
+                        status='pending',
+                        deleted_at__isnull=True
+                    ).order_by('-created_at').first()
+                    if not inv:
+                        return cls(success=False, error='No se encontró una invitación activa para tu número.')
+                    invitation_id = inv.invitation_id
+                except Exception as e:
+                    logger.exception('[ClaimInviteForPhone] Failed resolving PhoneInvite for user phone: %s', e)
+                    return cls(success=False, error='Error interno al resolver la invitación')
+
+        logger.info('[ClaimInviteForPhone] Resolving invitation_id=%s for recipient=%s', invitation_id, recipient_address)
+        # Pre-validate invitation id length: receipt key 'r:' + id must be <= 64 bytes
+        try:
+            if len(invitation_id.encode()) > 62:  # 'r:' adds 2 bytes
+                return cls(success=False, error='Invitación inválida: ID demasiado largo para reclamar. Pide al remitente recrearla.')
+        except Exception:
+            pass
+        # Validate invitation exists on-chain
+        try:
+            _ = algod_client.application_box_by_name(builder.app_id, invitation_id.encode())
+        except Exception:
+            return cls(success=False, error='No se encontró una invitación activa para este número. Pide al remitente que la cree nuevamente e inténtalo de nuevo.')
+
+        # If receipt box already exists, treat as already-claimed and return success (idempotent)
+        try:
+            _ = algod_client.application_box_by_name(builder.app_id, ('r:' + invitation_id).encode())
+            logger.info('[ClaimInviteForPhone] Receipt box already exists for %s - treating as already claimed', invitation_id)
+            # Best-effort DB update for PhoneInvite
+            try:
+                from send.models import PhoneInvite
+                inv = PhoneInvite.objects.filter(invitation_id=invitation_id).first()
+                if inv and inv.status != 'claimed':
+                    inv.status = 'claimed'
+                    inv.claimed_by = user
+                    inv.claimed_at = timezone.now()
+                    inv.save(update_fields=['status', 'claimed_by', 'claimed_at', 'updated_at'])
+            except Exception:
+                pass
+            return cls(success=True, txid='')
+        except Exception:
+            pass
+
+        # Pre-check: ensure claim is valid and recipient is opted in to the invitation's asset to avoid TEAL assert
+        asset_id_int = None
+        inviter_addr_decoded = None
+        try:
+            box = algod_client.application_box_by_name(builder.app_id, invitation_id.encode())
+            import base64 as _b
+            raw = _b.b64decode(box['value']['bytes']) if isinstance(box.get('value'), dict) else _b.b64decode(box.get('value', ''))
+            # raw layout: inviter(32) | amount(8) | asset_id(8) | created_at(8) | expires_at(8) | flags...
+            if len(raw) >= 48:
+                # Disallow self-claim: recipient cannot be the original inviter
+                try:
+                    from algosdk import encoding as _enc
+                    inviter_addr = _enc.encode_address(raw[0:32])
+                    inviter_addr_decoded = inviter_addr
+                    if inviter_addr == recipient_address:
+                        return cls(success=False, error='No puedes reclamar una invitación a la misma dirección que la que la envió. Inicia sesión con la cuenta del invitado.')
+                except Exception:
+                    pass
+                asset_id_bytes = raw[40:48]
+                asset_id_int = int.from_bytes(asset_id_bytes, 'big')
+                try:
+                    algod_client.account_asset_info(recipient_address, asset_id_int)
+                except Exception:
+                    return cls(success=False, error=f'Recipient address must opt in to asset {asset_id_int} before claiming. Please complete asset opt-in and retry.')
+        except Exception:
+            # If pre-check fails, proceed and let on-chain logic handle; but clearer error helps when available
+            pass
 
         params = algod_client.suggested_params()
         min_fee = getattr(params, 'min_fee', 1000) or 1000
 
-        # Build 2-txn group: fee-bump pay0, app call
+        # Build 2-txn group: fee-bump pay0 (from sponsor), app call (from admin)
         from algosdk import account as _acct
-        admin_sk = mnemonic.to_private_key(admin_mn)
+        admin_sk = mnemonic.to_private_key(operator_mn)
         admin_addr = _acct.address_from_private_key(admin_sk)
+        logger.info('[ClaimInviteForPhone] Using %s address %s for claim', operator_label, admin_addr)
+
+        # Choose fee-bump payer: on-chain sponsor if available, else configured sponsor, else admin
+        fee_payer_addr = onchain_sponsor_addr or getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None) or admin_addr
+        fee_payer_sk = None
+        if fee_payer_addr == admin_addr:
+            fee_payer_sk = admin_sk
+        else:
+            if not sponsor_mn:
+                logger.warning('[ClaimInviteForPhone] Missing sponsor mnemonic; falling back to admin to pay fee')
+                fee_payer_sk = admin_sk
+                fee_payer_addr = admin_addr
+            else:
+                fee_payer_sk = mnemonic.to_private_key(sponsor_mn)
+                payer_check = _acct.address_from_private_key(fee_payer_sk)
+                if payer_check != fee_payer_addr:
+                    logger.warning('[ClaimInviteForPhone] Configured sponsor mnemonic/address mismatch; using mnemonic-derived address %s', payer_check)
+                    fee_payer_addr = payer_check
+
+        # Increase fee-bump budget to cover inner transactions in the app call
+        # Use a generous multiplier to avoid underpayment across networks
         pay0 = transaction.PaymentTxn(
-            sender=admin_addr,
-            sp=transaction.SuggestedParams(fee=min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True),
-            receiver=admin_addr,
+            sender=fee_payer_addr,
+            sp=transaction.SuggestedParams(fee=min_fee * 5, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True),
+            receiver=fee_payer_addr,
             amt=0
         )
 
         atc = AtomicTransactionComposer()
-        atc.add_transaction(TransactionWithSigner(pay0, AccountTransactionSigner(admin_sk)))
+        atc.add_transaction(TransactionWithSigner(pay0, AccountTransactionSigner(fee_payer_sk)))
+        # Include required box references: invitation box and receipt box
+        # Build explicit BoxReference objects to avoid SDK tuple ambiguity
+        # Index 0 refers to the current application (no ForeignApps needed)
+        boxes = [
+            _txn.BoxReference(0, invitation_id.encode()),
+            _txn.BoxReference(0, ('r:' + invitation_id).encode()),
+        ]
+        # Include foreign asset reference for AssetHolding lookups
+        foreign_assets = []
+        if asset_id_int:
+            foreign_assets = [asset_id_int]
+
+        # Build accounts array including recipient (for AssetHolding) and inviter (for refund inner txn in some AVM patterns)
+        accounts_list = [recipient_address]
+        if inviter_addr_decoded and inviter_addr_decoded != recipient_address:
+            accounts_list.append(inviter_addr_decoded)
+
         atc.add_method_call(
             app_id=builder.app_id,
             method=method,
             sender=admin_addr,
-            sp=transaction.SuggestedParams(fee=min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True),
+            sp=transaction.SuggestedParams(fee=0, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True),
             signer=AccountTransactionSigner(admin_sk),
             method_args=[invitation_id, recipient_address],
+            accounts=accounts_list,
+            foreign_assets=foreign_assets,
+            boxes=boxes,
         )
 
         # Sign and submit
         try:
             res = atc.execute(algod_client, 10)
-            return cls(success=True, txid=res.tx_ids[-1] if res.tx_ids else '')
+            txid = res.tx_ids[-1] if res.tx_ids else ''
+            # Update PhoneInvite as claimed
+            try:
+                from send.models import PhoneInvite, SendTransaction
+                from notifications.utils import create_notification
+                from notifications.models import NotificationType as NotificationTypeChoices
+                inv = PhoneInvite.objects.filter(invitation_id=invitation_id).select_related('send_transaction', 'inviter_user').first()
+                if inv:
+                    inv.status = 'claimed'
+                    inv.claimed_by = user
+                    inv.claimed_at = timezone.now()
+                    inv.claimed_txid = txid
+                    inv.save(update_fields=['status', 'claimed_by', 'claimed_at', 'claimed_txid', 'updated_at'])
+
+                    # Update related SendTransaction so it appears in both parties' activities
+                    stx = inv.send_transaction
+                    if stx:
+                        # Set recipient as the claimer and mark invitation claimed
+                        stx.recipient_user = user
+                        stx.recipient_type = 'user'
+                        stx.recipient_display_name = user.get_full_name() or user.username
+                        stx.recipient_address = recipient_address
+                        stx.invitation_claimed = True
+                        # Keep existing status/transaction_hash (original invite submit tx)
+                        stx.save(update_fields=['recipient_user', 'recipient_type', 'recipient_display_name', 'recipient_address', 'invitation_claimed', 'updated_at'])
+
+                        # Create notifications for inviter and invitee
+                        inviter = inv.inviter_user
+                        display_amount = f"{inv.amount} {inv.token_type}"
+                        # Notify inviter: their invite was claimed
+                        if inviter:
+                            try:
+                                create_notification(
+                                    user=inviter,
+                                    notification_type=NotificationTypeChoices.SEND_INVITATION_CLAIMED,
+                                    title='Invitación reclamada',
+                                    message=f"Tu invitación a {inv.phone_number} fue reclamada. Se enviaron {display_amount}.",
+                                    data={
+                                        'transaction_type': 'send',
+                                        'amount': f'-{inv.amount}',
+                                        'token_type': inv.token_type,
+                                        'invitation_id': inv.invitation_id,
+                                        'recipient_phone': inv.phone_number,
+                                        'recipient_address': recipient_address,
+                                        'status': 'confirmed',
+                                        'isInvitedFriend': True,
+                                        'txid': txid,
+                                    },
+                                    related_object_type='SendTransaction',
+                                    related_object_id=str(stx.id),
+                                    action_url=f"confio://transaction/{stx.id}"
+                                )
+                            except Exception:
+                                logger.exception('[InviteSend] Failed to create inviter notification')
+
+                        # Notify invitee: received funds via invitation
+                        try:
+                            sender_name = inviter.get_full_name() or inviter.username if inviter else 'Un amigo'
+                            create_notification(
+                                user=user,
+                                notification_type=NotificationTypeChoices.INVITE_RECEIVED,
+                                title='Invitación recibida',
+                                message=f"Recibiste {display_amount} de {sender_name}",
+                                data={
+                                    'transaction_type': 'send',
+                                    'amount': f'+{inv.amount}',
+                                    'token_type': inv.token_type,
+                                    'invitation_id': inv.invitation_id,
+                                    'sender_name': sender_name,
+                                    'sender_address': stx.sender_address if stx else '',
+                                    'status': 'confirmed',
+                                    'isInvitedFriend': True,
+                                    'txid': txid,
+                                },
+                                related_object_type='SendTransaction',
+                                related_object_id=str(stx.id) if stx else None,
+                                action_url=f"confio://transaction/{stx.id}" if stx else None
+                            )
+                        except Exception:
+                            logger.exception('[InviteSend] Failed to create invitee notification')
+            except Exception as e:
+                logger.warning(f'[InviteSend] Could not update PhoneInvite claim: {e}')
+            return cls(success=True, txid=txid)
         except Exception as e:
+            # Map common TEAL errors to friendlier messages
+            msg = str(e)
             logger.error(f'Claim invite error: {e}')
-            return cls(success=False, error=str(e))
+            friendly = None
+            if 'logic eval error' in msg and 'assert' in msg:
+                friendly = 'No se pudo reclamar la invitación. Verifica que no haya sido reclamada previamente, que no esté expirada y que tu dirección esté opt-in al activo.'
+            return cls(success=False, error=friendly or msg)
 
 
 # Expose claim mutation at module level
@@ -437,22 +801,35 @@ class InviteReceiptType(graphene.ObjectType):
     amount = graphene.Int()
     timestamp = graphene.Int()
 
-
 def get_invite_receipt_for_phone(user_phone: str, user_country: str | None):
+    """Resolve latest invitation for this phone from DB, then check its on-chain receipt box.
+
+    This allows multiple invitations per phone over time (unique IDs), while keeping
+    a simple client API keyed by phone.
+    """
     builder = InviteSendTransactionBuilder()
-    key = builder.normalize_phone(user_phone, user_country)
-    invitation_id = builder.make_invitation_id(key)
-    name = ('r:' + invitation_id).encode()
     client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
     try:
-        box = client.application_box_by_name(builder.app_id, name)
-        b = base64.b64decode(box['value']['bytes']) if isinstance(box.get('value'), dict) else base64.b64decode(box.get('value', ''))
-        if len(b) < 32:
+        from users.phone_utils import normalize_phone as _norm
+        from send.models import PhoneInvite
+        phone_key = _norm(user_phone or '', user_country or '')
+        if not phone_key or ':' not in phone_key:
             return {'exists': False}
-        status = int.from_bytes(b[0:8], 'big')
-        asset_id = int.from_bytes(b[8:16], 'big')
-        amount = int.from_bytes(b[16:24], 'big')
-        ts = int.from_bytes(b[24:32], 'big')
-        return {'exists': True, 'status_code': status, 'asset_id': asset_id, 'amount': amount, 'timestamp': ts}
+        inv = PhoneInvite.objects.filter(phone_key=phone_key, deleted_at__isnull=True).order_by('-created_at').first()
+        if not inv:
+            return {'exists': False}
+        name = ('r:' + inv.invitation_id).encode()
+        try:
+            box = client.application_box_by_name(builder.app_id, name)
+            b = base64.b64decode(box['value']['bytes']) if isinstance(box.get('value'), dict) else base64.b64decode(box.get('value', ''))
+            if len(b) < 32:
+                return {'exists': False}
+            status = int.from_bytes(b[0:8], 'big')
+            asset_id = int.from_bytes(b[8:16], 'big')
+            amount = int.from_bytes(b[16:24], 'big')
+            ts = int.from_bytes(b[24:32], 'big')
+            return {'exists': True, 'status_code': status, 'asset_id': asset_id, 'amount': amount, 'timestamp': ts}
+        except Exception:
+            return {'exists': False}
     except Exception:
         return {'exists': False}

@@ -593,7 +593,7 @@ from p2p_exchange.admin import (
     P2PFavoriteTraderAdmin
 )
 from payments.admin import PaymentTransactionAdmin, InvoiceAdmin
-from send.admin import SendTransactionAdmin
+from send.admin import SendTransactionAdmin, PhoneInviteAdmin
 from conversion.admin import ConversionAdmin
 
 # Register with custom admin site
@@ -673,8 +673,9 @@ confio_admin_site.register(Invoice, InvoiceAdmin)
 confio_admin_site.register(PaymentTransaction, PaymentTransactionAdmin)
 
 # Send models
-from send.models import SendTransaction
+from send.models import SendTransaction, PhoneInvite
 confio_admin_site.register(SendTransaction, SendTransactionAdmin)
+confio_admin_site.register(PhoneInvite, PhoneInviteAdmin)
 
 # Conversion models
 from conversion.models import Conversion

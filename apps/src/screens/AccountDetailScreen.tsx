@@ -112,6 +112,25 @@ export const AccountDetailScreen = () => {
   const { formatNumber, formatCurrency } = useNumberFormat();
   const { activeAccount } = useAccount();
   
+  // Helpers to avoid overstating balances
+  const floorToDecimals = useCallback((value: number, decimals: number) => {
+    if (!isFinite(value)) return 0;
+    const m = Math.pow(10, decimals);
+    return Math.floor(value * m) / m;
+  }, []);
+
+  const formatFixedFloor = useCallback((value: number, decimals = 2) => {
+    const floored = floorToDecimals(value, decimals);
+    return floored.toLocaleString('es-ES', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  }, [floorToDecimals]);
+
+  const formatBalanceDisplay = useCallback((valueStr: string | number) => {
+    const v = typeof valueStr === 'string' ? parseFloat(valueStr) : valueStr;
+    if (!isFinite(v) || v <= 0) return '0.00';
+    if (v < 0.01) return '< 0.01';
+    return formatFixedFloor(v, 2);
+  }, [formatFixedFloor]);
+  
   // Helper function to format transaction amounts to 2 decimal places
   const formatTransactionAmount = (amount: string): string => {
     // Remove any sign (+/-) temporarily
@@ -268,7 +287,7 @@ export const AccountDetailScreen = () => {
   const usdcAccount = shouldFetchUSDC ? {
     name: "USD Coin",
     symbol: "USDC",
-    balance: usdcBalance.toFixed(2),
+    balance: formatBalanceDisplay(usdcBalance),
     balanceHidden: "•••••••",
     description: "Para usuarios avanzados - depósito directo vía Algorand Blockchain"
   } : null;
@@ -278,7 +297,7 @@ export const AccountDetailScreen = () => {
     limit: transactionLimit,
     offset: 0, // Always start with offset 0 for initial query
     tokenTypes: route.params.accountType === 'cusd' ? 
-      (activeAccount?.isEmployee ? ['cUSD', 'CUSD'] : ['cUSD', 'CUSD', 'USDC']) : 
+      (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC']) : 
       ['CONFIO']
   };
   
@@ -379,8 +398,8 @@ export const AccountDetailScreen = () => {
           limit: 20,
           offset: 0,
           tokenTypes: route.params.accountType === 'cusd' ? 
-        (activeAccount?.isEmployee ? ['cUSD', 'CUSD'] : ['cUSD', 'CUSD', 'USDC']) : 
-        ['CONFIO']
+            (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC']) : 
+            ['CONFIO']
         })
       ];
       
@@ -581,7 +600,9 @@ export const AccountDetailScreen = () => {
           fromPhone: isConversion ? undefined : (tx.direction === 'received' ? tx.senderPhone : undefined),
           toPhone: isConversion ? undefined : (tx.direction === 'sent' ? tx.counterpartyPhone : undefined),
           amount: isConversion ? conversionAmount : tx.displayAmount,
-          currency: isConversion ? (conversionType === 'usdc_to_cusd' ? 'USDC' : conversionType === 'cusd_to_usdc' ? 'cUSD' : undefined) : (tx.tokenType === 'CUSD' ? 'cUSD' : tx.tokenType),
+          currency: isConversion 
+            ? (conversionType === 'usdc_to_cusd' ? 'USDC' : conversionType === 'cusd_to_usdc' ? 'cUSD' : undefined) 
+            : (((tx.tokenType || '').toUpperCase() === 'CUSD') ? 'cUSD' : (tx.tokenType || '')),
           secondaryCurrency: isConversion ? (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined) : undefined,
           conversionType: conversionType || tx.conversionType,
           date: tx.createdAt, // Keep full timestamp for proper sorting
@@ -968,7 +989,10 @@ export const AccountDetailScreen = () => {
           conversionType: transaction.conversionType,
           formattedTitle: transaction.type === 'conversion' && transaction.conversionType === 'usdc_to_cusd' ? 'USDC → cUSD' :
                           transaction.type === 'conversion' && transaction.conversionType === 'cusd_to_usdc' ? 'cUSD → USDC' : undefined,
-          isInvitedFriend: transaction.isInvitation || false // true means friend is NOT on Confío
+          isInvitedFriend: transaction.isInvitation || false, // true means friend is NOT on Confío
+          invitationClaimed: transaction.invitationClaimed || false,
+          invitationReverted: transaction.invitationReverted || false,
+          invitationExpiresAt: transaction.invitationExpiresAt || undefined,
         }
       };
       // Navigate to different screens based on transaction type
@@ -1274,8 +1298,8 @@ export const AccountDetailScreen = () => {
           limit: transactionLimit,
           offset: newOffset,
           tokenTypes: route.params.accountType === 'cusd' ? 
-      (activeAccount?.isEmployee ? ['cUSD', 'CUSD'] : ['cUSD', 'CUSD', 'USDC']) : 
-      ['CONFIO']
+            (activeAccount?.isEmployee ? ['CUSD'] : ['CUSD', 'USDC']) : 
+            ['CONFIO']
         },
         updateQuery: (prev, { fetchMoreResult }) => {
           console.log('loadMoreTransactions - fetchMoreResult:', {
@@ -1340,7 +1364,11 @@ export const AccountDetailScreen = () => {
 
         <View style={styles.balanceRow}>
           <Text style={styles.balanceText}>
-            {!canViewBalance ? account.balanceHidden : (showBalance ? `$${account.balance}` : account.balanceHidden)}
+            {!canViewBalance 
+              ? account.balanceHidden 
+              : (showBalance 
+                  ? `$${formatBalanceDisplay(account.balance)}` 
+                  : account.balanceHidden)}
           </Text>
           {canViewBalance && (
             <TouchableOpacity onPress={toggleBalanceVisibility}>
@@ -1360,7 +1388,7 @@ export const AccountDetailScreen = () => {
             <View style={styles.lockedStatusRow}>
               <Icon name="lock" size={14} color="#fbbf24" />
               <Text style={styles.lockedStatusText}>
-                Bloqueado: ${account.balance} $CONFIO
+                Bloqueado: ${formatBalanceDisplay(account.balance)} $CONFIO
               </Text>
             </View>
             <View style={styles.lockedStatusRow}>
