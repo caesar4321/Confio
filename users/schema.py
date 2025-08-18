@@ -1656,82 +1656,154 @@ class UpdateBusiness(graphene.Mutation):
 			return UpdateBusiness(success=False, error="Error interno del servidor")
 
 class UpdateAccountAlgorandAddress(graphene.Mutation):
-	class Arguments:
-		algorand_address = graphene.String(required=True)
+    class Arguments:
+        algorand_address = graphene.String(required=True)
 
-	success = graphene.Boolean()
-	error = graphene.String()
-	account = graphene.Field(AccountType)
+    success = graphene.Boolean()
+    error = graphene.String()
+    account = graphene.Field(AccountType)
+    # New: merge CheckAssetOptIns semantics for CONFIO and cUSD
+    needs_opt_in = graphene.List(graphene.Int)
+    opt_in_transactions = graphene.JSONString()
 
-	@classmethod
-	def mutate(cls, root, info, algorand_address):
-		user = getattr(info.context, 'user', None)
-		if not (user and getattr(user, 'is_authenticated', False)):
-			return UpdateAccountAlgorandAddress(success=False, error="Authentication required")
+    @classmethod
+    def mutate(cls, root, info, algorand_address):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return UpdateAccountAlgorandAddress(success=False, error="Authentication required")
 
-		try:
-			# Get JWT context with validation and permission check
-			from .jwt_context import get_jwt_business_context_with_validation
-			jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-			if not jwt_context:
-				return UpdateAccountAlgorandAddress(success=False, error="Invalid account context")
-			
-			account_type = jwt_context['account_type']
-			account_index = jwt_context['account_index']
-			business_id = jwt_context.get('business_id')
-			
-			# Get the account using JWT context
-			if account_type == 'business' and business_id:
-				# For business accounts, find the account by business_id (ignore index to support employee JWT index)
-				account = Account.objects.filter(
-					business_id=business_id,
-					account_type='business'
-				).order_by('account_index').first()
-				if not account:
-					return UpdateAccountAlgorandAddress(success=False, error="Cuenta no encontrada")
-				
-				# IMPORTANT: Only the business owner can update the business account's Algorand address
-				# The address is derived from the owner's OAuth credentials, not the employee's
-				if not Account.objects.filter(user=user, business_id=business_id, account_type='business').exists():
-					# Check if user is an owner-employee (owner role in BusinessEmployee table)
-					from .models_employee import BusinessEmployee
-					employee_record = BusinessEmployee.objects.filter(
-						user=user,
-						business_id=business_id,
-						role='owner',
-						is_active=True,
-						deleted_at__isnull=True
-					).first()
-					
-					if not employee_record:
-						# Non-owner employees CANNOT update the business Algorand address
-						return UpdateAccountAlgorandAddress(
-							success=False, 
-							error="Solo el dueño del negocio puede actualizar la dirección de Algorand. Los empleados no pueden cambiar esta configuración."
-						)
-			else:
-				# For personal accounts
-				account = Account.objects.get(
-					user=user,
-					account_type=account_type,
-					account_index=account_index
-				)
-			
-			# Update the Algorand address
-			account.algorand_address = algorand_address
-			account.save()
-			
-			return UpdateAccountAlgorandAddress(
-				success=True,
-				error=None,
-				account=account
-			)
+        try:
+            # Get JWT context with validation and permission check
+            from .jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            if not jwt_context:
+                return UpdateAccountAlgorandAddress(success=False, error="Invalid account context")
 
-		except Account.DoesNotExist:
-			return UpdateAccountAlgorandAddress(success=False, error="Cuenta no encontrada")
-		except Exception as e:
-			logger.error(f"Error updating account Algorand address: {str(e)}")
-			return UpdateAccountAlgorandAddress(success=False, error="Error interno del servidor")
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
+
+            # Get the account using JWT context
+            if account_type == 'business' and business_id:
+                # For business accounts, find the account by business_id (ignore index to support employee JWT index)
+                account = Account.objects.filter(
+                    business_id=business_id,
+                    account_type='business'
+                ).order_by('account_index').first()
+                if not account:
+                    return UpdateAccountAlgorandAddress(success=False, error="Cuenta no encontrada")
+
+                # Only business owner can update business account's address
+                if not Account.objects.filter(user=user, business_id=business_id, account_type='business').exists():
+                    from .models_employee import BusinessEmployee
+                    employee_record = BusinessEmployee.objects.filter(
+                        user=user,
+                        business_id=business_id,
+                        role='owner',
+                        is_active=True,
+                        deleted_at__isnull=True
+                    ).first()
+                    if not employee_record:
+                        return UpdateAccountAlgorandAddress(
+                            success=False,
+                            error="Solo el dueño del negocio puede actualizar la dirección de Algorand. Los empleados no pueden cambiar esta configuración."
+                        )
+            else:
+                # Personal account
+                account = Account.objects.get(
+                    user=user,
+                    account_type=account_type,
+                    account_index=account_index
+                )
+
+            # Update the Algorand address
+            account.algorand_address = algorand_address
+            account.save()
+
+            # After setting address, check/fund and prepare asset opt-ins for CONFIO and cUSD
+            needs_opt_in = []
+            opt_in_transactions = []
+            try:
+                from blockchain.algorand_account_manager import AlgorandAccountManager
+                from algosdk.v2client import algod
+                algod_client = algod.AlgodClient(
+                    AlgorandAccountManager.ALGOD_TOKEN,
+                    AlgorandAccountManager.ALGOD_ADDRESS
+                )
+
+                # Query on-chain account info (may not exist yet)
+                try:
+                    account_info = algod_client.account_info(algorand_address)
+                    balance = account_info.get('amount', 0)
+                    current_assets = account_info.get('assets', [])
+                except Exception:
+                    balance = 0
+                    current_assets = []
+
+                current_asset_ids = [a.get('asset-id') for a in current_assets if isinstance(a, dict)]
+
+                # Only track CONFIO and cUSD assets (exclude app opt-ins here)
+                if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_asset_ids:
+                    needs_opt_in.append(AlgorandAccountManager.CONFIO_ASSET_ID)
+                if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_asset_ids:
+                    needs_opt_in.append(AlgorandAccountManager.CUSD_ASSET_ID)
+
+                # Fund to cover asset MBR only (100_000 microAlgos per asset)
+                try:
+                    current_min_balance = account_info.get('min-balance', 0) if 'account_info' in locals() else 0
+                except Exception:
+                    current_min_balance = 0
+                new_min_balance = current_min_balance + (len(needs_opt_in) * 100000)
+                if balance < new_min_balance and len(needs_opt_in) > 0:
+                    from algosdk import mnemonic
+                    from algosdk.transaction import PaymentTxn, wait_for_confirmation
+                    sponsor_private_key = mnemonic.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
+                    params = algod_client.suggested_params()
+                    fund_txn = PaymentTxn(
+                        sender=AlgorandAccountManager.SPONSOR_ADDRESS,
+                        sp=params,
+                        receiver=algorand_address,
+                        amt=new_min_balance - balance
+                    )
+                    signed_txn = fund_txn.sign(sponsor_private_key)
+                    tx_id = algod_client.send_transaction(signed_txn)
+                    wait_for_confirmation(algod_client, tx_id, 4)
+
+                # Prepare atomic opt-in transactions for needed assets
+                if len(needs_opt_in) > 0:
+                    try:
+                        from blockchain.mutations import GenerateOptInTransactionsMutation
+                        class MockInfo:
+                            class Context:
+                                def __init__(self, user):
+                                    self.user = user
+                            def __init__(self, user):
+                                self.context = self.Context(user)
+                        mock_info = MockInfo(user)
+                        result = GenerateOptInTransactionsMutation.mutate(
+                            None, mock_info, asset_ids=needs_opt_in
+                        )
+                        if getattr(result, 'success', False) and getattr(result, 'transactions', None):
+                            opt_in_transactions = result.transactions
+                    except Exception:
+                        pass
+            except Exception:
+                # Non-fatal; keep base mutation success
+                pass
+
+            return UpdateAccountAlgorandAddress(
+                success=True,
+                error=None,
+                account=account,
+                needs_opt_in=needs_opt_in,
+                opt_in_transactions=opt_in_transactions
+            )
+
+        except Account.DoesNotExist:
+            return UpdateAccountAlgorandAddress(success=False, error="Cuenta no encontrada")
+        except Exception as e:
+            logger.error(f"Error updating account Algorand address: {str(e)}")
+            return UpdateAccountAlgorandAddress(success=False, error="Error interno del servidor")
 
 class SwitchAccountToken(graphene.Mutation):
 	"""Generate a new JWT token with updated account context"""

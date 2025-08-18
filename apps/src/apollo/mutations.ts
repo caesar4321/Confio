@@ -4,7 +4,7 @@ import { gql } from '@apollo/client';
 export const WEB3AUTH_LOGIN = gql`
   mutation Web3AuthLogin(
     $firebaseIdToken: String!
-    $algorandAddress: String!
+    $algorandAddress: String
     $deviceFingerprint: JSONString
   ) {
     web3AuthLogin(
@@ -246,6 +246,86 @@ export const SUBMIT_INVITE_FOR_PHONE = gql`
 export const CLAIM_INVITE_FOR_PHONE = gql`
   mutation ClaimInviteForPhone($recipientAddress: String!, $invitationId: String, $phone: String, $phoneCountry: String) {
     claimInviteForPhone(recipientAddress: $recipientAddress, invitationId: $invitationId, phone: $phone, phoneCountry: $phoneCountry) {
+      success
+      error
+      txid
+    }
+  }
+`;
+
+// P2P Trade — prepare create (seller deposits escrow)
+export const PREPARE_P2P_CREATE_TRADE = gql`
+  mutation PrepareP2PCreateTrade($tradeId: String!, $amount: Float!, $assetType: String) {
+    prepareP2pCreateTrade(tradeId: $tradeId, amount: $amount, assetType: $assetType) {
+      success
+      error
+      userTransactions
+      sponsorTransactions { txn index }
+      groupId
+      tradeId
+    }
+  }
+`;
+
+export const SUBMIT_P2P_CREATE_TRADE = gql`
+  mutation SubmitP2PCreateTrade($signedUserTxn: String!, $sponsorTransactions: [JSONString!]!, $tradeId: String!) {
+    submitP2pCreateTrade(signedUserTxn: $signedUserTxn, sponsorTransactions: $sponsorTransactions, tradeId: $tradeId) {
+      success
+      error
+      txid
+    }
+  }
+`;
+
+export const ACCEPT_P2P_TRADE = gql`
+  mutation AcceptP2pTrade($tradeId: String!) {
+    acceptP2pTrade(tradeId: $tradeId) {
+      success
+      error
+      txid
+    }
+  }
+`;
+
+export const PREPARE_P2P_MARK_PAID = gql`
+  mutation PrepareP2pMarkPaid($tradeId: String!, $paymentRef: String!) {
+    prepareP2pMarkPaid(tradeId: $tradeId, paymentRef: $paymentRef) {
+      success
+      error
+      userTransactions
+      sponsorTransactions { txn index }
+      groupId
+      tradeId
+    }
+  }
+`;
+
+export const MARK_P2P_TRADE_PAID = gql`
+  mutation MarkP2pTradePaid($tradeId: String!, $signedUserTxn: String!, $sponsorTransactions: [JSONString!]!) {
+    markP2pTradePaid(tradeId: $tradeId, signedUserTxn: $signedUserTxn, sponsorTransactions: $sponsorTransactions) {
+      success
+      error
+      txid
+    }
+  }
+`;
+
+export const PREPARE_P2P_CONFIRM_RECEIVED = gql`
+  mutation PrepareP2pConfirmReceived($tradeId: String!) {
+    prepareP2pConfirmReceived(tradeId: $tradeId) {
+      success
+      error
+      userTransactions
+      sponsorTransactions { txn index }
+      groupId
+      tradeId
+    }
+  }
+`;
+
+export const CONFIRM_P2P_TRADE_RECEIVED = gql`
+  mutation ConfirmP2pTradeReceived($tradeId: String!, $signedUserTxn: String!, $sponsorTransactions: [JSONString!]!) {
+    confirmP2pTradeReceived(tradeId: $tradeId, signedUserTxn: $signedUserTxn, sponsorTransactions: $sponsorTransactions) {
       success
       error
       txid

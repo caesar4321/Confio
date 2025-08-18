@@ -17,6 +17,10 @@ import messagingService from './services/messagingService';
 import { pushNotificationService } from './services/pushNotificationService';
 import { navigationRef } from './navigation/RootNavigation';
 import { initializeNotifee } from './services/notifeeConfig';
+// Dev: attach derivation verifier helper
+if (__DEV__) {
+  import('./dev/derivationVerifier').catch(() => {});
+}
 
 // Native screens are enabled in bootstrap.ts for better performance
 

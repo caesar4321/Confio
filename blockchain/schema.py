@@ -29,6 +29,7 @@ from .invite_send_mutations import (
     InviteReceiptType,
     get_invite_receipt_for_phone,
 )
+from .p2p_trade_mutations import P2PTradeMutations, P2PTradePrepareMutations
 
 
 class Query(graphene.ObjectType):
@@ -80,6 +81,15 @@ class Mutation(graphene.ObjectType):
     prepare_invite_for_phone = PrepareInviteForPhone.Field()
     submit_invite_for_phone = SubmitInviteForPhone.Field()
     claim_invite_for_phone = ClaimInviteForPhoneField
+
+    # P2P Trade mutations
+    prepare_p2p_create_trade = P2PTradeMutations.prepare_p2p_create_trade
+    submit_p2p_create_trade = P2PTradeMutations.submit_p2p_create_trade
+    accept_p2p_trade = P2PTradeMutations.accept_p2p_trade
+    mark_p2p_trade_paid = P2PTradeMutations.mark_p2p_trade_paid
+    confirm_p2p_trade_received = P2PTradeMutations.confirm_p2p_trade_received
+    prepare_p2p_mark_paid = P2PTradePrepareMutations.prepare_p2p_mark_paid
+    prepare_p2p_confirm_received = P2PTradePrepareMutations.prepare_p2p_confirm_received
 
 
 __all__ = ['Query', 'Mutation']

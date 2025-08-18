@@ -880,4 +880,4 @@ def ensure_single_default_bank_account(sender, instance, **kwargs):
 # Achievement System Models have been moved to achievements/models.py
 
 # Import wallet models
-from .models_wallet import WalletPepper
+from .models_wallet import WalletPepper, WalletDerivationPepper

@@ -202,8 +202,8 @@ export class AuthService {
       }
 
       // 5) Generate Algorand wallet first
-      console.log('Generating Algorand wallet...');
-      perfLog('Starting Algorand wallet generation');
+      console.log('Store OAuth subject for later wallet derivation');
+      perfLog('Store OAuth subject for later wallet derivation');
       
       // Use OAuth subject directly from Google Sign-In response
       // The structure is userInfo.data.user.id based on the actual response
@@ -223,13 +223,7 @@ export class AuthService {
       await oauthStorage.storeOAuthSubject(googleSubject, 'google');
       console.log('Stored OAuth subject securely for future use');
       
-      // Create or restore Algorand wallet
-      const algorandService = (await import('./algorandService')).default;
-      const algorandAddress = await algorandService.createOrRestoreWallet(firebaseToken, googleSubject);
-      console.log('Algorand wallet created:', algorandAddress);
-      perfLog('Algorand wallet created');
-      
-      // 6) Authenticate with backend using Web3Auth
+      // 6) Authenticate with backend using Web3Auth (derive wallet after JWT is stored)
       console.log('Authenticating with backend...');
       perfLog('Starting backend authentication');
       const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
@@ -237,7 +231,7 @@ export class AuthService {
         mutation: WEB3AUTH_LOGIN,
         variables: { 
           firebaseIdToken: firebaseToken,
-          algorandAddress: algorandAddress,
+          algorandAddress: null,
           deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null
         }
       });
@@ -301,6 +295,36 @@ export class AuthService {
         throw new Error('No auth tokens received from server');
       }
 
+      // 7) Now derive Algorand wallet (pepper fetch requires JWT)
+      const algorandService = (await import('./algorandService')).default;
+      const algorandAddress = await algorandService.createOrRestoreWallet(firebaseToken, googleSubject);
+      console.log('Algorand wallet created:', algorandAddress);
+      perfLog('Algorand wallet created');
+
+      // Update server with derived address
+      try {
+        const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
+        const updRes = await apolloClient.mutate({ mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS, variables: { algorandAddress } });
+        console.log('Updated server with Algorand address');
+        // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
+        try {
+          const payload = updRes?.data?.updateAccountAlgorandAddress;
+          const needsOptIn = payload?.needsOptIn as number[] | undefined;
+          const txns = payload?.optInTransactions as string | any[] | undefined;
+          if (needsOptIn && needsOptIn.length > 0 && txns) {
+            const groups = typeof txns === 'string' ? JSON.parse(txns) : txns;
+            console.log('Processing server-prepared opt-in transactions...', { assets: needsOptIn });
+            await algorandService.processSponsoredOptIn(groups);
+            console.log('Server-prepared asset opt-ins submitted');
+          }
+        } catch (e) {
+          console.error('Opt-in post-update handling failed (non-fatal):', e);
+        }
+      } catch (e) {
+        console.error('Failed updating server with Algorand address:', e);
+      }
+
+
       // Now that tokens are stored, process any required opt-ins for PERSONAL accounts only
       // Business accounts handle opt-ins separately during payment flow
       const accountManager = AccountManager.getInstance();
@@ -326,7 +350,7 @@ export class AuthService {
         }
       }
 
-      // 7) Set default personal account context
+      // 8) Set default personal account context
       console.log('Setting default personal account context...');
       try {
         const accountManager = AccountManager.getInstance();
@@ -347,13 +371,13 @@ export class AuthService {
         // Don't throw here - account creation failure shouldn't break the sign-in flow
       }
 
-      // 8) Get user info for return
+      // 9) Get user info for return
       const [firstName, ...lastNameParts] = user.displayName?.split(' ') || [];
       const lastName = lastNameParts.join(' ');
       const isPhoneVerified = authData.user?.isPhoneVerified || false;
       console.log('Phone verification status from backend:', isPhoneVerified);
       
-      // 9) Return user info with Algorand address
+      // 10) Return user info with Algorand address
       const result = {
         userInfo: { 
           email: user.email, 
@@ -362,7 +386,7 @@ export class AuthService {
           photoURL: user.photoURL 
         },
         walletData: { 
-          algorandAddress: algorandAddress,
+          algorandAddress: null,
           isPhoneVerified
         }
       };
@@ -422,9 +446,9 @@ export class AuthService {
         console.error('Error collecting device fingerprint (Apple):', error);
       }
       
-      // Generate Algorand wallet first
+      // Defer Algorand wallet derivation until after backend JWT is obtained
       onProgress?.('Preparando tu cuenta segura...');
-      console.log('Generating Algorand wallet for Apple sign-in...');
+      console.log('Deferring Algorand wallet derivation until after backend auth...');
       
       // Use Apple user ID directly from the auth response
       let appleSub = appleAuthResponse.user;
@@ -439,19 +463,14 @@ export class AuthService {
       await oauthStorage.storeOAuthSubject(appleSub, 'apple');
       console.log('Stored Apple OAuth subject securely for future use');
       
-      // Create or restore Algorand wallet
-      const algorandService = (await import('./algorandService')).default;
-      const algorandAddress = await algorandService.createOrRestoreWallet(firebaseToken, appleSub);
-      console.log('Algorand wallet created (Apple):', algorandAddress);
-      
-      // Authenticate with backend using Web3Auth
+      // Authenticate with backend using Web3Auth (no address yet)
       console.log('Authenticating with backend (Apple)...');
       const { WEB3AUTH_LOGIN } = await import('../apollo/mutations');
       const { data: { web3AuthLogin: authData } } = await apolloClient.mutate({
         mutation: WEB3AUTH_LOGIN,
         variables: {
           firebaseIdToken: firebaseToken,
-          algorandAddress: algorandAddress,
+          algorandAddress: null,
           deviceFingerprint: deviceFingerprint ? JSON.stringify(deviceFingerprint) : null
         }
       });
@@ -481,6 +500,35 @@ export class AuthService {
           // Continue, but follow-up GraphQL may fail if tokens missing
         }
       }
+
+      // Now derive Algorand wallet (pepper fetch requires JWT)
+      const algorandService = (await import('./algorandService')).default;
+      const algorandAddress = await algorandService.createOrRestoreWallet(firebaseToken, appleSub);
+      console.log('Algorand wallet created (Apple):', algorandAddress);
+
+      // Update server with derived address
+      try {
+        const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
+        const updRes = await apolloClient.mutate({ mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS, variables: { algorandAddress } });
+        console.log('Updated server with Algorand address (Apple)');
+        // If server prepared opt-in transactions (CONFIO/cUSD), sign and submit now
+        try {
+          const payload = updRes?.data?.updateAccountAlgorandAddress;
+          const needsOptIn = payload?.needsOptIn as number[] | undefined;
+          const txns = payload?.optInTransactions as string | any[] | undefined;
+          if (needsOptIn && needsOptIn.length > 0 && txns) {
+            const groups = typeof txns === 'string' ? JSON.parse(txns) : txns;
+            console.log('Processing server-prepared opt-in transactions (Apple)...', { assets: needsOptIn });
+            await algorandService.processSponsoredOptIn(groups);
+            console.log('Server-prepared asset opt-ins submitted (Apple)');
+          }
+        } catch (e) {
+          console.error('Opt-in post-update handling (Apple) failed (non-fatal):', e);
+        }
+      } catch (e) {
+        console.error('Failed updating server with Algorand address (Apple):', e);
+      }
+
 
       // Tokens already stored above for Apple flow
 
@@ -548,7 +596,7 @@ export class AuthService {
           photoURL: userCredential.user.photoURL
         },
         walletData: {
-          algorandAddress: algorandAddress,
+          algorandAddress: null,
           isPhoneVerified // Use the actual value from backend
         },
         algorandAddress: algorandAddress // Also store at top level for compatibility
@@ -640,13 +688,27 @@ export class AuthService {
     try {
       console.log('🔐 Computing Algorand address for account context:', accountContext);
       
-      // Get the Firebase ID token
-      const currentUser = this.auth.currentUser;
-      if (!currentUser) {
-        console.error('No authenticated user');
+      // Ensure we have JWT tokens before attempting pepper-protected derivation
+      try {
+        const creds = await Keychain.getGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME
+        });
+        if (!creds || !creds.password) {
+          console.log('No JWT found in Keychain; skipping wallet derivation until after login');
+          return '';
+        }
+      } catch (_) {
+        console.log('Keychain not ready for JWT; skipping wallet derivation until after login');
         return '';
       }
       
+      // Get the Firebase ID token (should be present post-login)
+      const currentUser = this.auth.currentUser;
+      if (!currentUser) {
+        console.error('No authenticated Firebase user; skipping derivation');
+        return '';
+      }
       const firebaseIdToken = await currentUser.getIdToken();
       
       // Get OAuth subject from keychain
@@ -880,11 +942,25 @@ export class AuthService {
         }
 
 
-        // Clear auth tokens
-        await Keychain.resetGenericPassword({
-          service: AUTH_KEYCHAIN_SERVICE
-        });
-        console.log('Cleared auth tokens from Keychain');
+        // Clear auth tokens (cover both API variants: with and without username)
+        // Pass username explicitly to ensure the exact entry is removed
+        try {
+          await Keychain.resetGenericPassword({
+            service: AUTH_KEYCHAIN_SERVICE,
+            username: AUTH_KEYCHAIN_USERNAME
+          });
+          console.log('Cleared auth tokens with service+username');
+        } catch (e) {
+          console.log('Reset with service+username not supported or failed, will try service-only:', e);
+        }
+        try {
+          await Keychain.resetGenericPassword({
+            service: AUTH_KEYCHAIN_SERVICE
+          });
+          console.log('Cleared auth tokens with service-only');
+        } catch (e) {
+          console.log('Reset with service-only not supported or failed:', e);
+        }
 
         // Verify tokens are cleared
         const postReset = await Keychain.getGenericPassword({
@@ -900,9 +976,37 @@ export class AuthService {
             passwordLength: postReset.password.length
           });
           if (postReset.password) {
-            throw new Error('Failed to clear tokens from Keychain');
+            console.warn('Auth tokens still present after reset, attempting explicit overwrite');
+            try {
+              // Overwrite with empty payload to ensure credential entry is invalidated
+              await Keychain.setGenericPassword(
+                AUTH_KEYCHAIN_USERNAME,
+                '',
+                {
+                  service: AUTH_KEYCHAIN_SERVICE,
+                  username: AUTH_KEYCHAIN_USERNAME,
+                  accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+                }
+              );
+              await Keychain.resetGenericPassword({
+                service: AUTH_KEYCHAIN_SERVICE,
+                username: AUTH_KEYCHAIN_USERNAME
+              });
+              console.log('Successfully overwrote and cleared lingering tokens');
+            } catch (overwriteError) {
+              console.error('Failed to overwrite lingering tokens:', overwriteError);
+            }
           }
         }
+
+        // Final sanity check: also try service-only read
+        try {
+          const postResetServiceOnly = await Keychain.getGenericPassword({ service: AUTH_KEYCHAIN_SERVICE } as any);
+          if (postResetServiceOnly && (postResetServiceOnly as any).password) {
+            console.warn('Service-only credential still present; forcing service-only reset');
+            await Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE } as any);
+          }
+        } catch (_) { /* ignore */ }
       } catch (keychainError) {
         console.error('Error clearing Keychain:', keychainError);
         // Continue with sign out even if Keychain clearing fails
@@ -1337,6 +1441,22 @@ export class AuthService {
           );
           
           console.log('AuthService - Updated JWT token stored');
+
+          // Ensure businessId is present in context after switch (owner path may omit it in input)
+          try {
+            const payload = data.switchAccountToken.payload || {};
+            const businessIdFromToken: any = (payload.business_id ?? payload.businessId);
+            if (accountContext.type === 'business' && !accountContext.businessId && businessIdFromToken) {
+              accountContext.businessId = String(businessIdFromToken);
+              console.log('AuthService - Enriched account context with businessId from token payload:', {
+                businessId: accountContext.businessId
+              });
+              // Persist updated active context for consistent cache keys and salt generation
+              await accountManager.setActiveAccountContext(accountContext);
+            }
+          } catch (e) {
+            console.warn('AuthService - Could not enrich account context with businessId from token payload:', e);
+          }
         }
       } catch (error) {
         console.error('Error getting new JWT token for account switch:', error);
@@ -1368,21 +1488,82 @@ export class AuthService {
             accountId: accountId,
             address: storedAddress
           });
-          
-          // Update the backend with the stored address if needed
+
+          // One-time migration: if no encrypted seed exists for this account scope,
+          // derive pepper-based wallet and update stored address if needed.
+          let finalAddress = storedAddress;
+          try {
+            // Build seed cache key consistent with SecureDeterministicWallet
+            const accountIdForSeed = accountContext.businessId
+              ? `${accountContext.type}_${accountContext.businessId}_${accountContext.index}`
+              : `${accountContext.type}_${accountContext.index}`;
+            const seedUsername = accountIdForSeed.replace(/[^a-zA-Z0-9_]/g, '_');
+            const seedServer = 'wallet.confio.app';
+
+            // Check if seed cache exists
+            const seedCreds = await Keychain.getInternetCredentials(seedServer as any);
+            const hasSeed = !!(seedCreds && (seedCreds as any).password && (seedCreds as any).username === seedUsername);
+            if (!hasSeed) {
+              console.log('AuthService - No seed cache found for scope, deriving pepper-based wallet to migrate address');
+
+              // Gather OAuth inputs for derivation
+              const { oauthStorage } = await import('./oauthStorageService');
+              const oauthData = await oauthStorage.getOAuthSubject();
+              if (oauthData && oauthData.subject) {
+                const oauthSubject = oauthData.subject;
+                const provider = oauthData.provider;
+                const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+                const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+                const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+                const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+
+                const { SecureDeterministicWalletService } = await import('./secureDeterministicWallet');
+                const secureDeterministicWallet = SecureDeterministicWalletService.getInstance();
+                const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+                  iss,
+                  oauthSubject,
+                  aud,
+                  provider,
+                  accountContext.type,
+                  accountContext.index,
+                  accountContext.businessId
+                );
+
+                if (wallet && wallet.address) {
+                  if (wallet.address !== storedAddress) {
+                    console.log('AuthService - Migrated to pepper-based address (updating cache and backend):', {
+                      previous: storedAddress,
+                      next: wallet.address
+                    });
+                    finalAddress = wallet.address;
+                    await this.storeAlgorandAddress(finalAddress, accountContext);
+                  } else {
+                    console.log('AuthService - Pepper-based derivation matches stored address; seed cached.');
+                    finalAddress = storedAddress;
+                  }
+                }
+              } else {
+                console.warn('AuthService - Missing OAuth subject; skipping migration to pepper-based address');
+              }
+            }
+          } catch (migrationError) {
+            console.warn('AuthService - Seed migration check/derivation failed (non-fatal):', migrationError);
+          }
+
+          // Update the backend with the final address (stored or migrated)
           if (apolloClient) {
             try {
               const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
               await apolloClient.mutate({
                 mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS,
-                variables: { algorandAddress: storedAddress }
+                variables: { algorandAddress: finalAddress }
               });
-              console.log('AuthService - Updated backend with stored Algorand address');
+              console.log('AuthService - Updated backend with stored/migrated Algorand address');
             } catch (updateError) {
               console.error('AuthService - Error updating backend with Algorand address:', updateError);
             }
           }
-          return; // Address already exists, no need to generate
+          return; // Address already exists (possibly migrated), no need to generate further
         }
         
         // Get OAuth subject from secure storage (only needed if no stored address)
@@ -1428,7 +1609,7 @@ export class AuthService {
           accountContext.index,   // Use the actual account index
           accountContext.businessId // Pass the businessId for business accounts
         );
-          
+
           console.log('🎯 GENERATED NEW Algorand address for account:', {
             accountId: accountId,
             accountType: accountContext.type,

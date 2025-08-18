@@ -593,6 +593,31 @@ class MessagingService {
     console.log('[MessagingService] Extracted transaction data:', transactionData);
     console.log('[MessagingService] Navigation params:', { action_url, notification_type, related_type, related_id });
 
+    // Auto-initiate P2P escrow for SELLER on trade start (server-sponsored)
+    try {
+      if (notification_type === 'P2P_TRADE_STARTED' && transactionData.trade_id) {
+        const tradeType = (transactionData.trade_type || '').toLowerCase();
+        const tokenType = String(transactionData.token_type || transactionData.token || 'CUSD');
+        const amountNum = parseFloat(String(transactionData.amount || transactionData.crypto_amount || '0'));
+        // Only the seller should deposit escrow
+        if (tradeType === 'sell' && amountNum > 0) {
+          const { p2pSponsoredService } = await import('./p2pSponsoredService');
+          // Fire-and-forget; UI will still navigate as normal
+          p2pSponsoredService.createEscrowIfSeller(String(transactionData.trade_id), amountNum, tokenType)
+            .then(res => {
+              if (!res.success) {
+                console.warn('[MessagingService] P2P escrow auto-create failed:', res.error);
+              } else {
+                console.log('[MessagingService] P2P escrow auto-created txid:', res.txid);
+              }
+            })
+            .catch(e => console.warn('[MessagingService] P2P escrow auto-create error:', e));
+        }
+      }
+    } catch (e) {
+      console.warn('[MessagingService] P2P escrow auto-create guard error:', e);
+    }
+
     // Ensure navigation is ready before attempting to navigate
     const attemptNavigation = () => {
       if (!navigationRef.current || !navigationRef.current.isReady()) {

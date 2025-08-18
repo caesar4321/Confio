@@ -19,7 +19,7 @@ import {
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { formatLocalDate, formatLocalTime } from '../utils/dateUtils';
-import { useMutation, useQuery } from '@apollo/client';
+import { useMutation, useQuery, useApolloClient } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
@@ -67,8 +67,9 @@ export const TradeChatScreen: React.FC = () => {
   const route = useRoute<TradeChatRouteProp>();
   const { offer, crypto, amount, tradeType, tradeId, selectedPaymentMethodId, initialStep, tradeStatus } = route.params;
   const { userProfile } = useAuth();
-  const { activeAccount, accounts, getActiveAccountContext } = useAccount();
+  const { activeAccount, accounts, getActiveAccountContext, switchAccount } = useAccount();
   const { formatNumber, formatCurrency } = useNumberFormat();
+  const apollo = useApolloClient();
   
   // Get the current active account context
   const [currentAccountContext, setCurrentAccountContext] = useState<any>(null);
@@ -109,6 +110,51 @@ export const TradeChatScreen: React.FC = () => {
     };
     loadAccountContext();
   }, [tradeDetailsData, activeAccount, userProfile]);
+
+  // Ensure the active account context matches the trade role (personal vs business)
+  const [contextEnsured, setContextEnsured] = useState(false);
+  useEffect(() => {
+    const ensureContext = async () => {
+      try {
+        const trade = tradeDetailsData?.p2pTrade;
+        if (!trade || !activeAccount || !accounts) return;
+
+        // Determine which of my accounts is the participant in this trade
+        const buyerBizId = trade.buyerBusiness?.id ? String(trade.buyerBusiness.id) : null;
+        const sellerBizId = trade.sellerBusiness?.id ? String(trade.sellerBusiness.id) : null;
+
+        const hasBuyerBusiness = buyerBizId && accounts.some(a => a.type === 'business' && String(a.business?.id) === buyerBizId);
+        const hasSellerBusiness = sellerBizId && accounts.some(a => a.type === 'business' && String(a.business?.id) === sellerBizId);
+
+        let desiredAccountId: string | null = null;
+        if (hasBuyerBusiness) {
+          desiredAccountId = `business_${buyerBizId}_0`;
+        } else if (hasSellerBusiness) {
+          desiredAccountId = `business_${sellerBizId}_0`;
+        } else if (trade.buyerUser || trade.sellerUser) {
+          // Personal user side
+          desiredAccountId = 'personal_0';
+        }
+
+        if (!desiredAccountId) {
+          console.log('[TradeChatScreen] No matching account found yet; waiting for profile/accounts.');
+          return;
+        }
+
+        if (activeAccount.id !== desiredAccountId) {
+          console.log('[TradeChatScreen] Switching account context to match trade participant:', { desiredAccountId, current: activeAccount.id });
+          await switchAccount(desiredAccountId);
+        } else {
+          console.log('[TradeChatScreen] Active account already matches trade participant:', { active: activeAccount.id });
+        }
+
+        setContextEnsured(true);
+      } catch (e) {
+        console.warn('[TradeChatScreen] Failed to ensure account context:', e);
+      }
+    };
+    ensureContext();
+  }, [tradeDetailsData?.p2pTrade, activeAccount?.id, accounts?.length]);
   
   // Currency formatting
   const { formatAmount } = useCurrency();
@@ -550,9 +596,9 @@ export const TradeChatScreen: React.FC = () => {
       try {
         console.log('🔄 Connecting to WebSocket for real-time updates...');
         
-        // Get JWT token from Keychain
+        // Get JWT token from Keychain (use Apollo client constants to avoid circular export)
         const Keychain = require('react-native-keychain');
-        const { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } = require('../services/authService');
+        const { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } = require('../apollo/client');
         
         const credentials = await Keychain.getGenericPassword({
           service: AUTH_KEYCHAIN_SERVICE,
@@ -925,11 +971,7 @@ export const TradeChatScreen: React.FC = () => {
             }, 2000); // Give time to see the completion message
           }
           
-          // Always refetch to ensure all data is synced
-          if (refetchTradeDetails) {
-            console.log('🔄 Refetching trade details after WebSocket update');
-            refetchTradeDetails();
-          }
+          // Removed extra refetch: WebSocket already delivered authoritative update
           
           // Force a re-render to update button visibility immediately
           // This ensures the UI updates even if the user initiated the change
@@ -1011,6 +1053,46 @@ export const TradeChatScreen: React.FC = () => {
     }
   }, [tradeId]);
 
+  // As seller, ensure escrow is created on entering chat (sponsored)
+  useEffect(() => {
+    const autoEscrow = async () => {
+      try {
+        const trade = tradeDetailsData?.p2pTrade;
+        // Determine seller role directly from trade data to avoid relying on userProfile timing
+        const sellerBusinessId = trade?.sellerBusiness?.id ? String(trade.sellerBusiness.id) : null;
+        const isSeller = (!!sellerBusinessId && activeAccount?.type === 'business' && String(activeAccount?.business?.id) === sellerBusinessId)
+          || (!sellerBusinessId && computedTradeType === 'sell');
+        if (!contextEnsured || !isSeller || !tradeId || !amount || !crypto) return;
+        const amt = parseFloat(String(amount));
+        if (isNaN(amt) || amt <= 0) return;
+        const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
+        // Fire-and-forget to avoid blocking UI; normal auth context must already match
+        p2pSponsoredService.createEscrowIfSeller(String(tradeId), amt, String(crypto)).catch(() => {});
+      } catch {}
+    };
+    autoEscrow();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradeId, computedTradeType, tradeDetailsData?.p2pTrade, activeAccount, contextEnsured]);
+
+  // As buyer, ensure accept on-chain to open 15-minute window (sponsored)
+  useEffect(() => {
+    const autoAccept = async () => {
+      try {
+        const trade = tradeDetailsData?.p2pTrade;
+        const buyerBusinessId = trade?.buyerBusiness?.id ? String(trade.buyerBusiness.id) : null;
+        const isBuyer = (
+          (!!buyerBusinessId && activeAccount?.type === 'business' && String(activeAccount?.business?.id) === buyerBusinessId) ||
+          (!buyerBusinessId && computedTradeType === 'buy')
+        );
+        if (!contextEnsured || !isBuyer || !tradeId) return;
+        const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
+        await p2pSponsoredService.ensureAccepted(String(tradeId));
+      } catch {}
+    };
+    autoAccept();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradeId, computedTradeType, tradeDetailsData?.p2pTrade, activeAccount, contextEnsured]);
+
   // Send typing indicator via WebSocket
   const sendTypingIndicator = (isTyping: boolean) => {
     if (websocket.current && websocket.current.readyState === WebSocket.OPEN) {
@@ -1028,10 +1110,17 @@ export const TradeChatScreen: React.FC = () => {
     
     const trade = tradeDetailsData.p2pTrade;
     const iAmBuyer = computedTradeType === 'buy';
+    // Guard: if buyerBusiness and sellerBusiness are identical (bad server state),
+    // force counterparty to the opposite user/business side to avoid showing self.
+    const sameBusiness = trade.buyerBusiness && trade.sellerBusiness && 
+      String(trade.buyerBusiness.id) === String(trade.sellerBusiness.id);
+    if (sameBusiness) {
+      console.warn('[TradeChat] buyerBusiness == sellerBusiness; applying UI guard for counterparty name');
+    }
     
     if (iAmBuyer) {
       // I'm the buyer, show seller's name
-      if (trade.sellerBusiness) {
+      if (trade.sellerBusiness && !sameBusiness) {
         return trade.sellerBusiness.name;
       } else if (trade.sellerUser) {
         const name = `${trade.sellerUser.firstName || ''} ${trade.sellerUser.lastName || ''}`.trim();
@@ -1041,7 +1130,7 @@ export const TradeChatScreen: React.FC = () => {
       }
     } else {
       // I'm the seller, show buyer's name
-      if (trade.buyerBusiness) {
+      if (trade.buyerBusiness && !sameBusiness) {
         return trade.buyerBusiness.name;
       } else if (trade.buyerUser) {
         const name = `${trade.buyerUser.firstName || ''} ${trade.buyerUser.lastName || ''}`.trim();
@@ -1067,7 +1156,12 @@ export const TradeChatScreen: React.FC = () => {
     
     const trade = tradeDetailsData.p2pTrade;
     const iAmBuyer = computedTradeType === 'buy';
-    const stats = iAmBuyer ? trade.sellerStats : trade.buyerStats;
+    // Apply same-business guard: if both businesses are identical, invert stats source to avoid "self" stats
+    const sameBusiness = trade.buyerBusiness && trade.sellerBusiness && 
+      String(trade.buyerBusiness.id) === String(trade.sellerBusiness.id);
+    const stats = iAmBuyer
+      ? (sameBusiness ? trade.buyerStats : trade.sellerStats)
+      : (sameBusiness ? trade.sellerStats : trade.buyerStats);
     
     return {
       isVerified: stats?.isVerified || false,
@@ -1400,19 +1494,7 @@ export const TradeChatScreen: React.FC = () => {
       setMessages(prev => [systemMessage, ...prev]); // Add at beginning (descending order)
       
       // Refetch trade details to get updated status (with a small delay to ensure backend has processed)
-      if (refetchTradeDetails) {
-        console.log('🔄 Refetching trade details after sharing payment info...');
-        // Add a small delay to ensure backend has processed the update
-        setTimeout(async () => {
-          const refetchResult = await refetchTradeDetails();
-          console.log('📊 Refetch result:', {
-            newStatus: refetchResult?.data?.p2pTrade?.status,
-            previousStatus: tradeDetailsData?.p2pTrade?.status,
-            currentStep: currentTradeStep,
-            tradeType: tradeType
-          });
-        }, 1000); // 1 second delay
-      }
+      // Removed extra refetch: mutation + WebSocket should keep state in sync
       
       // Debug the current state after sharing payment details
       console.log('✅ Payment details shared successfully:', {
@@ -1432,6 +1514,18 @@ export const TradeChatScreen: React.FC = () => {
     setShowConfirmPaidModal(false);
     
     try {
+      // Ensure accept on-chain and mark as paid via sponsored AppCall
+      try {
+        const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
+        await p2pSponsoredService.ensureAccepted(String(tradeId));
+        const chain = await p2pSponsoredService.markAsPaid(String(tradeId), '');
+        if (!chain.success) {
+          Alert.alert('Error', chain.error || 'Error on-chain al marcar como pagado');
+          return;
+        }
+      } catch (e) {
+        console.warn('[P2P] markAsPaid on-chain error:', e);
+      }
       // Confirm payment sent using the new mutation
       const { data } = await confirmTradeStep({
         variables: {
@@ -1459,9 +1553,7 @@ export const TradeChatScreen: React.FC = () => {
         setMessages(prev => [systemMessage, ...prev]); // Add at beginning (descending order)
         
         // Refetch trade details to get updated status and escrow info
-        if (refetchTradeDetails) {
-          refetchTradeDetails();
-        }
+        // Removed extra refetch: mutation cache update + WebSocket keep state in sync
       } else {
         const errorMessage = data?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al actualizar el estado';
         Alert.alert('Error', errorMessage);
@@ -1492,6 +1584,18 @@ export const TradeChatScreen: React.FC = () => {
   
   const confirmReleaseFunds = async () => {
     try {
+      // First confirm payment received on-chain (sponsored AppCall)
+      try {
+        const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
+        const chain = await p2pSponsoredService.confirmReceived(String(tradeId));
+        if (!chain.success) {
+          Alert.alert('Error', chain.error || 'Error on-chain al liberar fondos');
+          return;
+        }
+      } catch (e) {
+        console.warn('[P2P] confirmReceived on-chain error:', e);
+      }
+      // Then reflect in app status
       // First confirm payment received
       const { data: confirmData } = await confirmTradeStep({
         variables: {
@@ -1629,9 +1733,7 @@ export const TradeChatScreen: React.FC = () => {
         );
         
         // Refetch trade details to get updated status
-        if (refetchTradeDetails) {
-          refetchTradeDetails();
-        }
+        // Removed extra refetch: mutation cache update + WebSocket keep state in sync
       } else {
         const errorMessage = data?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al liberar los fondos';
         Alert.alert('Error', errorMessage);

@@ -24,14 +24,16 @@ sequenceDiagram
     rect rgb(240, 255, 240)
         Note over Client,Server: Wallet Generation with Server Pepper
         Client->>Client: 2. Extract OAuth claims (iss, sub, aud)
-        Client->>Server: 3. GraphQL: getWalletPepper query
-        Note right of Client: POST /graphql<br/>{<br/>  scope: "oauth_subject_123"<br/>}
-        Server->>Server: Generate/retrieve pepper for scope
-        Server->>Client: Return pepper (valid for 30 days)
+        Client->>Server: 3a. GraphQL: getDerivationPepper
+        Server->>Server: Generate/retrieve NON-ROTATING derivation pepper
+        Server->>Client: Return derivation pepper
         Client->>Client: 4. Generate salt = SHA256(iss | sub | aud | account_type | business_id | account_index)
-        Client->>Client: 5. Combine seed = salt ⊕ pepper (XOR operation)
+        Client->>Client: 5. Derive Ed25519 seed via HKDF-SHA256 using derivation pepper as extract salt
         Client->>Client: 6. Generate Ed25519 keypair from seed
         Client->>Client: 7. Derive Algorand address from public key
+        Client->>Server: 3b. GraphQL: getKekPepper (for cache encryption)
+        Server->>Server: Generate/retrieve ROTATING KEK pepper (with grace)
+        Server->>Client: Return KEK pepper + version
         Client->>Keychain: 8. Store private key securely (never sent to server)
     end
 
@@ -173,7 +175,7 @@ These operations happen entirely on the device:
 
 1. **OAuth claim extraction** - Parse JWT from Firebase
 2. **Salt generation** - SHA256(issuer | subject | audience | account_type | business_id | account_index)
-3. **Seed combination** - seed = salt ⊕ pepper (XOR operation)
+3. **Seed derivation** - HKDF-SHA256 with extract salt = H(derivationPepper)
 4. **Keypair generation** - Ed25519 from seed
 5. **Address derivation** - Algorand address from public key
 6. **Private key storage** - Secure storage in device Keychain
@@ -197,25 +199,24 @@ Where (extracted from Firebase ID Token claims):
 - `business_id`: Business ID (only for business accounts, empty for personal)
 - `account_index`: Account index (0, 1, 2, etc.)
 
-### 2. Pepper (Server-Provided)
-- Unique 32-byte random value per OAuth subject
-- Retrieved via `getWalletPepper` query
-- Valid for 30 days with grace period
+### 2. Peppers (Server-Provided)
+- Derivation Pepper: 32-byte random per account, NON-ROTATING. API: `getDerivationPepper`
+- KEK Pepper: 32-byte random per account, ROTATING with grace. API: `getKekPepper`
 
 ### 3. Final Seed Calculation
 ```
-seed = salt ⊕ pepper  // XOR operation
+seed = HKDF-SHA256(IKM=`confio-wallet-v1|${salt}`,
+                   salt=`confio/extract/v1|${derivationPepper}`,
+                   info=`confio/algo/v1|...`)
 keypair = Ed25519.fromSeed(seed)
 algorandAddress = encodeAddress(keypair.publicKey)
 ```
 
-## Server Pepper System
+## Server Pepper Systems
 
-The server pepper adds an additional layer of security:
-- **Scope-based**: Each OAuth subject gets a unique pepper
-- **Time-limited**: Peppers expire after 30 days (with grace period)
-- **Server-controlled**: Prevents wallet generation without server involvement
-- **Deterministic**: Same scope always gets same pepper (until rotation)
+Two peppers with separate purposes and policies:
+- **Derivation**: Non-rotating per account. Used in salt to define the address. Never rotates.
+- **KEK**: Rotating per account. Used for encrypting cached seeds. Grace period supports re-wrapping.
 
 ## Key Differences from zkLogin
 
@@ -242,11 +243,11 @@ The server pepper adds an additional layer of security:
 ## Multi-Account Support
 
 When switching accounts, the client:
-1. Uses cached pepper (if still valid) or fetches new one
+1. Uses cached pepper (or fetches if missing)
 2. Regenerates salt with new account context (account_type, business_id, account_index)
-3. Combines seed = salt ⊕ pepper
+3. Derives seed via HKDF-SHA256 using the client salt
 4. Derives new keypair and Algorand address
-5. No additional server requests if pepper is cached and valid
+5. No additional server requests if pepper is cached
 
 ## Subsequent Sessions
 
