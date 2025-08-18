@@ -6,7 +6,7 @@ from django.utils import timezone
 from django.contrib import messages
 from django.db import transaction
 import secrets
-from .models import User, Account, Business, Country, Bank, BankInfo, WalletPepper
+from .models import User, Account, Business, Country, Bank, BankInfo, WalletPepper, WalletDerivationPepper
 from .models_unified import UnifiedTransactionTable
 from .models_employee import BusinessEmployee, EmployeeInvitation
 
@@ -987,3 +987,119 @@ class WalletPepperAdmin(admin.ModelAdmin):
         if not request.user.is_superuser:
             return list(set([field.name for field in self.model._meta.fields]))
         return self.readonly_fields
+
+
+@admin.register(WalletDerivationPepper)
+class WalletDerivationPepperAdmin(admin.ModelAdmin):
+    """
+    Admin for non-rotating derivation pepper (fixed pepper used for address derivation).
+    Mirrors WalletPepperAdmin presentation but without rotation/grace controls.
+    """
+
+    list_display = ('account_key_display', 'account_type', 'created_at', 'updated_at')
+    list_filter = ('created_at',)
+    search_fields = ('account_key',)
+    readonly_fields = ('account_key', 'pepper_display', 'created_at', 'updated_at', 'user_link')
+    ordering = ('-updated_at',)
+
+    fieldsets = (
+        ('Account Information', {
+            'fields': ('account_key', 'user_link'),
+            'description': 'Fixed derivation pepper per account (non-rotating)'
+        }),
+        ('Derivation Pepper', {
+            'fields': ('pepper_display',),
+            'description': 'Hidden for security; changing this would change addresses'
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    # Reuse helpers from WalletPepperAdmin for consistent UI
+    def account_type(self, obj):
+        if obj.account_key and obj.account_key.startswith('user_'):
+            parts = obj.account_key.split('_')
+            if len(parts) >= 3:
+                account_type = parts[2]
+                if account_type == 'business':
+                    return format_html('<span style="color: #1976d2; font-weight: bold;">👔 Business</span>')
+                elif account_type == 'personal':
+                    return format_html('<span style="color: #7b1fa2; font-weight: bold;">👤 Personal</span>')
+        return format_html('<span style="color: #666;">📦 Legacy</span>')
+    account_type.short_description = "Type"
+    account_type.admin_order_field = 'account_key'
+
+    def account_key_display(self, obj):
+        if obj.account_key:
+            if obj.account_key.startswith('user_'):
+                parts = obj.account_key.split('_')
+                if len(parts) >= 3:
+                    user_id = parts[1]
+                    account_type = parts[2]
+                    if account_type == 'business' and len(parts) >= 4:
+                        business_id = parts[3]
+                        account_index = parts[4] if len(parts) > 4 else '0'
+                        return format_html(
+                            '<span style="font-family: monospace; background: #e3f2fd; padding: 2px 4px; border-radius: 3px;">'
+                            '👔 Business #{} (User #{}, Index {})</span>',
+                            business_id, user_id, account_index
+                        )
+                    else:
+                        account_index = parts[3] if len(parts) > 3 else '0'
+                        return format_html(
+                            '<span style="font-family: monospace; background: #f3e5f5; padding: 2px 4px; border-radius: 3px;">'
+                            '👤 Personal (User #{}, Index {})</span>',
+                            user_id, account_index
+                        )
+            if len(obj.account_key) > 20:
+                return format_html(
+                    '<span style="font-family: monospace; color: #666;">📦 Legacy: {}...{}</span>',
+                    obj.account_key[:6], obj.account_key[-4:]
+                )
+            return obj.account_key
+        return '-'
+    account_key_display.short_description = "Account"
+
+    def pepper_display(self, obj):
+        if obj.pepper:
+            return format_html(
+                '<span style="font-family: monospace; background: #f0f0f0; padding: 2px 4px; border-radius: 3px;">'
+                '●●●●●●●● (Hidden for security)</span>'
+            )
+        return '-'
+    pepper_display.short_description = "Pepper"
+
+    def user_link(self, obj):
+        try:
+            if obj.account_key and obj.account_key.startswith('user_'):
+                parts = obj.account_key.split('_')
+                if len(parts) >= 2:
+                    user_id = parts[1]
+                    user = User.objects.get(id=user_id)
+                    links = []
+                    user_url = reverse('admin:users_user_change', args=[user.id])
+                    links.append(format_html('<a href="{}">👤 {}</a>', user_url, user.email or user.username))
+                    if len(parts) >= 3:
+                        account_type = parts[2]
+                        if account_type == 'business' and len(parts) >= 4:
+                            business_id = parts[3]
+                            try:
+                                business = Business.objects.get(id=business_id)
+                                business_url = reverse('admin:users_business_change', args=[business.id])
+                                links.append(format_html('<a href="{}">🏢 {}</a>', business_url, business.name))
+                            except Business.DoesNotExist:
+                                links.append(format_html('<span style="color: #666;">🏢 Business #{}</span>', business_id))
+                    return format_html(' | '.join(links))
+            else:
+                user = User.objects.get(firebase_uid=obj.account_key)
+                url = reverse('admin:users_user_change', args=[user.id])
+                return format_html('<a href="{}">📦 Legacy User: {}</a>', url, user.email or user.username)
+        except User.DoesNotExist:
+            return format_html('<span style="color: #dc3545;">User not found</span>')
+    user_link.short_description = "Associated User & Account"
+
+
+# Ensure WalletPepper Admin is registered
+admin.site.register(WalletPepper, WalletPepperAdmin)

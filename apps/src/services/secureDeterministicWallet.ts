@@ -2,8 +2,8 @@
  * Secure Deterministic Wallet Service
  * 
  * Implements a truly non-custodial approach where:
- * 1. Client generates deterministic salt from OAuth claims
- * 2. Server optionally provides additional entropy (pepper)
+ * 1. Client generates deterministic salt from OAuth claims + server pepper
+ * 2. Server provides additional entropy (pepper) used inside the salt
  * 3. Neither server nor OAuth provider alone can compute the private key
  * 4. User can recover wallet from any device with OAuth login + recovery secret
  * 
@@ -23,10 +23,20 @@ import { randomBytes } from '@noble/hashes/utils';
 import { Buffer } from 'buffer'; // RN polyfill for base64
 import { CONFIO_DERIVATION_SPEC } from './derivationSpec';
 
-// GraphQL mutations for server pepper (per-account, derived from JWT context)
-const GET_SERVER_PEPPER = gql`
-  mutation GetServerPepper($requestVersion: Int) {
-    getServerPepper(requestVersion: $requestVersion) {
+// GraphQL mutations for peppers (per-account, derived from JWT context)
+const GET_DERIVATION_PEPPER = gql`
+  mutation GetDerivationPepper {
+    getDerivationPepper {
+      success
+      pepper
+      error
+    }
+  }
+`;
+
+const GET_KEK_PEPPER = gql`
+  mutation GetKekPepper($requestVersion: Int) {
+    getKekPepper(requestVersion: $requestVersion) {
       success
       pepper
       version
@@ -70,8 +80,8 @@ function makeCacheKey(accountType: string, accountIndex: number, businessId?: st
 }
 
 export interface DeriveWalletOptions {
-  clientSalt: string;           // Client-generated deterministic salt (contains hashed OAuth claims)
-  serverPepper?: string;        // Optional server entropy for additional security
+  clientSalt: string;           // Client-generated deterministic salt (hash of OAuth claims; no pepper)
+  derivationPepper: string;     // Non-rotating derivation pepper (HKDF extract salt)
   provider: 'google' | 'apple';
   accountType: 'personal' | 'business';
   accountIndex: number;         // 0, 1, 2...
@@ -94,7 +104,7 @@ function canonicalize(s: string): string {
 
 /**
  * Derive Key Encryption Key (KEK) for securing cached seeds
- * Uses OAuth claims + optional server pepper
+ * Uses OAuth claims + server pepper
  */
 function deriveKEK(
   iss: string,
@@ -219,12 +229,11 @@ export function generateClientSalt(
  * Security properties:
  * - Client controls the salt (non-custodial)
  * - Uses HKDF-SHA256 for proper key derivation
- * - Optional server pepper adds entropy but isn't required
  * - Domain separation prevents cross-chain attacks
  * - Versioned for future migration
  */
 export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): DerivedWallet {
-  const { clientSalt, serverPepper, provider, accountType, accountIndex, businessId } = opts;
+  const { clientSalt, derivationPepper, provider, accountType, accountIndex, businessId } = opts;
   
   // The clientSalt already contains the hash of the OAuth claims
   // It was generated using generateClientSalt with the real OAuth issuer, subject, and audience
@@ -237,11 +246,9 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
   const ikmString = `${CONFIO_DERIVATION_SPEC.root}|${clientSalt}`;
   const ikm = sha256(utf8ToBytes(ikmString));
 
-  // CRITICAL: Extract salt uses ONLY client-side stable values
-  // Do NOT include serverPepper here - it would change the wallet address!
-  // Pepper is used ONLY for KEK derivation (encryption key), not seed derivation
+  // Use derivation pepper as HKDF extract salt (domain-separated)
   const extractSalt = sha256(utf8ToBytes(
-    `${CONFIO_DERIVATION_SPEC.extract}|${clientSalt}`
+    `${CONFIO_DERIVATION_SPEC.extract}|${derivationPepper}`
   ));
 
   // Domain separation and versioning
@@ -287,56 +294,65 @@ export class SecureDeterministicWalletService {
     return SecureDeterministicWalletService.instance;
   }
 
-  /**
-   * Get server pepper for additional entropy (per-account, not per-user)
-   * This is NOT required for wallet derivation (non-custodial)
-   * Server will derive the account context from JWT
-   * @param requestVersion - Optional: request specific version during grace period
-   */
-  async getServerPepper(requestVersion?: number): Promise<{ 
-    pepper: string | undefined; 
-    version: number;
-    isRotated?: boolean;
-    gracePeriodUntil?: string;
-  }> {
+  async getDerivationPepper(): Promise<{ pepper: string | undefined }> {
     try {
-      // If user isn't authenticated yet, skip requesting pepper to avoid noisy logs
+      // Require JWT to be present; otherwise skip
       try {
         const creds = await Keychain.getGenericPassword({
           service: AUTH_KEYCHAIN_SERVICE,
           username: AUTH_KEYCHAIN_USERNAME
         });
         if (!creds) {
-          // No auth yet; operate without server pepper silently
+          return { pepper: undefined };
+        }
+      } catch (_) {
+        return { pepper: undefined };
+      }
+      const { data } = await apolloClient.mutate({ mutation: GET_DERIVATION_PEPPER });
+      if (data?.getDerivationPepper?.success) {
+        return { pepper: data.getDerivationPepper.pepper };
+      }
+      console.debug('Derivation pepper not provided');
+      return { pepper: undefined };
+    } catch (_) {
+      console.debug('Skipping derivation pepper due to fetch error');
+      return { pepper: undefined };
+    }
+  }
+
+  async getKekPepper(requestVersion?: number): Promise<{ 
+    pepper: string | undefined; 
+    version: number;
+    isRotated?: boolean;
+    gracePeriodUntil?: string;
+  }> {
+    try {
+      // Require JWT to be present; otherwise skip
+      try {
+        const creds = await Keychain.getGenericPassword({
+          service: AUTH_KEYCHAIN_SERVICE,
+          username: AUTH_KEYCHAIN_USERNAME
+        });
+        if (!creds) {
           return { pepper: undefined, version: 1 };
         }
       } catch (_) {
-        // Any keychain read issue: treat as unauthenticated and continue quietly
         return { pepper: undefined, version: 1 };
       }
+      const { data } = await apolloClient.mutate({ mutation: GET_KEK_PEPPER, variables: { requestVersion } });
 
-      // Server pepper is optional - wallet works without it
-      // Server will get account context from JWT (user_id, business_id, account_type, account_index)
-      const { data } = await apolloClient.mutate({
-        mutation: GET_SERVER_PEPPER,
-        variables: { requestVersion }
-      });
-
-      if (data?.getServerPepper?.success) {
+      if (data?.getKekPepper?.success) {
         return {
-          pepper: data.getServerPepper.pepper,
-          version: data.getServerPepper.version || 1,
-          isRotated: data.getServerPepper.isRotated,
-          gracePeriodUntil: data.getServerPepper.gracePeriodUntil
+          pepper: data.getKekPepper.pepper,
+          version: data.getKekPepper.version || 1,
+          isRotated: data.getKekPepper.isRotated,
+          gracePeriodUntil: data.getKekPepper.gracePeriodUntil
         };
       }
-      
-      // It's OK if server doesn't provide pepper (use client-only salt)
-      console.debug('Server pepper not provided; proceeding with client-only salt');
+      console.debug('KEK pepper not provided');
       return { pepper: undefined, version: 1 };
     } catch (error) {
-      // Network/auth hiccup; proceed without pepper without alarming logs
-      console.debug('Skipping server pepper due to fetch error; using client-only salt');
+      console.debug('Skipping KEK pepper due to fetch error');
       return { pepper: undefined, version: 1 };
     }
   }
@@ -376,7 +392,8 @@ export class SecureDeterministicWalletService {
     provider: 'google' | 'apple',
     accountType: 'personal' | 'business' = 'personal',
     accountIndex: number = 0,
-    businessId?: string
+    businessId?: string,
+    firebaseIdToken?: string
   ): Promise<DerivedWallet> {
     const startTime = Date.now();
     const perfLog = (step: string) => {
@@ -394,13 +411,31 @@ export class SecureDeterministicWalletService {
       // Store current scope for this session
       this.currentScope.set('current', scope);
       
-      // Get server pepper (optional for 2-of-2 security) with version
-      perfLog('Before server pepper');
-      const { pepper: serverPepper, version: pepperVersion } = await this.getServerPepper();
-      perfLog('Got server pepper');
+      // Get derivation pepper (REQUIRED for derivation salt)
+      perfLog('Before derivation pepper');
+      const { pepper: derivPepper } = await this.getDerivationPepper({
+        firebaseIdToken,
+        accountType,
+        accountIndex,
+        businessId
+      });
+      perfLog('Got derivation pepper');
+      if (!derivPepper) {
+        throw new Error('Missing derivation pepper: cannot derive wallet without pepper. Ensure authentication and network are available.');
+      }
+
+      // Get KEK pepper (for encryption)
+      perfLog('Before KEK pepper');
+      const { pepper: kekPepper, version: pepperVersion } = await this.getKekPepper(undefined, {
+        firebaseIdToken,
+        accountType,
+        accountIndex,
+        businessId
+      });
+      perfLog('Got KEK pepper');
       
       // Derive KEK for encryption
-      const kek = deriveKEK(iss, sub, aud, serverPepper, scope);
+      const kek = deriveKEK(iss, sub, aud, kekPepper, scope);
       
       // Try to load cached encrypted seed first (fast path <50ms)
       let wallet: DerivedWallet | null = null;
@@ -421,7 +456,7 @@ export class SecureDeterministicWalletService {
           
           if (storedPepperVersion !== pepperVersion) {
             console.log(`Stored pepper v${storedPepperVersion} differs from current v${pepperVersion}`);
-            const { pepper: oldPepper } = await this.getServerPepper(storedPepperVersion);
+            const { pepper: oldPepper } = await this.getKekPepper(storedPepperVersion);
             
             if (oldPepper) {
               // Derive KEK with the old pepper version
@@ -477,7 +512,7 @@ export class SecureDeterministicWalletService {
         
         // Use the OAuth claims directly
         
-        // Generate client-controlled salt using the exact formula from README.md
+      // Generate client-controlled salt using the exact formula from README.md (no pepper inside)
         console.log('[SecureDeterministicWallet] Salt generation inputs:', {
           platform: require('react-native').Platform.OS,
           iss,
@@ -513,7 +548,7 @@ export class SecureDeterministicWalletService {
         perfLog('Starting key derivation');
         wallet = deriveDeterministicAlgorandKey({
           clientSalt,
-          serverPepper,
+          derivationPepper: derivPepper,
           provider,
           accountType,
           accountIndex,

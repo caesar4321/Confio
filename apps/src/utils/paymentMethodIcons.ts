@@ -3,6 +3,16 @@
  * This handles the mapping between backend icon names and react-native-vector-icons/Feather icons
  */
 
+// Toggle verbose logging for icon resolution
+const DEBUG_PAYMENT_METHOD_ICONS = false;
+
+function debugLog(...args: any[]) {
+  if (DEBUG_PAYMENT_METHOD_ICONS) {
+    // eslint-disable-next-line no-console
+    console.log('[PaymentMethodIcon]', ...args);
+  }
+}
+
 // Map of payment method types/names to appropriate Feather icons
 const PAYMENT_METHOD_ICONS: { [key: string]: string } = {
   // Banks - use credit-card or dollar-sign icons
@@ -71,25 +81,25 @@ export function getPaymentMethodIcon(
   providerType?: string | null,
   displayName?: string | null
 ): string {
-  // Debug logging to help identify the issue
-  console.log('[PaymentMethodIcon] Input:', { icon, providerType, displayName });
+  // Debug logging (gated)
+  debugLog('Input:', { icon, providerType, displayName });
   
   // First try to use the provided icon if it's valid
   if (icon && isValidFeatherIcon(icon)) {
-    console.log('[PaymentMethodIcon] Using provided valid icon:', icon);
+    debugLog('Using provided valid icon:', icon);
     return icon;
   }
   
   // If icon is provided but not valid, log it for debugging
   if (icon) {
-    console.log('[PaymentMethodIcon] Invalid icon provided:', icon);
+    debugLog('Invalid icon provided:', icon);
   }
   
   // Try to match by icon name (normalized)
   if (icon) {
     const normalizedIcon = normalizeKey(icon);
     if (PAYMENT_METHOD_ICONS[normalizedIcon]) {
-      console.log('[PaymentMethodIcon] Using normalized icon mapping:', PAYMENT_METHOD_ICONS[normalizedIcon]);
+      debugLog('Using normalized icon mapping:', PAYMENT_METHOD_ICONS[normalizedIcon]);
       return PAYMENT_METHOD_ICONS[normalizedIcon];
     }
   }
@@ -98,18 +108,18 @@ export function getPaymentMethodIcon(
   if (providerType) {
     const normalizedType = normalizeKey(providerType);
     if (PAYMENT_METHOD_ICONS[normalizedType]) {
-      console.log('[PaymentMethodIcon] Using provider type mapping:', PAYMENT_METHOD_ICONS[normalizedType]);
+      debugLog('Using provider type mapping:', PAYMENT_METHOD_ICONS[normalizedType]);
       return PAYMENT_METHOD_ICONS[normalizedType];
     }
   }
   
   // Default fallback based on provider type (most important for banks)
   if (providerType?.toLowerCase() === 'bank') {
-    console.log('[PaymentMethodIcon] Using bank fallback: credit-card');
+    debugLog('Using bank fallback: credit-card');
     return 'credit-card';
   }
   if (providerType?.toLowerCase() === 'fintech') {
-    console.log('[PaymentMethodIcon] Using fintech fallback: smartphone');
+    debugLog('Using fintech fallback: smartphone');
     return 'smartphone';
   }
   
@@ -120,32 +130,32 @@ export function getPaymentMethodIcon(
     // Check if it contains any known patterns
     for (const [pattern, iconName] of Object.entries(PAYMENT_METHOD_ICONS)) {
       if (normalizedName.includes(pattern) || pattern.includes(normalizedName)) {
-        console.log('[PaymentMethodIcon] Using display name pattern match:', iconName);
+        debugLog('Using display name pattern match:', iconName);
         return iconName;
       }
     }
     
     // Check for common patterns
     if (normalizedName.includes('banco') || normalizedName.includes('bank')) {
-      console.log('[PaymentMethodIcon] Using banco/bank pattern: credit-card');
+      debugLog('Using banco/bank pattern: credit-card');
       return 'credit-card';
     }
     if (normalizedName.includes('pago') && normalizedName.includes('movil')) {
-      console.log('[PaymentMethodIcon] Using pago movil pattern: smartphone');
+      debugLog('Using pago movil pattern: smartphone');
       return 'smartphone';
     }
     if (normalizedName.includes('efectivo') || normalizedName.includes('cash')) {
-      console.log('[PaymentMethodIcon] Using cash pattern: dollar-sign');
+      debugLog('Using cash pattern: dollar-sign');
       return 'dollar-sign';
     }
     if (normalizedName.includes('transfer')) {
-      console.log('[PaymentMethodIcon] Using transfer pattern: repeat');
+      debugLog('Using transfer pattern: repeat');
       return 'repeat';
     }
   }
   
   // Ultimate fallback
-  console.log('[PaymentMethodIcon] Using ultimate fallback:', PAYMENT_METHOD_ICONS.default);
+  debugLog('Using ultimate fallback:', PAYMENT_METHOD_ICONS.default);
   return PAYMENT_METHOD_ICONS.default;
 }
 

@@ -203,21 +203,8 @@ export const ActiveTradeScreen: React.FC = () => {
     }
   }, [trade?.timeRemaining]);
 
-  // Timer countdown effect
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeRemaining(prev => {
-        if (prev <= 0) {
-          clearInterval(timer);
-          Alert.alert('Tiempo Expirado', 'El tiempo para completar el intercambio ha expirado.');
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
+  // Removed per-second countdown to avoid unnecessary re-renders/polling-like behavior
+  // If needed, we can derive a remaining time based on server timestamps without a 1s interval
 
   // Spinning animation for step 3
   useEffect(() => {
@@ -234,28 +221,20 @@ export const ActiveTradeScreen: React.FC = () => {
     }
   }, [activeTradeStep, spinAnim]);
   
-  // Debug log to see what data we have
-  console.log('[ActiveTradeScreen] Trade data:', {
-    hasRouteData: !!routeTrade,
-    hasFullData: !!fullTradeData,
-    loading: tradeDetailsLoading,
-    error: tradeDetailsError,
-    tradeId: routeTrade?.id,
-    fullDataStatus: fullTradeData?.status,
-    fullDataStep: fullTradeData?.step,
-    currentUserId,
-    currentBusinessId,
-    myBusinessIds,
-    iAmBuyer,
-    iAmSeller,
-    buyerUser: fullTradeData?.buyerUser,
-    buyerBusiness: fullTradeData?.buyerBusiness,
-    sellerUser: fullTradeData?.sellerUser,
-    sellerBusiness: fullTradeData?.sellerBusiness,
-    traderName: trade?.trader?.name,
-  });
+  // Reduce render-time logging to avoid noise that looks like polling
+  useEffect(() => {
+    console.log('[ActiveTradeScreen] Trade status changed:', {
+      tradeId: routeTrade?.id,
+      status: fullTradeData?.status,
+      step: fullTradeData?.step,
+      isBuyer: iAmBuyer,
+      isSeller: iAmSeller,
+    });
+  }, [routeTrade?.id, fullTradeData?.status, fullTradeData?.step, iAmBuyer, iAmSeller]);
   
-  console.log('[ActiveTradeScreen] Using mutation:', !!mutationToUse, mutationToUse === DISPUTE_P2P_TRADE_LOCAL ? 'local' : 'imported');
+  useEffect(() => {
+    console.log('[ActiveTradeScreen] Using mutation:', !!mutationToUse, mutationToUse === DISPUTE_P2P_TRADE_LOCAL ? 'local' : 'imported');
+  }, []);
   
   // Format crypto token for display
   const formatCrypto = (crypto: string): string => {
@@ -469,7 +448,6 @@ export const ActiveTradeScreen: React.FC = () => {
   const isSeller = trade.tradeType === 'sell';
 
   const renderStep1 = () => {
-    console.log('[ActiveTradeScreen] renderStep1 called, isBuyer:', isBuyer);
     if (isBuyer) {
       return (
         <View style={styles.stepCard}>

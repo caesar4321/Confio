@@ -235,6 +235,8 @@ export const UPDATE_ACCOUNT_ALGORAND_ADDRESS = gql`
       }
       success
       error
+      needsOptIn
+      optInTransactions
     }
   }
 `;
