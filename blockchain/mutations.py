@@ -360,7 +360,7 @@ class CheckAssetOptInsQuery(graphene.ObjectType):
             deleted_at__isnull=True
         ).first()
         
-        return user_account.algorand_address if account else None
+        return account.algorand_address if account else None
     
     def resolve_opted_in_assets(self, info):
         address = self.resolve_algorand_address(info)

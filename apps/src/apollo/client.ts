@@ -204,6 +204,8 @@ const authLink = setContext(async (operation, previousContext) => {
   // Extract headers from previous context
   const { headers = {} } = previousContext || {};
 
+  // No per-request account override: JWT must always match active account context
+
   // Check if we should skip authentication (for login mutations)
   // The custom context is passed through previousContext when using mutation context option
   if (previousContext?.skipAuth) {

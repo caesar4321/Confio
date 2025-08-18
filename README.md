@@ -379,6 +379,7 @@ Where:
 - `issuer`: JWT issuer (e.g., "https://accounts.google.com")
 - `subject`: JWT subject (user's unique ID)
 - `audience`: OAuth client ID
+- `pepper`: Server-provided pepper (non-rotating for derivation)
 - `account_type`: Either "personal" or "business"
 - `business_id`: Business ID (only included for business accounts)
 - `account_index`: Numeric index (0, 1, 2, etc.)
@@ -789,7 +790,7 @@ User Wallet = HKDF(OAuth Claims + Server Pepper)
 ```
 
 **Key Properties:**
-- ✅ **Non-custodial**: User controls one factor (OAuth claims), server controls optional second factor (pepper)
+- ✅ **Non-custodial**: User controls one factor (OAuth claims), server controls second factor (pepper)
 - ✅ **Deterministic**: Same OAuth identity + pepper = same wallet address
 - ✅ **Recoverable**: User can restore wallet on any device with OAuth login
 - ✅ **Secure**: Neither party alone can access funds
@@ -797,7 +798,7 @@ User Wallet = HKDF(OAuth Claims + Server Pepper)
 
 #### Implementation Components
 
-**1. Client Salt Generation (OAuth Claims)**
+**1. Client Salt Generation (OAuth Claims + Derivation Pepper)**
 ```typescript
 // Uses real OAuth issuer, subject, and audience - NOT Firebase tokens
 function generateClientSalt(
@@ -839,14 +840,13 @@ class WalletPepper(models.Model):
 ```typescript
 // Deterministic wallet derivation using HKDF-SHA256
 export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): DerivedWallet {
-  const { clientSalt, serverPepper, provider, accountType, accountIndex, businessId, network } = opts;
+  const { clientSalt, derivationPepper, provider, accountType, accountIndex, businessId, network } = opts;
   
   // Input Key Material from client salt (OAuth claims)
   const ikm = SHA256(`confio-wallet-v1|${clientSalt}`);
   
-  // Extract salt - CRITICAL: Only client-controlled values
-  // serverPepper is NOT included here to prevent address changes during rotation
-  const extractSalt = SHA256(`confio/extract/v1|${clientSalt}`);
+  // Extract salt uses derivation pepper (non-rotating)
+  const extractSalt = SHA256(`confio/extract/v1|${derivationPepper}`);
   
   // Domain separation info
   const info = `confio/algo/v1|${network}|${provider}|${accountType}|${accountIndex}|${businessId ?? ''}`;
@@ -864,14 +864,14 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
 
 **4. Seed Encryption with KEK (Key Encryption Key)**
 ```typescript
-// Server pepper is used ONLY for KEK derivation, NOT seed derivation
+// KEK pepper is separate from derivation pepper
 function deriveKEK(idToken: string, serverPepper: string | undefined, scope: string): Uint8Array {
   const { iss, sub } = jwtDecode(idToken);
   
   // Client-controlled input
   const x_c = SHA256(`${iss}|${sub}|com.confio.app`);
   
-  // Salt includes server pepper for 2-of-2 security
+  // Salt includes KEK pepper for encryption key derivation
   const salt = SHA256(`confio/kek-salt/v1|${serverPepper ?? ''}`);
   
   // Scope for domain separation
@@ -895,18 +895,24 @@ function wrapSeed(seed32: Uint8Array, kek32: Uint8Array, pepperVersion: number):
 }
 ```
 
-#### Pepper Rotation System
+#### Pepper Systems
+
+Derivation Pepper (address-defining):
+- Non-rotating per account (never changes)
+- API: getDerivationPepper
+
+KEK Pepper (cache encryption):
 
 **Grace Period Protection**
-- When pepper rotates, old pepper remains valid for 7 days
+- When KEK pepper rotates, old pepper remains valid for 7 days
 - Client can decrypt old seeds during grace period
 - Automatic re-wrapping with new pepper version
-- Prevents wallet lockout during pepper rotation
+- Prevents wallet lockout during KEK pepper rotation
 
-**Rotation Process**
+**KEK Rotation Process**
 ```python
-# GraphQL mutation for pepper rotation
-class RotateServerPepperMutation(graphene.Mutation):
+# GraphQL mutation for KEK pepper rotation
+class RotateKekPepperMutation(graphene.Mutation):
     def mutate(self, info, firebase_uid):
         with transaction.atomic():
             pepper_obj = WalletPepper.objects.select_for_update().get(
@@ -929,7 +935,7 @@ class RotateServerPepperMutation(graphene.Mutation):
 
 **1. True Non-Custodial**
 - User controls OAuth claims (issuer, subject, audience)
-- Server pepper is optional enhancement, not requirement
+- Server provides pepper; server never sees OAuth subject in our design
 - No third-party can unilaterally access funds
 
 **2. Deterministic Recovery**
@@ -938,7 +944,7 @@ class RotateServerPepperMutation(graphene.Mutation):
 - Cross-device wallet restoration
 
 **3. Enhanced Security (2-of-2)**
-- Client salt: Deterministic from OAuth claims
+- Client salt: Deterministic from OAuth claims + pepper
 - Server pepper: Adds entropy without custody
 - Neither party alone can access wallet
 

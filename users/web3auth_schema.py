@@ -7,7 +7,7 @@ import json
 import logging
 import secrets
 from datetime import datetime
-from .models import Account, WalletPepper
+from .models import Account, WalletPepper, WalletDerivationPepper
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -41,7 +41,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
     """
     class Arguments:
         firebase_id_token = graphene.String(required=True)  # Firebase ID token containing all user info
-        algorand_address = graphene.String(required=True)  # Client-generated Algorand address
+        algorand_address = graphene.String(required=False)  # Client-generated Algorand address (optional at login)
         device_fingerprint = graphene.JSONString()  # Device fingerprint data
     
     success = graphene.Boolean()
@@ -53,7 +53,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
     opt_in_transactions = graphene.JSONString()  # Unsigned transactions for opt-in
     
     @classmethod
-    def mutate(cls, root, info, firebase_id_token, algorand_address, device_fingerprint=None):
+    def mutate(cls, root, info, firebase_id_token, algorand_address=None, device_fingerprint=None):
         try:
             from django.contrib.auth import get_user_model
             from graphql_jwt.utils import jwt_encode
@@ -584,9 +584,9 @@ class CreateAlgorandTransactionMutation(graphene.Mutation):
             return cls(success=False, error=str(e))
 
 
-class GetServerPepperMutation(graphene.Mutation):
+class GetKekPepperMutation(graphene.Mutation):
     """
-    Get or create a server pepper for wallet key derivation.
+    Get or create a KEK pepper for seed encryption and re-wrapping (rotating).
     Pepper is per-account (derived from JWT context: user_id + account_type + account_index + business_id).
     During grace period after rotation, can optionally return previous pepper.
     """
@@ -603,22 +603,14 @@ class GetServerPepperMutation(graphene.Mutation):
     @classmethod
     def mutate(cls, root, info, request_version=None):
         try:
-            # Get user and account context from JWT
+            # Determine user and account context (JWT-only)
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
-            
-            # Get account context from JWT
             from .jwt_context import get_jwt_business_context_with_validation
             jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
             if not jwt_context:
-                # Fallback to personal account if no JWT context
-                jwt_context = {
-                    'account_type': 'personal',
-                    'account_index': 0,
-                    'business_id': None
-                }
-            
+                jwt_context = {'account_type': 'personal', 'account_index': 0, 'business_id': None}
             account_type = jwt_context['account_type']
             account_index = jwt_context['account_index']
             business_id = jwt_context.get('business_id')
@@ -669,9 +661,9 @@ class GetServerPepperMutation(graphene.Mutation):
             return cls(success=False, error=str(e))
 
 
-class RotateServerPepperMutation(graphene.Mutation):
+class RotateKekPepperMutation(graphene.Mutation):
     """
-    Rotate the server pepper for an account.
+    Rotate the KEK pepper for an account.
     This will increment the version and generate a new pepper.
     Client must re-wrap (re-encrypt) the seed with the new pepper.
     Pepper is per-account based on JWT context.
@@ -735,7 +727,7 @@ class RotateServerPepperMutation(graphene.Mutation):
                     pepper_obj.rotated_at = timezone.now()
                     pepper_obj.save()
                     
-                    logger.info(f'Rotated wallet pepper for account {pepper_key}: v{old_version} -> v{pepper_obj.version}')
+                    logger.info(f'Rotated KEK pepper for account {pepper_key}: v{old_version} -> v{pepper_obj.version}')
                     
                     return cls(
                         success=True,
@@ -751,17 +743,63 @@ class RotateServerPepperMutation(graphene.Mutation):
                         pepper=secrets.token_hex(32),
                         version=1
                     )
-                    logger.info(f'Created initial wallet pepper during rotation for account {pepper_key}')
-                    
+                    logger.info(f'Created initial KEK pepper during rotation for account {pepper_key}')
                     return cls(
                         success=True,
                         pepper=pepper_obj.pepper,
                         version=1,
                         old_version=0
                     )
-            
         except Exception as e:
             logger.error(f'Rotate server pepper error: {str(e)}')
+            return cls(success=False, error=str(e))
+
+
+class GetDerivationPepperMutation(graphene.Mutation):
+    """
+    Get or create the non-rotating derivation pepper for wallet key derivation.
+    Pepper is per-account (derived from JWT context: user_id + account_type + account_index + business_id).
+    This value must never rotate, otherwise addresses change.
+    """
+    class Arguments:
+        pass
+
+    success = graphene.Boolean()
+    pepper = graphene.String()
+    error = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info):
+        try:
+            user = info.context.user
+            if not user.is_authenticated:
+                return cls(success=False, error='Not authenticated')
+            from .jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+            if not jwt_context:
+                jwt_context = {'account_type': 'personal', 'account_index': 0, 'business_id': None}
+            account_type = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
+
+            if account_type == 'business' and business_id:
+                pepper_key = f"user_{user.id}_business_{business_id}_{account_index}"
+            else:
+                pepper_key = f"user_{user.id}_{account_type}_{account_index}"
+
+            with transaction.atomic():
+                deriv, created = WalletDerivationPepper.objects.get_or_create(
+                    account_key=pepper_key,
+                    defaults={
+                        'pepper': secrets.token_hex(32)
+                    }
+                )
+            if created:
+                logger.info(f'Created derivation pepper for account {pepper_key}')
+
+            return cls(success=True, pepper=deriv.pepper)
+        except Exception as e:
+            logger.error(f'Get derivation pepper error: {str(e)}')
             return cls(success=False, error=str(e))
 
 
@@ -804,8 +842,9 @@ class Web3AuthMutation(graphene.ObjectType):
     update_algorand_address = UpdateAlgorandAddressMutation.Field()
     verify_algorand_ownership = VerifyAlgorandOwnershipMutation.Field()
     create_algorand_transaction = CreateAlgorandTransactionMutation.Field()
-    get_server_pepper = GetServerPepperMutation.Field()
-    rotate_server_pepper = RotateServerPepperMutation.Field()
+    get_kek_pepper = GetKekPepperMutation.Field()
+    rotate_kek_pepper = RotateKekPepperMutation.Field()
+    get_derivation_pepper = GetDerivationPepperMutation.Field()
     opt_in_to_usdc = OptInToUSDCMutation.Field()
 
 

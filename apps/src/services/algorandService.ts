@@ -183,7 +183,8 @@ class AlgorandService {
         provider,
         accountType,  // Use the provided account type
         accountIndex, // Use the provided account index
-        businessId    // Use the provided business ID (if applicable)
+        businessId,   // Use the provided business ID (if applicable)
+        firebaseIdToken
       );
       
       console.log('Secure wallet created:', wallet.address);

@@ -159,6 +159,23 @@ export const TradeConfirmScreen: React.FC = () => {
 
       if (data?.createP2pTrade?.success) {
         const createdTrade = data.createP2pTrade.trade;
+        // If the current user is selling crypto, create escrow on-chain (sponsored)
+        try {
+          if (tradeType === 'sell') {
+            const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
+            const amt = parseFloat(amount);
+            if (!isNaN(amt) && amt > 0) {
+              // Run asynchronously; navigation continues regardless but will alert on error
+              p2pSponsoredService.createEscrowIfSeller(String(createdTrade.id), amt, crypto).then((res) => {
+                if (!res.success) {
+                  console.warn('[P2P] Escrow creation failed:', res.error);
+                }
+              }).catch((e) => console.warn('[P2P] Escrow creation error:', e));
+            }
+          }
+        } catch (e) {
+          console.warn('[P2P] Skipping escrow create hook:', e);
+        }
         
         // Navigate to TradeChatScreen with the actual trade data
         navigation.navigate('TradeChat', { 

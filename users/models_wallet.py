@@ -81,3 +81,33 @@ class WalletPepper(models.Model):
         self.version += 1
         self.rotated_at = timezone.now()
         self.save()
+
+
+class WalletDerivationPepper(models.Model):
+    """
+    Non-rotating pepper used for wallet derivation (address-defining).
+    One per account_key; never rotated to preserve deterministic addresses.
+    """
+    account_key = models.CharField(
+        max_length=255,
+        unique=True,
+        db_index=True,
+        help_text='Unique key per account: user_{id}_{type}_{index} or user_{id}_business_{businessId}_{index}'
+    )
+
+    pepper = models.CharField(
+        max_length=64,  # 32 bytes hex
+        help_text='Non-rotating pepper for derivation; changing it changes addresses'
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'user_wallet_derivation_pepper'
+        verbose_name = 'Account Derivation Pepper'
+        verbose_name_plural = 'Account Derivation Peppers'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'DerivationPepper for {self.account_key}'
