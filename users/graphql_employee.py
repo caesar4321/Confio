@@ -69,6 +69,8 @@ class BusinessEmployeeType(DjangoObjectType):
     permissions = graphene.JSONString()
     effective_permissions = graphene.JSONString()
     is_within_shift = graphene.Boolean()
+    # Explicitly use core UserType to avoid picking Web3AuthUserType for relations
+    user = graphene.Field('users.schema.UserType')
     
     class Meta:
         model = BusinessEmployee
@@ -86,6 +88,10 @@ class BusinessEmployeeType(DjangoObjectType):
     def resolve_is_within_shift(self, info):
         """Check if employee is currently within their shift"""
         return self.is_within_shift()
+
+    def resolve_user(self, info):
+        # Return the related User instance; Graphene will use the explicit UserType
+        return self.user
 
 
 class EmployerBusinessType(graphene.ObjectType):

@@ -298,7 +298,9 @@ export const USDCConversionScreen = () => {
                 oauthData.provider,
                 activeAccount?.type || 'personal',
                 activeAccount?.index || 0,
-                activeAccount?.id?.startsWith('business_') ? activeAccount.id.replace('business_', '') : undefined
+                activeAccount?.id?.startsWith('business_')
+                  ? (activeAccount.id.split('_')[1] || undefined)
+                  : undefined
               );
               
               console.log('[USDCConversionScreen] Wallet restored, proceeding with signing');
@@ -370,7 +372,9 @@ export const USDCConversionScreen = () => {
                 oauthData.provider,
                 activeAccount?.type || 'personal',
                 activeAccount?.index || 0,
-                activeAccount?.id?.startsWith('business_') ? activeAccount.id.replace('business_', '') : undefined
+                activeAccount?.id?.startsWith('business_')
+                  ? (activeAccount.id.split('_')[1] || undefined)
+                  : undefined
               );
             }
             

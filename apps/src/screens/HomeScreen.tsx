@@ -351,7 +351,9 @@ export const HomeScreen = () => {
     currentAccountType: currentAccount?.type,
     currentAccountName: currentAccount?.name,
     currentAccountAvatar: currentAccount?.avatar,
-    currentAccountIndex: currentAccount?.id ? currentAccount.id.split('_')[1] : undefined,
+    currentAccountIndex: currentAccount?.id && currentAccount.id.startsWith('business_')
+      ? currentAccount.id.split('_')[2]
+      : currentAccount?.id?.split('_')[1],
     activeAccountId: activeAccount?.id,
     activeAccountType: activeAccount?.type,
     activeAccountName: activeAccount?.name,
