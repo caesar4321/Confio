@@ -56,6 +56,33 @@ class ConversionService {
       } else {
         console.log('[ConversionService] No account provided, proceeding with existing wallet scope');
       }
+
+      // Ensure signer scope matches active account (especially for business)
+      try {
+        const { oauthStorage } = await import('../services/oauthStorageService');
+        const oauth = await oauthStorage.getOAuthSubject();
+        if (oauth?.subject && oauth?.provider) {
+          const provider: 'google' | 'apple' = oauth.provider === 'apple' ? 'apple' : 'google';
+          const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+          const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+          const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+          const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+          // Extract businessId if available
+          const businessId = account?.businessId 
+            || (account?.id?.startsWith('business_') ? (account.id.split('_')[1] || undefined) : undefined);
+          await secureDeterministicWallet.createOrRestoreWallet(
+            iss,
+            oauth.subject,
+            aud,
+            provider,
+            account?.type || 'personal',
+            account?.index ?? 0,
+            businessId
+          );
+        }
+      } catch (scopeErr) {
+        console.warn('[ConversionService] Could not initialize signer scope (will attempt anyway):', scopeErr);
+      }
       
       // The wallet should already be initialized from login
       // The scope would have been set during wallet creation/restoration

@@ -131,7 +131,12 @@ function deriveKEK(
 /**
  * Encrypt seed with KEK using XSalsa20-Poly1305
  */
-function wrapSeed(seed32: Uint8Array, kek32: Uint8Array, pepperVersion: number = 1): string {
+function wrapSeed(
+  seed32: Uint8Array,
+  kek32: Uint8Array,
+  pepperVersion: number = 1,
+  meta?: { derivationPepperHash?: string; scope?: string; saltFingerprint?: string }
+): string {
   const nonce = randomBytes(24);
   const ciphertext = nacl.secretbox(seed32, nonce, kek32);
   
@@ -141,7 +146,11 @@ function wrapSeed(seed32: Uint8Array, kek32: Uint8Array, pepperVersion: number =
     nonce: bytesToHex(nonce),
     ct: bytesToHex(ciphertext),
     createdAt: new Date().toISOString(),
-    pepperVersion: String(pepperVersion) // Track server pepper version for re-wrap detection
+    pepperVersion: String(pepperVersion), // Track server pepper version for re-wrap detection
+    // Track derivation metadata to detect changes
+    dp: meta?.derivationPepperHash || null,
+    scope: meta?.scope || null,
+    sf: meta?.saltFingerprint || null
   };
   
   // Use Buffer for base64 encoding (RN compatible)
@@ -156,13 +165,19 @@ function parseSeedBlob(blobB64: string): {
   nonce: string; 
   ct: string;
   createdAt?: string;
+  dp?: string | null;
+  scope?: string | null;
+  sf?: string | null;
 } {
   const blob = JSON.parse(Buffer.from(blobB64, 'base64').toString('utf8'));
   return {
     pepperVersion: parseInt(blob.pepperVersion || '1'),
     nonce: blob.nonce,
     ct: blob.ct,
-    createdAt: blob.createdAt
+    createdAt: blob.createdAt,
+    dp: blob.dp ?? null,
+    scope: blob.scope ?? null,
+    sf: blob.sf ?? null
   };
 }
 
@@ -437,8 +452,18 @@ export class SecureDeterministicWalletService {
       // Derive KEK for encryption
       const kek = deriveKEK(iss, sub, aud, kekPepper, scope);
       
+      // Prepare fingerprints to validate cache correctness
+      const canonicalIssuer = canonicalize(iss);
+      const canonicalAudience = canonicalize(aud);
+      const saltInput = businessId
+        ? `${canonicalIssuer}_${sub}_${canonicalAudience}_${accountType}_${businessId}_${accountIndex}`
+        : `${canonicalIssuer}_${sub}_${canonicalAudience}_${accountType}_${accountIndex}`;
+      const saltFingerprint = bytesToHex(sha256(utf8ToBytes(saltInput)));
+
       // Try to load cached encrypted seed first (fast path <50ms)
       let wallet: DerivedWallet | null = null;
+      const currentScope = scope;
+      const derivPepperHash = bytesToHex(sha256(utf8ToBytes(String(derivPepper))));
       
       try {
         perfLog('Checking cache');
@@ -449,6 +474,9 @@ export class SecureDeterministicWalletService {
           // Parse blob to get the pepper version it was encrypted with
           const blobMeta = parseSeedBlob(credentials.password);
           const storedPepperVersion = blobMeta.pepperVersion;
+          const storedDerivPepperHash = blobMeta.dp || null;
+          const storedScope = blobMeta.scope || null;
+          const storedSaltFingerprint = blobMeta.sf || null;
           
           // If stored version differs from current, get the appropriate pepper
           let kekToUse = kek;
@@ -469,26 +497,43 @@ export class SecureDeterministicWalletService {
           
           // Decrypt with appropriate KEK
           const seed = unwrapSeed(credentials.password, kekToUse);
+
+          // Validate derivation metadata; if missing or mismatched, force re-derive
+          let derivationMatches = true;
+          if (!storedDerivPepperHash || storedDerivPepperHash !== derivPepperHash) {
+            derivationMatches = false;
+            console.log('Derivation fingerprint mismatch or missing; will derive fresh');
+          }
+          if (storedScope && storedScope !== currentScope) {
+            derivationMatches = false;
+            console.log('Cached scope differs; will derive fresh');
+          }
+          if (!storedSaltFingerprint || storedSaltFingerprint !== saltFingerprint) {
+            derivationMatches = false;
+            console.log('Salt fingerprint mismatch or missing; will derive fresh');
+          }
           
-          // Recreate wallet from cached seed
-          const keyPair = nacl.sign.keyPair.fromSeed(seed);
-          
-          const algosdk = require('algosdk');
-          const address = algosdk.encodeAddress(keyPair.publicKey);
-          
-          wallet = {
-            address,
-            privSeedHex: bytesToHex(seed),
-            publicKey: keyPair.publicKey
-          };
-          
-          perfLog('Wallet restored from cache');
-          console.log('Wallet restored from encrypted cache:', wallet.address);
+          if (derivationMatches) {
+            // Recreate wallet from cached seed
+            const keyPair = nacl.sign.keyPair.fromSeed(seed);
+            const algosdk = require('algosdk');
+            const address = algosdk.encodeAddress(keyPair.publicKey);
+            wallet = {
+              address,
+              privSeedHex: bytesToHex(seed),
+              publicKey: keyPair.publicKey
+            };
+            perfLog('Wallet restored from cache');
+            console.log('Wallet restored from encrypted cache:', wallet.address);
+          } else {
+            // Treat as cache miss
+            throw new Error('Stale derivation cache');
+          }
           
           // Re-wrap with new pepper if needed
           if (needsReWrap) {
             console.log(`Re-wrapping seed with new pepper v${pepperVersion}...`);
-            const newEncryptedBlob = wrapSeed(seed, kek, pepperVersion);
+            const newEncryptedBlob = wrapSeed(seed, kek, pepperVersion, { derivationPepperHash: derivPepperHash, scope: currentScope, saltFingerprint });
             await Keychain.setInternetCredentials(
               cacheKey.server, 
               cacheKey.username, 
@@ -561,7 +606,7 @@ export class SecureDeterministicWalletService {
         // Encrypt and cache the seed for next time
         perfLog('Encrypting for cache');
         const seed = hexToBytes(wallet.privSeedHex);
-        const encryptedBlob = wrapSeed(seed, kek, pepperVersion);
+        const encryptedBlob = wrapSeed(seed, kek, pepperVersion, { derivationPepperHash: derivPepperHash, scope: currentScope, saltFingerprint });
         
         await Keychain.setInternetCredentials(
           cacheKey.server,
