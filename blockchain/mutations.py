@@ -361,13 +361,31 @@ class CheckAssetOptInsQuery(graphene.ObjectType):
         user = info.context.user
         if not user.is_authenticated:
             return None
-        
+
+        # Try to use JWT account context (business or personal)
+        try:
+            from users.jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+        except Exception:
+            jwt_context = None
+
+        # Business context: use the business account's address
+        if jwt_context and jwt_context.get('account_type') == 'business' and jwt_context.get('business_id'):
+            business_id = jwt_context.get('business_id')
+            business_account = Account.objects.filter(
+                business_id=business_id,
+                account_type='business',
+                deleted_at__isnull=True
+            ).order_by('account_index').first()
+            if business_account and business_account.algorand_address:
+                return business_account.algorand_address
+
+        # Fallback: personal account address
         account = Account.objects.filter(
             user=user,
             account_type='personal',
             deleted_at__isnull=True
         ).first()
-        
         return account.algorand_address if account else None
     
     def resolve_opted_in_assets(self, info):

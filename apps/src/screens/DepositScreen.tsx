@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Clipboard, Image, ActivityIndicator } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import QRCode from 'react-native-qrcode-svg';
@@ -10,6 +10,8 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useAccount } from '../contexts/AccountContext';
 import { gql, useMutation, useQuery } from '@apollo/client';
 import algorandService from '../services/algorandService';
+import businessOptInService from '../services/businessOptInService';
+import { cusdAppOptInService } from '../services/cusdAppOptInService';
 
 // GraphQL mutation for USDC opt-in specifically
 const OPT_IN_TO_USDC = gql`
@@ -181,6 +183,8 @@ const DepositScreen = () => {
   const [isOptedIn, setIsOptedIn] = useState<boolean | null>(null);
   const [checkingOptIn, setCheckingOptIn] = useState(true);
   const [optingIn, setOptingIn] = useState(false);
+  const [needsWalletSetup, setNeedsWalletSetup] = useState(false);
+  
   const { activeAccount, refreshAccounts } = useAccount();
   
   // Get token type from route params, default to 'usdc' for backward compatibility
@@ -203,7 +207,7 @@ const DepositScreen = () => {
     fetchPolicy: 'network-only',
   });
 
-  // Check if user is opted in to USDC
+  // Check if user is opted in to USDC and whether additional setup is needed
   useEffect(() => {
     console.log('[DepositScreen] Checking opt-in status, optInData:', optInData);
     console.log('[DepositScreen] Token type:', tokenType);
@@ -227,18 +231,22 @@ const DepositScreen = () => {
           }
         }
         
-        // Check if USDC is in the opted-in assets
-        // The backend will include USDC in assetDetails if opted in
-        const hasUSDC = parsedAssetDetails && Object.values(parsedAssetDetails).some((asset: any) => 
-          asset.symbol === 'USDC'
-        );
-        
+        // Determine present assets
+        const values = parsedAssetDetails ? (Object.values(parsedAssetDetails) as any[]) : [];
+        const hasUSDC = values.some((asset: any) => asset.symbol === 'USDC');
+        const hasCUSD = values.some((asset: any) => asset.symbol === 'cUSD');
+        const hasCONFIO = values.some((asset: any) => asset.symbol === 'CONFIO');
+
         console.log('[DepositScreen] Parsed asset details:', parsedAssetDetails);
         console.log('[DepositScreen] Has USDC:', hasUSDC);
+        console.log('[DepositScreen] Has cUSD:', hasCUSD);
+        console.log('[DepositScreen] Has CONFIO:', hasCONFIO);
         setIsOptedIn(hasUSDC);
+        setNeedsWalletSetup(Boolean(hasUSDC && (!hasCUSD || !hasCONFIO)));
       } else {
         // For other tokens (cUSD, CONFIO), assume they're always ready
         setIsOptedIn(true);
+        setNeedsWalletSetup(false);
       }
       
       setCheckingOptIn(false);
@@ -247,13 +255,42 @@ const DepositScreen = () => {
     }
   }, [optInData, loadingOptIns, tokenType]);
 
+  // Ensure we always re-check opt-in status when returning to this screen
+  useFocusEffect(
+    useCallback(() => {
+      if (typeof refetchOptIns === 'function') {
+        refetchOptIns();
+      }
+    }, [refetchOptIns])
+  );
+
   const handleOptIn = async () => {
     try {
       setOptingIn(true);
-      console.log('[DepositScreen] Starting USDC opt-in...');
-      
+      console.log('[DepositScreen] Activating USDC address');
+
+      // Step A: Ensure cUSD application opt-in (sponsored) for business accounts
+      try {
+        console.log('[DepositScreen] Ensuring cUSD app opt-in (sponsored)');
+        const appOptIn = await cusdAppOptInService.handleAppOptIn(activeAccount);
+        console.log('[DepositScreen] cUSD app opt-in result:', appOptIn);
+      } catch (e) {
+        console.warn('[DepositScreen] cUSD app opt-in step failed or not required:', e);
+      }
+
+      // Step B: Ensure asset opt-ins for cUSD and CONFIO on business accounts
+      try {
+        console.log('[DepositScreen] Ensuring business asset opt-ins (cUSD, CONFIO)');
+        const ok = await businessOptInService.checkAndHandleOptIns((msg) => {
+          console.log('[DepositScreen] Business opt-in progress:', msg);
+        });
+        console.log('[DepositScreen] Business asset opt-ins ready:', ok);
+      } catch (e) {
+        console.warn('[DepositScreen] Business asset opt-in step failed or not needed:', e);
+      }
+
       // Request USDC opt-in from backend
-      console.log('[DepositScreen] Calling optInToAsset mutation...');
+      console.log('[DepositScreen] Calling optInToAsset mutation for USDC...');
       const { data, errors } = await optInToAsset({
         variables: { assetType: 'USDC' }
       });
@@ -263,7 +300,7 @@ const DepositScreen = () => {
         return;
       }
       
-      console.log('[DepositScreen] Opt-in mutation response:', data);
+      console.log('[DepositScreen] USDC opt-in mutation response:', data);
       
       if (data?.optInToAssetByType?.alreadyOptedIn) {
         // Already opted in
@@ -310,6 +347,10 @@ const DepositScreen = () => {
       setOptingIn(false);
     }
   };
+
+  // No separate CTA; setup runs within handleOptIn when needed
+
+  // No additional setup CTA; keep UI simple for USDC
 
   const handleCopy = async () => {
     await Clipboard.setString(depositAddress);
@@ -624,16 +665,15 @@ const styles = StyleSheet.create({
             <ActivityIndicator size="large" color={config.color} />
             <Text style={styles.loadingText}>Verificando configuración...</Text>
           </View>
-        ) : tokenType === 'usdc' && isOptedIn === false ? (
-          /* Show opt-in prompt for USDC if not opted in */
+        ) : tokenType === 'usdc' && (isOptedIn === false || needsWalletSetup === true) ? (
+          /* Single friendly CTA for USDC; background handles everything else */
           <View style={styles.optInContainer}>
             <View style={[styles.optInIcon, { backgroundColor: config.color + '20' }]}>
               <Icon name="unlock" size={40} color={config.color} />
             </View>
             <Text style={styles.optInTitle}>Activa tu dirección USDC</Text>
             <Text style={styles.optInDescription}>
-              Para recibir USDC, primero necesitas activar tu dirección en la red Algorand. 
-              Este es un proceso único y gratuito que habilita tu wallet para recibir USDC.
+              Activa tu dirección para recibir USDC. Es un paso único y gratis.
             </Text>
             <TouchableOpacity 
               style={[styles.optInButton, { backgroundColor: config.color }]}
