@@ -14,6 +14,35 @@ class CUSDAppOptInService {
     try {
       console.log('[CUSDAppOptInService] Starting sponsored app opt-in flow');
       
+      // Preflight: ensure the derived wallet matches the backend address; otherwise skip silently
+      try {
+        const { oauthStorage } = await import('../services/oauthStorageService');
+        const oauth = await oauthStorage.getOAuthSubject();
+        if (oauth?.subject && oauth?.provider) {
+          const provider: 'google' | 'apple' = oauth.provider === 'apple' ? 'apple' : 'google';
+          const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+          const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+          const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+          const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+          const wallet = await secureDeterministicWallet.createOrRestoreWallet(
+            iss,
+            oauth.subject,
+            aud,
+            provider,
+            account?.type || 'personal',
+            account?.index || 0,
+            account?.id?.startsWith('business_') ? (account.id.split('_')[1] || undefined) : undefined
+          );
+          const serverAddr = account?.algorandAddress;
+          if (serverAddr && wallet?.address && wallet.address !== serverAddr) {
+            console.warn('[CUSDAppOptInService] Derived address does not match server address; skipping app opt-in');
+            return { success: true };
+          }
+        }
+      } catch (prefError) {
+        console.warn('[CUSDAppOptInService] Preflight check failed; continuing anyway:', prefError);
+      }
+      
       // Step 1: Generate the sponsored opt-in transaction from server
       const optInResult = await apolloClient.mutate({
         mutation: GENERATE_APP_OPT_IN,
@@ -56,7 +85,34 @@ class CUSDAppOptInService {
       const isSponsored = !!sponsorTransaction;
       
       if (isSponsored) {
-        console.log('[CUSDAppOptInService] Got sponsored opt-in transactions, signing user transaction...');
+      console.log('[CUSDAppOptInService] Got sponsored opt-in transactions, preparing signer...');
+
+      // Ensure the signer scope matches the active account (business) before signing
+      try {
+        const { oauthStorage } = await import('../services/oauthStorageService');
+        const oauth = await oauthStorage.getOAuthSubject();
+        if (oauth?.subject && oauth?.provider) {
+          const provider: 'google' | 'apple' = oauth.provider === 'apple' ? 'apple' : 'google';
+          const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+          const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+          const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+          const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+          await secureDeterministicWallet.createOrRestoreWallet(
+            iss,
+            oauth.subject,
+            aud,
+            provider,
+            // Use AccountContext from AccountManager/AuthService when available
+            account?.type || 'business',
+            account?.index ?? 0,
+            account?.businessId || (account?.id?.startsWith('business_') ? (account.id.split('_')[1] || undefined) : undefined)
+          );
+        }
+      } catch (scopeErr) {
+        console.warn('[CUSDAppOptInService] Could not initialize signer scope (will attempt anyway):', scopeErr);
+      }
+
+      console.log('[CUSDAppOptInService] Signing user transaction...');
       } else {
         console.log('[CUSDAppOptInService] Got solo opt-in transaction, signing...');
       }

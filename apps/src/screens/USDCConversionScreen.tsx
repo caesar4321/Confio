@@ -286,7 +286,8 @@ export const USDCConversionScreen = () => {
               console.log('[USDCConversionScreen] Restoring wallet for signing');
               
               // Determine OAuth parameters based on provider
-              const GOOGLE_WEB_CLIENT_ID = '831051040123-d5tf8e1n66ae5rhs4lrtrsepckna8o21.apps.googleusercontent.com';
+              const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+              const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
               const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
               const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
               
@@ -361,7 +362,8 @@ export const USDCConversionScreen = () => {
             setLoadingMessage('Preparando tu wallet...');
             const oauthData = await oauthStorage.getOAuthSubject();
             if (oauthData && oauthData.subject && oauthData.provider) {
-              const GOOGLE_WEB_CLIENT_ID = '831051040123-d5tf8e1n66ae5rhs4lrtrsepckna8o21.apps.googleusercontent.com';
+              const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+              const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
               const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
               const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
               
