@@ -16,6 +16,8 @@ import {
   Keyboard,
   FlatList,
 } from 'react-native';
+import LoadingOverlay from '../components/LoadingOverlay';
+import { p2pSponsoredService } from '../services/p2pSponsoredService';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { formatLocalDate, formatLocalTime } from '../utils/dateUtils';
@@ -25,7 +27,7 @@ import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
 import { useCurrency } from '../hooks/useCurrency';
 import { useAuth } from '../contexts/AuthContext';
-import { SEND_P2P_MESSAGE, GET_P2P_TRADE, GET_USER_BANK_ACCOUNTS, UPDATE_P2P_TRADE_STATUS, CONFIRM_P2P_TRADE_STEP } from '../apollo/queries';
+import { SEND_P2P_MESSAGE, GET_P2P_TRADE, GET_USER_BANK_ACCOUNTS, UPDATE_P2P_TRADE_STATUS, CONFIRM_P2P_TRADE_STEP, GET_P2P_ESCROW_BOX_EXISTS } from '../apollo/queries';
 import { ExchangeRateDisplay } from '../components/ExchangeRateDisplay';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
 import { useCountry } from '../contexts/CountryContext';
@@ -63,6 +65,7 @@ interface TradeData {
 }
 
 export const TradeChatScreen: React.FC = () => {
+  const DEBUG = false; // Toggle verbose logs for this screen
   const navigation = useNavigation<TradeChatNavigationProp>();
   const route = useRoute<TradeChatRouteProp>();
   const { offer, crypto, amount, tradeType, tradeId, selectedPaymentMethodId, initialStep, tradeStatus } = route.params;
@@ -70,9 +73,22 @@ export const TradeChatScreen: React.FC = () => {
   const { activeAccount, accounts, getActiveAccountContext, switchAccount } = useAccount();
   const { formatNumber, formatCurrency } = useNumberFormat();
   const apollo = useApolloClient();
+  // Feature flags
+  const ENABLE_AUTO_ESCROW = false;
   
   // Get the current active account context
   const [currentAccountContext, setCurrentAccountContext] = useState<any>(null);
+  // Busy overlay for critical actions
+  const [busy, setBusy] = useState(false);
+  const [busyText, setBusyText] = useState<string>('');
+  const withBusy = async <T,>(text: string, fn: () => Promise<T>): Promise<T> => {
+    setBusyText(text);
+    setBusy(true);
+    try { return await fn(); } finally { setBusy(false); setBusyText(''); }
+  };
+
+  // Prevent duplicate auto-accept prompts for the buyer
+  const autoAcceptAttemptedRef = useRef<boolean>(false);
   
   useEffect(() => {
     const loadAccountContext = async () => {
@@ -81,7 +97,7 @@ export const TradeChatScreen: React.FC = () => {
       console.log('🔍 Loaded account context:', context);
       
       // Also log trade details to understand who is who
-      if (tradeDetailsData?.p2pTrade) {
+      if (DEBUG && tradeDetailsData?.p2pTrade) {
         const trade = tradeDetailsData.p2pTrade;
         console.log('📊 Trade participants:', {
           buyer: trade.buyer,
@@ -114,6 +130,17 @@ export const TradeChatScreen: React.FC = () => {
   // Ensure the active account context matches the trade role (personal vs business)
   const [contextEnsured, setContextEnsured] = useState(false);
   useEffect(() => {
+    // Ensure account context only once per screen mount to avoid fighting user-initiated switches
+    if (contextEnsured) {
+      return;
+    }
+    // Respect navigation source: only allow auto-switch when explicitly enabled (e.g., push notification deep link)
+    const allowAccountSwitch = (route.params as any)?.allowAccountSwitch === true;
+    if (!allowAccountSwitch) {
+      console.log('[TradeChatScreen] Skipping auto account switch (not allowed from this navigation source)');
+      setContextEnsured(true);
+      return;
+    }
     const ensureContext = async () => {
       try {
         const trade = tradeDetailsData?.p2pTrade;
@@ -154,7 +181,7 @@ export const TradeChatScreen: React.FC = () => {
       }
     };
     ensureContext();
-  }, [tradeDetailsData?.p2pTrade, activeAccount?.id, accounts?.length]);
+  }, [tradeDetailsData?.p2pTrade, accounts?.length, contextEnsured, route.params]);
   
   // Currency formatting
   const { formatAmount } = useCurrency();
@@ -166,7 +193,7 @@ export const TradeChatScreen: React.FC = () => {
   const { selectedCountry } = useCountry();
   
   // Get currency directly from trade data
-  const getCurrencyInfo = () => {
+  const getCurrencyInfo = React.useMemo(() => {
     // First check if we have currency from navigation params (most reliable for new trades)
     if (route.params?.tradeCurrencyCode) {
       const navCurrencyCode = route.params.tradeCurrencyCode;
@@ -175,14 +202,14 @@ export const TradeChatScreen: React.FC = () => {
       // Always show currency code instead of symbol to avoid confusion
       const displaySymbol = navCurrencyCode;
       
-      console.log('💱 Currency from navigation params:', {
+      if (DEBUG) console.log('💱 Currency from navigation params:', {
         currencyCode: navCurrencyCode,
         currencySymbol: displaySymbol,
         countryCode: route.params.tradeCountryCode,
         source: 'navigation params'
       });
       
-      return { currencyCode: navCurrencyCode, currencySymbol: displaySymbol, source: 'navigation' };
+      return { currencyCode: navCurrencyCode, currencySymbol: displaySymbol, source: 'navigation' } as const;
     }
     
     // Use trade's currency if available from GraphQL query
@@ -193,14 +220,14 @@ export const TradeChatScreen: React.FC = () => {
       // Always show currency code instead of symbol to avoid confusion
       const displaySymbol = tradeCurrencyCode;
       
-      console.log('💱 Currency from trade query:', {
+      if (DEBUG) console.log('💱 Currency from trade query:', {
         currencyCode: tradeCurrencyCode,
         currencySymbol: displaySymbol,
         countryCode: tradeDetailsData.p2pTrade.countryCode,
         source: 'trade query'
       });
       
-      return { currencyCode: tradeCurrencyCode, currencySymbol: displaySymbol, source: 'trade' };
+      return { currencyCode: tradeCurrencyCode, currencySymbol: displaySymbol, source: 'trade' } as const;
     }
     
     // Fallback to offer's country if trade data not loaded yet
@@ -212,17 +239,18 @@ export const TradeChatScreen: React.FC = () => {
     // Always show currency code instead of symbol to avoid confusion
     const displaySymbol = currencyCode;
     
-    console.log('💱 Currency from offer (fallback):', {
+    if (DEBUG) console.log('💱 Currency from offer (fallback):', {
       offerCountryCode,
       currencyCode,
       currencySymbol: displaySymbol,
       source: 'offer fallback'
     });
     
-    return { currencyCode, currencySymbol: displaySymbol, source: 'offer' };
-  };
+    return { currencyCode, currencySymbol: displaySymbol, source: 'offer' } as const;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.params?.tradeCurrencyCode, route.params?.tradeCountryCode, tradeDetailsData?.p2pTrade?.currencyCode, tradeDetailsData?.p2pTrade?.countryCode, offer.countryCode]);
   
-  const { currencyCode, currencySymbol } = getCurrencyInfo();
+  const { currencyCode, currencySymbol } = getCurrencyInfo;
   
   // Fetch trade details
   const { data: tradeDetailsData, loading: tradeLoading, refetch: refetchTradeDetails } = useQuery(GET_P2P_TRADE, {
@@ -279,7 +307,7 @@ export const TradeChatScreen: React.FC = () => {
   }, [bankAccountsLoading, bankAccountsError, bankAccountsData]);
   
   // Log the active account being used
-  console.log('Active account for bank accounts query:', {
+  if (DEBUG) console.log('Active account for bank accounts query:', {
     id: activeAccount?.id,
     type: activeAccount?.type,
     name: activeAccount?.name,
@@ -288,11 +316,14 @@ export const TradeChatScreen: React.FC = () => {
     fullAccount: activeAccount
   });
   
-  console.log('All accounts:', accounts);
-  console.log('User profile:', userProfile);
+  if (DEBUG) {
+    console.log('All accounts:', accounts);
+    console.log('User profile:', userProfile);
+  }
   
   // Debug logs moved to useEffect to avoid render issues
   useEffect(() => {
+    if (!DEBUG) return;
     console.log('Trade type:', computedTradeType, '- User is:', computedTradeType === 'sell' ? 'seller' : 'buyer');
     console.log('🎯 Trade state:', {
       currentTradeStep,
@@ -349,8 +380,11 @@ export const TradeChatScreen: React.FC = () => {
   
   // Update computed trade type when trade data loads
   useEffect(() => {
-    if (!tradeDetailsData?.p2pTrade || !userProfile?.id) return;
-    
+    const trade = tradeDetailsData?.p2pTrade;
+    const isBusinessAccount = activeAccount?.type === 'business';
+    // Allow computation in business context without userProfile
+    if (!trade || (!isBusinessAccount && !userProfile?.id)) return;
+
     // IMPORTANT: Wait for activeAccount and accounts to be loaded
     if (!activeAccount || !accounts) {
       console.log('[TradeChatScreen] Waiting for activeAccount and accounts to load...', {
@@ -360,11 +394,9 @@ export const TradeChatScreen: React.FC = () => {
       return;
     }
     
-    const trade = tradeDetailsData.p2pTrade;
-    const myUserId = String(userProfile.id);
+    const myUserId = userProfile?.id ? String(userProfile.id) : null;
     
     // For business accounts, we need to check the business ID
-    const isBusinessAccount = activeAccount?.type === 'business';
     const myBusinessId = activeAccount?.business?.id ? String(activeAccount.business.id) : null;
     
     // Get all my business IDs from all accounts
@@ -372,7 +404,7 @@ export const TradeChatScreen: React.FC = () => {
       ?.filter(acc => acc.type === 'business' && acc.business?.id)
       .map(acc => String(acc.business.id)) || [];
     
-    console.log('[TradeChatScreen] Trade type computation - Raw data:', {
+    if (DEBUG) console.log('[TradeChatScreen] Trade type computation - Raw data:', {
       trade: {
         buyerUser: trade.buyerUser,
         buyerBusiness: trade.buyerBusiness,
@@ -398,19 +430,19 @@ export const TradeChatScreen: React.FC = () => {
       // Business account viewing - only check business fields
       const buyerBusinessId = trade.buyerBusiness?.id;
       iAmBuyer = buyerBusinessId && String(buyerBusinessId) === String(myBusinessId);
-      console.log('[TradeChatScreen] Business account buyer check:', {
+      if (DEBUG) console.log('[TradeChatScreen] Business account buyer check:', {
         myBusinessId,
         buyerBusinessId,
         matches: iAmBuyer,
         note: 'Business account only checks business fields'
       });
-    } else {
+    } else if (myUserId) {
       // Personal account viewing - only check personal fields
       iAmBuyer = (
         (trade.buyerUser && String(trade.buyerUser.id) === myUserId) ||
         (trade.buyer && String(trade.buyer.id) === myUserId)
       );
-      console.log('[TradeChatScreen] Personal account buyer check:', {
+      if (DEBUG) console.log('[TradeChatScreen] Personal account buyer check:', {
         myUserId,
         buyerUserId: trade.buyerUser?.id,
         buyerId: trade.buyer?.id,
@@ -426,19 +458,19 @@ export const TradeChatScreen: React.FC = () => {
       // Business account viewing - only check business fields
       const sellerBusinessId = trade.sellerBusiness?.id;
       iAmSeller = sellerBusinessId && String(sellerBusinessId) === String(myBusinessId);
-      console.log('[TradeChatScreen] Business account seller check:', {
+      if (DEBUG) console.log('[TradeChatScreen] Business account seller check:', {
         myBusinessId,
         sellerBusinessId,
         matches: iAmSeller,
         note: 'Business account only checks business fields'
       });
-    } else {
+    } else if (myUserId) {
       // Personal account viewing - only check personal fields
       iAmSeller = (
         (trade.sellerUser && String(trade.sellerUser.id) === myUserId) ||
         (trade.seller && String(trade.seller.id) === myUserId)
       );
-      console.log('[TradeChatScreen] Personal account seller check:', {
+      if (DEBUG) console.log('[TradeChatScreen] Personal account seller check:', {
         myUserId,
         sellerUserId: trade.sellerUser?.id,
         sellerId: trade.seller?.id,
@@ -449,7 +481,7 @@ export const TradeChatScreen: React.FC = () => {
     
     const newComputedType = iAmBuyer ? 'buy' : iAmSeller ? 'sell' : tradeType;
     
-    console.log('[TradeChatScreen] Computing trade type - Final result:', {
+    if (DEBUG) console.log('[TradeChatScreen] Computing trade type - Final result:', {
       myUserId,
       myBusinessId,
       isBusinessAccount,
@@ -496,7 +528,8 @@ export const TradeChatScreen: React.FC = () => {
     }
   }, [tradeDetailsData?.p2pTrade?.status]);
   const [forceUpdate, setForceUpdate] = useState(0); // Force update counter
-  const [timeRemaining, setTimeRemaining] = useState(900); // 15 minutes in seconds
+  const [timeRemaining, setTimeRemaining] = useState(900); // default; replaced when trade loads
+  const [expiresAtOverride, setExpiresAtOverride] = useState<string | undefined>(undefined);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -831,10 +864,22 @@ export const TradeChatScreen: React.FC = () => {
               return true;
             });
           }
+
+          // Update countdown if server sent a new expires_at (accept or extension)
+          try {
+            if (data.expires_at) {
+              setExpiresAtOverride(data.expires_at);
+              const expMs = new Date(data.expires_at).getTime();
+              if (!isNaN(expMs)) {
+                const secs = Math.max(0, Math.floor((expMs - Date.now()) / 1000));
+                setTimeRemaining(secs);
+              }
+            }
+          } catch {}
           
           // Force a re-render to ensure UI updates
           setForceUpdate(prev => prev + 1);
-          
+
           // Log button visibility after state updates
           setTimeout(() => {
             console.log('🔘 Button visibility check after WebSocket update:', {
@@ -846,6 +891,17 @@ export const TradeChatScreen: React.FC = () => {
               timestamp: new Date().toISOString()
             });
           }, 100);
+
+          // If I'm the buyer and the trade just moved to PAYMENT_PENDING,
+          // auto-trigger accept so the 15m timer starts immediately.
+          try {
+            if (data.status === 'PAYMENT_PENDING' && computedTradeTypeRef.current === 'buy' && !autoAcceptAttemptedRef.current) {
+              autoAcceptAttemptedRef.current = true;
+              p2pSponsoredService.ensureAccepted(String(tradeId)).catch(() => {
+                // Non-fatal: user can still tap Mark as Paid which re-invokes accept path
+              });
+            }
+          } catch {}
             
           // Add a system message for status changes
           // Show message even if we initiated it, as other user needs to see the update
@@ -878,6 +934,62 @@ export const TradeChatScreen: React.FC = () => {
             };
             setMessages(prev => [systemMessage, ...prev]);
           }
+
+          // Auto-navigate both parties to rating when crypto is released
+          try {
+            if (data.status === 'CRYPTO_RELEASED') {
+              const t = tradeDetailsData?.p2pTrade;
+              const iAmBuyer = (() => {
+                if (!t || !activeAccount) return false;
+                if (activeAccount.type === 'business') {
+                  return t?.buyerBusiness?.id && String(t.buyerBusiness.id) === String(activeAccount.business?.id);
+                }
+                return t?.buyerUser?.id && String(t.buyerUser.id) === String(userProfile?.id);
+              })();
+              // Ensure account context matches my role for correct transaction perspective
+              try {
+                if (t && activeAccount && switchAccount) {
+                  let desiredAccountId: string | null = null;
+                  if (iAmBuyer) {
+                    if (t.buyerBusiness?.id) desiredAccountId = `business_${String(t.buyerBusiness.id)}_0`;
+                    else desiredAccountId = 'personal_0';
+                  } else {
+                    if (t.sellerBusiness?.id) desiredAccountId = `business_${String(t.sellerBusiness.id)}_0`;
+                    else desiredAccountId = 'personal_0';
+                  }
+                  if (desiredAccountId && activeAccount.id !== desiredAccountId) {
+                    // Avoid await in non-async handler
+                    switchAccount(desiredAccountId).catch(() => {});
+                  }
+                }
+              } catch {}
+              const counterpartyName = iAmBuyer
+                ? (t?.sellerBusiness?.name || `${t?.sellerUser?.firstName || ''} ${t?.sellerUser?.lastName || ''}`.trim() || t?.sellerUser?.username || 'Comerciante')
+                : (t?.buyerBusiness?.name || `${t?.buyerUser?.firstName || ''} ${t?.buyerUser?.lastName || ''}`.trim() || t?.buyerUser?.username || 'Comprador');
+              // Compute duration from createdAt to completedAt (or now)
+              const startMs2 = t?.createdAt ? new Date(t.createdAt as any).getTime() : Date.now();
+              const endMs2 = t?.completedAt ? new Date(t.completedAt as any).getTime() : Date.now();
+              const durationMin2 = Math.max(0, Math.round((endMs2 - startMs2) / 60000));
+
+              navigation.navigate('TraderRating', {
+                tradeId: String(tradeId),
+                trader: {
+                  name: counterpartyName,
+                  verified: false,
+                  completedTrades: 0,
+                  successRate: 0,
+                },
+                tradeDetails: {
+                  amount,
+                  crypto,
+                  totalPaid: (parseFloat(amount) * parseFloat(offer.rate)).toFixed(2),
+                  method: t?.paymentMethod?.displayName || 'N/A',
+                  date: formatLocalDate(new Date().toISOString()),
+                  duration: `${durationMin2} minutos`,
+                }
+              });
+            }
+          } catch {}
           
           // Navigate both buyer and seller to rating screen when trade is completed
           if ((data.status === 'PAYMENT_CONFIRMED' || data.status === 'COMPLETED') && data.updated_by !== String(userProfile?.id)) {
@@ -886,7 +998,13 @@ export const TradeChatScreen: React.FC = () => {
               const tradeData = tradeDetailsData?.p2pTrade;
               
               // Determine who is rating whom based on the current user's role
-              const iAmBuyer = computedTradeType === 'buy';
+              const iAmBuyer = (() => {
+                if (!tradeData || !activeAccount) return false;
+                if (activeAccount.type === 'business') {
+                  return tradeData?.buyerBusiness?.id && String(tradeData.buyerBusiness.id) === String(activeAccount.business?.id);
+                }
+                return tradeData?.buyerUser?.id && String(tradeData.buyerUser.id) === String(userProfile?.id);
+              })();
               
               // Get counterparty information - handle both personal and business accounts
               let counterpartyName = '';
@@ -951,6 +1069,11 @@ export const TradeChatScreen: React.FC = () => {
                 return;
               }
               
+              // Compute duration from createdAt to completedAt (or now)
+              const startMs = tradeData?.createdAt ? new Date(tradeData.createdAt as any).getTime() : Date.now();
+              const endMs = tradeData?.completedAt ? new Date(tradeData.completedAt as any).getTime() : Date.now();
+              const durationMin = Math.max(0, Math.round((endMs - startMs) / 60000));
+
               navigation.navigate('TraderRating', {
                 tradeId,
                 trader: {
@@ -965,7 +1088,7 @@ export const TradeChatScreen: React.FC = () => {
                   totalPaid: (parseFloat(amount) * parseFloat(offer.rate)).toFixed(2),
                   method: tradeData?.paymentMethod?.displayName || 'N/A',
                   date: formatLocalDate(new Date().toISOString()),
-                  duration: `${Math.floor((900 - timeRemaining) / 60)} minutos`,
+                  duration: `${durationMin} minutos`,
                 }
               });
             }, 2000); // Give time to see the completion message
@@ -1054,44 +1177,64 @@ export const TradeChatScreen: React.FC = () => {
   }, [tradeId]);
 
   // As seller, ensure escrow is created on entering chat (sponsored)
+  // Guard to avoid repeated attempts
+  const escrowAttemptedRef = useRef<string | null>(null);
   useEffect(() => {
     const autoEscrow = async () => {
       try {
         const trade = tradeDetailsData?.p2pTrade;
-        // Determine seller role directly from trade data to avoid relying on userProfile timing
-        const sellerBusinessId = trade?.sellerBusiness?.id ? String(trade.sellerBusiness.id) : null;
-        const isSeller = (!!sellerBusinessId && activeAccount?.type === 'business' && String(activeAccount?.business?.id) === sellerBusinessId)
-          || (!sellerBusinessId && computedTradeType === 'sell');
-        if (!contextEnsured || !isSeller || !tradeId || !amount || !crypto) return;
-        const amt = parseFloat(String(amount));
-        if (isNaN(amt) || amt <= 0) return;
+        // Explicit action UX: do not auto-run
+        if (!ENABLE_AUTO_ESCROW) return;
+        if (!contextEnsured || !trade || !activeAccount) return;
+        // Do not create escrow again if already escrowed
+        if (trade?.escrow?.isEscrowed) return;
+        let isSeller = false;
+        if (activeAccount.type === 'business') {
+          const sellerBusinessId = trade?.sellerBusiness?.id ? String(trade.sellerBusiness.id) : null;
+          const myBizId = activeAccount.business?.id ? String(activeAccount.business.id) : null;
+          isSeller = !!sellerBusinessId && !!myBizId && sellerBusinessId === myBizId;
+        } else {
+          const myUserId = userProfile?.id ? String(userProfile.id) : null;
+          const sellerUserId = trade?.sellerUser?.id ? String(trade.sellerUser.id) : (trade?.seller?.id ? String(trade.seller.id) : null);
+          isSeller = !!myUserId && !!sellerUserId && myUserId === sellerUserId;
+        }
+        if (!isSeller || !tradeId) return;
+        // Derive escrow params: amount and token
+        let tokenToEscrow = (trade?.offer?.tokenType || trade?.escrow?.tokenType || String(crypto || '')).toString().toUpperCase() || 'CUSD';
+        // Normalize token display (cUSD vs CUSD)
+        if (tokenToEscrow === 'CUSD' || tokenToEscrow === 'Cusd') tokenToEscrow = 'CUSD';
+        const amountFromRoute = typeof amount !== 'undefined' ? parseFloat(String(amount)) : NaN;
+        const amountFromTrade = trade?.cryptoAmount ? parseFloat(String(trade.cryptoAmount)) : NaN;
+        const amt = !isNaN(amountFromRoute) && amountFromRoute > 0 ? amountFromRoute
+                  : (!isNaN(amountFromTrade) && amountFromTrade > 0 ? amountFromTrade : NaN);
+        if (isNaN(amt) || amt <= 0) {
+          console.warn('[TradeChatScreen] Skipping escrow create: missing/invalid amount', { amountFromRoute, amountFromTrade, tokenToEscrow });
+          return;
+        }
+        // Avoid duplicate attempts per tradeId
+        if (escrowAttemptedRef.current === String(tradeId)) return;
         const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
         // Fire-and-forget to avoid blocking UI; normal auth context must already match
-        p2pSponsoredService.createEscrowIfSeller(String(tradeId), amt, String(crypto)).catch(() => {});
+        escrowAttemptedRef.current = String(tradeId);
+        console.log('[TradeChatScreen] Creating escrow as seller', { tradeId: String(tradeId), amount: amt, token: tokenToEscrow });
+        p2pSponsoredService.createEscrowIfSeller(String(tradeId), amt, tokenToEscrow).then((res) => {
+          console.log('[TradeChatScreen] Escrow create result', res);
+          if (!res?.success) {
+            // Allow retry on next mount if server rejects (e.g., not opted in yet)
+            escrowAttemptedRef.current = null;
+          }
+        }).catch((e) => {
+          // allow retry on next mount if it failed quickly
+          escrowAttemptedRef.current = null;
+          console.warn('[TradeChatScreen] Escrow create error', e);
+        });
       } catch {}
     };
     autoEscrow();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tradeId, computedTradeType, tradeDetailsData?.p2pTrade, activeAccount, contextEnsured]);
+  }, [tradeId, tradeDetailsData?.p2pTrade, activeAccount, contextEnsured, userProfile?.id, amount, crypto]);
 
-  // As buyer, ensure accept on-chain to open 15-minute window (sponsored)
-  useEffect(() => {
-    const autoAccept = async () => {
-      try {
-        const trade = tradeDetailsData?.p2pTrade;
-        const buyerBusinessId = trade?.buyerBusiness?.id ? String(trade.buyerBusiness.id) : null;
-        const isBuyer = (
-          (!!buyerBusinessId && activeAccount?.type === 'business' && String(activeAccount?.business?.id) === buyerBusinessId) ||
-          (!buyerBusinessId && computedTradeType === 'buy')
-        );
-        if (!contextEnsured || !isBuyer || !tradeId) return;
-        const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
-        await p2pSponsoredService.ensureAccepted(String(tradeId));
-      } catch {}
-    };
-    autoAccept();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tradeId, computedTradeType, tradeDetailsData?.p2pTrade, activeAccount, contextEnsured]);
+  // Buyer auto-accept removed: server auto-accepts after seller shares payment details
 
   // Send typing indicator via WebSocket
   const sendTypingIndicator = (isTyping: boolean) => {
@@ -1109,7 +1252,17 @@ export const TradeChatScreen: React.FC = () => {
     if (!tradeDetailsData?.p2pTrade) return offer.name; // Fallback to offer name
     
     const trade = tradeDetailsData.p2pTrade;
-    const iAmBuyer = computedTradeType === 'buy';
+    // Determine role robustly from current account context (avoid stale computedTradeType)
+    let iAmBuyer = false;
+    if (activeAccount?.type === 'business') {
+      const buyerBusinessId = trade?.buyerBusiness?.id ? String(trade.buyerBusiness.id) : null;
+      const myBizId = activeAccount.business?.id ? String(activeAccount.business.id) : null;
+      iAmBuyer = !!buyerBusinessId && !!myBizId && buyerBusinessId === myBizId;
+    } else {
+      const myUserId = userProfile?.id ? String(userProfile.id) : null;
+      const buyerUserId = trade?.buyerUser?.id ? String(trade.buyerUser.id) : (trade?.buyer?.id ? String(trade.buyer.id) : null);
+      iAmBuyer = !!myUserId && !!buyerUserId && myUserId === buyerUserId;
+    }
     // Guard: if buyerBusiness and sellerBusiness are identical (bad server state),
     // force counterparty to the opposite user/business side to avoid showing self.
     const sameBusiness = trade.buyerBusiness && trade.sellerBusiness && 
@@ -1155,7 +1308,17 @@ export const TradeChatScreen: React.FC = () => {
     }
     
     const trade = tradeDetailsData.p2pTrade;
-    const iAmBuyer = computedTradeType === 'buy';
+    // Determine role robustly from current account context
+    let iAmBuyer = false;
+    if (activeAccount?.type === 'business') {
+      const buyerBusinessId = trade?.buyerBusiness?.id ? String(trade.buyerBusiness.id) : null;
+      const myBizId = activeAccount.business?.id ? String(activeAccount.business.id) : null;
+      iAmBuyer = !!buyerBusinessId && !!myBizId && buyerBusinessId === myBizId;
+    } else {
+      const myUserId = userProfile?.id ? String(userProfile.id) : null;
+      const buyerUserId = trade?.buyerUser?.id ? String(trade.buyerUser.id) : (trade?.buyer?.id ? String(trade.buyer.id) : null);
+      iAmBuyer = !!myUserId && !!buyerUserId && myUserId === buyerUserId;
+    }
     // Apply same-business guard: if both businesses are identical, invert stats source to avoid "self" stats
     const sameBusiness = trade.buyerBusiness && trade.sellerBusiness && 
       String(trade.buyerBusiness.id) === String(trade.sellerBusiness.id);
@@ -1197,14 +1360,23 @@ export const TradeChatScreen: React.FC = () => {
   const displayCurrencyCode = tradeDetailsData?.p2pTrade?.currencyCode || currencyCode;
   // Always show currency code instead of symbol to avoid confusion
   const displayCurrencySymbol = displayCurrencyCode;
-  
-  console.log('💱 Currency determination:', {
-    tradeCountryCode: tradeDetailsData?.p2pTrade?.countryCode,
-    tradeCurrencyCode: tradeDetailsData?.p2pTrade?.currencyCode,
-    displayCurrencyCode,
-    displayCurrencySymbol,
-    source: tradeDetailsData?.p2pTrade?.currencyCode ? 'trade' : 'fallback'
-  });
+
+  // Log currency determination only when values change (and in DEBUG)
+  const currencyLogRef = useRef<string>('');
+  useEffect(() => {
+    if (!DEBUG) return;
+    const snapshot = JSON.stringify({
+      tradeCountryCode: tradeDetailsData?.p2pTrade?.countryCode,
+      tradeCurrencyCode: tradeDetailsData?.p2pTrade?.currencyCode,
+      displayCurrencyCode,
+      displayCurrencySymbol,
+      source: tradeDetailsData?.p2pTrade?.currencyCode ? 'trade' : 'fallback'
+    });
+    if (snapshot !== currencyLogRef.current) {
+      currencyLogRef.current = snapshot;
+      console.log('💱 Currency determination:', JSON.parse(snapshot));
+    }
+  }, [DEBUG, tradeDetailsData?.p2pTrade?.countryCode, tradeDetailsData?.p2pTrade?.currencyCode, displayCurrencyCode, displayCurrencySymbol]);
   
   const tradeData: TradeData = {
     amount: amount,
@@ -1214,21 +1386,38 @@ export const TradeChatScreen: React.FC = () => {
     rate: offer.rate
   };
 
-  // Timer effect
+  // Initialize and run countdown from on-chain/server expiresAt (with override)
   useEffect(() => {
+    // Derive initial remaining seconds from override or tradeDetailsData.expiresAt
+    const expiresAtIso = (expiresAtOverride || (tradeDetailsData?.p2pTrade?.expiresAt as string | undefined));
+    const nowMs = Date.now();
+    if (expiresAtIso) {
+      const expMs = new Date(expiresAtIso).getTime();
+      if (!isNaN(expMs)) {
+        const initial = Math.max(0, Math.floor((expMs - nowMs) / 1000));
+        setTimeRemaining(initial);
+      }
+    }
     const timer = setInterval(() => {
       setTimeRemaining(prev => {
         if (prev <= 1) {
           clearInterval(timer);
-          Alert.alert('Tiempo Expirado', 'El tiempo para completar el pago ha expirado.');
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
-
     return () => clearInterval(timer);
-  }, []);
+  }, [expiresAtOverride, tradeDetailsData?.p2pTrade?.expiresAt]);
+
+  // Post-expiry grace timer (contract uses 120s grace)
+  const GRACE_SECONDS = 120;
+  const expiresAtMs = (() => {
+    const iso = (expiresAtOverride || (tradeDetailsData?.p2pTrade?.expiresAt as string | undefined));
+    const ms = iso ? new Date(iso).getTime() : 0;
+    return isNaN(ms) ? 0 : ms;
+  })();
+  const secondsSinceExpiry = expiresAtMs > 0 ? Math.max(0, Math.floor((Date.now() - expiresAtMs) / 1000)) : 0;
 
   // Monitor trade status for dispute
   useEffect(() => {
@@ -1397,8 +1586,10 @@ export const TradeChatScreen: React.FC = () => {
       // If only one account, use it directly
       const userBankAccount = matchingAccounts[0];
       
-      // Share the payment details directly with the single account
-      await sharePaymentDetailsWithAccount(userBankAccount);
+      // Share the payment details directly with the single account with blocking spinner
+      await withBusy('Compartiendo datos de pago…', async () => {
+        await sharePaymentDetailsWithAccount(userBankAccount);
+      });
       
     } catch (error) {
       console.error('Error sharing payment details:', error);
@@ -1512,52 +1703,52 @@ export const TradeChatScreen: React.FC = () => {
 
   const confirmMarkAsPaid = async () => {
     setShowConfirmPaidModal(false);
-    
     try {
-      // Ensure accept on-chain and mark as paid via sponsored AppCall
-      try {
-        const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
-        await p2pSponsoredService.ensureAccepted(String(tradeId));
-        const chain = await p2pSponsoredService.markAsPaid(String(tradeId), '');
-        if (!chain.success) {
-          Alert.alert('Error', chain.error || 'Error on-chain al marcar como pagado');
-          return;
+      await withBusy('Marcando como pagado…', async () => {
+        // Ensure on-chain accept before marking as paid (sponsor-only)
+        try {
+          await p2pSponsoredService.ensureAccepted(String(tradeId));
+        } catch (e) {
+          // non-fatal: continue to attempt mark as paid
         }
-      } catch (e) {
-        console.warn('[P2P] markAsPaid on-chain error:', e);
-      }
-      // Confirm payment sent using the new mutation
-      const { data } = await confirmTradeStep({
-        variables: {
-          input: {
-            tradeId: tradeId,
-            confirmationType: 'PAYMENT_SENT',
-            reference: '', // User can add this later if needed
-            notes: 'Pago marcado como enviado por el comprador'
+        // Mark as paid via sponsored AppCall (server auto-accepts earlier)
+        try {
+          const chain = await p2pSponsoredService.markAsPaid(String(tradeId), '');
+          if (!chain.success) {
+            Alert.alert('Error', chain.error || 'Error on-chain al marcar como pagado');
+            throw new Error(chain.error || 'On-chain mark paid failed');
           }
+        } catch (e) {
+          console.warn('[P2P] markAsPaid on-chain error:', e);
+          throw e;
+        }
+        // Confirm payment sent using the new mutation
+        const { data } = await confirmTradeStep({
+          variables: {
+            input: {
+              tradeId: tradeId,
+              confirmationType: 'PAYMENT_SENT',
+              reference: '',
+              notes: 'Pago marcado como enviado por el comprador'
+            }
+          }
+        });
+        if (data?.confirmP2pTradeStep?.success) {
+          setCurrentTradeStep(3);
+          const systemMessage: Message = {
+            id: Date.now() + Math.random(),
+            sender: 'system',
+            text: '✅ Has marcado el pago como completado. El vendedor debe confirmar la recepción.',
+            timestamp: new Date(),
+            type: 'system',
+          };
+          setMessages(prev => [systemMessage, ...prev]);
+        } else {
+          const errorMessage = data?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al actualizar el estado';
+          Alert.alert('Error', errorMessage);
+          throw new Error(errorMessage);
         }
       });
-      
-      if (data?.confirmP2pTradeStep?.success) {
-        // Update local state to reflect new status
-        setCurrentTradeStep(3);
-        
-        // Add system message
-        const systemMessage: Message = {
-          id: Date.now() + Math.random(), // Use timestamp + random for unique ID
-          sender: 'system',
-          text: '✅ Has marcado el pago como completado. El vendedor debe confirmar la recepción.',
-          timestamp: new Date(),
-          type: 'system',
-        };
-        setMessages(prev => [systemMessage, ...prev]); // Add at beginning (descending order)
-        
-        // Refetch trade details to get updated status and escrow info
-        // Removed extra refetch: mutation cache update + WebSocket keep state in sync
-      } else {
-        const errorMessage = data?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al actualizar el estado';
-        Alert.alert('Error', errorMessage);
-      }
     } catch (error) {
       console.error('Error confirming payment sent:', error);
       Alert.alert('Error', 'No se pudo actualizar el estado del intercambio. Por favor intenta de nuevo.');
@@ -1584,167 +1775,87 @@ export const TradeChatScreen: React.FC = () => {
   
   const confirmReleaseFunds = async () => {
     try {
-      // First confirm payment received on-chain (sponsored AppCall)
-      try {
-        const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
-        const chain = await p2pSponsoredService.confirmReceived(String(tradeId));
-        if (!chain.success) {
-          Alert.alert('Error', chain.error || 'Error on-chain al liberar fondos');
-          return;
-        }
-      } catch (e) {
-        console.warn('[P2P] confirmReceived on-chain error:', e);
-      }
-      // Then reflect in app status
-      // First confirm payment received
-      const { data: confirmData } = await confirmTradeStep({
-        variables: {
-          input: {
-            tradeId: tradeId,
-            confirmationType: 'PAYMENT_RECEIVED',
-            notes: 'Pago confirmado por el vendedor'
+      await withBusy('Liberando fondos…', async () => {
+        // First confirm payment received on-chain (sponsored AppCall)
+        try {
+          const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
+          const chain = await p2pSponsoredService.confirmReceived(String(tradeId));
+          if (!chain.success) {
+            Alert.alert('Error', chain.error || 'Error on-chain al liberar fondos');
+            throw new Error(chain.error || 'On-chain confirm received failed');
           }
+        } catch (e) {
+          console.warn('[P2P] confirmReceived on-chain error:', e);
+          throw e;
         }
-      });
-      
-      if (confirmData?.confirmP2pTradeStep?.success) {
-        // Then immediately release the crypto
-        const { data } = await confirmTradeStep({
+        // Then reflect in app status
+        const { data: confirmData } = await confirmTradeStep({
           variables: {
             input: {
               tradeId: tradeId,
-              confirmationType: 'CRYPTO_RELEASED',
-              notes: 'Fondos liberados al comprador'
+              confirmationType: 'PAYMENT_RECEIVED',
+              notes: 'Pago confirmado por el vendedor'
             }
           }
         });
-      
-      if (data?.confirmP2pTradeStep?.success) {
-          // Update local state to reflect new status
-          setCurrentTradeStep(4);
-          
-          // Add system message
-          const systemMessage: Message = {
-            id: Date.now() + Math.random(), // Use timestamp + random for unique ID
-            sender: 'system',
-            text: '🎉 ¡Intercambio completado exitosamente! Los fondos han sido liberados.',
-            timestamp: new Date(),
-            type: 'system',
-          };
-          setMessages(prev => [systemMessage, ...prev]); // Add at beginning (descending order)
-          
-          // Show success alert and navigate to rating
-          Alert.alert(
-          '¡Éxito!',
-          'El intercambio se ha completado exitosamente. Los fondos han sido liberados al comprador.',
-          [
-            {
-              text: 'Calificar al comprador',
-              onPress: () => {
-                // Navigate to rating screen
-                const tradeData = tradeDetailsData?.p2pTrade;
-                
-                // Determine who is rating whom based on the current user's role
-                const iAmSeller = computedTradeType === 'sell';
-                
-                // Get counterparty information - handle both personal and business accounts
-                let counterpartyName = '';
-                let counterpartyInfo = null;
-                
-                if (iAmSeller) {
-                  // I'm the seller, so I rate the buyer
-                  if (tradeData?.buyerBusiness) {
-                    counterpartyName = tradeData.buyerBusiness.name;
-                    counterpartyInfo = tradeData.buyerBusiness;
-                  } else if (tradeData?.buyerUser) {
-                    counterpartyInfo = tradeData.buyerUser;
-                    counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Comprador';
-                  } else if (tradeData?.buyerDisplayName) {
-                    counterpartyName = tradeData.buyerDisplayName;
-                  } else {
-                    counterpartyName = 'Comprador';
-                  }
-                } else {
-                  // I'm the buyer, so I rate the seller (shouldn't happen here but handle it)
-                  if (tradeData?.sellerBusiness) {
-                    counterpartyName = tradeData.sellerBusiness.name;
-                    counterpartyInfo = tradeData.sellerBusiness;
-                  } else if (tradeData?.sellerUser) {
-                    counterpartyInfo = tradeData.sellerUser;
-                    counterpartyName = `${counterpartyInfo.firstName || ''} ${counterpartyInfo.lastName || ''}`.trim() || counterpartyInfo.username || 'Vendedor';
-                  } else if (tradeData?.sellerDisplayName) {
-                    counterpartyName = tradeData.sellerDisplayName;
-                  } else {
-                    counterpartyName = 'Vendedor';
-                  }
-                }
-                
-                // Get the actual stats for the counterparty
-                const counterpartyStats = iAmSeller 
-                  ? tradeData?.buyerStats 
-                  : tradeData?.sellerStats;
-                
-                console.log('🎯 Seller rating navigation - Stats debug:', {
-                  iAmSeller,
-                  tradeType: computedTradeType,
-                  buyerUser: tradeData?.buyerUser,
-                  buyerBusiness: tradeData?.buyerBusiness,
-                  sellerUser: tradeData?.sellerUser,
-                  sellerBusiness: tradeData?.sellerBusiness,
-                  buyerDisplayName: tradeData?.buyerDisplayName,
-                  sellerDisplayName: tradeData?.sellerDisplayName,
-                  counterpartyName,
-                  counterpartyStats,
-                });
-                
-                // Use the stats if available, otherwise fallback to default
-                const stats = counterpartyStats || {
-                  isVerified: false,
-                  completedTrades: 0,
-                  successRate: 0,
-                };
-                
-                // Check if already rated
-                if (tradeData?.hasRating) {
-                  Alert.alert('Ya calificado', 'Ya has calificado este intercambio.');
-                  return;
-                }
-                
-                navigation.navigate('TraderRating', {
-                  tradeId,
-                  trader: {
-                    name: counterpartyName,
-                    verified: stats.isVerified || false,
-                    completedTrades: stats.completedTrades || 0,
-                    successRate: stats.successRate || 0,
-                  },
-                  tradeDetails: {
-                    amount: amount,
-                    crypto: crypto,
-                    totalPaid: (parseFloat(amount) * parseFloat(offer.rate)).toFixed(2),
-                    method: tradeData?.paymentMethod?.displayName || 'N/A',
-                    date: formatLocalDate(new Date().toISOString()),
-                    duration: `${Math.floor((900 - timeRemaining) / 60)} minutos`,
-                  }
-                });
+        if (confirmData?.confirmP2pTradeStep?.success) {
+          const { data } = await confirmTradeStep({
+            variables: {
+              input: {
+                tradeId: tradeId,
+                confirmationType: 'CRYPTO_RELEASED',
+                notes: 'Fondos liberados al comprador'
               }
             }
-          ]
-        );
-        
-        // Refetch trade details to get updated status
-        // Removed extra refetch: mutation cache update + WebSocket keep state in sync
-      } else {
-        const errorMessage = data?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al liberar los fondos';
-        Alert.alert('Error', errorMessage);
-      }
-      } else {
-        const errorMessage = confirmData?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al confirmar el pago';
-        Alert.alert('Error', errorMessage);
-      }
-    } catch (error) {
-      console.error('Error releasing funds:', error);
-      Alert.alert('Error', 'No se pudieron liberar los fondos. Por favor intenta de nuevo.');
+          });
+          if (data?.confirmP2pTradeStep?.success) {
+            setCurrentTradeStep(4);
+            const systemMessage: Message = {
+              id: Date.now() + Math.random(),
+              sender: 'system',
+              text: '🎉 ¡Intercambio completado exitosamente! Los fondos han sido liberados.',
+              timestamp: new Date(),
+              type: 'system',
+            };
+            setMessages(prev => [systemMessage, ...prev]);
+            // Auto-navigate to rating (seller perspective here)
+            try {
+              const tradeData = tradeDetailsData?.p2pTrade;
+              const iAmBuyer = computedTradeTypeRef.current === 'buy';
+              const name = iAmBuyer
+                ? (tradeData?.sellerBusiness?.name || `${tradeData?.sellerUser?.firstName || ''} ${tradeData?.sellerUser?.lastName || ''}`.trim() || tradeData?.sellerUser?.username || 'Comerciante')
+                : (tradeData?.buyerBusiness?.name || `${tradeData?.buyerUser?.firstName || ''} ${tradeData?.buyerUser?.lastName || ''}`.trim() || tradeData?.buyerUser?.username || 'Comprador');
+              navigation.navigate('TraderRating', {
+                tradeId: String(tradeId),
+                trader: {
+                  name,
+                  verified: false,
+                  completedTrades: 0,
+                  successRate: 0,
+                },
+                tradeDetails: {
+                  amount,
+                  crypto,
+                  totalPaid: (parseFloat(amount) * parseFloat(offer.rate)).toFixed(2),
+                  method: tradeData?.paymentMethod?.displayName || 'N/A',
+                  date: formatLocalDate(new Date().toISOString()),
+                  duration: `${Math.floor((900 - timeRemaining) / 60)} minutos`,
+                }
+              });
+            } catch {}
+          } else {
+            const errorMessage = data?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al liberar fondos';
+            Alert.alert('Error', errorMessage);
+            throw new Error(errorMessage);
+          }
+        } else {
+          const err = confirmData?.confirmP2pTradeStep?.errors?.join(', ') || 'Error al confirmar pago recibido';
+          Alert.alert('Error', err);
+          throw new Error(err);
+        }
+      });
+    } catch (e) {
+      console.error('[P2P] confirmReleaseFunds error:', e);
     }
   };
 
@@ -1885,9 +1996,143 @@ export const TradeChatScreen: React.FC = () => {
     );
   };
 
+  // Seller CTA: Habilitar intercambio (explicit action)
+  const [enablingTrade, setEnablingTrade] = useState(false);
+  const handleEnableTrade = async () => {
+    try {
+      if (enablingTrade) return;
+      const trade = tradeDetailsData?.p2pTrade;
+      if (!trade) return;
+      // Only seller can enable
+      let isSeller = false;
+      if (activeAccount?.type === 'business') {
+        const sellerBizId = trade?.sellerBusiness?.id ? String(trade.sellerBusiness.id) : null;
+        const myBizId = activeAccount.business?.id ? String(activeAccount.business.id) : null;
+        isSeller = !!sellerBizId && !!myBizId && sellerBizId === myBizId;
+      } else {
+        const myUserId = userProfile?.id ? String(userProfile.id) : null;
+        const sellerUserId = trade?.sellerUser?.id ? String(trade.sellerUser.id) : (trade?.seller?.id ? String(trade.seller.id) : null);
+        isSeller = !!myUserId && !!sellerUserId && myUserId === sellerUserId;
+      }
+      if (!isSeller) return;
+
+      // Derive params
+      let token = (trade?.offer?.tokenType || trade?.escrow?.tokenType || String(crypto || '')).toString().toUpperCase() || 'CUSD';
+      if (token === 'Cusd') token = 'CUSD';
+      const amountFromTrade = trade?.cryptoAmount ? parseFloat(String(trade.cryptoAmount)) : NaN;
+      const amountFromRoute = typeof amount !== 'undefined' ? parseFloat(String(amount)) : NaN;
+      const amt = !isNaN(amountFromTrade) && amountFromTrade > 0 ? amountFromTrade : (!isNaN(amountFromRoute) ? amountFromRoute : NaN);
+      if (isNaN(amt) || amt <= 0) {
+        Alert.alert('Acción requerida', 'No se pudo determinar el monto del intercambio.');
+        return;
+      }
+
+      setEnablingTrade(true);
+      const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
+      const res = await withBusy('Habilitando intercambio…', async () =>
+        p2pSponsoredService.createEscrowIfSeller(String(tradeId), amt, token)
+      );
+      setEnablingTrade(false);
+      if (res?.success) {
+        Alert.alert('Listo', 'Intercambio habilitado. El comprador ya puede pagar.');
+        // Set local flag and refetch server/on-chain state
+        setEscrowEnabledLocal(true);
+        try {
+          await Promise.all([
+            refetchTradeDetails?.(),
+            refetchBoxExists?.(),
+          ]);
+        } catch {}
+      } else {
+        const msg = res?.error || 'No se pudo habilitar el intercambio.';
+        console.error('[P2P][EnableEscrow][ERROR]', { tradeId, token, amount: amt, error: msg });
+      }
+    } catch (e: any) {
+      setEnablingTrade(false);
+      console.error('[P2P][EnableEscrow][ERROR]', { tradeId, error: String(e?.message || e) });
+    }
+  };
+
+  // On-chain escrow sanity check (if DB says enabled but box might be missing)
+  // Robust role derivation for render-time gating
+  const iAmBuyerNow = (() => {
+    const trade = tradeDetailsData?.p2pTrade;
+    if (!trade) return computedTradeType === 'buy';
+    if (activeAccount?.type === 'business') {
+      const myBizId = activeAccount.business?.id ? String(activeAccount.business.id) : null;
+      const buyerBusinessId = trade?.buyerBusiness?.id ? String(trade.buyerBusiness.id) : null;
+      return !!myBizId && !!buyerBusinessId && myBizId === buyerBusinessId;
+    } else {
+      const myUserId = userProfile?.id ? String(userProfile.id) : null;
+      const buyerUserId = trade?.buyerUser?.id ? String(trade.buyerUser.id) : (trade?.buyer?.id ? String(trade.buyer.id) : null);
+      return !!myUserId && !!buyerUserId && myUserId === buyerUserId;
+    }
+  })();
+
+  const iAmSellerNow = (() => {
+    const trade = tradeDetailsData?.p2pTrade;
+    if (!trade) return computedTradeType === 'sell';
+    if (activeAccount?.type === 'business') {
+      const myBizId = activeAccount.business?.id ? String(activeAccount.business.id) : null;
+      const sellerBusinessId = trade?.sellerBusiness?.id ? String(trade.sellerBusiness.id) : null;
+      return !!myBizId && !!sellerBusinessId && myBizId === sellerBusinessId;
+    } else {
+      const myUserId = userProfile?.id ? String(userProfile.id) : null;
+      const sellerUserId = trade?.sellerUser?.id ? String(trade.sellerUser.id) : (trade?.seller?.id ? String(trade.seller.id) : null);
+      return !!myUserId && !!sellerUserId && myUserId === sellerUserId;
+    }
+  })();
+
+  // Proactively sync buyer's Algorand address on mount/context change so server auto-accept has the correct address
+  useEffect(() => {
+    const syncBuyerAddress = async () => {
+      try {
+        if (!iAmBuyerNow) return;
+        const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
+        const { default: algorandService } = await import('../services/algorandService');
+        const addr = algorandService.getCurrentAddress?.();
+        if (addr) {
+          await apollo.mutate({ mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS, variables: { algorandAddress: addr }, fetchPolicy: 'no-cache' });
+        }
+      } catch {}
+    };
+    syncBuyerAddress();
+  }, [iAmBuyerNow, activeAccount?.id]);
+
+  const sellerStepOne = iAmSellerNow && currentTradeStep === 1;
+  const { data: boxExistsData, refetch: refetchBoxExists } = useQuery(GET_P2P_ESCROW_BOX_EXISTS, {
+    variables: { tradeId: String(tradeId) },
+    skip: !tradeId,
+    fetchPolicy: 'no-cache',
+  });
+  const onChainBoxExists: boolean | undefined = boxExistsData?.p2pTradeBoxExists;
+  // DB flag can be stale across redeploys; use on-chain/local strictly for gating seller actions
+  const dbEscrowed = !!tradeDetailsData?.p2pTrade?.escrow?.isEscrowed;
+  const [escrowEnabledLocal, setEscrowEnabledLocal] = useState(false);
+  // For step gating, require on-chain (or local) escrow confirmation
+  const hasEscrowOnChainOrLocal = (onChainBoxExists === true) || escrowEnabledLocal;
+  const sellerNeedsEnable = sellerStepOne && !hasEscrowOnChainOrLocal;
+
+  // Only set local flag when on-chain confirms escrow (avoid DB-only stale state)
+  useEffect(() => {
+    if (onChainBoxExists === true && !escrowEnabledLocal) {
+      setEscrowEnabledLocal(true);
+    }
+  }, [onChainBoxExists, escrowEnabledLocal]);
+  const gatingLogRef = useRef<string>('');
+  useEffect(() => {
+    if (!DEBUG) return;
+    const snapshot = JSON.stringify({ sellerStepOne, dbEscrowed, onChainBoxExists, hasEscrowOnChainOrLocal, sellerNeedsEnable, currentTradeStep, computedTradeType });
+    if (snapshot !== gatingLogRef.current) {
+      gatingLogRef.current = snapshot;
+      console.log('[TradeChatScreen] Seller enable gating:', JSON.parse(snapshot));
+    }
+  }, [DEBUG, sellerStepOne, dbEscrowed, onChainBoxExists, sellerNeedsEnable, currentTradeStep, computedTradeType]);
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+      <LoadingOverlay visible={busy} message={busyText || 'Procesando…'} />
       
       {/* Header */}
       <View style={styles.headerRow}>
@@ -1930,12 +2175,44 @@ export const TradeChatScreen: React.FC = () => {
 
         {/* Right: Abandonar Button - Hidden during disputes */}
         {!isTradeDisputed && (
-          <TouchableOpacity 
-            style={styles.abandonButton}
-            onPress={handleAbandonTrade}
-          >
-            <Text style={styles.abandonButtonText}>Abandonar</Text>
-          </TouchableOpacity>
+          timeRemaining > 0 || !iAmSellerNow ? (
+            // Default action: Abandonar (both roles), while active or for buyers always
+            <TouchableOpacity 
+              style={styles.abandonButton}
+              onPress={handleAbandonTrade}
+            >
+              <Text style={styles.abandonButtonText}>Abandonar</Text>
+            </TouchableOpacity>
+          ) : (
+            // Seller-only after expiry: Recuperar fondos
+            secondsSinceExpiry >= GRACE_SECONDS ? (
+              <TouchableOpacity 
+                style={styles.abandonButton}
+                onPress={async () => {
+                  try {
+                    const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
+                    await withBusy('Recuperando fondos…', async () => {
+                      const res = await p2pSponsoredService.cancelExpired(String(tradeId));
+                      if (!res.success) {
+                        Alert.alert('Error', res.error || 'No se pudo recuperar los fondos');
+                        return;
+                      }
+                    });
+                    Alert.alert('Listo', 'Fondos recuperados correctamente.');
+                    navigation.navigate('BottomTabs', { screen: 'Exchange' });
+                  } catch (e) {
+                    Alert.alert('Error', 'No se pudo recuperar los fondos');
+                  }
+                }}
+              >
+                <Text style={styles.abandonButtonText}>Recuperar fondos</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={[styles.abandonButton, { backgroundColor: '#F3F4F6' }]}>
+                <Text style={[styles.abandonButtonText, { color: '#6B7280' }]}>Recuperar en {formatTime(GRACE_SECONDS - secondsSinceExpiry)}</Text>
+              </View>
+            )
+          )
         )}
       </View>
 
@@ -1953,9 +2230,9 @@ export const TradeChatScreen: React.FC = () => {
             </View>
             <View style={styles.tradeProgress}>
               <Text style={styles.stepIndicator}>Paso {currentTradeStep}/4</Text>
-              <View style={styles.timerBadge}>
-                <Text style={styles.timerText}>{formatTime(timeRemaining)}</Text>
-              </View>
+            <View style={[styles.timerBadge, timeRemaining <= 0 && styles.timerBadgeExpired]}>
+              <Text style={[styles.timerText, timeRemaining <= 0 && styles.timerTextExpired]}>{formatTime(timeRemaining)}</Text>
+            </View>
             </View>
           </View>
           
@@ -1998,9 +2275,24 @@ export const TradeChatScreen: React.FC = () => {
         </View>
       </TouchableWithoutFeedback>
 
+      {/* Seller explicit action: Habilitar intercambio (top banner) */}
+      {sellerNeedsEnable && (
+        <View style={{ backgroundColor: '#FFF7ED', borderTopWidth: 1, borderTopColor: '#FFEDD5', padding: 16 }}>
+          <Text style={{ color: '#9A3412', fontWeight: '600', marginBottom: 4 }}>Habilitar intercambio</Text>
+          <Text style={{ color: '#9A3412', marginBottom: 12 }}>
+            Guardaremos el monto de este intercambio. Solo se libera cuando confirmes el pago. Sin comisiones.
+          </Text>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+            <TouchableOpacity onPress={handleEnableTrade} disabled={enablingTrade} style={{ backgroundColor: colors.primary, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}>
+              <Text style={{ color: '#fff', fontWeight: '600' }}>{enablingTrade ? 'Procesando…' : 'Habilitar intercambio'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* Quick Actions - Key prop added to force re-render */}
       {/* For Buyers - Mark as Paid (show in step 2 - PAYMENT_PENDING status) */}
-      {currentTradeStep === 2 && computedTradeType === 'buy' && (
+      {currentTradeStep === 2 && iAmBuyerNow && timeRemaining > 0 && (
         <TouchableWithoutFeedback key={`mark-paid-${currentTradeStep}-${forceUpdate}`} onPress={Keyboard.dismiss}>
           <View style={styles.paymentActionBanner}>
             <View style={styles.paymentActionContent}>
@@ -2017,7 +2309,7 @@ export const TradeChatScreen: React.FC = () => {
       )}
       
       {/* For Sellers - Release Funds - Key prop added to force re-render */}
-      {currentTradeStep === 3 && computedTradeType === 'sell' && (
+      {currentTradeStep === 3 && iAmSellerNow && (
         <TouchableWithoutFeedback key={`release-funds-${currentTradeStep}-${forceUpdate}`} onPress={Keyboard.dismiss}>
           <View style={[styles.paymentActionBanner, { backgroundColor: '#D1FAE5' }]}>
             <View style={styles.paymentActionContent}>
@@ -2128,10 +2420,34 @@ export const TradeChatScreen: React.FC = () => {
                   Chat bloqueado durante la disputa. El equipo de soporte revisará este intercambio.
                 </Text>
               </View>
+            ) : sellerNeedsEnable ? (
+              <View style={styles.disputedInputContainer}>
+                <Icon name="lock" size={16} color={colors.primary} style={styles.disputedInputIcon} />
+                <Text style={[styles.disputedInputText, { color: colors.primary }]}>
+                  Habilita el intercambio para comenzar.
+                </Text>
+                <TouchableOpacity onPress={handleEnableTrade} disabled={enablingTrade} style={[styles.markAsPaidButton, { marginLeft: 8 }]}> 
+                  <Text style={{ color: '#fff', fontWeight: '600' }}>{enablingTrade ? 'Procesando…' : 'Habilitar'}</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (iAmSellerNow && currentTradeStep === 1 && hasEscrowOnChainOrLocal && !hasSharedPaymentDetails) ? (
+              // Lock seller input until seller shares payment details (accept is triggered from this action)
+              <View style={styles.disputedInputContainer}>
+                <Icon name="lock" size={16} color={colors.primary} style={styles.disputedInputIcon} />
+                <Text style={[styles.disputedInputText, { color: colors.primary }]}>
+                  Comparte tus datos de pago para iniciar el intercambio.
+                </Text>
+                <TouchableOpacity 
+                  onPress={handleSharePaymentDetails}
+                  style={[styles.markAsPaidButton, { marginLeft: 8 }]}
+                >
+                  <Text style={{ color: '#fff', fontWeight: '600' }}>Compartir</Text>
+                </TouchableOpacity>
+              </View>
             ) : (
               <View style={styles.inputRow}>
-          {/* Share Payment Details Button - Only show for seller in step 1 */}
-          {computedTradeType === 'sell' && currentTradeStep === 1 && (
+          {/* Share Payment Details Button - Seller in step 1 only after escrow confirmed on-chain (or just enabled locally) */}
+          {iAmSellerNow && currentTradeStep === 1 && (escrowEnabledLocal || onChainBoxExists === true) && (
             <TouchableOpacity 
               onPress={handleSharePaymentDetails}
               onLongPress={() => Alert.alert('Compartir Datos de Pago', 'Comparte los datos de tu método de pago seleccionado con el comprador')}
@@ -2273,7 +2589,12 @@ export const TradeChatScreen: React.FC = () => {
                       borderBottomWidth: index < availablePaymentAccounts.length - 1 ? 1 : 0,
                       borderBottomColor: '#E5E7EB',
                     }}
-                    onPress={() => sharePaymentDetailsWithAccount(item)}
+                    onPress={async () => {
+                      await withBusy('Compartiendo datos de pago…', async () => {
+                        await sharePaymentDetailsWithAccount(item);
+                      });
+                      setShowPaymentMethodSelector(false);
+                    }}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                       <View style={{
@@ -2476,10 +2797,19 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 12,
   },
+  timerBadgeExpired: {
+    backgroundColor: '#FEE2E2',
+    borderRadius: 9999,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
   timerText: {
     fontSize: 12,
     color: '#065F46',
     fontWeight: '600',
+  },
+  timerTextExpired: {
+    color: '#991B1B',
   },
   tradeStatusFooter: {
     flexDirection: 'row',
@@ -2885,7 +3215,37 @@ const styles = StyleSheet.create({
     color: '#7F1D1D',
     lineHeight: 16,
   },
+  // Full-screen loading modal styles
+  loadingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    width: '80%',
+    maxWidth: 320,
+    alignItems: 'center',
+  },
+  loadingTitle: {
+    marginTop: 12,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    textAlign: 'center',
+  },
+  loadingHint: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#6B7280',
+    textAlign: 'center',
+  },
   disputedInputContainer: {
+    // Match the existing bottom blocker style (simple, unobtrusive)
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2899,5 +3259,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#DC2626',
     textAlign: 'center',
+    marginRight: 8,
+    flexShrink: 1,
   },
 }); 

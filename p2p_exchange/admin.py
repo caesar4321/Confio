@@ -336,53 +336,93 @@ class DisputedTradeFilter(admin.SimpleListFilter):
 
 @admin.register(P2PTrade)
 class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
-    list_display = ['id', 'crypto_amount_display', 'country_display', 'trade_summary', 'status_display', 'dispute_indicator', 'time_remaining', 'created_at', 'completed_at']
+    list_display = ['id', 'crypto_amount_display', 'country_display', 'trade_summary', 'status_display', 'escrow_status_display', 'dispute_indicator', 'time_remaining', 'created_at', 'completed_at']
     list_filter = [DisputedTradeFilter, 'status', 'created_at', 'completed_at', 'offer__token_type', 'country_code', 'payment_method']
     search_fields = [
         'id', 'buyer_user__username', 'seller_user__username', 'offer__user__username',
         'buyer_business__name', 'seller_business__name', 'payment_reference'
     ]
-    readonly_fields = ['created_at', 'updated_at', 'crypto_amount_display', 'country_display', 'status_display', 'time_remaining', 'trade_summary', 'rating_link', 'dispute_link']
+    readonly_fields = [
+        'created_at', 'updated_at', 'crypto_amount_display', 'country_display', 'status_display', 'time_remaining', 'trade_summary', 'rating_link', 'dispute_link',
+        'escrow_status_display', 'escrow_amount_display', 'escrow_token_display', 'escrow_tx_hash_display', 'escrow_released_tx_hash_display', 'escrow_escrowed_at_display', 'escrow_released_at_display',
+        'onchain_escrow_sanity'
+    ]
+    readonly_fields = ['created_at', 'updated_at', 'crypto_amount_display', 'country_display', 'status_display', 'time_remaining', 'trade_summary', 'rating_link', 'dispute_link',
+                      'escrow_status_display', 'escrow_amount_display', 'escrow_token_display', 'escrow_tx_hash_display', 'escrow_released_tx_hash_display', 'escrow_escrowed_at_display', 'escrow_released_at_display',
+                      'onchain_escrow_sanity']
     list_per_page = 50
     date_hierarchy = 'created_at'
     actions = ['mark_as_completed', 'mark_as_disputed', 'resolve_dispute']
     
-    fieldsets = (
-        ('Trade Parties', {
-            'fields': (
-                ('buyer_user', 'buyer_business'),
-                ('seller_user', 'seller_business'),
-            )
-        }),
-        ('Trade Details', {
-            'fields': (
-                'offer',
-                ('crypto_amount', 'crypto_amount_display'),
-                ('fiat_amount', 'fiat_amount_display'),
-                'rate_used',
-                ('country_code', 'currency_code'),
-                'payment_method',
-            ),
-            'description': 'Trade amounts and currencies'
-        }),
-        ('Status & Timing', {
-            'fields': (
-                'status',
-                'expires_at',
-                ('payment_reference', 'payment_notes'),
-                'crypto_transaction_hash',
-                ('created_at', 'completed_at'),
-            )
-        }),
-        ('Rating', {
-            'fields': ('rating_link',),
-            'classes': ('collapse',)
-        }),
-        ('Metadata', {
-            'fields': ('updated_at',),
-            'classes': ('collapse',)
-        }),
-    )
+    # Fieldsets are defined below (Spanish localized variant)
+
+    # ===== Escrow helpers for admin =====
+    def _escrow(self, obj):
+        try:
+            return obj.escrow
+        except Exception:
+            return None
+
+    def escrow_status_display(self, obj):
+        """DB-only escrow status for list views (fast)."""
+        e = self._escrow(obj)
+        if not e:
+            return format_html('<span style="color:#6B7280; font-weight:600;">❌ Sin escrow</span>')
+        if e.is_escrowed and not e.is_released:
+            return format_html('<span style="color:#2563EB; font-weight:600;">🔒 En custodia</span>')
+        if e.is_released:
+            return format_html('<span style="color:#10B981; font-weight:600;">✅ Liberado ({})</span>', e.get_release_type_display() if hasattr(e, 'get_release_type_display') else e.release_type)
+        return format_html('<span style="color:#6B7280; font-weight:600;">⏳ Pendiente</span>')
+    escrow_status_display.short_description = 'Escrow'
+
+    def escrow_amount_display(self, obj):
+        e = self._escrow(obj)
+        return f"{e.escrow_amount:,.2f}" if e else '-'
+    escrow_amount_display.short_description = 'Monto'
+
+    def escrow_token_display(self, obj):
+        e = self._escrow(obj)
+        return e.token_type if e else '-'
+    escrow_token_display.short_description = 'Token'
+
+    def escrow_tx_hash_display(self, obj):
+        e = self._escrow(obj)
+        if e and e.escrow_transaction_hash:
+            return format_html('<code style="font-size:11px;">{}</code>', e.escrow_transaction_hash)
+        return '-'
+    escrow_tx_hash_display.short_description = 'Tx Escrow'
+
+    def escrow_released_tx_hash_display(self, obj):
+        e = self._escrow(obj)
+        if e and e.release_transaction_hash:
+            return format_html('<code style="font-size:11px;">{}</code>', e.release_transaction_hash)
+        return '-'
+    escrow_released_tx_hash_display.short_description = 'Tx Liberación'
+
+    def escrow_escrowed_at_display(self, obj):
+        e = self._escrow(obj)
+        return e.escrowed_at.strftime('%Y-%m-%d %H:%M') if (e and e.escrowed_at) else '-'
+    escrow_escrowed_at_display.short_description = 'En custodia desde'
+
+    def escrow_released_at_display(self, obj):
+        e = self._escrow(obj)
+        return e.released_at.strftime('%Y-%m-%d %H:%M') if (e and e.released_at) else '-'
+    escrow_released_at_display.short_description = 'Liberado en'
+
+    # Detail-only on-chain sanity check (read-only; may incur latency)
+    def onchain_escrow_sanity(self, obj):
+        try:
+            from django.conf import settings
+            from algosdk.v2client import algod
+            client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            app_id = getattr(settings, 'ALGORAND_P2P_TRADE_APP_ID', 0)
+            if not app_id:
+                return mark_safe('<span style="color:#6B7280;">Config sin app_id</span>')
+            client.application_box_by_name(app_id, str(obj.id).encode('utf-8'))
+            return mark_safe('<span style="color:#2563EB; font-weight:600;">On-chain: caja presente</span>')
+        except Exception:
+            return mark_safe('<span style="color:#EF4444; font-weight:600;">On-chain: sin caja</span>')
+    onchain_escrow_sanity.short_description = 'Sanidad on-chain'
     
     def buyer_entity_display(self, obj):
         """Display buyer entity (User or Business) using new direct relationships"""
@@ -674,6 +714,16 @@ class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
             'fields': ('payment_reference', 'payment_notes'),
             'description': 'Referencia de pago y notas adicionales'
         }),
+        ('🔒 Escrow', {
+            'fields': (
+                'escrow_status_display',
+                ('escrow_amount_display', 'escrow_token_display'),
+                ('escrow_tx_hash_display', 'escrow_released_tx_hash_display'),
+                ('escrow_escrowed_at_display', 'escrow_released_at_display'),
+                'onchain_escrow_sanity',
+            ),
+            'description': 'Estado de la custodia on-chain y detalles relacionados'
+        }),
         ('🚨 Gestión de Disputas', {
             'fields': ('dispute_link',),
             'description': 'Enlace a detalles de disputa si existe'
@@ -692,6 +742,20 @@ class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
             'description': 'Campos antiguos - no usar para nuevos registros'
         }),
     )
+
+    def onchain_escrow_sanity(self, obj):
+        try:
+            from django.conf import settings
+            from algosdk.v2client import algod
+            client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            app_id = getattr(settings, 'ALGORAND_P2P_TRADE_APP_ID', 0)
+            if not app_id:
+                return mark_safe('<span style="color:#6B7280;">Config sin app_id</span>')
+            client.application_box_by_name(app_id, str(obj.id).encode('utf-8'))
+            return mark_safe('<span style="color:#2563EB; font-weight:600;">On-chain: caja presente</span>')
+        except Exception:
+            return mark_safe('<span style="color:#EF4444; font-weight:600;">On-chain: sin caja</span>')
+    onchain_escrow_sanity.short_description = 'Sanidad on-chain'
     
     # Admin actions
     def mark_as_completed(self, request, queryset):

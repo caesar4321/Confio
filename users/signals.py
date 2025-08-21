@@ -122,7 +122,8 @@ def create_unified_transaction_from_p2p_trade(p2p_trade):
     try:
         # Get offer details
         offer = p2p_trade.offer
-        token_type = offer.token_type if offer else 'cUSD'
+        # Normalize token type to match UnifiedTransactionTable choices (CUSD, CONFIO, USDC)
+        token_type = (offer.token_type if offer and offer.token_type else 'CUSD').upper()
         
         # Determine sender/counterparty based on trade type
         # In P2P trades, the crypto sender is always the "sender" in unified transactions
@@ -154,6 +155,14 @@ def create_unified_transaction_from_p2p_trade(p2p_trade):
         
         description = f"Intercambio P2P: {p2p_trade.crypto_amount} {token_type} por {p2p_trade.fiat_amount} {p2p_trade.currency_code}"
         
+        # Attempt to include blockchain tx hash from escrow release when available
+        release_tx = ''
+        try:
+            if hasattr(p2p_trade, 'escrow') and p2p_trade.escrow and p2p_trade.escrow.release_transaction_hash:
+                release_tx = p2p_trade.escrow.release_transaction_hash
+        except Exception:
+            release_tx = ''
+
         unified, created = UnifiedTransactionTable.objects.update_or_create(
             p2p_trade=p2p_trade,
             defaults={
@@ -161,7 +170,7 @@ def create_unified_transaction_from_p2p_trade(p2p_trade):
                 'amount': str(p2p_trade.crypto_amount),
                 'token_type': token_type,
                 'status': 'CONFIRMED',  # P2P trades are confirmed when they appear
-                'transaction_hash': '',
+                'transaction_hash': release_tx or '',
                 'error_message': '',
                 
                 # Sender info

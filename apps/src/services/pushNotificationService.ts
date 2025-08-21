@@ -215,7 +215,9 @@ export class PushNotificationService {
               params: { 
                 trade: { 
                   id: tradeId 
-                } 
+                },
+                // Allow TradeChatScreen to auto-switch context only for push-origin navigation
+                allowAccountSwitch: true
               }
             } as never);
           } else {
@@ -225,7 +227,8 @@ export class PushNotificationService {
               RootNavigation.navigate('ActiveTrade' as never, { 
                 trade: { 
                   id: tradeId 
-                } 
+                },
+                allowAccountSwitch: true
               } as never);
             }, 1000);
           }

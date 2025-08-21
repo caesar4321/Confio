@@ -622,10 +622,10 @@ class P2PEscrow(SoftDeleteModel):
     """Escrow records for P2P trades (for future Sui blockchain integration)"""
     
     RELEASE_TYPES = [
-        ('NORMAL', 'Normal Release to Seller'),      # Standard trade completion
-        ('REFUND', 'Refund to Buyer'),              # Full refund due to dispute/cancellation
-        ('PARTIAL_REFUND', 'Partial Refund'),       # Split payment after dispute
-        ('DISPUTE_RELEASE', 'Dispute Release to Seller'),  # Dispute resolved in favor of seller
+        ('NORMAL', 'Normal Release to Buyer'),       # Standard trade completion (crypto released to buyer)
+        ('REFUND', 'Refund to Seller'),              # Refund back to seller (trade cancelled/expired)
+        ('PARTIAL_REFUND', 'Partial Refund'),        # Split payment after dispute
+        ('DISPUTE_RELEASE', 'Dispute Release to Buyer'),  # Dispute resolved in favor of buyer
     ]
     
     trade = models.OneToOneField(P2PTrade, on_delete=models.CASCADE, related_name='escrow')

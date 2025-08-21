@@ -198,8 +198,9 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   }
 });
 
+const AUTH_DEBUG = false; // Toggle verbose auth logs
 const authLink = setContext(async (operation, previousContext) => {
-  console.log('AuthLink called for operation:', operation.operationName);
+  if (AUTH_DEBUG) console.log('AuthLink called for operation:', operation.operationName);
   
   // Extract headers from previous context
   const { headers = {} } = previousContext || {};
@@ -209,7 +210,7 @@ const authLink = setContext(async (operation, previousContext) => {
   // Check if we should skip authentication (for login mutations)
   // The custom context is passed through previousContext when using mutation context option
   if (previousContext?.skipAuth) {
-    console.log('Skipping authentication for operation:', operation.operationName);
+    if (AUTH_DEBUG) console.log('Skipping authentication for operation:', operation.operationName);
     return { 
       headers: {
         ...headers,
@@ -221,7 +222,7 @@ const authLink = setContext(async (operation, previousContext) => {
 
   // Skip token refresh for the refresh token mutation itself
   if (operation.operationName === 'RefreshToken') {
-    console.log('Skipping token refresh for RefreshToken operation');
+    if (AUTH_DEBUG) console.log('Skipping token refresh for RefreshToken operation');
     return { 
       headers: {
         ...headers,
@@ -231,7 +232,7 @@ const authLink = setContext(async (operation, previousContext) => {
   }
 
   try {
-    console.log('Attempting to retrieve tokens from Keychain:', {
+    if (AUTH_DEBUG) console.log('Attempting to retrieve tokens from Keychain:', {
       service: AUTH_KEYCHAIN_SERVICE,
       username: AUTH_KEYCHAIN_USERNAME
     });
@@ -273,7 +274,7 @@ const authLink = setContext(async (operation, previousContext) => {
     // Type assertion to handle the false | UserCredentials type
     const userCredentials = credentials as any;
     
-    console.log('Found credentials in Keychain:', {
+    if (AUTH_DEBUG) console.log('Found credentials in Keychain:', {
       hasPassword: !!userCredentials.password,
       passwordLength: userCredentials.password?.length
     });
@@ -284,7 +285,7 @@ const authLink = setContext(async (operation, previousContext) => {
     try {
       // Parse tokens from JSON
       const tokens = JSON.parse(userCredentials.password);
-      console.log('Parsed tokens:', {
+      if (AUTH_DEBUG) console.log('Parsed tokens:', {
         hasAccessToken: !!tokens.accessToken,
         hasRefreshToken: !!tokens.refreshToken,
         accessTokenLength: tokens.accessToken?.length,
@@ -313,7 +314,7 @@ const authLink = setContext(async (operation, previousContext) => {
     // Check if token is expired or about to expire (within 5 minutes)
     try {
       const decoded = jwtDecode<CustomJwtPayload>(token);
-      console.log('Decoded token payload:', {
+      if (AUTH_DEBUG) console.log('Decoded token payload:', {
         user_id: decoded.user_id,
         exp: decoded.exp,
         type: decoded.type,
@@ -324,7 +325,7 @@ const authLink = setContext(async (operation, previousContext) => {
       const fiveMinutes = 5 * 60; // 5 minutes in seconds
       
       if (decoded.exp && (decoded.exp < currentTime || decoded.exp - currentTime < fiveMinutes)) {
-        console.log('Token expired or about to expire, refreshing...');
+        if (AUTH_DEBUG) console.log('Token expired or about to expire, refreshing...');
         
         // Only refresh if we're not already refreshing
         if (!isRefreshing) {
@@ -423,10 +424,10 @@ const authLink = setContext(async (operation, previousContext) => {
       }
 
       // Always include the token in the header for authenticated requests
-      console.log('Including JWT token in request header');
+      if (AUTH_DEBUG) console.log('Including JWT token in request header');
       
       // Log the token payload to verify account context
-      console.log('Token contains account context:', {
+      if (AUTH_DEBUG) console.log('Token contains account context:', {
         account_type: decoded.account_type ?? 'not present',
         account_index: decoded.account_index ?? 'not present',
         business_id: decoded.business_id ?? 'not present'

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, Easing, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Dimensions, Easing, ActivityIndicator } from 'react-native';
+import LoadingOverlay from '../components/LoadingOverlay';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { appleAuth } from '@invertase/react-native-apple-authentication';
 import authService from '../services/authService';
@@ -229,35 +230,7 @@ export const AuthScreen = () => {
         </View>
       </View>
       
-      {/* Loading Overlay */}
-      <Modal
-        visible={isLoading}
-        transparent={true}
-        animationType="fade"
-        statusBarTranslucent={true}
-      >
-        <View style={styles.loadingOverlay}>
-          <View style={styles.loadingCard}>
-            {/* Animated Confío Logo */}
-            <Animated.View style={{ transform: [{ rotate: spin }] }}>
-              <Image
-                source={require('../assets/png/CONFIO.png')}
-                style={styles.loadingLogo}
-              />
-            </Animated.View>
-            
-            {/* Loading Message */}
-            <Text style={styles.loadingText}>{loadingMessage}</Text>
-            
-            {/* Progress Dots Animation */}
-            <View style={styles.dotsContainer}>
-              <View style={[styles.dot, { backgroundColor: colors.confioGreen }]} />
-              <View style={[styles.dot, { backgroundColor: colors.confioGreen, opacity: 0.6 }]} />
-              <View style={[styles.dot, { backgroundColor: colors.confioGreen, opacity: 0.3 }]} />
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <LoadingOverlay visible={isLoading} message={loadingMessage} />
     </View>
   );
 };

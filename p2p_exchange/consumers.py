@@ -186,6 +186,9 @@ class TradeChatConsumer(AsyncWebsocketConsumer):
             'payment_reference': event.get('payment_reference', ''),
             'payment_notes': event.get('payment_notes', ''),
         }
+        # Include expires_at if provided by the broadcaster (aligns client timer immediately)
+        if 'expires_at' in event and event['expires_at']:
+            message_data['expires_at'] = event['expires_at']
         
         await self.send(text_data=json.dumps(message_data))
 
