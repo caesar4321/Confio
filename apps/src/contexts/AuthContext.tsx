@@ -164,7 +164,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           currentAccountType: 'personal'
         });
       } else if (accountType === 'business' && businessId) {
-        // Fetch business profile
+        // Fetch only business profile in business context
         const { data } = await apolloClient.query({
           query: GET_BUSINESS_PROFILE,
           variables: { businessId },
@@ -246,11 +246,9 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             }
           }
           
-          if (accountContext.type === 'business') {
-            // For business accounts, we need to get the business ID from the server
-            // We'll load the personal profile first, then the business profile will be loaded
-            // when the account manager loads the accounts from the server
-            await refreshProfile('personal');
+          // Load the correct profile for the active context to avoid a "personal" flash
+          if (accountContext.type === 'business' && accountContext.businessId) {
+            await refreshProfile('business', accountContext.businessId);
           } else {
             await refreshProfile('personal');
           }

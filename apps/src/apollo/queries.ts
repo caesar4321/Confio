@@ -991,6 +991,13 @@ export const GET_P2P_TRADE = gql`
   }
 `;
 
+// Check on-chain box existence for P2P trade (escrow sanity)
+export const GET_P2P_ESCROW_BOX_EXISTS = gql`
+  query GetP2PEscrowBoxExists($tradeId: String!) {
+    p2pTradeBoxExists(tradeId: $tradeId)
+  }
+`;
+
 export const GET_P2P_TRADE_MESSAGES = gql`
   query GetP2PTradeMessages($tradeId: ID!) {
     p2pTradeMessages(tradeId: $tradeId) {

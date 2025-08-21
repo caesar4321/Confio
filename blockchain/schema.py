@@ -36,6 +36,7 @@ class Query(graphene.ObjectType):
     """Blockchain-related queries"""
     check_asset_opt_ins = graphene.Field(CheckAssetOptInsQuery)
     check_sponsor_health = graphene.Field(CheckSponsorHealthQuery)
+    p2p_trade_box_exists = graphene.Field(graphene.Boolean, trade_id=graphene.String(required=True))
     invite_receipt_for_phone = graphene.Field(
         InviteReceiptType,
         phone=graphene.String(required=True),
@@ -47,6 +48,20 @@ class Query(graphene.ObjectType):
     
     def resolve_check_sponsor_health(self, info):
         return CheckSponsorHealthQuery()
+
+    def resolve_p2p_trade_box_exists(self, info, trade_id: str):
+        """Return True if the P2P trade box exists on-chain for the given trade_id."""
+        try:
+            from algosdk.v2client import algod
+            client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            app_id = getattr(settings, 'ALGORAND_P2P_TRADE_APP_ID', 0)
+            if not app_id:
+                return False
+            # Will raise if not found
+            client.application_box_by_name(app_id, trade_id.encode('utf-8'))
+            return True
+        except Exception:
+            return False
 
     def resolve_invite_receipt_for_phone(self, info, phone, phone_country=None):
         user = info.context.user
@@ -86,10 +101,15 @@ class Mutation(graphene.ObjectType):
     prepare_p2p_create_trade = P2PTradeMutations.prepare_p2p_create_trade
     submit_p2p_create_trade = P2PTradeMutations.submit_p2p_create_trade
     accept_p2p_trade = P2PTradeMutations.accept_p2p_trade
+    prepare_p2p_accept_trade = P2PTradeMutations.prepare_p2p_accept_trade
+    submit_p2p_accept_trade = P2PTradeMutations.submit_p2p_accept_trade
     mark_p2p_trade_paid = P2PTradeMutations.mark_p2p_trade_paid
     confirm_p2p_trade_received = P2PTradeMutations.confirm_p2p_trade_received
     prepare_p2p_mark_paid = P2PTradePrepareMutations.prepare_p2p_mark_paid
     prepare_p2p_confirm_received = P2PTradePrepareMutations.prepare_p2p_confirm_received
+    # Cancel expired trades
+    prepare_p2p_cancel = P2PTradePrepareMutations.prepare_p2p_cancel
+    cancel_p2p_trade = P2PTradeMutations.cancel_p2p_trade
 
 
 __all__ = ['Query', 'Mutation']

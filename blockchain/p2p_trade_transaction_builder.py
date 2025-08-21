@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
+import logging
 from typing import Dict, List, Optional
 
 from django.conf import settings
@@ -18,6 +19,7 @@ from algosdk.v2client import algod
 from algosdk import encoding as algo_encoding
 from algosdk import transaction
 from algosdk.logic import get_application_address
+from algosdk import abi
 from algosdk.abi import Contract
 from algosdk.atomic_transaction_composer import (
     AtomicTransactionComposer,
@@ -54,6 +56,7 @@ class P2PTradeTransactionBuilder:
     """Builds sponsored transaction groups for P2P trade operations."""
 
     def __init__(self):
+        self.logger = logging.getLogger(__name__)
         # Algod client
         self.algod_address = settings.ALGORAND_ALGOD_ADDRESS
         self.algod_token = settings.ALGORAND_ALGOD_TOKEN
@@ -111,9 +114,21 @@ class P2PTradeTransactionBuilder:
             except Exception:
                 return BuildResult(False, error=f'P2P app not opted into asset {asset_id}')
             try:
-                self.algod_client.account_asset_info(seller_address, asset_id)
-            except Exception:
-                return BuildResult(False, error=f'Seller not opted into asset {asset_id}')
+                seller_asset = self.algod_client.account_asset_info(seller_address, asset_id)
+                # Ensure seller is opted-in and has sufficient balance to escrow
+                holding = (seller_asset or {}).get('asset-holding') or {}
+                seller_balance = int(holding.get('amount', 0))
+                self.logger.info('[P2P Builder] Seller asset check: addr=%s asset=%s balance=%s network=%s', seller_address, asset_id, seller_balance, getattr(settings, 'ALGORAND_NETWORK', 'unknown'))
+                if seller_balance <= 0:
+                    return BuildResult(False, error=f'Seller not opted into asset {asset_id} on {getattr(settings, "ALGORAND_NETWORK", "unknown")} (address {seller_address})')
+                if seller_balance < amount:
+                    # Convert to token units (assumes 6 decimals for cUSD/CONFIO)
+                    need = amount / 1_000_000
+                    have = seller_balance / 1_000_000
+                    return BuildResult(False, error=f'Insufficient {token} balance: need {need:.6f}, have {have:.6f} on {getattr(settings, "ALGORAND_NETWORK", "unknown")} (address {seller_address})')
+            except Exception as e:
+                self.logger.info('[P2P Builder] Seller asset check failed: addr=%s asset=%s error=%r', seller_address, asset_id, e)
+                return BuildResult(False, error=f'Unable to verify seller balance for asset {asset_id} on {getattr(settings, "ALGORAND_NETWORK", "unknown")} (address {seller_address})')
 
             # Calculate MBR for trade_id box
             key_len = len(trade_id.encode())
@@ -124,33 +139,30 @@ class P2PTradeTransactionBuilder:
             params = self.algod_client.suggested_params()
             min_fee = getattr(params, 'min_fee', 1000) or 1000
 
+            # Build with ATC to correctly pass the AXFER txn as ABI arg
             atc = AtomicTransactionComposer()
 
-            # Tx 0: Sponsor fee-bump (0 ALGO) to app (covers group fees via fee pooling)
-            sp0 = transaction.SuggestedParams(fee=min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
-            pay0 = transaction.PaymentTxn(sender=self.sponsor_address, sp=sp0, receiver=self.app_address, amt=0, note=b'P2P sponsor')
-            atc.add_transaction(TransactionWithSigner(pay0, AccountTransactionSigner('0'*64)))
-
-            # Tx 1: Sponsor MBR payment for trade box
-            sp1 = transaction.SuggestedParams(fee=min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            # Tx 0: Sponsor MBR payment for trade box (must be first, consumed as gtxn 0 in app logic)
+            sp1 = transaction.SuggestedParams(fee=3*min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
             pay1 = transaction.PaymentTxn(sender=self.sponsor_address, sp=sp1, receiver=self.app_address, amt=mbr, note=b'P2P trade MBR')
             atc.add_transaction(TransactionWithSigner(pay1, AccountTransactionSigner('0'*64)))
 
-            # Tx 2: AXFER from seller to app (fee=0)
+            # Tx 1: AXFER from seller to app (fee=0)
             sp2 = transaction.SuggestedParams(fee=0, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
             axfer = transaction.AssetTransferTxn(sender=seller_address, sp=sp2, receiver=self.app_address, amt=amount, index=asset_id)
 
-            # Tx 3: App call by sponsor with ABI (create_trade)
+            # Tx 2: App call by SELLER with ABI (create_trade)
             method = self._method('create_trade')
             if method is None:
                 return BuildResult(False, error='ABI method create_trade not found')
-            sp3 = transaction.SuggestedParams(fee=2*min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
-            # Add method call with seller in accounts to mark actual_seller
+            # Set fee 0 here; sponsor payment covers total group fee budget
+            sp3 = transaction.SuggestedParams(fee=0, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
             atc.add_method_call(
                 app_id=self.app_id,
                 method=method,
-                sender=self.sponsor_address,
+                sender=seller_address,
                 sp=sp3,
+                # Placeholder signer; we will return the unsigned tx for client to sign
                 signer=AccountTransactionSigner('0'*64),
                 method_args=[trade_id, TransactionWithSigner(axfer, _NoopSigner())],
                 accounts=[seller_address],
@@ -158,30 +170,45 @@ class P2PTradeTransactionBuilder:
                 boxes=[(0, trade_id.encode())],
             )
 
-            # Build group
+            # Build group and ensure accounts are present on appcall
             tws = atc.build_group()
+            try:
+                ensured = False
+                for tw in tws:
+                    tx = tw.txn
+                    if isinstance(tx, transaction.ApplicationCallTxn) and not getattr(tx, 'accounts', None):
+                        tx.accounts = [seller_address]
+                        ensured = True
+                if ensured:
+                    self.logger.info('[P2P Builder] Ensured seller address present in app-call accounts')
+            except Exception:
+                pass
+
             gid = transaction.calculate_group_id([t.txn for t in tws])
 
             sponsor_txs: List[Dict] = []
             user_txs: List[Dict] = []
-            # Identify the AXFER by type and sender, do not rely on fixed index
+            # Identify indices to mark user-signed
             axfer_index = None
+            app_index = None
             for idx, tw in enumerate(tws):
-                tx = tw.txn
-                if isinstance(tx, transaction.AssetTransferTxn) and tx.sender == seller_address:
+                if isinstance(tw.txn, transaction.AssetTransferTxn) and tw.txn.sender == seller_address:
                     axfer_index = idx
-                    break
+                if isinstance(tw.txn, transaction.ApplicationCallTxn) and tw.txn.sender == seller_address:
+                    app_index = idx
             if axfer_index is None:
                 return BuildResult(False, error='AXFER transaction not found in group')
+            if app_index is None:
+                return BuildResult(False, error='AppCall transaction not found in group')
 
             for idx, tw in enumerate(tws):
-                tx = tw.txn
-                b64 = algo_encoding.msgpack_encode(tx)
-                entry = {'txn': b64, 'signed': None, 'index': idx}
+                b64 = algo_encoding.msgpack_encode(tw.txn)
                 if idx == axfer_index:
                     user_txs.append({'txn': b64, 'signers': [seller_address], 'message': 'Deposit assets to P2P escrow'})
+                elif idx == app_index:
+                    user_txs.append({'txn': b64, 'signers': [seller_address], 'message': 'Create trade (AppCall)'})
                 else:
-                    sponsor_txs.append(entry)
+                    sponsor_txs.append({'txn': b64, 'signed': None, 'index': idx})
 
             return BuildResult(
                 success=True,
@@ -209,7 +236,9 @@ class P2PTradeTransactionBuilder:
             atc = AtomicTransactionComposer()
 
             # Optional fee-bump payment (0 ALGO) just to robustly cover fee pooling across SDKs
-            sp0 = transaction.SuggestedParams(fee=min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            # Group has 2 txns (sponsor pay + buyer app call). Use fee pooling by
+            # setting sponsor fee to cover both min fees to avoid 1000<->2000 errors.
+            sp0 = transaction.SuggestedParams(fee=2*min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
             pay0 = transaction.PaymentTxn(sender=self.sponsor_address, sp=sp0, receiver=self.app_address, amt=0, note=b'P2P accept')
             atc.add_transaction(TransactionWithSigner(pay0, AccountTransactionSigner('0'*64)))
 
@@ -217,6 +246,8 @@ class P2PTradeTransactionBuilder:
             if method is None:
                 return BuildResult(False, error='ABI method accept_trade not found')
             sp1 = transaction.SuggestedParams(fee=min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            # Include both common assets to satisfy asset_holding_get availability in app logic
+            foreign_assets = [a for a in [self.cusd_asset_id, self.confio_asset_id] if a]
             atc.add_method_call(
                 app_id=self.app_id,
                 method=method,
@@ -225,6 +256,7 @@ class P2PTradeTransactionBuilder:
                 signer=AccountTransactionSigner('0'*64),
                 method_args=[trade_id],
                 accounts=[buyer_address],  # actual_buyer inferred on-chain
+                foreign_assets=foreign_assets,
                 boxes=[(0, trade_id.encode())],
             )
 
@@ -235,13 +267,60 @@ class P2PTradeTransactionBuilder:
         except Exception as e:
             return BuildResult(False, error=str(e))
 
+    def build_accept_trade_user(
+        self,
+        buyer_address: str,
+        trade_id: str,
+    ) -> BuildResult:
+        """Build [Payment(sponsor fee-bump), AppCall(buyer)] so buyer is txn.Sender.
+
+        This guarantees buyer is written correctly even if the approval uses txn.Sender.
+        """
+        try:
+            params = self.algod_client.suggested_params()
+            min_fee = getattr(params, 'min_fee', 1000) or 1000
+
+            atc = AtomicTransactionComposer()
+            # Fee bump
+            sp0 = transaction.SuggestedParams(fee=2*min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            pay = transaction.PaymentTxn(sender=self.sponsor_address, sp=sp0, receiver=self.app_address, amt=0, note=b'P2P accept user')
+            atc.add_transaction(TransactionWithSigner(pay, AccountTransactionSigner('0'*64)))
+
+            method = self._method('accept_trade')
+            if method is None:
+                return BuildResult(False, error='ABI method accept_trade not found')
+            sp1 = transaction.SuggestedParams(fee=min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            # Include both common assets to satisfy asset_holding_get availability in app logic
+            foreign_assets = [a for a in [self.cusd_asset_id, self.confio_asset_id] if a]
+            atc.add_method_call(
+                app_id=self.app_id,
+                method=method,
+                sender=buyer_address,
+                sp=sp1,
+                signer=AccountTransactionSigner('0'*64),
+                method_args=[trade_id],
+                boxes=[(0, trade_id.encode())],
+                foreign_assets=foreign_assets,
+            )
+
+            tws = atc.build_group()
+            gid = transaction.calculate_group_id([t.txn for t in tws])
+            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
+            user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [buyer_address], 'message': 'Accept trade'}]
+            return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
+        except Exception as e:
+            return BuildResult(False, error=str(e))
+
     def build_mark_paid(
         self,
         buyer_address: str,
         trade_id: str,
         payment_ref: str,
     ) -> BuildResult:
-        """Build [Payment(sponsor→app, MBR), AppCall(buyer)] with user-signed AppCall."""
+        """Build [Payment(sponsor→app, MBR), AppCall(buyer)]. Buyer signs only AppCall.
+
+        Requires contract to accept sponsor as payer for the MBR/fee payment.
+        """
         try:
             key = (trade_id + "_paid").encode()
             if len(key) > 64:
@@ -251,7 +330,8 @@ class P2PTradeTransactionBuilder:
             min_fee = getattr(params, 'min_fee', 1000) or 1000
 
             atc = AtomicTransactionComposer()
-            sp0 = transaction.SuggestedParams(fee=min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            # Group has 2 txns (sponsor MBR pay + buyer app call). Pool fees on sponsor.
+            sp0 = transaction.SuggestedParams(fee=2*min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
             pay = transaction.PaymentTxn(sender=self.sponsor_address, sp=sp0, receiver=self.app_address, amt=mbr, note=b'P2P paid MBR')
             atc.add_transaction(TransactionWithSigner(pay, AccountTransactionSigner('0'*64)))
 
@@ -269,9 +349,15 @@ class P2PTradeTransactionBuilder:
                 boxes=[(0, trade_id.encode()), (0, (trade_id + "_paid").encode())],
             )
 
+            # Debug: log key params for troubleshooting
+            try:
+                self.logger.info('[P2P Builder] mark_paid: app_id=%s sponsor=%s buyer=%s mbr=%s fee_each=%s', self.app_id, (self.sponsor_address or '')[:10], (buyer_address or '')[:10], mbr, min_fee)
+            except Exception:
+                pass
+
             tws = atc.build_group()
             gid = transaction.calculate_group_id([t.txn for t in tws])
-            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(t.txn), 'signed': None, 'index': i} for i, t in enumerate(tws) if i == 0]
+            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
             user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [buyer_address], 'message': 'Mark P2P trade as paid'}]
             return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
         except Exception as e:
@@ -284,12 +370,25 @@ class P2PTradeTransactionBuilder:
     ) -> BuildResult:
         """Build [Payment(sponsor fee-bump), AppCall(seller)] with user-signed AppCall."""
         try:
+            # Derive buyer address from on-chain box so we can include it in AppCall accounts
+            buyer_addr: Optional[str] = None
+            try:
+                bx = self.algod_client.application_box_by_name(self.app_id, trade_id.encode('utf-8'))
+                import base64 as _b64
+                raw = _b64.b64decode((bx or {}).get('value', ''))
+                buyer_b = raw[73:105] if len(raw) >= 105 else b''
+                if len(buyer_b) == 32:
+                    buyer_addr = algo_encoding.encode_address(buyer_b)
+            except Exception:
+                buyer_addr = None
+
             params = self.algod_client.suggested_params()
             min_fee = getattr(params, 'min_fee', 1000) or 1000
 
             atc = AtomicTransactionComposer()
-            # Fee bump needs 3000 per contract
-            sp0 = transaction.SuggestedParams(fee=3*min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            # Fee bump must cover inner itxns (asset transfer + up to 2 MBR refunds)
+            # Pool a generous budget to avoid 'fee too small' during itxn_submit
+            sp0 = transaction.SuggestedParams(fee=6*min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
             pay = transaction.PaymentTxn(sender=self.sponsor_address, sp=sp0, receiver=self.app_address, amt=0, note=b'P2P confirm')
             atc.add_transaction(TransactionWithSigner(pay, AccountTransactionSigner('0'*64)))
 
@@ -297,6 +396,14 @@ class P2PTradeTransactionBuilder:
             if method is None:
                 return BuildResult(False, error='ABI method confirm_payment_received not found')
             sp1 = transaction.SuggestedParams(fee=0, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            # Include assets for asset_holding_get checks inside approval
+            foreign_assets = [a for a in [self.cusd_asset_id, self.confio_asset_id] if a]
+            # Accounts: include sponsor (for MBR refunds/receivers) and buyer (for asset_holding_get)
+            accounts: List[str] = []
+            if self.sponsor_address:
+                accounts.append(self.sponsor_address)
+            if buyer_addr and buyer_addr not in accounts:
+                accounts.append(buyer_addr)
             atc.add_method_call(
                 app_id=self.app_id,
                 method=method,
@@ -304,13 +411,69 @@ class P2PTradeTransactionBuilder:
                 sp=sp1,
                 signer=AccountTransactionSigner('0'*64),  # placeholder; user signs
                 method_args=[trade_id],
-                boxes=[(0, trade_id.encode())],
+                boxes=[
+                    (0, trade_id.encode()),
+                    (0, (trade_id + "_paid").encode()),
+                ],
+                foreign_assets=foreign_assets,
+                accounts=accounts,
             )
 
             tws = atc.build_group()
             gid = transaction.calculate_group_id([t.txn for t in tws])
             sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
             user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [seller_address], 'message': 'Confirm payment received'}]
+            return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
+        except Exception as e:
+            return BuildResult(False, error=str(e))
+
+    def build_cancel_trade(
+        self,
+        caller_address: str,
+        trade_id: str,
+    ) -> BuildResult:
+        """Build cancellation group for expired trades.
+        Pattern: optional sponsor fee-bump Payment + user AppCall(cancel_trade).
+        Boxes: trade_id, trade_id+"_paid", trade_id+"_dispute" (the app tolerates missing boxes).
+        """
+        try:
+            params = self.algod_client.suggested_params()
+            min_fee = getattr(params, 'min_fee', 1000) or 1000
+
+            atc = AtomicTransactionComposer()
+            # Sponsor fee bump to cover inner tx fees during cancel cleanup.
+            # Worst-case inner txns: 1 asset transfer + up to 2 MBR refund payments = 3.
+            # Group (2 outers) + 3 inners => budget ~5 * min_fee pooled on sponsor.
+            sp0 = transaction.SuggestedParams(fee=5*min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            pay = transaction.PaymentTxn(sender=self.sponsor_address, sp=sp0, receiver=self.app_address, amt=0, note=b'P2P cancel')
+            atc.add_transaction(TransactionWithSigner(pay, AccountTransactionSigner('0'*64)))
+
+            method = self._method('cancel_trade')
+            if method is None:
+                return BuildResult(False, error='ABI method cancel_trade not found')
+            sp1 = transaction.SuggestedParams(fee=0, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            # Include both common assets to satisfy asset_holding_get availability in app logic
+            foreign_assets = [a for a in [self.cusd_asset_id, self.confio_asset_id] if a]
+            atc.add_method_call(
+                app_id=self.app_id,
+                method=method,
+                sender=caller_address,
+                sp=sp1,
+                signer=AccountTransactionSigner('0'*64),  # placeholder; user signs
+                method_args=[trade_id],
+                boxes=[
+                    (0, trade_id.encode()),
+                    (0, (trade_id + "_paid").encode()),
+                    (0, (trade_id + "_dispute").encode()),
+                ],
+                foreign_assets=foreign_assets,
+                accounts=[self.sponsor_address],
+            )
+
+            tws = atc.build_group()
+            gid = transaction.calculate_group_id([t.txn for t in tws])
+            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
+            user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [caller_address], 'message': 'Cancelar intercambio (expirado)'}]
             return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
         except Exception as e:
             return BuildResult(False, error=str(e))

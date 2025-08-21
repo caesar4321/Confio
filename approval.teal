@@ -753,6 +753,11 @@ assert
 gtxn 0 Sender
 txn Sender
 ==
+gtxn 0 Sender
+bytec 2 // "sponsor_address"
+app_global_get
+==
+||
 assert
 gtxn 0 Amount
 load 16

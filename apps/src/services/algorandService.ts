@@ -233,6 +233,21 @@ class AlgorandService {
     }
   }
 
+  /**
+   * Get the current wallet address, attempting to load stored address if not in memory.
+   */
+  async getCurrentAddress(): Promise<string | null> {
+    try {
+      await this.ensureInitialized();
+      if (this.currentAccount?.addr) return this.currentAccount.addr;
+      const loaded = await this.loadStoredWallet();
+      return loaded && this.currentAccount ? this.currentAccount.addr : null;
+    } catch (e) {
+      console.error('[AlgorandService] getCurrentAddress error:', e);
+      return null;
+    }
+  }
+
   async sendTransaction(toAddress: string, amount: number): Promise<string> {
     try {
       await this.ensureInitialized();

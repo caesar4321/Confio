@@ -268,8 +268,8 @@ export const PREPARE_P2P_CREATE_TRADE = gql`
 `;
 
 export const SUBMIT_P2P_CREATE_TRADE = gql`
-  mutation SubmitP2PCreateTrade($signedUserTxn: String!, $sponsorTransactions: [JSONString!]!, $tradeId: String!) {
-    submitP2pCreateTrade(signedUserTxn: $signedUserTxn, sponsorTransactions: $sponsorTransactions, tradeId: $tradeId) {
+  mutation SubmitP2PCreateTrade($signedUserTxns: [String!]!, $sponsorTransactions: [JSONString!]!, $tradeId: String!) {
+    submitP2pCreateTrade(signedUserTxns: $signedUserTxns, sponsorTransactions: $sponsorTransactions, tradeId: $tradeId) {
       success
       error
       txid
@@ -280,6 +280,29 @@ export const SUBMIT_P2P_CREATE_TRADE = gql`
 export const ACCEPT_P2P_TRADE = gql`
   mutation AcceptP2pTrade($tradeId: String!) {
     acceptP2pTrade(tradeId: $tradeId) {
+      success
+      error
+      txid
+    }
+  }
+`;
+
+export const PREPARE_P2P_ACCEPT_TRADE = gql`
+  mutation PrepareP2pAcceptTrade($tradeId: String!) {
+    prepareP2pAcceptTrade(tradeId: $tradeId) {
+      success
+      error
+      userTransactions
+      sponsorTransactions { txn index }
+      groupId
+      tradeId
+    }
+  }
+`;
+
+export const SUBMIT_P2P_ACCEPT_TRADE = gql`
+  mutation SubmitP2pAcceptTrade($tradeId: String!, $signedUserTxn: String!, $sponsorTransactions: [JSONString!]!) {
+    submitP2pAcceptTrade(tradeId: $tradeId, signedUserTxn: $signedUserTxn, sponsorTransactions: $sponsorTransactions) {
       success
       error
       txid
@@ -301,8 +324,8 @@ export const PREPARE_P2P_MARK_PAID = gql`
 `;
 
 export const MARK_P2P_TRADE_PAID = gql`
-  mutation MarkP2pTradePaid($tradeId: String!, $signedUserTxn: String!, $sponsorTransactions: [JSONString!]!) {
-    markP2pTradePaid(tradeId: $tradeId, signedUserTxn: $signedUserTxn, sponsorTransactions: $sponsorTransactions) {
+  mutation MarkP2pTradePaid($tradeId: String!, $signedUserTxn: String!, $sponsorTransactions: [JSONString!]!, $paymentRef: String!) {
+    markP2pTradePaid(tradeId: $tradeId, signedUserTxn: $signedUserTxn, sponsorTransactions: $sponsorTransactions, paymentRef: $paymentRef) {
       success
       error
       txid
@@ -326,6 +349,29 @@ export const PREPARE_P2P_CONFIRM_RECEIVED = gql`
 export const CONFIRM_P2P_TRADE_RECEIVED = gql`
   mutation ConfirmP2pTradeReceived($tradeId: String!, $signedUserTxn: String!, $sponsorTransactions: [JSONString!]!) {
     confirmP2pTradeReceived(tradeId: $tradeId, signedUserTxn: $signedUserTxn, sponsorTransactions: $sponsorTransactions) {
+      success
+      error
+      txid
+    }
+  }
+`;
+
+export const PREPARE_P2P_CANCEL = gql`
+  mutation PrepareP2pCancel($tradeId: String!) {
+    prepareP2pCancel(tradeId: $tradeId) {
+      success
+      error
+      userTransactions
+      sponsorTransactions { txn index }
+      groupId
+      tradeId
+    }
+  }
+`;
+
+export const CANCEL_P2P_TRADE = gql`
+  mutation CancelP2pTrade($tradeId: String!, $signedUserTxn: String!, $sponsorTransactions: [JSONString!]!) {
+    cancelP2pTrade(tradeId: $tradeId, signedUserTxn: $signedUserTxn, sponsorTransactions: $sponsorTransactions) {
       success
       error
       txid
