@@ -711,7 +711,9 @@ class MessagingService {
               params: { 
                 trade: { 
                   id: parts[2] 
-                } 
+                },
+                // Allow TradeChatScreen to auto-switch context only for push-origin navigation
+                allowAccountSwitch: true
               }
             } as never);
           } else if (parts[1] === 'offer' && parts[2]) {

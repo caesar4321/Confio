@@ -107,23 +107,17 @@ export const ActiveTradeScreen: React.FC = () => {
     ?.filter(acc => acc.type === 'business' && acc.business?.id)
     .map(acc => String(acc.business.id)) || [];
   
-  // Determine if current user is buyer or seller - check both user and business accounts
+  // Determine if current user is buyer or seller using strict ID comparisons against the active account context
   const iAmBuyer = fullTradeData ? (
-    // Check personal account
-    (fullTradeData.buyerUser?.id === currentUserId || fullTradeData.buyer?.id === currentUserId) ||
-    // Check business account
-    (currentBusinessId && fullTradeData.buyerBusiness?.id && String(fullTradeData.buyerBusiness.id) === String(currentBusinessId)) ||
-    // Check if buyer business is in my list of businesses
-    (fullTradeData.buyerBusiness && myBusinessIds.includes(String(fullTradeData.buyerBusiness.id)))
+    (fullTradeData.buyerUser?.id && String(fullTradeData.buyerUser.id) === String(currentUserId || '')) ||
+    (fullTradeData.buyer?.id && String(fullTradeData.buyer.id) === String(currentUserId || '')) ||
+    (currentBusinessId && fullTradeData.buyerBusiness?.id && String(fullTradeData.buyerBusiness.id) === String(currentBusinessId))
   ) : false;
   
   const iAmSeller = fullTradeData ? (
-    // Check personal account
-    (fullTradeData.sellerUser?.id === currentUserId || fullTradeData.seller?.id === currentUserId) ||
-    // Check business account
-    (currentBusinessId && fullTradeData.sellerBusiness?.id && String(fullTradeData.sellerBusiness.id) === String(currentBusinessId)) ||
-    // Check if seller business is in my list of businesses
-    (fullTradeData.sellerBusiness && myBusinessIds.includes(String(fullTradeData.sellerBusiness.id)))
+    (fullTradeData.sellerUser?.id && String(fullTradeData.sellerUser.id) === String(currentUserId || '')) ||
+    (fullTradeData.seller?.id && String(fullTradeData.seller.id) === String(currentUserId || '')) ||
+    (currentBusinessId && fullTradeData.sellerBusiness?.id && String(fullTradeData.sellerBusiness.id) === String(currentBusinessId))
   ) : false;
   
   const trade = fullTradeData ? {
@@ -196,15 +190,22 @@ export const ActiveTradeScreen: React.FC = () => {
     }
   }, [trade?.status]);
   
-  // Update timeRemaining when trade data is loaded
+  // Initialize and tick countdown from server expiresAt
   useEffect(() => {
-    if (trade?.timeRemaining) {
-      setTimeRemaining(trade.timeRemaining);
+    const expiresAtIso = fullTradeData?.expiresAt as string | undefined;
+    const nowMs = Date.now();
+    if (expiresAtIso) {
+      const expMs = new Date(expiresAtIso).getTime();
+      if (!isNaN(expMs)) {
+        const initial = Math.max(0, Math.floor((expMs - nowMs) / 1000));
+        setTimeRemaining(initial);
+      }
     }
-  }, [trade?.timeRemaining]);
-
-  // Removed per-second countdown to avoid unnecessary re-renders/polling-like behavior
-  // If needed, we can derive a remaining time based on server timestamps without a 1s interval
+    const timer = setInterval(() => {
+      setTimeRemaining(prev => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [fullTradeData?.expiresAt]);
 
   // Spinning animation for step 3
   useEffect(() => {
@@ -995,7 +996,13 @@ export const ActiveTradeScreen: React.FC = () => {
                 totalPaid: trade.totalBs,
                 method: fullTradeData?.paymentMethod?.displayName || trade.paymentMethod || 'N/A',
                 date: formatLocalDateTime(fullTradeData?.completedAt || trade.completedAt || trade.createdAt || new Date().toISOString()),
-                duration: '8 minutos', // Replace with real data if available
+                // Use real timestamps to avoid negatives
+                duration: (() => {
+                  const startMs = fullTradeData?.createdAt ? new Date(fullTradeData.createdAt as any).getTime() : Date.now();
+                  const endMs = fullTradeData?.completedAt ? new Date(fullTradeData.completedAt as any).getTime() : Date.now();
+                  const mins = Math.max(0, Math.round((endMs - startMs) / 60000));
+                  return `${mins} minutos`;
+                })(),
               }
             });
           }}>
@@ -1066,13 +1073,20 @@ export const ActiveTradeScreen: React.FC = () => {
           <View style={styles.timerCard}>
             <View style={styles.timerHeader}>
               <Text style={styles.timerLabel}>Tiempo restante</Text>
-              <Text style={styles.timerValue}>{formatTime(timeRemaining)}</Text>
+              {timeRemaining > 0 ? (
+                <Text style={styles.timerValue}>{formatTime(timeRemaining)}</Text>
+              ) : (
+                <View style={styles.timerPillExpired}>
+                  <Text style={[styles.timerValue, styles.timerValueExpired]}>{formatTime(timeRemaining)}</Text>
+                </View>
+              )}
             </View>
             <View style={styles.timerProgressBar}>
               <View 
                 style={[
                   styles.timerProgressFill, 
-                  { width: `${Math.max(10, 100 - getProgressPercentage())}%` }
+                  { width: `${Math.max(10, 100 - getProgressPercentage())}%` },
+                  timeRemaining <= 0 && styles.timerProgressExpired
                 ]} 
               />
             </View>
@@ -1335,6 +1349,17 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#1E40AF',
   },
+  timerValueExpired: {
+    color: '#991B1B',
+  },
+  timerPillExpired: {
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 9999,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
   timerProgressBar: {
     width: '100%',
     height: 8,
@@ -1345,6 +1370,9 @@ const styles = StyleSheet.create({
     height: 8,
     backgroundColor: '#2563EB',
     borderRadius: 4,
+  },
+  timerProgressExpired: {
+    backgroundColor: '#FCA5A5',
   },
   content: {
     flex: 1,

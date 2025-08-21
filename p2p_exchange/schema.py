@@ -1535,6 +1535,8 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                 trade.completed_at = timezone.now()
 
             trade.save()
+
+            # Server no longer auto-accepts on seller share. Buyer must accept with a user-signed AppCall.
             
             # Create confirmation records for specific status changes
             confirmation_type = None
@@ -1723,6 +1725,12 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                 'payment_reference': input.payment_reference or '',
                 'payment_notes': input.payment_notes or '',
             }
+            # If we have a known expires_at (e.g., after accept or extension), include it
+            try:
+                if getattr(trade, 'expires_at', None):
+                    broadcast_data['expires_at'] = trade.expires_at.isoformat()
+            except Exception:
+                pass
             
             async_to_sync(channel_layer.group_send)(
                 room_group_name,
@@ -2840,18 +2848,21 @@ class Query(graphene.ObjectType):
         # DISPUTED trades should appear at the top with high priority
         status_ordering = Case(
             When(status='DISPUTED', then=1),
-            When(status='PENDING', then=2),
-            When(status='PAYMENT_PENDING', then=3),
-            When(status='PAYMENT_SENT', then=4),
-            When(status='PAYMENT_CONFIRMED', then=5),
-            When(status='COMPLETED', then=6),
+            # Promote trades requiring rating to near the top
+            When(status='CRYPTO_RELEASED', then=2),
+            When(status='PENDING', then=3),
+            When(status='PAYMENT_PENDING', then=4),
+            When(status='PAYMENT_SENT', then=5),
+            When(status='PAYMENT_CONFIRMED', then=6),
+            When(status='COMPLETED', then=7),
             default=999,
             output_field=IntegerField()
         )
         
+        # Order by status priority, then most recently updated, then most recently created
         return base_queryset.annotate(
             status_priority=status_ordering
-        ).order_by('status_priority', '-created_at')
+        ).order_by('status_priority', '-updated_at', '-created_at')
 
     def resolve_p2p_trade(self, info, id):
         user = getattr(info.context, 'user', None)

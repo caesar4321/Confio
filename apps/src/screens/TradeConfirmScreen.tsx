@@ -12,6 +12,7 @@ import {
   Modal,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
+import LoadingOverlay from '../components/LoadingOverlay';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation, useQuery } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
@@ -66,6 +67,13 @@ export const TradeConfirmScreen: React.FC = () => {
   const [amount, setAmount] = useState('');
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState(offer.paymentMethods[0] || null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [busyText, setBusyText] = useState('');
+  const withBusy = async <T,>(text: string, fn: () => Promise<T>): Promise<T> => {
+    setBusyText(text);
+    setBusy(true);
+    try { return await fn(); } finally { setBusy(false); setBusyText(''); }
+  };
   
   // Refetch bank accounts when screen comes into focus
   useFocusEffect(
@@ -165,12 +173,13 @@ export const TradeConfirmScreen: React.FC = () => {
             const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
             const amt = parseFloat(amount);
             if (!isNaN(amt) && amt > 0) {
-              // Run asynchronously; navigation continues regardless but will alert on error
-              p2pSponsoredService.createEscrowIfSeller(String(createdTrade.id), amt, crypto).then((res) => {
-                if (!res.success) {
-                  console.warn('[P2P] Escrow creation failed:', res.error);
-                }
-              }).catch((e) => console.warn('[P2P] Escrow creation error:', e));
+              // Show blocking overlay during escrow enable for better UX
+              const res = await withBusy('Habilitando intercambio…', async () =>
+                p2pSponsoredService.createEscrowIfSeller(String(createdTrade.id), amt, crypto)
+              );
+              if (!res.success) {
+                console.warn('[P2P] Escrow creation failed:', res.error);
+              }
             }
           }
         } catch (e) {
@@ -219,6 +228,7 @@ export const TradeConfirmScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container}>
+      <LoadingOverlay visible={busy} message={busyText || 'Procesando…'} />
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       
       {/* Header */}

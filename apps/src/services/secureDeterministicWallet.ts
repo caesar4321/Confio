@@ -724,8 +724,15 @@ export class SecureDeterministicWalletService {
       // Sign transaction
       const signedTxn = txn.signTxn(sk);
       return signedTxn;
-    } catch (error) {
-      console.error('Error signing transaction:', error);
+    } catch (error: any) {
+      const msg = String(error?.message || error);
+      if (msg.includes('No active wallet scope')) {
+        console.info('[WALLET][INFO] No active wallet scope (will restore/create wallet and retry)');
+      } else if (msg.includes('No wallet seed in memory')) {
+        console.info('[WALLET][INFO] No wallet seed in memory (will restore/create wallet and retry)');
+      } else {
+        console.error('Error signing transaction:', error);
+      }
       throw error;
     }
   }

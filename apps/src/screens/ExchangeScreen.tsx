@@ -584,21 +584,26 @@ export const ExchangeScreen = () => {
         if (activeAccount?.type === 'business') {
           // Current account is business
           const currentBusinessId = activeAccount.business?.id;
-          const isBuyer = trade.buyerBusiness?.id === currentBusinessId;
+          const isBuyer = String(trade.buyerBusiness?.id || '') === String(currentBusinessId || '');
           
           tradeType = isBuyer ? 'buy' : 'sell';
           otherPartyName = isBuyer ? sellerDisplayName : buyerDisplayName;
         } else {
           // Current account is personal - use the user ID from profile, not account ID
           const currentUserId = profileData?.userProfile?.id;
-          const isBuyer = trade.buyerUser?.id === currentUserId;
+          const isBuyer = String(trade.buyerUser?.id || '') === String(currentUserId || '');
           
           tradeType = isBuyer ? 'buy' : 'sell';
           otherPartyName = isBuyer ? sellerDisplayName : buyerDisplayName;
         }
         
-        // Calculate time remaining (mock for now)
-        const timeRemaining = 900; // 15 minutes default
+        // Calculate time remaining from server expiresAt without per-item timers
+        const timeRemaining = (() => {
+          const exp = trade.expiresAt ? new Date(trade.expiresAt).getTime() : 0;
+          if (!exp) return 0;
+          const now = Date.now();
+          return Math.max(0, Math.floor((exp - now) / 1000));
+        })();
         
         // Map status to step
         const getStepFromStatus = (status: string, hasRating?: boolean) => {
@@ -639,11 +644,11 @@ export const ExchangeScreen = () => {
         let otherPartyStats;
         if (activeAccount?.type === 'business') {
           const currentBusinessId = activeAccount.business?.id;
-          const isBuyer = trade.buyerBusiness?.id === currentBusinessId;
+          const isBuyer = String(trade.buyerBusiness?.id || '') === String(currentBusinessId || '');
           otherPartyStats = isBuyer ? trade.sellerStats : trade.buyerStats;
         } else {
           const currentUserId = profileData?.userProfile?.id;
-          const isBuyer = trade.buyerUser?.id === currentUserId;
+          const isBuyer = String(trade.buyerUser?.id || '') === String(currentUserId || '');
           otherPartyStats = isBuyer ? trade.sellerStats : trade.buyerStats;
         }
         
@@ -686,12 +691,12 @@ export const ExchangeScreen = () => {
         
         if (activeAccount?.type === 'business') {
           const currentBusinessId = activeAccount.business?.id;
-          const isBuyer = trade.buyerBusiness?.id === currentBusinessId;
+          const isBuyer = String(trade.buyerBusiness?.id || '') === String(currentBusinessId || '');
           otherPartyUserId = isBuyer ? trade.sellerUser?.id : trade.buyerUser?.id;
           otherPartyBusinessId = isBuyer ? trade.sellerBusiness?.id : trade.buyerBusiness?.id;
         } else {
           const currentUserId = profileData?.userProfile?.id;
-          const isBuyer = trade.buyerUser?.id === currentUserId;
+          const isBuyer = String(trade.buyerUser?.id || '') === String(currentUserId || '');
           otherPartyUserId = isBuyer ? trade.sellerUser?.id : trade.buyerUser?.id;
           otherPartyBusinessId = isBuyer ? trade.sellerBusiness?.id : trade.buyerBusiness?.id;
         }
@@ -2180,8 +2185,8 @@ export const ExchangeScreen = () => {
                 </TouchableOpacity>
                 {/* Only show timer for active trades */}
                 {trade.status !== 'COMPLETED' && trade.status !== 'DISPUTED' && (
-                    <View style={styles.timerBadge}>
-                        <Text style={styles.timerText}>{formatTime(trade.timeRemaining)}</Text>
+                    <View style={[styles.timerBadge, trade.timeRemaining <= 0 && styles.timerBadgeExpired]}>
+                        <Text style={[styles.timerText, trade.timeRemaining <= 0 && styles.timerTextExpired]}>{formatTime(trade.timeRemaining)}</Text>
                     </View>
                 )}
                 {/* Show completed date for completed trades */}
@@ -4378,10 +4383,19 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 12,
   },
+  timerBadgeExpired: {
+    backgroundColor: '#FEE2E2',
+    borderRadius: 9999,
+    borderWidth: 1,
+    borderColor: '#FCA5A5',
+  },
   timerText: {
     color: colors.primary,
     fontWeight: 'bold',
     fontSize: 12,
+  },
+  timerTextExpired: {
+    color: '#991B1B',
   },
   disputeBadge: {
     backgroundColor: '#DC2626',

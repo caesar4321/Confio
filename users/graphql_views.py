@@ -65,31 +65,22 @@ class UnifiedTransactionType(DjangoObjectType):
         if self.transaction_type == 'conversion':
             return 'conversion'
         
-        # P2P exchanges need special handling as they don't have blockchain addresses
+        # P2P exchanges need special handling: derive from the viewer's active account context first
         if self.transaction_type == 'exchange':
             user = info.context.user if info.context else None
-            if user and user.is_authenticated:
-                # Check if user is sender (seller in the trade)
+            acct_type = getattr(self, '_account_type', None)
+            acct_biz_id = getattr(self, '_account_business_id', None)
+            if acct_type == 'business' and acct_biz_id:
+                if self.sender_business and self.sender_business.id == acct_biz_id:
+                    return 'sent'
+                if self.counterparty_business and self.counterparty_business.id == acct_biz_id:
+                    return 'received'
+            elif user and user.is_authenticated:
+                # Fall back to user identity when personal account
                 if self.sender_user and self.sender_user.id == user.id:
                     return 'sent'
-                elif self.sender_business:
-                    # Check if user has access to sender business (owner or employee)
-                    from users.models_employee import BusinessEmployee
-                    has_access = user.accounts.filter(business_id=self.sender_business.id).exists() or \
-                                BusinessEmployee.objects.filter(user=user, business=self.sender_business, is_active=True, deleted_at__isnull=True).exists()
-                    if has_access:
-                        return 'sent'
-                
-                # Check if user is counterparty (buyer in the trade)
                 if self.counterparty_user and self.counterparty_user.id == user.id:
                     return 'received'
-                elif self.counterparty_business:
-                    # Check if user has access to counterparty business (owner or employee)
-                    from users.models_employee import BusinessEmployee
-                    has_access = user.accounts.filter(business_id=self.counterparty_business.id).exists() or \
-                                BusinessEmployee.objects.filter(user=user, business=self.counterparty_business, is_active=True, deleted_at__isnull=True).exists()
-                    if has_access:
-                        return 'received'
             return 'unknown'
             
         # Get the user's address from the transaction context
@@ -112,29 +103,11 @@ class UnifiedTransactionType(DjangoObjectType):
             
             # Handle P2P exchanges
             if self.transaction_type == 'exchange':
-                user = info.context.user if info.context else None
-                if user and user.is_authenticated:
-                    # Check if user is sender (seller in the trade)
-                    if self.sender_user and self.sender_user.id == user.id:
-                        return f'-{self.amount}'
-                    elif self.sender_business:
-                        # Check if user has access to sender business (owner or employee)
-                        from users.models_employee import BusinessEmployee
-                        has_access = user.accounts.filter(business_id=self.sender_business.id).exists() or \
-                                    BusinessEmployee.objects.filter(user=user, business=self.sender_business, is_active=True, deleted_at__isnull=True).exists()
-                        if has_access:
-                            return f'-{self.amount}'
-                    
-                    # Check if user is counterparty (buyer in the trade)
-                    if self.counterparty_user and self.counterparty_user.id == user.id:
-                        return f'+{self.amount}'
-                    elif self.counterparty_business:
-                        # Check if user has access to counterparty business (owner or employee)
-                        from users.models_employee import BusinessEmployee
-                        has_access = user.accounts.filter(business_id=self.counterparty_business.id).exists() or \
-                                    BusinessEmployee.objects.filter(user=user, business=self.counterparty_business, is_active=True, deleted_at__isnull=True).exists()
-                        if has_access:
-                            return f'+{self.amount}'
+                direction = UnifiedTransactionType.resolve_direction(self, info)
+                if direction == 'sent':
+                    return f'-{self.amount}'
+                if direction == 'received':
+                    return f'+{self.amount}'
                 return str(self.amount)
                 
             # Get direction directly
@@ -158,29 +131,11 @@ class UnifiedTransactionType(DjangoObjectType):
             
             # Handle P2P exchanges
             if self.transaction_type == 'exchange':
-                user = info.context.user if info.context else None
-                if user and user.is_authenticated:
-                    # Check if user is sender (seller in the trade)
-                    if self.sender_user and self.sender_user.id == user.id:
-                        return self.counterparty_display_name or 'Unknown'
-                    elif self.sender_business:
-                        # Check if user has access to sender business (owner or employee)
-                        from users.models_employee import BusinessEmployee
-                        has_access = user.accounts.filter(business_id=self.sender_business.id).exists() or \
-                                    BusinessEmployee.objects.filter(user=user, business=self.sender_business, is_active=True, deleted_at__isnull=True).exists()
-                        if has_access:
-                            return self.counterparty_display_name or 'Unknown'
-                    
-                    # Check if user is counterparty (buyer in the trade)
-                    if self.counterparty_user and self.counterparty_user.id == user.id:
-                        return self.sender_display_name or 'Unknown'
-                    elif self.counterparty_business:
-                        # Check if user has access to counterparty business (owner or employee)
-                        from users.models_employee import BusinessEmployee
-                        has_access = user.accounts.filter(business_id=self.counterparty_business.id).exists() or \
-                                    BusinessEmployee.objects.filter(user=user, business=self.counterparty_business, is_active=True, deleted_at__isnull=True).exists()
-                        if has_access:
-                            return self.sender_display_name or 'Unknown'
+                direction = UnifiedTransactionType.resolve_direction(self, info)
+                if direction == 'sent':
+                    return self.counterparty_display_name or 'Unknown'
+                if direction == 'received':
+                    return self.sender_display_name or 'Unknown'
                 return 'Unknown'
                 
             # Get direction directly
@@ -319,13 +274,14 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         # Order by created_at descending to show newest first
         queryset = queryset.order_by('-created_at')
         
-        # Apply pagination and add user address to each transaction for direction calculation
+        # Apply pagination and add viewer context hints to each transaction for resolvers
         transactions = list(queryset[offset:offset + limit])
-        
-        # Set the user's address on each transaction for the resolvers
         for transaction in transactions:
+            # Hints used by resolvers to compute perspective/direction correctly
             transaction._user_address = account.algorand_address
-            
+            transaction._account_type = account.account_type
+            transaction._account_business_id = getattr(account.business, 'id', None) if account.account_type == 'business' else None
+        
         return transactions
     
     def resolve_current_account_transactions(self, info, limit=50, offset=0, token_types=None):
@@ -400,15 +356,14 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         # Order by created_at descending to show newest first
         queryset = queryset.order_by('-created_at')
         
-        # Apply pagination and add user address to each transaction for direction calculation
+        # Apply pagination and add viewer context hints to each transaction for resolvers
         transactions = list(queryset[offset:offset + limit])
-        
         print(f"Found {len(transactions)} transactions for account {account.id}")
-        
-        # Set the user's address on each transaction for the resolvers
         for transaction in transactions:
             transaction._user_address = account.algorand_address
-            
+            transaction._account_type = account.account_type
+            transaction._account_business_id = getattr(account.business, 'id', None) if account.account_type == 'business' else None
+        
         return transactions
     
     def resolve_unified_transactions_with_friend(self, info, friend_user_id=None, friend_phone=None, 
