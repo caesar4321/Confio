@@ -4,13 +4,14 @@ Provides a comprehensive overview of platform metrics and quick actions
 """
 from django.contrib import admin
 from django.urls import path
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.utils import timezone
 from django.db.models import Count, Sum, Q, F, Avg
 from django.db.models.functions import Cast
 from django.db.models import DecimalField
 from django.contrib.admin.views.decorators import staff_member_required
 from django.utils.html import format_html
+from django.contrib import messages
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -38,6 +39,7 @@ class ConfioAdminSite(admin.AdminSite):
             path('user-analytics/', self.admin_view(self.user_analytics_view), name='user_analytics'),
             path('transaction-analytics/', self.admin_view(self.transaction_analytics_view), name='transaction_analytics'),
             path('blockchain-analytics/', self.admin_view(self.blockchain_analytics_view), name='blockchain_analytics'),
+            path('blockchain-analytics/scan-now/', self.admin_view(self.blockchain_scan_now_view), name='blockchain_scan_now'),
             path('achievements/', self.admin_view(self.achievement_dashboard_view), name='achievement_dashboard'),
         ]
         return custom_urls + urls
@@ -207,14 +209,8 @@ class ConfioAdminSite(admin.AdminSite):
         
         context['top_countries'] = country_stats
         
-        # Blockchain metrics
-        from blockchain.models import RawBlockchainEvent, Balance, TransactionProcessingLog
-        context['blockchain_events_today'] = RawBlockchainEvent.objects.filter(
-            created_at__gte=today_start
-        ).count()
-        context['blockchain_events_unprocessed'] = RawBlockchainEvent.objects.filter(
-            processed=False
-        ).count()
+        # Blockchain metrics (events removed; keep balance cache health only)
+        from blockchain.models import Balance
         context['cached_balances'] = Balance.objects.count()
         context['stale_balances'] = Balance.objects.filter(is_stale=True).count()
         context['balance_cache_health'] = {
@@ -230,16 +226,7 @@ class ConfioAdminSite(admin.AdminSite):
         ).order_by('-last_blockchain_check').first()
         context['last_blockchain_sync'] = last_sync.last_blockchain_check if last_sync else None
         
-        # Processing success rate
-        processing_logs = TransactionProcessingLog.objects.filter(
-            created_at__gte=today_start
-        )
-        total_processed = processing_logs.count()
-        failed_processed = processing_logs.filter(status='failed').count()
-        context['blockchain_processing_success_rate'] = (
-            ((total_processed - failed_processed) / total_processed * 100) 
-            if total_processed > 0 else 100
-        )
+        # Processing success rate removed (no separate event processing logs)
         
         # Recent activities
         context['recent_trades'] = P2PTrade.objects.select_related(
@@ -473,8 +460,8 @@ class ConfioAdminSite(admin.AdminSite):
         return dashboard_func(request)
     
     def blockchain_analytics_view(self, request):
-        """Blockchain integration analytics"""
-        from blockchain.models import RawBlockchainEvent, Balance, TransactionProcessingLog
+        """Blockchain integration analytics (event/log tracking removed)"""
+        from blockchain.models import Balance, IndexerAssetCursor, ProcessedIndexerTransaction
         
         context = dict(
             self.each_context(request),
@@ -484,28 +471,6 @@ class ConfioAdminSite(admin.AdminSite):
         # Get date range from request
         days = int(request.GET.get('days', 30))
         start_date = timezone.now() - timedelta(days=days)
-        
-        # Event processing by day
-        daily_events = RawBlockchainEvent.objects.filter(
-            created_at__gte=start_date
-        ).extra(
-            select={'day': 'date(blockchain_rawblockchainevent.created_at)'}
-        ).values('day').annotate(
-            total_count=Count('id'),
-            processed_count=Count('id', filter=Q(processed=True)),
-            unprocessed_count=Count('id', filter=Q(processed=False))
-        ).order_by('day')
-        
-        context['daily_events'] = list(daily_events)
-        
-        # Event types breakdown
-        event_types = RawBlockchainEvent.objects.filter(
-            created_at__gte=start_date
-        ).values('module', 'function').annotate(
-            count=Count('id')
-        ).order_by('-count')[:20]
-        
-        context['event_types'] = event_types
         
         # Balance cache metrics
         context['total_cached_balances'] = Balance.objects.count()
@@ -522,22 +487,9 @@ class ConfioAdminSite(admin.AdminSite):
         ).order_by('token')
         
         context['token_balances'] = token_balances
-        
-        # Processing performance
-        processing_stats = TransactionProcessingLog.objects.filter(
-            created_at__gte=start_date
-        ).values('status').annotate(
-            count=Count('id'),
-            avg_attempts=Avg('attempts')
-        ).order_by('status')
-        
-        context['processing_stats'] = processing_stats
-        
-        # Recent failed processing
-        context['recent_failures'] = TransactionProcessingLog.objects.filter(
-            status='failed'
-        ).select_related('raw_event').order_by('-updated_at')[:20]
-        
+
+        # Processing performance removed — no TransactionProcessingLog
+
         # Balance freshness distribution
         now = timezone.now()
         freshness_ranges = [
@@ -595,11 +547,59 @@ class ConfioAdminSite(admin.AdminSite):
             pass
         context['algod_health'] = algod_health
         context['indexer_health'] = indexer_health
+        current_round = (indexer_health.get('round') if isinstance(indexer_health, dict) else None) or (
+            algod_health.get('last_round') if isinstance(algod_health, dict) else None
+        ) or 0
+        context['current_round'] = current_round
         
-        # Recent blockchain events
-        context['recent_events'] = RawBlockchainEvent.objects.order_by('-block_time')[:20]
+        # Recent blockchain events removed — no RawBlockchainEvent model
+
+        # Indexer cursor status (per asset)
+        from django.conf import settings as _settings
+        assets = []
+        asset_map = [
+            ('USDC', getattr(_settings, 'ALGORAND_USDC_ASSET_ID', None)),
+            ('cUSD', getattr(_settings, 'ALGORAND_CUSD_ASSET_ID', None)),
+            ('CONFIO', getattr(_settings, 'ALGORAND_CONFIO_ASSET_ID', None)),
+        ]
+        for name, asset_id in asset_map:
+            if not asset_id:
+                continue
+            cursor = IndexerAssetCursor.objects.filter(asset_id=asset_id).first()
+            assets.append({
+                'token': name,
+                'asset_id': asset_id,
+                'last_scanned_round': getattr(cursor, 'last_scanned_round', 0),
+                'lag': max(0, current_round - (getattr(cursor, 'last_scanned_round', 0) or 0)),
+                'updated_at': getattr(cursor, 'updated_at', None),
+            })
+        context['indexer_cursors'] = assets
+
+        # Recent processed inbound markers count
+        context['processed_markers_recent'] = ProcessedIndexerTransaction.objects.filter(
+            created_at__gte=start_date
+        ).count()
+        context['recent_processed'] = ProcessedIndexerTransaction.objects.order_by('-created_at')[:20]
         
         return render(request, 'admin/blockchain_analytics.html', context)
+
+    def blockchain_scan_now_view(self, request):
+        """Trigger an immediate indexer scan via Celery (and update address cache)."""
+        from blockchain.tasks import update_address_cache, scan_inbound_deposits
+        if request.method == 'POST':
+            try:
+                update_address_cache.delay()
+                scan_inbound_deposits.delay()
+                messages.success(request, 'Scan triggered. Check back in a moment for updated rounds.')
+            except Exception:
+                # As a fallback, attempt synchronous execution (may take time)
+                try:
+                    update_address_cache()
+                    scan_inbound_deposits()
+                    messages.warning(request, 'Celery unavailable; ran scan synchronously.')
+                except Exception as e:
+                    messages.error(request, f'Failed to trigger scan: {e}')
+        return redirect('admin:blockchain_analytics')
 
 
 # Create custom admin site instance
@@ -731,9 +731,9 @@ confio_admin_site.register(Notification, NotificationAdmin)
 confio_admin_site.register(NotificationPreference, NotificationPreferenceAdmin)
 confio_admin_site.register(FCMDeviceToken, FCMDeviceTokenAdmin)
 
-# Blockchain models
-from blockchain.models import RawBlockchainEvent, Balance, TransactionProcessingLog
-from blockchain.admin import RawBlockchainEventAdmin, BalanceAdmin, TransactionProcessingLogAdmin
-confio_admin_site.register(RawBlockchainEvent, RawBlockchainEventAdmin)
+# Blockchain models (events and processing logs removed); add indexer cursor + processed markers
+from blockchain.models import Balance, ProcessedIndexerTransaction, IndexerAssetCursor
+from blockchain.admin import BalanceAdmin, ProcessedIndexerTransactionAdmin, IndexerAssetCursorAdmin
 confio_admin_site.register(Balance, BalanceAdmin)
-confio_admin_site.register(TransactionProcessingLog, TransactionProcessingLogAdmin)
+confio_admin_site.register(ProcessedIndexerTransaction, ProcessedIndexerTransactionAdmin)
+confio_admin_site.register(IndexerAssetCursor, IndexerAssetCursorAdmin)

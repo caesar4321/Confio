@@ -8,7 +8,7 @@ from decimal import Decimal
 import logging
 
 from users.models import Account
-from .models import RawBlockchainEvent, Balance, TransactionProcessingLog
+from .models import Balance
 from django.conf import settings
 from .algorand_client import AlgorandClient
 from .models import ProcessedIndexerTransaction, IndexerAssetCursor
@@ -20,132 +20,10 @@ from send.models import SendTransaction
 logger = logging.getLogger(__name__)
 
 
-@shared_task(bind=True, max_retries=3)
-def process_transaction(self, tx_data):
-    """Process a blockchain transaction"""
-    try:
-        with transaction.atomic():
-            # Save raw event
-            raw_event, created = RawBlockchainEvent.objects.get_or_create(
-                tx_hash=tx_data['digest'],
-                defaults={
-                    'sender': tx_data.get('transaction', {}).get('data', {}).get('sender', ''),
-                    'module': extract_module(tx_data),
-                    'function': extract_function(tx_data),
-                    'raw_data': tx_data,
-                    'block_time': tx_data.get('timestampMs', 0),
-                    'epoch': tx_data.get('checkpoint', {}).get('epoch'),
-                    'checkpoint': tx_data.get('checkpoint', {}).get('sequenceNumber')
-                }
-            )
-            
-            if not created and raw_event.processed:
-                logger.info(f"Transaction {tx_data['digest']} already processed")
-                return
-            
-            # Log processing attempt
-            log = TransactionProcessingLog.objects.create(
-                raw_event=raw_event,
-                status='processing'
-            )
-            
-            # Determine transaction type and process
-            module = raw_event.module
-            if 'cusd' in module.lower():
-                handle_cusd_transaction.delay(raw_event.id)
-            elif 'pay' in module.lower():
-                handle_payment_transaction.delay(raw_event.id)
-            elif 'p2p_trade' in module.lower():
-                handle_p2p_trade_transaction.delay(raw_event.id)
-            elif 'invite_send' in module.lower():
-                handle_invitation_transaction.delay(raw_event.id)
-            else:
-                logger.warning(f"Unknown transaction type: {module}")
-                
-            # Mark as processed
-            raw_event.processed = True
-            raw_event.save()
-            
-            log.status = 'completed'
-            log.save()
-            
-    except Exception as e:
-        logger.error(f"Failed to process transaction: {e}")
-        if 'log' in locals():
-            log.status = 'failed'
-            log.error_message = str(e)
-            log.attempts += 1
-            log.save()
-        
-        # Retry
-        self.retry(countdown=60 * (self.request.retries + 1))
-
-
-@shared_task
-def handle_cusd_transaction(raw_event_id):
-    """Process cUSD transfer"""
-    try:
-        raw_event = RawBlockchainEvent.objects.get(id=raw_event_id)
-        tx_data = raw_event.raw_data
-        
-        # Extract balance changes
-        balance_changes = tx_data.get('balanceChanges', [])
-        
-        for change in balance_changes:
-            if 'cusd' in change.get('coinType', '').lower():
-                owner = change['owner']['AddressOwner']
-                amount = Decimal(change['amount']) / Decimal(10 ** 6)  # cUSD has 6 decimals
-                
-                # Find user account
-                account = Account.objects.filter(algorand_address=owner).first()
-                if account:
-                    # Update balance cache
-                    update_user_balances.delay(account.id)
-                    
-                    # Create transaction record if receiving
-                    if amount > 0:
-                        Transaction.objects.create(
-                            account=account,
-                            tx_hash=raw_event.tx_hash,
-                            type='received',
-                            amount=abs(amount),
-                            token='CUSD',
-                            status='completed',
-                            blockchain_timestamp=raw_event.block_time
-                        )
-                        
-                        # Send notification
-                        from notifications.tasks import send_push_notification
-                        send_push_notification.delay(
-                            account.user.id,
-                            f"Recibiste {amount} cUSD",
-                            {'type': 'transaction', 'tx_hash': raw_event.tx_hash}
-                        )
-                        
-    except Exception as e:
-        logger.error(f"Error handling cUSD transaction: {e}")
-        raise
-
-
-@shared_task
-def handle_payment_transaction(raw_event_id):
-    """Process payment through Pay contract"""
-    # Similar structure - extract payment details and process
-    pass
-
-
-@shared_task
-def handle_p2p_trade_transaction(raw_event_id):
-    """Process P2P trade events"""
-    # Handle trade creation, acceptance, completion, disputes
-    pass
-
-
-@shared_task
-def handle_invitation_transaction(raw_event_id):
-    """Process invitation events"""
-    # Handle invitation creation, claims, reclaims
-    pass
+"""
+Legacy Sui transaction handlers (process_transaction, handle_cusd_transaction, etc.)
+have been removed. Algorand deposits are handled by scan_inbound_deposits below.
+"""
 
 
 @shared_task(bind=True, max_retries=3)
@@ -322,38 +200,7 @@ def mark_transaction_balances_stale(tx_hash, sender_address=None, recipient_addr
     return marked
 
 
-# Helper functions
-def extract_module(tx_data):
-    """Extract module from transaction data"""
-    if 'objectChanges' in tx_data:
-        for change in tx_data['objectChanges']:
-            if change.get('type') == 'created':
-                return change.get('objectType', '').split('::')[0]
-    return 'unknown'
-
-
-def extract_function(tx_data):
-    """Extract function from transaction data"""
-    tx = tx_data.get('transaction', {}).get('data', {}).get('transaction', {})
-    if isinstance(tx, dict) and tx.get('kind') == 'ProgrammableTransaction':
-        for cmd in tx.get('transactions', []):
-            if 'MoveCall' in cmd:
-                return cmd['MoveCall'].get('function', 'unknown')
-    return 'unknown'
-
-
-@shared_task
-def cleanup_old_events():
-    """Clean up old blockchain events"""
-    # Keep events for 90 days
-    cutoff = timezone.now() - timedelta(days=90)
-    deleted_count = RawBlockchainEvent.objects.filter(
-        created_at__lt=cutoff,
-        processed=True
-    ).delete()[0]
-    
-    logger.info(f"Cleaned up {deleted_count} old blockchain events")
-    return deleted_count
+# Removed old Sui event helpers and cleanup task
 
 
 ## Sui epoch tracking removed — fully migrated to Algorand
@@ -673,9 +520,12 @@ def scan_inbound_deposits():
                 if not next_token:
                     break
 
-            # Advance cursor only to the maximum round actually seen
-            if max_seen_round > (cursor.last_scanned_round or 0):
-                cursor.last_scanned_round = max_seen_round
+            # Advance cursor to the furthest boundary scanned. Even if there
+            # were no transactions for this asset in the window, we mark the
+            # cursor up to current_round so lag reflects real-time progress.
+            new_round = max(max_seen_round, current_round)
+            if new_round > (cursor.last_scanned_round or 0):
+                cursor.last_scanned_round = new_round
                 cursor.save(update_fields=['last_scanned_round', 'updated_at'])
 
         logger.info(f"Indexer scan complete: processed={processed}, skipped={skipped}")

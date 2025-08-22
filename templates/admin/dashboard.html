@@ -494,18 +494,6 @@
         </div>
         
         <div class="metric-card">
-            <div class="metric-label">Blockchain Events Today</div>
-            <div class="metric-value">{{ blockchain_events_today|intcomma }}</div>
-            <div class="metric-change">{{ blockchain_events_unprocessed }} unprocessed</div>
-        </div>
-        
-        <div class="metric-card {% if blockchain_processing_success_rate < 95 %}warning{% endif %}">
-            <div class="metric-label">Processing Success Rate</div>
-            <div class="metric-value">{{ blockchain_processing_success_rate|floatformat:1 }}%</div>
-            <div class="metric-change">Today</div>
-        </div>
-        
-        <div class="metric-card">
             <div class="metric-label">Last Blockchain Sync</div>
             <div class="metric-value" style="font-size: 16px;">
                 {% if last_blockchain_sync %}

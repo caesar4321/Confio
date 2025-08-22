@@ -186,7 +186,7 @@ This is a **monolithic repository** containing the full Confío stack:
 │   ├── sponsor_service.py # Atomic group transaction fee payment service
 │   ├── auth_helper.py      # Authentication helper functions (client-side only)
 │   ├── tasks.py       # Celery tasks for blockchain polling
-│   ├── management/    # Management commands (poll_blockchain, test_algorand_connection)
+│   ├── management/    # Management commands (algorand connection tests)
 │   ├── migrations/    # Database migrations
 │   └── README.md      # Blockchain integration documentation
 
@@ -2349,41 +2349,31 @@ pip install grpcio grpcio-tools celery redis
 python manage.py migrate blockchain
 ```
 
-3. Start polling:
+3. Start workers:
 ```bash
 # Terminal 1: Celery worker
 celery -A config worker -l info
 
 # Terminal 2: Celery beat
 celery -A config beat -l info
-
-# Terminal 3: Blockchain poller
-python manage.py poll_blockchain
 ```
 
 ### Architecture
 
 #### Overview
-The blockchain integration uses a **two-part system**:
-1. **Polling Process**: Monitors blockchain for relevant transactions
-2. **Celery Workers**: Process transactions asynchronously
+The blockchain integration uses **Celery beat + workers**:
+1. **Celery Beat Schedules**: Periodically scan indexer and refresh balances
+2. **Celery Workers**: Perform scans and update cached balances asynchronously
 
 #### How Polling Works
 
 ```
-Algorand Blockchain → poll_blockchain → Celery Queue → process_transaction → Update Cache
-       ↑              (detect)         (queue)        (parse & route)      (invalidate)
-       |                                                    ↓
-   RPC calls                                         handle_*_transaction
-                                                     (token-specific logic)
+Algorand Indexer → Celery Beat → scan_inbound_deposits → Update Cache
+      ↑                 (schedule)          (detect & persist)      (stale/invalidate)
+  RPC calls
 ```
 
-The `poll_blockchain` management command:
-- Runs as a **separate long-running process**
-- Polls blockchain every 2 seconds
-- Detects transactions involving your contracts/users
-- Queues transactions to Celery for processing
-- Does NOT block the web server
+There is no separate poller process. Scans run on a schedule via Celery Beat.
 
 #### Key Features
 - **Hybrid Caching**: Database + Redis caching with blockchain verification
@@ -2406,22 +2396,18 @@ The `poll_blockchain` management command:
 - **Pending Tracking**: Track in-flight transaction amounts
 
 #### Management Commands
-- `poll_blockchain`: Long-running blockchain monitor
 - `test_algorand_connection`: Test RPC connectivity
 - `test_balance_service`: Test hybrid caching system
-- `test_transaction_manager`: Test coin preparation and estimates
 
 #### Celery Tasks
-- `process_transaction`: Initial processing
+- `update_address_cache`: Cache active user addresses for scans
+- `blockchain.scan_inbound_deposits`: Detect inbound USDC/ASA deposits
 - `reconcile_all_balances`: Hourly full reconciliation
 - `refresh_stale_balances`: 5-minute stale balance refresh
 - `mark_transaction_balances_stale`: Invalidate after transactions
 
 #### Models
-- `RawBlockchainEvent`: Raw blockchain data storage
 - `Balance`: Cached token balances with staleness tracking
-- `TransactionProcessingLog`: Processing audit trail
-- `AlgorandRound`: Round tracking for network monitoring
 
 ### Balance Caching Strategy
 
@@ -2568,20 +2554,19 @@ MONITORED_CONTRACTS = [
 ### Production Deployment
 
 #### Process Architecture
-You need to run **4 separate processes** in production:
+Run **3 processes** in production:
 
 ```bash
 # 1. Django Web Server
 gunicorn config.wsgi
 
-# 2. Celery Worker (processes blockchain transactions)
+# 2. Celery Worker (processes scheduled scans and balance updates)
 celery -A config worker -l info
 
 # 3. Celery Beat (runs periodic tasks)
 celery -A config beat -l info
 
-# 4. Blockchain Poller (monitors blockchain)
-python manage.py poll_blockchain
+# No separate poller process is required
 ```
 
 #### Docker Compose Example
@@ -2597,36 +2582,17 @@ services:
   celery-beat:
     command: celery -A config beat -l info
     
-  blockchain-poller:
-    command: python manage.py poll_blockchain
-    restart: always  # Important: keep running
+  # no separate poller service needed
 ```
 
 #### Systemd Service Example
 ```ini
-# /etc/systemd/system/confio-poller.service
-[Unit]
-Description=Confio Blockchain Poller
-After=network.target
-
-[Service]
-Type=simple
-User=confio
-WorkingDirectory=/opt/confio
-Environment="DJANGO_SETTINGS_MODULE=config.settings"
-ExecStart=/opt/confio/venv/bin/python manage.py poll_blockchain
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
+# (No poller service required — Celery Beat handles scheduling)
 ```
 
 #### Important Notes
-- The poller is **NOT a Celery task** - it's a standalone process
-- It must run continuously to detect transactions
-- Use supervisor, systemd, or Docker to ensure it restarts on failure
-- Monitor logs for polling errors
+- Celery Beat schedules scans; ensure both worker and beat are healthy
+- Monitor Celery logs for indexer scan and reconciliation errors
 
 ### Scaling
 
