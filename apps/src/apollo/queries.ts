@@ -1261,19 +1261,6 @@ export const RATE_P2P_TRADE = gql`
   }
 `;
 
-export const DISPUTE_P2P_TRADE = gql`
-  mutation DisputeP2PTrade($tradeId: ID!, $reason: String!) {
-    disputeP2pTrade(tradeId: $tradeId, reason: $reason) {
-      trade {
-        id
-        status
-      }
-      success
-      errors
-    }
-  }
-`;
-
 export const TOGGLE_FAVORITE_TRADER = gql`
   mutation ToggleFavoriteTrader($traderUserId: ID, $traderBusinessId: ID, $note: String) {
     toggleFavoriteTrader(traderUserId: $traderUserId, traderBusinessId: $traderBusinessId, note: $note) {

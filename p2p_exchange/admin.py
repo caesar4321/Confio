@@ -352,7 +352,12 @@ class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
                       'onchain_escrow_sanity']
     list_per_page = 50
     date_hierarchy = 'created_at'
-    actions = ['mark_as_completed', 'mark_as_disputed', 'resolve_dispute']
+    actions = [
+        'mark_as_completed',
+        'mark_as_disputed',
+        'resolve_dispute_refund_buyer_onchain',
+        'resolve_dispute_release_seller_onchain',
+    ]
     
     # Fieldsets are defined below (Spanish localized variant)
 
@@ -792,29 +797,195 @@ class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         self.message_user(request, f'{updated} trades marked as disputed.')
     mark_as_disputed.short_description = '⚠️ Marcar como disputado'
     
-    def resolve_dispute(self, request, queryset):
-        """Resolve disputes and mark trades as completed"""
+    # Removed legacy DB-only resolve_dispute action in favor of on-chain actions
+
+    def _resolve_onchain(self, request, queryset, winner_side: str):
+        """Backend-only on-chain dispute resolution for selected DISPUTED trades.
+        winner_side: 'BUYER' or 'SELLER'
+        """
         from django.utils import timezone
-        updated = 0
-        for trade in queryset.filter(status='DISPUTED'):
-            trade.status = 'COMPLETED'
-            trade.completed_at = timezone.now()
-            trade.save()
-            
-            # Update the dispute record
+        from django.conf import settings
+        from algosdk import mnemonic, encoding as algo_encoding
+        from algosdk.v2client import algod
+        from algosdk import transaction
+        import base64, msgpack
+        from blockchain.p2p_trade_transaction_builder import P2PTradeTransactionBuilder
+        from .models import P2PDispute
+
+        admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None)
+        sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+        if not admin_mn or not sponsor_mn:
+            self.message_user(request, 'Config error: missing ALGORAND_ADMIN_MNEMONIC or ALGORAND_SPONSOR_MNEMONIC', level='error')
+            return
+
+        from algosdk import account as algo_account
+        admin_sk = mnemonic.to_private_key(admin_mn)
+        admin_addr = algo_account.address_from_private_key(admin_sk)
+        sponsor_sk = mnemonic.to_private_key(sponsor_mn)
+        sponsor_addr = algo_account.address_from_private_key(sponsor_sk)
+
+        client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        builder = P2PTradeTransactionBuilder()
+
+        # Preflight: verify on-chain admin and sponsor match env
+        try:
+            app_info = client.application_info(builder.app_id)
+            gs_list = (app_info.get('params') or {}).get('global-state') or []
+            def _decode_gs(lst):
+                out = {}
+                import base64
+                for kv in lst:
+                    k = base64.b64decode(kv.get('key','')).decode('utf-8', errors='ignore')
+                    v = kv.get('value') or {}
+                    if 'bytes' in v and v['bytes']:
+                        try:
+                            b = base64.b64decode(v['bytes'])
+                            out[k] = algo_account.address_from_private_key(b'\x00'*32)  # placeholder
+                            # Replace with actual bytes for addresses
+                            out[k] = b
+                        except Exception:
+                            out[k] = v['bytes']
+                    else:
+                        out[k] = v.get('uint')
+                return out
+            gs = _decode_gs(gs_list)
+            on_admin_b = gs.get('admin')
+            on_sponsor_b = gs.get('sponsor_address')
+            on_admin = None
+            on_sponsor = None
             try:
-                dispute = trade.dispute_details
-                dispute.status = 'RESOLVED'
-                dispute.resolution_type = 'NO_ACTION'
-                dispute.resolved_at = timezone.now()
-                dispute.resolved_by = request.user
-                dispute.resolution_notes = f"Resolved by {request.user.username} via admin action"
-                dispute.save()
-                updated += 1
-            except P2PDispute.DoesNotExist:
-                pass
-        self.message_user(request, f'{updated} disputes resolved and trades marked as completed.')
-    resolve_dispute.short_description = '✅ Resolver disputa'
+                from algosdk import encoding as algo_encoding
+                if isinstance(on_admin_b, (bytes, bytearray)) and len(on_admin_b) == 32:
+                    on_admin = algo_encoding.encode_address(on_admin_b)
+                if isinstance(on_sponsor_b, (bytes, bytearray)) and len(on_sponsor_b) == 32:
+                    on_sponsor = algo_encoding.encode_address(on_sponsor_b)
+            except Exception:
+                on_admin = None
+                on_sponsor = None
+            if on_admin and admin_addr != on_admin:
+                self.message_user(request, f'Admin address mismatch. Env={admin_addr[:10]}.. App={on_admin[:10]}..', level='error')
+                return
+            if on_sponsor and sponsor_addr != on_sponsor:
+                self.message_user(request, f'Sponsor address mismatch. Env={sponsor_addr[:10]}.. App={on_sponsor[:10]}..', level='error')
+                return
+        except Exception as e:
+            self.message_user(request, f'Preflight: unable to read app info: {e}', level='error')
+            return
+
+        successes = 0
+        failures = 0
+        for trade in queryset.filter(status='DISPUTED').select_related('buyer_user', 'seller_user', 'buyer_business', 'seller_business'):
+            try:
+                # Resolve winner address
+                from users.models import Business
+                def _addr_user(u):
+                    from users.models import Account
+                    a = Account.objects.filter(user_id=getattr(u, 'id', None), account_type='personal', deleted_at__isnull=True).order_by('account_index').first()
+                    return getattr(a, 'algorand_address', None) if a else None
+                def _addr_biz(biz_id):
+                    from users.models import Account
+                    try:
+                        biz = Business.objects.get(id=biz_id)
+                    except Business.DoesNotExist:
+                        return None
+                    a = Account.objects.filter(business=biz, account_type='business', deleted_at__isnull=True).order_by('account_index').first()
+                    return getattr(a, 'algorand_address', None) if a else None
+                if winner_side == 'BUYER':
+                    winner_addr = _addr_biz(trade.buyer_business_id) if trade.buyer_business_id else _addr_user(trade.buyer_user)
+                else:
+                    winner_addr = _addr_biz(trade.seller_business_id) if trade.seller_business_id else _addr_user(trade.seller_user)
+                if not winner_addr:
+                    failures += 1
+                    continue
+
+                # Preflight: ensure winner is opted into asset from trade box
+                try:
+                    import base64 as _b64
+                    bx = client.application_box_by_name(builder.app_id, str(trade.id).encode('utf-8'))
+                    raw = _b64.b64decode((bx or {}).get('value',''))
+                    if len(raw) < 48:
+                        self.message_user(request, f'Trade {trade.id}: on-chain box incomplete', level='error')
+                        failures += 1
+                        continue
+                    import struct
+                    asset_id = struct.unpack('>Q', raw[40:48])[0]
+                    try:
+                        client.account_asset_info(winner_addr, asset_id)
+                    except Exception:
+                        self.message_user(request, f'Trade {trade.id}: winner {winner_addr[:10]}.. not opted-in to asset {asset_id}', level='error')
+                        failures += 1
+                        continue
+                except Exception as ee:
+                    self.message_user(request, f'Trade {trade.id}: preflight error {ee}', level='error')
+                    failures += 1
+                    continue
+
+                res = builder.build_resolve_dispute(admin_addr, str(trade.id), winner_addr)
+                if not res.success:
+                    self.message_user(request, f'Trade {trade.id}: build failed: {res.error}', level='error')
+                    failures += 1
+                    continue
+
+                # Sign sponsor
+                parsed = res.sponsor_transactions or []
+                if not parsed:
+                    failures += 1
+                    continue
+                b0 = base64.b64decode(parsed[0].get('txn'))
+                tx0 = transaction.Transaction.undictify(msgpack.unpackb(b0, raw=False))
+                stx0 = tx0.sign(sponsor_sk)
+
+                # Sign admin appcall
+                app_b64 = (res.transactions_to_sign or [])[0].get('txn')
+                tx1 = transaction.Transaction.undictify(msgpack.unpackb(base64.b64decode(app_b64), raw=False))
+                stx1 = tx1.sign(admin_sk)
+
+                try:
+                    txid = client.send_transactions([stx0, stx1])
+                except Exception as send_err:
+                    self.message_user(request, f'Trade {trade.id}: submit error: {send_err}', level='error')
+                    failures += 1
+                    continue
+                try:
+                    transaction.wait_for_confirmation(client, stx1.get_txid(), 6)
+                except Exception:
+                    pass
+
+                # Update local records
+                try:
+                    dispute = trade.dispute_details
+                    dispute.status = 'RESOLVED'
+                    dispute.resolution_type = 'REFUND_BUYER' if winner_side == 'BUYER' else 'RELEASE_TO_SELLER'
+                    dispute.resolution_notes = f'Resolved on-chain by {request.user.username}'
+                    dispute.resolved_at = timezone.now()
+                    dispute.resolved_by = request.user
+                    dispute.save()
+                except P2PDispute.DoesNotExist:
+                    pass
+
+                # Update trade status
+                if winner_side == 'BUYER':
+                    trade.status = 'CANCELLED'
+                else:
+                    trade.status = 'COMPLETED'
+                    trade.completed_at = timezone.now()
+                trade.updated_at = timezone.now()
+                trade.save()
+
+                successes += 1
+            except Exception:
+                failures += 1
+                continue
+
+        self.message_user(request, f'On-chain dispute resolution completed: {successes} succeeded, {failures} failed.')
+
+    def resolve_dispute_refund_buyer_onchain(self, request, queryset):
+        return self._resolve_onchain(request, queryset, 'BUYER')
+    resolve_dispute_refund_buyer_onchain.short_description = '🟢 Resolver disputa en cadena: Reembolso al comprador'
+
+    def resolve_dispute_release_seller_onchain(self, request, queryset):
+        return self._resolve_onchain(request, queryset, 'SELLER')
+    resolve_dispute_release_seller_onchain.short_description = '🔵 Resolver disputa en cadena: Liberar al vendedor'
 
 @admin.register(P2PMessage)
 class P2PMessageAdmin(admin.ModelAdmin):

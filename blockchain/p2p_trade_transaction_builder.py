@@ -87,6 +87,11 @@ class P2PTradeTransactionBuilder:
         # PAID_VALUE_LEN = 41; MBR = 2500 + 400 * (key_len + 41)
         return 2500 + 400 * (key_len + 41)
 
+    @staticmethod
+    def _dispute_box_mbr(key_len: int) -> int:
+        # DISPUTE_VALUE_LEN = 104; MBR = 2500 + 400 * (key_len + 104)
+        return 2500 + 400 * (key_len + 104)
+
     def _asset_id_for_type(self, token: str) -> int:
         t = (token or 'CUSD').upper()
         if t == 'CUSD':
@@ -474,6 +479,144 @@ class P2PTradeTransactionBuilder:
             gid = transaction.calculate_group_id([t.txn for t in tws])
             sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
             user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [caller_address], 'message': 'Cancelar intercambio (expirado)'}]
+            return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
+        except Exception as e:
+            return BuildResult(False, error=str(e))
+
+    def build_open_dispute(
+        self,
+        opener_address: str,
+        trade_id: str,
+        reason: str,
+    ) -> BuildResult:
+        """Build [Payment(sponsor→app, MBR), AppCall(opener)] to open dispute.
+
+        Boxes required: trade_id, trade_id+"_dispute" (created if missing).
+        """
+        try:
+            # Key for dispute box
+            key = (trade_id + "_dispute").encode()
+            if len(trade_id.encode()) == 0 or len(trade_id.encode()) > 56:
+                return BuildResult(False, error='trade_id must be 1..56 bytes')
+            if len(key) > 64:
+                return BuildResult(False, error='trade_id too long for _dispute box key')
+            mbr = self._dispute_box_mbr(len(key))
+
+            params = self.algod_client.suggested_params()
+            min_fee = getattr(params, 'min_fee', 1000) or 1000
+
+            atc = AtomicTransactionComposer()
+            # Pool minimal fees on sponsor; user AppCall uses fee=0
+            sp0 = transaction.SuggestedParams(fee=2*min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            pay = transaction.PaymentTxn(sender=self.sponsor_address, sp=sp0, receiver=self.app_address, amt=mbr, note=b'P2P dispute MBR')
+            atc.add_transaction(TransactionWithSigner(pay, AccountTransactionSigner('0'*64)))
+
+            method = self._method('open_dispute')
+            if method is None:
+                return BuildResult(False, error='ABI method open_dispute not found')
+            sp1 = transaction.SuggestedParams(fee=0, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            atc.add_method_call(
+                app_id=self.app_id,
+                method=method,
+                sender=opener_address,
+                sp=sp1,
+                signer=AccountTransactionSigner('0'*64),  # placeholder; user signs
+                method_args=[trade_id, reason],
+                boxes=[(0, trade_id.encode()), (0, key)],
+            )
+
+            tws = atc.build_group()
+            gid = transaction.calculate_group_id([t.txn for t in tws])
+            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
+            user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [opener_address], 'message': 'Open dispute'}]
+            return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
+        except Exception as e:
+            return BuildResult(False, error=str(e))
+
+    def build_resolve_dispute(
+        self,
+        admin_address: str,
+        trade_id: str,
+        winner_address: str,
+    ) -> BuildResult:
+        """Build [Payment(sponsor fee-bump), AppCall(admin)] to resolve dispute.
+
+        Boxes required: trade_id, trade_id+"_dispute", trade_id+"_paid" (optional but include).
+        Include common assets to satisfy asset_holding_get for inner transfers.
+        """
+        try:
+            params = self.algod_client.suggested_params()
+            min_fee = getattr(params, 'min_fee', 1000) or 1000
+
+            atc = AtomicTransactionComposer()
+            # Budget generously for inner itxns: asset transfer + up to 2 MBR refunds
+            sp0 = transaction.SuggestedParams(fee=6*min_fee, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            pay = transaction.PaymentTxn(sender=self.sponsor_address, sp=sp0, receiver=self.app_address, amt=0, note=b'P2P resolve dispute')
+            atc.add_transaction(TransactionWithSigner(pay, AccountTransactionSigner('0'*64)))
+
+            method = self._method('resolve_dispute')
+            if method is None:
+                return BuildResult(False, error='ABI method resolve_dispute not found')
+            sp1 = transaction.SuggestedParams(fee=0, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
+            foreign_assets = [a for a in [self.cusd_asset_id, self.confio_asset_id] if a]
+            # Accounts: include sponsor (for refunds) and winner (for asset_holding_get)
+            accounts: List[str] = []
+            if self.sponsor_address:
+                accounts.append(self.sponsor_address)
+            if winner_address and winner_address not in accounts:
+                accounts.append(winner_address)
+
+            # Best-effort: include buyer, mbr_payer, dispute_payer derived from boxes to avoid 'unavailable Account' during inner refunds
+            try:
+                import base64 as _b64
+                bx = self.algod_client.application_box_by_name(self.app_id, trade_id.encode('utf-8'))
+                raw = _b64.b64decode((bx or {}).get('value', ''))
+                if len(raw) >= 137:
+                    buyer_b = raw[73:105]
+                    mbr_payer_b = raw[105:137]
+                    if len(buyer_b) == 32:
+                        from algosdk import encoding as algo_encoding
+                        buyer_addr = algo_encoding.encode_address(buyer_b)
+                        if buyer_addr not in accounts:
+                            accounts.append(buyer_addr)
+                    if len(mbr_payer_b) == 32:
+                        from algosdk import encoding as algo_encoding
+                        mbr_payer_addr = algo_encoding.encode_address(mbr_payer_b)
+                        if mbr_payer_addr not in accounts:
+                            accounts.append(mbr_payer_addr)
+                # Dispute box payer
+                dbx = self.algod_client.application_box_by_name(self.app_id, (trade_id + "_dispute").encode('utf-8'))
+                dval = _b64.b64decode((dbx or {}).get('value', ''))
+                if len(dval) >= 104:
+                    dispute_payer_b = dval[72:104]
+                    if len(dispute_payer_b) == 32:
+                        from algosdk import encoding as algo_encoding
+                        dispute_payer_addr = algo_encoding.encode_address(dispute_payer_b)
+                        if dispute_payer_addr not in accounts:
+                            accounts.append(dispute_payer_addr)
+            except Exception:
+                pass
+
+            atc.add_method_call(
+                app_id=self.app_id,
+                method=method,
+                sender=admin_address,
+                sp=sp1,
+                signer=AccountTransactionSigner('0'*64),  # placeholder; admin signs
+                method_args=[trade_id, winner_address],
+                boxes=[
+                    (0, trade_id.encode()),
+                    (0, (trade_id + "_dispute").encode()),
+                    (0, (trade_id + "_paid").encode()),
+                ],
+                foreign_assets=foreign_assets,
+                accounts=accounts,
+            )
+
+            tws = atc.build_group()
+            gid = transaction.calculate_group_id([t.txn for t in tws])
+            sponsor_txs = [{'txn': algo_encoding.msgpack_encode(tws[0].txn), 'signed': None, 'index': 0}]
+            user_txs = [{'txn': algo_encoding.msgpack_encode(tws[1].txn), 'signers': [admin_address], 'message': 'Resolve dispute'}]
             return BuildResult(True, transactions_to_sign=user_txs, sponsor_transactions=sponsor_txs, group_id=base64.b64encode(gid).decode(), trade_id=trade_id)
         except Exception as e:
             return BuildResult(False, error=str(e))

@@ -11,6 +11,10 @@ import {
   Animated,
   Modal,
   TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -18,29 +22,14 @@ import Icon from 'react-native-vector-icons/Feather';
 import { colors } from '../config/theme';
 import { MainStackParamList } from '../types/navigation';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
-import { useQuery, useMutation, gql } from '@apollo/client';
-import { GET_P2P_TRADE, DISPUTE_P2P_TRADE } from '../apollo/queries';
+import { useQuery } from '@apollo/client';
+import { GET_P2P_TRADE } from '../apollo/queries';
+import { p2pSponsoredService } from '../services/p2pSponsoredService';
+import LoadingOverlay from '../components/LoadingOverlay';
 import { formatLocalDateTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
 
-// Temporary workaround - define mutation locally if import fails
-const DISPUTE_P2P_TRADE_LOCAL = gql`
-  mutation DisputeP2PTrade($tradeId: ID!, $reason: String!) {
-    disputeP2pTrade(tradeId: $tradeId, reason: $reason) {
-      trade {
-        id
-        status
-      }
-      success
-      errors
-    }
-  }
-`;
-
-// Debug log
-console.log('[ActiveTradeScreen] DISPUTE_P2P_TRADE imported:', !!DISPUTE_P2P_TRADE);
-console.log('[ActiveTradeScreen] Using fallback:', !DISPUTE_P2P_TRADE);
 
 type ActiveTradeRouteProp = RouteProp<MainStackParamList, 'ActiveTrade'>;
 type ActiveTradeNavigationProp = NativeStackNavigationProp<MainStackParamList, 'ActiveTrade'>;
@@ -86,9 +75,7 @@ export const ActiveTradeScreen: React.FC = () => {
   const [disputeReason, setDisputeReason] = useState('');
   const [isSubmittingDispute, setIsSubmittingDispute] = useState(false);
   
-  // Mutations - Use local fallback if import fails
-  const mutationToUse = DISPUTE_P2P_TRADE || DISPUTE_P2P_TRADE_LOCAL;
-  const [disputeP2PTrade] = useMutation(mutationToUse);
+  // Dispute now goes on-chain via prepare/submit using p2pSponsoredService
   
   // Fetch full trade details immediately if we only have an ID
   const { data: tradeDetailsData, loading: tradeDetailsLoading, error: tradeDetailsError, refetch } = useQuery(GET_P2P_TRADE, {
@@ -233,9 +220,7 @@ export const ActiveTradeScreen: React.FC = () => {
     });
   }, [routeTrade?.id, fullTradeData?.status, fullTradeData?.step, iAmBuyer, iAmSeller]);
   
-  useEffect(() => {
-    console.log('[ActiveTradeScreen] Using mutation:', !!mutationToUse, mutationToUse === DISPUTE_P2P_TRADE_LOCAL ? 'local' : 'imported');
-  }, []);
+  // no-op
   
   // Format crypto token for display
   const formatCrypto = (crypto: string): string => {
@@ -321,23 +306,14 @@ export const ActiveTradeScreen: React.FC = () => {
       return;
     }
 
-    if (!disputeP2PTrade) {
-      console.error('[ActiveTradeScreen] DISPUTE_P2P_TRADE mutation is not available');
-      Alert.alert('Error', 'La función de disputa no está disponible en este momento. Por favor intenta más tarde.');
-      return;
-    }
-
+    // Ensure keyboard is closed and show global spinner overlay
+    try { Keyboard.dismiss(); } catch {}
     setIsSubmittingDispute(true);
+    // Hide the modal so the spinner overlay is clearly visible above the screen
+    setShowDisputeModal(false);
     try {
-      const { data } = await disputeP2PTrade({
-        variables: {
-          tradeId: trade.id,
-          reason: disputeReason.trim(),
-        },
-      });
-
-      if (data?.disputeP2pTrade?.success) {
-        setShowDisputeModal(false);
+      const res = await p2pSponsoredService.openDispute(trade.id, disputeReason.trim());
+      if (res.success) {
         Alert.alert(
           'Disputa iniciada',
           'Tu disputa ha sido registrada. Un administrador revisará el caso pronto.',
@@ -349,7 +325,7 @@ export const ActiveTradeScreen: React.FC = () => {
           ],
         );
       } else {
-        Alert.alert('Error', data?.disputeP2pTrade?.errors?.join(', ') || 'No se pudo iniciar la disputa.');
+        Alert.alert('Error', res.error || 'No se pudo iniciar la disputa.');
       }
     } catch (error) {
       console.error('Error initiating dispute:', error);
@@ -1191,68 +1167,88 @@ export const ActiveTradeScreen: React.FC = () => {
       <Modal
         visible={showDisputeModal}
         animationType="slide"
-        transparent={true}
+        transparent
+        presentationStyle="overFullScreen"
         onRequestClose={() => setShowDisputeModal(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Disputar intercambio</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setShowDisputeModal(false);
-                  setDisputeReason('');
-                }}
-                style={styles.modalCloseButton}
-              >
-                <Icon name="x" size={24} color="#6B7280" />
-              </TouchableOpacity>
-            </View>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={styles.modalOverlay}>
+            <KeyboardAvoidingView
+              style={styles.kbContainer}
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
+            >
+              <View style={styles.modalContent}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Disputar intercambio</Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setShowDisputeModal(false);
+                      setDisputeReason('');
+                    }}
+                    style={styles.modalCloseButton}
+                  >
+                    <Icon name="x" size={24} color="#6B7280" />
+                  </TouchableOpacity>
+                </View>
 
-            <Text style={styles.modalDescription}>
-              Por favor describe detalladamente el problema con este intercambio. 
-              Tu reporte será revisado por nuestro equipo de soporte.
-            </Text>
+                <ScrollView
+                  style={styles.modalScroll}
+                  contentContainerStyle={styles.modalScrollContent}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                >
+                  <Text style={styles.modalDescription}>
+                    Por favor describe detalladamente el problema con este intercambio.
+                    Tu reporte será revisado por nuestro equipo de soporte.
+                  </Text>
 
-            <TextInput
-              style={styles.disputeTextInput}
-              placeholder="Describe el problema (mínimo 10 caracteres)..."
-              placeholderTextColor="#9CA3AF"
-              value={disputeReason}
-              onChangeText={setDisputeReason}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-            />
+                  <TextInput
+                    style={styles.disputeTextInput}
+                    placeholder="Describe el problema (mínimo 10 caracteres)..."
+                    placeholderTextColor="#9CA3AF"
+                    value={disputeReason}
+                    onChangeText={setDisputeReason}
+                    multiline
+                    numberOfLines={6}
+                    textAlignVertical="top"
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                  />
+                </ScrollView>
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.modalCancelButton}
-                onPress={() => {
-                  setShowDisputeModal(false);
-                  setDisputeReason('');
-                }}
-                disabled={isSubmittingDispute}
-              >
-                <Text style={styles.modalCancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={styles.modalCancelButton}
+                    onPress={() => {
+                      setShowDisputeModal(false);
+                      setDisputeReason('');
+                    }}
+                    disabled={isSubmittingDispute}
+                  >
+                    <Text style={styles.modalCancelButtonText}>Cancelar</Text>
+                  </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[
-                  styles.modalSubmitButton,
-                  (isSubmittingDispute || disputeReason.trim().length < 10) && styles.modalSubmitButtonDisabled
-                ]}
-                onPress={submitDispute}
-                disabled={isSubmittingDispute || disputeReason.trim().length < 10}
-              >
-                <Text style={styles.modalSubmitButtonText}>
-                  {isSubmittingDispute ? 'Enviando...' : 'Enviar disputa'}
-                </Text>
-              </TouchableOpacity>
-            </View>
+                  <TouchableOpacity
+                    style={[
+                      styles.modalSubmitButton,
+                      (isSubmittingDispute || disputeReason.trim().length < 10) && styles.modalSubmitButtonDisabled,
+                    ]}
+                    onPress={submitDispute}
+                    disabled={isSubmittingDispute || disputeReason.trim().length < 10}
+                  >
+                    <Text style={styles.modalSubmitButtonText}>
+                      {isSubmittingDispute ? 'Enviando...' : 'Enviar disputa'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </KeyboardAvoidingView>
           </View>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
+      {/* Global loading overlay for blockchain confirmation */}
+      <LoadingOverlay visible={isSubmittingDispute} message="Confirmando disputa en blockchain…" />
     </SafeAreaView>
   );
 };
@@ -1859,12 +1855,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
+  kbContainer: {
+    width: '100%',
+  },
   modalContent: {
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 20,
     width: '100%',
     maxWidth: 400,
+  },
+  modalScroll: {
+    maxHeight: 300,
+  },
+  modalScrollContent: {
+    paddingBottom: 8,
   },
   modalHeader: {
     flexDirection: 'row',
