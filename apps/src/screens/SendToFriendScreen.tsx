@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, Modal, ActivityIndicator } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useQuery } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
+import { apolloClient } from '../apollo/client';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -84,18 +84,33 @@ export const SendToFriendScreen = () => {
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const navLock = React.useRef(false);
 
-  // Get real balance from GraphQL
-  const { data: balanceData, loading: balanceLoading } = useQuery(GET_ACCOUNT_BALANCE, {
-    variables: { tokenType: tokenType.toUpperCase() },
-    fetchPolicy: 'cache-and-network',
-  });
-
-  // Get real balance or fallback to 0
-  const availableBalance = React.useMemo(() => {
-    const balance = parseFloat(balanceData?.accountBalance || '0');
-    return balance;
-  }, [balanceData]);
+  // Balance snapshot + background refresh
+  const [balanceSnapshot, setBalanceSnapshot] = useState<string | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState<boolean>(false);
+  useEffect(() => {
+    let mounted = true;
+    const tok = tokenType.toUpperCase();
+    try {
+      const cached = apolloClient.readQuery<{ accountBalance: string }>({
+        query: GET_ACCOUNT_BALANCE,
+        variables: { tokenType: tok }
+      });
+      if (cached?.accountBalance && mounted) setBalanceSnapshot(cached.accountBalance);
+    } catch {}
+    setBalanceLoading(true);
+    apolloClient.query<{ accountBalance: string }>({
+      query: GET_ACCOUNT_BALANCE,
+      variables: { tokenType: tok },
+      fetchPolicy: 'network-only'
+    }).then(res => {
+      if (!mounted) return;
+      setBalanceSnapshot(res.data?.accountBalance ?? null);
+    }).catch(() => {}).finally(() => mounted && setBalanceLoading(false));
+    return () => { mounted = false; };
+  }, [tokenType]);
+  const availableBalance = React.useMemo(() => parseFloat(balanceSnapshot || '0'), [balanceSnapshot]);
 
   // Prevent overstatement: floor display to 2 decimals
   const floorToDecimals = React.useCallback((value: number, decimals: number) => {
@@ -117,7 +132,7 @@ export const SendToFriendScreen = () => {
     console.log('SendToFriendScreen: handleSend called');
     
     // Prevent double-clicks/rapid button presses
-    if (isProcessing) {
+    if (isProcessing || navLock.current) {
       console.log('SendToFriendScreen: Already processing, ignoring duplicate click');
       return;
     }
@@ -129,6 +144,7 @@ export const SendToFriendScreen = () => {
     }
     
     setIsProcessing(true);
+    navLock.current = true;
     
     try {
       console.log('SendToFriendScreen: Navigating to TransactionProcessing');
@@ -173,7 +189,10 @@ export const SendToFriendScreen = () => {
       setErrorMessage('Error al procesar la transacción. Inténtalo de nuevo.');
       setShowError(true);
     } finally {
-      setIsProcessing(false);
+      setTimeout(() => {
+        setIsProcessing(false);
+        navLock.current = false;
+      }, 600);
     }
   };
 
@@ -305,6 +324,7 @@ export const SendToFriendScreen = () => {
           >
             <Text style={styles.confirmButtonText}>
               {isProcessing ? 'Procesando...' : 
+               balanceSnapshot == null ? 'Cargando saldo…' : 
                parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' : 
                `Enviar a ${friend.name}`}
             </Text>

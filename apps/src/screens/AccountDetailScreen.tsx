@@ -622,6 +622,8 @@ export const AccountDetailScreen = () => {
           recipientAddress: tx.counterpartyAddress, // Note: unified view uses counterpartyAddress
           isExternalDeposit, // Add this flag for the UI to show the "Wallet externa" tag
           senderType: tx.senderType,
+          // Helps UI decide if this was a Confío friend vs external
+          hasCounterpartyUser: Boolean(tx.counterpartyUser && tx.counterpartyUser.id),
           description: isConversion ? tx.description : undefined,
           conversionType: isConversion ? conversionType : undefined,
           p2pTradeId: type === 'exchange' ? tx.p2pTradeId : undefined
@@ -1036,7 +1038,7 @@ export const AccountDetailScreen = () => {
             </Text>
           )}
           {/* Show external wallet indicator for sends to addresses without phone */}
-          {transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && (
+          {transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && !(transaction as any).hasCounterpartyUser && (
             <Text style={styles.externalWalletNote}>
               <Icon name="external-link" size={12} color="#3B82F6" /> Wallet externa
             </Text>

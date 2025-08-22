@@ -612,6 +612,25 @@ def confirm_payment_transaction(self, payment_id: str, txid: str):
 
             amount_str = str(payment_tx.amount)
             token = payment_tx.token_type
+            display_token = 'cUSD' if str(token).upper() == 'CUSD' else str(token)
+            # Derive friendly, privacy-safe display names
+            def full_name(u):
+                try:
+                    name = f"{(u.first_name or '').strip()} {(u.last_name or '').strip()}".strip()
+                    return name or None
+                except Exception:
+                    return None
+            payer_name = (
+                payment_tx.payer_display_name
+                or (full_name(payment_tx.payer_user) if payment_tx.payer_user else None)
+                or (payment_tx.payer_phone if getattr(payment_tx, 'payer_phone', '') else None)
+                or (f"{(payment_tx.payer_address or '')[:6]}...{(payment_tx.payer_address or '')[-4:]}" if getattr(payment_tx, 'payer_address', '') else 'Usuario')
+            )
+            merchant_name = (
+                payment_tx.merchant_display_name
+                or (payment_tx.merchant_business.name if payment_tx.merchant_business else None)
+                or (f"{(payment_tx.merchant_address or '')[:6]}...{(payment_tx.merchant_address or '')[-4:]}" if getattr(payment_tx, 'merchant_address', '') else 'Comercio')
+            )
 
             try:
                 merchant_acct = payment_tx.merchant_account
@@ -621,7 +640,7 @@ def confirm_payment_transaction(self, payment_id: str, txid: str):
                     business=payment_tx.merchant_business,
                     notification_type=NotificationTypeChoices.PAYMENT_RECEIVED,
                     title="Pago recibido",
-                    message=f"Recibiste {amount_str} {token}",
+                    message=f"Recibiste {amount_str} {display_token} de {payer_name}",
                     data={
                         'transaction_id': payment_tx.payment_transaction_id,
                         'transaction_hash': payment_tx.transaction_hash,
@@ -642,7 +661,7 @@ def confirm_payment_transaction(self, payment_id: str, txid: str):
                     business=payment_tx.payer_business,
                     notification_type=NotificationTypeChoices.PAYMENT_SENT,
                     title="Pago enviado",
-                    message=f"Tu pago de {amount_str} {token} fue confirmado",
+                    message=f"Pagaste {amount_str} {display_token} a {merchant_name}",
                     data={
                         'transaction_id': payment_tx.payment_transaction_id,
                         'transaction_hash': payment_tx.transaction_hash,
@@ -730,6 +749,25 @@ def scan_outbound_confirmations(max_batch: int = 50):
                 try:
                     amount_str = str(s.amount)
                     token = s.token_type
+                    display_token = 'cUSD' if str(token).upper() == 'CUSD' else str(token)
+                    def full_name_user(u):
+                        try:
+                            nm = f"{(u.first_name or '').strip()} {(u.last_name or '').strip()}".strip()
+                            return nm or None
+                        except Exception:
+                            return None
+                    sender_name = (
+                        s.sender_display_name
+                        or (full_name_user(s.sender_user) if s.sender_user_id else None)
+                        or (s.sender_phone if getattr(s, 'sender_phone', '') else None)
+                        or (s.sender_address[:6] + '...' + s.sender_address[-4:] if s.sender_address else 'Usuario')
+                    )
+                    recipient_name = (
+                        s.recipient_display_name
+                        or (full_name_user(s.recipient_user) if s.recipient_user_id else None)
+                        or (s.recipient_phone if getattr(s, 'recipient_phone', '') else None)
+                        or (s.recipient_address[:6] + '...' + s.recipient_address[-4:] if s.recipient_address else 'Contacto')
+                    )
                     # Recipient notification
                     if s.recipient_user_id:
                         create_notification(
@@ -738,7 +776,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             business=s.recipient_business,
                             notification_type=NotifType.SEND_RECEIVED,
                             title="Dinero recibido",
-                            message=f"Recibiste {amount_str} {token}",
+                            message=f"Recibiste {amount_str} {display_token} de {sender_name}",
                             data={
                                 'transaction_hash': s.transaction_hash,
                                 'amount': amount_str,
@@ -756,7 +794,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             business=s.sender_business,
                             notification_type=NotifType.SEND_SENT,
                             title="Dinero enviado",
-                            message=f"Tu envío de {amount_str} {token} fue confirmado",
+                            message=f"Enviaste {amount_str} {display_token} a {recipient_name}",
                             data={
                                 'transaction_hash': s.transaction_hash,
                                 'amount': amount_str,

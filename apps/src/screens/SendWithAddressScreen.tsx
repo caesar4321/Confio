@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, ActivityIndicator } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useQuery } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
+import { apolloClient } from '../apollo/client';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -67,18 +68,33 @@ export const SendWithAddressScreen = () => {
   const [showError, setShowError] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const navLock = React.useRef(false);
 
-  // Get real balance from GraphQL
-  const { data: balanceData, loading: balanceLoading } = useQuery(GET_ACCOUNT_BALANCE, {
-    variables: { tokenType: tokenType.toUpperCase() },
-    fetchPolicy: 'cache-and-network',
-  });
-
-  // Get real balance or fallback to 0
-  const availableBalance = React.useMemo(() => {
-    const balance = parseFloat(balanceData?.accountBalance || '0');
-    return balance;
-  }, [balanceData]);
+  // Balance snapshot + background refresh
+  const [balanceSnapshot, setBalanceSnapshot] = useState<string | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState<boolean>(false);
+  useEffect(() => {
+    let mounted = true;
+    const tok = tokenType.toUpperCase();
+    try {
+      const cached = apolloClient.readQuery<{ accountBalance: string }>({
+        query: GET_ACCOUNT_BALANCE,
+        variables: { tokenType: tok }
+      });
+      if (cached?.accountBalance && mounted) setBalanceSnapshot(cached.accountBalance);
+    } catch {}
+    setBalanceLoading(true);
+    apolloClient.query<{ accountBalance: string }>({
+      query: GET_ACCOUNT_BALANCE,
+      variables: { tokenType: tok },
+      fetchPolicy: 'network-only'
+    }).then(res => {
+      if (!mounted) return;
+      setBalanceSnapshot(res.data?.accountBalance ?? null);
+    }).catch(() => {}).finally(() => mounted && setBalanceLoading(false));
+    return () => { mounted = false; };
+  }, [tokenType]);
+  const availableBalance = React.useMemo(() => parseFloat(balanceSnapshot || '0'), [balanceSnapshot]);
 
   // Prevent overstatement: floor display to 2 decimals
   const floorToDecimals = React.useCallback((value: number, decimals: number) => {
@@ -98,7 +114,7 @@ export const SendWithAddressScreen = () => {
     console.log('SendWithAddressScreen: handleSend called');
     
     // Prevent double-clicks/rapid button presses
-    if (isProcessing) {
+    if (isProcessing || navLock.current) {
       console.log('SendWithAddressScreen: Already processing, ignoring duplicate click');
       return;
     }
@@ -139,6 +155,7 @@ export const SendWithAddressScreen = () => {
     }
     
     setIsProcessing(true);
+    navLock.current = true;
     
     try {
       console.log('SendWithAddressScreen: Navigating to TransactionProcessing');
@@ -168,7 +185,10 @@ export const SendWithAddressScreen = () => {
       setErrorMessage('Error al procesar la transacción. Inténtalo de nuevo.');
       setShowError(true);
     } finally {
-      setIsProcessing(false);
+      setTimeout(() => {
+        setIsProcessing(false);
+        navLock.current = false;
+      }, 600);
     }
   };
 
@@ -196,7 +216,7 @@ export const SendWithAddressScreen = () => {
         {/* Available Balance */}
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Saldo disponible</Text>
-          {balanceLoading ? (
+          {balanceSnapshot == null || balanceLoading ? (
             <ActivityIndicator size="small" color={config.color} style={{ marginVertical: 8 }} />
           ) : (
             <Text style={styles.balanceAmount}>
@@ -284,7 +304,7 @@ export const SendWithAddressScreen = () => {
             <>
               <Icon name="send" size={20} color="#ffffff" style={{ marginRight: 8 }} />
               <Text style={styles.sendButtonText}>
-                {parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' : 'Enviar'}
+                {balanceSnapshot == null ? 'Cargando saldo…' : parseFloat(amount || '0') > availableBalance ? 'Saldo insuficiente' : 'Enviar'}
               </Text>
             </>
           )}

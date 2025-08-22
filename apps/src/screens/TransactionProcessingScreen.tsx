@@ -149,12 +149,15 @@ export const TransactionProcessingScreen = () => {
   // Handle navigation after transaction completes
   useEffect(() => {
     if (isComplete && transactionSuccess) {
-      // Navigate to success screen after successful transaction
-      setTimeout(() => {
-        console.log('TransactionProcessingScreen: Navigating to TransactionSuccess with data:', transactionData);
-        console.log('TransactionProcessingScreen: isOnConfio value:', transactionData.isOnConfio);
+      // Navigate quickly; confirmation may complete in background
+      const delayMs = 0;
+      const timer = setTimeout(() => {
+        try {
+          console.log('TransactionProcessingScreen: Navigating to TransactionSuccess (send/payment)');
+        } catch {}
         (navigation as any).replace('TransactionSuccess', { transactionData });
-      }, 2000);
+      }, delayMs);
+      return () => clearTimeout(timer);
     } else if (isComplete && transactionError) {
       // Show error and go back
       Alert.alert(
@@ -299,7 +302,15 @@ export const TransactionProcessingScreen = () => {
           return;
         }
         
-        console.log('TransactionProcessingScreen: Calling algorandSponsoredSend with variables:', JSON.stringify(variables, null, 2));
+        try {
+          console.log('TransactionProcessingScreen: Calling algorandSponsoredSend', {
+            hasRecipientUserId: !!variables.recipientUserId,
+            hasRecipientPhone: !!variables.recipientPhone,
+            hasRecipientAddress: !!variables.recipientAddress,
+            amount: variables.amount,
+            assetType: variables.assetType
+          });
+        } catch {}
         
         const { data: sponsorData } = await algorandSponsoredSend({
           variables
@@ -367,18 +378,20 @@ export const TransactionProcessingScreen = () => {
         }
         
         const { transactionId, confirmedRound, feesSaved } = submitData.submitSponsoredGroup;
-        console.log(`TransactionProcessingScreen: Algorand transaction confirmed! ID: ${transactionId}, Round: ${confirmedRound}`);
-        console.log(`TransactionProcessingScreen: Fees saved: ${feesSaved} ALGO`);
-        
-        // Store transaction details for success screen
+        try {
+          console.log('TransactionProcessingScreen: Submit result received', { hasTxId: !!transactionId, confirmedRound });
+        } catch {}
+
+        // Store lightweight transaction details for success screen
         if (transactionData) {
-          transactionData.transactionId = transactionId;
-          transactionData.transactionHash = transactionId; // Algorand uses tx ID as hash
-          transactionData.confirmedRound = confirmedRound;
-          transactionData.feesSaved = feesSaved;
+          (transactionData as any).transactionId = transactionId || '';
+          (transactionData as any).transactionHash = transactionId || '';
+          (transactionData as any).status = confirmedRound ? 'CONFIRMED' : 'SUBMITTED';
+          (transactionData as any).confirmedRound = confirmedRound || 0;
+          (transactionData as any).feesSaved = feesSaved;
         }
-        
-        // Mark transaction as successful
+
+        // Mark as successful and let confirmation complete in background
         setTransactionSuccess(true);
         setIsComplete(true);
         
@@ -414,6 +427,8 @@ export const TransactionProcessingScreen = () => {
         if (res.txid) {
           (transactionData as any).transactionId = res.txid;
         }
+        // Mark as submitted so Success screen shows "Confirmando…" until Celery confirms
+        (transactionData as any).status = 'SUBMITTED';
         setTransactionSuccess(true);
         setIsComplete(true);
       } catch (error) {
