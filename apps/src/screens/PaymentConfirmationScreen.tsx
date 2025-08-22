@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,9 +12,11 @@ import {
   StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import { useQuery } from '@apollo/client';
+import { useNavigation, useRoute, RouteProp, StackActions } from '@react-navigation/native';
+import { useMutation } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
+import { apolloClient } from '../apollo/client';
+import { PAY_INVOICE } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
 import { formatNumber } from '../utils/numberFormatting';
@@ -63,6 +65,8 @@ export const PaymentConfirmationScreen = () => {
   const route = useRoute<PaymentConfirmationRouteProp>();
   const { activeAccount } = useAccount();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [preDispatchPayInvoice] = useMutation(PAY_INVOICE);
+  const navLock = useRef(false);
 
 
   const { invoiceData } = route.params;
@@ -107,11 +111,45 @@ export const PaymentConfirmationScreen = () => {
     return tokenType;
   };
 
-  // Fetch real account balance
-  const { data: balanceData, loading: balanceLoading, error: balanceError } = useQuery(GET_ACCOUNT_BALANCE, {
-    variables: { tokenType: normalizeTokenType(invoiceData.tokenType) },
-    fetchPolicy: 'cache-and-network'
-  });
+  // Balance snapshot from Apollo cache, refresh in background only
+  const [balanceSnapshot, setBalanceSnapshot] = useState<string | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState<boolean>(false);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const token = normalizeTokenType(invoiceData.tokenType);
+    try {
+      // Read from cache only (no network)
+      const cached = apolloClient.readQuery<{ accountBalance: string }>({
+        query: GET_ACCOUNT_BALANCE,
+        variables: { tokenType: token }
+      });
+      if (cached?.accountBalance && mounted) {
+        setBalanceSnapshot(cached.accountBalance);
+      }
+    } catch (_) {
+      // cache miss is fine
+    }
+    // Background refresh (non-blocking)
+    setBalanceLoading(true);
+    apolloClient.query<{ accountBalance: string}>({
+      query: GET_ACCOUNT_BALANCE,
+      variables: { tokenType: token },
+      fetchPolicy: 'network-only'
+    }).then((res) => {
+      if (!mounted) return;
+      setBalanceSnapshot(res.data?.accountBalance ?? null);
+      setBalanceError(null);
+    }).catch((err) => {
+      if (!mounted) return;
+      setBalanceError(err?.message || '');
+    }).finally(() => {
+      if (mounted) setBalanceLoading(false);
+    });
+    return () => { mounted = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceData.tokenType]);
 
   const currentPayment = {
     type: 'merchant',
@@ -131,10 +169,10 @@ export const PaymentConfirmationScreen = () => {
     verification: 'Verificado ✓'
   };
 
-  // Get real balance from GraphQL query
-  const realBalance = balanceData?.accountBalance || '0';
+  // Use snapshot balance; no immediate network dependency
+  const realBalance = balanceSnapshot || '0';
   
-  // Fallback to mock values if query fails (for testing)
+  // Fallback to mock values only if explicit error (dev/test)
   const mockBalances: { [key: string]: string } = {
     'cUSD': '2850.35',
     'CUSD': '2850.35', // Handle both cases
@@ -143,7 +181,7 @@ export const PaymentConfirmationScreen = () => {
   };
   
   const fallbackBalance = balanceError ? mockBalances[invoiceData.tokenType] || '0' : realBalance;
-  const hasEnoughBalance = parseFloat(fallbackBalance) >= parseFloat(currentPayment.amount);
+  const hasEnoughBalance = balanceSnapshot != null && parseFloat(fallbackBalance) >= parseFloat(currentPayment.amount);
 
   // Prevent overstatement: floor-based formatting with tiny-balance label
   const floorToDecimals = (value: number, decimals: number) => {
@@ -164,7 +202,7 @@ export const PaymentConfirmationScreen = () => {
 
   // Debug logging
   console.log('PaymentConfirmationScreen - Balance Debug:', {
-    balanceData,
+    hasSnapshot: balanceSnapshot != null,
     balanceError,
     realBalance,
     fallbackBalance,
@@ -173,13 +211,6 @@ export const PaymentConfirmationScreen = () => {
     hasEnoughBalance,
     balanceLoading,
     tokenType: invoiceData.tokenType,
-    comparison: {
-      fallbackBalance: fallbackBalance,
-      paymentAmount: currentPayment.amount,
-      fallbackBalanceFloat: parseFloat(fallbackBalance),
-      paymentAmountFloat: parseFloat(currentPayment.amount),
-      isEnough: parseFloat(fallbackBalance) >= parseFloat(currentPayment.amount)
-    }
   });
 
   // Wallet data for display
@@ -201,7 +232,7 @@ export const PaymentConfirmationScreen = () => {
     console.log('PaymentConfirmationScreen: handleConfirmPayment called');
     
     // Prevent double-clicks/rapid button presses
-    if (isProcessing) {
+    if (isProcessing || navLock.current) {
       console.log('PaymentConfirmationScreen: Already processing, ignoring duplicate click');
       return;
     }
@@ -212,16 +243,49 @@ export const PaymentConfirmationScreen = () => {
     }
 
     setIsProcessing(true);
+    navLock.current = true;
+
+    // Best-effort wallet prewarm: fetch OAuth subject and peppers so signing is instant on next screen
+    try {
+      const { oauthStorage } = await import('../services/oauthStorageService');
+      await oauthStorage.getOAuthSubject();
+    } catch (e) {
+      // Non-fatal
+    }
+    try {
+      const { SecureDeterministicWalletService } = await import('../services/secureDeterministicWallet');
+      const sdw = SecureDeterministicWalletService.getInstance();
+      // Fire-and-forget pepper fetches
+      void sdw.getDerivationPepper();
+      void sdw.getKekPepper();
+    } catch (e) {
+      // Non-fatal
+    }
+    // Create deterministic idempotency key for this submission window (1 min granularity)
+    const minuteTimestamp = Math.floor(Date.now() / 60000);
+    const idempotencyKey = `pay_${invoiceData.invoiceId}_${minuteTimestamp}`;
+
+    // Pre-handle in background: create the payment on server so Processing can immediately sign
+    // Do not await to avoid UI delay.
+    try {
+      void preDispatchPayInvoice({
+        variables: { invoiceId: invoiceData.invoiceId, idempotencyKey }
+      });
+    } catch (e) {
+      // Non-fatal — Processing will use the same idempotency key to retrieve existing
+    }
+
     console.log('PaymentConfirmationScreen: Navigating to PaymentProcessing with data:', {
       type: 'payment',
       amount: currentPayment.amount,
       currency: currentPayment.currency,
       merchant: currentPayment.recipient,
-      action: 'Procesando pago'
+      action: 'Procesando pago',
+      idempotencyKey
     });
 
-    // Navigate to payment processing screen
-    (navigation as any).navigate('PaymentProcessing', {
+    // Navigate to payment processing screen using replace to avoid duplicate mounts
+    (navigation as any).dispatch(StackActions.replace('PaymentProcessing', {
       transactionData: {
         type: 'payment',
         amount: currentPayment.amount,
@@ -230,12 +294,17 @@ export const PaymentConfirmationScreen = () => {
         address: currentPayment.location,
         message: currentPayment.description,
         action: 'Procesando pago',
-        invoiceId: invoiceData.invoiceId
+        invoiceId: invoiceData.invoiceId,
+        idempotencyKey,
+        preflight: true
       }
-    });
+    }));
     
     // Reset processing state after navigation
-    setTimeout(() => setIsProcessing(false), 1000);
+    setTimeout(() => {
+      setIsProcessing(false);
+      navLock.current = false;
+    }, 1000);
   };
 
   const handleCancel = () => {
@@ -340,14 +409,14 @@ export const PaymentConfirmationScreen = () => {
                 </View>
                 <View style={styles.balanceAmount}>
                   <Text style={styles.balanceValue}>
-                    {balanceLoading ? 'Cargando...' : 
+                    {balanceSnapshot == null || balanceLoading ? 'Cargando...' : 
                      balanceError ? 'Error' : `$${walletData.balance}`}
                   </Text>
                   <Text style={[
                     styles.balanceStatus,
                     { color: hasEnoughBalance ? '#10B981' : '#EF4444' }
                   ]}>
-                    {balanceLoading ? 'Verificando...' : 
+                    {balanceSnapshot == null || balanceLoading ? 'Verificando...' : 
                      balanceError ? 'Error al cargar saldo' :
                      hasEnoughBalance ? 'Saldo suficiente' : 'Saldo insuficiente'}
                   </Text>
@@ -426,9 +495,9 @@ export const PaymentConfirmationScreen = () => {
             >
               <Text style={styles.confirmButtonText}>
                 {isProcessing ? 'Procesando...' :
-                 hasEnoughBalance ? 'Confirmar Pago' : 'Saldo Insuficiente'}
-              </Text>
-            </TouchableOpacity>
+                 hasEnoughBalance ? 'Confirmar Pago' : (balanceSnapshot == null ? 'Cargando saldo…' : 'Saldo Insuficiente')}
+            </Text>
+          </TouchableOpacity>
             
             <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
               <Text style={styles.cancelButtonText}>Cancelar</Text>

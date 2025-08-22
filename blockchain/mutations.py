@@ -649,119 +649,8 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             if not result['success']:
                 return cls(success=False, error=result.get('error', 'Failed to create sponsored transaction'))
             
-            # Create notifications immediately (like CreateSendTransaction does)
-            # We'll create them now even though the transaction hasn't been submitted yet
-            try:
-                from notifications.utils import create_notification
-                from notifications.models import NotificationType
-                from django.utils import timezone
-                
-                # Determine recipient display name
-                recipient_display_name = None
-                
-                # Use the recipient_user we already looked up earlier
-                if recipient_user:
-                    # Build display name from user fields
-                    recipient_display_name = f"{recipient_user.first_name} {recipient_user.last_name}".strip()
-                    if not recipient_display_name:
-                        recipient_display_name = recipient_user.username or f"User {recipient_user.id}"
-                    logger.info(f"Recipient user for notification: {recipient_user.id} - {recipient_display_name}")
-                elif recipient_phone:
-                    recipient_display_name = recipient_phone
-                elif resolved_recipient_address:
-                    recipient_display_name = f"{resolved_recipient_address[:6]}...{resolved_recipient_address[-4:]}"
-                
-                if not recipient_display_name:
-                    recipient_display_name = "alguien"
-                
-                # Build sender display name from user fields
-                sender_display_name = f"{user.first_name} {user.last_name}".strip()
-                if not sender_display_name:
-                    sender_display_name = user.username or f"User {user.id}"
-                
-                # Create notification for sender
-                logger.info(f"Creating send notification for sender {user.id}")
-                create_notification(
-                    user=user,
-                    notification_type=NotificationType.SEND_SENT,
-                    title="Envío completado",
-                    message=f"Enviaste {amount} {asset_type} a {recipient_display_name}",
-                    data={
-                        'transaction_type': 'send',
-                        'amount': f'-{amount}',
-                        'token_type': asset_type,
-                        'currency': asset_type,
-                        'recipient_name': recipient_display_name,
-                        'recipient_address': resolved_recipient_address,
-                        'sender_name': sender_display_name,
-                        'sender_address': user_account.algorand_address,
-                        'status': 'pending',
-                        'created_at': timezone.now().isoformat(),
-                        'note': note or '',
-                        'type': 'send',
-                        'to': recipient_display_name,
-                        'toAddress': resolved_recipient_address,
-                        'from': sender_display_name,
-                        'fromAddress': user_account.algorand_address,
-                        'date': timezone.now().strftime('%Y-%m-%d'),
-                        'time': timezone.now().strftime('%H:%M'),
-                        'avatar': recipient_display_name[0] if recipient_display_name else 'U',
-                    },
-                    related_object_type='AlgorandTransaction',
-                    related_object_id=result['group_id'],
-                    action_url=f"confio://transaction/pending"
-                )
-                logger.info(f"Created sender notification for {user.id}")
-                
-                # Create notification for recipient if they're a Confío user
-                logger.info(f"Checking if recipient_user exists: {recipient_user}")
-                if recipient_user:
-                    logger.info(f"YES - Creating send notification for recipient {recipient_user.id} ({recipient_user.username})")
-                    logger.info(f"Recipient user details: ID={recipient_user.id}, username={recipient_user.username}, email={recipient_user.email}")
-                    try:
-                        logger.info(f"Calling create_notification for recipient...")
-                        recipient_notification = create_notification(
-                            user=recipient_user,
-                            notification_type=NotificationType.SEND_RECEIVED,
-                            title="Envío recibido",
-                            message=f"Recibiste {amount} {asset_type} de {sender_display_name}",
-                            data={
-                            'transaction_type': 'send',
-                            'amount': f'+{amount}',
-                            'token_type': asset_type,
-                            'currency': asset_type,
-                            'sender_name': sender_display_name,
-                            'sender_address': user_account.algorand_address,
-                            'recipient_name': recipient_display_name,
-                            'recipient_address': resolved_recipient_address,
-                            'status': 'pending',
-                            'created_at': timezone.now().isoformat(),
-                            'note': note or '',
-                            'type': 'send',
-                            'from': sender_display_name,
-                            'fromAddress': user_account.algorand_address,
-                            'to': recipient_display_name,
-                            'toAddress': resolved_recipient_address,
-                            'date': timezone.now().strftime('%Y-%m-%d'),
-                            'time': timezone.now().strftime('%H:%M'),
-                            'avatar': sender_display_name[0] if sender_display_name else 'U',
-                            },
-                            related_object_type='AlgorandTransaction',
-                            related_object_id=result['group_id'],
-                            action_url=f"confio://transaction/pending"
-                        )
-                        logger.info(f"Created recipient notification ID {recipient_notification.id} for user {recipient_user.id}")
-                    except Exception as e:
-                        logger.error(f"Failed to create recipient notification for user {recipient_user.id}: {e}")
-                        import traceback
-                        traceback.print_exc()
-                else:
-                    logger.info(f"No recipient user found, recipient_user_id was: {recipient_user_id}")
-                    
-            except Exception as e:
-                logger.error(f"Failed to create notifications: {e}")
-                import traceback
-                traceback.print_exc()
+            # Do not send push/in-app notifications here; use optimistic UI on client.
+            # Push notifications will be sent after on-chain confirmation by the worker.
             
             # Return the transactions for client signing
             # The client will sign the user transaction and call SubmitSponsoredGroup
@@ -857,8 +746,7 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                 f"TxID: {result['tx_id']}, Round: {result['confirmed_round']}"
             )
             
-            # Notifications are now created immediately in AlgorandSponsoredSend mutation
-            # No need to create them here after submission
+            # No notifications on submit. Worker sends push after on-chain confirmation.
             
             return cls(
                 success=True,

@@ -299,6 +299,9 @@ export class SecureDeterministicWalletService {
   private inMemSeeds = new Map<string, string>(); // In-memory seed cache for session
   private currentScope = new Map<string, string>(); // Track current scope per user
   private cacheKeysPerUser = new Map<string, Set<string>>(); // Track all cache keys created per user
+  // Session caches to avoid repeated GraphQL/keychain overhead
+  private cachedDerivationPepper?: string;
+  private cachedKekPepperByVersion: Map<number, string> = new Map();
   
   private constructor() {}
   
@@ -311,6 +314,10 @@ export class SecureDeterministicWalletService {
 
   async getDerivationPepper(): Promise<{ pepper: string | undefined }> {
     try {
+      // Fast path: return from session cache
+      if (this.cachedDerivationPepper) {
+        return { pepper: this.cachedDerivationPepper };
+      }
       // Require JWT to be present; otherwise skip
       try {
         const creds = await Keychain.getGenericPassword({
@@ -325,7 +332,8 @@ export class SecureDeterministicWalletService {
       }
       const { data } = await apolloClient.mutate({ mutation: GET_DERIVATION_PEPPER });
       if (data?.getDerivationPepper?.success) {
-        return { pepper: data.getDerivationPepper.pepper };
+        this.cachedDerivationPepper = data.getDerivationPepper.pepper;
+        return { pepper: this.cachedDerivationPepper };
       }
       console.debug('Derivation pepper not provided');
       return { pepper: undefined };
@@ -342,6 +350,11 @@ export class SecureDeterministicWalletService {
     gracePeriodUntil?: string;
   }> {
     try {
+      const versionToUse = requestVersion || 1;
+      // Fast path: return from session cache for requested version
+      if (this.cachedKekPepperByVersion.has(versionToUse)) {
+        return { pepper: this.cachedKekPepperByVersion.get(versionToUse), version: versionToUse } as any;
+      }
       // Require JWT to be present; otherwise skip
       try {
         const creds = await Keychain.getGenericPassword({
@@ -354,12 +367,17 @@ export class SecureDeterministicWalletService {
       } catch (_) {
         return { pepper: undefined, version: 1 };
       }
-      const { data } = await apolloClient.mutate({ mutation: GET_KEK_PEPPER, variables: { requestVersion } });
+      const { data } = await apolloClient.mutate({ mutation: GET_KEK_PEPPER, variables: { requestVersion: versionToUse } });
 
       if (data?.getKekPepper?.success) {
+        const pepper = data.getKekPepper.pepper;
+        const version = data.getKekPepper.version || versionToUse || 1;
+        if (pepper && version) {
+          this.cachedKekPepperByVersion.set(version, pepper);
+        }
         return {
           pepper: data.getKekPepper.pepper,
-          version: data.getKekPepper.version || 1,
+          version,
           isRotated: data.getKekPepper.isRotated,
           gracePeriodUntil: data.getKekPepper.gracePeriodUntil
         };

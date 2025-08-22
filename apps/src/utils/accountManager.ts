@@ -60,6 +60,7 @@ const ACCOUNT_KEYCHAIN_SERVICE = 'com.confio.accounts';
  */
 export class AccountManager {
   private static instance: AccountManager;
+  private cachedActiveContext: AccountContext | null = null;
 
   private constructor() {}
 
@@ -138,6 +139,10 @@ export class AccountManager {
    */
   public async getActiveAccountContext(): Promise<AccountContext> {
     try {
+      // Use in-memory cache to avoid repeated Keychain reads
+      if (this.cachedActiveContext) {
+        return this.cachedActiveContext;
+      }
       console.log('AccountManager - getActiveAccountContext: retrieving from Keychain');
       
       const credentials = await Keychain.getGenericPassword({
@@ -168,7 +173,8 @@ export class AccountManager {
         contextBusinessId: context.businessId
       });
       
-      return context;
+      this.cachedActiveContext = context;
+      return this.cachedActiveContext;
     } catch (error) {
       console.error('Error getting active account context:', error);
       // Return default on error
@@ -206,6 +212,8 @@ export class AccountManager {
       );
       
       console.log('AccountManager - Active account context stored in Keychain');
+      // Update cache to reflect the latest context
+      this.cachedActiveContext = context;
     } catch (error) {
       console.error('Error setting active account context:', error);
       throw error;

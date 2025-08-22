@@ -592,6 +592,11 @@ export const AccountDetailScreen = () => {
           toDisplay = tx.displayCounterparty;
         }
         
+        // Map backend status to UI status labels
+        const rawStatus = (tx.status || '').toUpperCase();
+        const mappedStatus: 'completed' | 'pending' | 'failed' =
+          rawStatus === 'CONFIRMED' ? 'completed' : rawStatus === 'FAILED' ? 'failed' : 'pending';
+
         const finalTransaction = {
           id: tx.id,
           type,
@@ -607,7 +612,7 @@ export const AccountDetailScreen = () => {
           conversionType: conversionType || tx.conversionType,
           date: tx.createdAt, // Keep full timestamp for proper sorting
           time: new Date(tx.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
-          status: tx.status.toLowerCase() === 'confirmed' ? 'completed' : 'pending',
+          status: mappedStatus,
           hash: tx.transactionHash || 'pending',
           isInvitation: isActualInvitation,
           invitationClaimed: tx.invitationClaimed || false,
@@ -1051,8 +1056,25 @@ export const AccountDetailScreen = () => {
             {formatTransactionAmount(transaction.amount)} {transaction.currency}
           </Text>
           <View style={styles.transactionStatus}>
-            <Text style={styles.statusText}>Completado</Text>
-            <View style={styles.statusDot} />
+            {(() => {
+              const isCompleted = transaction.status === 'completed';
+              const isFailed = transaction.status === 'failed';
+              const statusLabel = isCompleted ? 'Completado' : isFailed ? 'Fallido' : 'Pendiente';
+              const textStyle = [
+                styles.statusText,
+                isCompleted ? styles.statusTextCompleted : isFailed ? styles.statusTextFailed : styles.statusTextPending,
+              ];
+              const dotStyle = [
+                styles.statusDot,
+                isCompleted ? styles.statusDotCompleted : isFailed ? styles.statusDotFailed : styles.statusDotPending,
+              ];
+              return (
+                <>
+                  <Text style={textStyle}>{statusLabel}</Text>
+                  <View style={dotStyle} />
+                </>
+              );
+            })()}
           </View>
         </View>
       </TouchableOpacity>
@@ -2444,15 +2466,25 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: 12,
-    color: '#10b981',
     marginRight: 4,
+  },
+  statusTextCompleted: {
+    color: '#10b981', // green
+  },
+  statusTextPending: {
+    color: '#f59e0b', // amber
+  },
+  statusTextFailed: {
+    color: '#ef4444', // red
   },
   statusDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#10b981',
   },
+  statusDotCompleted: { backgroundColor: '#10b981' },
+  statusDotPending: { backgroundColor: '#f59e0b' },
+  statusDotFailed: { backgroundColor: '#ef4444' },
   viewMoreButton: {
     backgroundColor: '#ffffff',
     borderRadius: 8,
