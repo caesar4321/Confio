@@ -740,19 +740,126 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
             
             if not result['success']:
                 return cls(success=False, error=result.get('error', 'Failed to submit transaction'))
-            
+
             logger.info(
                 f"Submitted sponsored transaction for user {user.id}: "
                 f"TxID: {result['tx_id']}, Round: {result['confirmed_round']}"
             )
-            
+
             # No notifications on submit. Worker sends push after on-chain confirmation.
-            
+
+            # Persist a SendTransaction row with SUBMITTED status so Celery can confirm later
+            try:
+                import base64
+                import msgpack
+                from algosdk.encoding import encode_address
+                from decimal import Decimal
+                from django.conf import settings
+                from send.models import SendTransaction
+                from users.models import Account
+
+                raw = base64.b64decode(signed_user_txn)
+                try:
+                    d = msgpack.unpackb(raw, raw=False)
+                except Exception:
+                    d = None
+
+                sender_addr = ''
+                recipient_addr = ''
+                token_type = 'CUSD'
+                amount_dec = Decimal('0')
+
+                if isinstance(d, dict):
+                    td = d.get('txn', {})
+                    t = td.get('type')
+                    if t == 'axfer':
+                        snd = td.get('snd')
+                        arcv = td.get('arcv')
+                        xaid = int(td.get('xaid') or 0)
+                        aamt = int(td.get('aamt') or 0)
+                        sender_addr = encode_address(snd) if snd else ''
+                        recipient_addr = encode_address(arcv) if arcv else ''
+                        # Map asset id to token type and decimals (default 6)
+                        if xaid == int(getattr(settings, 'ALGORAND_CUSD_ASSET_ID', 0)):
+                            token_type = 'CUSD'
+                            decimals = 6
+                        elif xaid == int(getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 0)):
+                            token_type = 'CONFIO'
+                            decimals = 6
+                        elif xaid == int(getattr(settings, 'ALGORAND_USDC_ASSET_ID', 0)):
+                            token_type = 'USDC'
+                            decimals = 6
+                        else:
+                            token_type = 'CUSD'
+                            decimals = 6
+                        amount_dec = Decimal(aamt) / (Decimal(10) ** Decimal(decimals))
+                    elif t == 'pay':
+                        # ALGO payment (rare in our app); store as CONFIRMED token 'ALGO' if needed
+                        snd = td.get('snd')
+                        rcv = td.get('rcv')
+                        amt = int(td.get('amt') or 0)
+                        sender_addr = encode_address(snd) if snd else ''
+                        recipient_addr = encode_address(rcv) if rcv else ''
+                        token_type = 'ALGO'
+                        amount_dec = Decimal(amt) / Decimal(1_000_000)
+
+                # Resolve recipient user if known by Algorand address
+                recipient_user = None
+                try:
+                    acct = Account.objects.filter(algorand_address=recipient_addr).select_related('user').first()
+                    recipient_user = acct.user if acct else None
+                except Exception:
+                    recipient_user = None
+
+                # Derive friendly display names and types
+                def full_name(u):
+                    try:
+                        nm = f"{(u.first_name or '').strip()} {(u.last_name or '').strip()}".strip()
+                        return nm or None
+                    except Exception:
+                        return None
+
+                sender_display = full_name(user) or (getattr(user, 'username', None) if '@' not in (getattr(user, 'username', '') or '') else None)
+                recipient_display = None
+                if recipient_user:
+                    recipient_display = full_name(recipient_user) or (getattr(recipient_user, 'username', None) if '@' not in (getattr(recipient_user, 'username', '') or '') else None)
+
+                sender_type = 'user'
+                recipient_type = 'user' if recipient_user else 'external'
+
+                # Phone numbers (used for contact matching; optional)
+                sender_phone = getattr(user, 'phone_number', '') or ''
+                recipient_phone = ''
+
+                # Create or update by unique transaction_hash
+                stx, created = SendTransaction.all_objects.update_or_create(
+                    transaction_hash=result['tx_id'],
+                    defaults={
+                        'sender_user': user,
+                        'recipient_user': recipient_user,
+                        'sender_address': sender_addr or '',
+                        'recipient_address': recipient_addr or '',
+                        'amount': amount_dec,
+                        'token_type': token_type if token_type in ['CUSD', 'CONFIO', 'USDC'] else 'CUSD',
+                        'status': 'SUBMITTED',
+                        'error_message': '',
+                        'sender_display_name': sender_display or '',
+                        'recipient_display_name': recipient_display or '',
+                        'sender_type': sender_type,
+                        'recipient_type': recipient_type,
+                        'sender_phone': sender_phone,
+                        'recipient_phone': recipient_phone,
+                    }
+                )
+                logger.info(f"SendTransaction persisted for tx {result['tx_id']} (created={created})")
+            except Exception as pe:
+                logger.warning(f"Failed to persist SendTransaction for tx {result.get('tx_id')}: {pe}")
+
             return cls(
                 success=True,
                 transaction_id=result['tx_id'],
-                confirmed_round=result['confirmed_round'],
-                fees_saved=result['fees_saved']
+                confirmed_round=result['confirmed_round'] or 0,
+                fees_saved=result.get('fees_saved') or 0.0
             )
             
         except Exception as e:
