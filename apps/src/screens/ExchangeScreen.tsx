@@ -1443,7 +1443,7 @@ export const ExchangeScreen = () => {
       name: userName,
       rate: offer.rate.toString(),
       limit: `${offer.minAmount} - ${offer.maxAmount}`,
-      available: offer.availableAmount.toString(),
+              // available removed
       paymentMethods: offer.paymentMethods || [],
       responseTime: getResponseTimeText(),
       completedTrades: completedTrades,
@@ -1773,10 +1773,7 @@ export const ExchangeScreen = () => {
             <Text style={styles.limitLabel}>Límites</Text>
             <Text style={styles.limitValue}>{offer.minAmount} - {offer.maxAmount} {crypto}</Text>
           </View>
-          <View style={styles.availableBox}>
-            <Text style={styles.availableLabel}>Disponible</Text>
-            <Text style={styles.availableValue}>{offer.availableAmount} {crypto}</Text>
-          </View>
+          {/* Removed Disponible: availability verified at escrow enable time */}
         </View>
         <TouchableOpacity 
           style={styles.detailRow}
@@ -1922,7 +1919,7 @@ export const ExchangeScreen = () => {
           rate: offer.rate,
           minAmount: offer.minAmount,
           maxAmount: offer.maxAmount,
-          availableAmount: offer.availableAmount,
+          // available removed
           countryCode: offer.countryCode,
           paymentMethods: offer.paymentMethods,
           terms: offer.terms
@@ -2027,13 +2024,7 @@ export const ExchangeScreen = () => {
           </View>
         </View>
 
-        {/* Available Amount */}
-        <View style={styles.myOfferAvailableContainer}>
-          <Icon name="package" size={14} color={colors.primary} />
-          <Text style={styles.myOfferAvailableText}>
-            {offer.availableAmount} {formatTokenType(offer.tokenType)} disponible
-          </Text>
-        </View>
+        {/* Removed Available Amount: availability is verified at trade time */}
 
         {/* Payment Methods */}
         {offer.paymentMethods && offer.paymentMethods.length > 0 && (

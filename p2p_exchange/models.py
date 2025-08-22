@@ -131,7 +131,6 @@ class P2POffer(SoftDeleteModel):
     rate = models.DecimalField(max_digits=10, decimal_places=2)  # Rate in fiat per token
     min_amount = models.DecimalField(max_digits=10, decimal_places=2)  # Min crypto amount
     max_amount = models.DecimalField(max_digits=10, decimal_places=2)  # Max crypto amount
-    available_amount = models.DecimalField(max_digits=10, decimal_places=2)  # Available crypto amount
     
     # Payment methods accepted
     payment_methods = models.ManyToManyField(P2PPaymentMethod, related_name='offers')
@@ -200,7 +199,7 @@ class P2POffer(SoftDeleteModel):
         ]
     
     def __str__(self):
-        return f"{self.get_exchange_type_display()} {self.available_amount} {self.token_type} @ {self.rate} Bs"
+        return f"{self.get_exchange_type_display()} {self.token_type} (min {self.min_amount} / max {self.max_amount}) @ {self.rate}"
 
 class P2PTrade(SoftDeleteModel):
     """Individual P2P trades between users"""
