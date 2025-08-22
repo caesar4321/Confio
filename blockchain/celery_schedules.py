@@ -23,10 +23,12 @@ BLOCKCHAIN_CELERY_BEAT_SCHEDULE = {
         'schedule': crontab(minute=0),  # Every hour at :00
     },
     
-    # Clean up old blockchain events daily
-    'cleanup-old-blockchain-events': {
-        'task': 'blockchain.tasks.cleanup_old_events',
-        'schedule': crontab(hour=2, minute=0),  # Daily at 2 AM
+    # Removed cleanup of old Sui events (no event storage)
+    
+    # Indexer inbound deposit scan (USDC, cUSD, CONFIO)
+    'scan-inbound-deposits': {
+        'task': 'blockchain.scan_inbound_deposits',
+        'schedule': 3.0,  # Every 3 seconds
     },
     
     # Removed Sui epoch tracking

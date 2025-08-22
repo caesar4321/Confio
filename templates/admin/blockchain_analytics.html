@@ -109,7 +109,7 @@
     <h1>Blockchain Analytics</h1>
     
     <div class="date-filter" style="margin-bottom: 20px;">
-        <form method="get" style="display: inline;">
+        <form method="get" style="display: inline; margin-right: 12px;">
             <label for="days">Show data for last:</label>
             <select name="days" id="days" onchange="this.form.submit()">
                 <option value="7" {% if request.GET.days == '7' %}selected{% endif %}>7 days</option>
@@ -117,6 +117,11 @@
                 <option value="90" {% if request.GET.days == '90' %}selected{% endif %}>90 days</option>
             </select>
         </form>
+        <form method="post" action="{% url 'admin:blockchain_scan_now' %}" style="display: inline;">
+            {% csrf_token %}
+            <button type="submit" class="button" style="padding:6px 12px;">Scan Now</button>
+        </form>
+        <span style="margin-left: 12px; color:#666;">Current round: <strong>{{ current_round|default:0 }}</strong></span>
     </div>
 
     <!-- Network Status -->
@@ -211,126 +216,84 @@
         </table>
     </div>
 
-    <!-- Event Processing Stats -->
+    <!-- Indexer Cursor Status -->
     <div class="dashboard-module">
-        <h2>Event Processing Statistics</h2>
-        <div class="metrics-grid">
-            {% for stat in processing_stats %}
-            <div class="metric-card {% if stat.status == 'completed' %}success{% elif stat.status == 'failed' %}danger{% else %}warning{% endif %}">
-                <div class="metric-label">{{ stat.status|title }}</div>
-                <div class="metric-value">{{ stat.count|floatformat:0 }}</div>
-                <small>Avg {{ stat.avg_attempts|floatformat:1 }} attempts</small>
-            </div>
-            {% endfor %}
-        </div>
-
-        <!-- Event Types Breakdown -->
-        <h3>Event Types (Last {{ request.GET.days|default:'30' }} days)</h3>
+        <h2>Indexer Cursor Status</h2>
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Module</th>
-                    <th>Function</th>
-                    <th>Count</th>
+                    <th>Token</th>
+                    <th>Asset ID</th>
+                    <th>Last Scanned Round</th>
+                    <th>Lag (rounds)</th>
+                    <th>Updated</th>
                 </tr>
             </thead>
             <tbody>
-                {% for event in event_types %}
+                {% for c in indexer_cursors %}
                 <tr>
-                    <td>{{ event.module }}</td>
-                    <td>{{ event.function }}</td>
-                    <td>{{ event.count|floatformat:0 }}</td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="3" style="text-align: center; color: #999;">No events in selected period</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-
-    <!-- Recent Blockchain Events -->
-    <div class="dashboard-module">
-        <h2>Recent Blockchain Events</h2>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>TX Hash</th>
-                    <th>Module</th>
-                    <th>Function</th>
-                    <th>Sender</th>
-                    <th>Block Time</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for event in recent_events %}
-                <tr>
-                    <td style="font-family: monospace; font-size: 12px;">
-                        {{ event.tx_hash|truncatechars:20 }}
-                    </td>
-                    <td>{{ event.module }}</td>
-                    <td>{{ event.function }}</td>
-                    <td style="font-family: monospace; font-size: 12px;">
-                        {{ event.sender|truncatechars:20 }}
-                    </td>
-                    <td>{{ event.block_time|date:"Y-m-d H:i:s" }}</td>
+                    <td><strong>{{ c.token }}</strong></td>
+                    <td style="font-family: monospace;">{{ c.asset_id }}</td>
+                    <td>{{ c.last_scanned_round|default:0 }}</td>
                     <td>
-                        <span class="status-badge {% if event.processed %}processed{% else %}unprocessed{% endif %}">
-                            {% if event.processed %}Processed{% else %}Pending{% endif %}
+                        <span class="status-badge {% if c.lag > 500 %}danger{% elif c.lag > 50 %}warning{% else %}processed{% endif %}">
+                            {{ c.lag }}
                         </span>
                     </td>
+                    <td>{{ c.updated_at|date:"Y-m-d H:i:s" }}</td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="6" style="text-align: center; color: #999;">No blockchain events recorded</td>
+                    <td colspan="5" style="text-align:center; color:#999;">No cursor data yet</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
 
-    <!-- Recent Failed Processing -->
-    {% if recent_failures %}
+    <!-- Recent Processed Markers -->
     <div class="dashboard-module">
-        <h2>Recent Failed Processing</h2>
-        <table class="data-table">
+        <h2>Processed Inbound Transactions</h2>
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-label">Last {{ request.GET.days|default:'30' }} days</div>
+                <div class="metric-value">{{ processed_markers_recent|floatformat:0 }}</div>
+            </div>
+        </div>
+        <table class="data-table" style="margin-top:10px;">
             <thead>
                 <tr>
-                    <th>TX Hash</th>
-                    <th>Status</th>
-                    <th>Attempts</th>
-                    <th>Error Message</th>
-                    <th>Last Updated</th>
+                    <th>TxID</th>
+                    <th>Asset</th>
+                    <th>Receiver</th>
+                    <th>Round</th>
+                    <th>Intra</th>
+                    <th>Created</th>
                 </tr>
             </thead>
             <tbody>
-                {% for log in recent_failures %}
+                {% for p in recent_processed %}
                 <tr>
-                    <td style="font-family: monospace; font-size: 12px;">
-                        {{ log.raw_event.tx_hash|truncatechars:20 }}
-                    </td>
-                    <td>
-                        <span class="status-badge failed">{{ log.status }}</span>
-                    </td>
-                    <td>{{ log.attempts }}</td>
-                    <td style="color: #dc3545; font-size: 12px;">
-                        {{ log.error_message|truncatechars:50 }}
-                    </td>
-                    <td>{{ log.updated_at|date:"Y-m-d H:i:s" }}</td>
+                    <td style="font-family: monospace; font-size: 12px;">{{ p.txid|truncatechars:24 }}</td>
+                    <td>{{ p.asset_id }}</td>
+                    <td style="font-family: monospace; font-size: 12px;">{{ p.receiver|truncatechars:20 }}</td>
+                    <td>{{ p.confirmed_round }}</td>
+                    <td>{{ p.intra }}</td>
+                    <td>{{ p.created_at|date:"Y-m-d H:i:s" }}</td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" style="text-align:center; color:#999;">No processed markers recorded</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
-    {% endif %}
-</div>
 
-<!-- Daily Events Chart (placeholder for future chart integration) -->
-<script>
-    // Daily events data for future chart implementation
-    const dailyEventsData = {{ daily_events|safe }};
-    console.log('Daily events data available:', dailyEventsData);
-</script>
+    
+    <!-- Event processing and recent event sections removed (no DB-stored events) -->
+    
+    </div>
+
+    
 {% endblock %}
