@@ -1,4 +1,4 @@
-.PHONY: runserver runserver-dev runserver-wsgi migrate makemigrations shell test clean db-setup db-migrate db-reset collectstatic
+.PHONY: runserver runserver-dev runserver-wsgi migrate makemigrations shell test clean db-setup db-migrate db-reset collectstatic celery-worker celery-beat
 
 # Virtual environment path
 VENV_PATH = ./myvenv
@@ -54,6 +54,14 @@ createsuperuser:
 # Run with full path (alternative to runserver)
 run:
 	DEBUG=True ./myvenv/bin/python -m daphne -b 0.0.0.0 -p 8000 config.asgi:application
+
+# Celery worker
+celery-worker:
+	$(VENV_PATH)/bin/celery -A config worker -l info
+
+# Celery beat (scheduler)
+celery-beat:
+	$(VENV_PATH)/bin/celery -A config beat -l info
 
 # Strict deploy targets
 deploy-cusd:

@@ -1,17 +1,5 @@
 from django.contrib import admin
-from .models import RawBlockchainEvent, Balance, TransactionProcessingLog
-
-
-@admin.register(RawBlockchainEvent)
-class RawBlockchainEventAdmin(admin.ModelAdmin):
-    list_display = ['tx_hash', 'module', 'function', 'sender', 'epoch', 'checkpoint', 'block_time', 'processed', 'created_at']
-    list_filter = ['processed', 'module', 'function', 'epoch', 'created_at']
-    search_fields = ['tx_hash', 'sender', 'epoch', 'checkpoint']
-    readonly_fields = ['tx_hash', 'sender', 'module', 'function', 'raw_data', 'block_time', 'epoch', 'checkpoint', 'created_at']
-    ordering = ['-block_time']
-    
-    def has_add_permission(self, request):
-        return False  # Don't allow manual creation
+from .models import Balance, ProcessedIndexerTransaction, IndexerAssetCursor
 
 
 @admin.register(Balance)
@@ -25,13 +13,22 @@ class BalanceAdmin(admin.ModelAdmin):
         return super().get_queryset(request).select_related('account', 'account__user')
 
 
-@admin.register(TransactionProcessingLog)
-class TransactionProcessingLogAdmin(admin.ModelAdmin):
-    list_display = ['raw_event', 'status', 'attempts', 'created_at', 'updated_at']
-    list_filter = ['status', 'created_at']
-    search_fields = ['raw_event__tx_hash']
-    readonly_fields = ['created_at', 'updated_at']
-    
-    def get_queryset(self, request):
-        return super().get_queryset(request).select_related('raw_event')
+@admin.register(ProcessedIndexerTransaction)
+class ProcessedIndexerTransactionAdmin(admin.ModelAdmin):
+    list_display = ['txid', 'asset_id', 'receiver', 'confirmed_round', 'intra', 'created_at']
+    list_filter = ['asset_id', 'confirmed_round', 'created_at']
+    search_fields = ['txid', 'receiver', 'sender']
+    ordering = ['-created_at']
 
+
+@admin.register(IndexerAssetCursor)
+class IndexerAssetCursorAdmin(admin.ModelAdmin):
+    list_display = ['asset_id', 'last_scanned_round', 'updated_at']
+    search_fields = ['asset_id']
+    ordering = ['-updated_at']
+    actions = ['reset_cursors']
+
+    def reset_cursors(self, request, queryset):
+        updated = queryset.update(last_scanned_round=0)
+        self.message_user(request, f"Reset {updated} cursor(s) to round 0.")
+    reset_cursors.short_description = "Reset selected cursors to round 0"
