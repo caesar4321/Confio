@@ -15,7 +15,7 @@ from .mutations import (
     CheckSponsorHealthQuery,
     CheckBusinessOptInMutation,
     CompleteBusinessOptInMutation,
-    SubmitBusinessOptInGroupMutation
+    SubmitBusinessOptInGroupMutation,
 )
 from .payment_mutations import (
     CreateSponsoredPaymentMutation,
