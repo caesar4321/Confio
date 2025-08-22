@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Clipboard } from 'react-native';
+import { View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Clipboard, Linking, Share } from 'react-native';
+import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
@@ -38,6 +39,8 @@ interface TransactionData {
   sendTransactionId?: string;
   merchant?: string;
   invoiceId?: string;
+  transactionId?: string;
+  status?: 'SUBMITTED' | 'CONFIRMED' | 'FAILED';
 }
 
 export const TransactionSuccessScreen = () => {
@@ -127,32 +130,79 @@ export const TransactionSuccessScreen = () => {
     Alert.alert('Compartir Comprobante', 'Función de compartir en desarrollo');
   };
 
-  const handleShareInvitation = () => {
-    // Share invitation for non-Confío friends
-    const invitationMessage = `¡Hola ${transactionData.recipient}! Te envié $${transactionData.amount} ${formatCurrency(transactionData.currency)} a través de Confío. 
+  const handleShareInvitation = async () => {
+    try {
+      const phoneRaw = (transactionData as any).recipientPhone as string | undefined;
+      const cleanPhone = phoneRaw ? String(phoneRaw).replace(/[^\d]/g, '') : '';
+      const amount = String(transactionData.amount).replace(/[+-]/g, '');
+      const currency = formatCurrency(transactionData.currency);
+      const message = `¡Hola! Te envié ${amount} ${currency} por Confío. 🎉\n\nTienes 7 días para reclamarlo. Descarga la app y crea tu cuenta:\n\n📲 ${SHARE_LINKS.campaigns.beta}\n\n¡Es gratis y en segundos recibes tu dinero!`;
+      const encodedMessage = encodeURIComponent(message);
 
-Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 días:
+      if (Platform.OS === 'android') {
+        const apiUrl = cleanPhone
+          ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`
+          : `https://api.whatsapp.com/send?text=${encodedMessage}`;
+        try {
+          await Linking.openURL(apiUrl);
+          return;
+        } catch (e) {}
 
-📱 Descarga Confío: ${SHARE_LINKS.campaigns.beta}
-💰 Monto: $${transactionData.amount} ${formatCurrency(transactionData.currency)}
-⏰ Válido hasta: ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString('es-ES')}
-
-¡Confío - Transferencias gratuitas para Latinoamérica! 🇻🇪`;
-
-    Alert.alert(
-      'Compartir Invitación',
-      '¿Quieres compartir la invitación con ' + transactionData.recipient + '?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        { 
-          text: 'Compartir', 
-          onPress: () => {
-            // In a real app, this would use the Share API
-            Alert.alert('Invitación Compartida', 'La invitación se ha compartido exitosamente. Tu amigo tiene 7 días para reclamar el dinero.');
-          }
+        const schemeUrl = cleanPhone
+          ? `whatsapp://send?phone=${cleanPhone}&text=${encodedMessage}`
+          : `whatsapp://send?text=${encodedMessage}`;
+        const canOpenScheme = await Linking.canOpenURL(schemeUrl);
+        if (canOpenScheme) {
+          await Linking.openURL(schemeUrl);
+          return;
         }
-      ]
-    );
+
+        const intentUrl = `intent://send?text=${encodedMessage}#Intent;scheme=whatsapp;package=com.whatsapp;end`;
+        try {
+          await Linking.openURL(intentUrl);
+          return;
+        } catch (_) {}
+
+        const webUrl = cleanPhone
+          ? `https://wa.me/${cleanPhone}?text=${encodedMessage}`
+          : `https://wa.me/?text=${encodedMessage}`;
+        const canOpenWeb = await Linking.canOpenURL(webUrl);
+        if (canOpenWeb) {
+          await Linking.openURL(webUrl);
+          return;
+        }
+
+        try {
+          await Linking.openURL('market://details?id=com.whatsapp');
+          return;
+        } catch (_) {}
+        await Share.share({ message });
+        return;
+      } else {
+        const schemeUrl = cleanPhone
+          ? `whatsapp://send?phone=${cleanPhone}&text=${encodedMessage}`
+          : `whatsapp://send?text=${encodedMessage}`;
+        const canOpen = await Linking.canOpenURL(schemeUrl);
+        if (canOpen) {
+          await Linking.openURL(schemeUrl);
+          return;
+        }
+        const webUrl = cleanPhone
+          ? `https://wa.me/${cleanPhone}?text=${encodedMessage}`
+          : `https://wa.me/?text=${encodedMessage}`;
+        const canOpenWeb = await Linking.canOpenURL(webUrl);
+        if (canOpenWeb) {
+          await Linking.openURL(webUrl);
+          return;
+        }
+        await Share.share({ message });
+      }
+    } catch (error) {
+      try {
+        await Share.share({ message: `Te envié dinero por Confío. ${SHARE_LINKS.campaigns.beta}` });
+      } catch (_) {}
+      Alert.alert('Error', 'No se pudo abrir WhatsApp.');
+    }
   };
 
   const handleViewTechnicalDetails = () => {
@@ -167,7 +217,8 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
     (navigation as any).navigate('BottomTabs', { screen: 'Contacts' });
   };
 
-  const transactionId = 'ABC123DEF456';
+  const transactionId = (transactionData as any).transactionId || 'pendiente';
+  const isConfirmed = (transactionData as any).status === 'CONFIRMED';
   const currentDate = new Date().toLocaleDateString('es-ES');
   const currentTime = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
@@ -296,25 +347,36 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
                 </Text>
               </View>
 
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>ID de Transacción</Text>
-                <View style={styles.transactionIdContainer}>
-                  <Text style={styles.transactionId}>#{transactionId}</Text>
-                  <TouchableOpacity onPress={handleCopy} style={styles.copyButton}>
-                    {copied ? (
-                      <Icon name="check-circle" size={16} color={colors.accent} />
-                    ) : (
-                      <Icon name="copy" size={16} color={colors.accent} />
-                    )}
-                  </TouchableOpacity>
+              {transactionId && transactionId !== 'pendiente' && (
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>ID de Transacción</Text>
+                  <View style={styles.transactionIdContainer}>
+                    <Text style={styles.transactionId}>#{String(transactionId).slice(0, 8)}</Text>
+                    <TouchableOpacity onPress={handleCopy} style={styles.copyButton}>
+                      {copied ? (
+                        <Icon name="check-circle" size={16} color={colors.accent} />
+                      ) : (
+                        <Icon name="copy" size={16} color={colors.accent} />
+                      )}
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
+              )}
 
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Estado</Text>
                 <View style={styles.statusContainer}>
-                  <Icon name="check-circle" size={16} color={colors.success} />
-                  <Text style={styles.statusText}>Confirmado</Text>
+                  {isConfirmed ? (
+                    <>
+                      <Icon name="check-circle" size={16} color={colors.success} />
+                      <Text style={styles.statusText}>Confirmado</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="clock" size={16} color={colors.warning} />
+                      <Text style={[styles.statusText, { color: colors.warning }]}>Confirmando…</Text>
+                    </>
+                  )}
                 </View>
               </View>
 
@@ -374,7 +436,7 @@ Para reclamar tu dinero, descarga Confío y crea tu cuenta en los próximos 7 d�
                 style={styles.shareButton}
                 onPress={handleShareInvitation}
               >
-                <Icon name="share-2" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <WhatsAppLogo width={20} height={20} style={{ marginRight: 8 }} />
                 <Text style={styles.shareButtonText}>Compartir invitación por WhatsApp</Text>
               </TouchableOpacity>
             </View>
