@@ -2498,23 +2498,7 @@ result = await TransactionManager.send_tokens(
 
 ### Sponsored Transactions (Gas-Free)
 
-All user transactions are sponsored, meaning users don't need SUI tokens for gas:
-
-```python
-from blockchain.sponsor_service import SponsorService
-
-# Check sponsor health
-health = await SponsorService.check_sponsor_health()
-print(f"Can sponsor: {health['can_sponsor']}")
-print(f"Balance: {health['balance']} SUI")
-
-# Estimate sponsorship cost
-estimate = await SponsorService.estimate_sponsorship_cost(
-    'send',
-    {'coin_count': 5}
-)
-print(f"Estimated fee: {estimate['estimated_fee_algo']} ALGO")
-```
+Transactions are sponsored using Algorand pooled/atomic groups so users don't need ALGO for fees.
 
 **GraphQL Mutations for Sending:**
 

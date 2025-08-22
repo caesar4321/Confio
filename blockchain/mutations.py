@@ -85,19 +85,31 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
-            # Use BUSINESS account context only
+            # Determine account context (personal or business)
             from users.jwt_context import get_jwt_business_context_with_validation
             jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-            if not (jwt_context and jwt_context.get('account_type') == 'business' and jwt_context.get('business_id')):
-                return cls(success=False, error='This action requires a business account context')
-            business_id = jwt_context.get('business_id')
-            business_account = Account.objects.filter(
-                business_id=business_id,
-                account_type='business',
-                deleted_at__isnull=True
-            ).order_by('account_index').first()
-            if not business_account or not business_account.algorand_address:
-                return cls(success=False, error='No Algorand address found for business account')
+            account = None
+            if jwt_context and jwt_context.get('account_type') == 'business' and jwt_context.get('business_id'):
+                business_id = jwt_context.get('business_id')
+                account = Account.objects.filter(
+                    business_id=business_id,
+                    account_type='business',
+                    deleted_at__isnull=True
+                ).order_by('account_index').first()
+            else:
+                # Personal account fallback (use account_index from JWT if available)
+                account_index = (jwt_context or {}).get('account_index', 0)
+                account = Account.objects.filter(
+                    user=user,
+                    account_type='personal',
+                    account_index=account_index,
+                    deleted_at__isnull=True
+                ).first()
+
+            if not account or not account.algorand_address:
+                return cls(success=False, error='No Algorand address found for account')
+            if len(account.algorand_address) != 58:
+                return cls(success=False, error='Invalid Algorand address format')
             
             # Generate unsigned transactions
             from algosdk.v2client import algod
@@ -111,7 +123,7 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             )
             
             # Check current opt-ins
-            account_info = algod_client.account_info(business_account.algorand_address)
+            account_info = algod_client.account_info(account.algorand_address)
             current_assets = [asset['asset-id'] for asset in account_info.get('assets', [])]
             
             # Default assets if not specified - only include assets user hasn't opted into
@@ -146,9 +158,9 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             # Create opt-in transactions with 0 fee for each asset
             for asset_id in assets_to_opt_in:
                 opt_in_txn = AssetTransferTxn(
-                    sender=user_account.algorand_address,
+                    sender=account.algorand_address,
                     sp=params,
-                    receiver=user_account.algorand_address,
+                    receiver=account.algorand_address,
                     amt=0,
                     index=asset_id
                 )
@@ -187,7 +199,7 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             fee_payment_txn = PaymentTxn(
                 sender=AlgorandAccountManager.SPONSOR_ADDRESS,
                 sp=params,
-                receiver=user_account.algorand_address,
+                receiver=account.algorand_address,
                 amt=funding_needed,  # Fund exact MBR increase needed
                 note=b"Sponsored asset opt-ins with MBR funding"
             )
@@ -275,22 +287,31 @@ class OptInToAssetMutation(graphene.Mutation):
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
-            # Use BUSINESS account context only
+            # Determine account context (personal or business)
             from users.jwt_context import get_jwt_business_context_with_validation
             jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-            if not (jwt_context and jwt_context.get('account_type') == 'business' and jwt_context.get('business_id')):
-                return cls(success=False, error='This action requires a business account context')
-            business_id = jwt_context.get('business_id')
-            business_account = Account.objects.filter(
-                business_id=business_id,
-                account_type='business',
-                deleted_at__isnull=True
-            ).order_by('account_index').first()
-            if not business_account or not business_account.algorand_address:
-                return cls(success=False, error='No Algorand address found for business account')
+            active_account = None
+            if jwt_context and jwt_context.get('account_type') == 'business' and jwt_context.get('business_id'):
+                business_id = jwt_context.get('business_id')
+                active_account = Account.objects.filter(
+                    business_id=business_id,
+                    account_type='business',
+                    deleted_at__isnull=True
+                ).order_by('account_index').first()
+            else:
+                account_index = (jwt_context or {}).get('account_index', 0)
+                active_account = Account.objects.filter(
+                    user=user,
+                    account_type='personal',
+                    account_index=account_index,
+                    deleted_at__isnull=True
+                ).first()
+
+            if not active_account or not active_account.algorand_address:
+                return cls(success=False, error='No Algorand address found for account')
             
             # Validate it's an Algorand address
-            if len(user_account.algorand_address) != 58:
+            if len(active_account.algorand_address) != 58:
                 return cls(success=False, error='Invalid Algorand address format')
             
             # Check if already opted in
@@ -300,7 +321,7 @@ class OptInToAssetMutation(graphene.Mutation):
                 AlgorandAccountManager.ALGOD_ADDRESS
             )
             
-            account_info = algod_client.account_info(business_account.algorand_address)
+            account_info = algod_client.account_info(active_account.algorand_address)
             assets = account_info.get('assets', [])
             
             if any(asset['asset-id'] == asset_id for asset in assets):
@@ -317,9 +338,9 @@ class OptInToAssetMutation(graphene.Mutation):
             params = algod_client.suggested_params()
             
             opt_in_txn = AssetTransferTxn(
-                sender=user_account.algorand_address,
+                sender=active_account.algorand_address,
                 sp=params,
-                receiver=user_account.algorand_address,
+                receiver=active_account.algorand_address,
                 amt=0,
                 index=asset_id
             )
@@ -990,25 +1011,34 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
             if not asset_id:
                 return cls(success=False, error=f'{asset_type} not configured on this network')
             
-            # Determine account context using JWT context (BUSINESS ONLY)
+            # Determine account context using JWT context (allow business or personal)
             from users.jwt_context import get_jwt_business_context_with_validation
             jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
 
-            # Require business context explicitly; never fallback to personal here
+            sender_address = None
             if jwt_context and jwt_context.get('account_type') == 'business' and jwt_context.get('business_id'):
-                # Business account flow: use the business account's address
                 business_id = jwt_context.get('business_id')
                 business_account = Account.objects.filter(
                     business_id=business_id,
                     account_type='business',
                     deleted_at__isnull=True
                 ).order_by('account_index').first()
-
-                if not business_account or not business_account.algorand_address:
-                    return cls(success=False, error='No Algorand address found for business account')
-                sender_address = business_account.algorand_address
+                if business_account and business_account.algorand_address:
+                    sender_address = business_account.algorand_address
             else:
-                return cls(success=False, error='This action requires a business account context')
+                # Personal account
+                account_index = (jwt_context or {}).get('account_index', 0)
+                personal_account = Account.objects.filter(
+                    user=user,
+                    account_type='personal',
+                    account_index=account_index,
+                    deleted_at__isnull=True
+                ).first()
+                if personal_account and personal_account.algorand_address:
+                    sender_address = personal_account.algorand_address
+            
+            if not sender_address:
+                return cls(success=False, error='No Algorand address found for account')
 
             # Validate it's an Algorand address
             if not sender_address or len(sender_address) != 58:
@@ -1138,20 +1168,28 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
-            # Use BUSINESS account context only
+            # Determine account context (personal or business)
             from users.jwt_context import get_jwt_business_context_with_validation
             jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-            if not (jwt_context and jwt_context.get('account_type') == 'business' and jwt_context.get('business_id')):
-                return cls(success=False, error='This action requires a business account context')
-            business_id = jwt_context.get('business_id')
-            business_account = Account.objects.filter(
-                business_id=business_id,
-                account_type='business',
-                deleted_at__isnull=True
-            ).order_by('account_index').first()
-            
-            if not business_account or not business_account.algorand_address:
-                return cls(success=False, error='No Algorand address found for business account')
+            account = None
+            if jwt_context and jwt_context.get('account_type') == 'business' and jwt_context.get('business_id'):
+                business_id = jwt_context.get('business_id')
+                account = Account.objects.filter(
+                    business_id=business_id,
+                    account_type='business',
+                    deleted_at__isnull=True
+                ).order_by('account_index').first()
+            else:
+                account_index = (jwt_context or {}).get('account_index', 0)
+                account = Account.objects.filter(
+                    user=user,
+                    account_type='personal',
+                    account_index=account_index,
+                    deleted_at__isnull=True
+                ).first()
+
+            if not account or not account.algorand_address:
+                return cls(success=False, error='No Algorand address found for account')
             
             # Default to cUSD app if not specified
             if not app_id:
@@ -1167,11 +1205,11 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
                 AlgorandAccountManager.ALGOD_ADDRESS
             )
             
-            account_info = algod_client.account_info(business_account.algorand_address)
+            account_info = algod_client.account_info(account.algorand_address)
             apps_local_state = account_info.get('apps-local-state', [])
             
             if any(app['id'] == app_id for app in apps_local_state):
-                logger.info(f"Business {business_id} already opted into app {app_id}")
+                logger.info(f"Account already opted into app {app_id}")
                 return cls(
                     success=True,
                     already_opted_in=True,
@@ -1188,12 +1226,14 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
             app_mbr_increase = 100_000 + (2 * 28_500)  # 157,000 microAlgos
             min_balance_after_optin = min_balance_required + app_mbr_increase
             
-            logger.info(f"Business {business_account.algorand_address}: current_balance={current_balance}, "
-                       f"min_balance={min_balance_required}, min_after_optin={min_balance_after_optin}")
+            logger.info(
+                f"Account {account.algorand_address}: current_balance={current_balance}, "
+                f"min_balance={min_balance_required}, min_after_optin={min_balance_after_optin}"
+            )
             
             # Create sponsored opt-in transaction group
             from algosdk.transaction import ApplicationOptInTxn, PaymentTxn, calculate_group_id, SuggestedParams
-            from algosdk import mnemonic, account
+            from algosdk import mnemonic, account as algo_account
             import base64
             import msgpack
             
@@ -1203,7 +1243,7 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
             # Get sponsor credentials
             sponsor_mnemonic = settings.ALGORAND_SPONSOR_MNEMONIC
             sponsor_private_key = mnemonic.to_private_key(sponsor_mnemonic)
-            sponsor_address = account.address_from_private_key(sponsor_private_key)
+            sponsor_address = algo_account.address_from_private_key(sponsor_private_key)
             
             # Calculate funding needed for minimum balance increase
             funding_needed = 0
@@ -1225,7 +1265,7 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
             
             sponsor_payment = PaymentTxn(
                 sender=sponsor_address,
-                receiver=business_account.algorand_address,
+                receiver=account.algorand_address,
                 amt=funding_needed,  # Fund the MBR increase + buffer for fees
                 sp=sponsor_params,
                 note=b"Sponsored app opt-in MBR funding"
@@ -1246,7 +1286,7 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
             opt_in_selector = bytes.fromhex("30c6d58a")  # "opt_in()void"
             
             app_opt_in = ApplicationOptInTxn(
-                sender=business_account.algorand_address,
+                sender=account.algorand_address,
                 sp=opt_in_params,
                 index=app_id,
                 app_args=[opt_in_selector]  # Required for Beaker router
@@ -1269,7 +1309,7 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
             from algosdk import encoding
             user_txn_encoded = encoding.msgpack_encode(app_opt_in)
             
-            logger.info(f"Created sponsored app opt-in transaction group for business {business_id}: App {app_id} (sponsor first)")
+            logger.info(f"Created sponsored app opt-in group for account: App {app_id} (sponsor first)")
             
             # Return sponsored transaction group
             return cls(
@@ -1784,4 +1824,3 @@ class CompleteBusinessOptInMutation(graphene.Mutation):
         except Exception as e:
             logger.error(f'Error completing business opt-in: {str(e)}')
             return cls(success=False, error=str(e))
-

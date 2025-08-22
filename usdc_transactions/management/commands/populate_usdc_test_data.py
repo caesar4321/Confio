@@ -55,7 +55,7 @@ class Command(BaseCommand):
                         actor_address=account.algorand_address or f"0x{uuid.uuid4().hex[:40]}",
                         amount=Decimal(random.uniform(50, 500)).quantize(Decimal('0.01')),
                         source_address=f"0x{uuid.uuid4().hex[:40]}",
-                        network='SUI',
+                        network='ALGORAND',
                         status=random.choice(['COMPLETED', 'COMPLETED', 'COMPLETED', 'PENDING']),  # 75% completed
                         created_at=timezone.now() - timedelta(days=random.randint(0, 30), hours=random.randint(0, 23)),
                         updated_at=timezone.now()
@@ -92,7 +92,7 @@ class Command(BaseCommand):
                         actor_address=account.algorand_address or f"0x{uuid.uuid4().hex[:40]}",
                         amount=Decimal(random.uniform(25, 250)).quantize(Decimal('0.01')),
                         destination_address=f"0x{uuid.uuid4().hex[:40]}",
-                        network='SUI',
+                        network='ALGORAND',
                         service_fee=Decimal(random.uniform(0, 2)).quantize(Decimal('0.01')),
                         status=random.choice(['COMPLETED', 'COMPLETED', 'COMPLETED', 'PROCESSING']),  # 75% completed
                         created_at=timezone.now() - timedelta(days=random.randint(0, 30), hours=random.randint(0, 23)),

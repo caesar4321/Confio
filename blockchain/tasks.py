@@ -9,7 +9,13 @@ import logging
 
 from users.models import Account
 from .models import RawBlockchainEvent, Balance, TransactionProcessingLog
-from .sui_client import sui_client
+from django.conf import settings
+from .algorand_client import AlgorandClient
+from .models import ProcessedIndexerTransaction, IndexerAssetCursor
+from usdc_transactions.models import USDCDeposit
+from notifications.utils import create_notification
+from notifications.models import NotificationType as NotificationTypeChoices
+from send.models import SendTransaction
 
 logger = logging.getLogger(__name__)
 
@@ -153,45 +159,41 @@ def update_user_balances(self, account_id):
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
+        from .balance_service import BalanceService
         try:
-            # Get balances from blockchain
-            cusd_balance = loop.run_until_complete(
-                sui_client.get_cusd_balance(account.algorand_address)
-            )
-            confio_balance = loop.run_until_complete(
-                sui_client.get_confio_balance(account.algorand_address)
-            )
-            sui_balance = loop.run_until_complete(
-                sui_client.get_sui_balance(account.algorand_address)
-            )
-            
-            # Update database
+            cusd = BalanceService.get_balance(account, 'CUSD', force_refresh=True)
+            confio = BalanceService.get_balance(account, 'CONFIO', force_refresh=True)
+            usdc = BalanceService.get_balance(account, 'USDC', force_refresh=True)
+
             Balance.objects.update_or_create(
                 account=account,
                 token='CUSD',
-                defaults={'amount': cusd_balance}
+                defaults={'amount': cusd['amount']}
             )
             Balance.objects.update_or_create(
                 account=account,
                 token='CONFIO',
-                defaults={'amount': confio_balance}
+                defaults={'amount': confio['amount']}
             )
             Balance.objects.update_or_create(
                 account=account,
-                token='SUI',
-                defaults={'amount': sui_balance}
+                token='USDC',
+                defaults={'amount': usdc['amount']}
             )
-            
-            # Update cache
+
             cache_key = f"balances:{account.algorand_address}"
             cache.set(cache_key, {
-                'cusd': float(cusd_balance),
-                'confio': float(confio_balance),
-                'sui': float(sui_balance)
+                'cusd': float(cusd['amount']),
+                'confio': float(confio['amount']),
+                'usdc': float(usdc['amount']),
+                'sui': 0.0,
             }, 30)
-            
+
         finally:
-            loop.close()
+            try:
+                loop.close()
+            except Exception:
+                pass
             
     except Account.DoesNotExist:
         logger.error(f"Account {account_id} not found")
@@ -205,7 +207,7 @@ def update_address_cache():
     """Update cached user addresses for polling"""
     addresses = set(
         Account.objects.filter(
-            is_active=True,
+            deleted_at__isnull=True,
             algorand_address__isnull=False
         ).values_list('algorand_address', flat=True)
     )
@@ -227,7 +229,7 @@ def reconcile_all_balances():
     # Get all active accounts with stale or old balances
     stale_threshold = timezone.now() - timedelta(hours=1)
     accounts = Account.objects.filter(
-        is_active=True,
+        deleted_at__isnull=True,
         algorand_address__isnull=False
     ).filter(
         Q(balances__is_stale=True) |
@@ -270,7 +272,7 @@ def refresh_stale_balances():
     
     stale_balances = Balance.objects.filter(
         is_stale=True,
-        account__is_active=True
+        account__deleted_at__isnull=True
     ).select_related('account')[:100]  # Batch limit
     
     refreshed = 0
@@ -354,72 +356,330 @@ def cleanup_old_events():
     return deleted_count
 
 
-@shared_task
-def track_epoch_change():
-    """
-    Monitor and track Sui epoch changes
-    Run this every 30 minutes
-    """
-    from .models import SuiEpoch
-    import asyncio
-    
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
+## Sui epoch tracking removed — fully migrated to Algorand
+
+
+# =====================
+# Algorand Indexer scan
+# =====================
+
+def _get_asset_decimals(algod_client, asset_id: int) -> int:
+    """Fetch and cache ASA decimals."""
+    cache_key = f"algo:asset_decimals:{asset_id}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
-        # Get current epoch info
-        epoch_info = loop.run_until_complete(sui_client.get_epoch_info())
-        
-        current_epoch_num = int(epoch_info['epoch'])
-        epoch_start_ms = int(epoch_info['epochStartTimestampMs'])
-        
-        # Check if this epoch is already tracked
-        current_epoch, created = SuiEpoch.objects.get_or_create(
-            epoch_number=current_epoch_num,
-            defaults={
-                'start_timestamp_ms': epoch_start_ms,
-                'first_checkpoint': 0,  # Will be updated later
-                'is_current': True
-            }
-        )
-        
-        if created:
-            logger.info(f"New epoch detected: {current_epoch_num}")
-            
-            # Mark previous epochs as not current
-            SuiEpoch.objects.filter(is_current=True).exclude(
-                epoch_number=current_epoch_num
-            ).update(is_current=False)
-            
-            # Try to finalize previous epoch
-            try:
-                previous_epoch = SuiEpoch.objects.filter(
-                    epoch_number=current_epoch_num - 1
-                ).first()
-                
-                if previous_epoch and not previous_epoch.end_timestamp_ms:
-                    previous_epoch.end_timestamp_ms = epoch_start_ms - 1
-                    previous_epoch.save()
-                    logger.info(f"Finalized epoch {previous_epoch.epoch_number}")
-            except Exception as e:
-                logger.error(f"Error finalizing previous epoch: {e}")
-        
-        # Update current epoch stats
-        if epoch_info.get('totalStake'):
-            current_epoch.total_stake = int(epoch_info['totalStake'])
-        if epoch_info.get('storageFundNonRefundableBalance'):
-            current_epoch.storage_fund_balance = int(epoch_info['storageFundNonRefundableBalance'])
-        
-        current_epoch.save()
-        
-        return {
-            'epoch': current_epoch_num,
-            'created': created,
-            'start_time': epoch_start_ms
-        }
-        
+        info = algod_client.asset_info(asset_id)
+        decimals = int(info.get('params', {}).get('decimals', 0))
+        cache.set(cache_key, decimals, 3600)  # 1 hour
+        return decimals
     except Exception as e:
-        logger.error(f"Failed to track epoch: {e}")
+        logger.error(f"Failed to fetch asset info for {asset_id}: {e}")
+        return 0
+
+
+def _amount_from_base(amount_base: int, decimals: int) -> Decimal:
+    q = Decimal(10) ** Decimal(decimals)
+    return (Decimal(amount_base) / q).quantize(Decimal('0.000001'))
+
+
+@shared_task(name='blockchain.scan_inbound_deposits')
+def scan_inbound_deposits():
+    """
+    Asset-centric scanner:
+    - For each relevant asset (USDC, cUSD, CONFIO), sweep transactions from the
+      last asset cursor to current round using Indexer search by asset-id.
+    - Filter in-memory for our user addresses (receiver or close-to), skipping
+      internal Confío-to-Confío sends as deposits.
+    - Idempotent via (txid, intra) markers.
+    - Create USDCDeposit for USDC; send notifications for all assets.
+    """
+    try:
+        # Load user addresses from cache or DB (Set for O(1) lookups)
+        addresses: set[str] = cache.get('user_addresses') or set(
+            Account.objects.filter(
+                deleted_at__isnull=True,
+                algorand_address__isnull=False
+            ).values_list('algorand_address', flat=True)
+        )
+        if not addresses:
+            logger.info('No user addresses to scan')
+            return {'processed': 0}
+        try:
+            sample = ', '.join([(a[:12] + '...') for a in list(addresses)[:8]])
+            logger.info(f"[IndexerScan] tracking {len(addresses)} addresses: {sample}")
+        except Exception:
+            pass
+
+        # Build quick lookup Account map
+        accounts = Account.objects.filter(deleted_at__isnull=True, algorand_address__in=addresses).select_related('user', 'business')
+        addr_to_account = {a.algorand_address: a for a in accounts}
+
+        # Set up clients
+        client = AlgorandClient()
+        algod_client = client.algod
+        indexer_client = client.indexer
+
+        # Asset IDs
+        USDC_ID = settings.ALGORAND_USDC_ASSET_ID
+        CUSD_ID = settings.ALGORAND_CUSD_ASSET_ID
+        CONFIO_ID = settings.ALGORAND_CONFIO_ASSET_ID
+        # Decimal cache per asset
+        asset_ids = [aid for aid in [USDC_ID, CUSD_ID, CONFIO_ID] if aid]
+        decimals_map = {aid: _get_asset_decimals(algod_client, aid) for aid in asset_ids}
+
+        # Health snapshot for bounded windows
+        try:
+            current_round = indexer_client.health().get('round') or algod_client.status().get('last-round', 0)
+        except Exception:
+            current_round = algod_client.status().get('last-round', 0)
+
+        processed = 0
+        skipped = 0
+
+        # Treat deposits from the sponsor/admin as external deposits, not internal transfers
+        sponsor_address = None
+        try:
+            from algosdk import mnemonic as _mn
+            from algosdk import account as _acct
+            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+            if sponsor_mn:
+                sponsor_address = _acct.address_from_private_key(_mn.to_private_key(sponsor_mn))
+        except Exception:
+            sponsor_address = None
+
+        def handle_one(axfer_tx: dict, cround: int, intra: int):
+            nonlocal processed, skipped
+            inner = axfer_tx.get('asset-transfer-transaction', {})
+            receiver = inner.get('receiver')
+            close_to = inner.get('close-to') or inner.get('close_to')
+            sender = axfer_tx.get('sender')
+            xaid = inner.get('asset-id')
+            aamt = inner.get('amount', 0)
+            txid = axfer_tx.get('id')
+
+            # Determine deposit target (receiver or close-to)
+            to_addr = receiver or close_to
+            if not to_addr or to_addr not in addresses:
+                return
+            if sender in addresses and (not sponsor_address or sender != sponsor_address):
+                # Internal transfer; treat as non-deposit for inbound notification
+                logger.info(
+                    f"[IndexerScan] skip internal tx: sender={sender} to={to_addr} sponsor={sponsor_address}"
+                )
+                skipped += 1
+                return
+            elif sender in addresses and sponsor_address and sender == sponsor_address:
+                logger.info(
+                    f"[IndexerScan] sponsor deposit: sender={sender} to={to_addr}"
+                )
+
+            # Idempotency check by (txid, intra)
+            if ProcessedIndexerTransaction.objects.filter(txid=txid, intra=intra or 0).exists():
+                skipped += 1
+                return
+
+            # Persist processed marker ASAP
+            ProcessedIndexerTransaction.objects.create(
+                txid=txid,
+                asset_id=xaid,
+                sender=sender or '',
+                receiver=to_addr or '',
+                confirmed_round=cround,
+                intra=intra or 0,
+            )
+
+            # Convert amount
+            dec = int(decimals_map.get(xaid, 0))
+            human_amt = _amount_from_base(int(aamt), dec)
+
+            account = addr_to_account.get(to_addr)
+            if not account:
+                return
+
+            if xaid == USDC_ID:
+                # Create DB deposit + notification
+                try:
+                    if account.account_type == 'personal':
+                        actor_type = 'user'
+                        kwargs = {'actor_user_id': account.user_id, 'actor_business': None}
+                    else:
+                        actor_type = 'business'
+                        kwargs = {'actor_user': None, 'actor_business_id': account.business_id}
+
+                    deposit = USDCDeposit.objects.create(
+                        actor_type=actor_type,
+                        actor_display_name=account.display_name,
+                        actor_address=to_addr,
+                        amount=human_amt,
+                        source_address=sender or '',
+                        network='ALGORAND',
+                        status='COMPLETED',
+                        **kwargs,
+                    )
+                    try:
+                        create_notification(
+                            user=account.user,
+                            account=account,
+                            business=account.business if account.account_type == 'business' else None,
+                            notification_type=NotificationTypeChoices.USDC_DEPOSIT_COMPLETED,
+                            title="Depósito USDC recibido",
+                            message=f"Recibiste {human_amt} USDC",
+                            data={
+                                'transaction_id': str(deposit.deposit_id),
+                                'transaction_type': 'deposit',
+                                'type': 'deposit',
+                                'currency': 'USDC',
+                                'amount': str(human_amt),
+                                'sender': sender,
+                                'receiver': to_addr,
+                                'txid': txid,
+                                'round': cround,
+                            },
+                            related_object_type='USDCDeposit',
+                            related_object_id=str(deposit.id),
+                            action_url=f"confio://transaction/{deposit.deposit_id}",
+                        )
+                    except Exception as ne:
+                        logger.warning(f"Failed to create USDC deposit notification: {ne}")
+                except Exception as de:
+                    logger.error(f"Failed to create USDCDeposit for {to_addr}: {de}")
+            else:
+                # cUSD or CONFIO inbound notification
+                token_name = 'cUSD' if xaid == CUSD_ID else 'CONFIO'
+                try:
+                    create_notification(
+                        user=account.user,
+                        account=account,
+                        business=account.business if account.account_type == 'business' else None,
+                        notification_type=NotificationTypeChoices.SEND_FROM_EXTERNAL,
+                        title=f"Depósito {token_name} recibido",
+                        message=f"Recibiste {human_amt} {token_name}",
+                        data={
+                            'token_type': token_name,
+                            'amount': str(human_amt),
+                            'sender': sender,
+                            'receiver': to_addr,
+                            'txid': txid,
+                            'round': cround,
+                        },
+                    )
+                except Exception as ne:
+                    logger.warning(f"Failed to create inbound {token_name} notification: {ne}")
+
+                # Persist as a SendTransaction (external -> Confío) so unified picks it up via signals
+                try:
+                    from datetime import datetime, timezone as py_tz
+                    created_at = datetime.fromtimestamp(
+                        tx.get('round-time', cround) or cround,
+                        tz=py_tz.utc,
+                    )
+                    # Use indexer txid and intra for idempotency;
+                    # never use empty string for unique transaction_hash
+                    idempotency_key = f"ALG:{txid}:{intra or 0}"
+                    send_kwargs = {
+                        'sender_user': None,
+                        'recipient_user': account.user if account.account_type == 'personal' else None,
+                        'sender_business': None,
+                        'recipient_business': account.business if account.account_type == 'business' else None,
+                        'sender_type': 'external',
+                        'recipient_type': 'business' if account.account_type == 'business' else 'user',
+                        'sender_display_name': 'Billetera externa',
+                        'recipient_display_name': account.display_name,
+                        'sender_phone': '',
+                        'recipient_phone': getattr(account.user, 'phone_number', '') if account.account_type == 'personal' else '',
+                        'sender_address': sender or '',
+                        'recipient_address': to_addr or '',
+                        'amount': human_amt,
+                        'token_type': 'CUSD' if token_name == 'cUSD' else 'CONFIO',
+                        'memo': f'Depósito {token_name} recibido',
+                        'status': 'CONFIRMED',
+                        'transaction_hash': txid or None,
+                        'idempotency_key': idempotency_key,
+                        'error_message': '',
+                        'created_at': created_at,
+                    }
+                    # Create or update the send transaction based on idempotency
+                    # If a row with the same transaction_hash already exists, skip
+                    if txid:
+                        exists = SendTransaction.all_objects.filter(transaction_hash=txid).exists()
+                        if not exists:
+                            SendTransaction.all_objects.create(**send_kwargs)
+                    else:
+                        # No txid (inner txns); fall back to idempotency key uniqueness
+                        try:
+                            SendTransaction.all_objects.create(**send_kwargs)
+                        except Exception:
+                            # If race/dup, ignore
+                            pass
+                except Exception as ue:
+                    logger.warning(f"Failed to create SendTransaction for inbound {token_name}: {ue}")
+
+            # Mark balances stale for this recipient
+            try:
+                mark_transaction_balances_stale.delay(txid, sender_address=None, recipient_addresses=[to_addr])
+            except Exception:
+                pass
+            processed += 1
+
+        # Sweep per asset
+        for asset_id in asset_ids:
+            # Cursor with small rewind
+            cursor, _ = IndexerAssetCursor.objects.get_or_create(asset_id=asset_id)
+            # Small rewind to catch recent events and avoid misses
+            min_round = max(0, (cursor.last_scanned_round or 0) - 500)
+            logger.info(
+                f"[IndexerScan] asset={asset_id} window {min_round}->{current_round} addresses={len(addresses)}"
+            )
+            max_seen_round = cursor.last_scanned_round or 0
+
+            next_token = None
+            while True:
+                try:
+                    resp = indexer_client.search_transactions(
+                        asset_id=asset_id,
+                        min_round=min_round,
+                        max_round=current_round,
+                        limit=1000,
+                        next_page=next_token,
+                    )
+                except Exception as e:
+                    logger.error(f"Indexer search failed (asset={asset_id}): {e}")
+                    break
+
+                txs = resp.get('transactions', []) or []
+                next_token = resp.get('next-token')
+
+                for tx in txs:
+                    try:
+                        if tx.get('tx-type') != 'axfer':
+                            continue
+                        cround = tx.get('confirmed-round') or 0
+                        intra = tx.get('intra-round-offset', 0) or 0
+                        max_seen_round = max(max_seen_round, cround)
+
+                        # Top-level axfer
+                        handle_one(tx, cround, intra)
+
+                        # Inner transactions
+                        for inner_tx in tx.get('inner-txns', []) or []:
+                            if inner_tx.get('tx-type') == 'axfer':
+                                i_intra = inner_tx.get('intra-round-offset', intra)
+                                handle_one(inner_tx, cround, i_intra or intra)
+                    except Exception as ie:
+                        logger.error(f"Error processing tx in asset sweep: {ie}")
+
+                if not next_token:
+                    break
+
+            # Advance cursor only to the maximum round actually seen
+            if max_seen_round > (cursor.last_scanned_round or 0):
+                cursor.last_scanned_round = max_seen_round
+                cursor.save(update_fields=['last_scanned_round', 'updated_at'])
+
+        logger.info(f"Indexer scan complete: processed={processed}, skipped={skipped}")
+        return {'processed': processed, 'skipped': skipped}
+    except Exception as e:
+        logger.error(f"scan_inbound_deposits failed: {e}")
         raise
-    finally:
-        loop.close()

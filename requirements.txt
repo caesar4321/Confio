@@ -26,3 +26,4 @@ psycopg[binary]==3.2.6
 python-decouple==3.8
 whitenoise==6.9.0
 django-graphql-jwt
+py-algorand-sdk==2.7.0

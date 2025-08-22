@@ -34,7 +34,6 @@ class Balance(models.Model):
     token = models.CharField(max_length=20, choices=[
         ('CUSD', 'cUSD'),
         ('CONFIO', 'CONFIO'),
-        ('SUI', 'SUI'),
         ('USDC', 'USDC'),
     ])
     amount = models.DecimalField(max_digits=36, decimal_places=18)
@@ -88,47 +87,6 @@ class TransactionProcessingLog(models.Model):
         return f"{self.raw_event} - {self.status}"
 
 
-class SuiEpoch(models.Model):
-    """Track Sui network epochs for monitoring"""
-    epoch_number = models.BigIntegerField(unique=True, db_index=True)
-    start_timestamp_ms = models.BigIntegerField()
-    end_timestamp_ms = models.BigIntegerField(null=True, blank=True)
-    first_checkpoint = models.BigIntegerField()
-    last_checkpoint = models.BigIntegerField(null=True, blank=True)
-    total_transactions = models.BigIntegerField(default=0)
-    total_gas_cost = models.BigIntegerField(default=0)
-    stake_subsidy_amount = models.BigIntegerField(default=0)
-    total_stake_rewards = models.BigIntegerField(default=0)
-    storage_fund_balance = models.BigIntegerField(default=0)
-    epoch_commitments = models.JSONField(default=list, blank=True)  # Validator commitments
-    is_current = models.BooleanField(default=False, db_index=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        ordering = ['-epoch_number']
-        indexes = [
-            models.Index(fields=['is_current']),
-            models.Index(fields=['start_timestamp_ms', 'end_timestamp_ms']),
-        ]
-    
-    def __str__(self):
-        return f"Epoch {self.epoch_number} {'(current)' if self.is_current else ''}"
-    
-    @property
-    def duration_hours(self):
-        """Calculate epoch duration in hours"""
-        if self.end_timestamp_ms:
-            duration_ms = self.end_timestamp_ms - self.start_timestamp_ms
-            return duration_ms / (1000 * 60 * 60)  # Convert ms to hours
-        return None
-    
-    @property
-    def avg_gas_price(self):
-        """Calculate average gas price for the epoch"""
-        if self.total_transactions > 0:
-            return self.total_gas_cost / self.total_transactions
-        return 0
 
 
 class Payment(models.Model):
@@ -240,3 +198,40 @@ class PaymentReceipt(models.Model):
     
     def __str__(self):
         return f"Receipt for {self.payment.payment_id[:8]}..."
+
+
+
+class ProcessedIndexerTransaction(models.Model):
+    """Idempotency guard for processed on-chain transactions from the Indexer."""
+    txid = models.CharField(max_length=100, db_index=True)
+    asset_id = models.BigIntegerField(null=True, blank=True)
+    sender = models.CharField(max_length=100, blank=True)
+    receiver = models.CharField(max_length=100, blank=True)
+    confirmed_round = models.BigIntegerField(default=0)
+    intra = models.IntegerField(default=0, help_text="Intra-round offset if available")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['asset_id', 'confirmed_round']),
+            models.Index(fields=['receiver']),
+        ]
+        unique_together = [('txid', 'intra')]
+
+    def __str__(self):
+        return f"{self.txid[:10]}... ({self.asset_id})"
+
+
+class IndexerAssetCursor(models.Model):
+    """Per-asset global cursor for Indexer scanning (asset-centric strategy)."""
+    asset_id = models.BigIntegerField(unique=True, db_index=True)
+    last_scanned_round = models.BigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['last_scanned_round']),
+        ]
+
+    def __str__(self):
+        return f"asset:{self.asset_id} @ {self.last_scanned_round}"
