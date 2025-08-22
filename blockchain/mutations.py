@@ -1784,3 +1784,4 @@ class CompleteBusinessOptInMutation(graphene.Mutation):
         except Exception as e:
             logger.error(f'Error completing business opt-in: {str(e)}')
             return cls(success=False, error=str(e))
+

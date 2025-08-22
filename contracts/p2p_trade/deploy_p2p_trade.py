@@ -165,8 +165,14 @@ def deploy_p2p_trade():
         extra_pages = (len(approval) - 2048 + 2047) // 2048
         print(f"Approval requires {extra_pages} extra page(s)")
 
+    # Global integers used (current):
+    # - asset ids: cusd_asset_id, confio_asset_id (2)
+    # - flags/counters: is_paused, active_trades, active_disputes (3)
+    # - volumes: total_cusd_volume, total_confio_volume (2)
+    # - trade stats: total_trades_created, completed, cancelled, disputed (4)
+    # Total = 11. Provide headroom (12) to avoid schema overflow on future increments.
     global_schema = StateSchema(
-        num_uints=10,   # stats + asset ids
+        num_uints=12,
         num_byte_slices=3,  # admin, sponsor_address, padding
     )
     local_schema = StateSchema(num_uints=0, num_byte_slices=0)
