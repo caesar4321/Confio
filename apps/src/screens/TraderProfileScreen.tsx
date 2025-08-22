@@ -436,10 +436,7 @@ export const TraderProfileScreen: React.FC = () => {
                 <Text style={styles.detailLabel}>Precio</Text>
                 <Text style={styles.detailValueBold}>{formatOfferAmount(offer.rate, offer.countryCode)} / {crypto}</Text>
               </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Disponible</Text>
-                <Text style={styles.detailValue}>{offer.available} {crypto}</Text>
-              </View>
+              {/* Removed Disponible: we validate availability at trade time */}
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Límites</Text>
                 <Text style={styles.detailValue}>{offer.limit} {crypto}</Text>
@@ -477,7 +474,7 @@ export const TraderProfileScreen: React.FC = () => {
                     name: trader.name,
                     rate: offer.rate.toString(),
                     limit: `${offer.minAmount} - ${offer.maxAmount}`,
-                    available: offer.availableAmount.toString(),
+                    // available removed
                     paymentMethods: offer.paymentMethods || [],
                     responseTime: trader.responseTime,
                     completedTrades: trader.completedTrades,
@@ -502,9 +499,7 @@ export const TraderProfileScreen: React.FC = () => {
                           <Text style={styles.offerLimits}>
                             Límite: {offer.minAmount} - {offer.maxAmount}
                           </Text>
-                          <Text style={styles.offerAvailable}>
-                            Disponible: {offer.availableAmount} {offer.tokenType === 'CUSD' ? 'cUSD' : 'CONFIO'}
-                          </Text>
+                          {/* Removed Disponible from list item */}
                         </View>
                         <View style={styles.offerRateContainer}>
                           <Text style={styles.rateValue}>{formatOfferAmount(offer.rate, offer.countryCode)}</Text>

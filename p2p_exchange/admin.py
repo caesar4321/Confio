@@ -51,8 +51,8 @@ class P2PPaymentMethodAdmin(EnhancedAdminMixin, BulkUpdateMixin, admin.ModelAdmi
 class P2POfferAdmin(EnhancedAdminMixin, admin.ModelAdmin):
     list_display = [
         'id', 'offer_entity_display', 'exchange_type_display', 'token_type_display', 
-        'country_display', 'rate_display', 'amount_range_display', 
-        'available_amount_display', 'payment_methods_count', 'status_display', 'created_at'
+        'country_display', 'rate_display', 'amount_range_display',
+        'payment_methods_count', 'status_display', 'created_at'
     ]
     list_filter = [
         'exchange_type', 'token_type', 'country_code', 'status', 'created_at',
@@ -68,11 +68,11 @@ class P2POfferAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         'user__username', 'user__email', 'country_code', 'account__business__name'
     ]
     readonly_fields = ['created_at', 'updated_at', 'exchange_type_display', 'token_type_display', 
-                      'rate_display', 'amount_range_display', 'available_amount_display']
+                      'rate_display', 'amount_range_display']
     filter_horizontal = ['payment_methods']
     list_per_page = 50
     date_hierarchy = 'created_at'
-    actions = ['activate_offers', 'pause_offers', 'refresh_available_amount']
+    actions = ['activate_offers', 'pause_offers']
     
     def offer_entity_display(self, obj):
         """Display offer entity (User or Business) using new direct relationships"""
@@ -153,22 +153,7 @@ class P2POfferAdmin(EnhancedAdminMixin, admin.ModelAdmin):
                          f'{float(obj.min_amount):,.0f}', f'{float(obj.max_amount):,.0f}', token)
     amount_range_display.short_description = 'Límites'
     
-    def available_amount_display(self, obj):
-        """Display available amount with color coding"""
-        token = obj.token_type
-        percentage = (obj.available_amount / obj.max_amount * 100) if obj.max_amount > 0 else 0
-        
-        # Color code based on availability
-        if percentage > 75:
-            color = '#10B981'  # Green
-        elif percentage > 25:
-            color = '#F59E0B'  # Yellow
-        else:
-            color = '#EF4444'  # Red
-            
-        return format_html('<span style="color: {}; font-weight: bold;">{} {}</span>', 
-                         color, f'{float(obj.available_amount):,.0f}', token)
-    available_amount_display.short_description = 'Disponible'
+    # removed available amount display
     
     def payment_methods_count(self, obj):
         """Display payment methods count with icons"""
@@ -212,7 +197,6 @@ class P2POfferAdmin(EnhancedAdminMixin, admin.ModelAdmin):
             'fields': (
                 'rate',
                 ('min_amount', 'max_amount'),
-                'available_amount'
             ),
             'description': 'Tasa de cambio y límites de transacción'
         }),
@@ -306,13 +290,7 @@ class P2POfferAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         self.message_user(request, f'{updated} ofertas pausadas exitosamente.')
     pause_offers.short_description = '⏸️ Pausar ofertas seleccionadas'
     
-    def refresh_available_amount(self, request, queryset):
-        """Refresh available amount to max amount"""
-        for offer in queryset:
-            offer.available_amount = offer.max_amount
-            offer.save()
-        self.message_user(request, f'{queryset.count()} ofertas actualizadas con cantidad máxima disponible.')
-    refresh_available_amount.short_description = '🔄 Restablecer cantidad disponible'
+    # removed refresh_available_amount action
 
 class DisputedTradeFilter(admin.SimpleListFilter):
     title = 'Dispute Status'

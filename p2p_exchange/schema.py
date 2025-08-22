@@ -168,7 +168,7 @@ class P2POfferType(DjangoObjectType):
             # Keep old fields for backward compatibility (but marked as deprecated)
             'user', 'account', 
             'exchange_type', 'token_type', 'rate', 'min_amount',
-            'max_amount', 'available_amount', 'payment_methods', 'country_code', 'currency_code', 'terms',
+            'max_amount', 'payment_methods', 'country_code', 'currency_code', 'terms',
             'response_time_minutes', 'status', 'auto_complete_enabled',
             'auto_complete_time_minutes', 'created_at', 'updated_at'
         )
@@ -749,7 +749,6 @@ class CreateP2POfferInput(graphene.InputObjectType):
     rate = graphene.Decimal(required=True)
     min_amount = graphene.Decimal(required=True)
     max_amount = graphene.Decimal(required=True)
-    available_amount = graphene.Decimal(required=True)
     payment_method_ids = graphene.List(graphene.ID, required=True)
     country_code = graphene.String(required=True)  # Required country code for the offer
     terms = graphene.String()
@@ -858,17 +857,7 @@ class CreateP2POffer(graphene.Mutation):
                     errors=["Invalid token type"]
                 )
 
-            # For SELL offers, validate the user has enough balance
-            if input.exchange_type == 'SELL':
-                # Get user's current balance for the token they want to sell
-                user_balance = _get_user_balance(user, input.token_type)
-                
-                if user_balance < input.available_amount:
-                    return CreateP2POffer(
-                        offer=None,
-                        success=False,
-                        errors=[f"Saldo insuficiente. Tienes {user_balance} {input.token_type} pero intentas vender {input.available_amount}"]
-                    )
+            # No preflight balance validation; availability checked at escrow time
 
             # Validate and get/create payment methods for database storage
             if not input.payment_method_ids:
@@ -923,7 +912,6 @@ class CreateP2POffer(graphene.Mutation):
                 'rate': input.rate,
                 'min_amount': input.min_amount,
                 'max_amount': input.max_amount,
-                'available_amount': input.available_amount,
                 'country_code': input.country_code,
                 'currency_code': cls._get_currency_for_country(input.country_code),
                 'terms': input.terms or '',
@@ -993,7 +981,7 @@ class UpdateP2POffer(graphene.Mutation):
         rate = graphene.Float()
         min_amount = graphene.Float()
         max_amount = graphene.Float()
-        available_amount = graphene.Float()
+        # available_amount removed
         payment_method_ids = graphene.List(graphene.ID)
         terms = graphene.String()
     
@@ -1047,8 +1035,7 @@ class UpdateP2POffer(graphene.Mutation):
             if 'max_amount' in kwargs and kwargs['max_amount'] is not None:
                 offer.max_amount = kwargs['max_amount']
             
-            if 'available_amount' in kwargs and kwargs['available_amount'] is not None:
-                offer.available_amount = kwargs['available_amount']
+            # available_amount removed
             
             if 'terms' in kwargs and kwargs['terms'] is not None:
                 offer.terms = kwargs['terms']
@@ -1160,12 +1147,7 @@ class CreateP2PTrade(graphene.Mutation):
                     errors=[f"Amount must be between {offer.min_amount} and {offer.max_amount}"]
                 )
 
-            if input.cryptoAmount > offer.available_amount:
-                return CreateP2PTrade(
-                    trade=None,
-                    success=False,
-                    errors=["Insufficient available amount"]
-                )
+            # Do not check offer.available_amount; rely on on-chain escrow validation
 
             # Validate payment method - frontend sends actual database IDs
             try:
@@ -1414,8 +1396,7 @@ class CreateP2PTrade(graphene.Mutation):
             escrow.escrow_transaction_hash = f"simulated_tx_hash_{trade.id}"
             escrow.save()
 
-            # Update offer available amount
-            offer.available_amount -= input.cryptoAmount
+            # No available amount tracking; removed
             offer.save()
 
             return CreateP2PTrade(
