@@ -398,13 +398,15 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         await new Promise(resolve => setTimeout(resolve, 100));
         
         // Clear Apollo cache to ensure fresh data with new account context
+        // Avoid resetStore() during in-flight queries (causes invariant error)
         try {
-          // Use resetStore instead of clearStore - it clears cache AND refetches active queries
-          await apolloClient.resetStore();
-          console.log('useAccountManager - Apollo store reset after account switch');
+          apolloClient.stop(); // stop polls/in-flight operations
+          await apolloClient.clearStore(); // clear cache without auto-refetch
+          apolloClient.reFetchObservableQueries(); // restart and refetch active observers
+          console.log('useAccountManager - Apollo store cleared after account switch');
         } catch (error) {
-          console.log('useAccountManager - Error resetting Apollo store:', error);
-          // If resetStore fails, try cache eviction as fallback
+          console.log('useAccountManager - Error clearing Apollo store:', error);
+          // Fallback to cache eviction
           try {
             apolloClient.cache.evict({});
             apolloClient.cache.gc();

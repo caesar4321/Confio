@@ -391,9 +391,10 @@ export const AddBankInfoModal = ({
             include: ['GetUserBankAccounts']
           });
           
-          // Method 2: Reset the entire store to force all queries to refetch
-          // This is more aggressive but ensures all data is fresh
-          await apolloClient.resetStore();
+          // Method 2: Safer global refresh to avoid in-flight reset invariant
+          apolloClient.stop();
+          await apolloClient.clearStore();
+          apolloClient.reFetchObservableQueries();
           
           console.log('Successfully reset Apollo store and refetched all queries');
         } catch (refetchError) {
