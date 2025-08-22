@@ -55,8 +55,8 @@ const formatAmount = (amount: string | number | undefined): string => {
   return numericAmount.toFixed(2);
 };
 
-// Helper function to format amount with sign
-const formatAmountWithSign = (amount: string | undefined): string => {
+  // Helper function to format amount with sign
+  const formatAmountWithSign = (amount: string | undefined): string => {
   if (!amount) return '0.00';
   const sign = amount.startsWith('-') ? '-' : amount.startsWith('+') ? '+' : '';
   const numericPart = formatAmount(amount);
@@ -105,6 +105,21 @@ const formatPhoneNumber = (phone: string | undefined): string => {
   }
   
   return phone; // Return as-is if we can't format it
+};
+
+// Helper to compute Confío service fee (0.9%) for payment transactions
+const computeConfioFee = (amountLike: string | number | undefined): number => {
+  try {
+    if (amountLike === undefined || amountLike === null) return 0;
+    const amt = typeof amountLike === 'string' 
+      ? parseFloat(amountLike.replace(/[+-]/g, '')) 
+      : Number(amountLike);
+    if (!isFinite(amt)) return 0;
+    // 0.9% fee charged to the merchant (informational here)
+    return parseFloat((amt * 0.009).toFixed(2));
+  } catch {
+    return 0;
+  }
 };
 
 export const TransactionDetailScreen = () => {
@@ -1667,7 +1682,7 @@ export const TransactionDetailScreen = () => {
               {(currentTx.status?.toLowerCase() === 'completed' || currentTx.status?.toLowerCase() === 'confirmed') && (
                 <Icon name="check-circle" size={16} color={statusColors.text} style={styles.statusIcon} />
               )}
-              {currentTx.status?.toLowerCase() === 'pending' && (
+              {(currentTx.status?.toLowerCase() === 'pending' || currentTx.status?.toLowerCase() === 'submitted') && (
                 <Icon name="clock" size={16} color={statusColors.text} style={styles.statusIcon} />
               )}
               {currentTx.status?.toLowerCase() === 'processing' && (
@@ -1679,7 +1694,7 @@ export const TransactionDetailScreen = () => {
               <Text style={[styles.statusText, { color: statusColors.text }]}>
                 {currentTx.status?.toLowerCase() === 'completed' ? 'Completado' :
                  currentTx.status?.toLowerCase() === 'confirmed' ? 'Completado' :
-                 currentTx.status?.toLowerCase() === 'pending' ? 'Pendiente' :
+                 (currentTx.status?.toLowerCase() === 'pending' || currentTx.status?.toLowerCase() === 'submitted') ? 'Pendiente' :
                  currentTx.status?.toLowerCase() === 'processing' ? 'Procesando' :
                  currentTx.status?.toLowerCase() === 'failed' ? 'Fallido' : 'Desconocido'}
               </Text>
@@ -2076,6 +2091,16 @@ export const TransactionDetailScreen = () => {
                     <Text style={styles.feeValueNote}>• Cubierto por Confío</Text>
                   </View>
                 </View>
+
+                {currentTx.type === 'payment' && (() => {
+                  const fee = computeConfioFee(currentTx.amount);
+                  return fee > 0 ? (
+                    <View style={styles.feeRow}>
+                      <Text style={styles.feeLabel}>Comisión Confío (0.9%)</Text>
+                      <Text style={styles.feeAmount}>- {fee.toFixed(2)} {currentTx.currency || 'cUSD'}</Text>
+                    </View>
+                  ) : null;
+                })()}
                 
                 {(currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment') && (
                   <>
@@ -2083,7 +2108,14 @@ export const TransactionDetailScreen = () => {
                     <View style={styles.feeRow}>
                       <Text style={styles.totalLabel}>Total debitado</Text>
                       <Text style={styles.totalAmount}>
-                        {formatAmountWithSign(currentTx.amount)} {currentTx.currency || 'cUSD'}
+                        {(() => {
+                          const raw = currentTx.amount;
+                          const sign = typeof raw === 'string' && raw.startsWith('-') ? '-' : (typeof raw === 'string' && raw.startsWith('+') ? '+' : '');
+                          const grossAbs = typeof raw === 'string' ? parseFloat(raw.replace(/[+-]/g, '')) : (Number(raw) || 0);
+                          const fee = computeConfioFee(raw);
+                          const netAbs = Math.max(0, grossAbs - fee);
+                          return `${sign}${netAbs.toFixed(2)}`;
+                        })()} {currentTx.currency || 'cUSD'}
                       </Text>
                     </View>
                   </>

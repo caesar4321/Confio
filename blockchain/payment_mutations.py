@@ -18,6 +18,7 @@ from algosdk import mnemonic, account, encoding
 import asyncio
 import base64
 import msgpack
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
     def mutate(cls, root, info, amount, asset_type='CUSD', payment_id=None, 
               note=None, create_receipt=False):
         try:
+            t0 = time.time()
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
@@ -184,29 +186,36 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
                 AlgorandAccountManager.ALGOD_ADDRESS
             )
             
-            # Check and fund account if needed for MBR
-            from blockchain.account_funding_service import account_funding_service
-            
-            # Calculate funding needed for current MBR
-            funding_needed = account_funding_service.calculate_funding_needed(
-                sender_account.algorand_address, 
-                for_app_optin=False  # For payment transactions
-            )
-            
-            if funding_needed > 0:
-                logger.info(f"Account needs {funding_needed} microAlgos for MBR, funding...")
-                funding_result = account_funding_service.fund_account_for_optin(sender_account.algorand_address)
-                if not funding_result['success']:
-                    logger.error(f"Failed to fund account: {funding_result.get('error')}")
-                    return cls(success=False, error='Failed to fund account for minimum balance')
-                logger.info(f"Successfully funded account with {funding_result.get('amount_funded')} microAlgos")
+            # Optional MBR funding (disabled by default to avoid latency and confirmation wait)
+            if getattr(settings, 'PAYMENT_MBR_CHECK_ENABLED', False):
+                from blockchain.account_funding_service import account_funding_service
+                funding_needed = account_funding_service.calculate_funding_needed(
+                    sender_account.algorand_address,
+                    for_app_optin=False  # For payment transactions
+                )
+                if funding_needed > 0:
+                    logger.info(f"Account needs {funding_needed} microAlgos for MBR, funding...")
+                    funding_result = account_funding_service.fund_account_for_optin(sender_account.algorand_address)
+                    if not funding_result['success']:
+                        logger.error(f"Failed to fund account: {funding_result.get('error')}")
+                        return cls(success=False, error='Failed to fund account for minimum balance')
+                    logger.info(f"Successfully funded account with {funding_result.get('amount_funded')} microAlgos")
             
             account_info = algod_client.account_info(sender_account.algorand_address)
             assets = account_info.get('assets', [])
             
             # Check balance (users are already opted-in during sign-up)
             asset_balance = next((asset['amount'] for asset in assets if asset['asset-id'] == asset_id), 0)
-            asset_info = algod_client.asset_info(asset_id)
+            # Cache asset_info to reduce network round-trips
+            try:
+                from .utils.cache import ttl_cache
+                akey = ("asset_info", asset_id, AlgorandAccountManager.ALGOD_ADDRESS)
+                asset_info = ttl_cache.get(akey)
+                if not asset_info:
+                    asset_info = algod_client.asset_info(asset_id)
+                    ttl_cache.set(akey, asset_info, ttl_seconds=300.0)
+            except Exception:
+                asset_info = algod_client.asset_info(asset_id)
             decimals = asset_info['params'].get('decimals', 6)
             
             # Convert amount to base units
@@ -366,15 +375,19 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
     @classmethod  
     def mutate(cls, root, info, signed_transactions, payment_id=None):
         try:
+            t0 = time.time()
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
+            verbose = getattr(settings, 'PAYMENT_VERBOSE_LOGS', False)
             logger.info(f"Submitting sponsored payment group for user {user.id}")
             logger.info(f"Raw signed_transactions type: {type(signed_transactions)}")
-            logger.info(f"Raw signed_transactions: {signed_transactions[:200] if isinstance(signed_transactions, str) else str(signed_transactions)[:200]}")
+            if verbose:
+                logger.info(f"Raw signed_transactions: {signed_transactions[:200] if isinstance(signed_transactions, str) else str(signed_transactions)[:200]}")
             
             # Parse the signed_transactions - it might be a JSON string
+            t_parse_start = time.time()
             import msgpack
             import json
             from algosdk import transaction, encoding, mnemonic
@@ -400,16 +413,20 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     sorted_txn_dicts = sorted(signed_transactions, key=lambda x: x.get('index', 0))
                     # Log the indices we received
                     received_indices = [txn.get('index', -1) for txn in sorted_txn_dicts]
-                    logger.info(f"Received transactions with indices: {received_indices}")
+                    if verbose:
+                        logger.info(f"Received transactions with indices: {received_indices}")
                     # Also create a simple list of strings for legacy 2-txn path
                     signed_transactions = [txn['transaction'] for txn in sorted_txn_dicts]
-                    logger.info(f"Prepared {len(signed_transactions)} transaction strings for legacy path")
+                    if verbose:
+                        logger.info(f"Prepared {len(signed_transactions)} transaction strings for legacy path")
             
             # SOLUTION 1: Accept all 4 transactions from client (sponsor ones already signed)
+            t_prebuild_start = time.time()
             # This ensures all transactions have the SAME chain parameters
             
             dict_count = len(sorted_txn_dicts) if isinstance(sorted_txn_dicts, list) else 0
-            logger.info(f"Transaction count (dicts): {dict_count} | (strings): {len(signed_transactions) if isinstance(signed_transactions, list) else 'n/a'}")
+            if verbose:
+                logger.info(f"Transaction count (dicts): {dict_count} | (strings): {len(signed_transactions) if isinstance(signed_transactions, list) else 'n/a'}")
             
             # Check if we received all 4 transactions (new approach)
             if isinstance(sorted_txn_dicts, list) and len(sorted_txn_dicts) == 4:
@@ -423,12 +440,14 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                         # Decode base64 to get raw bytes
                         decoded_bytes = base64.b64decode(txn_b64)
                         signed_txn_objects.append(decoded_bytes)
-                        logger.info(f"  Transaction {i}: decoded successfully")
+                        if verbose:
+                            logger.info(f"  Transaction {i}: decoded successfully")
                     except Exception as e:
                         logger.error(f"Failed to decode transaction {i}: {e}")
                         raise
                 
-                logger.info("All 4 transactions ready for submission")
+                if verbose:
+                    logger.info("All 4 transactions ready for submission")
                 
             elif len(signed_transactions) == 2:
                 logger.error("Received only 2 transactions - this is no longer supported!")
@@ -840,7 +859,8 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                         # Decode to bytes and append
                         decoded_bytes = base64.b64decode(txn_b64)
                         signed_txn_objects.append(decoded_bytes)
-                        logger.info(f"  Transaction {i}: validated successfully")
+                        if verbose:
+                            logger.info(f"  Transaction {i}: validated successfully")
                     except Exception as e:
                         logger.error(f"Failed to validate transaction {i}: {e}")
                         logger.error(f"Base64 string preview: {txn_b64[:50]}...")
@@ -854,56 +874,57 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
 
             logger.info(f"Submitting payment transaction group of {len(signed_txn_objects)} transactions")
             
-            # Debug: Log transaction structure before sending
-            logger.info(f"=== SUBMITTING TRANSACTION GROUP ===")
-            for i, item in enumerate(signed_txn_objects):
-                # Support SignedTransaction, raw bytes, or base64 strings for logging
-                try:
-                    import msgpack
-                    if hasattr(item, 'dictify'):
-                        txn_dict = item.dictify()
-                    else:
-                        if isinstance(item, (bytes, bytearray)):
-                            txn_bytes = item
+            # Debug: Log transaction structure before sending (verbose only)
+            if verbose:
+                logger.info(f"=== SUBMITTING TRANSACTION GROUP ===")
+                for i, item in enumerate(signed_txn_objects):
+                    # Support SignedTransaction, raw bytes, or base64 strings for logging
+                    try:
+                        import msgpack
+                        if hasattr(item, 'dictify'):
+                            txn_dict = item.dictify()
                         else:
-                            txn_bytes = base64.b64decode(item)
-                        txn_dict = msgpack.unpackb(txn_bytes, raw=False)
-                    
-                    # Log transaction details
-                    if isinstance(txn_dict, dict) and 'txn' in txn_dict:
-                        txn_data = txn_dict['txn']
-                        txn_type = txn_data.get('type', 'unknown')
-                        sender = txn_data.get('snd', b'')
-                        if isinstance(sender, bytes) and len(sender) == 32:
-                            from algosdk import encoding
-                            sender_addr = encoding.encode_address(sender)
+                            if isinstance(item, (bytes, bytearray)):
+                                txn_bytes = item
+                            else:
+                                txn_bytes = base64.b64decode(item)
+                            txn_dict = msgpack.unpackb(txn_bytes, raw=False)
+                        
+                        # Log transaction details
+                        if isinstance(txn_dict, dict) and 'txn' in txn_dict:
+                            txn_data = txn_dict['txn']
+                            txn_type = txn_data.get('type', 'unknown')
+                            sender = txn_data.get('snd', b'')
+                            if isinstance(sender, bytes) and len(sender) == 32:
+                                from algosdk import encoding
+                                sender_addr = encoding.encode_address(sender)
+                            else:
+                                sender_addr = 'unknown'
+                            
+                            logger.info(f"  Txn {i}: Type={txn_type}, Sender={sender_addr[:10]}...")
+                            
+                            # Log more details based on type
+                            if txn_type == 'pay':
+                                rcv = txn_data.get('rcv', b'')
+                                if isinstance(rcv, bytes) and len(rcv) == 32:
+                                    rcv_addr = encoding.encode_address(rcv)
+                                    logger.info(f"         Receiver={rcv_addr[:10]}..., Amount={txn_data.get('amt', 0)}")
+                            elif txn_type == 'axfer':
+                                arcv = txn_data.get('arcv', b'')
+                                if isinstance(arcv, bytes) and len(arcv) == 32:
+                                    arcv_addr = encoding.encode_address(arcv)
+                                    logger.info(f"         AssetReceiver={arcv_addr[:10]}..., Amount={txn_data.get('aamt', 0)}, AssetID={txn_data.get('xaid', 0)}")
+                            elif txn_type == 'appl':
+                                logger.info(f"         AppID={txn_data.get('apid', 0)}, OnComplete={txn_data.get('apan', 0)}")
+                                # Log accounts array
+                                apat = txn_data.get('apat', [])
+                                if apat:
+                                    logger.info(f"         Accounts={[encoding.encode_address(a)[:10] + '...' if isinstance(a, bytes) and len(a) == 32 else 'invalid' for a in apat]}")
                         else:
-                            sender_addr = 'unknown'
-                        
-                        logger.info(f"  Txn {i}: Type={txn_type}, Sender={sender_addr[:10]}...")
-                        
-                        # Log more details based on type
-                        if txn_type == 'pay':
-                            rcv = txn_data.get('rcv', b'')
-                            if isinstance(rcv, bytes) and len(rcv) == 32:
-                                rcv_addr = encoding.encode_address(rcv)
-                                logger.info(f"         Receiver={rcv_addr[:10]}..., Amount={txn_data.get('amt', 0)}")
-                        elif txn_type == 'axfer':
-                            arcv = txn_data.get('arcv', b'')
-                            if isinstance(arcv, bytes) and len(arcv) == 32:
-                                arcv_addr = encoding.encode_address(arcv)
-                                logger.info(f"         AssetReceiver={arcv_addr[:10]}..., Amount={txn_data.get('aamt', 0)}, AssetID={txn_data.get('xaid', 0)}")
-                        elif txn_type == 'appl':
-                            logger.info(f"         AppID={txn_data.get('apid', 0)}, OnComplete={txn_data.get('apan', 0)}")
-                            # Log accounts array
-                            apat = txn_data.get('apat', [])
-                            if apat:
-                                logger.info(f"         Accounts={[encoding.encode_address(a)[:10] + '...' if isinstance(a, bytes) and len(a) == 32 else 'invalid' for a in apat]}")
-                    else:
-                        logger.info(f"  Txn {i}: Unable to parse transaction structure")
-                except Exception as e:
-                    logger.info(f"  Txn {i}: Unable to decode for logging: {e}")
-            logger.info(f"=====================================")
+                            logger.info(f"  Txn {i}: Unable to parse transaction structure")
+                    except Exception as e:
+                        logger.info(f"  Txn {i}: Unable to decode for logging: {e}")
+                    logger.info(f"=====================================")
             
             # Pre-submit validation to produce clearer errors (byte-level)
             try:
@@ -966,7 +987,8 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     
                     # Extract foreign assets (THIS IS THE KEY CHECK!)
                     apas = appl_txn['txn'].get('apas', [])
-                    logger.info(f"AppCall foreign assets (apas): {apas}")
+                    if verbose:
+                        logger.info(f"AppCall foreign assets (apas): {apas}")
                     if not apas:
                         logger.error("CRITICAL: AppCall has NO foreign assets! This will fail pc=1330")
                     elif apas[0] != xaid:
@@ -980,8 +1002,9 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     # Detect if we have a 4-txn group (new format) or 3-txn group (old format)
                     is_4txn_group = len(decoded_txns) == 4
                     
-                    logger.info(f"=== PAYER BINDING DEBUG ({len(decoded_txns)}-TXN GROUP) ===")
-                    logger.info(f"Group structure:")
+                    if verbose:
+                        logger.info(f"=== PAYER BINDING DEBUG ({len(decoded_txns)}-TXN GROUP) ===")
+                        logger.info(f"Group structure:")
                     
                     if is_4txn_group:
                         # 4-txn group: [Payment(sponsor→user), AXFER(user→merchant), AXFER(user→fee), AppCall(sponsor)]
@@ -998,33 +1021,37 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                         fee_receiver = addr32(fee_axfer['txn'].get('arcv', b'')) if fee_axfer else 'missing'
                         fee_amount = fee_axfer['txn'].get('aamt', 0) if fee_axfer else 0
                         
-                        logger.info(f"  Txn[0] (pay): sender={pay_sender[:10]}..., receiver={pay_receiver[:10]}..., amount={pay_amount}")
-                        logger.info(f"  Txn[1] (merchant axfer): sender={merchant_sender[:10]}..., receiver={merchant_receiver[:10]}..., amount={merchant_amount}")
-                        logger.info(f"  Txn[2] (fee axfer): sender={fee_sender[:10]}..., receiver={fee_receiver[:10]}..., amount={fee_amount}")
-                        logger.info(f"  Txn[3] (appl): sender={appl_sender[:10]}...")
+                        if verbose:
+                            logger.info(f"  Txn[0] (pay): sender={pay_sender[:10]}..., receiver={pay_receiver[:10]}..., amount={pay_amount}")
+                            logger.info(f"  Txn[1] (merchant axfer): sender={merchant_sender[:10]}..., receiver={merchant_receiver[:10]}..., amount={merchant_amount}")
+                            logger.info(f"  Txn[2] (fee axfer): sender={fee_sender[:10]}..., receiver={fee_receiver[:10]}..., amount={fee_amount}")
+                            logger.info(f"  Txn[3] (appl): sender={appl_sender[:10]}...")
                     else:
                         # 3-txn group (old format)
-                        logger.info(f"  Txn[0] (pay): sender={pay_sender[:10]}..., receiver={pay_receiver[:10]}..., amount={pay_amount}")
-                        logger.info(f"  Txn[1] (axfer): sender={axfer_sender[:10]}..., receiver={axfer_receiver[:10]}...")
-                        logger.info(f"  Txn[2] (appl): sender={appl_sender[:10]}...")
+                        if verbose:
+                            logger.info(f"  Txn[0] (pay): sender={pay_sender[:10]}..., receiver={pay_receiver[:10]}..., amount={pay_amount}")
+                            logger.info(f"  Txn[1] (axfer): sender={axfer_sender[:10]}..., receiver={axfer_receiver[:10]}...")
+                            logger.info(f"  Txn[2] (appl): sender={appl_sender[:10]}...")
                     
-                    logger.info(f"AppCall details:")
-                    logger.info(f"  ABI selector: {abi_selector}")
-                    logger.info(f"  ABI recipient (at app_args[1]): {abi_recipient[:10]}..." if abi_recipient != 'missing' else "  ABI recipient: missing")
-                    logger.info(f"  ABI payment_id (at app_args[2]): {abi_payment_id}")
-                    logger.info(f"  Accounts[0] (payer): {accounts_0[:10]}..." if accounts_0 != 'missing' else "  Accounts[0]: missing")
-                    logger.info(f"  Accounts[1] (recipient): {accounts_1[:10]}..." if accounts_1 != 'missing' else "  Accounts[1]: missing")
+                    if verbose:
+                        logger.info(f"AppCall details:")
+                        logger.info(f"  ABI selector: {abi_selector}")
+                        logger.info(f"  ABI recipient (at app_args[1]): {abi_recipient[:10]}..." if abi_recipient != 'missing' else "  ABI recipient: missing")
+                        logger.info(f"  ABI payment_id (at app_args[2]): {abi_payment_id}")
+                        logger.info(f"  Accounts[0] (payer): {accounts_0[:10]}..." if accounts_0 != 'missing' else "  Accounts[0]: missing")
+                        logger.info(f"  Accounts[1] (recipient): {accounts_1[:10]}..." if accounts_1 != 'missing' else "  Accounts[1]: missing")
                     
                     # Critical assertions the contract will check
                     if is_4txn_group:
-                        logger.info("Contract assertions for 4-txn group:")
-                        logger.info(f"  1. Merchant AXFER sender == Txn.accounts[0]?")
-                        logger.info(f"     {merchant_sender[:10]}... == {accounts_0[:10]}...? {merchant_sender == accounts_0}")
-                        logger.info(f"  2. Fee AXFER sender == Txn.accounts[0]?")
-                        logger.info(f"     {fee_sender[:10]}... == {accounts_0[:10]}...? {fee_sender == accounts_0}")
-                        logger.info(f"  3. Gtxn[0].receiver == Txn.accounts[0]?")
-                        logger.info(f"     {pay_receiver[:10]}... == {accounts_0[:10]}...? {pay_receiver == accounts_0}")
-                        logger.info(f"  4. Caster will compute tx refs: index 1 for merchant, index 2 for fee")
+                        if verbose:
+                            logger.info("Contract assertions for 4-txn group:")
+                            logger.info(f"  1. Merchant AXFER sender == Txn.accounts[0]?")
+                            logger.info(f"     {merchant_sender[:10]}... == {accounts_0[:10]}...? {merchant_sender == accounts_0}")
+                            logger.info(f"  2. Fee AXFER sender == Txn.accounts[0]?")
+                            logger.info(f"     {fee_sender[:10]}... == {accounts_0[:10]}...? {fee_sender == accounts_0}")
+                            logger.info(f"  3. Gtxn[0].receiver == Txn.accounts[0]?")
+                            logger.info(f"     {pay_receiver[:10]}... == {accounts_0[:10]}...? {pay_receiver == accounts_0}")
+                            logger.info(f"  4. Caster will compute tx refs: index 1 for merchant, index 2 for fee")
 
                         # Byte-level equality checks to mirror TEAL exactly
                         try:
@@ -1051,9 +1078,10 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                             # Log hex equality
                             def hx(b):
                                 return b.hex() if isinstance(b, (bytes, bytearray)) else 'invalid'
-                            logger.info(f"  [BYTES] snd1==acct0? {snd1 == acct0_bytes} (snd1={hx(snd1)}, acct0={hx(acct0_bytes)})")
-                            logger.info(f"  [BYTES] snd2==acct0? {snd2 == acct0_bytes} (snd2={hx(snd2)}, acct0={hx(acct0_bytes)})")
-                            logger.info(f"  [BYTES] rcv0==acct0? {rcv0 == acct0_bytes} (rcv0={hx(rcv0)}, acct0={hx(acct0_bytes)})")
+                            if verbose:
+                                logger.info(f"  [BYTES] snd1==acct0? {snd1 == acct0_bytes} (snd1={hx(snd1)}, acct0={hx(acct0_bytes)})")
+                                logger.info(f"  [BYTES] snd2==acct0? {snd2 == acct0_bytes} (snd2={hx(snd2)}, acct0={hx(acct0_bytes)})")
+                                logger.info(f"  [BYTES] rcv0==acct0? {rcv0 == acct0_bytes} (rcv0={hx(rcv0)}, acct0={hx(acct0_bytes)})")
                         except Exception as be:
                             logger.warning(f"Byte-level equality check failed: {be}")
                         
@@ -1063,11 +1091,12 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                         if fee_sender != accounts_0:
                             logger.error(f"CRITICAL: Fee AXFER sender ({fee_sender}) != accounts[0] ({accounts_0})")
                     else:
-                        logger.info("Contract assertions for 3-txn group:")
-                        logger.info(f"  1. Gtxn[1].sender == Txn.accounts[0]?")
-                        logger.info(f"     {axfer_sender[:10]}... == {accounts_0[:10]}...? {axfer_sender == accounts_0}")
-                        logger.info(f"  2. Gtxn[0].receiver == Txn.accounts[0]?")
-                        logger.info(f"     {pay_receiver[:10]}... == {accounts_0[:10]}...? {pay_receiver == accounts_0}")
+                        if verbose:
+                            logger.info("Contract assertions for 3-txn group:")
+                            logger.info(f"  1. Gtxn[1].sender == Txn.accounts[0]?")
+                            logger.info(f"     {axfer_sender[:10]}... == {accounts_0[:10]}...? {axfer_sender == accounts_0}")
+                            logger.info(f"  2. Gtxn[0].receiver == Txn.accounts[0]?")
+                            logger.info(f"     {pay_receiver[:10]}... == {accounts_0[:10]}...? {pay_receiver == accounts_0}")
                         
                         # Validation warnings for 3-txn group
                         if axfer_sender != accounts_0:
@@ -1076,7 +1105,8 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     if pay_receiver != accounts_0:
                         logger.error(f"CRITICAL: Payment receiver ({pay_receiver}) != accounts[0] ({accounts_0})")
                     
-                    logger.info("=====================================")
+                    if verbose:
+                        logger.info("=====================================")
                     # Check that app_args are correctly formatted
                     if abi_recipient == 'missing':
                         logger.error(f"CRITICAL: Recipient address missing from app_args[1]")
@@ -1137,6 +1167,7 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                 logger.warning(f"Pre-submit validation skipped due to error: {ve}")
 
             # Send the grouped transactions
+            t_send_start = time.time()
             # Normalize to a list of SignedTransaction bytes and submit as list (preferred)
             try:
                 from algosdk import transaction as _txn
@@ -1173,7 +1204,8 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                 combined_bytes = b"".join(tx_bytes_list)
                 combined_b64 = base64.b64encode(combined_bytes).decode('utf-8')
                 tx_id = algod_client.send_raw_transaction(combined_b64)
-                logger.info(f"Payment transaction sent: {tx_id}")
+                t_send_end = time.time()
+                logger.info(f"Payment transaction sent: {tx_id} (send_time={t_send_end - t_send_start:.3f}s, prebuild={t_send_start - t_prebuild_start:.3f}s, parse={t_prebuild_start - t_parse_start:.3f}s, total={t_send_end - t0:.3f}s)")
             except Exception as e_send:
                 # Attempt a TEAL dryrun for detailed diagnostics in DEBUG mode
                 from django.conf import settings as dj_settings
@@ -1231,206 +1263,31 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                 # Re-raise so the outer handler updates DB and returns error to client
                 raise
             
-            # Wait for confirmation
-            from algosdk.transaction import wait_for_confirmation
-            confirmed_txn = wait_for_confirmation(algod_client, tx_id, 10)
-            confirmed_round = confirmed_txn.get('confirmed-round', 0)
-            
-            # Update payment record if exists
+            # Async confirm: mark as submitted, enqueue Celery poller, and return immediately
+            t_update_start = time.time()
             if payment_id:
-                # First try to update PaymentTransaction (for invoice payments)
                 try:
-                    from payments.models import PaymentTransaction, Invoice
-                    from django.utils import timezone
-                    
+                    from payments.models import PaymentTransaction
                     payment_transaction = PaymentTransaction.objects.get(payment_transaction_id=payment_id)
-                    payment_transaction.status = 'CONFIRMED'
+                    payment_transaction.status = 'SUBMITTED'
                     payment_transaction.transaction_hash = tx_id
                     payment_transaction.save()
-                    
-                    # If this payment has an associated invoice, mark it as PAID
-                    if payment_transaction.invoice:
-                        invoice = payment_transaction.invoice
-                        if invoice.status != 'PAID':
-                            invoice.status = 'PAID'
-                            invoice.paid_at = timezone.now()
-                            invoice.paid_by_user = payment_transaction.payer_user
-                            invoice.paid_by_business = payment_transaction.payer_business
-                            invoice.save()
-                            logger.info(f"Marked invoice {invoice.invoice_id} as PAID after blockchain confirmation")
-                    
-                    # Now that blockchain confirmed, create and send notifications
-                    try:
-                        from notifications.models import Notification, NotificationType
-                        from notifications.fcm_service import send_push_notification
-                        from decimal import Decimal
-                        
-                        # Get all needed data for notifications
-                        payer_user = payment_transaction.payer_user
-                        payer_account = payment_transaction.payer_account
-                        payer_business = payment_transaction.payer_business
-                        payer_display_name = payment_transaction.payer_display_name
-                        payer_phone = payment_transaction.payer_phone
-                        
-                        merchant_user = payment_transaction.merchant_account_user
-                        merchant_account = payment_transaction.merchant_account
-                        merchant_business = payment_transaction.merchant_business
-                        merchant_display_name = payment_transaction.merchant_display_name
-                        
-                        # Convert amount to string for display with 2 decimal places
-                        amount_decimal = Decimal(str(payment_transaction.amount))
-                        amount_str = f"{amount_decimal:.2f}"
-                        
-                        logger.info(f"Creating notifications for confirmed payment {payment_transaction.id}")
-                        
-                        # Create notification for payer (sender)
-                        payer_notification = Notification.objects.create(
-                            user=payer_user,
-                            account=payer_account,
-                            business=payer_business,
-                            notification_type=NotificationType.PAYMENT_SENT,
-                            title="Pago enviado",
-                            message=f"Pagaste {amount_str} {payment_transaction.token_type} a {merchant_display_name}",
-                            data={
-                                'transaction_type': 'payment',
-                                'amount': f'-{amount_str}',  # Negative for sent
-                                'token_type': payment_transaction.token_type,
-                                'currency': payment_transaction.token_type,
-                                'transaction_id': str(payment_transaction.id),
-                                'payment_transaction_id': payment_transaction.payment_transaction_id,
-                                'merchant_name': merchant_display_name,
-                                'merchant_address': payment_transaction.merchant_address,
-                                'payer_name': payer_display_name,
-                                'payer_phone': payer_phone,
-                                'payer_address': payment_transaction.payer_address,
-                                'status': 'confirmed',  # Now it's confirmed!
-                                'created_at': payment_transaction.created_at.isoformat(),
-                                'description': payment_transaction.description or '',
-                                'transaction_hash': tx_id,  # Use the real blockchain tx hash
-                                'invoice_id': invoice.invoice_id if invoice else None,
-                                # For TransactionDetailScreen
-                                'type': 'sent',
-                                'to': merchant_display_name,
-                                'toAddress': payment_transaction.merchant_address,
-                                'from': payer_display_name,
-                                'fromAddress': payment_transaction.payer_address,
-                                'date': payment_transaction.created_at.strftime('%Y-%m-%d'),
-                                'time': payment_transaction.created_at.strftime('%H:%M'),
-                                'hash': tx_id,
-                            },
-                            related_object_type='payment',
-                            related_object_id=payment_transaction.id,
-                            action_url=f'confio://transaction/{payment_transaction.id}'
-                        )
-                        
-                        # Create notification for merchant (receiver)
-                        merchant_notification = Notification.objects.create(
-                            user=merchant_user,
-                            account=merchant_account,
-                            business=merchant_business,
-                            notification_type=NotificationType.PAYMENT_RECEIVED,
-                            title="Pago recibido",
-                            message=f"Recibiste {amount_str} {payment_transaction.token_type} de {payer_display_name}",
-                            data={
-                                'transaction_type': 'payment',
-                                'amount': f'+{amount_str}',  # Positive for received
-                                'token_type': payment_transaction.token_type,
-                                'currency': payment_transaction.token_type,
-                                'transaction_id': str(payment_transaction.id),
-                                'payment_transaction_id': payment_transaction.payment_transaction_id,
-                                'payer_name': payer_display_name,
-                                'payer_phone': payer_phone,
-                                'payer_address': payment_transaction.payer_address,
-                                'merchant_name': merchant_display_name,
-                                'merchant_address': payment_transaction.merchant_address,
-                                'status': 'confirmed',  # Now it's confirmed!
-                                'created_at': payment_transaction.created_at.isoformat(),
-                                'description': payment_transaction.description or '',
-                                'transaction_hash': tx_id,  # Use the real blockchain tx hash
-                                'invoice_id': invoice.invoice_id if invoice else None,
-                                # For TransactionDetailScreen
-                                'type': 'received',
-                                'from': payer_display_name,
-                                'fromAddress': payment_transaction.payer_address,
-                                'to': merchant_display_name,
-                                'toAddress': payment_transaction.merchant_address,
-                                'date': payment_transaction.created_at.strftime('%Y-%m-%d'),
-                                'time': payment_transaction.created_at.strftime('%H:%M'),
-                                'hash': tx_id,
-                            },
-                            related_object_type='payment',
-                            related_object_id=payment_transaction.id,
-                            action_url=f'confio://transaction/{payment_transaction.id}'
-                        )
-                        
-                        # Send push notifications
-                        # Send to payer
-                        logger.info(f"Sending push notification to payer {payer_user.id}")
-                        payer_push_result = send_push_notification(
-                            notification=payer_notification,
-                            additional_data={
-                                'type': 'payment',
-                                'transactionType': 'payment'
-                            }
-                        )
-                        logger.info(f"Payer push result: {payer_push_result}")
-                        
-                        # Send to merchant
-                        logger.info(f"Sending push notification to merchant {merchant_user.id}")
-                        merchant_push_result = send_push_notification(
-                            notification=merchant_notification,
-                            additional_data={
-                                'type': 'payment',
-                                'transactionType': 'payment'
-                            }
-                        )
-                        logger.info(f"Merchant push result: {merchant_push_result}")
-                        
-                    except Exception as e:
-                        # Log the error but don't fail the submission
-                        logger.error(f"Error creating payment notifications: {e}")
-                        import traceback
-                        traceback.print_exc()
-                    
-                    logger.info(f"Updated PaymentTransaction {payment_id} as confirmed with tx {tx_id}")
-                except:
-                    # Fall back to Payment model if PaymentTransaction doesn't exist
-                    try:
-                        payment_record = Payment.objects.get(payment_id=payment_id)
-                        payment_record.status = 'completed'
-                        payment_record.transaction_hash = tx_id
-                        payment_record.confirmed_at_block = confirmed_round
-                        payment_record.save()
-                        
-                        # Create receipt if payment was completed
-                        PaymentReceipt.objects.create(
-                            payment=payment_record,
-                            transaction_hash=tx_id,
-                            block_number=confirmed_round,
-                            receipt_data={
-                                'network': 'algorand',
-                                'contract': 'payment',
-                                'confirmed_round': confirmed_round
-                            }
-                        )
-                        
-                        logger.info(f"Updated payment record {payment_id} as completed")
-                    except Payment.DoesNotExist:
-                        logger.warning(f"Payment record {payment_id} not found for update")
-            
-            # Extract fee information from transaction (0.9% of gross)
-            # This would need to be parsed from the actual transaction data
-            # For now, we'll estimate based on the 0.9% fee
-            
+                except Exception as e:
+                    logger.warning(f"Could not update PaymentTransaction {payment_id} to SUBMITTED: {e}")
+                try:
+                    from blockchain.tasks import confirm_payment_transaction as _confirm_task
+                    _confirm_task.delay(payment_id, tx_id)
+                except Exception as e:
+                    logger.warning(f"Failed to enqueue confirmation task for {payment_id}: {e}")
+
             logger.info(
-                f"Sponsored payment confirmed for user {user.id}: "
-                f"TxID: {tx_id}, Round: {confirmed_round}"
+                f"Sponsored payment submitted for user {user.id}: TxID: {tx_id}. (db+enqueue={time.time() - t_update_start:.3f}s, total_mutation={time.time() - t0:.3f}s) Confirmation handled asynchronously."
             )
-            
+
             return cls(
                 success=True,
                 transaction_id=tx_id,
-                confirmed_round=confirmed_round
+                confirmed_round=None
             )
             
         except Exception as e:

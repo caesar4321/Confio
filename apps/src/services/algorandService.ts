@@ -1112,6 +1112,8 @@ class AlgorandService {
   ): Promise<string | null> {
     try {
       console.log(`[AlgorandService] Initiating sponsored send of ${amount} ${assetType} to ${toAddress}`);
+      const now = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+      const t0 = now();
       
       // Step 1: Create sponsored transaction
       const sponsoredTx = await this.createSponsoredSendTransaction(toAddress, amount, assetType);
@@ -1119,6 +1121,7 @@ class AlgorandService {
         console.error('[AlgorandService] Failed to create sponsored transaction');
         return null;
       }
+      const tCreate = now();
       
       console.log(`[AlgorandService] Created sponsored transaction. Group ID: ${sponsoredTx.groupId}`);
       
@@ -1127,6 +1130,7 @@ class AlgorandService {
         sponsoredTx.userTransaction,
         sponsoredTx.sponsorTransaction
       );
+      const tSubmit = now();
       
       if (!txId) {
         console.error('[AlgorandService] Failed to submit sponsored transaction');
@@ -1134,6 +1138,13 @@ class AlgorandService {
       }
       
       console.log(`[AlgorandService] Successfully sent ${amount} ${assetType} with sponsored fees. TxID: ${txId}`);
+      try {
+        console.log('[AlgorandService][Perf]', {
+          create_ms: Math.round(tCreate - t0),
+          sign_submit_ms: Math.round(tSubmit - tCreate),
+          total_ms: Math.round(tSubmit - t0)
+        });
+      } catch {}
       return txId;
       
     } catch (error) {
@@ -1153,6 +1164,8 @@ class AlgorandService {
     // Payment to business - recipient determined by JWT on server
     try {
       console.log(`[AlgorandService] Initiating sponsored payment of ${amount} ${assetType} to business`);
+      const now = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+      const t0 = now();
       
       // Get auth token
       const { authStorage } = await import('./authStorageService');
@@ -1205,6 +1218,7 @@ class AlgorandService {
       });
       
       const data = await response.json();
+      const tCreate = now();
       
       if (!data?.data?.createSponsoredPayment?.success) {
         console.error('[AlgorandService] Failed to create sponsored payment:', data?.data?.createSponsoredPayment?.error);
@@ -1233,6 +1247,7 @@ class AlgorandService {
           });
         }
       }
+      const tSign = now();
       
       // Step 3: Submit the signed transaction group
       const submitResponse = await fetch('https://api.confio.app/graphql', {
@@ -1266,6 +1281,7 @@ class AlgorandService {
       });
       
       const submitData = await submitResponse.json();
+      const tSubmit = now();
       
       if (!submitData?.data?.submitSponsoredPayment?.success) {
         console.error('[AlgorandService] Failed to submit payment:', submitData?.data?.submitSponsoredPayment?.error);
@@ -1274,6 +1290,14 @@ class AlgorandService {
       
       const txId = submitData.data.submitSponsoredPayment.transactionId;
       console.log(`[AlgorandService] Successfully sent ${amount} ${assetType} (net: ${paymentData.netAmount}) with 0.9% fee. TxID: ${txId}`);
+      try {
+        console.log('[AlgorandService][Perf]', {
+          create_ms: Math.round(tCreate - t0),
+          sign_ms: Math.round(tSign - tCreate),
+          submit_ms: Math.round(tSubmit - tSign),
+          total_ms: Math.round(tSubmit - t0)
+        });
+      } catch {}
       return txId;
       
     } catch (error) {

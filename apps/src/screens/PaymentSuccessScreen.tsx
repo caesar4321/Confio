@@ -162,12 +162,31 @@ export const PaymentSuccessScreen = () => {
                     <Text style={styles.feeNote}>• Cubierto por Confío</Text>
                   </View>
                 </View>
+
+                {/* Informational: Confío merchant fee (does not change payer total) */}
+                <View style={styles.feeRow}>
+                  <Text style={styles.feeLabel}>Comisión Confío (0.9%)</Text>
+                  <Text style={styles.amountValue}>
+                    {/* Show computed fee as reference for transparency */}
+                    {(() => {
+                      const amt = parseFloat(String(transactionData.amount || '0').replace(/[^0-9.\-]/g, '')) || 0;
+                      const fee = (amt * 0.009);
+                      return `-${fee.toFixed(2)} ${formatCurrency(transactionData.currency)}`;
+                    })()}
+                  </Text>
+                </View>
                 
                 <View style={styles.divider} />
                 <View style={styles.totalRow}>
                   <Text style={styles.totalLabel}>Total debitado</Text>
                   <Text style={styles.totalValue}>
-                    ${transactionData.amount} {formatCurrency(transactionData.currency)}
+                    {(() => {
+                      const amt = parseFloat(String(transactionData.amount || '0').replace(/[^0-9.\-]/g, '')) || 0;
+                      const fee = amt * 0.009;
+                      const sign = String(transactionData.amount || '').startsWith('-') ? '-' : '';
+                      const net = Math.max(0, amt - fee);
+                      return `${sign}${net.toFixed(2)} ${formatCurrency(transactionData.currency)}`;
+                    })()}
                   </Text>
                 </View>
               </View>
@@ -181,7 +200,7 @@ export const PaymentSuccessScreen = () => {
                   </Text>
                 </View>
 
-                {transactionData.transactionHash && (
+                {(transactionData.transactionHash && transactionData.transactionHash !== 'pending') ? (
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>ID de Transacción</Text>
                     <View style={styles.transactionIdContainer}>
@@ -195,13 +214,31 @@ export const PaymentSuccessScreen = () => {
                       </TouchableOpacity>
                     </View>
                   </View>
+                ) : (
+                  transactionData.paymentTransactionId ? (
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>ID de Pago</Text>
+                      <View style={styles.transactionIdContainer}>
+                        <Text style={styles.transactionId}>#{String(transactionData.paymentTransactionId).slice(-8).toUpperCase()}</Text>
+                      </View>
+                    </View>
+                  ) : null
                 )}
 
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Estado</Text>
                   <View style={styles.statusContainer}>
-                    <Icon name="check-circle" size={16} color={colors.success} />
-                    <Text style={styles.statusText}>Confirmado</Text>
+                    {transactionData.status === 'SUBMITTED' || !transactionData.transactionHash ? (
+                      <>
+                        <Icon name="clock" size={16} color={colors.warning || '#d97706'} />
+                        <Text style={[styles.statusText, { color: colors.warning || '#d97706' }]}>Confirmando…</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Icon name="check-circle" size={16} color={colors.success} />
+                        <Text style={styles.statusText}>Confirmado</Text>
+                      </>
+                    )}
                   </View>
                 </View>
 

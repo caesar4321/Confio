@@ -267,9 +267,11 @@ class UnifiedTransactionQuery(graphene.ObjectType):
                 )
             )
         
-        # Filter by token types if provided
+        # Filter by token types if provided (case-insensitive to handle legacy rows)
         if token_types:
-            queryset = queryset.filter(token_type__in=token_types)
+            from django.db.models.functions import Upper
+            wanted = [t.upper() for t in token_types]
+            queryset = queryset.annotate(tok_upper=Upper('token_type')).filter(tok_upper__in=wanted)
         
         # Order by created_at descending to show newest first
         queryset = queryset.order_by('-created_at')
