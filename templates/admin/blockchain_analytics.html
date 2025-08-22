@@ -121,15 +121,21 @@
 
     <!-- Network Status -->
     <div class="dashboard-module">
-        <h2>Network Configuration</h2>
+        <h2>Algorand Network</h2>
         <div class="metrics-grid">
             <div class="metric-card">
                 <div class="metric-label">Network</div>
                 <div class="metric-value" style="font-size: 20px;">{{ network|upper }}</div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">RPC Endpoint</div>
-                <div class="metric-value" style="font-size: 14px; word-break: break-all;">{{ rpc_url }}</div>
+                <div class="metric-label">Algod Endpoint</div>
+                <div class="metric-value" style="font-size: 14px; word-break: break-all;">{{ algod_url }}</div>
+                <small>Last Round: {{ algod_health.last_round|default:'-' }}</small>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Indexer Endpoint</div>
+                <div class="metric-value" style="font-size: 14px; word-break: break-all;">{{ indexer_url }}</div>
+                <small>Indexer Round: {{ indexer_health.round|default:'-' }}</small>
             </div>
         </div>
     </div>

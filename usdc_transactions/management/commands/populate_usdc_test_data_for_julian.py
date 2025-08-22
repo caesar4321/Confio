@@ -75,7 +75,7 @@ class Command(BaseCommand):
                         actor_address=account.algorand_address or '',
                         amount=amount,
                         source_address=random.choice(external_addresses),
-                        network='SUI',
+                        network='ALGORAND',
                         status=status,
                         created_at=created_time,
                         completed_at=created_time + timedelta(minutes=random.randint(1, 10)) if status == 'COMPLETED' else None
@@ -102,7 +102,7 @@ class Command(BaseCommand):
                         actor_address=account.algorand_address or '',
                         amount=amount,
                         destination_address=random.choice(external_addresses),
-                        network='SUI',
+                        network='ALGORAND',
                         service_fee=Decimal(str(round(random.uniform(0.5, 2.0), 2))),
                         status=status,
                         created_at=created_time,

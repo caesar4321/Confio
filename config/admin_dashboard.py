@@ -491,9 +491,9 @@ class ConfioAdminSite(admin.AdminSite):
         ).extra(
             select={'day': 'date(blockchain_rawblockchainevent.created_at)'}
         ).values('day').annotate(
-            total=Count('id'),
-            processed=Count('id', filter=Q(processed=True)),
-            unprocessed=Count('id', filter=Q(processed=False))
+            total_count=Count('id'),
+            processed_count=Count('id', filter=Q(processed=True)),
+            unprocessed_count=Count('id', filter=Q(processed=False))
         ).order_by('day')
         
         context['daily_events'] = list(daily_events)
@@ -570,8 +570,31 @@ class ConfioAdminSite(admin.AdminSite):
         
         # Network health check
         from django.conf import settings
-        context['network'] = settings.NETWORK if hasattr(settings, 'NETWORK') else 'Unknown'
-        context['rpc_url'] = settings.SUI_RPC_URL if hasattr(settings, 'SUI_RPC_URL') else 'Not configured'
+        context['network'] = getattr(settings, 'ALGORAND_NETWORK', 'Unknown')
+        context['algod_url'] = getattr(settings, 'ALGORAND_ALGOD_ADDRESS', 'Not configured')
+        context['indexer_url'] = getattr(settings, 'ALGORAND_INDEXER_ADDRESS', 'Not configured')
+        # Try to fetch live health from Algod and Indexer
+        algod_health = {'ok': False}
+        indexer_health = {'ok': False}
+        try:
+            from algosdk.v2client import algod as _algod, indexer as _indexer
+            algod_client = _algod.AlgodClient(getattr(settings, 'ALGORAND_ALGOD_TOKEN', ''), context['algod_url'])
+            status = algod_client.status()
+            algod_health = {
+                'ok': True,
+                'last_round': status.get('last-round'),
+                'catchup_time': status.get('catchup-time')
+            }
+        except Exception:
+            pass
+        try:
+            idx_client = _indexer.IndexerClient(getattr(settings, 'ALGORAND_INDEXER_TOKEN', ''), context['indexer_url'])
+            h = idx_client.health()
+            indexer_health = {'ok': True, 'round': h.get('round')}
+        except Exception:
+            pass
+        context['algod_health'] = algod_health
+        context['indexer_health'] = indexer_health
         
         # Recent blockchain events
         context['recent_events'] = RawBlockchainEvent.objects.order_by('-block_time')[:20]
@@ -709,9 +732,8 @@ confio_admin_site.register(NotificationPreference, NotificationPreferenceAdmin)
 confio_admin_site.register(FCMDeviceToken, FCMDeviceTokenAdmin)
 
 # Blockchain models
-from blockchain.models import RawBlockchainEvent, Balance, TransactionProcessingLog, SuiEpoch
-from blockchain.admin import RawBlockchainEventAdmin, BalanceAdmin, TransactionProcessingLogAdmin, SuiEpochAdmin
+from blockchain.models import RawBlockchainEvent, Balance, TransactionProcessingLog
+from blockchain.admin import RawBlockchainEventAdmin, BalanceAdmin, TransactionProcessingLogAdmin
 confio_admin_site.register(RawBlockchainEvent, RawBlockchainEventAdmin)
 confio_admin_site.register(Balance, BalanceAdmin)
 confio_admin_site.register(TransactionProcessingLog, TransactionProcessingLogAdmin)
-confio_admin_site.register(SuiEpoch, SuiEpochAdmin)

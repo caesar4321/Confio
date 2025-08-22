@@ -60,7 +60,7 @@ class USDCDeposit(models.Model):
     # Deposit details
     amount = models.DecimalField(max_digits=19, decimal_places=6, help_text='Amount of USDC deposited')
     source_address = models.CharField(max_length=66, help_text='External wallet address that sent the USDC')
-    network = models.CharField(max_length=20, default='SUI', help_text='Blockchain network used')
+    network = models.CharField(max_length=20, default='ALGORAND', help_text='Blockchain network used')
     
     # Status tracking
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
@@ -180,7 +180,7 @@ class USDCWithdrawal(models.Model):
     # Withdrawal details
     amount = models.DecimalField(max_digits=19, decimal_places=6, help_text='Amount of USDC withdrawn')
     destination_address = models.CharField(max_length=66, help_text='External wallet address receiving the USDC')
-    network = models.CharField(max_length=20, default='SUI', help_text='Blockchain network used')
+    network = models.CharField(max_length=20, default='ALGORAND', help_text='Blockchain network used')
     
     # Fee information
     service_fee = models.DecimalField(max_digits=19, decimal_places=6, default=Decimal('0'), help_text='Confío service fee')
@@ -250,5 +250,4 @@ class USDCWithdrawal(models.Model):
 
 # Import new table models
 from .models_unified import UnifiedUSDCTransactionTable
-
 

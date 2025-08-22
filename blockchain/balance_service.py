@@ -44,7 +44,7 @@ class BalanceService:
         
         Args:
             account: User account
-            token: Token type (CUSD, CONFIO, SUI, USDC)
+            token: Token type (CUSD, CONFIO, USDC)
             force_refresh: Force blockchain query
             verify_critical: Always query blockchain (for critical operations)
             
@@ -114,7 +114,7 @@ class BalanceService:
     def get_all_balances(cls, account: Account, verify_critical: bool = False, force_refresh: bool = False) -> Dict[str, Dict]:
         """Get all token balances for an account"""
         balances = {}
-        for token in ['CUSD', 'CONFIO', 'SUI', 'USDC']:
+        for token in ['CUSD', 'CONFIO', 'USDC']:
             balances[token.lower()] = cls.get_balance(
                 account, token, verify_critical=verify_critical, force_refresh=force_refresh
             )
@@ -153,7 +153,7 @@ class BalanceService:
         """
         results = {}
         
-        for token in ['CUSD', 'CONFIO', 'SUI', 'USDC']:
+        for token in ['CUSD', 'CONFIO', 'USDC']:
             try:
                 # Get blockchain balance
                 blockchain_data = cls._fetch_from_blockchain(account, token)
@@ -219,9 +219,6 @@ class BalanceService:
                     return await client.get_cusd_balance(account.algorand_address, skip_cache=skip_cache)
                 elif token == 'CONFIO':
                     return await client.get_confio_balance(account.algorand_address, skip_cache=skip_cache)
-                elif token == 'SUI':
-                    # No SUI on Algorand - return 0
-                    return Decimal('0')
                 elif token == 'USDC':
                     return await client.get_usdc_balance(account.algorand_address, skip_cache=skip_cache)
                 else:
