@@ -56,7 +56,8 @@ export const MainNavigator = () => {
     <Stack.Navigator
       screenOptions={{
         headerShown: false,
-        animation: 'none'
+        animation: 'none',
+        detachInactiveScreens: true,
       }}
     >
       <Stack.Screen name="BottomTabs" component={BottomTabNavigator} />
@@ -278,7 +279,7 @@ export const MainNavigator = () => {
       <Stack.Screen
         name="Scan"
         component={ScanScreen}
-        options={{ headerShown: false }}
+        options={{ headerShown: false, freezeOnBlur: true }}
       />
       <Stack.Screen
         name="CreateOffer"

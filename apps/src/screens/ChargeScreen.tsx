@@ -62,7 +62,7 @@ const ChargeScreen = () => {
   const [showQRCode, setShowQRCode] = useState(false);
   const [invoice, setInvoice] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'paid' | 'expired'>('pending');
+  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'submitted' | 'paid' | 'expired'>('pending');
   const [hasNavigatedToSuccess, setHasNavigatedToSuccess] = useState(false);
   const [isOptingIn, setIsOptingIn] = useState(false);
   const [optInMessage, setOptInMessage] = useState('Preparando cuenta empresarial...');
@@ -73,7 +73,7 @@ const ChargeScreen = () => {
   // Poll for invoice status updates when QR is shown
   const { data: invoiceData, refetch: refetchInvoice } = useQuery(GET_INVOICES, {
     skip: !showQRCode || !invoice,
-    pollInterval: 3000, // Poll every 3 seconds for real-time updates
+    pollInterval: 3000, // Keep at 3 seconds to avoid server load
     fetchPolicy: 'cache-and-network',
   });
 
@@ -93,6 +93,55 @@ const ChargeScreen = () => {
           transaction: currentInvoice.transaction
         });
         
+        // Optimistic: show submitted as soon as the invoice has a SUBMITTED/PENDING_BLOCKCHAIN payment txn
+        const hasSubmittedTxn = Array.isArray(currentInvoice.paymentTransactions) && currentInvoice.paymentTransactions.some(
+          (pt: any) => pt?.status === 'SUBMITTED' || pt?.status === 'PENDING_BLOCKCHAIN'
+        );
+        if (hasSubmittedTxn && !hasNavigatedToSuccess) {
+          console.log('ChargeScreen: Payment submitted — navigating optimistically to BusinessPaymentSuccess');
+          setPaymentStatus('submitted');
+          setHasNavigatedToSuccess(true);
+
+          // Find the first submitted/pending txn for details
+          const firstTxn = (currentInvoice.paymentTransactions || []).find(
+            (pt: any) => pt?.status === 'SUBMITTED' || pt?.status === 'PENDING_BLOCKCHAIN'
+          );
+
+          // Navigate immediately with available data
+          (navigation as any).navigate('BusinessPaymentSuccess', {
+            paymentData: {
+              id: currentInvoice.id,
+              paymentTransactionId: firstTxn?.paymentTransactionId || currentInvoice.invoiceId,
+              invoiceId: currentInvoice.invoiceId,
+              amount: currentInvoice.amount,
+              tokenType: currentInvoice.tokenType,
+              description: currentInvoice.description,
+              // Use payer info from the submitted transaction for proper display
+              payerUser: firstTxn?.payerUser || currentInvoice.paidByUser || {
+                id: '',
+                username: 'Cliente',
+                firstName: undefined,
+                lastName: undefined
+              },
+              payerAccount: firstTxn?.payerAccount,
+              // Do not include raw blockchain address for privacy
+              payerAddress: '',
+              merchantUser: {
+                id: activeAccount?.id || '',
+                username: activeAccount?.name || 'Tu Negocio',
+                firstName: undefined,
+                lastName: undefined
+              },
+              merchantAccount: currentInvoice.merchantAccount,
+              merchantAddress: activeAccount?.algorandAddress || '',
+              status: 'SUBMITTED',
+              // Leave hash empty until confirmed; UI will still show status
+              transactionHash: firstTxn?.transactionHash || '',
+              createdAt: new Date().toISOString()
+            }
+          });
+        }
+
         if (currentInvoice.status === 'PAID' && !hasNavigatedToSuccess) {
           console.log('ChargeScreen: Payment confirmed! Navigating to BusinessPaymentSuccess...');
           setPaymentStatus('paid');
@@ -270,6 +319,10 @@ const ChargeScreen = () => {
         setShowQRCode(true);
         setPaymentStatus('pending');
         setHasNavigatedToSuccess(false);
+        // Trigger an immediate fetch so we don't wait for first poll tick
+        try {
+          await refetchInvoice();
+        } catch (_) {}
       } else {
         const errors = data?.createInvoice?.errors || ['Error desconocido'];
         Alert.alert('Error', errors.join(', '));
@@ -306,6 +359,13 @@ const ChargeScreen = () => {
   // Get status display info
   const getStatusInfo = () => {
     switch (paymentStatus) {
+      case 'submitted':
+        return {
+          text: 'Pago enviado — esperando confirmación',
+          color: '#d97706', // amber-600
+          bgColor: '#fef3c7', // amber-100
+          icon: 'clock'
+        };
       case 'paid':
         return {
           text: '¡Pago Confirmado!',

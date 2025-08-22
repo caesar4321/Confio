@@ -340,6 +340,9 @@ export const PAY_INVOICE = gql`
         blockchainData
         createdAt
       }
+      grossAmount
+      netAmount
+      feeAmount
       success
       errors
     }

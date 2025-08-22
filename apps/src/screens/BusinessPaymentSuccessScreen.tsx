@@ -15,6 +15,8 @@ import {
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { colors } from '../config/theme';
+import { useMutation } from '@apollo/client';
+import { GET_INVOICE } from '../apollo/queries';
 
 const { width } = Dimensions.get('window');
 
@@ -23,6 +25,7 @@ type BusinessPaymentSuccessRouteProp = RouteProp<{
     paymentData: {
       id: string;
       paymentTransactionId: string;
+      invoiceId?: string;
       amount: string;
       tokenType: string;
       description?: string;
@@ -75,6 +78,7 @@ export const BusinessPaymentSuccessScreen = () => {
   const navigation = useNavigation();
   const route = useRoute<BusinessPaymentSuccessRouteProp>();
   const [copied, setCopied] = useState(false);
+  const [displayCustomerName, setDisplayCustomerName] = useState<string>('Cliente');
   
   const { paymentData } = route.params;
 
@@ -92,13 +96,41 @@ export const BusinessPaymentSuccessScreen = () => {
   };
 
   // Get customer name - prefer business name if payment was made from business account
-  const customerName = paymentData.payerAccount?.business?.name || 
-                      paymentData.payerUser.firstName || 
-                      paymentData.payerUser.lastName || 
-                      paymentData.payerUser.username;
+  const initialCustomerName = paymentData.payerAccount?.business?.name || 
+                              paymentData.payerUser?.firstName || 
+                              paymentData.payerUser?.lastName || 
+                              paymentData.payerUser?.username || 'Cliente';
+
+  // Prefer the name in params; if it's a placeholder, try fetching from invoice to enrich
+  React.useEffect(() => {
+    setDisplayCustomerName(initialCustomerName);
+  }, [initialCustomerName]);
+
+  const invoiceId = paymentData.invoiceId;
+  const shouldFetchInvoice = !initialCustomerName || initialCustomerName === 'Cliente';
+  const [fetchInvoice] = useMutation(GET_INVOICE);
+
+  React.useEffect(() => {
+    (async () => {
+      if (!invoiceId || !shouldFetchInvoice) return;
+      try {
+        const { data } = await fetchInvoice({ variables: { invoiceId } });
+        if (data?.getInvoice?.success && data.getInvoice.invoice?.paymentTransactions) {
+          const list = data.getInvoice.invoice.paymentTransactions;
+          const ptx = list.find((pt: any) => pt?.paymentTransactionId === paymentData.paymentTransactionId) || list[0];
+          if (ptx?.payerUser) {
+            const name = ptx.payerUser.firstName || ptx.payerUser.lastName || ptx.payerUser.username;
+            if (name) setDisplayCustomerName(name);
+          }
+        }
+      } catch (e) {
+        // ignore enrichment errors
+      }
+    })();
+  }, [invoiceId, shouldFetchInvoice, fetchInvoice, paymentData?.paymentTransactionId]);
 
   // Get customer avatar
-  const customerAvatar = customerName.charAt(0).toUpperCase();
+  const customerAvatar = (displayCustomerName || 'C').charAt(0).toUpperCase();
 
   // Format date and time
   const paymentDate = new Date(paymentData.createdAt);
@@ -137,27 +169,29 @@ export const BusinessPaymentSuccessScreen = () => {
 
   const currentCurrency = formatCurrency(paymentData.tokenType);
   const isCUSD = currentCurrency === 'cUSD';
+  const isConfirming = (paymentData.status || '').toUpperCase() === 'SUBMITTED' || (paymentData.status || '').toUpperCase() === 'PENDING_BLOCKCHAIN';
+  const headerBgColor = isCUSD ? colors.primary : colors.secondary;
+  const confirmColor = '#d97706'; // amber-600
+  const confirmBg = '#fef3c7'; // amber-100
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Success Header */}
-        <View style={[styles.header, { backgroundColor: isCUSD ? colors.primary : colors.secondary }]}>
+        <View style={[styles.header, { backgroundColor: headerBgColor }]}>
           <View style={styles.headerContent}>
             {/* Success Animation */}
             <View style={styles.successIconContainer}>
               <Icon name="check-circle" size={48} color={isCUSD ? colors.primary : colors.secondary} />
             </View>
-            
+
             <Text style={styles.successTitle}>¡Pago Recibido!</Text>
             
             <Text style={styles.amountText}>
               +${netAmount.toFixed(2)} {currentCurrency}
             </Text>
             
-            <Text style={styles.customerText}>
-              De {customerName}
-            </Text>
+            <Text style={styles.customerText}>De {displayCustomerName}</Text>
           </View>
         </View>
 
@@ -172,18 +206,8 @@ export const BusinessPaymentSuccessScreen = () => {
                 <Text style={styles.avatarText}>{customerAvatar}</Text>
               </View>
               <View style={styles.customerInfo}>
-                <Text style={styles.customerName}>{customerName}</Text>
-                <View style={styles.addressRow}>
-                  <Text style={styles.addressText} numberOfLines={1}>
-                    {paymentData.payerAddress}
-                  </Text>
-                  <TouchableOpacity onPress={() => {
-                    Clipboard.setString(paymentData.payerAddress);
-                    Alert.alert('Copiado', 'Dirección copiada al portapapeles');
-                  }} style={styles.copyButton}>
-                    <Icon name="copy" size={16} color={colors.accent} />
-                  </TouchableOpacity>
-                </View>
+                <Text style={styles.customerName}>{displayCustomerName}</Text>
+                {/* For privacy, do not show raw blockchain address */}
               </View>
               <View style={styles.verificationBadge}>
                 <Icon name="check-circle" size={20} color="#10B981" />
@@ -254,8 +278,17 @@ export const BusinessPaymentSuccessScreen = () => {
                 <View style={styles.transactionRow}>
                   <Text style={styles.transactionLabel}>Estado</Text>
                   <View style={styles.statusContainer}>
+                {isConfirming ? (
+                  <>
+                    <Icon name="clock" size={16} color={confirmColor} />
+                    <Text style={[styles.statusText, { color: confirmColor }]}>Confirmando…</Text>
+                  </>
+                ) : (
+                  <>
                     <Icon name="check-circle" size={16} color="#10B981" />
                     <Text style={styles.statusText}>Procesado exitosamente</Text>
+                  </>
+                )}
                   </View>
                 </View>
 
@@ -351,12 +384,8 @@ export const BusinessPaymentSuccessScreen = () => {
           {/* Success Message */}
           <View style={[styles.successMessage, { backgroundColor: isCUSD ? '#ECFDF5' : '#F5F3FF' }]}>
             <Icon name="check-circle" size={32} color={isCUSD ? colors.primary : colors.secondary} />
-            <Text style={[styles.successMessageTitle, { color: isCUSD ? colors.primary : colors.secondary }]}>
-              ¡Pago procesado exitosamente!
-            </Text>
-            <Text style={[styles.successMessageText, { color: isCUSD ? '#065F46' : '#5B21B6' }]}>
-              El dinero ya está disponible en tu cuenta. Puedes continuar vendiendo.
-            </Text>
+            <Text style={[styles.successMessageTitle, { color: isCUSD ? colors.primary : colors.secondary }]}>¡Pago procesado exitosamente!</Text>
+            <Text style={[styles.successMessageText, { color: isCUSD ? '#065F46' : '#5B21B6' }]}>El dinero ya está disponible en tu cuenta. Puedes continuar vendiendo.</Text>
           </View>
         </View>
       </ScrollView>

@@ -709,6 +709,12 @@ confio_admin_site.register(PhoneInvite, PhoneInviteAdmin)
 from conversion.models import Conversion
 confio_admin_site.register(Conversion, ConversionAdmin)
 
+# Exchange rate models
+from exchange_rates.models import ExchangeRate, RateFetchLog
+from exchange_rates.admin import ExchangeRateAdmin, RateFetchLogAdmin
+confio_admin_site.register(ExchangeRate, ExchangeRateAdmin)
+confio_admin_site.register(RateFetchLog, RateFetchLogAdmin)
+
 # USDC Transaction models
 from usdc_transactions.models import USDCDeposit, USDCWithdrawal
 from usdc_transactions.admin import USDCDepositAdmin, USDCWithdrawalAdmin

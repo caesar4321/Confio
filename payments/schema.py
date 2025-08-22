@@ -1,5 +1,7 @@
 import graphene
 from graphene_django import DjangoObjectType
+import json
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from datetime import timedelta
@@ -19,6 +21,8 @@ class InvoiceInput(graphene.InputObjectType):
 
 class PaymentTransactionType(DjangoObjectType):
     """GraphQL type for PaymentTransaction model"""
+    # Explicitly declare to force using our resolver instead of default ORM mapping
+    blockchain_data = graphene.JSONString()
     class Meta:
         model = PaymentTransaction
         fields = (
@@ -43,11 +47,37 @@ class PaymentTransactionType(DjangoObjectType):
             'status', 
             'transaction_hash',
             'error_message',
-            'blockchain_data',  # Add blockchain_data field
             'created_at', 
             'updated_at',
             'invoice'
         )
+
+    # Return ephemeral override when present to include transactions in mutation response
+    def resolve_blockchain_data(self, info):
+        try:
+            # 1) If the instance already has the response-time dict with transactions, return it
+            if isinstance(self.blockchain_data, dict) and 'transactions' in self.blockchain_data:
+                print(f"resolve_blockchain_data: using instance data for {self.payment_transaction_id} (transactions present)")
+                return self.blockchain_data
+
+            # 2) Otherwise, try cross-request override cache
+            key = f"ptx:override:{self.payment_transaction_id}"
+            override = cache.get(key)
+            if override is not None:
+                print(f"resolve_blockchain_data: using override for {self.payment_transaction_id} with keys: {list(override.keys())}")
+                return override
+        except Exception:
+            pass
+        try:
+            # Log fallback case for diagnostics
+            truncated = str(self.blockchain_data)
+            if isinstance(self.blockchain_data, (dict, list)):
+                print(f"resolve_blockchain_data: fallback dict/list for {self.payment_transaction_id}")
+            else:
+                print(f"resolve_blockchain_data: fallback string for {self.payment_transaction_id}: {truncated[:120]}...")
+        except Exception:
+            pass
+        return self.blockchain_data
 
 class InvoiceType(DjangoObjectType):
     """GraphQL type for Invoice model"""
@@ -284,6 +314,12 @@ class PayInvoice(graphene.Mutation):
 
     invoice = graphene.Field(InvoiceType)
     payment_transaction = graphene.Field(PaymentTransactionType)
+    # Transient fields to carry signing payload back to client without persisting
+    transactions = graphene.JSONString(description="Array of 4 transactions (sponsor pre-signed, user-signed required)")
+    group_id = graphene.String()
+    gross_amount = graphene.Float()
+    net_amount = graphene.Float()
+    fee_amount = graphene.Float()
     success = graphene.Boolean()
     errors = graphene.List(graphene.String)
 
@@ -307,29 +343,6 @@ class PayInvoice(graphene.Mutation):
         # Use atomic transaction with SELECT FOR UPDATE to prevent race conditions
         try:
             with transaction.atomic():
-                # Check for existing payment with same idempotency key
-                if idempotency_key:
-                    print(f"PayInvoice: Checking for existing payment with idempotency key: {idempotency_key}")
-                    existing_payment = PaymentTransaction.objects.filter(
-                        invoice__invoice_id=invoice_id,
-                        payer_user=user,
-                        idempotency_key=idempotency_key
-                    ).first()
-                    
-                    if existing_payment:
-                        print(f"PayInvoice: Found existing payment {existing_payment.id}, returning it")
-                        # Return existing payment to prevent duplicate
-                        return PayInvoice(
-                            invoice=existing_payment.invoice,
-                            payment_transaction=existing_payment,
-                            success=True,
-                            errors=None
-                        )
-                    else:
-                        print(f"PayInvoice: No existing payment found, proceeding with creation")
-                else:
-                    print(f"PayInvoice: No idempotency key provided")
-                
                 # Get the invoice with row-level locking
                 invoice = Invoice.objects.select_for_update().get(
                     invoice_id=invoice_id,
@@ -370,6 +383,24 @@ class PayInvoice(graphene.Mutation):
                 account_type = jwt_context['account_type']
                 account_index = jwt_context['account_index']
                 business_id = jwt_context.get('business_id')
+
+                # After locking the invoice row, re-check idempotency to avoid race
+                if idempotency_key:
+                    print(f"PayInvoice: Post-lock idempotency check for key: {idempotency_key}")
+                    existing_payment = PaymentTransaction.objects.filter(
+                        invoice=invoice,
+                        payer_user=user,
+                        idempotency_key=idempotency_key,
+                        deleted_at__isnull=True
+                    ).first()
+                    if existing_payment:
+                        print(f"PayInvoice: Found existing payment {existing_payment.id} after lock, returning it")
+                        return PayInvoice(
+                            invoice=existing_payment.invoice,
+                            payment_transaction=existing_payment,
+                            success=True,
+                            errors=None
+                        )
                 
                 # Debug: Log the JWT account context being used
                 print(f"PayInvoice - JWT account context: {account_type}_{account_index}, business_id={business_id}")
@@ -537,21 +568,40 @@ class PayInvoice(graphene.Mutation):
                         # No need to store transactions in DB - client will sign and return them immediately
                         all_txns = json.loads(create_result.transactions) if isinstance(create_result.transactions, str) else create_result.transactions
                         
-                        # Save minimal tracking info to DB (no transactions)
+                        # Save minimal tracking info to DB (no transactions persisted)
                         payment_transaction.blockchain_data = {
                             'payment_id': payment_transaction.payment_transaction_id,
                             'status': 'pending_signature'
                         }
-                        payment_transaction.save()
-                        
-                        # After saving, add transactions to the response only (not persisted)
+                        # Persist status + placeholder hash so merchants can react immediately
+                        payment_transaction.save(update_fields=['status', 'transaction_hash', 'blockchain_data', 'updated_at'])
+
+                        # After saving, attach full transactions ONLY on the response instance (not persisted)
                         payment_transaction.blockchain_data = {
-                            'transactions': all_txns,  # ALL 4 transactions for client to sign
+                            'transactions': all_txns,
                             'group_id': create_result.group_id,
                             'gross_amount': float(create_result.gross_amount),
                             'net_amount': float(create_result.net_amount),
                             'fee_amount': float(create_result.fee_amount),
                         }
+
+                        # Prepare transient signing payload (do not persist) and cache override for immediate response
+                        response_transactions = all_txns
+                        response_group_id = create_result.group_id
+                        response_gross = float(create_result.gross_amount)
+                        response_net = float(create_result.net_amount)
+                        response_fee = float(create_result.fee_amount)
+                        cache.set(
+                            f"ptx:override:{payment_transaction.payment_transaction_id}",
+                            {
+                                'transactions': response_transactions,
+                                'group_id': response_group_id,
+                                'gross_amount': response_gross,
+                                'net_amount': response_net,
+                                'fee_amount': response_fee,
+                            },
+                            timeout=300
+                        )
                         
                         # DON'T mark invoice as PAID yet - wait for blockchain confirmation
                         # The invoice will be marked as PAID in SubmitSponsoredPayment mutation
@@ -614,9 +664,15 @@ class PayInvoice(graphene.Mutation):
                             }
                         )
 
+                # Return transient transactions alongside DB object
                 return PayInvoice(
                     invoice=invoice,
                     payment_transaction=payment_transaction,
+                    transactions=response_transactions if blockchain_success else None,
+                    group_id=response_group_id if blockchain_success else None,
+                    gross_amount=response_gross if blockchain_success else None,
+                    net_amount=response_net if blockchain_success else None,
+                    fee_amount=response_fee if blockchain_success else None,
                     success=True,
                     errors=None
                 )

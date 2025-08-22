@@ -11,6 +11,7 @@ from algosdk.v2client import algod
 from algosdk.abi import Method, Returns, Argument
 import base64
 from django.conf import settings
+from .utils.cache import ttl_cache
 
 class PaymentTransactionBuilder:
     """Builds sponsored payment transactions through the payment contract"""
@@ -84,8 +85,14 @@ class PaymentTransactionBuilder:
                     'error': f"Invalid asset ID. Must be cUSD ({self.cusd_asset_id}) or CONFIO ({self.confio_asset_id})"
                 }
             
-            # Get suggested parameters
-            params = self.algod_client.suggested_params()
+            # Get suggested parameters (cache briefly to avoid per-request network hits)
+            params_key = ("suggested_params", self.algod_address)
+            params = ttl_cache.get(params_key)
+            if not params:
+                params = self.algod_client.suggested_params()
+                # Short TTL keeps fv/lv fresh while de-duping bursts
+                from django.conf import settings as dj_settings
+                ttl_cache.set(params_key, params, ttl_seconds=getattr(dj_settings, 'PAYMENT_TTL_SUGGESTED_PARAMS', 3))
             
             # Determine method based on asset
             if asset_id == self.cusd_asset_id:
@@ -95,7 +102,12 @@ class PaymentTransactionBuilder:
 
             # Preflight checks to mirror on-chain assertions for clearer failures
             # 0) Validate sponsor address matches on-chain config
-            app_info = self.algod_client.application_info(self.payment_app_id)
+            app_info_key = ("application_info", self.payment_app_id, self.algod_address)
+            app_info = ttl_cache.get(app_info_key)
+            if not app_info:
+                app_info = self.algod_client.application_info(self.payment_app_id)
+                from django.conf import settings as dj_settings
+                ttl_cache.set(app_info_key, app_info, ttl_seconds=getattr(dj_settings, 'PAYMENT_TTL_APP_INFO', 120))
             global_state = {base64.b64decode(e["key"]).decode(): e["value"] for e in app_info["params"]["global-state"]}
             sp_b64 = global_state.get("sponsor_address", {}).get("bytes")
             onchain_sponsor = encoding.encode_address(base64.b64decode(sp_b64)) if sp_b64 else ""
@@ -107,7 +119,13 @@ class PaymentTransactionBuilder:
             
             # 1) App must be opted-in to the asset (setup_assets done)
             try:
-                _ = self.algod_client.account_asset_info(self.app_address, asset_id)
+                app_optin_key = ("account_asset_info", self.app_address, asset_id, self.algod_address)
+                app_optin = ttl_cache.get(app_optin_key)
+                if app_optin is None:
+                    app_optin = self.algod_client.account_asset_info(self.app_address, asset_id)
+                    # Cache presence/absence for a short period
+                    from django.conf import settings as dj_settings
+                    ttl_cache.set(app_optin_key, app_optin, ttl_seconds=getattr(dj_settings, 'PAYMENT_TTL_APP_OPTIN', 60))
             except Exception:
                 return {
                     'success': False,
@@ -118,7 +136,12 @@ class PaymentTransactionBuilder:
             skip_recipient_check = bool(settings.BLOCKCHAIN_CONFIG.get('ALGORAND_SKIP_RECIPIENT_OPTIN_CHECK', False))
             if not skip_recipient_check:
                 try:
-                    _ = self.algod_client.account_asset_info(recipient_address, asset_id)
+                    recip_optin_key = ("account_asset_info", recipient_address, asset_id, self.algod_address)
+                    recip_optin = ttl_cache.get(recip_optin_key)
+                    if recip_optin is None:
+                        recip_optin = self.algod_client.account_asset_info(recipient_address, asset_id)
+                        from django.conf import settings as dj_settings
+                        ttl_cache.set(recip_optin_key, recip_optin, ttl_seconds=getattr(dj_settings, 'PAYMENT_TTL_RECIPIENT_OPTIN', 120))
                 except Exception:
                     return {
                         'success': False,
@@ -160,9 +183,8 @@ class PaymentTransactionBuilder:
             
             logger.info(f"Payment split - Total: {amount}, Net to merchant: {net_amount}, Fee: {fee_amount}")
             
-            # Get fee recipient from contract global state
-            app_info = self.algod_client.application_info(self.payment_app_id)
-            global_state = {base64.b64decode(e["key"]).decode(): e["value"] for e in app_info["params"]["global-state"]}
+            # Get fee recipient from cached contract global state
+            # (we already loaded app_info above)
             fee_recipient_b64 = global_state.get("fee_recipient", {}).get("bytes")
             if not fee_recipient_b64:
                 return {
@@ -240,16 +262,18 @@ class PaymentTransactionBuilder:
             # Get the ABI method selector
             selector = method.get_selector()
             
-            # Log critical details before building app call
-            logger.info(f"=== PAYMENT APP CALL DETAILS (4-TXN GROUP) ===")
-            logger.info(f"App call sender (sponsor): {self.sponsor_address}")
-            logger.info(f"Payment app ID: {self.payment_app_id}")
-            logger.info(f"Accounts array: [0]={sender_address}, [1]={recipient_address}")
-            logger.info(f"Fee recipient: {fee_recipient}")
-            logger.info(f"Asset ID: {asset_id}")
-            logger.info(f"Method: {method_name}")
-            logger.info(f"Total amount: {amount}, Net: {net_amount}, Fee: {fee_amount}")
-            logger.info(f"===============================================")
+            # Log critical details before building app call (verbose only)
+            from django.conf import settings as dj_settings
+            if getattr(dj_settings, 'PAYMENT_VERBOSE_LOGS', False):
+                logger.info(f"=== PAYMENT APP CALL DETAILS (4-TXN GROUP) ===")
+                logger.info(f"App call sender (sponsor): {self.sponsor_address}")
+                logger.info(f"Payment app ID: {self.payment_app_id}")
+                logger.info(f"Accounts array: [0]={sender_address}, [1]={recipient_address}")
+                logger.info(f"Fee recipient: {fee_recipient}")
+                logger.info(f"Asset ID: {asset_id}")
+                logger.info(f"Method: {method_name}")
+                logger.info(f"Total amount: {amount}, Net: {net_amount}, Fee: {fee_amount}")
+                logger.info(f"===============================================")
             
             # Properly ABI-encode the arguments
             from algosdk.abi import ABIType
@@ -259,7 +283,8 @@ class PaymentTransactionBuilder:
             recipient_arg = encoding.decode_address(recipient_address)  # Address is just 32 bytes
             payment_id_str = payment_id if payment_id else ""
             payment_id_arg = string_type.encode(payment_id_str)  # String needs ABI encoding
-            logger.info(f"Creating app call with payment_id: '{payment_id_str}' (length: {len(payment_id_str)})")
+            if getattr(dj_settings, 'PAYMENT_VERBOSE_LOGS', False):
+                logger.info(f"Creating app call with payment_id: '{payment_id_str}' (length: {len(payment_id_str)})")
             
             # SPONSOR sends the app call (true sponsorship)
             # The deployed contract's caster reads recipient from app_args[1] and payment_id from app_args[2]
@@ -313,7 +338,7 @@ class PaymentTransactionBuilder:
                 }
             ]
             
-            return {
+            result = {
                 'success': True,
                 'transactions_to_sign': transactions_to_sign,
                 'sponsor_transactions': [
@@ -341,6 +366,14 @@ class PaymentTransactionBuilder:
                     'min_fee': getattr(params, 'min_fee', 1000)
                 }
             }
+
+            # Reduce verbose logs if disabled
+            from django.conf import settings as dj_settings
+            if not getattr(dj_settings, 'PAYMENT_VERBOSE_LOGS', False):
+                # Already kept minimal info logs; nothing else to strip here
+                pass
+
+            return result
             
         except Exception as e:
             import traceback
@@ -359,7 +392,13 @@ class PaymentTransactionBuilder:
         Returns a dict: {success: bool, error?: str, info?: dict}
         """
         try:
-            app_info = self.algod_client.application_info(self.payment_app_id)
+            # Use cached app info to reduce latency
+            app_info_key = ("application_info", self.payment_app_id, self.algod_address)
+            app_info = ttl_cache.get(app_info_key)
+            if not app_info:
+                app_info = self.algod_client.application_info(self.payment_app_id)
+                from django.conf import settings as dj_settings
+                ttl_cache.set(app_info_key, app_info, ttl_seconds=getattr(dj_settings, 'PAYMENT_TTL_APP_INFO', 120))
             params = app_info.get('params', {})
             # Decode global state to a readable map
             import base64, hashlib
@@ -411,7 +450,12 @@ class PaymentTransactionBuilder:
 
             # App must be opted-in to the asset
             try:
-                _ = self.algod_client.account_asset_info(self.app_address, asset_id)
+                app_optin_key = ("account_asset_info", self.app_address, asset_id, self.algod_address)
+                app_optin = ttl_cache.get(app_optin_key)
+                if app_optin is None:
+                    app_optin = self.algod_client.account_asset_info(self.app_address, asset_id)
+                    from django.conf import settings as dj_settings
+                    ttl_cache.set(app_optin_key, app_optin, ttl_seconds=getattr(dj_settings, 'PAYMENT_TTL_APP_OPTIN', 60))
             except Exception as e:
                 return {'success': False, 'error': f'Payment app not opted-in to asset {asset_id}: {e}'}
 

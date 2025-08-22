@@ -31,6 +31,12 @@ BLOCKCHAIN_CELERY_BEAT_SCHEDULE = {
         'schedule': 3.0,  # Every 3 seconds
     },
     
+    # Outbound confirmation scan (payments, sends)
+    'scan-outbound-confirmations': {
+        'task': 'blockchain.scan_outbound_confirmations',
+        'schedule': 2.0,  # Every 2 seconds
+    },
+    
     # Removed Sui epoch tracking
 }
 

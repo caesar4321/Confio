@@ -1,5 +1,6 @@
 // bootstrap.ts - Ensures polyfills are loaded before any other imports
 import './src/setup/polyfills';   // URL, crypto, slice, Buffer - MUST be first
+import './src/setup/silenceLogs'; // Silence noisy logs early in app boot
 
 // Apollo Client setup and error messages (after polyfills)
 import { ApolloClient, InMemoryCache, ApolloProvider } from '@apollo/client';

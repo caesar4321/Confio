@@ -136,6 +136,7 @@ export const BottomTabNavigator = () => {
   // Memoize tab options to ensure they update when activeAccount changes
   const scanTabOptions = useMemo(() => ({
     header: () => <ScanHeader />,
+    freezeOnBlur: true,
     tabBarLabel: ({ color }: any) => (
       <Text style={{ color, fontSize: 12 }}>
         Escanear
@@ -191,6 +192,7 @@ export const BottomTabNavigator = () => {
             paddingBottom: 8,
             paddingTop: 8,
           },
+          detachInactiveScreens: true,
         }}
       >
         <Tabs.Screen 
@@ -198,6 +200,7 @@ export const BottomTabNavigator = () => {
           component={HomeScreen}
           options={{
             header: () => <HomeHeader />,
+            freezeOnBlur: true,
             tabBarLabel: 'Inicio',
             tabBarIcon: ({ color, size }: any) => <Icon name="home" size={size} color={color} />
           }}
@@ -215,16 +218,16 @@ export const BottomTabNavigator = () => {
           <Tabs.Screen 
             name="Scan" 
             component={ScanTab}
-            options={scanTabOptions}
-          />
-        )}
-        {isBusinessAccount && (
-          <Tabs.Screen 
-            name="Charge" 
-            component={ChargeScreen}
-            options={chargeTabOptions}
-          />
-        )}
+          options={scanTabOptions}
+        />
+      )}
+      {isBusinessAccount && (
+        <Tabs.Screen 
+          name="Charge" 
+          component={ChargeScreen}
+          options={{ ...chargeTabOptions, freezeOnBlur: true }}
+        />
+      )}
         <Tabs.Screen 
           name="Exchange" 
           component={ExchangeScreen}

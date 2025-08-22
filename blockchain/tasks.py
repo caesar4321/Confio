@@ -16,6 +16,9 @@ from usdc_transactions.models import USDCDeposit
 from notifications.utils import create_notification
 from notifications.models import NotificationType as NotificationTypeChoices
 from send.models import SendTransaction
+from payments.models import PaymentTransaction
+from send.models import SendTransaction
+from notifications.models import NotificationType as NotifType
 
 logger = logging.getLogger(__name__)
 
@@ -532,4 +535,243 @@ def scan_inbound_deposits():
         return {'processed': processed, 'skipped': skipped}
     except Exception as e:
         logger.error(f"scan_inbound_deposits failed: {e}")
+        raise
+
+
+# ================================
+# Outbound confirmation (algod poll)
+# ================================
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 6})
+def confirm_payment_transaction(self, payment_id: str, txid: str):
+    """
+    Poll algod for a submitted payment transaction until confirmed, then
+    update DB state and send notifications. On transient errors, Celery
+    auto‑retries with exponential backoff.
+
+    Args:
+        payment_id: PaymentTransaction.payment_transaction_id
+        txid: Algorand transaction id for the submitted group
+    """
+    try:
+        client = AlgorandClient()
+        algod_client = client.algod
+
+        delays = [0.5, 1, 2, 4, 6, 8, 10]
+        confirmed_round = 0
+        pool_error = None
+
+        for d in delays:
+            try:
+                info = algod_client.pending_transaction_info(txid)
+            except Exception as e:
+                logger.warning(f"pending_transaction_info error for {txid}: {e}")
+                info = {}
+
+            confirmed_round = int(info.get('confirmed-round') or 0)
+            pool_error = info.get('pool-error') or info.get('pool_error')
+
+            if confirmed_round > 0:
+                break
+            if pool_error:
+                break
+
+            try:
+                import time
+                time.sleep(d)
+            except Exception:
+                pass
+
+        try:
+            payment_tx: PaymentTransaction = PaymentTransaction.objects.select_related(
+                'invoice', 'payer_user', 'payer_business', 'merchant_business', 'merchant_account'
+            ).get(payment_transaction_id=payment_id)
+        except PaymentTransaction.DoesNotExist:
+            logger.error(f"PaymentTransaction {payment_id} not found for confirmation")
+            return {'status': 'missing'}
+
+        if pool_error:
+            payment_tx.status = 'FAILED'
+            payment_tx.error_message = str(pool_error)
+            payment_tx.save(update_fields=['status', 'error_message', 'updated_at'])
+            logger.error(f"Payment {payment_id} failed in pool: {pool_error}")
+            return {'status': 'failed', 'pool_error': pool_error}
+
+        if confirmed_round > 0:
+            payment_tx.status = 'CONFIRMED'
+            payment_tx.save(update_fields=['status', 'updated_at'])
+
+            if payment_tx.invoice and payment_tx.invoice.status != 'PAID':
+                from django.utils import timezone as dj_tz
+                invoice = payment_tx.invoice
+                invoice.status = 'PAID'
+                invoice.paid_at = dj_tz.now()
+                invoice.paid_by_user = payment_tx.payer_user
+                invoice.paid_by_business = payment_tx.payer_business
+                invoice.save(update_fields=['status', 'paid_at', 'paid_by_user', 'paid_by_business', 'updated_at'])
+
+            amount_str = str(payment_tx.amount)
+            token = payment_tx.token_type
+
+            try:
+                merchant_acct = payment_tx.merchant_account
+                create_notification(
+                    user=payment_tx.merchant_account_user,
+                    account=merchant_acct,
+                    business=payment_tx.merchant_business,
+                    notification_type=NotificationTypeChoices.PAYMENT_RECEIVED,
+                    title="Pago recibido",
+                    message=f"Recibiste {amount_str} {token}",
+                    data={
+                        'transaction_id': payment_tx.payment_transaction_id,
+                        'transaction_hash': payment_tx.transaction_hash,
+                        'amount': amount_str,
+                        'token_type': token,
+                    },
+                    related_object_type='PaymentTransaction',
+                    related_object_id=str(payment_tx.id),
+                    action_url=f"confio://transaction/{payment_tx.payment_transaction_id}",
+                )
+            except Exception as e:
+                logger.warning(f"Could not create merchant notification for {payment_id}: {e}")
+
+            try:
+                create_notification(
+                    user=payment_tx.payer_user,
+                    account=payment_tx.payer_account,
+                    business=payment_tx.payer_business,
+                    notification_type=NotificationTypeChoices.PAYMENT_SENT,
+                    title="Pago enviado",
+                    message=f"Tu pago de {amount_str} {token} fue confirmado",
+                    data={
+                        'transaction_id': payment_tx.payment_transaction_id,
+                        'transaction_hash': payment_tx.transaction_hash,
+                        'amount': amount_str,
+                        'token_type': token,
+                    },
+                    related_object_type='PaymentTransaction',
+                    related_object_id=str(payment_tx.id),
+                    action_url=f"confio://transaction/{payment_tx.payment_transaction_id}",
+                )
+            except Exception as e:
+                logger.warning(f"Could not create payer notification for {payment_id}: {e}")
+
+            # Do not send an extra 'invoice paid' notification; 'Pago recibido' is sufficient.
+
+            logger.info(f"Payment {payment_id} confirmed in round {confirmed_round}")
+            return {'status': 'confirmed', 'round': confirmed_round}
+
+        # Not confirmed yet: keep polling via Celery retry
+        raise Exception(f"Tx {txid} not yet confirmed; scheduling retry")
+    except Exception as e:
+        # Allow Celery autoretry to handle transient issues
+        logger.warning(f"confirm_payment_transaction error: {e}")
+        raise
+
+
+@shared_task(name='blockchain.scan_outbound_confirmations')
+def scan_outbound_confirmations(max_batch: int = 50):
+    """
+    Worker-side autonomous scanner for any SUBMITTED outbound txns.
+    - Confirms PaymentTransaction and SendTransaction by polling algod.
+    - Avoids reliance on direct enqueue from API path.
+    """
+    try:
+        client = AlgorandClient()
+        algod_client = client.algod
+
+        processed = 0
+
+        # Helper: confirm a txid
+        def check_tx(txid: str) -> tuple[int, str]:
+            try:
+                info = algod_client.pending_transaction_info(txid)
+            except Exception as e:
+                logger.warning(f"pending_transaction_info error for {txid}: {e}")
+                return 0, ''
+            cr = int(info.get('confirmed-round') or 0)
+            pe = info.get('pool-error') or info.get('pool_error') or ''
+            return cr, pe
+
+        # Payments
+        pay_qs = PaymentTransaction.objects.filter(status='SUBMITTED').exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
+        for p in pay_qs:
+            cr, pe = check_tx(p.transaction_hash)
+            if pe:
+                p.status = 'FAILED'
+                p.error_message = str(pe)
+                p.save(update_fields=['status', 'error_message', 'updated_at'])
+                processed += 1
+                continue
+            if cr > 0:
+                # Reuse logic from confirm_payment_transaction
+                try:
+                    confirm_payment_transaction.run(p.payment_transaction_id, p.transaction_hash)
+                except Exception:
+                    # Fallback to inline minimal update
+                    p.status = 'CONFIRMED'
+                    p.save(update_fields=['status', 'updated_at'])
+                processed += 1
+
+        # Sends
+        send_qs = SendTransaction.objects.filter(status='SUBMITTED').exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
+        for s in send_qs:
+            cr, pe = check_tx(s.transaction_hash or '')
+            if pe:
+                s.status = 'FAILED'
+                s.error_message = str(pe)
+                s.save(update_fields=['status', 'error_message', 'updated_at'])
+                processed += 1
+                continue
+            if cr > 0:
+                s.status = 'CONFIRMED'
+                s.save(update_fields=['status', 'updated_at'])
+                # Notifications (best-effort)
+                try:
+                    amount_str = str(s.amount)
+                    token = s.token_type
+                    # Recipient notification
+                    if s.recipient_user_id:
+                        create_notification(
+                            user=s.recipient_user,
+                            account=None,
+                            business=s.recipient_business,
+                            notification_type=NotifType.SEND_RECEIVED,
+                            title="Dinero recibido",
+                            message=f"Recibiste {amount_str} {token}",
+                            data={
+                                'transaction_hash': s.transaction_hash,
+                                'amount': amount_str,
+                                'token_type': token,
+                            },
+                            related_object_type='SendTransaction',
+                            related_object_id=str(s.id),
+                            action_url=f"confio://send/{s.id}",
+                        )
+                    # Sender notification
+                    if s.sender_user_id:
+                        create_notification(
+                            user=s.sender_user,
+                            account=None,
+                            business=s.sender_business,
+                            notification_type=NotifType.SEND_SENT,
+                            title="Dinero enviado",
+                            message=f"Tu envío de {amount_str} {token} fue confirmado",
+                            data={
+                                'transaction_hash': s.transaction_hash,
+                                'amount': amount_str,
+                                'token_type': token,
+                            },
+                            related_object_type='SendTransaction',
+                            related_object_id=str(s.id),
+                            action_url=f"confio://send/{s.id}",
+                        )
+                except Exception as ne:
+                    logger.warning(f"Notification error for SendTransaction {s.id}: {ne}")
+                processed += 1
+
+        logger.info(f"[OutboundScan] processed={processed} items")
+        return {'processed': processed}
+    except Exception as e:
+        logger.error(f"scan_outbound_confirmations failed: {e}")
         raise

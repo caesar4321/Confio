@@ -72,7 +72,8 @@ def create_unified_transaction_from_payment(payment_transaction):
             defaults={
                 'transaction_type': 'payment',
                 'amount': payment_transaction.amount,
-                'token_type': payment_transaction.token_type,
+                # Normalize to uppercase to align with filters and choices
+                'token_type': (payment_transaction.token_type or '').upper(),
                 'status': 'CONFIRMED' if payment_transaction.status == 'PAID' else payment_transaction.status,
                 'transaction_hash': payment_transaction.transaction_hash or '',
                 'error_message': payment_transaction.error_message or '',
