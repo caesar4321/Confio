@@ -332,7 +332,6 @@ export type MainStackParamList = {
       rate: number;
       minAmount: number;
       maxAmount: number;
-      availableAmount: number;
       countryCode: string;
       paymentMethods: Array<{id: string; name: string; displayName: string}>;
       terms?: string;

@@ -939,12 +939,13 @@ export const TradeChatScreen: React.FC = () => {
           try {
             if (data.status === 'CRYPTO_RELEASED') {
               const t = tradeDetailsData?.p2pTrade;
+              // Determine role independent of current activeAccount by checking both my personal and business identities
+              const myBusinessIds = (accounts || []).filter(acc => acc.type === 'business' && acc.business?.id).map(acc => String(acc.business!.id));
               const iAmBuyer = (() => {
-                if (!t || !activeAccount) return false;
-                if (activeAccount.type === 'business') {
-                  return t?.buyerBusiness?.id && String(t.buyerBusiness.id) === String(activeAccount.business?.id);
-                }
-                return t?.buyerUser?.id && String(t.buyerUser.id) === String(userProfile?.id);
+                if (!t) return false;
+                const isBuyerBusinessMe = t?.buyerBusiness?.id && myBusinessIds.includes(String(t.buyerBusiness.id));
+                const isBuyerUserMe = t?.buyerUser?.id && String(t.buyerUser.id) === String(userProfile?.id);
+                return !!(isBuyerBusinessMe || isBuyerUserMe);
               })();
               // Ensure account context matches my role for correct transaction perspective
               try {
@@ -999,12 +1000,12 @@ export const TradeChatScreen: React.FC = () => {
               const tradeData = tradeDetailsData?.p2pTrade;
               
               // Determine who is rating whom based on the current user's role
+              const myBizIds2 = (accounts || []).filter(acc => acc.type === 'business' && acc.business?.id).map(acc => String(acc.business!.id));
               const iAmBuyer = (() => {
-                if (!tradeData || !activeAccount) return false;
-                if (activeAccount.type === 'business') {
-                  return tradeData?.buyerBusiness?.id && String(tradeData.buyerBusiness.id) === String(activeAccount.business?.id);
-                }
-                return tradeData?.buyerUser?.id && String(tradeData.buyerUser.id) === String(userProfile?.id);
+                if (!tradeData) return false;
+                const isBuyerBiz = tradeData?.buyerBusiness?.id && myBizIds2.includes(String(tradeData.buyerBusiness.id));
+                const isBuyerUser = tradeData?.buyerUser?.id && String(tradeData.buyerUser.id) === String(userProfile?.id);
+                return !!(isBuyerBiz || isBuyerUser);
               })();
               
               // Get counterparty information - handle both personal and business accounts
@@ -1822,17 +1823,25 @@ export const TradeChatScreen: React.FC = () => {
             // Auto-navigate to rating (seller perspective here)
             try {
               const tradeData = tradeDetailsData?.p2pTrade;
-              const iAmBuyer = computedTradeTypeRef.current === 'buy';
+              // Recompute role using identities rather than relying on computedTradeTypeRef
+              const myBizIds3 = (accounts || []).filter(acc => acc.type === 'business' && acc.business?.id).map(acc => String(acc.business!.id));
+              const iAmBuyer = (() => {
+                if (!tradeData) return false;
+                const isBuyerBiz = tradeData?.buyerBusiness?.id && myBizIds3.includes(String(tradeData.buyerBusiness.id));
+                const isBuyerUser = tradeData?.buyerUser?.id && String(tradeData.buyerUser.id) === String(userProfile?.id);
+                return !!(isBuyerBiz || isBuyerUser);
+              })();
               const name = iAmBuyer
                 ? (tradeData?.sellerBusiness?.name || `${tradeData?.sellerUser?.firstName || ''} ${tradeData?.sellerUser?.lastName || ''}`.trim() || tradeData?.sellerUser?.username || 'Comerciante')
                 : (tradeData?.buyerBusiness?.name || `${tradeData?.buyerUser?.firstName || ''} ${tradeData?.buyerUser?.lastName || ''}`.trim() || tradeData?.buyerUser?.username || 'Comprador');
+              const statsAuto = iAmBuyer ? (tradeData?.sellerStats || {}) : (tradeData?.buyerStats || {});
               navigation.navigate('TraderRating', {
                 tradeId: String(tradeId),
                 trader: {
                   name,
-                  verified: false,
-                  completedTrades: 0,
-                  successRate: 0,
+                  verified: !!statsAuto.isVerified,
+                  completedTrades: statsAuto.completedTrades || 0,
+                  successRate: statsAuto.successRate || 0,
                 },
                 tradeDetails: {
                   amount,

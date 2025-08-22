@@ -10,6 +10,8 @@ import {
   Alert,
   Modal,
   FlatList,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -99,7 +101,6 @@ export const CreateOfferScreen = () => {
   const [rate, setRate] = useState(editMode && offerData ? offerData.rate.toString() : '');
   const [minAmount, setMinAmount] = useState(editMode && offerData ? offerData.minAmount.toString() : '');
   const [maxAmount, setMaxAmount] = useState(editMode && offerData ? offerData.maxAmount.toString() : '');
-  const [availableAmount, setAvailableAmount] = useState(editMode && offerData ? offerData.availableAmount.toString() : '');
   const [terms, setTerms] = useState(editMode && offerData ? (offerData.terms || '') : '');
   const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<string[]>([]);
 
@@ -176,14 +177,6 @@ export const CreateOfferScreen = () => {
       Alert.alert('Error', 'El monto mínimo no puede ser mayor al máximo');
       return false;
     }
-    if (!availableAmount || parseFloat(availableAmount) <= 0) {
-      Alert.alert('Error', 'Por favor ingresa un monto disponible válido');
-      return false;
-    }
-    if (parseFloat(availableAmount) < parseFloat(minAmount)) {
-      Alert.alert('Error', 'El monto disponible no puede ser menor al mínimo');
-      return false;
-    }
     if (selectedPaymentMethods.length === 0) {
       Alert.alert('Error', 'Por favor selecciona al menos un método de pago');
       return false;
@@ -219,7 +212,6 @@ export const CreateOfferScreen = () => {
             rate: parseFloat(rate),
             minAmount: parseFloat(minAmount),
             maxAmount: parseFloat(maxAmount),
-            availableAmount: parseFloat(availableAmount),
             paymentMethodIds: selectedPaymentMethods,
             terms: terms.trim(),
           },
@@ -256,7 +248,6 @@ export const CreateOfferScreen = () => {
               rate: parseFloat(rate),
               minAmount: parseFloat(minAmount),
               maxAmount: parseFloat(maxAmount),
-              availableAmount: parseFloat(availableAmount),
               paymentMethodIds: selectedPaymentMethods,
               countryCode: selectedCountry?.[2], // Pass the country code
               terms: terms.trim(),
@@ -350,7 +341,8 @@ export const CreateOfferScreen = () => {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity 
@@ -493,23 +485,7 @@ export const CreateOfferScreen = () => {
           </View>
         </View>
 
-        {/* Available Amount */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Cantidad disponible</Text>
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.textInput}
-              value={availableAmount}
-              onChangeText={setAvailableAmount}
-              placeholder="5,000.00"
-              keyboardType="decimal-pad"
-            />
-            <Text style={styles.inputSuffix}>{tokenType}</Text>
-          </View>
-          <Text style={styles.helpText}>
-            Cantidad total de {tokenType} que tienes disponible para {exchangeType === 'BUY' ? 'comprar' : 'vender'}
-          </Text>
-        </View>
+        {/* Removed 'Cantidad disponible' — availability checked at escrow enable time */}
 
         {/* Payment Methods */}
         <View style={styles.section}>
@@ -697,7 +673,7 @@ export const CreateOfferScreen = () => {
           />
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
@@ -752,8 +728,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 50 : 20,
-    paddingBottom: 16,
+    paddingVertical: 16,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#E5E7EB',
   },

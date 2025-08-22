@@ -603,7 +603,7 @@ export const GET_P2P_OFFERS = gql`
       rate
       minAmount
       maxAmount
-      availableAmount
+      
       countryCode
       currencyCode
       paymentMethods {
@@ -650,7 +650,7 @@ export const GET_MY_P2P_OFFERS = gql`
       rate
       minAmount
       maxAmount
-      availableAmount
+      
       countryCode
       currencyCode
       paymentMethods {
@@ -1068,7 +1068,6 @@ export const CREATE_P2P_OFFER = gql`
         rate
         minAmount
         maxAmount
-        availableAmount
         status
         createdAt
       }
@@ -1085,7 +1084,6 @@ export const UPDATE_P2P_OFFER = gql`
     $rate: Float
     $minAmount: Float
     $maxAmount: Float
-    $availableAmount: Float
     $paymentMethodIds: [ID]
     $terms: String
   ) {
@@ -1095,7 +1093,6 @@ export const UPDATE_P2P_OFFER = gql`
       rate: $rate
       minAmount: $minAmount
       maxAmount: $maxAmount
-      availableAmount: $availableAmount
       paymentMethodIds: $paymentMethodIds
       terms: $terms
     ) {
@@ -1106,7 +1103,6 @@ export const UPDATE_P2P_OFFER = gql`
         rate
         minAmount
         maxAmount
-        availableAmount
         status
         terms
         paymentMethods {

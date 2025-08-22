@@ -46,7 +46,6 @@ class Command(BaseCommand):
             rate=Decimal('36.50'),
             min_amount=Decimal('10.00'),
             max_amount=Decimal('1000.00'),
-            available_amount=Decimal('500.00'),
             country_code='VE',
             defaults={
                 'user': user1,  # Backward compatibility
