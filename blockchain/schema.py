@@ -110,6 +110,12 @@ class Mutation(graphene.ObjectType):
     # Cancel expired trades
     prepare_p2p_cancel = P2PTradePrepareMutations.prepare_p2p_cancel
     cancel_p2p_trade = P2PTradeMutations.cancel_p2p_trade
+    # Dispute open/resolve
+    prepare_p2p_open_dispute = P2PTradePrepareMutations.prepare_p2p_open_dispute
+    submit_p2p_open_dispute = P2PTradeMutations.submit_p2p_open_dispute
+    prepare_p2p_resolve_dispute = P2PTradePrepareMutations.prepare_p2p_resolve_dispute
+    submit_p2p_resolve_dispute = P2PTradeMutations.submit_p2p_resolve_dispute
+    resolve_p2p_dispute_onchain = P2PTradeMutations.resolve_p2p_dispute_onchain
 
 
 __all__ = ['Query', 'Mutation']

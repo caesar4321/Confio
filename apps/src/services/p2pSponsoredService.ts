@@ -9,6 +9,8 @@ import {
   CONFIRM_P2P_TRADE_RECEIVED,
   PREPARE_P2P_CANCEL,
   CANCEL_P2P_TRADE,
+  PREPARE_P2P_OPEN_DISPUTE,
+  SUBMIT_P2P_OPEN_DISPUTE,
 } from '../apollo/mutations'
 
 import algorandService from './algorandService'
@@ -234,6 +236,51 @@ class P2PSponsoredService {
       return { success: true, txid: sub.txid }
     } catch (e: any) {
       console.error('[P2P] cancelExpired error:', e)
+      return { success: false, error: String(e?.message || e) }
+    }
+  }
+
+  async openDispute(
+    tradeId: string,
+    reason: string,
+  ): Promise<{ success: boolean; txid?: string; error?: string }> {
+    try {
+      await algorandService.ensureInitialized();
+      // Sync backend account address with current wallet before preparing dispute
+      try {
+        const { UPDATE_ACCOUNT_ALGORAND_ADDRESS } = await import('../apollo/queries');
+        const addr = algorandService.getCurrentAddress?.();
+        if (addr) {
+          await apolloClient.mutate({ mutation: UPDATE_ACCOUNT_ALGORAND_ADDRESS, variables: { algorandAddress: addr }, fetchPolicy: 'no-cache' });
+        }
+      } catch {}
+      console.log('[P2P] openDispute: preparing', { tradeId })
+      const { data } = await apolloClient.mutate({
+        mutation: PREPARE_P2P_OPEN_DISPUTE,
+        variables: { tradeId, reason },
+        fetchPolicy: 'no-cache',
+      })
+      const res = data?.prepareP2pOpenDispute
+      console.log('[P2P] openDispute: prepare result', { success: res?.success, error: res?.error, groupId: res?.groupId })
+      if (!res?.success) return { success: false, error: res?.error || 'Failed to prepare open dispute' }
+      const userTxnB64 = res.userTransactions?.[0]
+      const sponsorTxns = toJSONStringArray(res.sponsorTransactions)
+      if (!userTxnB64) return { success: false, error: 'No user transaction returned' }
+      const userTxnBytes = Uint8Array.from(Buffer.from(userTxnB64, 'base64'))
+      const signedUser = await algorandService.signTransactionBytes(userTxnBytes)
+      console.log('[P2P] openDispute: user txn signed, submitting pair')
+      const signedUserB64 = Buffer.from(signedUser).toString('base64')
+      const { data: submit } = await apolloClient.mutate({
+        mutation: SUBMIT_P2P_OPEN_DISPUTE,
+        variables: { tradeId, signedUserTxn: signedUserB64, sponsorTransactions: sponsorTxns, reason },
+        fetchPolicy: 'no-cache',
+      })
+      const sub = submit?.submitP2pOpenDispute
+      console.log('[P2P] openDispute: submit result', { success: sub?.success, error: sub?.error, txid: sub?.txid })
+      if (!sub?.success) return { success: false, error: sub?.error || 'Failed to submit open dispute' }
+      return { success: true, txid: sub.txid }
+    } catch (e: any) {
+      console.error('[P2P] openDispute error:', e)
       return { success: false, error: String(e?.message || e) }
     }
   }

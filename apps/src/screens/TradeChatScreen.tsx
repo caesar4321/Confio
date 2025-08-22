@@ -971,13 +971,14 @@ export const TradeChatScreen: React.FC = () => {
               const endMs2 = t?.completedAt ? new Date(t.completedAt as any).getTime() : Date.now();
               const durationMin2 = Math.max(0, Math.round((endMs2 - startMs2) / 60000));
 
+              const stats2 = iAmBuyer ? (t?.sellerStats || {}) : (t?.buyerStats || {});
               navigation.navigate('TraderRating', {
                 tradeId: String(tradeId),
                 trader: {
                   name: counterpartyName,
-                  verified: false,
-                  completedTrades: 0,
-                  successRate: 0,
+                  verified: !!stats2.isVerified,
+                  completedTrades: stats2.completedTrades || 0,
+                  successRate: stats2.successRate || 0,
                 },
                 tradeDetails: {
                   amount,
@@ -1839,7 +1840,13 @@ export const TradeChatScreen: React.FC = () => {
                   totalPaid: (parseFloat(amount) * parseFloat(offer.rate)).toFixed(2),
                   method: tradeData?.paymentMethod?.displayName || 'N/A',
                   date: formatLocalDate(new Date().toISOString()),
-                  duration: `${Math.floor((900 - timeRemaining) / 60)} minutos`,
+                  // Use timestamps to avoid negative durations
+                  duration: (() => {
+                    const startMs = tradeData?.createdAt ? new Date(tradeData.createdAt as any).getTime() : Date.now();
+                    const endMs = tradeData?.completedAt ? new Date(tradeData.completedAt as any).getTime() : Date.now();
+                    const mins = Math.max(0, Math.round((endMs - startMs) / 60000));
+                    return `${mins} minutos`;
+                  })(),
                 }
               });
             } catch {}
