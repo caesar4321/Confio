@@ -63,7 +63,7 @@ class UnifiedUSDCTransaction(models.Model):
     # Transaction tracking
     transaction_hash = models.CharField(max_length=66, blank=True, null=True)
     block_number = models.BigIntegerField(blank=True, null=True)
-    network = models.CharField(max_length=20, default='SUI')
+    network = models.CharField(max_length=20, default='ALGORAND')
     
     # Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES)

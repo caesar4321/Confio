@@ -160,7 +160,7 @@ def create_unified_usdc_transaction_from_conversion(conversion):
                 # Transaction tracking
                 'transaction_hash': conversion.from_transaction_hash,
                 'block_number': None,
-                'network': 'SUI',
+                'network': 'ALGORAND',
                 
                 # Status
                 'status': conversion.status,

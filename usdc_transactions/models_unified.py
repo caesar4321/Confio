@@ -16,6 +16,7 @@ class UnifiedUSDCTransactionTable(models.Model):
     
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
+        ('PENDING_SIG', 'Pending Signature'),
         ('PROCESSING', 'Processing'),
         ('COMPLETED', 'Completed'),
         ('FAILED', 'Failed'),
@@ -94,7 +95,7 @@ class UnifiedUSDCTransactionTable(models.Model):
     # Transaction tracking
     transaction_hash = models.CharField(max_length=66, blank=True, null=True)
     block_number = models.BigIntegerField(blank=True, null=True)
-    network = models.CharField(max_length=20, default='SUI')
+    network = models.CharField(max_length=20, default='ALGORAND')
     
     # Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True)

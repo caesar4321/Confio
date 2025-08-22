@@ -7,5 +7,5 @@ class BlockchainConfig(AppConfig):
     verbose_name = 'Blockchain Integration'
     
     def ready(self):
-        # Import settings when app is ready
-        from . import blockchain_settings
+        # No-op: Sui settings module removed; Algorand uses Django settings directly
+        return
