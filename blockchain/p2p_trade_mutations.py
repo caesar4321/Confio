@@ -361,16 +361,19 @@ class SubmitP2PCreateTrade(graphene.Mutation):
             missing = sorted([i for i in range(total_count) if i not in signed_by_idx])
             if len(missing) != len(user_signed_dicts):
                 return cls(success=False, error='Unexpected group shape: expected two user transactions')
-            # Log expected vs actual sender for debugging, but do not preflight-block
+            # Enforce that the AXFER sender matches the expected seller address from the AppCall accounts
             try:
                 expected_seller = None
                 if app_call_txn_dict and app_call_txn_dict.get('apat'):
                     expected_seller = algo_encoding.encode_address(app_call_txn_dict['apat'][0])
-                user_sender_addr = algo_encoding.encode_address(user_dict['txn'].get('snd')) if user_dict.get('txn', {}).get('snd') else None
-                logger.info('[P2P Submit] Group index inference: user_index=%s; app.accounts[0]=%s; user_axfer.sender=%s', user_index, expected_seller, user_sender_addr)
+                # Classify user-signed dicts earlier
+                axfer_dict = next((d for d in user_signed_dicts if d.get('txn', {}).get('type') == 'axfer'), None)
+                user_sender_addr = algo_encoding.encode_address(axfer_dict['txn'].get('snd')) if axfer_dict and axfer_dict.get('txn', {}).get('snd') else None
+                logger.info('[P2P Submit] Seller address check: expected=%s actual=%s', expected_seller, user_sender_addr)
                 if expected_seller and user_sender_addr and expected_seller != user_sender_addr:
-                    logger.error('[P2P Submit] Address mismatch: expected seller=%s active wallet=%s (submitting for on-chain validation)', expected_seller, user_sender_addr)
+                    return cls(success=False, error=f'Active wallet does not match seller address for this trade. Expected {expected_seller}, got {user_sender_addr}. Switch wallet or update your active account and retry.')
             except Exception:
+                # If we cannot determine addresses, proceed and rely on on-chain validation
                 pass
         except Exception as e:
             return cls(success=False, error=f'Failed to sign sponsor txns: {e}')
@@ -1076,7 +1079,9 @@ class PrepareP2PMarkPaid(graphene.Mutation):
             app_sponsor = gs.get('sponsor_address')
             env_sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
             try:
-                env_sponsor_from_mn = mnemonic.to_public_key(getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', '')) if getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None) else None
+                from algosdk import account as algo_account
+                _mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+                env_sponsor_from_mn = algo_account.address_from_private_key(mnemonic.to_private_key(_mn)) if _mn else None
             except Exception:
                 env_sponsor_from_mn = None
             logger.info('[P2P Prepare][mark_paid] Sponsor sanity: app=%s env_addr=%s env_from_mn=%s', (app_sponsor or '')[:12], (env_sponsor_addr or '')[:12], (env_sponsor_from_mn or '')[:12])
@@ -1356,6 +1361,461 @@ class CancelP2PTrade(graphene.Mutation):
         except Exception as e:
             return cls(success=False, error=str(e))
 
+class PrepareP2POpenDispute(graphene.Mutation):
+    class Arguments:
+        trade_id = graphene.String(required=True)
+        reason = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    user_transactions = graphene.List(graphene.String)
+    sponsor_transactions = graphene.List(SponsorTxnType)
+    group_id = graphene.String()
+    trade_id = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, trade_id: str, reason: str):
+        user = info.context.user
+        if not user.is_authenticated:
+            return cls(success=False, error='Not authenticated')
+
+        # Ensure user is part of the trade (buyer/seller; user or business)
+        trade = P2PTrade.objects.filter(id=trade_id).select_related('buyer_user', 'seller_user', 'buyer_business', 'seller_business').first()
+        if not trade:
+            return cls(success=False, error='Trade not found')
+
+        # Resolve opener address from the side the user controls
+        acct = None
+        try:
+            # Business side first
+            if trade.buyer_business_id:
+                from users.models import Business
+                try:
+                    biz = Business.objects.get(id=trade.buyer_business_id)
+                    if biz.accounts.filter(user=user, deleted_at__isnull=True).exists():
+                        acct = Account.objects.filter(business=biz, account_type='business', user=user, deleted_at__isnull=True).first() or \
+                               Account.objects.filter(business=biz, account_type='business', deleted_at__isnull=True).first()
+                except Business.DoesNotExist:
+                    pass
+            if not acct and trade.seller_business_id:
+                from users.models import Business
+                try:
+                    biz = Business.objects.get(id=trade.seller_business_id)
+                    if biz.accounts.filter(user=user, deleted_at__isnull=True).exists():
+                        acct = Account.objects.filter(business=biz, account_type='business', user=user, deleted_at__isnull=True).first() or \
+                               Account.objects.filter(business=biz, account_type='business', deleted_at__isnull=True).first()
+                except Business.DoesNotExist:
+                    pass
+            # Personal side fallback
+            if not acct and (trade.buyer_user_id == user.id or trade.seller_user_id == user.id):
+                acct = Account.objects.filter(user_id=user.id, account_type='personal', deleted_at__isnull=True).order_by('account_index').first()
+        except Exception:
+            acct = None
+        if not acct or not acct.algorand_address:
+            return cls(success=False, error='Opener Algorand address not found for this trade')
+
+        builder = P2PTradeTransactionBuilder()
+        res = builder.build_open_dispute(acct.algorand_address, trade_id, reason)
+        if not res.success:
+            return cls(success=False, error=res.error)
+
+        return cls(
+            success=True,
+            user_transactions=[t.get('txn') for t in (res.transactions_to_sign or [])],
+            sponsor_transactions=[SponsorTxnType(txn=e.get('txn'), index=e.get('index')) for e in (res.sponsor_transactions or [])],
+            group_id=res.group_id,
+            trade_id=trade_id,
+        )
+
+
+class SubmitP2POpenDispute(graphene.Mutation):
+    class Arguments:
+        trade_id = graphene.String(required=True)
+        signed_user_txn = graphene.String(required=True)
+        sponsor_transactions = graphene.List(graphene.JSONString, required=True)
+        reason = graphene.String(required=False)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    txid = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, trade_id: str, signed_user_txn: str, sponsor_transactions: List[str], reason: Optional[str] = None):
+        user = info.context.user
+        if not user.is_authenticated:
+            return cls(success=False, error='Not authenticated')
+
+        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+
+        # Decode user-signed AppCall
+        try:
+            user_signed = _b64_to_bytes(signed_user_txn)
+            user_dict = msgpack.unpackb(user_signed, raw=False)
+            if user_dict.get('txn', {}).get('type') != 'appl':
+                return cls(success=False, error='Signed transaction is not an AppCall')
+        except Exception as e:
+            return cls(success=False, error=f'Invalid signed AppCall: {e}')
+
+        # Sign sponsor txn and submit group
+        try:
+            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+            if not sponsor_mn:
+                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
+            sk = mnemonic.to_private_key(sponsor_mn)
+
+            parsed = [json.loads(s) if isinstance(s, str) else s for s in (sponsor_transactions or [])]
+            if not parsed:
+                return cls(success=False, error='Missing sponsor transaction')
+            b = base64.b64decode(parsed[0].get('txn'))
+            tx = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False))
+            stx0 = tx.sign(sk)
+            user_stx = transaction.SignedTransaction.undictify(user_dict)
+            txid = algod_client.send_transactions([stx0, user_stx])
+            ref_txid = user_stx.get_txid()
+            transaction.wait_for_confirmation(algod_client, ref_txid, 8)
+
+            # Reflect in DB: set status and create dispute record
+            try:
+                trade = P2PTrade.objects.filter(id=trade_id).first()
+                if trade and trade.status not in ('DISPUTED', 'CANCELLED', 'COMPLETED'):
+                    trade.status = 'DISPUTED'
+                    trade.updated_at = timezone.now()
+                    trade.save(update_fields=['status', 'updated_at'])
+                # Create dispute record if missing
+                try:
+                    from users.jwt_context import get_jwt_business_context_with_validation
+                    from p2p_exchange.models import P2PDispute
+                    exists = False
+                    try:
+                        _ = trade.dispute_details
+                        exists = True
+                    except Exception:
+                        exists = False
+                    if trade and not exists:
+                        dispute_kwargs = {
+                            'trade': trade,
+                            'reason': (reason or 'Dispute opened on-chain').strip(),
+                            'priority': 2,
+                            'status': 'UNDER_REVIEW',
+                        }
+                        jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+                        user = getattr(info.context, 'user', None)
+                        if jwt_context and jwt_context.get('account_type') == 'business' and jwt_context.get('business_id'):
+                            # Assign to buyer/seller business if matches
+                            try:
+                                if trade.buyer_business_id == jwt_context.get('business_id'):
+                                    dispute_kwargs['initiator_business'] = trade.buyer_business
+                                elif trade.seller_business_id == jwt_context.get('business_id'):
+                                    dispute_kwargs['initiator_business'] = trade.seller_business
+                                elif user and getattr(user, 'id', None):
+                                    dispute_kwargs['initiator_user'] = user
+                            except Exception:
+                                if user and getattr(user, 'id', None):
+                                    dispute_kwargs['initiator_user'] = user
+                        else:
+                            if user and getattr(user, 'id', None):
+                                dispute_kwargs['initiator_user'] = user
+                        P2PDispute.objects.create(**dispute_kwargs)
+                except Exception:
+                    pass
+                # Record system message
+                try:
+                    from p2p_exchange.models import P2PMessage
+                    P2PMessage.objects.create(
+                        trade=trade,
+                        message='🚩 Disputa abierta en cadena',
+                        sender_type='system',
+                        message_type='system',
+                    )
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
+            return cls(success=True, txid=ref_txid)
+        except Exception as e:
+            return cls(success=False, error=str(e))
+
+
+class PrepareP2PResolveDispute(graphene.Mutation):
+    class Arguments:
+        trade_id = graphene.String(required=True)
+        winner = graphene.String(required=True, description='"BUYER" or "SELLER"')
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    user_transactions = graphene.List(graphene.String)
+    sponsor_transactions = graphene.List(SponsorTxnType)
+    group_id = graphene.String()
+    trade_id = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, trade_id: str, winner: str):
+        user = info.context.user
+        if not user.is_authenticated:
+            return cls(success=False, error='Not authenticated')
+        if not (user.is_staff or user.is_superuser):
+            return cls(success=False, error='Admin privileges required')
+
+        trade = P2PTrade.objects.filter(id=trade_id).select_related('buyer_user', 'seller_user', 'buyer_business', 'seller_business').first()
+        if not trade:
+            return cls(success=False, error='Trade not found')
+
+        # Resolve winner address from side
+        side = (winner or '').strip().upper()
+        if side not in ('BUYER', 'SELLER'):
+            return cls(success=False, error='winner must be BUYER or SELLER')
+
+        def _resolve_address_for_user(u) -> Optional[str]:
+            a = Account.objects.filter(user_id=u.id, account_type='personal', deleted_at__isnull=True).order_by('account_index').first()
+            return getattr(a, 'algorand_address', None) if a else None
+
+        def _resolve_address_for_business(biz_id) -> Optional[str]:
+            from users.models import Business
+            try:
+                biz = Business.objects.get(id=biz_id)
+            except Business.DoesNotExist:
+                return None
+            a = Account.objects.filter(business=biz, account_type='business', deleted_at__isnull=True).order_by('account_index').first()
+            return getattr(a, 'algorand_address', None) if a else None
+
+        winner_addr = None
+        if side == 'BUYER':
+            winner_addr = _resolve_address_for_business(trade.buyer_business_id) if trade.buyer_business_id else (
+                _resolve_address_for_user(trade.buyer_user) if trade.buyer_user_id else None)
+        else:
+            winner_addr = _resolve_address_for_business(trade.seller_business_id) if trade.seller_business_id else (
+                _resolve_address_for_user(trade.seller_user) if trade.seller_user_id else None)
+        if not winner_addr:
+            return cls(success=False, error='Winner Algorand address not found')
+
+        # Resolve admin caller address (personal account)
+        admin_acct = Account.objects.filter(user_id=user.id, account_type='personal', deleted_at__isnull=True).order_by('account_index').first()
+        if not admin_acct or not admin_acct.algorand_address:
+            return cls(success=False, error='Admin Algorand address not found')
+
+        builder = P2PTradeTransactionBuilder()
+        res = builder.build_resolve_dispute(admin_acct.algorand_address, trade_id, winner_addr)
+        if not res.success:
+            return cls(success=False, error=res.error)
+        return cls(
+            success=True,
+            user_transactions=[t.get('txn') for t in (res.transactions_to_sign or [])],
+            sponsor_transactions=[SponsorTxnType(txn=e.get('txn'), index=e.get('index')) for e in (res.sponsor_transactions or [])],
+            group_id=res.group_id,
+            trade_id=trade_id,
+        )
+
+
+class SubmitP2PResolveDispute(graphene.Mutation):
+    class Arguments:
+        trade_id = graphene.String(required=True)
+        signed_user_txn = graphene.String(required=True)
+        sponsor_transactions = graphene.List(graphene.JSONString, required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    txid = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, trade_id: str, signed_user_txn: str, sponsor_transactions: List[str]):
+        user = info.context.user
+        if not user.is_authenticated:
+            return cls(success=False, error='Not authenticated')
+        if not (user.is_staff or user.is_superuser):
+            return cls(success=False, error='Admin privileges required')
+
+        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+
+        try:
+            user_signed = _b64_to_bytes(signed_user_txn)
+            user_dict = msgpack.unpackb(user_signed, raw=False)
+            if user_dict.get('txn', {}).get('type') != 'appl':
+                return cls(success=False, error='Signed transaction is not an AppCall')
+        except Exception as e:
+            return cls(success=False, error=f'Invalid signed AppCall: {e}')
+
+        try:
+            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+            if not sponsor_mn:
+                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
+            sk = mnemonic.to_private_key(sponsor_mn)
+
+            parsed = [json.loads(s) if isinstance(s, str) else s for s in (sponsor_transactions or [])]
+            if not parsed:
+                return cls(success=False, error='Missing sponsor transaction')
+            b = base64.b64decode(parsed[0].get('txn'))
+            tx = transaction.Transaction.undictify(msgpack.unpackb(b, raw=False))
+            stx0 = tx.sign(sk)
+            user_stx = transaction.SignedTransaction.undictify(user_dict)
+            txid = algod_client.send_transactions([stx0, user_stx])
+            ref_txid = user_stx.get_txid()
+            transaction.wait_for_confirmation(algod_client, ref_txid, 8)
+
+            # Reflect resolution locally (best-effort)
+            try:
+                trade = P2PTrade.objects.filter(id=trade_id).select_related('escrow').first()
+                if trade:
+                    # If escrow exists, mark as released
+                    try:
+                        escrow = getattr(trade, 'escrow', None)
+                        if escrow and escrow.is_escrowed and not escrow.is_released:
+                            escrow.is_released = True
+                            # Do not guess winner here; just mark disputed release
+                            escrow.release_type = 'DISPUTE_RELEASE'
+                            escrow.release_amount = escrow.escrow_amount
+                            escrow.release_transaction_hash = ref_txid
+                            escrow.released_at = timezone.now()
+                            escrow.save(update_fields=['is_released', 'release_type', 'release_amount', 'release_transaction_hash', 'released_at', 'updated_at'])
+                    except Exception:
+                        pass
+                    # Trade terminal status will be updated by the admin DB flow as well
+                    trade.updated_at = timezone.now()
+                    trade.save(update_fields=['updated_at'])
+                    try:
+                        from p2p_exchange.models import P2PMessage
+                        P2PMessage.objects.create(
+                            trade=trade,
+                            message='✅ Disputa resuelta en cadena',
+                            sender_type='system',
+                            message_type='system',
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            return cls(success=True, txid=ref_txid)
+        except Exception as e:
+            return cls(success=False, error=str(e))
+
+
+# Backend-only: Admin resolves dispute on-chain (server signs both txns)
+class ResolveP2pDisputeOnchain(graphene.Mutation):
+    class Arguments:
+        trade_id = graphene.String(required=True)
+        winner = graphene.String(required=True, description='"BUYER" or "SELLER"')
+
+    success = graphene.Boolean()
+    error = graphene.String()
+    txid = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, trade_id: str, winner: str):
+        user = info.context.user
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return cls(success=False, error='Authentication required')
+        if not (user.is_staff or user.is_superuser):
+            return cls(success=False, error='Admin privileges required')
+
+        # Require server-held admin mnemonic
+        admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None)
+        if not admin_mn:
+            return cls(success=False, error='Server missing ALGORAND_ADMIN_MNEMONIC')
+
+        try:
+            from algosdk import mnemonic
+            from algosdk.v2client import algod
+            from algosdk import encoding as algo_encoding
+            from algosdk import transaction
+            import msgpack
+
+            # Resolve winner address from trade
+            trade = P2PTrade.objects.filter(id=trade_id).select_related('buyer_user', 'seller_user', 'buyer_business', 'seller_business').first()
+            if not trade:
+                return cls(success=False, error='Trade not found')
+
+            side = (winner or '').strip().upper()
+            if side not in ('BUYER', 'SELLER'):
+                return cls(success=False, error='winner must be BUYER or SELLER')
+
+            def _resolve_addr_user(u) -> Optional[str]:
+                a = Account.objects.filter(user_id=getattr(u, 'id', None), account_type='personal', deleted_at__isnull=True).order_by('account_index').first()
+                return getattr(a, 'algorand_address', None) if a else None
+
+            def _resolve_addr_biz(biz_id) -> Optional[str]:
+                from users.models import Business
+                try:
+                    biz = Business.objects.get(id=biz_id)
+                except Business.DoesNotExist:
+                    return None
+                a = Account.objects.filter(business=biz, account_type='business', deleted_at__isnull=True).order_by('account_index').first()
+                return getattr(a, 'algorand_address', None) if a else None
+
+            winner_addr = None
+            if side == 'BUYER':
+                winner_addr = _resolve_addr_biz(trade.buyer_business_id) if trade.buyer_business_id else _resolve_addr_user(trade.buyer_user)
+            else:
+                winner_addr = _resolve_addr_biz(trade.seller_business_id) if trade.seller_business_id else _resolve_addr_user(trade.seller_user)
+            if not winner_addr:
+                return cls(success=False, error='Winner Algorand address not found')
+
+            # Admin sender address
+            from algosdk import account as algo_account
+            admin_sk = mnemonic.to_private_key(admin_mn)
+            admin_addr = algo_account.address_from_private_key(admin_sk)
+
+            # Build group
+            builder = P2PTradeTransactionBuilder()
+            res = builder.build_resolve_dispute(admin_addr, trade_id, winner_addr)
+            if not res.success:
+                return cls(success=False, error=res.error)
+
+            # Sign sponsor txn
+            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+            if not sponsor_mn:
+                return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
+            sponsor_sk = mnemonic.to_private_key(sponsor_mn)
+
+            parsed = [json.loads(s) if isinstance(s, str) else s for s in (res.sponsor_transactions or [])]
+            if not parsed:
+                return cls(success=False, error='Missing sponsor transaction from builder')
+
+            # Undictify and sign
+            sponsor_b = base64.b64decode(parsed[0].get('txn'))
+            sponsor_tx = transaction.Transaction.undictify(msgpack.unpackb(sponsor_b, raw=False))
+            stx0 = sponsor_tx.sign(sponsor_sk)
+
+            # User/admin appcall: res.transactions_to_sign[0]
+            if not res.transactions_to_sign:
+                return cls(success=False, error='Missing admin AppCall from builder')
+            appcall_b64 = (res.transactions_to_sign[0] or {}).get('txn')
+            if not appcall_b64:
+                return cls(success=False, error='Missing admin AppCall payload')
+            appcall_tx = transaction.Transaction.undictify(msgpack.unpackb(base64.b64decode(appcall_b64), raw=False))
+            stx1 = appcall_tx.sign(admin_sk)
+
+            algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            txid = algod_client.send_transactions([stx0, stx1])
+            ref_txid = stx1.get_txid()
+            try:
+                transaction.wait_for_confirmation(algod_client, ref_txid, 8)
+            except Exception:
+                pass
+
+            # Best-effort local bookkeeping (status handled elsewhere in admin flow)
+            try:
+                trade.updated_at = timezone.now()
+                trade.save(update_fields=['updated_at'])
+                from p2p_exchange.models import P2PMessage
+                P2PMessage.objects.create(
+                    trade=trade,
+                    message=f'✅ Disputa resuelta en cadena ({side})',
+                    sender_type='system',
+                    message_type='system',
+                )
+            except Exception:
+                pass
+
+            return cls(success=True, txid=ref_txid)
+        except Exception as e:
+            logger.exception('[P2P Dispute] Backend resolve error: %r', e)
+            return cls(success=False, error=str(e))
 # Late-bind fields that depend on classes defined earlier in the module
 P2PTradeMutations.cancel_p2p_trade = CancelP2PTrade.Field()
 P2PTradePrepareMutations.prepare_p2p_cancel = PrepareP2PCancel.Field()
+P2PTradePrepareMutations.prepare_p2p_open_dispute = PrepareP2POpenDispute.Field()
+P2PTradeMutations.submit_p2p_open_dispute = SubmitP2POpenDispute.Field()
+P2PTradePrepareMutations.prepare_p2p_resolve_dispute = PrepareP2PResolveDispute.Field()
+P2PTradeMutations.submit_p2p_resolve_dispute = SubmitP2PResolveDispute.Field()
+P2PTradeMutations.resolve_p2p_dispute_onchain = ResolveP2pDisputeOnchain.Field()

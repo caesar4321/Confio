@@ -379,6 +379,30 @@ export const CANCEL_P2P_TRADE = gql`
   }
 `;
 
+// P2P Trade — open dispute (buyer or seller)
+export const PREPARE_P2P_OPEN_DISPUTE = gql`
+  mutation PrepareP2pOpenDispute($tradeId: String!, $reason: String!) {
+    prepareP2pOpenDispute(tradeId: $tradeId, reason: $reason) {
+      success
+      error
+      userTransactions
+      sponsorTransactions { txn index }
+      groupId
+      tradeId
+    }
+  }
+`;
+
+export const SUBMIT_P2P_OPEN_DISPUTE = gql`
+  mutation SubmitP2pOpenDispute($tradeId: String!, $signedUserTxn: String!, $sponsorTransactions: [JSONString!]!, $reason: String) {
+    submitP2pOpenDispute(tradeId: $tradeId, signedUserTxn: $signedUserTxn, sponsorTransactions: $sponsorTransactions, reason: $reason) {
+      success
+      error
+      txid
+    }
+  }
+`;
+
 export const GET_CONVERSIONS = gql`
   query GetConversions($limit: Int, $status: String) {
     conversions(limit: $limit, status: $status) {
