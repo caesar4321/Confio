@@ -414,7 +414,7 @@ class ConfioAdminSite(admin.AdminSite):
             select={'day': 'date(payments_paymenttransaction.created_at)'}
         ).values('day').annotate(
             count=Count('id'),
-            cusd_count=Count('id', filter=Q(token_type='cUSD')),
+            cusd_count=Count('id', filter=Q(token_type='CUSD')),
             confio_count=Count('id', filter=Q(token_type='CONFIO'))
         ).order_by('day')
         

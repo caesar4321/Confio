@@ -46,7 +46,7 @@ async function getJwtToken(): Promise<string | null> {
       return tokens.accessToken || null;
     }
   } catch (e) {
-    console.error('[payWs] token error', e);
+    console.log('[payWs] token error', e);
   }
   return null;
 }
@@ -144,7 +144,7 @@ export class PayWsSession {
       this.pendingRejectors['submit'] = reject as any;
       const t = setTimeout(() => {
         if (this.pendingRejectors['submit']) {
-          console.error('[payWs] submit timeout');
+          console.log('[payWs] submit timeout');
           this.pendingRejectors['submit'](new Error('submit_timeout'));
           delete this.pendingRejectors['submit']; delete this.pendingResolvers['submit'];
         }

@@ -26,7 +26,7 @@ class PaymentTransaction(SoftDeleteModel):
     ]
 
     TOKEN_TYPES = [
-        ('cUSD', 'Confío Dollar'),
+        ('CUSD', 'Confío Dollar'),
         ('CONFIO', 'Confío Token'),
         ('USDC', 'USD Coin')
     ]
@@ -203,7 +203,7 @@ class Invoice(SoftDeleteModel):
     ]
 
     TOKEN_TYPES = [
-        ('cUSD', 'Confío Dollar'),
+        ('CUSD', 'Confío Dollar'),
         ('CONFIO', 'Confío Token'),
         ('USDC', 'USD Coin')
     ]
