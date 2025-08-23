@@ -26,6 +26,7 @@ import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import moment from 'moment';
 import 'moment/locale/es';
 import { useQuery } from '@apollo/client';
+import { contactService } from '../services/contactService';
 import { GET_SEND_TRANSACTION_BY_ID } from '../apollo/queries';
 import { useContactNameSync } from '../hooks/useContactName';
 import { getPreferredDisplayName, getPreferredSecondaryLine } from '../utils/contactDisplay';
@@ -1065,10 +1066,20 @@ export const TransactionDetailScreen = () => {
     }
   }
   
-  // Fetch transaction data if we only have an ID and minimal data
-  // Check if we have the essential fields for display
-  const hasCompleteData = transactionData?.amount && transactionData?.from && transactionData?.to;
-  const needsFetch = (transactionData?.id || transactionData?.transaction_id) && !hasCompleteData;
+  // Fetch transaction data if we lack phoneKey-style phones (to mirror AccountDetail behavior)
+  // Basic completeness for UI
+  const hasCompleteData = Boolean(transactionData?.amount && transactionData?.from && transactionData?.to);
+  // Phone presence by direction
+  const routeTypeLower = (transactionType || transactionData?.transaction_type || '').toString().toLowerCase();
+  const hasRecipientPhone = Boolean(
+    (transactionData as any)?.toPhone || (transactionData as any)?.recipient_phone || (transactionData as any)?.recipientPhone
+  );
+  const hasSenderPhone = Boolean(
+    (transactionData as any)?.fromPhone || (transactionData as any)?.sender_phone || (transactionData as any)?.senderPhone
+  );
+  const lacksPhonesForSend = routeTypeLower === 'sent' ? !hasRecipientPhone : (routeTypeLower === 'received' ? !hasSenderPhone : false);
+  // Decide fetch: if send-type and we don't have phoneKey-style phones, fetch even if names exist
+  const needsFetch = Boolean((transactionData?.id || transactionData?.transaction_id) && (lacksPhonesForSend));
   const transactionId = transactionData?.id || transactionData?.transaction_id;
   
   console.log('[TransactionDetailScreen] Data parsing:', {
@@ -1230,6 +1241,12 @@ export const TransactionDetailScreen = () => {
       tokenType: tx.tokenType,
     });
     
+    // Determine invitation flags accurately: only when there is an invitation context
+    const inviteFromRoute = Boolean((transactionData as any)?.is_invited_friend || (transactionData as any)?.isInvitedFriend);
+    const isInvite = Boolean(tx.invitationExpiresAt) || inviteFromRoute;
+    const claimedFromRoute = Boolean((transactionData as any)?.invitationClaimed || (transactionData as any)?.invitation_claimed);
+    const revertedFromRoute = Boolean((transactionData as any)?.invitationReverted || (transactionData as any)?.invitation_reverted);
+
     txData = {
       ...(transactionData || {}),
       type: resolvedType,
@@ -1245,15 +1262,16 @@ export const TransactionDetailScreen = () => {
       hash: tx.transactionHash || '',
       note: tx.memo || '',
       avatar: (resolvedType === 'sent' ? tx.recipientDisplayName : tx.senderDisplayName)?.[0] || 'U',
-      isInvitedFriend: !!tx.invitationExpiresAt,
+      isInvitedFriend: isInvite,
       invitationExpiresAt: tx.invitationExpiresAt,
-      invitationClaimed: !!(tx.recipientUser && tx.recipientUser.id),
+      invitationClaimed: isInvite ? claimedFromRoute : false,
+      invitationReverted: isInvite ? revertedFromRoute : false,
       transaction_type: 'send',
       // Add phone keys from fetched data (prefer user.phoneKey over legacy fields)
-      sender_phone: (tx.senderUser as any)?.phoneKey || tx.senderPhone,
-      recipient_phone: (tx.recipientUser as any)?.phoneKey || tx.recipientPhone,
-      senderPhone: (tx.senderUser as any)?.phoneKey || tx.senderPhone,
-      recipientPhone: (tx.recipientUser as any)?.phoneKey || tx.recipientPhone,
+      sender_phone: (tx.senderUser as any)?.phoneKey || (tx.senderPhone || undefined),
+      recipient_phone: (tx.recipientUser as any)?.phoneKey || (tx.recipientPhone || undefined),
+      senderPhone: (tx.senderUser as any)?.phoneKey || (tx.senderPhone || undefined),
+      recipientPhone: (tx.recipientUser as any)?.phoneKey || (tx.recipientPhone || undefined),
     };
     // If opened via an invite-received notification, force receiver perspective
     if (transactionData?.notification_type === 'INVITE_RECEIVED') {
@@ -1443,7 +1461,7 @@ export const TransactionDetailScreen = () => {
   
   const senderContactInfo = useContactNameSync(senderPhone, senderFallbackName);
   // Only use contact sync if we have a phone number or a valid name
-  const shouldUseContactSync = recipientPhone || (recipientFallbackName && !recipientFallbackName.startsWith('0x'));
+  const shouldUseContactSync = (recipientPhone && recipientPhone.trim() !== '') || (recipientFallbackName && !recipientFallbackName.startsWith('0x'));
   console.log('[TransactionDetailScreen] Contact sync decision:', {
     recipientPhone,
     recipientFallbackName,
@@ -1455,9 +1473,30 @@ export const TransactionDetailScreen = () => {
     recipientAddress: currentTx?.recipient_address
   });
   
+  // Derive phone from local contact by name when phone isn't present or didn't match a contact
+  // Try derive by Algorand address first (more reliable than name)
+  const toAlgAddress = currentTx?.toAddress || currentTx?.recipient_address;
+  const recipientContactByAddress = (!recipientPhone && toAlgAddress)
+    ? (contactService.getContactByAlgorandAddressSync
+        ? contactService.getContactByAlgorandAddressSync(toAlgAddress)
+        : null)
+    : null;
+  const derivedRecipientPhoneFromAddress = recipientContactByAddress?.normalizedPhones?.[0] || recipientContactByAddress?.phoneNumbers?.[0] || null;
+
+  const recipientContactByName = (!recipientPhone && recipientFallbackName)
+    ? (contactService.getContactByNameFuzzy
+        ? contactService.getContactByNameFuzzy(recipientFallbackName)
+        : contactService.getContactByNameSync(recipientFallbackName))
+    : null;
+  const derivedRecipientPhoneFromName = recipientContactByName?.normalizedPhones?.[0] || recipientContactByName?.phoneNumbers?.[0] || null;
+  const resolvedRecipientPhone = (recipientPhone && recipientPhone.trim() !== '') 
+    ? recipientPhone 
+    : (derivedRecipientPhoneFromAddress || derivedRecipientPhoneFromName || undefined);
+
   const recipientContactInfo = shouldUseContactSync
-    ? useContactNameSync(recipientPhone, recipientFallbackName)
+    ? useContactNameSync(resolvedRecipientPhone, recipientFallbackName)
     : { displayName: '', isFromContacts: false };
+
   
   console.log('[TransactionDetailScreen] Contact info results:', {
     senderContactInfo,
@@ -1535,6 +1574,24 @@ export const TransactionDetailScreen = () => {
   const preferredTo = getPreferredDisplayName(recipientPhone, recipientContactInfo.displayName);
   const displayFromName = preferredFrom.name;
   let displayToName = preferredTo.name;
+  if (!recipientContactInfo.isFromContacts) {
+    if (recipientContactByAddress?.name) displayToName = recipientContactByAddress.name;
+    else if (recipientContactByName?.name) displayToName = recipientContactByName.name;
+  }
+
+  // As a last-resort enhancement for notifications where phones may be missing
+  // prefer the user's local contact name by exact name match when no phone match exists.
+  try {
+    if (!preferredTo.fromContacts) {
+      const nameHint = (currentTx?.to || currentTx?.recipientName || currentTx?.recipient_name || '').toString().trim();
+      if (nameHint) {
+        const byName = contactService.getContactByNameSync(nameHint);
+        if (byName && byName.name) {
+          displayToName = byName.name;
+        }
+      }
+    }
+  } catch {}
   
   console.log('[TransactionDetailScreen] Display names:', {
     displayFromName,
@@ -1718,7 +1775,7 @@ export const TransactionDetailScreen = () => {
                 <Text style={styles.invitationText}>Tu amigo tiene 7 días para reclamar</Text>
               </View>
             )}
-            {!showInvitationWarning && invitationClaimed && (currentTx.type === 'send' || currentTx.type === 'sent') && (
+            {!showInvitationWarning && isInvitedFriend && invitationClaimed && (currentTx.type === 'send' || currentTx.type === 'sent') && (
               <View style={[styles.invitationNotice, { backgroundColor: '#10b981' }]}> 
                 <Icon name="check-circle" size={16} color="#fff" style={{ marginRight: 6 }} />
                 <Text style={styles.invitationText}>Invitación reclamada</Text>
@@ -1908,7 +1965,7 @@ export const TransactionDetailScreen = () => {
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
                         {(() => {
-                          const phoneVal = recipientPhone || currentTx.recipient_phone;
+                          const phoneVal = resolvedRecipientPhone || currentTx.recipient_phone || derivedRecipientPhoneFromName;
                           const forcePhone = !!phoneVal || !!preferredTo.fromContacts;
                           const isExternalHeuristic = !!(currentTx.is_external_address || (currentTx.toAddress && !currentTx.recipient_phone));
                           return getPreferredSecondaryLine({
@@ -2410,6 +2467,89 @@ export const TransactionDetailScreen = () => {
           </View>
         </View>
       </ScrollView>
+
+      {/* Technical Details Modal */}
+      <Modal
+        visible={showBlockchainDetails}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowBlockchainDetails(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Detalles técnicos</Text>
+              <TouchableOpacity onPress={() => setShowBlockchainDetails(false)} style={styles.headerButton}>
+                <Icon name="x" size={20} color={colors.dark} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalBody}>
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>Transacción</Text>
+                <View style={styles.technicalRow}>
+                  <Text style={styles.technicalLabel}>Red</Text>
+                  <Text style={styles.technicalValue}>{__DEV__ ? 'Testnet' : 'Mainnet'}</Text>
+                </View>
+                <View style={styles.technicalRow}>
+                  <Text style={styles.technicalLabel}>Hash</Text>
+                  <Text style={styles.technicalValue} numberOfLines={1}>
+                    {(() => {
+                      const h = (currentTx.transactionHash || currentTx.hash || '').toString();
+                      if (!h) return 'N/D';
+                      return h.replace(/(.{10}).+(.{6})/, '$1…$2');
+                    })()}
+                  </Text>
+                </View>
+                {(currentTx.fromAddress || currentTx.sender_address) && (
+                  <View style={styles.technicalRow}>
+                    <Text style={styles.technicalLabel}>De</Text>
+                    <Text style={styles.technicalValue} numberOfLines={1}>
+                      {(currentTx.fromAddress || currentTx.sender_address || '').toString()
+                        .replace(/(.{10}).+(.{6})/, '$1…$2')}
+                    </Text>
+                  </View>
+                )}
+                {(currentTx.toAddress || currentTx.recipient_address) && (
+                  <View style={styles.technicalRow}>
+                    <Text style={styles.technicalLabel}>Para</Text>
+                    <Text style={styles.technicalValue} numberOfLines={1}>
+                      {(currentTx.toAddress || currentTx.recipient_address || '').toString()
+                        .replace(/(.{10}).+(.{6})/, '$1…$2')}
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.technicalRow}>
+                  <Text style={styles.technicalLabel}>Monto</Text>
+                  <Text style={styles.technicalValue}>{formatAmount(currentTx.amount)} {currentTx.currency || 'cUSD'}</Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.explorerButton, { backgroundColor: colors.secondary }]}
+                onPress={async () => {
+                  try {
+                    const txid = (currentTx.transactionHash || currentTx.hash || '').toString();
+                    if (!txid) {
+                      Alert.alert('Sin hash', 'Aún no hay hash de transacción disponible.');
+                      return;
+                    }
+                    const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
+                    const url = `${base}/tx/${encodeURIComponent(txid)}/`;
+                    const canOpen = await Linking.canOpenURL(url);
+                    if (canOpen) await Linking.openURL(url);
+                    else Alert.alert('No se puede abrir', 'No se pudo abrir Pera Explorer.');
+                  } catch (e) {
+                    Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
+                  }
+                }}
+              >
+                <Icon name="external-link" size={16} color="#fff" style={styles.explorerIcon} />
+                <Text style={styles.explorerButtonText}>Abrir en Pera Explorer</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
