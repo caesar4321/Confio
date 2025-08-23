@@ -203,7 +203,7 @@ export const PaymentProcessingScreen = () => {
       try {
         const now = () => (typeof performance !== 'undefined' && (performance as any).now ? (performance as any).now() : Date.now());
         const t0 = now();
-      console.error('PaymentProcessingScreen[WS]: Start', { invoiceId: transactionData.invoiceId, preparedCount: prepared?.transactions?.length || 0 });
+      console.log('PaymentProcessingScreen[WS]: Start', { invoiceId: transactionData.invoiceId, preparedCount: prepared?.transactions?.length || 0 });
 
         // update UI steps
         setCurrentStep(0); // verifying
@@ -220,7 +220,7 @@ export const PaymentProcessingScreen = () => {
           const amt = parseFloat(String(transactionData.amount || '0'));
           const assetType = String(transactionData.currency || 'cUSD').toUpperCase();
           const note = `Invoice ${transactionData.invoiceId}`;
-      console.error('PaymentProcessingScreen[WS]: Calling prepareViaWs', { amt, assetType, note, recipientBusinessId: (transactionData as any).merchantBusinessId });
+      console.log('PaymentProcessingScreen[WS]: Calling prepareViaWs', { amt, assetType, note, recipientBusinessId: (transactionData as any).merchantBusinessId });
           const pack = await prepareViaWs({
             amount: amt,
             assetType,
@@ -236,7 +236,7 @@ export const PaymentProcessingScreen = () => {
             paymentId: (pack as any).paymentId || (pack as any).payment_id || transactionData.invoiceId,
             groupId: (pack as any).groupId || (pack as any).group_id
           } as any;
-        console.error('PaymentProcessingScreen[WS]: Prepared pack received');
+        console.log('PaymentProcessingScreen[WS]: Prepared pack received');
         }
 
         // Sign required transactions
@@ -245,7 +245,7 @@ export const PaymentProcessingScreen = () => {
         const { submitViaWs } = await import('../services/payWs');
 
         const transactions = (wsPack as any).transactions;
-      console.error('PaymentProcessingScreen[WS]: Signing transactions', { count: transactions.length });
+      console.log('PaymentProcessingScreen[WS]: Signing transactions', { count: transactions.length });
         const tSignStart = now();
         const signedTransactions: any[] = [];
         for (let i = 0; i < transactions.length; i++) {
@@ -266,14 +266,14 @@ export const PaymentProcessingScreen = () => {
         const tSignEnd = now();
 
       const paymentIdForSubmit = ((wsPack as any)?.paymentId as string) || (transactionData.invoiceId as string);
-      console.error('PaymentProcessingScreen[WS]: Submitting via WS', { indexes: signedTransactions.map(t => t.index), paymentIdForSubmit });
+      console.log('PaymentProcessingScreen[WS]: Submitting via WS', { indexes: signedTransactions.map(t => t.index), paymentIdForSubmit });
       const wsRes = await submitViaWs(signedTransactions, paymentIdForSubmit);
         if (!wsRes || (!wsRes.transactionId && !(wsRes as any).transaction_id)) {
           throw new Error('WS submit failed');
         }
         const txid = (wsRes as any).transactionId || (wsRes as any).transaction_id;
         const round = (wsRes as any).confirmedRound || (wsRes as any).confirmed_round;
-      console.error('PaymentProcessingScreen[WS]: Confirmed', { txid, round, sign_ms: Math.round(tSignEnd - tSignStart), total_ms: Math.round(now() - t0) });
+      console.log('PaymentProcessingScreen[WS]: Confirmed', { txid, round, sign_ms: Math.round(tSignEnd - tSignStart), total_ms: Math.round(now() - t0) });
         setIsComplete(true);
         setPaymentResponse({ blockchainTxId: txid, blockchainRound: round });
         return;

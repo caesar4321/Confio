@@ -205,6 +205,9 @@ class CreateInvoice(graphene.Mutation):
             merchant_type = 'business'
             merchant_display_name = merchant_business.name
 
+            # Normalize token type to canonical uppercase for DB/network
+            normalized_token = 'CUSD' if str(input.token_type).upper() == 'CUSD' else str(input.token_type).upper()
+
             # Create the invoice
             invoice = Invoice.objects.create(
                 created_by_user=user,
@@ -213,7 +216,7 @@ class CreateInvoice(graphene.Mutation):
                 merchant_type=merchant_type,
                 merchant_display_name=merchant_display_name,
                 amount=input.amount,
-                token_type=input.token_type,
+                token_type=normalized_token,
                 description=input.description or '',
                 expires_at=expires_at,
                 status='PENDING'
@@ -468,7 +471,8 @@ class PayInvoice(graphene.Mutation):
                 unique_id = str(uuid.uuid4())[:8]
                 temp_transaction_hash = f"temp_{invoice.invoice_id}_{microsecond_timestamp}_{unique_id}"
                 
-                # Create the payment transaction
+                # Create the payment transaction (normalize token type to backend canonical form)
+                normalized_token_type = 'CUSD' if str(invoice.token_type).upper() == 'CUSD' else str(invoice.token_type).upper()
                 payment_transaction = PaymentTransaction.objects.create(
                     payer_user=user,
                     payer_account=payer_account,
@@ -484,7 +488,7 @@ class PayInvoice(graphene.Mutation):
                     payer_address=payer_account.algorand_address,
                     merchant_address=invoice.merchant_account.algorand_address,
                     amount=invoice.amount,
-                    token_type=invoice.token_type,
+                    token_type=normalized_token_type,
                     description=invoice.description,
                     status='PENDING',
                     transaction_hash=temp_transaction_hash,  # Set temporary hash to avoid unique constraint violation
@@ -518,8 +522,8 @@ class PayInvoice(graphene.Mutation):
                     # Convert amount to proper format
                     amount_decimal = Decimal(str(invoice.amount))
                     
-                    # Determine asset type
-                    asset_type = 'CUSD' if invoice.token_type == 'cUSD' else invoice.token_type.upper()
+                    # Determine asset type (normalize to canonical uppercase)
+                    asset_type = 'CUSD' if str(invoice.token_type).upper() == 'CUSD' else str(invoice.token_type).upper()
                     
                     # Create sponsored payment transaction
                     # Note: The recipient business is already in JWT context
