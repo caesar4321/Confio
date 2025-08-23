@@ -1497,11 +1497,15 @@ class P2PDisputeAdmin(admin.ModelAdmin):
         if not obj.evidence_urls:
             return "No evidence submitted"
         
-        links = []
+        blocks = []
         for i, url in enumerate(obj.evidence_urls):
-            links.append(f'<a href="{url}" target="_blank">Evidence {i+1}</a>')
-        
-        return format_html('<br>'.join(links))
+            if isinstance(url, str) and (url.lower().endswith('.mp4') or 'video' in url.lower()):
+                blocks.append(
+                    f'<div style="margin:6px 0"><video controls width="360" src="{url}">Your browser does not support video.</video></div>'
+                )
+            else:
+                blocks.append(f'<a href="{url}" target="_blank">Evidence {i+1}</a>')
+        return format_html('<br>'.join(blocks))
     evidence_display.short_description = 'Evidence'
     
     fieldsets = (

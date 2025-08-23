@@ -641,6 +641,7 @@ class BankInfo(SoftDeleteModel):
         related_name='verified_bank_accounts',
         help_text="Admin user who verified this bank account"
     )
+
     
     class Meta:
         ordering = ['-is_default', '-created_at']

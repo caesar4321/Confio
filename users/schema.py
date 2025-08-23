@@ -33,6 +33,8 @@ from .graphql_employee import (
     BusinessEmployeeType, EmployerBusinessType
 )
 from .referral_mutations import SetReferrer, CheckReferralStatus
+from django.conf import settings
+from security.s3_utils import generate_presigned_put, build_s3_key, public_s3_url
 # Removed circular import - P2PPaymentMethodType will be referenced by string
 
 User = get_user_model()
@@ -1409,6 +1411,125 @@ class SubmitIdentityVerification(graphene.Mutation):
 		except Exception as e:
 			return SubmitIdentityVerification(success=False, error=str(e), verification=None)
 
+
+class PresignedUploadInfo(graphene.ObjectType):
+	url = graphene.String()
+	key = graphene.String()
+	method = graphene.String()
+	headers = graphene.JSONString()
+	expires_in = graphene.Int()
+
+
+class RequestIdentityUpload(graphene.Mutation):
+	class Arguments:
+		part = graphene.String(required=True, description="One of: front, back, selfie, payout")
+		filename = graphene.String(required=False)
+		content_type = graphene.String(required=False, default_value='image/jpeg')
+		sha256 = graphene.String(required=False)
+
+	upload = graphene.Field(PresignedUploadInfo)
+	success = graphene.Boolean()
+	error = graphene.String()
+
+	@classmethod
+	def mutate(cls, root, info, part, filename=None, content_type='image/jpeg', sha256=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return RequestIdentityUpload(upload=None, success=False, error="Authentication required")
+
+		if part not in ['front', 'back', 'selfie', 'payout']:
+			return RequestIdentityUpload(upload=None, success=False, error="Invalid part")
+		# Allow PDF for payout proof
+		allowed = ['image/jpeg', 'image/png'] if part != 'payout' else ['image/jpeg', 'image/png', 'application/pdf']
+		if content_type not in allowed:
+			return RequestIdentityUpload(upload=None, success=False, error="Unsupported content type")
+
+		prefix = getattr(settings, 'AWS_S3_ID_PREFIX', 'kyc/')
+		subdir = 'payouts' if part == 'payout' else ''
+		base = f"{prefix}{user.id}/{subdir}" if subdir else f"{prefix}{user.id}"
+		key = build_s3_key(f"{base}/{part}", filename or (f"{part}.pdf" if content_type == 'application/pdf' else f"{part}.jpg"))
+		metadata = {'user-id': str(user.id), 'part': part}
+		if sha256:
+			metadata['sha256'] = sha256
+		presigned = generate_presigned_put(key=key, content_type=content_type, metadata=metadata)
+		return RequestIdentityUpload(
+			upload=PresignedUploadInfo(
+				url=presigned['url'],
+				key=presigned['key'],
+				method=presigned['method'],
+				headers=presigned['headers'],
+				expires_in=presigned['expires_in'],
+			),
+			success=True,
+			error=None,
+		)
+
+
+class SubmitIdentityVerificationS3(graphene.Mutation):
+    class Arguments:
+        verified_first_name = graphene.String(required=False)
+        verified_last_name = graphene.String(required=False)
+        verified_date_of_birth = graphene.Date(required=False)
+        verified_nationality = graphene.String(required=False)
+        verified_address = graphene.String(required=False)
+        verified_city = graphene.String(required=False)
+        verified_state = graphene.String(required=False)
+        verified_country = graphene.String(required=False)
+        verified_postal_code = graphene.String()
+        document_type = graphene.String(required=False)
+        document_number = graphene.String(required=False)
+        document_issuing_country = graphene.String(required=False)
+        document_expiry_date = graphene.Date(required=False)
+        front_key = graphene.String(required=True)
+        selfie_key = graphene.String(required=True)
+        back_key = graphene.String()
+        payout_method_label = graphene.String()
+        payout_proof_key = graphene.String()
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	verification = graphene.Field(IdentityVerificationType)
+
+	@classmethod
+	def mutate(cls, root, info, **kwargs):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return SubmitIdentityVerificationS3(success=False, error="Authentication required", verification=None)
+
+        try:
+            # Provide safe defaults for MVP if fields are missing
+            def or_default(v, d):
+                return v if v not in [None, ''] else d
+
+            verification = IdentityVerification.objects.create(
+                user=user,
+                verified_first_name=or_default(kwargs.get('verified_first_name'), user.first_name or 'Unknown'),
+                verified_last_name=or_default(kwargs.get('verified_last_name'), user.last_name or 'Unknown'),
+                verified_date_of_birth=kwargs.get('verified_date_of_birth') or None,
+                verified_nationality=or_default(kwargs.get('verified_nationality'), 'UNK'),
+                verified_address=or_default(kwargs.get('verified_address'), 'Provided via document'),
+                verified_city=or_default(kwargs.get('verified_city'), 'Unknown City'),
+                verified_state=or_default(kwargs.get('verified_state'), 'Unknown State'),
+                verified_country=or_default(kwargs.get('verified_country'), 'UNK'),
+                verified_postal_code=kwargs.get('verified_postal_code'),
+                document_type=or_default(kwargs.get('document_type'), 'national_id'),
+                document_number=or_default(kwargs.get('document_number'), 'submitted-via-images'),
+                document_issuing_country=or_default(kwargs.get('document_issuing_country'), 'UNK'),
+                document_expiry_date=kwargs.get('document_expiry_date') or None,
+                # Leave FileFields empty; use URL fields for direct S3
+                document_front_url=public_s3_url(kwargs['front_key']),
+                document_back_url=public_s3_url(kwargs['back_key']) if kwargs.get('back_key') else None,
+                selfie_url=public_s3_url(kwargs['selfie_key']),
+                payout_method_label=kwargs.get('payout_method_label'),
+                payout_proof_url=public_s3_url(kwargs['payout_proof_key']) if kwargs.get('payout_proof_key') else None,
+            )
+			return SubmitIdentityVerificationS3(success=True, error=None, verification=verification)
+		except Exception as e:
+			return SubmitIdentityVerificationS3(success=False, error=str(e), verification=None)
+
+
+# BankInfo proof uploads removed; use integrated ID verification payout proof
+
 class ApproveIdentityVerification(graphene.Mutation):
 	class Arguments:
 		verification_id = graphene.ID(required=True)
@@ -2044,25 +2165,25 @@ class RefreshToken(graphene.Mutation):
 
 
 class CreateBankInfo(graphene.Mutation):
-	class Arguments:
-		payment_method_id = graphene.ID(required=True)
-		account_holder_name = graphene.String(required=True)
-		account_number = graphene.String()
-		phone_number = graphene.String()
-		email = graphene.String()
-		username = graphene.String()
-		account_type = graphene.String()
-		identification_number = graphene.String()
-		is_default = graphene.Boolean()
+    class Arguments:
+        payment_method_id = graphene.ID(required=True)
+        account_holder_name = graphene.String(required=True)
+        account_number = graphene.String()
+        phone_number = graphene.String()
+        email = graphene.String()
+        username = graphene.String()
+        account_type = graphene.String()
+        identification_number = graphene.String()
+        is_default = graphene.Boolean()
 
 	success = graphene.Boolean()
 	error = graphene.String()
 	bank_info = graphene.Field(BankInfoType)
 
 	@classmethod
-	def mutate(cls, root, info, payment_method_id, account_holder_name, 
-	          account_number=None, phone_number=None, email=None, username=None,
-	          account_type=None, identification_number=None, is_default=False):
+    def mutate(cls, root, info, payment_method_id, account_holder_name, 
+              account_number=None, phone_number=None, email=None, username=None,
+              account_type=None, identification_number=None, is_default=False):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return CreateBankInfo(success=False, error="Authentication required")
@@ -2152,18 +2273,18 @@ class CreateBankInfo(graphene.Mutation):
 				)
 
 			# Create bank info
-			bank_info = BankInfo.objects.create(
-				account=account,
-				payment_method=payment_method,
-				account_holder_name=account_holder_name.strip(),
-				account_number=account_number.strip() if account_number else None,
-				phone_number=phone_number.strip() if phone_number else None,
-				email=email.strip() if email else None,
-				username=username.strip() if username else None,
-				account_type=account_type,
-				identification_number=identification_number.strip() if identification_number else None,
-				is_default=is_default
-			)
+            bank_info = BankInfo.objects.create(
+                account=account,
+                payment_method=payment_method,
+                account_holder_name=account_holder_name.strip(),
+                account_number=account_number.strip() if account_number else None,
+                phone_number=phone_number.strip() if phone_number else None,
+                email=email.strip() if email else None,
+                username=username.strip() if username else None,
+                account_type=account_type,
+                identification_number=identification_number.strip() if identification_number else None,
+                is_default=is_default
+            )
 			
 			# Set legacy fields for backward compatibility (if it's a bank payment method)
 			if payment_method.bank:
@@ -2183,21 +2304,21 @@ class CreateBankInfo(graphene.Mutation):
 
 
 class UpdateBankInfo(graphene.Mutation):
-	class Arguments:
-		bank_info_id = graphene.ID(required=True)
-		account_holder_name = graphene.String(required=True)
-		account_number = graphene.String(required=True)
-		account_type = graphene.String(required=True)
-		identification_number = graphene.String()
-		is_default = graphene.Boolean()
+    class Arguments:
+        bank_info_id = graphene.ID(required=True)
+        account_holder_name = graphene.String(required=True)
+        account_number = graphene.String(required=True)
+        account_type = graphene.String(required=True)
+        identification_number = graphene.String()
+        is_default = graphene.Boolean()
 
 	success = graphene.Boolean()
 	error = graphene.String()
 	bank_info = graphene.Field(BankInfoType)
 
 	@classmethod
-	def mutate(cls, root, info, bank_info_id, account_holder_name, account_number,
-	          account_type, identification_number=None, is_default=False):
+    def mutate(cls, root, info, bank_info_id, account_holder_name, account_number,
+              account_type, identification_number=None, is_default=False):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return UpdateBankInfo(success=False, error="Authentication required")
@@ -2251,7 +2372,7 @@ class UpdateBankInfo(graphene.Mutation):
 			bank_info.account_type = account_type
 			bank_info.identification_number = identification_number.strip() if identification_number else None
 			bank_info.is_default = is_default
-			bank_info.save()
+            bank_info.save()
 
 			return UpdateBankInfo(success=True, error=None, bank_info=bank_info)
 
@@ -2974,6 +3095,9 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
 	refresh_token = RefreshToken.Field()
 	switch_account_token = SwitchAccountToken.Field()
 	submit_identity_verification = SubmitIdentityVerification.Field()
+	request_identity_upload = RequestIdentityUpload.Field()
+	submit_identity_verification_s3 = SubmitIdentityVerificationS3.Field()
+    # BankInfo proof uploads removed; use integrated payout proof in ID verification
 	approve_identity_verification = ApproveIdentityVerification.Field()
 	reject_identity_verification = RejectIdentityVerification.Field()
 	create_business = CreateBusiness.Field()

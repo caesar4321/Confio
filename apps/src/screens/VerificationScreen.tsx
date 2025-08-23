@@ -4,6 +4,10 @@ import { useNavigation } from '@react-navigation/native';
 import { RootStackNavigationProp } from '../types/navigation';
 import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
+import { useMutation } from '@apollo/client';
+import { REQUEST_IDENTITY_UPLOAD, SUBMIT_IDENTITY_VERIFICATION_S3 } from '../apollo/mutations';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
+import { uploadFileToPresigned } from '../services/uploadService';
 
 // Define colors directly in the component
 const colors = {
@@ -44,6 +48,65 @@ const VerificationScreen = () => {
   const [currentLevel, setCurrentLevel] = useState<number>(0);
   const [showUploadFlow, setShowUploadFlow] = useState<boolean>(false);
   const [uploadStep, setUploadStep] = useState<number>(1);
+  const [frontImageUri, setFrontImageUri] = useState<string | null>(null);
+  const [selfieImageUri, setSelfieImageUri] = useState<string | null>(null);
+  const [payoutProofUri, setPayoutProofUri] = useState<string | null>(null);
+  const [frontKey, setFrontKey] = useState<string | null>(null);
+  const [selfieKey, setSelfieKey] = useState<string | null>(null);
+  const [payoutKey, setPayoutKey] = useState<string | null>(null);
+  const [payoutLabel, setPayoutLabel] = useState<string>('');
+
+  const [requestIdentityUpload] = useMutation(REQUEST_IDENTITY_UPLOAD);
+  const [submitIdentityVerificationS3, { loading: submitting } ] = useMutation(SUBMIT_IDENTITY_VERIFICATION_S3);
+
+  const pickFromGallery = async (purpose: 'front' | 'selfie' | 'payout') => {
+    try {
+      const photos = await CameraRoll.getPhotos({ first: 1, assetType: 'Photos' });
+      if (!photos.edges.length) {
+        alert('No encontramos fotos en tu galería.');
+        return;
+      }
+      const uri = photos.edges[0].node.image.uri;
+      const filename = uri.split('/').pop() || `${purpose}.jpg`;
+      const contentType = 'image/jpeg';
+
+      const { data } = await requestIdentityUpload({
+        variables: { part: purpose, filename, contentType }
+      });
+      const res = data?.requestIdentityUpload;
+      if (!res?.success) throw new Error(res?.error || 'Error solicitando URL de subida');
+      const upload = res.upload;
+      await uploadFileToPresigned(upload.url, upload.headers, uri);
+
+      if (purpose === 'front') { setFrontImageUri(uri); setFrontKey(upload.key); }
+      if (purpose === 'selfie') { setSelfieImageUri(uri); setSelfieKey(upload.key); }
+      if (purpose === 'payout') { setPayoutProofUri(uri); setPayoutKey(upload.key); }
+    } catch (e: any) {
+      alert(e?.message || 'No se pudo subir el archivo.');
+    }
+  };
+
+  const handleSubmitVerification = async () => {
+    try {
+      if (!frontKey || !selfieKey) {
+        alert('Sube el documento y el selfie.');
+        return;
+      }
+      const { data } = await submitIdentityVerificationS3({
+        variables: {
+          frontKey,
+          selfieKey,
+          payoutMethodLabel: payoutLabel || null,
+          payoutProofKey: payoutKey || null,
+        }
+      });
+      const res = data?.submitIdentityVerificationS3;
+      if (!res?.success) throw new Error(res?.error || 'No se pudo enviar la verificación');
+      setUploadStep(4);
+    } catch (e: any) {
+      alert(e?.message || 'No se pudo enviar la verificación.');
+    }
+  };
 
   const verificationLevels: VerificationLevel[] = [
     {
@@ -191,11 +254,11 @@ const VerificationScreen = () => {
           </View>
 
           <View style={styles.uploadOptions}>
-            <TouchableOpacity style={styles.uploadOption}>
+            <TouchableOpacity style={styles.uploadOption} onPress={() => pickFromGallery('front')}>
               <Icon name="camera" size={24} color="#6B7280" />
               <Text style={styles.uploadOptionText}>Tomar foto del documento</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.uploadOption}>
+            <TouchableOpacity style={styles.uploadOption} onPress={() => pickFromGallery('front')}>
               <Icon name="upload" size={24} color="#6B7280" />
               <Text style={styles.uploadOptionText}>Subir desde galería</Text>
             </TouchableOpacity>
@@ -244,7 +307,7 @@ const VerificationScreen = () => {
 
           <View style={styles.cameraPreview}>
             <Icon name="camera" size={48} color="#9CA3AF" />
-            <Text style={styles.cameraPreviewText}>Cámara frontal activada</Text>
+            <Text style={styles.cameraPreviewText}>{selfieImageUri ? 'Selfie seleccionada' : 'Selecciona una selfie'}</Text>
           </View>
 
           <View style={styles.buttonRow}>
@@ -256,9 +319,17 @@ const VerificationScreen = () => {
             </TouchableOpacity>
             <TouchableOpacity 
               style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+              onPress={() => pickFromGallery('selfie')}
+            >
+              <Text style={styles.primaryButtonText}>Seleccionar Selfie</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.buttonRow}>
+            <TouchableOpacity 
+              style={[styles.primaryButton, { backgroundColor: colors.primary }]}
               onPress={() => setUploadStep(3)}
             >
-              <Text style={styles.primaryButtonText}>Tomar Foto</Text>
+              <Text style={styles.primaryButtonText}>Continuar</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -270,31 +341,50 @@ const VerificationScreen = () => {
         <View style={styles.uploadContainer}>
           <View style={styles.uploadHeader}>
             <View style={[styles.uploadIconContainer, { backgroundColor: colors.primary }]}>
-              <Icon name="check-circle" size={24} color="white" />
+              <Icon name="upload" size={24} color="white" />
             </View>
-            <Text style={styles.uploadTitle}>¡Documentos Enviados!</Text>
+            <Text style={styles.uploadTitle}>Comprobante de método de pago (opcional)</Text>
             <Text style={styles.uploadSubtitle}>
-              Revisaremos tu información en las próximas 24-48 horas
+              Sube un screenshot o estado de cuenta con tu nombre visible.
             </Text>
           </View>
 
-          <View style={styles.successBox}>
-            <Text style={styles.successTitle}>¿Qué sigue?</Text>
-            <View style={styles.successList}>
-              <Text style={styles.successText}>• Nuestro equipo revisará manualmente tus documentos</Text>
-              <Text style={styles.successText}>• Te notificaremos por la app cuando esté listo</Text>
-              <Text style={styles.successText}>• Una vez aprobado, podrás publicar ofertas P2P</Text>
-            </View>
+          <View style={styles.uploadOptions}>
+            <TouchableOpacity style={styles.uploadOption} onPress={() => pickFromGallery('payout')}>
+              <Icon name="upload" size={24} color="#6B7280" />
+              <Text style={styles.uploadOptionText}>Subir comprobante</Text>
+            </TouchableOpacity>
           </View>
 
-          <View style={styles.progressContainer}>
-            <View style={styles.progressHeader}>
-              <Text style={styles.progressLabel}>Progreso de verificación</Text>
-              <Text style={styles.progressStatus}>En revisión</Text>
+          <View style={{ marginVertical: 12 }}>
+            <Text style={{ fontSize: 14, color: '#374151', marginBottom: 6 }}>Nombre del método (Nequi, Daviplata, Banco...)</Text>
+            <TextInput
+              placeholder="Ej: Nequi"
+              value={payoutLabel}
+              onChangeText={setPayoutLabel}
+              style={{ borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8, padding: 10 }}
+            />
+          </View>
+
+          <TouchableOpacity 
+            style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+            onPress={handleSubmitVerification}
+          >
+            <Text style={styles.primaryButtonText}>Enviar Verificación</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (uploadStep === 4) {
+      return (
+        <View style={styles.uploadContainer}>
+          <View style={styles.uploadHeader}>
+            <View style={[styles.uploadIconContainer, { backgroundColor: colors.primary }]}>
+              <Icon name="check-circle" size={24} color="white" />
             </View>
-            <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { backgroundColor: colors.primary, width: '75%' }]} />
-            </View>
+            <Text style={styles.uploadTitle}>¡Documentos Enviados!</Text>
+            <Text style={styles.uploadSubtitle}>Revisaremos tu información en 24-48 horas.</Text>
           </View>
 
           <TouchableOpacity 

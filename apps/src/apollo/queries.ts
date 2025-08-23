@@ -1899,6 +1899,24 @@ export const GET_NOTIFICATIONS = gql`
             id
             name
           }
+          # Minimal related payment data for richer fallback display
+          relatedPaymentTransaction {
+            id
+            paymentTransactionId
+            amount
+            tokenType
+            status
+            transactionHash
+            createdAt
+            payerAddress
+            merchantAddress
+            description
+            merchantBusiness {
+              id
+              name
+              address
+            }
+          }
           # Optional: Fetch fresh related data if needed
           # Uncomment these fields if you want to fetch fresh data instead of using cached data
           # relatedSendTransaction {
