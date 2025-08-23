@@ -1,4 +1,5 @@
 import graphene
+from django.conf import settings
 from graphene_django import DjangoObjectType
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -21,6 +22,7 @@ from .models import (
     P2PFavoriteTrader
 )
 from .default_payment_methods import get_payment_methods_for_country
+from security.s3_utils import generate_presigned_put, public_s3_url, build_s3_key
 from security.utils import graphql_require_kyc, graphql_require_aml, perform_aml_check
 
 User = get_user_model()
@@ -2245,6 +2247,117 @@ class DisputeP2PTrade(graphene.Mutation):
                 errors=[str(e)]
             )
 
+
+class PresignedUploadInfo(graphene.ObjectType):
+    url = graphene.String()
+    key = graphene.String()
+    method = graphene.String()
+    headers = graphene.JSONString()
+    expires_in = graphene.Int()
+
+
+class RequestDisputeEvidenceUpload(graphene.Mutation):
+    class Arguments:
+        trade_id = graphene.ID(required=True)
+        filename = graphene.String(required=False)
+        content_type = graphene.String(required=False, default_value='video/mp4')
+        sha256 = graphene.String(required=False, description="Client-computed SHA-256 for metadata")
+
+    upload = graphene.Field(PresignedUploadInfo)
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, trade_id, filename=None, content_type='video/mp4', sha256=None):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return RequestDisputeEvidenceUpload(upload=None, success=False, error="Authentication required")
+
+        trade = P2PTrade.objects.filter(id=trade_id).first()
+        if not trade:
+            return RequestDisputeEvidenceUpload(upload=None, success=False, error="Trade not found")
+        # Must be one of the parties (user or through business account)
+        if user not in [trade.buyer_user, trade.seller_user]:
+            if not (
+                (trade.buyer_business and trade.buyer_business.accounts.filter(user=user).exists()) or
+                (trade.seller_business and trade.seller_business.accounts.filter(user=user).exists())
+            ):
+                return RequestDisputeEvidenceUpload(upload=None, success=False, error="Access denied")
+
+        if content_type not in ['video/mp4', 'video/quicktime']:
+            return RequestDisputeEvidenceUpload(upload=None, success=False, error="Unsupported content type")
+
+        try:
+            prefix = getattr(settings, 'AWS_S3_DISPUTE_PREFIX', 'disputes/')
+            key = build_s3_key(f"{prefix}{trade_id}", (filename or 'evidence.mp4'))
+            metadata = {
+                'trade-id': str(trade_id),
+                'uploader-id': str(user.id),
+            }
+            if sha256:
+                metadata['sha256'] = sha256
+            presigned = generate_presigned_put(key=key, content_type=content_type, metadata=metadata)
+            return RequestDisputeEvidenceUpload(
+                upload=PresignedUploadInfo(
+                    url=presigned['url'],
+                    key=presigned['key'],
+                    method=presigned['method'],
+                    headers=presigned['headers'],
+                    expires_in=presigned['expires_in'],
+                ),
+                success=True,
+                error=None,
+            )
+        except Exception as e:
+            return RequestDisputeEvidenceUpload(upload=None, success=False, error=str(e))
+
+
+class AttachDisputeEvidence(graphene.Mutation):
+    class Arguments:
+        trade_id = graphene.ID(required=True)
+        key = graphene.String(required=True)
+        size = graphene.Int(required=False)
+        sha256 = graphene.String(required=False)
+        etag = graphene.String(required=False)
+
+    dispute = graphene.Field('p2p_exchange.schema.P2PDisputeType')
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, trade_id, key, size=None, sha256=None, etag=None):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return AttachDisputeEvidence(dispute=None, success=False, error="Authentication required")
+
+        trade = P2PTrade.objects.filter(id=trade_id).first()
+        if not trade:
+            return AttachDisputeEvidence(dispute=None, success=False, error="Trade not found")
+        if user not in [trade.buyer_user, trade.seller_user]:
+            if not (
+                (trade.buyer_business and trade.buyer_business.accounts.filter(user=user).exists()) or
+                (trade.seller_business and trade.seller_business.accounts.filter(user=user).exists())
+            ):
+                return AttachDisputeEvidence(dispute=None, success=False, error="Access denied")
+
+        dispute = getattr(trade, 'dispute_details', None)
+        if not dispute:
+            # Create a minimal dispute record if missing
+            dispute = P2PDispute.objects.create(
+                trade=trade,
+                initiator_user=user,
+                reason='Evidence submitted',
+                priority=2,
+            )
+
+        url = public_s3_url(key)
+        evidence = list(dispute.evidence_urls or [])
+        evidence.append(url)
+        dispute.evidence_urls = evidence
+        dispute.save(update_fields=['evidence_urls', 'last_updated'])
+
+        return AttachDisputeEvidence(dispute=dispute, success=True, error=None)
+
 class ConfirmP2PTradeStep(graphene.Mutation):
     class Arguments:
         input = ConfirmP2PTradeStepInput(required=True)
@@ -3106,6 +3219,8 @@ class Mutation(graphene.ObjectType):
     send_p2p_message = SendP2PMessage.Field()
     rate_p2p_trade = RateP2PTrade.Field()
     dispute_p2p_trade = DisputeP2PTrade.Field()
+    request_dispute_evidence_upload = RequestDisputeEvidenceUpload.Field()
+    attach_dispute_evidence = AttachDisputeEvidence.Field()
     confirm_p2p_trade_step = ConfirmP2PTradeStep.Field()
     toggle_favorite_trader = ToggleFavoriteTrader.Field()
 

@@ -1093,15 +1093,19 @@ export const TransactionDetailScreen = () => {
     dataKeys: transactionData ? Object.keys(transactionData) : []
   });
   
-  // Check if this is a USDC transaction first
-  const isUSDCTransaction = transactionType === 'deposit' || transactionType === 'withdrawal' || transactionType === 'conversion' ||
-    (transactionData && ['deposit', 'withdrawal', 'conversion'].includes(transactionData.type || transactionData.transaction_type));
+  // Determine transaction kind to select proper fetch behavior
+  const typeLower = (transactionType || transactionData?.transaction_type || '').toString().toLowerCase();
+  const isUSDCTransaction = typeLower === 'deposit' || typeLower === 'withdrawal' || typeLower === 'conversion' ||
+    (transactionData && ['deposit', 'withdrawal', 'conversion'].includes((transactionData.type || transactionData.transaction_type || '').toString().toLowerCase()));
+  const isSendTransaction = ['send', 'sent', 'received'].includes(typeLower);
+  const isPaymentTransaction = typeLower === 'payment';
 
   const { data: fetchedData, loading: fetchLoading, error: fetchError } = useQuery(
     GET_SEND_TRANSACTION_BY_ID,
     {
       variables: { id: transactionId },
-      skip: !needsFetch || !transactionId || isUSDCTransaction, // Skip for USDC transactions
+      // Only fetch for send-type txns with numeric id; skip for USDC and payment
+      skip: !needsFetch || !transactionId || isUSDCTransaction || !isSendTransaction || isNaN(Number(transactionId)),
     }
   );
 
@@ -1211,7 +1215,7 @@ export const TransactionDetailScreen = () => {
   // 2) Normalized notification payload (camelCased + mapped fields)
   // 3) Raw notification payload (last resort)
   let txData: any = undefined;
-  if (fetchedData?.sendTransaction && needsFetch) {
+  if (fetchedData?.sendTransaction && needsFetch && isSendTransaction) {
     const tx = fetchedData.sendTransaction;
     // Resolve direction primarily from route params; fallback to simple heuristic
     const routeTypeRaw = (route.params?.transactionType || transactionData?.transaction_type || '').toString().toLowerCase();
@@ -1656,13 +1660,21 @@ export const TransactionDetailScreen = () => {
               {getTransactionIcon(currentTx.type)}
             </View>
             
-            <Text style={[
-              styles.amountText,
-              (currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal' || 
-               (currentTx.type === 'conversion' && currentTx.amount?.startsWith('-'))) && styles.negativeAmount
-            ]}>
-              {formatAmountWithSign(currentTx.amount)} {currentTx.currency || 'cUSD'}
-            </Text>
+            {(() => {
+              const raw = currentTx.amount as any;
+              const isNeg = typeof raw === 'string' ? raw.startsWith('-') : Number(raw) < 0;
+              const sign = isNeg ? '-' : (typeof raw === 'string' && raw.startsWith('+') ? '+' : '');
+              const abs = formatAmount(raw);
+              return (
+                <Text style={[
+                  styles.amountText,
+                  (currentTx.type === 'send' || currentTx.type === 'sent' || currentTx.type === 'payment' || currentTx.type === 'withdrawal' || 
+                   (currentTx.type === 'conversion' && currentTx.amount?.startsWith('-'))) && styles.negativeAmount
+                ]}>
+                  {sign ? `${sign} ` : ''}{abs} {currentTx.currency || 'cUSD'}
+                </Text>
+              );
+            })()}
             
             <Text style={styles.transactionTitle}>
               {(() => {
@@ -2058,8 +2070,19 @@ export const TransactionDetailScreen = () => {
               <View style={styles.feeBreakdown}>
                 <View style={styles.feeRow}>
                   <Text style={styles.feeLabel}>
-                    {currentTx.type === 'received' ? 'Monto recibido' : 
-                     currentTx.type === 'exchange' ? 'Monto intercambiado' : 'Monto enviado'}
+                    {(() => {
+                      if (currentTx.type === 'payment') {
+                        return (currentTx.amount?.startsWith('-')) ? 'Monto pagado' : 'Monto cobrado';
+                      }
+                      if (currentTx.type === 'exchange' || currentTx.type === 'conversion') {
+                        return 'Monto intercambiado';
+                      }
+                      if (currentTx.type === 'received') {
+                        return 'Monto recibido';
+                      }
+                      // sent / send
+                      return 'Monto enviado';
+                    })()}
                   </Text>
                   <Text style={styles.feeAmount}>
                     {formatAmount(currentTx.amount)} {currentTx.currency || 'cUSD'}
@@ -2074,7 +2097,8 @@ export const TransactionDetailScreen = () => {
                   </View>
                 </View>
 
-                {currentTx.type === 'payment' && (() => {
+                {currentTx.type === 'payment' && (currentTx.amount?.startsWith('+')) && (() => {
+                  // Only the seller (amount starts with '+') sees the Confío fee
                   const fee = computeConfioFee(currentTx.amount);
                   return fee > 0 ? (
                     <View style={styles.feeRow}>
@@ -2088,15 +2112,34 @@ export const TransactionDetailScreen = () => {
                   <>
                     <View style={styles.divider} />
                     <View style={styles.feeRow}>
-                      <Text style={styles.totalLabel}>Total debitado</Text>
+                      <Text style={styles.totalLabel}>
+                        {(() => {
+                          if (currentTx.type === 'payment') {
+                            // Buyer (money out) vs Seller (money in)
+                            return currentTx.amount?.startsWith('-') ? 'Total pagado' : 'Total recibido';
+                          }
+                          // For send/sent
+                          return currentTx.type === 'sent' ? 'Total enviado' : 'Total recibido';
+                        })()}
+                      </Text>
                       <Text style={styles.totalAmount}>
                         {(() => {
                           const raw = currentTx.amount;
                           const sign = typeof raw === 'string' && raw.startsWith('-') ? '-' : (typeof raw === 'string' && raw.startsWith('+') ? '+' : '');
                           const grossAbs = typeof raw === 'string' ? parseFloat(raw.replace(/[+-]/g, '')) : (Number(raw) || 0);
-                          const fee = computeConfioFee(raw);
-                          const netAbs = Math.max(0, grossAbs - fee);
-                          return `${sign}${netAbs.toFixed(2)}`;
+                          if (currentTx.type === 'payment') {
+                            if (sign === '-') {
+                              // Buyer: no Confío fee applies, show the gross negative
+                              return `${sign}${grossAbs.toFixed(2)}`;
+                            } else {
+                              // Seller: show net received after Confío fee
+                              const fee = computeConfioFee(raw);
+                              const netAbs = Math.max(0, grossAbs - fee);
+                              return `${sign}${netAbs.toFixed(2)}`;
+                            }
+                          }
+                          // For send/sent: no Confío fee, show original signed amount
+                          return `${sign}${grossAbs.toFixed(2)}`;
                         })()} {currentTx.currency || 'cUSD'}
                       </Text>
                     </View>

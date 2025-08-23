@@ -221,6 +221,39 @@ export const PREPARE_INVITE_FOR_PHONE = gql`
   }
 `;
 
+// KYC presigned uploads + submit
+export const REQUEST_IDENTITY_UPLOAD = gql`
+  mutation RequestIdentityUpload($part: String!, $filename: String, $contentType: String, $sha256: String) {
+    requestIdentityUpload(part: $part, filename: $filename, contentType: $contentType, sha256: $sha256) {
+      success
+      error
+      upload { url key method headers expires_in }
+    }
+  }
+`;
+
+export const SUBMIT_IDENTITY_VERIFICATION_S3 = gql`
+  mutation SubmitIdentityVerificationS3(
+    $frontKey: String!,
+    $selfieKey: String!,
+    $backKey: String,
+    $payoutMethodLabel: String,
+    $payoutProofKey: String
+  ) {
+    submitIdentityVerificationS3(
+      frontKey: $frontKey,
+      selfieKey: $selfieKey,
+      backKey: $backKey,
+      payoutMethodLabel: $payoutMethodLabel,
+      payoutProofKey: $payoutProofKey
+    ) {
+      success
+      error
+      verification { id status }
+    }
+  }
+`;
+
 // Invite & Send — submit invite group
 export const SUBMIT_INVITE_FOR_PHONE = gql`
   mutation SubmitInviteForPhone(
