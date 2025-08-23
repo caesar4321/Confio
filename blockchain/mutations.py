@@ -828,8 +828,18 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                 recipient_type = 'user' if recipient_user else 'external'
 
                 # Phone numbers (used for contact matching; optional)
-                sender_phone = getattr(user, 'phone_number', '') or ''
-                recipient_phone = ''
+                try:
+                    sc = getattr(user, 'phone_country', None) or getattr(user, 'phoneCountry', None)
+                    sn = getattr(user, 'phone_number', None) or getattr(user, 'phoneNumber', None)
+                    sender_phone = (f"{sc}{sn}" if sn and sc else (sn or '')) or ''
+                except Exception:
+                    sender_phone = ''
+                try:
+                    rc = getattr(recipient_user, 'phone_country', None) if recipient_user else None
+                    rn = getattr(recipient_user, 'phone_number', None) if recipient_user else None
+                    recipient_phone = (f"{rc}{rn}" if rn and rc else (rn or '')) or ''
+                except Exception:
+                    recipient_phone = ''
 
                 # Create or update by unique transaction_hash
                 stx, created = SendTransaction.all_objects.update_or_create(

@@ -1815,6 +1815,7 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
         username
         firstName
         lastName
+        phoneKey
       }
       senderBusiness {
         id
@@ -1831,6 +1832,7 @@ export const GET_UNIFIED_TRANSACTIONS = gql`
         username
         firstName
         lastName
+        phoneKey
       }
       counterpartyBusiness {
         id
@@ -2012,6 +2014,7 @@ export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
         username
         firstName
         lastName
+        phoneKey
       }
       senderBusiness {
         id
@@ -2028,6 +2031,7 @@ export const GET_CURRENT_ACCOUNT_TRANSACTIONS = gql`
         username
         firstName
         lastName
+        phoneKey
       }
       counterpartyBusiness {
         id
@@ -2088,6 +2092,7 @@ export const GET_UNIFIED_TRANSACTIONS_WITH_FRIEND = gql`
         username
         firstName
         lastName
+        phoneKey
       }
       senderBusiness {
         id
@@ -2104,6 +2109,7 @@ export const GET_UNIFIED_TRANSACTIONS_WITH_FRIEND = gql`
         username
         firstName
         lastName
+        phoneKey
       }
       counterpartyBusiness {
         id

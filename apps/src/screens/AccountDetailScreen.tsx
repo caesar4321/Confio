@@ -597,13 +597,17 @@ export const AccountDetailScreen = () => {
         const mappedStatus: 'completed' | 'pending' | 'failed' =
           rawStatus === 'CONFIRMED' ? 'completed' : rawStatus === 'FAILED' ? 'failed' : 'pending';
 
+        // Derive phone keys from nested users when available
+        const fromPhoneKey = (tx.senderUser && (tx.senderUser as any).phoneKey) || tx.senderPhone || (tx as any).fromPhone;
+        const toPhoneKey = (tx.counterpartyUser && (tx.counterpartyUser as any).phoneKey) || tx.counterpartyPhone || (tx as any).toPhone;
+
         const finalTransaction = {
           id: tx.id,
           type,
           from: fromDisplay,
           to: toDisplay,
-          fromPhone: isConversion ? undefined : (tx.direction === 'received' ? tx.senderPhone : undefined),
-          toPhone: isConversion ? undefined : (tx.direction === 'sent' ? tx.counterpartyPhone : undefined),
+          fromPhone: isConversion ? undefined : (tx.direction === 'received' ? fromPhoneKey : undefined),
+          toPhone: isConversion ? undefined : (tx.direction === 'sent' ? toPhoneKey : undefined),
           amount: isConversion ? conversionAmount : tx.displayAmount,
           currency: isConversion 
             ? (conversionType === 'usdc_to_cusd' ? 'USDC' : conversionType === 'cusd_to_usdc' ? 'cUSD' : undefined) 
@@ -985,8 +989,7 @@ export const AccountDetailScreen = () => {
           toAddress: transaction.type === 'sent' ? transaction.recipientAddress : undefined,
           fromPhone: transaction.fromPhone,
           toPhone: transaction.toPhone,
-          note: transaction.type === 'received' ? 'Pago por almuerzo - Gracias! 🍕' : 
-                transaction.type === 'sent' ? 'Pago servicios freelance' : undefined,
+          note: undefined,
           avatar: transaction.from ? transaction.from.charAt(0) : 
                  transaction.to ? transaction.to.charAt(0) : undefined,
           location: transaction.type === 'payment' ? 'Av. Libertador, Caracas' : undefined,
