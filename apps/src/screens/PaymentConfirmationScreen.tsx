@@ -17,6 +17,7 @@ import { useMutation } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 import { apolloClient } from '../apollo/client';
 import { PAY_INVOICE } from '../apollo/queries';
+import { CREATE_SPONSORED_PAYMENT } from '../apollo/mutations';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
 import { formatNumber } from '../utils/numberFormatting';
@@ -66,6 +67,9 @@ export const PaymentConfirmationScreen = () => {
   const { activeAccount } = useAccount();
   const [isProcessing, setIsProcessing] = useState(false);
   const [preDispatchPayInvoice] = useMutation(PAY_INVOICE);
+  const [createSponsoredPayment] = useMutation(CREATE_SPONSORED_PAYMENT);
+  const [prepared, setPrepared] = useState<any | null>(null);
+  const [prepareError, setPrepareError] = useState<string | null>(null);
   const navLock = useRef(false);
 
 
@@ -150,6 +154,39 @@ export const PaymentConfirmationScreen = () => {
     return () => { mounted = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoiceData.tokenType]);
+
+  // Background preflight: create the sponsored payment so confirm only signs+submits
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setPrepareError(null);
+        const amt = parseFloat(String(invoiceData.amount || '0'));
+        const assetType = (String(invoiceData.tokenType || 'cUSD')).toUpperCase();
+        const note = `Invoice ${invoiceData.invoiceId}`;
+        const { data } = await createSponsoredPayment({
+          variables: { amount: amt, assetType, paymentId: invoiceData.invoiceId, note, createReceipt: true }
+        });
+        const res = data?.createSponsoredPayment;
+        if (alive && res?.success && Array.isArray(res.transactions) && res.transactions.length === 4) {
+          setPrepared({
+            transactions: res.transactions,
+            paymentId: res.paymentId,
+            groupId: res.groupId
+          });
+          console.log('PaymentConfirmationScreen: Preflight prepared 4 transactions');
+        } else if (alive) {
+          setPrepareError(res?.error || 'Failed to prepare payment');
+          console.log('PaymentConfirmationScreen: Preflight failed', res?.error);
+        }
+      } catch (e: any) {
+        if (alive) setPrepareError(e?.message || 'Failed to prepare payment');
+        console.log('PaymentConfirmationScreen: Preflight exception', e?.message || e);
+      }
+    })();
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceData.invoiceId]);
 
   const currentPayment = {
     type: 'merchant',
@@ -244,36 +281,11 @@ export const PaymentConfirmationScreen = () => {
 
     setIsProcessing(true);
     navLock.current = true;
+  // Create deterministic idempotency key for this submission window (1 min granularity)
+  const minuteTimestamp = Math.floor(Date.now() / 60000);
+  const idempotencyKey = `pay_${invoiceData.invoiceId}_${minuteTimestamp}`;
 
-    // Best-effort wallet prewarm: fetch OAuth subject and peppers so signing is instant on next screen
-    try {
-      const { oauthStorage } = await import('../services/oauthStorageService');
-      await oauthStorage.getOAuthSubject();
-    } catch (e) {
-      // Non-fatal
-    }
-    try {
-      const { SecureDeterministicWalletService } = await import('../services/secureDeterministicWallet');
-      const sdw = SecureDeterministicWalletService.getInstance();
-      // Fire-and-forget pepper fetches
-      void sdw.getDerivationPepper();
-      void sdw.getKekPepper();
-    } catch (e) {
-      // Non-fatal
-    }
-    // Create deterministic idempotency key for this submission window (1 min granularity)
-    const minuteTimestamp = Math.floor(Date.now() / 60000);
-    const idempotencyKey = `pay_${invoiceData.invoiceId}_${minuteTimestamp}`;
-
-    // Pre-handle in background: create the payment on server so Processing can immediately sign
-    // Do not await to avoid UI delay.
-    try {
-      void preDispatchPayInvoice({
-        variables: { invoiceId: invoiceData.invoiceId, idempotencyKey }
-      });
-    } catch (e) {
-      // Non-fatal — Processing will use the same idempotency key to retrieve existing
-    }
+    // Background preflight: moved to top-level effect
 
     console.log('PaymentConfirmationScreen: Navigating to PaymentProcessing with data:', {
       type: 'payment',
@@ -281,11 +293,13 @@ export const PaymentConfirmationScreen = () => {
       currency: currentPayment.currency,
       merchant: currentPayment.recipient,
       action: 'Procesando pago',
-      idempotencyKey
+      idempotencyKey,
+      prepared: prepared ? { paymentId: prepared.paymentId, txCount: prepared.transactions.length } : null,
+      prepareError
     });
 
-    // Navigate to payment processing screen using replace to avoid duplicate mounts
-    (navigation as any).dispatch(StackActions.replace('PaymentProcessing', {
+    // Navigate to payment processing screen (prefer navigate for simplicity while debugging logs)
+    (navigation as any).navigate('PaymentProcessing', {
       transactionData: {
         type: 'payment',
         amount: currentPayment.amount,
@@ -296,9 +310,19 @@ export const PaymentConfirmationScreen = () => {
         action: 'Procesando pago',
         invoiceId: invoiceData.invoiceId,
         idempotencyKey,
-        preflight: true
+        preflight: true,
+        prepared
       }
-    }));
+    });
+    console.log('PaymentConfirmationScreen: Triggered navigation to PaymentProcessing');
+
+    // Safety reset in case navigation is blocked by an unseen error
+    setTimeout(() => {
+      if (navLock.current) {
+        navLock.current = false;
+        setIsProcessing(false);
+      }
+    }, 5000);
     
     // Reset processing state after navigation
     setTimeout(() => {

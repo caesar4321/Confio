@@ -106,6 +106,7 @@ export const PaymentProcessingScreen = () => {
   };
   
   const { transactionData } = route.params;
+  const prepared = (transactionData as any)?.prepared || null;
 
   const isValid = useMemo(() => {
     return (
@@ -235,6 +236,52 @@ export const PaymentProcessingScreen = () => {
         const now = () => (typeof performance !== 'undefined' && (performance as any).now ? (performance as any).now() : Date.now());
         const t0 = now();
         console.log('PaymentProcessingScreen: Starting payment processing for invoice:', transactionData.invoiceId);
+
+        // If prepared transactions were provided by Confirmation, use them directly
+        if (prepared && Array.isArray(prepared.transactions) && prepared.transactions.length === 4) {
+          try {
+            const algorandServiceModule = await import('../services/algorandService');
+            const algorandService = algorandServiceModule.default;
+            const { apolloClient } = await import('../apollo/client');
+            const { SUBMIT_SPONSORED_PAYMENT } = await import('../apollo/mutations');
+
+            console.log('PaymentProcessingScreen: Using prepared transactions from Confirmation');
+            const transactions = prepared.transactions;
+            const tSignStart = now();
+            const signedTransactions: any[] = [];
+
+            for (let i = 0; i < transactions.length; i++) {
+              const txn = transactions[i];
+              const needsSignature = txn.needs_signature || txn.needsSignature || false;
+              const isSigned = txn.signed || false;
+              const txnIndex = txn.index !== undefined ? txn.index : i;
+              if (needsSignature && !isSigned) {
+                const txnData = txn.transaction;
+                const txnBytes = Uint8Array.from(Buffer.from(txnData, 'base64'));
+                const signedTxnBytes = await algorandService.signTransactionBytes(txnBytes);
+                const signedTxnB64 = Buffer.from(signedTxnBytes).toString('base64');
+                signedTransactions.push({ index: txnIndex, transaction: signedTxnB64 });
+              } else {
+                signedTransactions.push({ index: txnIndex, transaction: txn.transaction });
+              }
+            }
+            const tSignEnd = now();
+            const submitResult = await apolloClient.mutate({
+              mutation: SUBMIT_SPONSORED_PAYMENT,
+              variables: { signedTransactions: JSON.stringify(signedTransactions), paymentId: prepared.paymentId || transactionData.invoiceId }
+            });
+            if (!submitResult.data?.submitSponsoredPayment?.success) {
+              throw new Error(submitResult.data?.submitSponsoredPayment?.error || 'Failed to submit blockchain payment');
+            }
+            console.log('PaymentProcessingScreen: Blockchain payment confirmed:', submitResult.data.submitSponsoredPayment);
+            setIsComplete(true);
+            setPaymentResponse({ blockchainTxId: submitResult.data.submitSponsoredPayment.transactionId, blockchainRound: submitResult.data.submitSponsoredPayment.confirmedRound });
+            return;
+          } catch (e) {
+            console.error('PaymentProcessingScreen: Prepared path failed:', e);
+            throw e;
+          }
+        }
         
         // Log current account context for debugging
         try {
