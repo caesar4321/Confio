@@ -63,7 +63,7 @@ const VerificationScreen = () => {
     try {
       const photos = await CameraRoll.getPhotos({ first: 1, assetType: 'Photos' });
       if (!photos.edges.length) {
-        alert('No encontramos fotos en tu galería.');
+        console.warn('[Verification] No photos found in gallery');
         return;
       }
       const uri = photos.edges[0].node.image.uri;
@@ -82,14 +82,14 @@ const VerificationScreen = () => {
       if (purpose === 'selfie') { setSelfieImageUri(uri); setSelfieKey(upload.key); }
       if (purpose === 'payout') { setPayoutProofUri(uri); setPayoutKey(upload.key); }
     } catch (e: any) {
-      alert(e?.message || 'No se pudo subir el archivo.');
+      console.error('[Verification] Upload failed:', e?.message || e);
     }
   };
 
   const handleSubmitVerification = async () => {
     try {
       if (!frontKey || !selfieKey) {
-        alert('Sube el documento y el selfie.');
+        console.warn('[Verification] Missing required files: front/selfie');
         return;
       }
       const { data } = await submitIdentityVerificationS3({
@@ -104,7 +104,7 @@ const VerificationScreen = () => {
       if (!res?.success) throw new Error(res?.error || 'No se pudo enviar la verificación');
       setUploadStep(4);
     } catch (e: any) {
-      alert(e?.message || 'No se pudo enviar la verificación.');
+      console.error('[Verification] Submit failed:', e?.message || e);
     }
   };
 

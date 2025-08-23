@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Clipboard, Linking, Share } from 'react-native';
+import { View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Clipboard, Linking, Share, Modal } from 'react-native';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -223,6 +223,7 @@ export const TransactionSuccessScreen = () => {
   const currentTime = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
   return (
+    <>
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {/* Success Header */}
       <View style={[styles.header, { backgroundColor: colors.primary, paddingTop: insets.top + 8 }]}>
@@ -532,6 +533,67 @@ export const TransactionSuccessScreen = () => {
         </View>
       </View>
     </ScrollView>
+
+    {/* Technical Details Modal */}
+    <Modal
+      visible={showTechnical}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setShowTechnical(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Detalles técnicos</Text>
+            <TouchableOpacity onPress={() => setShowTechnical(false)} style={{ padding: 8 }}>
+              <Icon name="x" size={20} color={colors.text.primary} />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.modalBody}>
+            <View style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>Transacción</Text>
+              <View style={styles.modalRow}>
+                <Text style={styles.modalLabel}>Red</Text>
+                <Text style={styles.modalValue}>{__DEV__ ? 'Testnet' : 'Mainnet'}</Text>
+              </View>
+              <View style={styles.modalRow}>
+                <Text style={styles.modalLabel}>Hash</Text>
+                <Text style={styles.modalValue} numberOfLines={1}>
+                  {(() => {
+                    const h = ((transactionData as any).transactionHash || '').toString();
+                    if (!h) return 'N/D';
+                    return h.replace(/(.{10}).+(.{6})/, '$1…$2');
+                  })()}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[styles.explorerButton, { backgroundColor: colors.secondary }]}
+              onPress={async () => {
+                const txid = (transactionData as any).transactionHash;
+                if (!txid) {
+                  Alert.alert('Sin hash', 'Aún no hay hash de transacción disponible.');
+                  return;
+                }
+                const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
+                const url = `${base}/tx/${encodeURIComponent(txid)}/`;
+                try {
+                  const canOpen = await Linking.canOpenURL(url);
+                  if (canOpen) await Linking.openURL(url);
+                  else Alert.alert('No se puede abrir', 'No se pudo abrir Pera Explorer.');
+                } catch {
+                  Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
+                }
+              }}
+            >
+              <Icon name="external-link" size={16} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.explorerButtonText}>Abrir en Pera Explorer</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+    </>
   );
 };
 
@@ -888,6 +950,78 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#ffffff',
     marginLeft: 8,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  modalBody: {
+    padding: 16,
+  },
+  modalSection: {
+    marginBottom: 16,
+  },
+  modalSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 8,
+  },
+  modalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  modalLabel: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  modalValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#111827',
+    flexShrink: 1,
+    textAlign: 'right',
+    marginLeft: 12,
+  },
+  explorerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accent,
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  explorerButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
   },
   remittanceContainer: {
     backgroundColor: '#ffffff',

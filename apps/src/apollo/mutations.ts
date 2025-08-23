@@ -227,7 +227,7 @@ export const REQUEST_IDENTITY_UPLOAD = gql`
     requestIdentityUpload(part: $part, filename: $filename, contentType: $contentType, sha256: $sha256) {
       success
       error
-      upload { url key method headers expires_in }
+      upload { url key method headers expiresIn }
     }
   }
 `;

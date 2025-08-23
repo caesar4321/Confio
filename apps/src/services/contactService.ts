@@ -672,6 +672,45 @@ export class ContactService {
   }
 
   /**
+   * Get contact by display name using fuzzy matching.
+   * - Normalizes accents/diacritics
+   * - Collapses whitespace and lowercases
+   * - Tries exact, then startsWith, then contains
+   */
+  getContactByNameFuzzy(name: string): StoredContact | null {
+    if (!name) return null;
+    if (!this.contactsArray || this.contactsArray.length === 0) return null;
+
+    const normalize = (s: string) => (s || '')
+      .normalize('NFD')
+      .replace(/\p{Diacritic}+/gu, '')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+
+    const target = normalize(name);
+    if (!target) return null;
+
+    // 1) Exact normalized match
+    for (const c of this.contactsArray) {
+      const nm = normalize(c.name);
+      if (nm === target) return c;
+    }
+    // 2) startsWith
+    for (const c of this.contactsArray) {
+      const nm = normalize(c.name);
+      if (nm.startsWith(target)) return c;
+    }
+    // 3) contains
+    for (const c of this.contactsArray) {
+      const nm = normalize(c.name);
+      if (nm.includes(target)) return c;
+    }
+    return null;
+  }
+
+  /**
    * Get all contacts that are Confío users
    */
   async getConfioContacts(confioUserPhones: string[]): Promise<StoredContact[]> {
@@ -717,6 +756,20 @@ export class ContactService {
       console.error('Error getting Confío contacts:', error);
       return [];
     }
+  }
+
+  /**
+   * Find a contact by Algorand address (matches confioAlgorandAddress saved during sync)
+   */
+  getContactByAlgorandAddressSync(address: string): StoredContact | null {
+    if (!address) return null;
+    if (!this.contactsArray || this.contactsArray.length === 0) return null;
+    const target = String(address).trim().toLowerCase();
+    for (const c of this.contactsArray) {
+      const a = (c as any).confioAlgorandAddress ? String((c as any).confioAlgorandAddress).trim().toLowerCase() : '';
+      if (a && a === target) return c;
+    }
+    return null;
   }
 
   /**

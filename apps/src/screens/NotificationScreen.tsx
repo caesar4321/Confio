@@ -126,13 +126,40 @@ export const NotificationScreen = () => {
 
         const fullData: any = parsedData;
         // Attempt to enrich with phones via contact name where possible for better display priority
-        const contactFromName = senderNameFromMsg ? contactService.getContactByNameSync(String(senderNameFromMsg)) : null;
-        const contactToName = recipientNameFromMsg ? contactService.getContactByNameSync(String(recipientNameFromMsg)) : null;
+        const contactFromName = senderNameFromMsg 
+          ? (contactService.getContactByNameFuzzy 
+              ? contactService.getContactByNameFuzzy(String(senderNameFromMsg)) 
+              : contactService.getContactByNameSync(String(senderNameFromMsg))) 
+          : null;
+        const contactToName = recipientNameFromMsg 
+          ? (contactService.getContactByNameFuzzy 
+              ? contactService.getContactByNameFuzzy(String(recipientNameFromMsg)) 
+              : contactService.getContactByNameSync(String(recipientNameFromMsg))) 
+          : null;
         const derivedFromPhone = contactFromName?.normalizedPhones?.[0] || contactFromName?.phoneNumbers?.[0];
         const derivedToPhone = contactToName?.normalizedPhones?.[0] || contactToName?.phoneNumbers?.[0];
 
         const isSent = txnType === 'sent' || txnType === 'send';
         const isReceived = txnType === 'received';
+        // Normalize phones to the contact's normalizedPhones (phoneKey/E.164) when possible
+        const candidateTo = fullData.recipient_phone ?? fullData.recipientPhone ?? derivedToPhone;
+        const candidateFrom = fullData.sender_phone ?? fullData.senderPhone ?? derivedFromPhone;
+        const contactTo = candidateTo ? contactService.getContactByPhoneSync(String(candidateTo)) : (contactToName || null);
+        const contactFrom = candidateFrom ? contactService.getContactByPhoneSync(String(candidateFrom)) : (contactFromName || null);
+        const normalizedTo = contactTo?.normalizedPhones?.[0] || contactTo?.phoneNumbers?.[0] || candidateTo;
+        const normalizedFrom = contactFrom?.normalizedPhones?.[0] || contactFrom?.phoneNumbers?.[0] || candidateFrom;
+
+        // Build contact-prioritized display names similar to AccountDetailScreen
+        let displayFrom: string | undefined;
+        let displayTo: string | undefined;
+        if (isSent) {
+          const toContact = normalizedTo ? contactService.getContactByPhoneSync(String(normalizedTo)) : null;
+          displayTo = toContact?.name || recipientNameFromMsg || fullData.recipient_name || fullData.recipient_display_name;
+        } else if (isReceived) {
+          const fromContact = normalizedFrom ? contactService.getContactByPhoneSync(String(normalizedFrom)) : null;
+          displayFrom = fromContact?.name || senderNameFromMsg || fullData.sender_name || fullData.sender_display_name;
+        }
+
         const fallbackTx = {
           id: sendId,
           notification_type: notifType,
@@ -140,12 +167,15 @@ export const NotificationScreen = () => {
           // names
           recipient_name: fullData.recipient_name ?? fullData.recipientName ?? recipientNameFromMsg,
           sender_name: fullData.sender_name ?? fullData.senderName ?? senderNameFromMsg,
+          // Imitate AccountDetail: pass from/to already resolved to contact names
+          ...(isSent ? { to: displayTo } : {}),
+          ...(isReceived ? { from: displayFrom } : {}),
           // propagate available phones and addresses when present
-          recipient_phone: fullData.recipient_phone ?? fullData.recipientPhone ?? derivedToPhone,
-          sender_phone: fullData.sender_phone ?? fullData.senderPhone ?? derivedFromPhone,
+          recipient_phone: normalizedTo,
+          sender_phone: normalizedFrom,
           // Common aliases used in other screens (match AccountDetail behavior)
-          ...(isSent ? { toPhone: fullData.recipient_phone ?? fullData.recipientPhone ?? derivedToPhone } : {}),
-          ...(isReceived ? { fromPhone: fullData.sender_phone ?? fullData.senderPhone ?? derivedFromPhone } : {}),
+          ...(isSent ? { toPhone: normalizedTo } : {}),
+          ...(isReceived ? { fromPhone: normalizedFrom } : {}),
           recipient_address: fullData.recipient_address ?? fullData.toAddress,
           sender_address: fullData.sender_address ?? fullData.fromAddress,
           // currency & amount if present
@@ -302,24 +332,96 @@ export const NotificationScreen = () => {
       // Parse data blob if available
       const fullData: any = parsedData;
 
-      // Use relatedPaymentTransaction as richer fallback for payments
-      const rpt: any = (notification as any)?.relatedPaymentTransaction;
-      const fallbackPayment = rpt ? {
-        transaction_id: rpt.paymentTransactionId || rpt.id,
-        amount: rpt.amount,
-        token_type: rpt.tokenType,
-        status: rpt.status,
-        transactionHash: rpt.transactionHash,
-        createdAt: rpt.createdAt,
-        payerAddress: rpt.payerAddress,
-        merchantAddress: rpt.merchantAddress,
-        description: rpt.description,
-      } : {};
+      // If this is a SendTransaction fallback, construct AccountDetail-like payload
+      if (type === 'SendTransaction' || notifType.startsWith('SEND_')) {
+        // Direction
+        const isSent = txnType === 'sent' || txnType === 'send';
+        const isReceived = txnType === 'received';
+        // Names from message if available
+        const msg = (notification.message || '').trim();
+        let recipientNameFromMsg: string | undefined;
+        let senderNameFromMsg: string | undefined;
+        if (notifType === 'SEND_SENT') {
+          const parts = msg.split(' a ');
+          recipientNameFromMsg = parts.length > 1 ? parts[parts.length - 1] : undefined;
+        } else if (notifType === 'SEND_RECEIVED') {
+          const parts = msg.split(' de ');
+          senderNameFromMsg = parts.length > 1 ? parts[parts.length - 1] : undefined;
+        }
+        // Candidate phones
+        const candidateTo = fullData.recipient_phone ?? fullData.recipientPhone;
+        const candidateFrom = fullData.sender_phone ?? fullData.senderPhone;
+        // Normalize to contact phoneKey-like values
+        // Try resolve contact by address when phones are missing
+        const contactTo = candidateTo 
+          ? contactService.getContactByPhoneSync(String(candidateTo)) 
+          : (toAddress 
+              ? (contactService.getContactByAlgorandAddressSync 
+                  ? contactService.getContactByAlgorandAddressSync(String(toAddress)) 
+                  : null)
+              : (recipientNameFromMsg 
+              ? (contactService.getContactByNameFuzzy 
+                  ? contactService.getContactByNameFuzzy(recipientNameFromMsg) 
+                  : contactService.getContactByNameSync(recipientNameFromMsg)) 
+              : null));
+        const contactFrom = candidateFrom 
+          ? contactService.getContactByPhoneSync(String(candidateFrom)) 
+          : (senderNameFromMsg 
+              ? (contactService.getContactByNameFuzzy 
+                  ? contactService.getContactByNameFuzzy(senderNameFromMsg) 
+                  : contactService.getContactByNameSync(senderNameFromMsg)) 
+              : null);
+        const normalizedTo = contactTo?.normalizedPhones?.[0] || contactTo?.phoneNumbers?.[0] || candidateTo;
+        const normalizedFrom = contactFrom?.normalizedPhones?.[0] || contactFrom?.phoneNumbers?.[0] || candidateFrom;
+        // Resolve names like AccountDetail
+        let displayFrom: string | undefined;
+        let displayTo: string | undefined;
+        if (isSent) {
+          displayTo = (contactTo && contactTo.name) || recipientNameFromMsg || fullData.recipient_name || fullData.recipient_display_name;
+        } else if (isReceived) {
+          displayFrom = (contactFrom && contactFrom.name) || senderNameFromMsg || fullData.sender_name || fullData.sender_display_name;
+        }
+        const currency = (fullData.currency ?? fullData.token_type ?? fullData.tokenType);
+        const uiCurrency = (typeof currency === 'string' && currency.toUpperCase() === 'CUSD') ? 'cUSD' : currency;
 
-      navigation.navigate('TransactionDetail', {
-        transactionType: txnType,
-        transactionData: { id, notification_type: notifType, ...fullData, ...fallbackPayment }
-      });
+        const txPayload: any = {
+          id,
+          notification_type: notifType,
+          transaction_type: txnType,
+          currency: uiCurrency,
+          // prefer contact-resolved names
+          ...(isSent ? { to: displayTo } : {}),
+          ...(isReceived ? { from: displayFrom } : {}),
+          // phones
+          recipient_phone: normalizedTo,
+          sender_phone: normalizedFrom,
+          ...(isSent ? { toPhone: normalizedTo } : {}),
+          ...(isReceived ? { fromPhone: normalizedFrom } : {}),
+        };
+        navigation.navigate('TransactionDetail', {
+          transactionType: txnType,
+          transactionData: { ...fullData, ...txPayload }
+        });
+      } else {
+        // Use relatedPaymentTransaction as richer fallback for payments
+        const rpt: any = (notification as any)?.relatedPaymentTransaction;
+        const fallbackPayment = rpt ? {
+          transaction_id: rpt.paymentTransactionId || rpt.id,
+          amount: rpt.amount,
+          token_type: rpt.tokenType,
+          status: rpt.status,
+          transactionHash: rpt.transactionHash,
+          createdAt: rpt.createdAt,
+          payerAddress: rpt.payerAddress,
+          merchantAddress: rpt.merchantAddress,
+          description: rpt.description,
+        } : {};
+
+        navigation.navigate('TransactionDetail', {
+          transactionType: txnType,
+          transactionData: { id, notification_type: notifType, ...fullData, ...fallbackPayment }
+        });
+      }
     } else {
       // Fallback: for transaction-like notifications without actionUrl/relatedObject, navigate using data
       if (notifType.startsWith('SEND_') || notifType.startsWith('PAYMENT_') || notifType === 'INVITE_RECEIVED') {
