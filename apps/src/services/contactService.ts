@@ -655,6 +655,23 @@ export class ContactService {
   }
 
   /**
+   * Get contact by exact display name (case-insensitive) - SYNCHRONOUS
+   * Useful when transaction payload lacks phone but we have a contact name
+   */
+  getContactByNameSync(name: string): StoredContact | null {
+    if (!name) return null;
+    // Ensure contacts are available in memory
+    if (!this.contactsArray || this.contactsArray.length === 0) return null;
+    const target = name.trim().toLowerCase();
+    for (const contact of this.contactsArray) {
+      if ((contact.name || '').trim().toLowerCase() === target) {
+        return contact;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Get all contacts that are Confío users
    */
   async getConfioContacts(confioUserPhones: string[]): Promise<StoredContact[]> {

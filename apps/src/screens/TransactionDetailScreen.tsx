@@ -28,6 +28,7 @@ import 'moment/locale/es';
 import { useQuery } from '@apollo/client';
 import { GET_SEND_TRANSACTION_BY_ID } from '../apollo/queries';
 import { useContactNameSync } from '../hooks/useContactName';
+import { getPreferredDisplayName, getPreferredSecondaryLine } from '../utils/contactDisplay';
 import { SHARE_LINKS } from '../config/shareLinks';
 
 type TransactionDetailScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
@@ -1122,7 +1123,7 @@ export const TransactionDetailScreen = () => {
       gasUsed: '21,000',
       gasFee: '0.001',
       confirmations: 127,
-      note: 'Pago por almuerzo - Gracias! 🍕',
+      note: undefined,
       avatar: 'M'
     },
     sent: {
@@ -1139,7 +1140,7 @@ export const TransactionDetailScreen = () => {
       gasUsed: '21,000',
       gasFee: '0.001',
       confirmations: 234,
-      note: 'Pago servicios freelance',
+      note: undefined,
       avatar: 'C'
     },
     exchange: {
@@ -1244,15 +1245,11 @@ export const TransactionDetailScreen = () => {
       invitationExpiresAt: tx.invitationExpiresAt,
       invitationClaimed: !!(tx.recipientUser && tx.recipientUser.id),
       transaction_type: 'send',
-      // Add phone numbers from fetched data
-      sender_phone: tx.senderUser?.phoneCountry && tx.senderUser?.phoneNumber ? 
-        `${tx.senderUser.phoneCountry}${tx.senderUser.phoneNumber}` : tx.senderPhone,
-      recipient_phone: tx.recipientUser?.phoneCountry && tx.recipientUser?.phoneNumber ? 
-        `${tx.recipientUser.phoneCountry}${tx.recipientUser.phoneNumber}` : tx.recipientPhone,
-      senderPhone: tx.senderUser?.phoneCountry && tx.senderUser?.phoneNumber ? 
-        `${tx.senderUser.phoneCountry}${tx.senderUser.phoneNumber}` : tx.senderPhone,
-      recipientPhone: tx.recipientUser?.phoneCountry && tx.recipientUser?.phoneNumber ? 
-        `${tx.recipientUser.phoneCountry}${tx.recipientUser.phoneNumber}` : tx.recipientPhone,
+      // Add phone keys from fetched data (prefer user.phoneKey over legacy fields)
+      sender_phone: (tx.senderUser as any)?.phoneKey || tx.senderPhone,
+      recipient_phone: (tx.recipientUser as any)?.phoneKey || tx.recipientPhone,
+      senderPhone: (tx.senderUser as any)?.phoneKey || tx.senderPhone,
+      recipientPhone: (tx.recipientUser as any)?.phoneKey || tx.recipientPhone,
     };
     // If opened via an invite-received notification, force receiver perspective
     if (transactionData?.notification_type === 'INVITE_RECEIVED') {
@@ -1419,8 +1416,8 @@ export const TransactionDetailScreen = () => {
   
   // Get contact names for display - check all possible phone fields
   // MUST be called before any early returns to follow React hooks rules
-  const senderPhone = currentTx?.sender_phone || currentTx?.senderPhone || currentTx?.fromPhone || transactionData?.sender_phone;
-  const recipientPhone = currentTx?.recipient_phone || currentTx?.recipientPhone || currentTx?.toPhone || transactionData?.recipient_phone;
+  const senderPhone = currentTx?.sender_phone || currentTx?.senderPhone || currentTx?.fromPhone || (transactionData as any)?.sender_phone || (transactionData as any)?.fromPhone;
+  const recipientPhone = currentTx?.recipient_phone || currentTx?.recipientPhone || currentTx?.toPhone || (transactionData as any)?.recipient_phone || (transactionData as any)?.toPhone || (transactionData as any)?.counterpartyPhone;
   
   console.log('[TransactionDetailScreen] Contact lookup:', {
     senderPhone,
@@ -1529,8 +1526,11 @@ export const TransactionDetailScreen = () => {
   });
   
   // Use contact names if available
-  const displayFromName = senderContactInfo.displayName;
-  let displayToName = recipientContactInfo.displayName;
+  // Prefer phone contact name over any server-provided display values
+  const preferredFrom = getPreferredDisplayName(senderPhone, senderContactInfo.displayName);
+  const preferredTo = getPreferredDisplayName(recipientPhone, recipientContactInfo.displayName);
+  const displayFromName = preferredFrom.name;
+  let displayToName = preferredTo.name;
   
   console.log('[TransactionDetailScreen] Display names:', {
     displayFromName,
@@ -1825,7 +1825,7 @@ export const TransactionDetailScreen = () => {
                     <Text style={styles.participantName}>{displayFromName}</Text>
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
-                        {senderPhone ? formatPhoneNumber(senderPhone) : currentTx.fromAddress}
+                        {getPreferredSecondaryLine({ phone: senderPhone, address: currentTx.fromAddress, isExternal: !!currentTx.is_external_address })}
                       </Text>
                       <TouchableOpacity 
                         onPress={() => handleCopy(
@@ -1896,32 +1896,14 @@ export const TransactionDetailScreen = () => {
                     <View style={styles.addressContainer}>
                       <Text style={styles.addressText}>
                         {(() => {
-                          // Direct logging
-                          console.log('[TransactionDetailScreen] ADDRESS SECTION:', JSON.stringify({
-                            recipientPhone,
-                            recipient_phone: currentTx.recipient_phone,
-                            toAddress: currentTx.toAddress,
-                            recipient_address: currentTx.recipient_address,
-                            is_invited_friend: currentTx.is_invited_friend,
-                            is_external_address: currentTx.is_external_address,
-                          }));
-                          
-                          // For external addresses - show the full address
-                          if (currentTx.is_external_address || (currentTx.toAddress && !currentTx.recipient_phone)) {
-                            const fullAddress = currentTx.toAddress || currentTx.recipient_address;
-                            if (fullAddress && fullAddress.length > 40) {
-                              return `${fullAddress.substring(0, 10)}...${fullAddress.substring(fullAddress.length - 6)}`;
-                            }
-                            return fullAddress || 'Sin dirección';
-                          }
-                          
-                          // For invited friends - show phone
-                          if (currentTx.is_invited_friend && currentTx.recipient_phone) {
-                            const phone = recipientPhone || currentTx.recipient_phone;
-                            return phone ? formatPhoneNumber(phone) : 'Sin número';
-                          }
-                          
-                          return 'DEBUG: No data';
+                          const phoneVal = recipientPhone || currentTx.recipient_phone;
+                          const forcePhone = !!phoneVal || !!preferredTo.fromContacts;
+                          const isExternalHeuristic = !!(currentTx.is_external_address || (currentTx.toAddress && !currentTx.recipient_phone));
+                          return getPreferredSecondaryLine({
+                            phone: phoneVal,
+                            address: currentTx.toAddress || currentTx.recipient_address,
+                            isExternal: forcePhone ? false : isExternalHeuristic,
+                          });
                         })()}
                       </Text>
                       <TouchableOpacity 
@@ -2136,10 +2118,24 @@ export const TransactionDetailScreen = () => {
               {/* Status */}
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Estado</Text>
-                <View style={styles.statusContainer}>
-                  <Icon name="check-circle" size={16} color="#10b981" style={styles.statusIcon} />
-                  <Text style={styles.statusValue}>Procesado exitosamente</Text>
-                </View>
+                {(() => {
+                  const statusLc = (currentTx.status || '').toString().toLowerCase();
+                  const isConfirming = statusLc === 'submitted' || statusLc === 'pending' || statusLc === 'pending_blockchain';
+                  if (isConfirming) {
+                    return (
+                      <View style={styles.statusContainer}>
+                        <Icon name="clock" size={16} color="#f59e0b" style={styles.statusIcon} />
+                        <Text style={[styles.statusValue, { color: '#f59e0b' }]}>Confirmando…</Text>
+                      </View>
+                    );
+                  }
+                  return (
+                    <View style={styles.statusContainer}>
+                      <Icon name="check-circle" size={16} color="#10b981" style={styles.statusIcon} />
+                      <Text style={styles.statusValue}>Procesado exitosamente</Text>
+                    </View>
+                  );
+                })()}
               </View>
 
               {/* Processing Time */}

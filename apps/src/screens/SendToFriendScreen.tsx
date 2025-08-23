@@ -85,6 +85,7 @@ export const SendToFriendScreen = () => {
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const navLock = React.useRef(false);
+  const [prepared, setPrepared] = useState<any | null>(null);
 
   // Balance snapshot + background refresh
   const [balanceSnapshot, setBalanceSnapshot] = useState<string | null>(null);
@@ -127,6 +128,34 @@ export const SendToFriendScreen = () => {
   // Mutations are now handled in TransactionProcessingScreen
 
   const handleQuickAmount = (val: string) => setAmount(val);
+
+  // Background preflight via WebSocket when inputs look valid
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setPrepared(null);
+        const amt = parseFloat(String(amount || '0'));
+        if (!(isFinite(amt) && amt > 0 && friend && friend.isOnConfio !== false)) return;
+        const assetType = (tokenType.toUpperCase() === 'CUSD' ? 'CUSD' : 'CONFIO');
+        const { prepareSendViaWs } = await import('../services/sendWs');
+        const pack = await prepareSendViaWs({
+          amount: amt,
+          assetType,
+          recipientUserId: friend.userId || friend.id,
+          recipientPhone: friend.phone,
+        });
+        if (!alive) return;
+        if (pack && Array.isArray((pack as any).transactions) && (pack as any).transactions.length >= 2) {
+          setPrepared({ transactions: (pack as any).transactions });
+          console.log('SendToFriendScreen: Preflight prepared via WS');
+        }
+      } catch (e) {
+        // ignore preflight errors; processing screen will fallback
+      }
+    })();
+    return () => { alive = false; };
+  }, [amount, tokenType, friend?.userId, friend?.id, friend?.phone, friend?.isOnConfio]);
 
   const handleSend = async () => {
     console.log('SendToFriendScreen: handleSend called');
@@ -181,7 +210,8 @@ export const SendToFriendScreen = () => {
           isOnConfio: friend.isOnConfio,
           // recipientAddress removed - server will determine this
           memo: '', // Empty memo - user can add notes in a future feature
-          idempotencyKey: idempotencyKey
+          idempotencyKey: idempotencyKey,
+          prepared: prepared
         }
       });
     } catch (error) {
