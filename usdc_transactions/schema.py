@@ -153,13 +153,18 @@ class CreateUSDCDeposit(graphene.Mutation):
             # Get the user's active account using JWT context
             if account_type == 'business' and business_id:
                 # For business accounts, find by business_id from JWT
-                # This will find the business account regardless of who owns it
                 from users.models import Account
                 active_account = Account.objects.filter(
                     account_type='business',
                     account_index=account_index,
                     business_id=business_id
                 ).first()
+                # Fallback: if index mismatch, use the first business account
+                if not active_account:
+                    active_account = Account.objects.filter(
+                        account_type='business',
+                        business_id=business_id
+                    ).order_by('account_index').first()
             else:
                 # For personal accounts
                 active_account = user.accounts.filter(
@@ -296,13 +301,18 @@ class CreateUSDCWithdrawal(graphene.Mutation):
             # Get the user's active account using JWT context
             if account_type == 'business' and business_id:
                 # For business accounts, find by business_id from JWT
-                # This will find the business account regardless of who owns it
                 from users.models import Account
                 active_account = Account.objects.filter(
                     account_type='business',
                     account_index=account_index,
                     business_id=business_id
                 ).first()
+                # Fallback: if index mismatch, use the first business account
+                if not active_account:
+                    active_account = Account.objects.filter(
+                        account_type='business',
+                        business_id=business_id
+                    ).order_by('account_index').first()
             else:
                 # For personal accounts
                 active_account = user.accounts.filter(

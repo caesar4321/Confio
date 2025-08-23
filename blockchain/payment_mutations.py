@@ -149,11 +149,15 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
             except Account.DoesNotExist:
                 return cls(success=False, error='Recipient business account not found')
             
+            # Normalize token to canonical DB form
+            asset_type_upper = str(asset_type or 'CUSD').upper()
+            token_type_value = 'CUSD' if asset_type_upper == 'CUSD' else asset_type_upper
+
             # Initialize payment transaction builder
             builder = PaymentTransactionBuilder(network=settings.ALGORAND_NETWORK)
             
             # Determine asset ID
-            asset_type_upper = asset_type.upper()
+            # Determine asset ID from normalized token
             if asset_type_upper == 'CUSD':
                 asset_id = builder.cusd_asset_id
             elif asset_type_upper == 'CONFIO':
@@ -161,7 +165,7 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
             else:
                 return cls(success=False, error=f'Unsupported asset type: {asset_type}')
             
-            logger.info(f"Payment mutation: Using asset ID {asset_id} for {asset_type_upper}")
+            logger.info(f"Payment mutation: Using asset ID {asset_id} for {token_type_value}")
             
             if not asset_id:
                 return cls(success=False, error=f'{asset_type} not configured on this network')
@@ -240,27 +244,38 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
             # Create payment record in database for business payment
             payment_record = None
             if payment_id:
+                # Idempotent creation of blockchain.Payment record by unique payment_id
+                from django.db import IntegrityError
                 with db_transaction.atomic():
                     # Get business owner for recipient tracking
                     recipient_user = recipient_business.owner if hasattr(recipient_business, 'owner') else None
-                    
-                    payment_record = Payment.objects.create(
-                        sender=user,
-                        sender_business=sender_business if sender_account_type == 'business' else None,
-                        recipient=recipient_user,  # Business owner for tracking
-                        recipient_business=recipient_business,  # The actual business recipient
-                        amount=Decimal(str(amount)),
-                        currency=asset_type_upper,
-                        payment_id=payment_id,
-                        status='pending',
-                        blockchain_network='algorand',
-                        sender_address=sender_account.algorand_address,
-                        recipient_address=resolved_recipient_address,
-                        note=note or f"Payment to {recipient_business.name}",
-                        fee_amount=Decimal(str(fee_amount_base / (10 ** decimals))),
-                        net_amount=Decimal(str(net_amount_base / (10 ** decimals)))
-                    )
-                    logger.info(f"Created payment record {payment_id} for {amount} {asset_type} to business {recipient_business.name}")
+                    defaults = {
+                        'sender': user,
+                        'sender_business': sender_business if sender_account_type == 'business' else None,
+                        'recipient': recipient_user,
+                        'recipient_business': recipient_business,
+                        'amount': Decimal(str(amount)),
+                        'currency': token_type_value,
+                        'status': 'pending',
+                        'blockchain_network': 'algorand',
+                        'sender_address': sender_account.algorand_address,
+                        'recipient_address': resolved_recipient_address,
+                        'note': note or f"Payment to {recipient_business.name}",
+                        'fee_amount': Decimal(str(fee_amount_base / (10 ** decimals))),
+                        'net_amount': Decimal(str(net_amount_base / (10 ** decimals))),
+                    }
+                    try:
+                        payment_record, created = Payment.objects.get_or_create(
+                            payment_id=payment_id,
+                            defaults=defaults,
+                        )
+                        if created:
+                            logger.info(f"Created payment record {payment_id} for {amount} {asset_type} to business {recipient_business.name}")
+                        else:
+                            logger.info(f"Reusing existing payment record {payment_id}")
+                    except IntegrityError:
+                        payment_record = Payment.objects.filter(payment_id=payment_id).first()
+                        logger.info(f"Payment record {payment_id} already exists; continuing idempotently")
             
             # Build sponsored payment transaction group using cUSD pattern
             try:
@@ -336,6 +351,61 @@ class CreateSponsoredPaymentMutation(graphene.Mutation):
                     'message': user_txn.get('message', f'Transaction {i+1}')
                 })
             
+            # Ensure a PaymentTransaction record exists for this payment_id (WS-only and GraphQL paths)
+            try:
+                if payment_id:
+                    from payments.models import PaymentTransaction, Invoice
+                    # Resolve invoice by invoice_id (payment_id is used as invoiceId in this flow)
+                    invoice_obj = Invoice.objects.filter(invoice_id=payment_id).first()
+                    # Determine merchant/payer accounts from prior variables
+                    # sender_account, recipient_business, recipient_account were resolved above
+                    payer_user = user
+                    # Prefer the actual account user tied to the merchant business account
+                    merchant_user = getattr(recipient_account, 'user', None)
+                    # Best-effort phone composition for payer
+                    payer_phone_display = ''
+                    try:
+                        cc = getattr(payer_user, 'phone_country_code', None)
+                        pn = getattr(payer_user, 'phone_number', None)
+                        if pn:
+                            payer_phone_display = f"+{cc}{pn}" if cc else str(pn)
+                    except Exception:
+                        pass
+                    # Build a unique placeholder hash to satisfy unique constraint before submit
+                    placeholder_hash = f"pending_blockchain_{payment_id}_{int(time.time()*1000)}"
+                    # Assemble minimal defaults
+                    defaults = {
+                        'payer_user': payer_user,
+                        'merchant_account_user': merchant_user,
+                        'payer_business': None,
+                        'merchant_business': recipient_business,
+                        'payer_type': 'user' if sender_account_type != 'business' else 'business',
+                        'merchant_type': 'business',
+                        # Never use username/email; leave display names blank so downstream logic chooses name/phone/address
+                        'payer_display_name': '',
+                        'merchant_display_name': getattr(recipient_business, 'name', ''),
+                        'payer_phone': payer_phone_display,
+                        'payer_account': sender_account,
+                        'merchant_account': recipient_account,
+                        'payer_address': sender_account.algorand_address,
+                        'merchant_address': resolved_recipient_address,
+                        'amount': Decimal(str(amount)),
+                        'token_type': token_type_value,
+                        'description': note or '',
+                        'status': 'PENDING_BLOCKCHAIN',
+                        'transaction_hash': placeholder_hash,
+                        'blockchain_data': transaction_data,
+                        'idempotency_key': None,
+                        'invoice': invoice_obj
+                    }
+                    # Create if missing
+                    PaymentTransaction.objects.get_or_create(
+                        payment_transaction_id=payment_id,
+                        defaults=defaults
+                    )
+            except Exception as e:
+                logger.warning(f"CreateSponsoredPayment: Failed to ensure PaymentTransaction {payment_id}: {e}")
+
             return cls(
                 success=True,
                 transactions=transaction_data,  # ALL 4 transactions (sponsor pre-signed)
@@ -1274,11 +1344,7 @@ class SubmitSponsoredPaymentMutation(graphene.Mutation):
                     payment_transaction.save()
                 except Exception as e:
                     logger.warning(f"Could not update PaymentTransaction {payment_id} to SUBMITTED: {e}")
-                try:
-                    from blockchain.tasks import confirm_payment_transaction as _confirm_task
-                    _confirm_task.delay(payment_id, tx_id)
-                except Exception as e:
-                    logger.warning(f"Failed to enqueue confirmation task for {payment_id}: {e}")
+                # Do not enqueue here; rely on Celery poller to pick up confirmations
 
             logger.info(
                 f"Sponsored payment submitted for user {user.id}: TxID: {tx_id}. (db+enqueue={time.time() - t_update_start:.3f}s, total_mutation={time.time() - t0:.3f}s) Confirmation handled asynchronously."

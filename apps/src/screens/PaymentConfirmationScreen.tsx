@@ -14,11 +14,9 @@ import {
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp, StackActions, useFocusEffect } from '@react-navigation/native';
 import { useCallback } from 'react';
-import { useMutation } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 import { apolloClient } from '../apollo/client';
-import { PAY_INVOICE } from '../apollo/queries';
-import { CREATE_SPONSORED_PAYMENT } from '../apollo/mutations';
+import { prepareViaWs } from '../services/payWs';
 import { useAccount } from '../contexts/AccountContext';
 import { colors } from '../config/theme';
 import { formatNumber } from '../utils/numberFormatting';
@@ -67,8 +65,6 @@ export const PaymentConfirmationScreen = () => {
   const route = useRoute<PaymentConfirmationRouteProp>();
   const { activeAccount } = useAccount();
   const [isProcessing, setIsProcessing] = useState(false);
-  const [preDispatchPayInvoice] = useMutation(PAY_INVOICE);
-  const [createSponsoredPayment] = useMutation(CREATE_SPONSORED_PAYMENT);
   const [prepared, setPrepared] = useState<any | null>(null);
   const [prepareError, setPrepareError] = useState<string | null>(null);
   const navLock = useRef(false);
@@ -165,20 +161,28 @@ export const PaymentConfirmationScreen = () => {
         const amt = parseFloat(String(invoiceData.amount || '0'));
         const assetType = (String(invoiceData.tokenType || 'cUSD')).toUpperCase();
         const note = `Invoice ${invoiceData.invoiceId}`;
-        const { data } = await createSponsoredPayment({
-          variables: { amount: amt, assetType, paymentId: invoiceData.invoiceId, note, createReceipt: true }
+        // Try WebSocket fast path first
+        const wsPack = await prepareViaWs({
+          amount: amt,
+          assetType,
+          paymentId: invoiceData.invoiceId,
+          note,
+          recipientBusinessId: invoiceData.merchantAccount?.business?.id
         });
-        const res = data?.createSponsoredPayment;
-        if (alive && res?.success && Array.isArray(res.transactions) && res.transactions.length === 4) {
+        if (alive && wsPack && Array.isArray(wsPack.transactions) && wsPack.transactions.length === 4) {
           setPrepared({
-            transactions: res.transactions,
-            paymentId: res.paymentId,
-            groupId: res.groupId
+            transactions: wsPack.transactions,
+            paymentId: (wsPack as any).paymentId || (wsPack as any).payment_id || invoiceData.invoiceId,
+            groupId: (wsPack as any).groupId || (wsPack as any).group_id
           });
-          console.log('PaymentConfirmationScreen: Preflight prepared 4 transactions');
-        } else if (alive) {
-          setPrepareError(res?.error || 'Failed to prepare payment');
-          console.log('PaymentConfirmationScreen: Preflight failed', res?.error);
+          console.error('PaymentConfirmationScreen: Preflight prepared via WS');
+          return;
+        }
+
+        // WS-only mode: if WS pack missing/invalid, record error
+        if (alive) {
+          setPrepareError('Failed to prepare payment via WebSocket');
+          console.error('PaymentConfirmationScreen: Preflight failed via WS');
         }
       } catch (e: any) {
         if (alive) setPrepareError(e?.message || 'Failed to prepare payment');
@@ -189,20 +193,7 @@ export const PaymentConfirmationScreen = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoiceData.invoiceId]);
 
-  // Prewarm network session on focus for this screen as well
-  useFocusEffect(useCallback(() => {
-    try {
-      const { getApiUrl } = require('../config/env');
-      const api: string = getApiUrl();
-      const health = api.replace(/\/graphql\/?$/, '/health');
-      const ping = () => { try { fetch(health, { method: 'HEAD', keepalive: true }).catch(() => {}); } catch {} };
-      ping();
-      const t = setInterval(ping, 20000);
-      return () => clearInterval(t);
-    } catch {
-      return () => {};
-    }
-  }, []));
+  // Removed prewarm HEAD /health pings
 
   const currentPayment = {
     type: 'merchant',
@@ -282,7 +273,7 @@ export const PaymentConfirmationScreen = () => {
   };
 
   const handleConfirmPayment = async () => {
-    console.log('PaymentConfirmationScreen: handleConfirmPayment called');
+    console.error('PaymentConfirmationScreen: handleConfirmPayment called for', { invoiceId: invoiceData.invoiceId });
     
     // Prevent double-clicks/rapid button presses
     if (isProcessing || navLock.current) {
@@ -303,14 +294,45 @@ export const PaymentConfirmationScreen = () => {
 
     // Background preflight: moved to top-level effect
 
-    console.log('PaymentConfirmationScreen: Navigating to PaymentProcessing with data:', {
+    // Ensure we have a prepared pack for THIS invoice before navigating (WS-only)
+    let preparedForNav = prepared;
+    if (!preparedForNav) {
+      try {
+        const amt = parseFloat(String(invoiceData.amount || '0'));
+        const assetType = (String(invoiceData.tokenType || 'cUSD')).toUpperCase();
+        const note = `Invoice ${invoiceData.invoiceId}`;
+        console.error('PaymentConfirmationScreen: prepareViaWs on confirm', { invoiceId: invoiceData.invoiceId, amt, assetType });
+        const pack = await prepareViaWs({
+          amount: amt,
+          assetType,
+          paymentId: invoiceData.invoiceId,
+          note,
+          recipientBusinessId: invoiceData.merchantAccount?.business?.id
+        });
+        if (pack && Array.isArray((pack as any).transactions) && (pack as any).transactions.length === 4) {
+          preparedForNav = {
+            transactions: (pack as any).transactions,
+            paymentId: (pack as any).paymentId || (pack as any).payment_id || invoiceData.invoiceId,
+            groupId: (pack as any).groupId || (pack as any).group_id
+          } as any;
+          setPrepared(preparedForNav);
+          console.error('PaymentConfirmationScreen: prepareViaWs on confirm OK');
+        } else {
+          console.error('PaymentConfirmationScreen: prepareViaWs on confirm failed');
+        }
+      } catch (e) {
+        console.error('PaymentConfirmationScreen: prepareViaWs on confirm exception', e);
+      }
+    }
+
+    console.error('PaymentConfirmationScreen: Navigating to PaymentProcessing with data:', {
       type: 'payment',
       amount: currentPayment.amount,
       currency: currentPayment.currency,
       merchant: currentPayment.recipient,
       action: 'Procesando pago',
       idempotencyKey,
-      prepared: prepared ? { paymentId: prepared.paymentId, txCount: prepared.transactions.length } : null,
+      prepared: preparedForNav ? { paymentId: preparedForNav.paymentId, txCount: preparedForNav.transactions.length } : null,
       prepareError
     });
 
@@ -326,8 +348,9 @@ export const PaymentConfirmationScreen = () => {
         action: 'Procesando pago',
         invoiceId: invoiceData.invoiceId,
         idempotencyKey,
+        merchantBusinessId: invoiceData.merchantAccount?.business?.id,
         preflight: true,
-        prepared
+        prepared: preparedForNav
       }
     });
     console.log('PaymentConfirmationScreen: Triggered navigation to PaymentProcessing');

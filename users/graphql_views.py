@@ -310,12 +310,20 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         from users.models import Account
         try:
             if account_type == 'business' and business_id:
-                # For business accounts, find the account by business_id
-                account = Account.objects.get(
-                    business_id=business_id,
-                    account_type='business',
-                    account_index=account_index
-                )
+                # For business accounts, find the account by business_id (normalize index if needed)
+                try:
+                    account = Account.objects.get(
+                        business_id=business_id,
+                        account_type='business',
+                        account_index=account_index
+                    )
+                except Account.DoesNotExist:
+                    account = Account.objects.filter(
+                        business_id=business_id,
+                        account_type='business'
+                    ).order_by('account_index').first()
+                    if not account:
+                        raise
             else:
                 # For personal accounts
                 account = Account.objects.get(
@@ -397,12 +405,20 @@ class UnifiedTransactionQuery(graphene.ObjectType):
         from users.models import Account
         try:
             if account_type == 'business' and business_id:
-                # For business accounts, find the account by business_id
-                account = Account.objects.get(
-                    business_id=business_id,
-                    account_type='business',
-                    account_index=account_index
-                )
+                # For business accounts, find the account by business_id (normalize index if needed)
+                try:
+                    account = Account.objects.get(
+                        business_id=business_id,
+                        account_type='business',
+                        account_index=account_index
+                    )
+                except Account.DoesNotExist:
+                    account = Account.objects.filter(
+                        business_id=business_id,
+                        account_type='business'
+                    ).order_by('account_index').first()
+                    if not account:
+                        raise
             else:
                 # For personal accounts
                 account = Account.objects.get(
