@@ -161,20 +161,7 @@ export const ScanScreen = () => {
     setIsFlashOn((current) => !current);
   }, []);
 
-  // Prewarm network session on focus (HEAD /health now and every 20s)
-  useFocusEffect(useCallback(() => {
-    try {
-      const { getApiUrl } = require('../config/env');
-      const api: string = getApiUrl();
-      const health = api.replace(/\/graphql\/?$/, '/health');
-      const ping = () => { try { fetch(health, { method: 'HEAD', keepalive: true }).catch(() => {}); } catch {} };
-      ping();
-      const t = setInterval(ping, 20000);
-      return () => clearInterval(t);
-    } catch {
-      return () => {};
-    }
-  }, []));
+  // Removed prewarm HEAD /health pings
 
   const handleClose = () => {
     navigation.goBack();

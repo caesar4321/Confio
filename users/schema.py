@@ -753,46 +753,38 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	def resolve_account_balance(self, info, token_type):
 		"""Resolve account balance for a specific token type and active account"""
 		user = getattr(info.context, 'user', None)
-		
-		# Log authentication status for debugging
-		print(f"AccountBalance resolver - User: {user}, Authenticated: {getattr(user, 'is_authenticated', False) if user else False}")
-		
 		if not (user and getattr(user, 'is_authenticated', False)):
-			print(f"AccountBalance resolver - Returning 0 for unauthenticated user")
 			return "0"
-		
 		# Get JWT context with validation and permission check
 		from .jwt_context import get_jwt_business_context_with_validation
 		jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_balance')
 		if not jwt_context:
-			print(f"AccountBalance resolver - No JWT context found, access denied, or lacking permission")
 			return "0"
-			
 		account_type = jwt_context['account_type']
 		account_index = jwt_context['account_index']
 		business_id_from_context = jwt_context.get('business_id')
 		employee_record = jwt_context.get('employee_record')
-		
-		print(f"AccountBalance resolver - JWT Account: {account_type}_{account_index}")
-		print(f"AccountBalance resolver - JWT Business ID: {business_id_from_context}")
-		
 		# Get the specific account
 		try:
 			from .models import Account
 			from .permissions import check_employee_permission
 			from django.core.exceptions import PermissionDenied
-			
 			# For business accounts, permission is already checked via role-based matrix
 			if account_type == 'business' and business_id_from_context and employee_record:
-				# Permission already validated in get_jwt_business_context_with_validation
-				# and check_role_permission ensures only authorized roles can view balance
-				
-				# Get the business account
-				account = Account.objects.get(
-					business_id=business_id_from_context,
-					account_type='business',
-					account_index=account_index
-				)
+				# Get the business account (normalize index if needed)
+				try:
+					account = Account.objects.get(
+						business_id=business_id_from_context,
+						account_type='business',
+						account_index=account_index
+					)
+				except Account.DoesNotExist:
+					account = Account.objects.filter(
+						business_id=business_id_from_context,
+						account_type='business'
+					).order_by('account_index').first()
+					if not account:
+						raise
 			else:
 				# Personal account - user must own it
 				account = Account.objects.get(
@@ -800,59 +792,38 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					account_type=account_type,
 					account_index=account_index
 				)
-				
-			print(f"AccountBalance resolver - Found account with Algorand address: {account.algorand_address}")
-		except (Account.DoesNotExist, Business.DoesNotExist) as e:
-			print(f"AccountBalance resolver - Account not found: {account_type}_{account_index}")
+		except (Account.DoesNotExist, Business.DoesNotExist):
 			return "0"
 		except PermissionDenied:
 			# Already handled above
 			pass
-		
 		# Normalize token type - always use uppercase for consistency
 		normalized_token_type = token_type.upper()
-		
 		# Check if account has an Algorand address
 		if not account.algorand_address:
-			print(f"AccountBalance resolver - Account has no Algorand address, returning 0")
 			return "0"
-		
 		# Use the blockchain integration to get real balance
 		try:
 			from blockchain.balance_service import BalanceService
-			
 			# Get balance from hybrid caching system
 			# ALWAYS force refresh to ensure real-time accuracy for financial data
 			balance_data = BalanceService.get_balance(
 				account,
 				normalized_token_type,
-				force_refresh=True  # Always get fresh data from blockchain
+				force_refresh=True
 			)
-			
-			print(f"AccountBalance resolver - Got balance data for {normalized_token_type}: {balance_data}")
-			
 			# Format balance as string with asset precision, rounding DOWN to avoid overstating balance
 			from decimal import Decimal, ROUND_DOWN
-			asset_decimals = 6  # Algorand ASA standard used for cUSD/CONFIO/USDC in this app
+			asset_decimals = 6
 			amt = Decimal(str(balance_data['amount']))
-			quant = Decimal('1').scaleb(-asset_decimals)  # e.g., 0.000001
+			quant = Decimal('1').scaleb(-asset_decimals)
 			safe_amt = amt.quantize(quant, rounding=ROUND_DOWN)
-			# Return fixed precision to ensure client comparisons are accurate
 			balance = f"{safe_amt:.6f}"
-			
-			print(f"AccountBalance resolver - Real blockchain balance: {balance} {normalized_token_type}")
-			print(f"AccountBalance resolver - Is stale: {balance_data['is_stale']}, Last synced: {balance_data['last_synced']}")
-			
 			return balance
-			
-		except Exception as e:
-			print(f"AccountBalance resolver - Error fetching blockchain balance: {e}")
+		except Exception:
 			import traceback
 			traceback.print_exc()
-			
-			# CRITICAL: Never show mock data in a financial app
-			# Return 0 and log the error for investigation
-			print(f"AccountBalance resolver - CRITICAL ERROR: Unable to fetch real balance for {normalized_token_type}")
+			# Return 0 on error
 			return "0"
 	
 	def resolve_current_account_permissions(self, info):
@@ -1811,13 +1782,13 @@ class SwitchAccountToken(graphene.Mutation):
 		account_type = graphene.String(required=True)
 		account_index = graphene.Int(required=True)
 		business_id = graphene.ID(required=False)  # Optional, for employee switching to business
-	
+
 	token = graphene.String()
 	payload = graphene.JSONString()
 	# Opt-in transactions if needed (for automatic background signing)
 	opt_in_required = graphene.Boolean()
 	opt_in_transactions = graphene.JSONString()  # Array of opt-in transaction groups to sign
-	
+
 	@classmethod
 	def mutate(cls, root, info, account_type, account_index, business_id=None):
 		user = getattr(info.context, 'user', None)
@@ -1852,6 +1823,23 @@ class SwitchAccountToken(graphene.Mutation):
 					
 					if not owned_account:
 						raise Exception("You don't have access to this business account")
+
+				# Normalize business account index to an existing one for the business
+				# This prevents using an arbitrary employee index that would change the derived address
+				business_accounts_qs = Account.objects.filter(
+					business_id=business_id,
+					account_type='business',
+					deleted_at__isnull=True
+				)
+				if not business_accounts_qs.exists():
+					raise Exception("Business account not found")
+
+				if not business_accounts_qs.filter(account_index=account_index).exists():
+					normalized_index = business_accounts_qs.order_by('account_index').values_list('account_index', flat=True).first()
+					logger.info(
+						f"SwitchAccountToken - Normalizing business account_index from {account_index} to {normalized_index} for business {business_id}"
+					)
+					account_index = normalized_index
 			else:
 				# For personal accounts or business without business_id, find owned account
 				account = Account.objects.get(
@@ -1934,7 +1922,7 @@ class SwitchAccountToken(graphene.Mutation):
 									logger.warning(f"SwitchAccountToken - Failed to create opt-in for asset {asset_id}: {result.get('error')}")
 							else:
 								logger.info(f"SwitchAccountToken - Business account already opted into asset {asset_id}")
-					
+						
 					except Exception as e:
 						# Don't fail the switch, just log the error
 						logger.error(f"SwitchAccountToken - Error checking/creating opt-ins: {e}")

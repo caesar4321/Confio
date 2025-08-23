@@ -273,6 +273,23 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
     `${CONFIO_DERIVATION_SPEC.algoInfoPrefix}|${provider}|${accountType}|${accountIndex}|${businessId ?? ''}`
   );
 
+  // Debug: trace derivation inputs without exposing secrets
+  try {
+    const derivPepperHash = bytesToHex(sha256(utf8ToBytes(String(derivationPepper))));
+    console.log('[Derive][DEBUG] Inputs:', {
+      provider,
+      accountType,
+      accountIndex,
+      businessId: businessId ?? 'none',
+      clientSaltPrefix: clientSalt.substring(0, 20) + '...',
+      derivationPepperHashPrefix: derivPepperHash.substring(0, 16) + '...',
+      extractSaltPrefix: bytesToHex(extractSalt).substring(0, 16) + '...',
+      infoString: `${CONFIO_DERIVATION_SPEC.algoInfoPrefix}|${provider}|${accountType}|${accountIndex}|${businessId ?? ''}`,
+    });
+  } catch (e) {
+    // best-effort debug only
+  }
+
   // Derive 32-byte ed25519 seed using HKDF
   const seed32 = hkdf(sha256, ikm, extractSalt, info, 32);
 
@@ -282,6 +299,9 @@ export function deriveDeterministicAlgorandKey(opts: DeriveWalletOptions): Deriv
   // Encode Algorand address from public key (runtime require to avoid RN issues)
   const algosdk = require('algosdk');
   const address = algosdk.encodeAddress(keyPair.publicKey);
+
+  // Debug: show derived address summary
+  console.log('[Derive][DEBUG] Derived Algorand address:', address);
 
   // Return the derived wallet
   return {

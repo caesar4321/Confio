@@ -61,10 +61,4 @@ def deletion_view(request):
     return render(request, 'deletion.html')
 
 
-def health_view(request):
-    """Ultra-light health endpoint for prewarm/keepalive.
-
-    Returns HTTP 200 with a short body and no heavy checks.
-    """
-    return HttpResponse('ok', content_type='text/plain')
-
+# Removed /health endpoint (not required for WS flow)
