@@ -175,14 +175,14 @@ export const PaymentConfirmationScreen = () => {
             paymentId: (wsPack as any).paymentId || (wsPack as any).payment_id || invoiceData.invoiceId,
             groupId: (wsPack as any).groupId || (wsPack as any).group_id
           });
-          console.error('PaymentConfirmationScreen: Preflight prepared via WS');
+          console.log('PaymentConfirmationScreen: Preflight prepared via WS');
           return;
         }
 
         // WS-only mode: if WS pack missing/invalid, record error
         if (alive) {
           setPrepareError('Failed to prepare payment via WebSocket');
-          console.error('PaymentConfirmationScreen: Preflight failed via WS');
+          console.log('PaymentConfirmationScreen: Preflight failed via WS');
         }
       } catch (e: any) {
         if (alive) setPrepareError(e?.message || 'Failed to prepare payment');
@@ -273,7 +273,7 @@ export const PaymentConfirmationScreen = () => {
   };
 
   const handleConfirmPayment = async () => {
-    console.error('PaymentConfirmationScreen: handleConfirmPayment called for', { invoiceId: invoiceData.invoiceId });
+    console.log('PaymentConfirmationScreen: handleConfirmPayment called for', { invoiceId: invoiceData.invoiceId });
     
     // Prevent double-clicks/rapid button presses
     if (isProcessing || navLock.current) {
@@ -301,7 +301,7 @@ export const PaymentConfirmationScreen = () => {
         const amt = parseFloat(String(invoiceData.amount || '0'));
         const assetType = (String(invoiceData.tokenType || 'cUSD')).toUpperCase();
         const note = `Invoice ${invoiceData.invoiceId}`;
-        console.error('PaymentConfirmationScreen: prepareViaWs on confirm', { invoiceId: invoiceData.invoiceId, amt, assetType });
+        console.log('PaymentConfirmationScreen: prepareViaWs on confirm', { invoiceId: invoiceData.invoiceId, amt, assetType });
         const pack = await prepareViaWs({
           amount: amt,
           assetType,
@@ -316,16 +316,16 @@ export const PaymentConfirmationScreen = () => {
             groupId: (pack as any).groupId || (pack as any).group_id
           } as any;
           setPrepared(preparedForNav);
-          console.error('PaymentConfirmationScreen: prepareViaWs on confirm OK');
+          console.log('PaymentConfirmationScreen: prepareViaWs on confirm OK');
         } else {
-          console.error('PaymentConfirmationScreen: prepareViaWs on confirm failed');
+          console.log('PaymentConfirmationScreen: prepareViaWs on confirm failed');
         }
       } catch (e) {
-        console.error('PaymentConfirmationScreen: prepareViaWs on confirm exception', e);
+        console.log('PaymentConfirmationScreen: prepareViaWs on confirm exception', e);
       }
     }
 
-    console.error('PaymentConfirmationScreen: Navigating to PaymentProcessing with data:', {
+    console.log('PaymentConfirmationScreen: Navigating to PaymentProcessing with data:', {
       type: 'payment',
       amount: currentPayment.amount,
       currency: currentPayment.currency,
