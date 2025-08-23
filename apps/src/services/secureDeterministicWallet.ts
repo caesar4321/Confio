@@ -320,8 +320,9 @@ export class SecureDeterministicWalletService {
   private currentScope = new Map<string, string>(); // Track current scope per user
   private cacheKeysPerUser = new Map<string, Set<string>>(); // Track all cache keys created per user
   // Session caches to avoid repeated GraphQL/keychain overhead
-  private cachedDerivationPepper?: string;
-  private cachedKekPepperByVersion: Map<number, string> = new Map();
+  // Peppers are per-account. Never cache globally across contexts.
+  private cachedDerivationPepperByContext: Map<string, string> = new Map();
+  private cachedKekPepperByCtxAndVersion: Map<string, string> = new Map();
   
   private constructor() {}
   
@@ -332,11 +333,18 @@ export class SecureDeterministicWalletService {
     return SecureDeterministicWalletService.instance;
   }
 
-  async getDerivationPepper(): Promise<{ pepper: string | undefined }> {
+  private makeAccountContextKey(accountType?: string, accountIndex?: number, businessId?: string | undefined): string {
+    const type = accountType ?? 'personal';
+    const idx = typeof accountIndex === 'number' ? accountIndex : 0;
+    return businessId ? `${type}|${idx}|${businessId}` : `${type}|${idx}`;
+  }
+
+  async getDerivationPepper(opts?: { accountType?: string; accountIndex?: number; businessId?: string }): Promise<{ pepper: string | undefined }> {
     try {
-      // Fast path: return from session cache
-      if (this.cachedDerivationPepper) {
-        return { pepper: this.cachedDerivationPepper };
+      const ctxKey = this.makeAccountContextKey(opts?.accountType, opts?.accountIndex, opts?.businessId);
+      // Fast path: return from session cache (per account context)
+      if (this.cachedDerivationPepperByContext.has(ctxKey)) {
+        return { pepper: this.cachedDerivationPepperByContext.get(ctxKey) } as any;
       }
       // Require JWT to be present; otherwise skip
       try {
@@ -352,8 +360,9 @@ export class SecureDeterministicWalletService {
       }
       const { data } = await apolloClient.mutate({ mutation: GET_DERIVATION_PEPPER });
       if (data?.getDerivationPepper?.success) {
-        this.cachedDerivationPepper = data.getDerivationPepper.pepper;
-        return { pepper: this.cachedDerivationPepper };
+        const pepper = data.getDerivationPepper.pepper as string;
+        this.cachedDerivationPepperByContext.set(ctxKey, pepper);
+        return { pepper };
       }
       console.debug('Derivation pepper not provided');
       return { pepper: undefined };
@@ -363,7 +372,7 @@ export class SecureDeterministicWalletService {
     }
   }
 
-  async getKekPepper(requestVersion?: number): Promise<{ 
+  async getKekPepper(requestVersion?: number, opts?: { accountType?: string; accountIndex?: number; businessId?: string }): Promise<{ 
     pepper: string | undefined; 
     version: number;
     isRotated?: boolean;
@@ -371,9 +380,11 @@ export class SecureDeterministicWalletService {
   }> {
     try {
       const versionToUse = requestVersion || 1;
+      const ctxKey = this.makeAccountContextKey(opts?.accountType, opts?.accountIndex, opts?.businessId);
+      const cacheKey = `${ctxKey}|v${versionToUse}`;
       // Fast path: return from session cache for requested version
-      if (this.cachedKekPepperByVersion.has(versionToUse)) {
-        return { pepper: this.cachedKekPepperByVersion.get(versionToUse), version: versionToUse } as any;
+      if (this.cachedKekPepperByCtxAndVersion.has(cacheKey)) {
+        return { pepper: this.cachedKekPepperByCtxAndVersion.get(cacheKey), version: versionToUse } as any;
       }
       // Require JWT to be present; otherwise skip
       try {
@@ -393,7 +404,7 @@ export class SecureDeterministicWalletService {
         const pepper = data.getKekPepper.pepper;
         const version = data.getKekPepper.version || versionToUse || 1;
         if (pepper && version) {
-          this.cachedKekPepperByVersion.set(version, pepper);
+          this.cachedKekPepperByCtxAndVersion.set(`${ctxKey}|v${version}`, pepper);
         }
         return {
           pepper: data.getKekPepper.pepper,
@@ -466,12 +477,12 @@ export class SecureDeterministicWalletService {
       
       // Get derivation pepper (REQUIRED for derivation salt)
       perfLog('Before derivation pepper');
-      const { pepper: derivPepper } = await this.getDerivationPepper({
-        firebaseIdToken,
-        accountType,
-        accountIndex,
-        businessId
-      });
+          const { pepper: derivPepper } = await this.getDerivationPepper({
+            firebaseIdToken,
+            accountType,
+            accountIndex,
+            businessId
+          });
       perfLog('Got derivation pepper');
       if (!derivPepper) {
         throw new Error('Missing derivation pepper: cannot derive wallet without pepper. Ensure authentication and network are available.');
@@ -479,12 +490,12 @@ export class SecureDeterministicWalletService {
 
       // Get KEK pepper (for encryption)
       perfLog('Before KEK pepper');
-      const { pepper: kekPepper, version: pepperVersion } = await this.getKekPepper(undefined, {
-        firebaseIdToken,
-        accountType,
-        accountIndex,
-        businessId
-      });
+          const { pepper: kekPepper, version: pepperVersion } = await this.getKekPepper(undefined, {
+            firebaseIdToken,
+            accountType,
+            accountIndex,
+            businessId
+          });
       perfLog('Got KEK pepper');
       
       // Derive KEK for encryption
@@ -522,7 +533,11 @@ export class SecureDeterministicWalletService {
           
           if (storedPepperVersion !== pepperVersion) {
             console.log(`Stored pepper v${storedPepperVersion} differs from current v${pepperVersion}`);
-            const { pepper: oldPepper } = await this.getKekPepper(storedPepperVersion);
+            const { pepper: oldPepper } = await this.getKekPepper(storedPepperVersion, {
+              accountType,
+              accountIndex,
+              businessId
+            });
             
             if (oldPepper) {
               // Derive KEK with the old pepper version
@@ -791,6 +806,10 @@ export class SecureDeterministicWalletService {
       
       // Clear ALL user tracking
       this.cacheKeysPerUser.clear();
+
+      // Clear pepper caches
+      this.cachedDerivationPepperByContext.clear();
+      this.cachedKekPepperByCtxAndVersion.clear();
       
       // Clear ALL encrypted cache from keychain
       // Since all wallets for this app use the same server 'wallet.confio.app',
