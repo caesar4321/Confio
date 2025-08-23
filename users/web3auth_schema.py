@@ -614,6 +614,24 @@ class GetKekPepperMutation(graphene.Mutation):
             account_type = jwt_context['account_type']
             account_index = jwt_context['account_index']
             business_id = jwt_context.get('business_id')
+
+            # Normalize business account index to an existing one for the business
+            if account_type == 'business' and business_id:
+                try:
+                    from .models import Account
+                    idx = Account.objects.filter(
+                        business_id=business_id,
+                        account_type='business',
+                        deleted_at__isnull=True
+                    ).order_by('account_index').values_list('account_index', flat=True).first()
+                    if idx is not None:
+                        if idx != account_index:
+                            logger.info(
+                                f"GetKekPepper - Normalizing business account_index from {account_index} to {idx} for business {business_id}"
+                            )
+                        account_index = idx
+                except Exception:
+                    pass
             
             # Create a unique pepper key based on account context
             # This ensures each account (personal/business) has its own pepper
@@ -633,7 +651,15 @@ class GetKekPepperMutation(graphene.Mutation):
                 )
             
             if created:
-                logger.info(f'Created new wallet pepper for account {pepper_key}')
+                logger.info(
+                    f'GetKekPepper: created new pepper (v1) for account_key={pepper_key} '
+                    f'user_id={user.id} account_type={account_type} account_index={account_index} business_id={business_id}'
+                )
+            else:
+                logger.info(
+                    f'GetKekPepper: fetched pepper v{pepper_obj.version} for account_key={pepper_key} '
+                    f'user_id={user.id} account_type={account_type} account_index={account_index} business_id={business_id}'
+                )
             
             # Check if client requested a specific version (during grace period)
             if request_version and request_version == pepper_obj.previous_version:
@@ -699,6 +725,24 @@ class RotateKekPepperMutation(graphene.Mutation):
             account_type = jwt_context['account_type']
             account_index = jwt_context['account_index']
             business_id = jwt_context.get('business_id')
+
+            # Normalize business account index to an existing one for the business
+            if account_type == 'business' and business_id:
+                try:
+                    from .models import Account
+                    idx = Account.objects.filter(
+                        business_id=business_id,
+                        account_type='business',
+                        deleted_at__isnull=True
+                    ).order_by('account_index').values_list('account_index', flat=True).first()
+                    if idx is not None:
+                        if idx != account_index:
+                            logger.info(
+                                f"GetDerivationPepper - Normalizing business account_index from {account_index} to {idx} for business {business_id}"
+                            )
+                        account_index = idx
+                except Exception:
+                    pass
             
             # Create a unique pepper key based on account context
             if account_type == 'business' and business_id:
@@ -795,7 +839,15 @@ class GetDerivationPepperMutation(graphene.Mutation):
                     }
                 )
             if created:
-                logger.info(f'Created derivation pepper for account {pepper_key}')
+                logger.info(
+                    f'GetDerivationPepper: created derivation pepper for account_key={pepper_key} '
+                    f'user_id={user.id} account_type={account_type} account_index={account_index} business_id={business_id}'
+                )
+            else:
+                logger.info(
+                    f'GetDerivationPepper: fetched derivation pepper for account_key={pepper_key} '
+                    f'user_id={user.id} account_type={account_type} account_index={account_index} business_id={business_id}'
+                )
 
             return cls(success=True, pepper=deriv.pepper)
         except Exception as e:

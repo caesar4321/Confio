@@ -13,11 +13,9 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import { useMutation } from '@apollo/client';
-import { PAY_INVOICE } from '../apollo/queries';
+// GraphQL not used in WS-only flow
 import { colors } from '../config/theme';
-import { GET_INVOICES } from '../apollo/queries'; // Added this import for cache update
-import { AccountManager } from '../utils/accountManager';
+// Removed GET_INVOICES and AccountManager in WS-only flow
 
 type PaymentProcessingRouteProp = RouteProp<{
   PaymentProcessing: {
@@ -31,6 +29,7 @@ type PaymentProcessingRouteProp = RouteProp<{
       message?: string;
       invoiceId?: string;
       idempotencyKey?: string;
+      merchantBusinessId?: string | number;
       preflight?: boolean;
     };
   };
@@ -47,55 +46,8 @@ export const PaymentProcessingScreen = () => {
   const [paymentResponse, setPaymentResponse] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   
-  // Generate idempotency key once per screen instance
-  const idempotencyKeyRef = useRef<string | null>(null);
   const hasProcessedRef = useRef(false);
   const ranRef = useRef(false);
-  
-  // Generate unique idempotency key
-  useEffect(() => {
-    if (!idempotencyKeyRef.current) {
-      const timestamp = Date.now();
-      const random = Math.random().toString(36).substring(2, 15);
-      idempotencyKeyRef.current = `pay_${timestamp}_${random}`;
-    }
-  }, []);
-
-  // GraphQL mutation for paying invoice
-  const [payInvoice] = useMutation(PAY_INVOICE, {
-    update: (cache, { data }) => {
-      if (data?.payInvoice?.success) {
-        console.log('PaymentProcessingScreen: Updating Apollo cache after successful payment');
-        
-        // Update the GET_INVOICES query cache to reflect the new status
-        try {
-          const existingInvoices = cache.readQuery({ query: GET_INVOICES });
-          if (existingInvoices && typeof existingInvoices === 'object' && 'invoices' in existingInvoices && Array.isArray(existingInvoices.invoices)) {
-            const updatedInvoices = existingInvoices.invoices.map((invoice: any) => {
-              if (invoice.invoiceId === transactionData.invoiceId) {
-                return {
-                  ...invoice,
-                  status: 'PAID',
-                  paidByUser: data.payInvoice.invoice.paidByUser,
-                  paidAt: data.payInvoice.invoice.paidAt,
-                  paymentTransactions: data.payInvoice.paymentTransaction ? [data.payInvoice.paymentTransaction] : []
-                };
-              }
-              return invoice;
-            });
-            
-            cache.writeQuery({
-              query: GET_INVOICES,
-              data: { invoices: updatedInvoices }
-            });
-            console.log('PaymentProcessingScreen: Cache updated successfully');
-          }
-        } catch (error) {
-          console.log('PaymentProcessingScreen: Cache update error (non-critical):', error);
-        }
-      }
-    }
-  });
 
   // Helper function to format currency for display
   const formatCurrency = (currency: string): string => {
@@ -239,7 +191,7 @@ export const PaymentProcessingScreen = () => {
     if (ranRef.current) return;
     ranRef.current = true;
 
-  const processPayment = async () => {
+  const processPaymentWsOnly = async () => {
       if (isProcessing || hasProcessedRef.current) {
         console.log('PaymentProcessingScreen: Payment already in progress, skipping duplicate request');
         return;
@@ -251,54 +203,81 @@ export const PaymentProcessingScreen = () => {
       try {
         const now = () => (typeof performance !== 'undefined' && (performance as any).now ? (performance as any).now() : Date.now());
         const t0 = now();
-        console.log('PaymentProcessingScreen: Starting payment processing for invoice:', transactionData.invoiceId);
+      console.error('PaymentProcessingScreen[WS]: Start', { invoiceId: transactionData.invoiceId, preparedCount: prepared?.transactions?.length || 0 });
 
-        // If prepared transactions were provided by Confirmation, use them directly
-        if (prepared && Array.isArray(prepared.transactions) && prepared.transactions.length === 4) {
-          try {
-            const algorandServiceModule = await import('../services/algorandService');
-            const algorandService = algorandServiceModule.default;
-            const { apolloClient } = await import('../apollo/client');
-            const { SUBMIT_SPONSORED_PAYMENT } = await import('../apollo/mutations');
+        // update UI steps
+        setCurrentStep(0); // verifying
+        setCurrentStep(1); // processing
+        setCurrentStep(2); // signing/submitting
 
-            console.log('PaymentProcessingScreen: Using prepared transactions from Confirmation');
-            const transactions = prepared.transactions;
-            const tSignStart = now();
-            const signedTransactions: any[] = [];
+        // Ensure we have a prepared pack; if not, prepare via WS now
+        let wsPack = prepared && Array.isArray(prepared.transactions) && prepared.transactions.length === 4
+          ? prepared
+          : null;
 
-            for (let i = 0; i < transactions.length; i++) {
-              const txn = transactions[i];
-              const needsSignature = txn.needs_signature || txn.needsSignature || false;
-              const isSigned = txn.signed || false;
-              const txnIndex = txn.index !== undefined ? txn.index : i;
-              if (needsSignature && !isSigned) {
-                const txnData = txn.transaction;
-                const txnBytes = Uint8Array.from(Buffer.from(txnData, 'base64'));
-                const signedTxnBytes = await algorandService.signTransactionBytes(txnBytes);
-                const signedTxnB64 = Buffer.from(signedTxnBytes).toString('base64');
-                signedTransactions.push({ index: txnIndex, transaction: signedTxnB64 });
-              } else {
-                signedTransactions.push({ index: txnIndex, transaction: txn.transaction });
-              }
-            }
-            const tSignEnd = now();
-            const submitResult = await apolloClient.mutate({
-              mutation: SUBMIT_SPONSORED_PAYMENT,
-              variables: { signedTransactions: JSON.stringify(signedTransactions), paymentId: prepared.paymentId || transactionData.invoiceId }
-            });
-            if (!submitResult.data?.submitSponsoredPayment?.success) {
-              throw new Error(submitResult.data?.submitSponsoredPayment?.error || 'Failed to submit blockchain payment');
-            }
-            console.log('PaymentProcessingScreen: Blockchain payment confirmed:', submitResult.data.submitSponsoredPayment);
-            setIsComplete(true);
-            setPaymentResponse({ blockchainTxId: submitResult.data.submitSponsoredPayment.transactionId, blockchainRound: submitResult.data.submitSponsoredPayment.confirmedRound });
-            return;
-          } catch (e) {
-            console.error('PaymentProcessingScreen: Prepared path failed:', e);
-            throw e;
+        if (!wsPack) {
+          const { prepareViaWs } = await import('../services/payWs');
+          const amt = parseFloat(String(transactionData.amount || '0'));
+          const assetType = String(transactionData.currency || 'cUSD').toUpperCase();
+          const note = `Invoice ${transactionData.invoiceId}`;
+      console.error('PaymentProcessingScreen[WS]: Calling prepareViaWs', { amt, assetType, note, recipientBusinessId: (transactionData as any).merchantBusinessId });
+          const pack = await prepareViaWs({
+            amount: amt,
+            assetType,
+            paymentId: transactionData.invoiceId,
+            note,
+            recipientBusinessId: (transactionData as any).merchantBusinessId
+          });
+          if (!pack || !Array.isArray((pack as any).transactions) || (pack as any).transactions.length !== 4) {
+            throw new Error('WS prepare failed or invalid pack');
+          }
+          wsPack = {
+            transactions: (pack as any).transactions,
+            paymentId: (pack as any).paymentId || (pack as any).payment_id || transactionData.invoiceId,
+            groupId: (pack as any).groupId || (pack as any).group_id
+          } as any;
+        console.error('PaymentProcessingScreen[WS]: Prepared pack received');
+        }
+
+        // Sign required transactions
+        const algorandServiceModule = await import('../services/algorandService');
+        const algorandService = algorandServiceModule.default;
+        const { submitViaWs } = await import('../services/payWs');
+
+        const transactions = (wsPack as any).transactions;
+      console.error('PaymentProcessingScreen[WS]: Signing transactions', { count: transactions.length });
+        const tSignStart = now();
+        const signedTransactions: any[] = [];
+        for (let i = 0; i < transactions.length; i++) {
+          const txn = transactions[i];
+          const needsSignature = txn.needs_signature || txn.needsSignature || false;
+          const isSigned = txn.signed || false;
+          const txnIndex = txn.index !== undefined ? txn.index : i;
+          if (needsSignature && !isSigned) {
+            const txnData = txn.transaction;
+            const txnBytes = Uint8Array.from(Buffer.from(txnData, 'base64'));
+            const signedTxnBytes = await algorandService.signTransactionBytes(txnBytes);
+            const signedTxnB64 = Buffer.from(signedTxnBytes).toString('base64');
+            signedTransactions.push({ index: txnIndex, transaction: signedTxnB64 });
+          } else {
+            signedTransactions.push({ index: txnIndex, transaction: txn.transaction });
           }
         }
-        
+        const tSignEnd = now();
+
+      const paymentIdForSubmit = ((wsPack as any)?.paymentId as string) || (transactionData.invoiceId as string);
+      console.error('PaymentProcessingScreen[WS]: Submitting via WS', { indexes: signedTransactions.map(t => t.index), paymentIdForSubmit });
+      const wsRes = await submitViaWs(signedTransactions, paymentIdForSubmit);
+        if (!wsRes || (!wsRes.transactionId && !(wsRes as any).transaction_id)) {
+          throw new Error('WS submit failed');
+        }
+        const txid = (wsRes as any).transactionId || (wsRes as any).transaction_id;
+        const round = (wsRes as any).confirmedRound || (wsRes as any).confirmed_round;
+      console.error('PaymentProcessingScreen[WS]: Confirmed', { txid, round, sign_ms: Math.round(tSignEnd - tSignStart), total_ms: Math.round(now() - t0) });
+        setIsComplete(true);
+        setPaymentResponse({ blockchainTxId: txid, blockchainRound: round });
+        return;
+        /*
         // Log current account context for debugging
         try {
           const accountManager = AccountManager.getInstance();
@@ -500,19 +479,42 @@ export const PaymentProcessingScreen = () => {
               }
             }
             
-            // Submit the signed transactions
-            // The mutation will detect if it's a 4-txn group (2 user transactions) and reconstruct sponsor transactions
-            const submitResult = await apolloClient.mutate({
+            // Submit via WebSocket first
+            const { submitViaWs } = await import('../services/payWs');
+            const wsRes = await submitViaWs(signedTransactions, data.payInvoice.paymentTransaction.paymentTransactionId);
+            let submitResult: any = null;
+            let tSubmitEnd = now();
+            if (wsRes && (wsRes.transactionId || wsRes.transaction_id)) {
+              console.log('PaymentProcessingScreen: Blockchain payment confirmed via WS:', wsRes);
+              try {
+                console.log('[Payment][Perf]', {
+                  create_ms: Math.round(tCreateEnd - tCreateStart),
+                  sign_ms: Math.round(tSignEnd - tSignStart),
+                  submit_ms: Math.round(tSubmitEnd - tSubmitStart),
+                  total_ms: Math.round(tSubmitEnd - t0)
+                });
+              } catch {}
+              setIsComplete(true);
+              setPaymentResponse({
+                ...data.payInvoice,
+                blockchainTxId: (wsRes as any).transactionId || (wsRes as any).transaction_id,
+                blockchainRound: (wsRes as any).confirmedRound || (wsRes as any).confirmed_round
+              });
+              return;
+            }
+
+            // Fallback to GraphQL mutation
+            submitResult = await apolloClient.mutate({
               mutation: SUBMIT_SPONSORED_PAYMENT,
               variables: {
                 signedTransactions: JSON.stringify(signedTransactions),
                 paymentId: data.payInvoice.paymentTransaction.paymentTransactionId
               }
             });
-            const tSubmitEnd = now();
+            tSubmitEnd = now();
             
             if (submitResult.data?.submitSponsoredPayment?.success) {
-              console.log('PaymentProcessingScreen: Blockchain payment confirmed:', submitResult.data.submitSponsoredPayment);
+              console.log('PaymentProcessingScreen: Blockchain payment confirmed (HTTP fallback):', submitResult.data.submitSponsoredPayment);
               try {
                 console.log('[Payment][Perf]', {
                   create_ms: Math.round(tCreateEnd - tCreateStart),
@@ -587,17 +589,35 @@ export const PaymentProcessingScreen = () => {
                     }
                   }
                   const tSignEnd = now();
-                  // Submit
+                  // Submit via WS first
+                  const { submitViaWs } = await import('../services/payWs');
+                  const tSubmitStart = now();
+                  const wsRes = await submitViaWs(signedTransactions, paymentId);
+                  let tSubmitEnd = now();
+                  if (wsRes && (wsRes.transactionId || wsRes.transaction_id)) {
+                    console.log('PaymentProcessingScreen: Blockchain payment confirmed (recovered path, WS):', wsRes);
+                    try {
+                      console.log('[Payment][Perf]', {
+                        create_ms: Math.round(tCreateEnd - tCreateStart),
+                        sign_ms: Math.round(tSignEnd - tSignStart),
+                        submit_ms: Math.round(tSubmitEnd - tSubmitStart),
+                        total_ms: Math.round(tSubmitEnd - t0)
+                      });
+                    } catch {}
+                    setIsComplete(true);
+                    setPaymentResponse({ paymentTransaction: { paymentTransactionId: paymentId } });
+                    return;
+                  }
+                  // Fallback HTTP GraphQL
                   const { apolloClient: apollo2 } = await import('../apollo/client');
                   const { SUBMIT_SPONSORED_PAYMENT } = await import('../apollo/mutations');
-                  const tSubmitStart = now();
                   const submitResult = await apollo2.mutate({
                     mutation: SUBMIT_SPONSORED_PAYMENT,
                     variables: { signedTransactions: JSON.stringify(signedTransactions), paymentId }
                   });
-                  const tSubmitEnd = now();
+                  tSubmitEnd = now();
                   if (submitResult.data?.submitSponsoredPayment?.success) {
-                    console.log('PaymentProcessingScreen: Blockchain payment confirmed (recovered path):', submitResult.data.submitSponsoredPayment);
+                    console.log('PaymentProcessingScreen: Blockchain payment confirmed (recovered path, HTTP):', submitResult.data.submitSponsoredPayment);
                     try {
                       console.log('[Payment][Perf]', {
                         create_ms: Math.round(tCreateEnd - tCreateStart),
@@ -627,6 +647,7 @@ export const PaymentProcessingScreen = () => {
           console.error('PaymentProcessingScreen: Payment failed:', errors);
           setPaymentError(errors.join(', '));
         }
+        */
       } catch (error) {
         console.error('PaymentProcessingScreen: Payment error:', error);
         setPaymentError('Error al procesar el pago. Inténtalo de nuevo.');
@@ -635,8 +656,8 @@ export const PaymentProcessingScreen = () => {
       }
     };
 
-    processPayment();
-  }, [isValid, transactionData.invoiceId, payInvoice]);
+    processPaymentWsOnly();
+  }, [isValid, transactionData.invoiceId]);
 
 
 
