@@ -28,13 +28,13 @@ BLOCKCHAIN_CELERY_BEAT_SCHEDULE = {
     # Indexer inbound deposit scan (USDC, cUSD, CONFIO)
     'scan-inbound-deposits': {
         'task': 'blockchain.scan_inbound_deposits',
-        'schedule': 3.0,  # Every 3 seconds
+        'schedule': 30.0,  # Every 30 seconds
     },
     
     # Outbound confirmation scan (payments, sends)
     'scan-outbound-confirmations': {
         'task': 'blockchain.scan_outbound_confirmations',
-        'schedule': 2.0,  # Every 2 seconds
+        'schedule': 10.0,  # Every 10 seconds
     },
     
     # Removed Sui epoch tracking
