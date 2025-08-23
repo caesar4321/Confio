@@ -14,6 +14,17 @@ collectstatic:
 runserver:
 	DEBUG=True $(PYTHON) -m daphne -b 0.0.0.0 -p 8000 config.asgi:application
 
+# Run Daphne with HTTP/2 + TLS (dev)
+# Requires: pip install "twisted[tls,http2]" service-identity
+# Usage: make runserver-h2 DEV_SSL_CERT=dev.crt DEV_SSL_KEY=dev.key DEV_PORT=8443
+runserver-h2:
+	@if [ -z "$(DEV_SSL_CERT)" ] || [ -z "$(DEV_SSL_KEY)" ]; then \
+		echo "DEV_SSL_CERT/DEV_SSL_KEY not set. Usage: make runserver-h2 DEV_SSL_CERT=dev.crt DEV_SSL_KEY=dev.key [DEV_PORT=8443]"; \
+		exit 1; \
+	fi
+	DEBUG=True $(PYTHON) -m daphne -b 0.0.0.0 -p $${DEV_PORT:-8443} -e "ssl:port=$${DEV_PORT:-8443}:privateKey=$(DEV_SSL_KEY):certificate=$(DEV_SSL_CERT)" config.asgi:application
+	@echo "Daphne running with HTTP/2 + TLS on port $${DEV_PORT:-8443}"
+
 # Run Django development server with ASGI support (alternative)
 runserver-dev:
 	DEBUG=True DJANGO_SETTINGS_MODULE=config.settings $(PYTHON) -m uvicorn config.asgi:application --host 0.0.0.0 --port 8000 --reload

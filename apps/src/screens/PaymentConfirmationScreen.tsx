@@ -12,7 +12,8 @@ import {
   StatusBar,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation, useRoute, RouteProp, StackActions } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, StackActions, useFocusEffect } from '@react-navigation/native';
+import { useCallback } from 'react';
 import { useMutation } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 import { apolloClient } from '../apollo/client';
@@ -187,6 +188,21 @@ export const PaymentConfirmationScreen = () => {
     return () => { alive = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoiceData.invoiceId]);
+
+  // Prewarm network session on focus for this screen as well
+  useFocusEffect(useCallback(() => {
+    try {
+      const { getApiUrl } = require('../config/env');
+      const api: string = getApiUrl();
+      const health = api.replace(/\/graphql\/?$/, '/health');
+      const ping = () => { try { fetch(health, { method: 'HEAD', keepalive: true }).catch(() => {}); } catch {} };
+      ping();
+      const t = setInterval(ping, 20000);
+      return () => clearInterval(t);
+    } catch {
+      return () => {};
+    }
+  }, []));
 
   const currentPayment = {
     type: 'merchant',

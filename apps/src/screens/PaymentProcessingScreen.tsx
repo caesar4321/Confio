@@ -134,9 +134,11 @@ export const PaymentProcessingScreen = () => {
     }
   }, [isValid, navigation]);
 
-  // Animation values
-  const spinValue = new Animated.Value(0);
-  const pulseValue = new Animated.Value(1);
+  // Animation values (persist across renders)
+  const spinValue = useRef(new Animated.Value(0)).current;
+  const pulseValue = useRef(new Animated.Value(1)).current;
+  const spinAnimRef = useRef<Animated.CompositeAnimation | null>(null);
+  const pulseAnimRef = useRef<Animated.CompositeAnimation | null>(null);
 
   // Processing steps
   const processingSteps = [
@@ -162,7 +164,9 @@ export const PaymentProcessingScreen = () => {
 
   // Start spinning animation
   useEffect(() => {
-    const spinAnimation = Animated.loop(
+    // reset value for fresh loop
+    spinValue.setValue(0);
+    spinAnimRef.current = Animated.loop(
       Animated.timing(spinValue, {
         toValue: 1,
         duration: 2000,
@@ -170,14 +174,21 @@ export const PaymentProcessingScreen = () => {
         useNativeDriver: true,
       })
     );
-    spinAnimation.start();
+    spinAnimRef.current.start();
 
-    return () => spinAnimation.stop();
-  }, []);
+    return () => {
+      if (spinAnimRef.current) {
+        spinAnimRef.current.stop();
+        spinAnimRef.current = null;
+      }
+    };
+  }, [spinValue]);
 
   // Start pulse animation
   useEffect(() => {
-    const pulseAnimation = Animated.loop(
+    // reset value for fresh loop
+    pulseValue.setValue(1);
+    pulseAnimRef.current = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseValue, {
           toValue: 1.2,
@@ -193,10 +204,15 @@ export const PaymentProcessingScreen = () => {
         }),
       ])
     );
-    pulseAnimation.start();
+    pulseAnimRef.current.start();
 
-    return () => pulseAnimation.stop();
-  }, []);
+    return () => {
+      if (pulseAnimRef.current) {
+        pulseAnimRef.current.stop();
+        pulseAnimRef.current = null;
+      }
+    };
+  }, [pulseValue]);
 
   // Process payment when screen loads
   useEffect(() => {
