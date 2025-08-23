@@ -1,7 +1,7 @@
 from django.urls import re_path
 from . import consumers
 from .subscription_consumer import GraphQLSubscriptionConsumer
-from payments.ws_consumers import PaySessionConsumer
+from payments.ws_consumers import PaySessionConsumer, SendSessionConsumer
 
 websocket_urlpatterns = [
     # GraphQL Subscriptions endpoint
@@ -12,4 +12,6 @@ websocket_urlpatterns = [
 
     # Payment flow ephemeral WebSocket
     re_path(r'ws/pay_session$', PaySessionConsumer.as_asgi()),
+    # Send flow ephemeral WebSocket
+    re_path(r'ws/send_session$', SendSessionConsumer.as_asgi()),
 ]

@@ -16,6 +16,7 @@ User = get_user_model()
 class Web3AuthUserType(DjangoObjectType):
     algorand_address = graphene.String()
     is_phone_verified = graphene.Boolean()
+    phone_key = graphene.String()
     
     class Meta:
         model = User
@@ -32,6 +33,12 @@ class Web3AuthUserType(DjangoObjectType):
     def resolve_is_phone_verified(self, info):
         """Check if user has a phone number stored"""
         return bool(self.phone_number)
+
+    def resolve_phone_key(self, info):
+        try:
+            return getattr(self, 'phone_key', None)
+        except Exception:
+            return None
 
 
 class Web3AuthLoginMutation(graphene.Mutation):

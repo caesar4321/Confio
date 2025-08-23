@@ -6,7 +6,7 @@ import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
 import { useMutation } from '@apollo/client';
 import { PAY_INVOICE } from '../apollo/queries';
-import { ALGORAND_SPONSORED_SEND, SUBMIT_SPONSORED_GROUP } from '../apollo/mutations';
+// HTTP GraphQL fallback removed for Send; WebSocket-only
 import { AccountManager } from '../utils/accountManager';
 import algorandService from '../services/algorandService';
 import { inviteSendService } from '../services/inviteSendService';
@@ -77,8 +77,7 @@ export const TransactionProcessingScreen = () => {
 
   // GraphQL mutations
   const [payInvoice] = useMutation(PAY_INVOICE);
-  const [algorandSponsoredSend] = useMutation(ALGORAND_SPONSORED_SEND);
-  const [submitSponsoredGroup] = useMutation(SUBMIT_SPONSORED_GROUP);
+  // Removed GraphQL send mutations to enforce WS-only for Send
   
   // Ref to prevent duplicate transaction processing within this session
   const hasProcessedRef = useRef(false);
@@ -274,10 +273,10 @@ export const TransactionProcessingScreen = () => {
 
     const processAlgorandSponsoredSend = async () => {
       try {
-        // Step 2: Create sponsored transaction on backend
+        // Prefer WebSocket prepare/submit for lower latency
         setCurrentStep(1);
-        console.log('TransactionProcessingScreen: Creating Algorand sponsored transaction...');
-        
+        console.log('TransactionProcessingScreen: Creating Algorand sponsored transaction (WS-first)...');
+
         // Build variables based on what recipient info we have
         const variables: any = {
           amount: parseFloat(transactionData.amount),
@@ -312,21 +311,51 @@ export const TransactionProcessingScreen = () => {
           });
         } catch {}
         
-        const { data: sponsorData } = await algorandSponsoredSend({
-          variables
-        });
-        
-        if (!sponsorData?.algorandSponsoredSend?.success) {
-          const error = sponsorData?.algorandSponsoredSend?.error || 'Failed to create sponsored transaction';
-          console.error('TransactionProcessingScreen: Sponsored transaction failed:', error);
-          setTransactionError(error);
+        let userTransaction: string | null = null;
+        let sponsorTransaction: string | null = null;
+        // Use prepared pack if provided by the confirm screen
+        try {
+          const prepared = (transactionData as any)?.prepared;
+          const txs = prepared && Array.isArray(prepared.transactions) ? prepared.transactions : [];
+          if (txs.length >= 2) {
+            sponsorTransaction = txs.find((t: any) => t.index === 0)?.transaction || null;
+            userTransaction = txs.find((t: any) => t.index === 1)?.transaction || null;
+          }
+          if (userTransaction && sponsorTransaction) {
+            console.log('TransactionProcessingScreen: Using pre-prepared WS pack from confirm screen');
+          }
+        } catch {}
+        try {
+          if (!(userTransaction && sponsorTransaction)) {
+            const { SendWsSession } = await import('../services/sendWs');
+            const session = new SendWsSession();
+            await session.open();
+            const pack = await session.prepare({
+              amount: variables.amount,
+              assetType: variables.assetType,
+              note: variables.note,
+              recipientAddress: variables.recipientAddress,
+              recipientUserId: variables.recipientUserId,
+              recipientPhone: variables.recipientPhone,
+            });
+            const txs = pack?.transactions || [];
+            sponsorTransaction = txs.find((t: any) => t.index === 0)?.transaction || null;
+            userTransaction = txs.find((t: any) => t.index === 1)?.transaction || null;
+            session.close();
+            console.log('TransactionProcessingScreen: WS prepare OK');
+          }
+        } catch (wsErr) {
+          console.error('TransactionProcessingScreen: WS prepare failed:', wsErr);
+          setTransactionError('No se pudo preparar la transacción. Revisa tu conexión e inténtalo de nuevo.');
           setIsComplete(true);
           return;
         }
-        
-        const { userTransaction, sponsorTransaction, groupId, totalFee } = sponsorData.algorandSponsoredSend;
-        console.log(`TransactionProcessingScreen: Sponsored transaction created. Group ID: ${groupId}, Fee: ${totalFee}`);
-        
+        if (!userTransaction || !sponsorTransaction) {
+          setTransactionError('Invalid prepare pack');
+          setIsComplete(true);
+          return;
+        }
+
         // Step 3: Sign the user transaction with Algorand wallet
         setCurrentStep(2);
         console.log('TransactionProcessingScreen: Signing Algorand transaction...');
@@ -359,25 +388,23 @@ export const TransactionProcessingScreen = () => {
         const signedUserTxnBytes = await algorandService.signTransactionBytes(userTxnBytes);
         const signedUserTxnB64 = Buffer.from(signedUserTxnBytes).toString('base64');
 
-        console.log('TransactionProcessingScreen: Submitting signed Algorand transaction group...');
-
-        // Submit the signed transaction group (user signed locally, sponsor signed by server)
-        const { data: submitData } = await submitSponsoredGroup({
-          variables: {
-            signedUserTxn: signedUserTxnB64,
-            signedSponsorTxn: sponsorTransaction
+        console.log('TransactionProcessingScreen: Submitting signed Algorand transaction group (WS-first)...');
+        let transactionId: string | undefined;
+        let confirmedRound: number | undefined;
+        try {
+          const { submitSendViaWs } = await import('../services/sendWs');
+          const submitRes = await submitSendViaWs(signedUserTxnB64, sponsorTransaction!);
+          if (!submitRes || !(submitRes.transactionId || submitRes.transaction_id)) {
+            throw new Error('submit_failed');
           }
-        });
-        
-        if (!submitData?.submitSponsoredGroup?.success) {
-          const error = submitData?.submitSponsoredGroup?.error || 'Failed to submit transaction';
-          console.error('TransactionProcessingScreen: Transaction submission failed:', error);
-          setTransactionError(error);
+          transactionId = (submitRes.transactionId || submitRes.transaction_id) as string;
+          confirmedRound = (submitRes.confirmedRound || submitRes.confirmed_round) as number | undefined;
+        } catch (wsSubmitErr) {
+          console.error('TransactionProcessingScreen: WS submit failed:', wsSubmitErr);
+          setTransactionError('No se pudo enviar la transacción. Revisa tu conexión e inténtalo de nuevo.');
           setIsComplete(true);
           return;
         }
-        
-        const { transactionId, confirmedRound, feesSaved } = submitData.submitSponsoredGroup;
         try {
           console.log('TransactionProcessingScreen: Submit result received', { hasTxId: !!transactionId, confirmedRound });
         } catch {}
@@ -388,7 +415,6 @@ export const TransactionProcessingScreen = () => {
           (transactionData as any).transactionHash = transactionId || '';
           (transactionData as any).status = confirmedRound ? 'CONFIRMED' : 'SUBMITTED';
           (transactionData as any).confirmedRound = confirmedRound || 0;
-          (transactionData as any).feesSaved = feesSaved;
         }
 
         // Mark as successful and let confirmation complete in background
