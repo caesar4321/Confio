@@ -39,8 +39,19 @@ class AlgorandClient:
     
     async def __aenter__(self):
         """Async context manager entry"""
-        self._algod_client = algod.AlgodClient(self.algod_token, self.algod_address)
-        self._indexer_client = indexer.IndexerClient(self.indexer_token, self.indexer_address)
+        # Add a friendly User-Agent; pass token separately per SDK signature
+        ua = {'User-Agent': 'confio-backend/algosdk'}
+        # Nodely uses X-API-Key instead of X-Algo-API-Token
+        if 'nodely' in (self.algod_address or '').lower() and (self.algod_token or ''):
+            algod_headers = {**ua, 'X-API-Key': self.algod_token}
+            self._algod_client = algod.AlgodClient('', self.algod_address, headers=algod_headers)
+        else:
+            self._algod_client = algod.AlgodClient(self.algod_token or '', self.algod_address, headers=ua)
+        if 'nodely' in (self.indexer_address or '').lower() and (self.indexer_token or ''):
+            indexer_headers = {**ua, 'X-API-Key': self.indexer_token}
+            self._indexer_client = indexer.IndexerClient('', self.indexer_address, headers=indexer_headers)
+        else:
+            self._indexer_client = indexer.IndexerClient(self.indexer_token or '', self.indexer_address, headers=ua)
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -52,14 +63,24 @@ class AlgorandClient:
     def algod(self) -> algod.AlgodClient:
         """Get the algod client instance"""
         if not self._algod_client:
-            self._algod_client = algod.AlgodClient(self.algod_token, self.algod_address)
+            ua = {'User-Agent': 'confio-backend/algosdk'}
+            if 'nodely' in (self.algod_address or '').lower() and (self.algod_token or ''):
+                headers = {**ua, 'X-API-Key': self.algod_token}
+                self._algod_client = algod.AlgodClient('', self.algod_address, headers=headers)
+            else:
+                self._algod_client = algod.AlgodClient(self.algod_token or '', self.algod_address, headers=ua)
         return self._algod_client
     
     @property
     def indexer(self) -> indexer.IndexerClient:
         """Get the indexer client instance"""
         if not self._indexer_client:
-            self._indexer_client = indexer.IndexerClient(self.indexer_token, self.indexer_address)
+            ua = {'User-Agent': 'confio-backend/algosdk'}
+            if 'nodely' in (self.indexer_address or '').lower() and (self.indexer_token or ''):
+                headers = {**ua, 'X-API-Key': self.indexer_token}
+                self._indexer_client = indexer.IndexerClient('', self.indexer_address, headers=headers)
+            else:
+                self._indexer_client = indexer.IndexerClient(self.indexer_token or '', self.indexer_address, headers=ua)
         return self._indexer_client
     
     # ===== Balance Operations =====
