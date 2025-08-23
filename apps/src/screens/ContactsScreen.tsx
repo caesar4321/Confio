@@ -33,26 +33,6 @@ const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string 
 
 type ContactsScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
-// Test mutation to create users (only in DEBUG mode)
-const CREATE_TEST_USERS = gql`
-  mutation CreateTestUsers($phoneNumbers: [String!]!) {
-    createTestUsers(phoneNumbers: $phoneNumbers) {
-      success
-      error
-      createdCount
-      usersCreated {
-        phoneNumber
-        userId
-        username
-        firstName
-        lastName
-        isOnConfio
-        activeAccountId
-        activeAccountAlgorandAddress
-      }
-    }
-  }
-`;
 
 const colors = {
   primary: '#34d399', // emerald-400
@@ -250,7 +230,6 @@ export const ContactsScreen = () => {
   const [searchTerm, setSearchTerm] = useState('');
   
   // Test users mutation
-  const [createTestUsers] = useMutation(CREATE_TEST_USERS);
   
   // Import useAccount to check account type
   const { activeAccount, user } = useAccount();
@@ -556,68 +535,6 @@ export const ContactsScreen = () => {
   };
 
   // Handle test user creation (DEBUG only)
-  const handleCreateTestUsers = async () => {
-    if (!__DEV__) {
-      Alert.alert('Error', 'Esta función solo está disponible en modo desarrollo');
-      return;
-    }
-    
-    Alert.alert(
-      'Crear Usuarios de Prueba',
-      '¿Quieres crear usuarios de prueba para todos tus contactos que no están en Confío?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Crear',
-          onPress: async () => {
-            try {
-              // Get all non-Confío contacts
-              const nonConfioPhones = contactsData.nonConfioFriends
-                .map(contact => contact.phone)
-                .filter(phone => phone && phone.trim() !== '');
-              
-              if (nonConfioPhones.length === 0) {
-                Alert.alert('Sin contactos', 'No hay contactos que no estén en Confío');
-                return;
-              }
-              
-              console.log(`[TEST] Creating test users for ${nonConfioPhones.length} phone numbers:`, nonConfioPhones);
-              
-              const result = await createTestUsers({
-                variables: { phoneNumbers: nonConfioPhones }
-              });
-              
-              console.log('[TEST] Mutation result:', result);
-              
-              if (result.data?.createTestUsers?.success) {
-                const createdCount = result.data.createTestUsers.createdCount;
-                const errorMsg = result.data.createTestUsers.error;
-                
-                if (createdCount > 0) {
-                  Alert.alert(
-                    'Éxito',
-                    errorMsg || `Se crearon ${createdCount} usuarios de prueba.\n\nAhora sincroniza los contactos para verlos.`,
-                    [{ text: 'OK', onPress: () => handleRefresh() }]
-                  );
-                } else {
-                  Alert.alert(
-                    'Sin usuarios creados',
-                    errorMsg || 'No se crearon usuarios nuevos. Es posible que todos los números ya existan en la base de datos.',
-                    [{ text: 'OK' }]
-                  );
-                }
-              } else {
-                Alert.alert('Error', result.data?.createTestUsers?.error || 'Error al crear usuarios de prueba');
-              }
-            } catch (error) {
-              console.error('Error creating test users:', error);
-              Alert.alert('Error', 'No se pudieron crear los usuarios de prueba');
-            }
-          }
-        }
-      ]
-    );
-  };
 
   // Handle pull to refresh
   const handleRefresh = async () => {
@@ -1614,18 +1531,7 @@ export const ContactsScreen = () => {
               </TouchableOpacity>
             </View>
             
-            {/* Test button - only in development and for personal accounts */}
-            {__DEV__ && isPersonalAccount && contactsData.nonConfioFriends.length > 0 && (
-              <TouchableOpacity 
-                style={styles.testButton}
-                onPress={handleCreateTestUsers}
-              >
-                <Icon name="user-plus" size={16} color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.testButtonText}>
-                  Crear {contactsData.nonConfioFriends.length} usuarios de prueba
-                </Text>
-              </TouchableOpacity>
-            )}
+            {/* Test user creation button removed */}
           </View>
         
         <SectionList

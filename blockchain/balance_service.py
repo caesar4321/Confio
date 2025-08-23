@@ -125,13 +125,14 @@ class BalanceService:
         """Mark balance(s) as stale after transaction"""
         if token:
             Balance.objects.filter(account=account, token=token).update(is_stale=True)
+            # Clear Redis cache for this specific token
+            cache.delete(f"balance:{account.id}:{token}")
         else:
             # Mark all balances as stale
             Balance.objects.filter(account=account).update(is_stale=True)
-        
-        # Clear Redis cache
-        cache_key = f"balance:{account.id}:{token or 'all'}"
-        cache.delete(cache_key)
+            # Clear Redis cache for all known tokens for this account
+            for t in ['CUSD', 'CONFIO', 'USDC']:
+                cache.delete(f"balance:{account.id}:{t}")
     
     @classmethod
     def update_pending(cls, account: Account, token: str, pending_delta: Decimal):

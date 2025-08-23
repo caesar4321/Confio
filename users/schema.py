@@ -802,29 +802,35 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		# Check if account has an Algorand address
 		if not account.algorand_address:
 			return "0"
-		# Use the blockchain integration to get real balance
+		# Use the blockchain integration to get real balance with graceful fallback to DB cache
+		from decimal import Decimal, ROUND_DOWN
+		asset_decimals = 6
 		try:
 			from blockchain.balance_service import BalanceService
-			# Get balance from hybrid caching system
-			# ALWAYS force refresh to ensure real-time accuracy for financial data
+			# First try a force refresh for up-to-date value
 			balance_data = BalanceService.get_balance(
 				account,
 				normalized_token_type,
 				force_refresh=True
 			)
-			# Format balance as string with asset precision, rounding DOWN to avoid overstating balance
-			from decimal import Decimal, ROUND_DOWN
-			asset_decimals = 6
-			amt = Decimal(str(balance_data['amount']))
-			quant = Decimal('1').scaleb(-asset_decimals)
-			safe_amt = amt.quantize(quant, rounding=ROUND_DOWN)
-			balance = f"{safe_amt:.6f}"
-			return balance
 		except Exception:
-			import traceback
-			traceback.print_exc()
-			# Return 0 on error
-			return "0"
+			# Fallback: use last known DB value (no force refresh)
+			try:
+				from blockchain.balance_service import BalanceService
+				balance_data = BalanceService.get_balance(
+					account,
+					normalized_token_type,
+					force_refresh=False
+				)
+			except Exception:
+				# As a last resort, return 0
+				return "0"
+		# Format balance as string with asset precision, rounding DOWN to avoid overstating balance
+		amt = Decimal(str(balance_data['amount']))
+		quant = Decimal('1').scaleb(-asset_decimals)
+		safe_amt = amt.quantize(quant, rounding=ROUND_DOWN)
+		balance = f"{safe_amt:.6f}"
+		return balance
 	
 	def resolve_current_account_permissions(self, info):
 		"""Get permissions for the current active account"""
@@ -2427,161 +2433,8 @@ class RefreshAccountBalance(graphene.Mutation):
 # SendTokens mutation removed - all sends now go through createSendTransaction
 
 
-class CreateTestUsers(graphene.Mutation):
-	"""Test mutation to create users based on phone numbers - FOR TESTING ONLY"""
-	class Arguments:
-		phone_numbers = graphene.List(graphene.String, required=True)
-	
-	success = graphene.Boolean()
-	error = graphene.String()
-	created_count = graphene.Int()
-	users_created = graphene.List(UserByPhoneType)
-	
-	@classmethod
-	def mutate(cls, root, info, phone_numbers):
-		# Only allow in development/testing
-		from django.conf import settings
-		if not settings.DEBUG:
-			return CreateTestUsers(
-				success=False, 
-				error="This mutation is only available in DEBUG mode",
-				created_count=0,
-				users_created=[]
-			)
-		
-		user = getattr(info.context, 'user', None)
-		if not (user and getattr(user, 'is_authenticated', False)):
-			return CreateTestUsers(success=False, error="Authentication required", created_count=0, users_created=[])
-		
-		import random
-		
-		created_users = []
-		skipped_reasons = []
-		
-		# Randomly select 30% of phone numbers to be Confío users
-		total_phones = len(phone_numbers)
-		confio_count = int(total_phones * 0.3)  # 30% will be Confío users
-		
-		# Shuffle the phone numbers and select the first 30%
-		shuffled_phones = phone_numbers.copy()
-		random.shuffle(shuffled_phones)
-		confio_phones = set(shuffled_phones[:confio_count])
-		
-		logger.info(f"Creating test users for {confio_count} out of {total_phones} contacts (30%)")
-		
-		for phone in phone_numbers:
-			# Only process phones that should be Confío users
-			if phone not in confio_phones:
-				skipped_reasons.append(f"{phone}: Not selected as Confío user (70% are external)")
-				continue
-			
-			# Clean the phone number
-			cleaned_phone = ''.join(filter(str.isdigit, phone))
-			if not cleaned_phone:
-				skipped_reasons.append(f"{phone}: Empty after cleaning")
-				continue
-			
-			# Check if user already exists (try multiple formats)
-			existing_user = None
-			
-			# Try exact match
-			existing_user = User.objects.filter(phone_number=cleaned_phone).first()
-			
-			# Try without country code (last 10 digits for Venezuelan numbers)
-			if not existing_user and len(cleaned_phone) > 10:
-				phone_without_code = cleaned_phone[-10:]
-				existing_user = User.objects.filter(phone_number=phone_without_code).first()
-			
-			# Try with Venezuelan country code
-			if not existing_user and not cleaned_phone.startswith('58'):
-				phone_with_ve_code = '58' + cleaned_phone
-				existing_user = User.objects.filter(phone_number=phone_with_ve_code).first()
-			
-			if existing_user:
-				skipped_reasons.append(f"{phone}: User already exists with username {existing_user.username}")
-				logger.info(f"User already exists for phone {cleaned_phone}: {existing_user.username}")
-				continue
-			
-			# Create a test user
-			try:
-				# Generate a unique username based on phone (max 66 chars)
-				# Use last 6 digits of phone for base username
-				phone_suffix = cleaned_phone[-6:] if len(cleaned_phone) >= 6 else cleaned_phone
-				base_username = f"test_{phone_suffix}"
-				username = base_username
-				counter = 1
-				while User.objects.filter(username=username).exists():
-					username = f"{base_username}_{counter}"
-					counter += 1
-					# Ensure username doesn't exceed 66 chars
-					if len(username) > 66:
-						username = f"t_{phone_suffix}_{counter}"
-				
-				# Create the user with a unique firebase_uid
-				new_user = User.objects.create(
-					username=username,
-					phone_number=cleaned_phone,
-					phone_country='VE',  # Default to Venezuela
-					first_name=f"Test",
-					last_name=f"User {cleaned_phone[-4:]}",
-					email=f"{username}@test.com",  # Use shorter email based on username
-					firebase_uid=f"test_uid_{cleaned_phone}"  # Unique firebase UID for test users
-				)
-				
-				# Create personal account
-				from .models import Account
-				import hashlib
-				
-				# Generate a valid Algorand address using hash of phone number
-				# Algorand addresses are 58 characters (base32 encoded)
-				import base64
-				phone_hash = hashlib.sha256(cleaned_phone.encode()).digest()
-				# Create a valid-looking test Algorand address (not cryptographically valid)
-				test_algorand_address = base64.b32encode(phone_hash[:32]).decode('utf-8').replace('=', '')[:58]
-				
-				personal_account = Account.objects.create(
-					user=new_user,
-					account_type='personal',
-					account_index=0,
-					algorand_address=test_algorand_address  # Valid Algorand address format
-				)
-				
-				created_users.append(UserByPhoneType(
-					phone_number=phone,
-					user_id=new_user.id,
-					username=new_user.username,
-					first_name=new_user.first_name,
-					last_name=new_user.last_name,
-					is_on_confio=True,
-					active_account_id=personal_account.id,
-					active_account_algorand_address=personal_account.algorand_address
-				))
-				
-				logger.info(f"Created test user: {username} for phone: {cleaned_phone}")
-			except Exception as e:
-				logger.error(f"Error creating test user for {phone}: {str(e)}")
-				continue
-		
-		# Build summary message
-		summary = f"Created {len(created_users)} test users from {total_phones} contacts ({confio_count} selected as Confío users - 30%)"
-		
-		return CreateTestUsers(
-			success=True,
-			error=summary,  # Using error field to return the informative message
-			created_count=len(created_users),
-			users_created=created_users
-		)
 
 
-class DeleteTestUsers(graphene.Mutation):
-	"""Delete test users - FOR TESTING ONLY"""
-	class Arguments:
-		pass  # No arguments needed, deletes all test users
-	
-	success = graphene.Boolean()
-	error = graphene.String()
-	deleted_count = graphene.Int()
-	
 	@classmethod
 	def mutate(cls, root, info):
 		# Only allow in development/testing
@@ -3141,8 +2994,7 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
 	# Removed send_tokens - all sends now go through createSendTransaction
 	
 	# Test mutations (only in DEBUG mode)
-	create_test_users = CreateTestUsers.Field()
-	delete_test_users = DeleteTestUsers.Field()
+	# Test user mutations removed
 	
 	# Achievement system mutations
 	claim_achievement_reward = ClaimAchievementReward.Field()
