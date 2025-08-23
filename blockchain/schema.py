@@ -20,7 +20,6 @@ from .mutations import (
 from .payment_mutations import (
     CreateSponsoredPaymentMutation,
     SubmitSponsoredPaymentMutation,
-    CreateDirectPaymentMutation
 )
 from .invite_send_mutations import (
     PrepareInviteForPhone,
@@ -90,7 +89,6 @@ class Mutation(graphene.ObjectType):
     # Payment contract mutations
     create_sponsored_payment = CreateSponsoredPaymentMutation.Field()
     submit_sponsored_payment = SubmitSponsoredPaymentMutation.Field()
-    create_direct_payment = CreateDirectPaymentMutation.Field()
 
     # Invite & Send contract mutations
     prepare_invite_for_phone = PrepareInviteForPhone.Field()
