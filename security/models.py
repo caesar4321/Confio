@@ -92,6 +92,8 @@ class IdentityVerification(SoftDeleteModel):
     # Document Files
     document_front_image = models.FileField(
         upload_to='verification_documents/',
+        null=True,
+        blank=True,
         help_text="Front side of identification document"
     )
     document_back_image = models.FileField(
@@ -102,7 +104,39 @@ class IdentityVerification(SoftDeleteModel):
     )
     selfie_with_document = models.FileField(
         upload_to='verification_documents/',
+        null=True,
+        blank=True,
         help_text="Selfie holding the identification document"
+    )
+
+    # S3 direct-upload URL fields (optional for presigned upload flow)
+    document_front_url = models.URLField(
+        null=True,
+        blank=True,
+        help_text="S3 URL to front side of document (if uploaded directly)"
+    )
+    document_back_url = models.URLField(
+        null=True,
+        blank=True,
+        help_text="S3 URL to back side of document (if uploaded directly)"
+    )
+    selfie_url = models.URLField(
+        null=True,
+        blank=True,
+        help_text="S3 URL to selfie with document (if uploaded directly)"
+    )
+
+    # Optional payout ownership proof integrated into ID verification (screenshot/statement)
+    payout_method_label = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="Label/name of payout method being proven (e.g., Nequi, Banco de Venezuela)"
+    )
+    payout_proof_url = models.URLField(
+        null=True,
+        blank=True,
+        help_text="S3 URL to payout ownership proof (integrated with ID verification)"
     )
     
     # Verification Details

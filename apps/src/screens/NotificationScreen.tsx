@@ -80,7 +80,18 @@ export const NotificationScreen = () => {
       }
     }
 
-    // Handle navigation based on notification type or actionUrl
+    // Handle navigation based on notification actionUrl or related object fallback
+    const notifType = notification.notificationType;
+    let baseTxnType: any = 'send';
+    if (notifType === 'INVITE_RECEIVED' || notifType === 'SEND_RECEIVED') baseTxnType = 'received';
+    if (notifType === 'PAYMENT_RECEIVED' || notifType === 'PAYMENT_SENT' || notifType === 'INVOICE_PAID') baseTxnType = 'payment';
+    if (notifType === 'SEND_SENT') baseTxnType = 'sent';
+
+    // Parse data blob once
+    let parsedData: any = notification.data;
+    if (typeof parsedData === 'string') { try { parsedData = JSON.parse(parsedData); } catch { parsedData = {}; } }
+    if (parsedData == null || typeof parsedData !== 'object') parsedData = {};
+
     if (notification.actionUrl) {
       // Parse deep link and navigate accordingly
       const url = notification.actionUrl;
@@ -94,23 +105,70 @@ export const NotificationScreen = () => {
       } else if (url.includes('p2p/offer/')) {
         const offerId = url.split('p2p/offer/')[1];
         // Navigate to offer details or trade confirmation
+      } else if (url.includes('send/')) {
+        // Deep link for SendTransaction: confio://send/{id}
+        const sendId = url.split('send/')[1];
+        const txnType: any = baseTxnType; // 'sent' or 'received'
+
+        // Derive names from translated message as fallback
+        const msg = (notification.message || '').trim();
+        let recipientNameFromMsg: string | undefined;
+        let senderNameFromMsg: string | undefined;
+        if (notifType === 'SEND_SENT') {
+          // e.g., "Enviaste 10 cUSD a Carlos"
+          const parts = msg.split(' a ');
+          recipientNameFromMsg = parts.length > 1 ? parts[parts.length - 1] : undefined;
+        } else if (notifType === 'SEND_RECEIVED') {
+          // e.g., "Recibiste 10 cUSD de María"
+          const parts = msg.split(' de ');
+          senderNameFromMsg = parts.length > 1 ? parts[parts.length - 1] : undefined;
+        }
+
+        const fullData: any = parsedData;
+        // Attempt to enrich with phones via contact name where possible for better display priority
+        const contactFromName = senderNameFromMsg ? contactService.getContactByNameSync(String(senderNameFromMsg)) : null;
+        const contactToName = recipientNameFromMsg ? contactService.getContactByNameSync(String(recipientNameFromMsg)) : null;
+        const derivedFromPhone = contactFromName?.normalizedPhones?.[0] || contactFromName?.phoneNumbers?.[0];
+        const derivedToPhone = contactToName?.normalizedPhones?.[0] || contactToName?.phoneNumbers?.[0];
+
+        const isSent = txnType === 'sent' || txnType === 'send';
+        const isReceived = txnType === 'received';
+        const fallbackTx = {
+          id: sendId,
+          notification_type: notifType,
+          transaction_type: txnType,
+          // names
+          recipient_name: fullData.recipient_name ?? fullData.recipientName ?? recipientNameFromMsg,
+          sender_name: fullData.sender_name ?? fullData.senderName ?? senderNameFromMsg,
+          // propagate available phones and addresses when present
+          recipient_phone: fullData.recipient_phone ?? fullData.recipientPhone ?? derivedToPhone,
+          sender_phone: fullData.sender_phone ?? fullData.senderPhone ?? derivedFromPhone,
+          // Common aliases used in other screens (match AccountDetail behavior)
+          ...(isSent ? { toPhone: fullData.recipient_phone ?? fullData.recipientPhone ?? derivedToPhone } : {}),
+          ...(isReceived ? { fromPhone: fullData.sender_phone ?? fullData.senderPhone ?? derivedFromPhone } : {}),
+          recipient_address: fullData.recipient_address ?? fullData.toAddress,
+          sender_address: fullData.sender_address ?? fullData.fromAddress,
+          // currency & amount if present
+          currency: ((): any => {
+            const currency = (fullData.currency ?? fullData.token_type ?? fullData.tokenType);
+            return (typeof currency === 'string' && currency.toUpperCase() === 'CUSD') ? 'cUSD' : currency;
+          })(),
+          token_type: fullData.token_type ?? fullData.tokenType ?? fullData.currency,
+          amount: fullData.amount,
+          createdAt: notification.createdAt,
+        };
+
+        navigation.navigate('TransactionDetail', {
+          transactionType: txnType,
+          transactionData: { id: sendId, notification_type: notifType, ...fullData, ...fallbackTx }
+        });
       } else if (url.includes('transaction/')) {
         const transactionId = url.split('transaction/')[1];
         // Prefer server fetch for full fidelity; pass minimal payload with id and type hint
-        const notifType = notification.notificationType;
-        let txnType: any = 'send';
-        if (notifType === 'INVITE_RECEIVED' || notifType === 'SEND_RECEIVED') txnType = 'received';
-        if (notifType === 'PAYMENT_RECEIVED') txnType = 'payment';
-        if (notifType === 'SEND_SENT') txnType = 'sent';
+        const txnType: any = baseTxnType;
 
         // Parse notification.data if it's a JSON string to avoid spreading characters
-        let fullData: any = notification.data;
-        if (typeof fullData === 'string') {
-          try { fullData = JSON.parse(fullData); } catch { fullData = {}; }
-        }
-        if (fullData == null || typeof fullData !== 'object') {
-          fullData = {};
-        }
+        const fullData: any = parsedData;
 
         // Derive invitation flags and normalize common fields for a better fallback
         const invitationClaimed = fullData.invitation_claimed ?? fullData.invitationClaimed ?? (notifType === 'SEND_INVITATION_CLAIMED');
@@ -125,8 +183,25 @@ export const NotificationScreen = () => {
         // Normalize phones and names
         const recipientPhone = fullData.recipient_phone ?? fullData.recipientPhone;
         const senderPhone = fullData.sender_phone ?? fullData.senderPhone;
-        const recipientName = fullData.recipient_name ?? fullData.recipientName ?? fullData.recipient_display_name;
-        const senderName = fullData.sender_name ?? fullData.senderName ?? fullData.sender_display_name;
+        // Try deriving names from the localized message for payments/sends
+        const msg = (notification.message || '').trim();
+        let derivedRecipientFromMsg: string | undefined;
+        let derivedSenderFromMsg: string | undefined;
+        if (notifType === 'PAYMENT_SENT' || notifType === 'SEND_SENT') {
+          const parts = msg.split(' a ');
+          derivedRecipientFromMsg = parts.length > 1 ? parts[parts.length - 1] : undefined;
+        } else if (notifType === 'PAYMENT_RECEIVED' || notifType === 'SEND_RECEIVED') {
+          const parts = msg.split(' de ');
+          derivedSenderFromMsg = parts.length > 1 ? parts[parts.length - 1] : undefined;
+        }
+        const recipientName = fullData.recipient_name ?? fullData.recipientName ?? fullData.recipient_display_name ?? derivedRecipientFromMsg;
+        const senderName = fullData.sender_name ?? fullData.senderName ?? fullData.sender_display_name ?? derivedSenderFromMsg;
+
+        // Try to enrich with phone numbers using contact name lookup when phones are missing
+        const contactFromByName = senderName ? contactService.getContactByNameSync(String(senderName)) : null;
+        const contactToByName = recipientName ? contactService.getContactByNameSync(String(recipientName)) : null;
+        const derivedFromPhone = contactFromByName?.normalizedPhones?.[0] || contactFromByName?.phoneNumbers?.[0];
+        const derivedToPhone = contactToByName?.normalizedPhones?.[0] || contactToByName?.phoneNumbers?.[0];
 
         // Normalize addresses
         const toAddress = fullData.toAddress ?? fullData.recipient_address;
@@ -139,18 +214,39 @@ export const NotificationScreen = () => {
         // Include notification timestamp as createdAt fallback if transaction lacks it
         const createdAt = notification.createdAt;
 
+        // For payments: ensure signed amount to reflect buyer/seller perspective
+        let signedAmount = fullData.amount;
+        if (notifType === 'PAYMENT_SENT' && typeof fullData.amount === 'string' && !fullData.amount.startsWith('-')) {
+          signedAmount = `-${fullData.amount}`;
+        } else if (notifType === 'PAYMENT_RECEIVED' && typeof fullData.amount === 'string' && !fullData.amount.startsWith('+')) {
+          signedAmount = `+${fullData.amount}`;
+        }
+
+        // Related payment transaction details (for extra context like location)
+        const rpt: any = (notification as any)?.relatedPaymentTransaction;
+        const locationFromRpt = fullData.location || rpt?.merchantBusiness?.address || undefined;
+        const merchantIdFromRpt = fullData.merchant_id || fullData.merchantId || (rpt?.merchantAddress ? `#${String(rpt.merchantAddress).slice(-8).toUpperCase()}` : undefined);
+
         // Build a richer fallback payload
+        const isPayment = txnType === 'payment';
         const fallbackTx = {
           id: transactionId,
           notification_type: notifType,
           transaction_type: txnType,
           // names and phones
           recipient_name: recipientName,
-          recipientPhone,
-          recipient_phone: recipientPhone,
+          recipientPhone: recipientPhone || derivedToPhone,
+          recipient_phone: recipientPhone || derivedToPhone,
           sender_name: senderName,
-          senderPhone,
-          sender_phone: senderPhone,
+          senderPhone: senderPhone || derivedFromPhone,
+          sender_phone: senderPhone || derivedFromPhone,
+          // Also map common alias keys used by AccountDetailScreen/TransactionDetailScreen
+          ...(isPayment 
+            ? (notifType === 'PAYMENT_SENT' 
+                ? { toPhone: recipientPhone || derivedToPhone } 
+                : { fromPhone: senderPhone || derivedFromPhone })
+            : { toPhone: recipientPhone || derivedToPhone, fromPhone: senderPhone || derivedFromPhone }
+          ),
           // addresses
           toAddress,
           recipient_address: toAddress,
@@ -159,6 +255,10 @@ export const NotificationScreen = () => {
           // currency
           currency: uiCurrency,
           token_type: currency,
+          amount: signedAmount,
+          // payment extras for buyer UI
+          location: locationFromRpt,
+          merchantId: merchantIdFromRpt,
           // invitation flags
           is_invited_friend: isInvitedFriend,
           isInvitedFriend: isInvitedFriend,
@@ -189,6 +289,46 @@ export const NotificationScreen = () => {
       } else if (url.includes('achievements/')) {
         // Navigate to achievements screen
         navigation.navigate('Achievements');
+      } else {
+        // Unknown actionUrl: fall back to notifications list (no-op navigation)
+        console.log('[NotificationScreen] Unhandled actionUrl, staying on Notifications:', url);
+      }
+    } else if (notification.relatedObjectType && notification.relatedObjectId) {
+      // Fallback: navigate using related object info when no actionUrl is provided
+      const type = notification.relatedObjectType;
+      const id = notification.relatedObjectId;
+      const txnType: any = baseTxnType;
+
+      // Parse data blob if available
+      const fullData: any = parsedData;
+
+      // Use relatedPaymentTransaction as richer fallback for payments
+      const rpt: any = (notification as any)?.relatedPaymentTransaction;
+      const fallbackPayment = rpt ? {
+        transaction_id: rpt.paymentTransactionId || rpt.id,
+        amount: rpt.amount,
+        token_type: rpt.tokenType,
+        status: rpt.status,
+        transactionHash: rpt.transactionHash,
+        createdAt: rpt.createdAt,
+        payerAddress: rpt.payerAddress,
+        merchantAddress: rpt.merchantAddress,
+        description: rpt.description,
+      } : {};
+
+      navigation.navigate('TransactionDetail', {
+        transactionType: txnType,
+        transactionData: { id, notification_type: notifType, ...fullData, ...fallbackPayment }
+      });
+    } else {
+      // Fallback: for transaction-like notifications without actionUrl/relatedObject, navigate using data
+      if (notifType.startsWith('SEND_') || notifType.startsWith('PAYMENT_') || notifType === 'INVITE_RECEIVED') {
+        // Attempt to derive an id from data for consistency; may be undefined
+        const derivedId = parsedData.transaction_id || parsedData.transactionId || parsedData.payment_transaction_id || parsedData.paymentTransactionId || parsedData.id;
+        navigation.navigate('TransactionDetail', {
+          transactionType: baseTxnType,
+          transactionData: { id: derivedId, notification_type: notifType, ...parsedData }
+        });
       }
     }
   }, [markNotificationRead, navigation]);
