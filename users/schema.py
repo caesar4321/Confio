@@ -1486,15 +1486,15 @@ class SubmitIdentityVerificationS3(graphene.Mutation):
         payout_method_label = graphene.String()
         payout_proof_key = graphene.String()
 
-	success = graphene.Boolean()
-	error = graphene.String()
-	verification = graphene.Field(IdentityVerificationType)
+    success = graphene.Boolean()
+    error = graphene.String()
+    verification = graphene.Field(IdentityVerificationType)
 
-	@classmethod
-	def mutate(cls, root, info, **kwargs):
-		user = getattr(info.context, 'user', None)
-		if not (user and getattr(user, 'is_authenticated', False)):
-			return SubmitIdentityVerificationS3(success=False, error="Authentication required", verification=None)
+    @classmethod
+    def mutate(cls, root, info, **kwargs):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return SubmitIdentityVerificationS3(success=False, error="Authentication required", verification=None)
 
         try:
             # Provide safe defaults for MVP if fields are missing
@@ -1523,9 +1523,9 @@ class SubmitIdentityVerificationS3(graphene.Mutation):
                 payout_method_label=kwargs.get('payout_method_label'),
                 payout_proof_url=public_s3_url(kwargs['payout_proof_key']) if kwargs.get('payout_proof_key') else None,
             )
-			return SubmitIdentityVerificationS3(success=True, error=None, verification=verification)
-		except Exception as e:
-			return SubmitIdentityVerificationS3(success=False, error=str(e), verification=None)
+            return SubmitIdentityVerificationS3(success=True, error=None, verification=verification)
+        except Exception as e:
+            return SubmitIdentityVerificationS3(success=False, error=str(e), verification=None)
 
 
 # BankInfo proof uploads removed; use integrated ID verification payout proof
@@ -2176,103 +2176,74 @@ class CreateBankInfo(graphene.Mutation):
         identification_number = graphene.String()
         is_default = graphene.Boolean()
 
-	success = graphene.Boolean()
-	error = graphene.String()
-	bank_info = graphene.Field(BankInfoType)
+    success = graphene.Boolean()
+    error = graphene.String()
+    bank_info = graphene.Field(BankInfoType)
 
-	@classmethod
-    def mutate(cls, root, info, payment_method_id, account_holder_name, 
-              account_number=None, phone_number=None, email=None, username=None,
-              account_type=None, identification_number=None, is_default=False):
-		user = getattr(info.context, 'user', None)
-		if not (user and getattr(user, 'is_authenticated', False)):
-			return CreateBankInfo(success=False, error="Authentication required")
+    @classmethod
+    def mutate(cls, root, info, payment_method_id, account_holder_name,
+               account_number=None, phone_number=None, email=None, username=None,
+               account_type=None, identification_number=None, is_default=False):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return CreateBankInfo(success=False, error="Authentication required")
 
-		try:
-			# Get JWT context with validation and permission check
-			from .jwt_context import get_jwt_business_context_with_validation
-			jwt_context = get_jwt_business_context_with_validation(info, required_permission='manage_bank_accounts')
-			if not jwt_context:
-				return CreateBankInfo(success=False, error="Invalid account context or insufficient permissions")
-			
-			account_type_context = jwt_context['account_type']
-			account_index = jwt_context['account_index']
-			business_id = jwt_context.get('business_id')
-			
-			# Get the account using JWT context
-			if account_type_context == 'business' and business_id:
-				# For business accounts, find the account by business_id
-				account = Account.objects.get(
-					business_id=business_id,
-					account_type='business',
-					account_index=account_index
-				)
-				
-				# Verify user has access to this business account
-				# Permission is already checked via get_jwt_business_context_with_validation
-			else:
-				# For personal accounts
-				account = Account.objects.get(
-					user=user,
-					account_type=account_type_context,
-					account_index=account_index
-				)
-			
-			# Import P2PPaymentMethod
-			from p2p_exchange.models import P2PPaymentMethod
-			
-			# Verify payment method exists
-			payment_method = P2PPaymentMethod.objects.get(id=payment_method_id, is_active=True)
-			
-			# Validate required fields based on payment method type
-			if payment_method.requires_account_number and not account_number:
-				return CreateBankInfo(
-					success=False,
-					error="Número de cuenta es requerido para este método de pago"
-				)
-			
-			if payment_method.requires_phone and not phone_number:
-				return CreateBankInfo(
-					success=False,
-					error="Número de teléfono es requerido para este método de pago"
-				)
-			
-			if payment_method.requires_email and not email:
-				return CreateBankInfo(
-					success=False,
-					error="Email es requerido para este método de pago"
-				)
-			
-			# For bank payment methods, validate identification requirement
-			if payment_method.bank and payment_method.bank.country.requires_identification and not identification_number:
-				return CreateBankInfo(
-					success=False,
-					error=f"{payment_method.bank.country.identification_name} es requerido para cuentas bancarias en {payment_method.bank.country.name}"
-				)
-			
-			# Check for duplicate payment method
-			duplicate_filter = {
-				'account': account,
-				'payment_method': payment_method
-			}
-			
-			# Add specific duplicate checks based on payment method type
-			if payment_method.requires_account_number and account_number:
-				duplicate_filter['account_number'] = account_number
-			elif payment_method.requires_phone and phone_number:
-				duplicate_filter['phone_number'] = phone_number
-			elif payment_method.requires_email and email:
-				duplicate_filter['email'] = email
-			
-			existing = BankInfo.objects.filter(**duplicate_filter).first()
-			
-			if existing:
-				return CreateBankInfo(
-					success=False,
-					error="Ya tienes registrado este método de pago"
-				)
+        try:
+            # Get JWT context with validation and permission check
+            from .jwt_context import get_jwt_business_context_with_validation
+            jwt_context = get_jwt_business_context_with_validation(info, required_permission='manage_bank_accounts')
+            if not jwt_context:
+                return CreateBankInfo(success=False, error="Invalid account context or insufficient permissions")
 
-			# Create bank info
+            account_type_context = jwt_context['account_type']
+            account_index = jwt_context['account_index']
+            business_id = jwt_context.get('business_id')
+
+            # Get the account using JWT context
+            if account_type_context == 'business' and business_id:
+                account = Account.objects.get(
+                    business_id=business_id,
+                    account_type='business',
+                    account_index=account_index
+                )
+            else:
+                account = Account.objects.get(
+                    user=user,
+                    account_type=account_type_context,
+                    account_index=account_index
+                )
+
+            # Import P2PPaymentMethod
+            from p2p_exchange.models import P2PPaymentMethod
+            payment_method = P2PPaymentMethod.objects.get(id=payment_method_id, is_active=True)
+
+            # Validate required fields based on payment method type
+            if payment_method.requires_account_number and not account_number:
+                return CreateBankInfo(success=False, error="Número de cuenta es requerido para este método de pago")
+            if payment_method.requires_phone and not phone_number:
+                return CreateBankInfo(success=False, error="Número de teléfono es requerido para este método de pago")
+            if payment_method.requires_email and not email:
+                return CreateBankInfo(success=False, error="Email es requerido para este método de pago")
+
+            if payment_method.bank and payment_method.bank.country.requires_identification and not identification_number:
+                return CreateBankInfo(
+                    success=False,
+                    error=f"{payment_method.bank.country.identification_name} es requerido para cuentas bancarias en {payment_method.bank.country.name}"
+                )
+
+            # Check for duplicate payment method
+            duplicate_filter = {'account': account, 'payment_method': payment_method}
+            if payment_method.requires_account_number and account_number:
+                duplicate_filter['account_number'] = account_number
+            elif payment_method.requires_phone and phone_number:
+                duplicate_filter['phone_number'] = phone_number
+            elif payment_method.requires_email and email:
+                duplicate_filter['email'] = email
+            existing = BankInfo.objects.filter(**duplicate_filter).first()
+            if existing:
+                return CreateBankInfo(success=False, error="Ya tienes registrado este método de pago")
+
+            # Create bank info
             bank_info = BankInfo.objects.create(
                 account=account,
                 payment_method=payment_method,
@@ -2285,22 +2256,22 @@ class CreateBankInfo(graphene.Mutation):
                 identification_number=identification_number.strip() if identification_number else None,
                 is_default=is_default
             )
-			
-			# Set legacy fields for backward compatibility (if it's a bank payment method)
-			if payment_method.bank:
-				bank_info.bank = payment_method.bank
-				bank_info.country = payment_method.bank.country
-				bank_info.save()
 
-			return CreateBankInfo(success=True, error=None, bank_info=bank_info)
+            # Legacy fields for compatibility
+            if payment_method.bank:
+                bank_info.bank = payment_method.bank
+                bank_info.country = payment_method.bank.country
+                bank_info.save()
 
-		except Account.DoesNotExist:
-			return CreateBankInfo(success=False, error="Cuenta no encontrada")
-		except P2PPaymentMethod.DoesNotExist:
-			return CreateBankInfo(success=False, error="Método de pago no encontrado")
-		except Exception as e:
-			logger.error(f"Error creating bank info: {str(e)}")
-			return CreateBankInfo(success=False, error="Error interno del servidor")
+            return CreateBankInfo(success=True, error=None, bank_info=bank_info)
+
+        except Account.DoesNotExist:
+            return CreateBankInfo(success=False, error="Cuenta no encontrada")
+        except P2PPaymentMethod.DoesNotExist:
+            return CreateBankInfo(success=False, error="Método de pago no encontrado")
+        except Exception as e:
+            logger.error(f"Error creating bank info: {str(e)}")
+            return CreateBankInfo(success=False, error="Error interno del servidor")
 
 
 class UpdateBankInfo(graphene.Mutation):
@@ -2312,75 +2283,71 @@ class UpdateBankInfo(graphene.Mutation):
         identification_number = graphene.String()
         is_default = graphene.Boolean()
 
-	success = graphene.Boolean()
-	error = graphene.String()
-	bank_info = graphene.Field(BankInfoType)
+    success = graphene.Boolean()
+    error = graphene.String()
+    bank_info = graphene.Field(BankInfoType)
 
-	@classmethod
+    @classmethod
     def mutate(cls, root, info, bank_info_id, account_holder_name, account_number,
-              account_type, identification_number=None, is_default=False):
-		user = getattr(info.context, 'user', None)
-		if not (user and getattr(user, 'is_authenticated', False)):
-			return UpdateBankInfo(success=False, error="Authentication required")
+               account_type, identification_number=None, is_default=False):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return UpdateBankInfo(success=False, error="Authentication required")
 
-		try:
-			# Get bank info and verify ownership
-			bank_info = BankInfo.objects.select_related('country', 'bank', 'account').get(
-				id=bank_info_id,
-				account__user=user
-			)
-			
-			# Check employee permissions for business accounts
-			if bank_info.account.account_type == 'business':
-				business = bank_info.account.business
-				if business:
-					# Get JWT context to check if user is accessing as employee
-					from .jwt_context import get_jwt_business_context_with_validation
-					jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-					if jwt_context:
-						jwt_business_id = jwt_context.get('business_id')
-						if jwt_business_id and str(business.id) == str(jwt_business_id):
-							# Check if user is an employee (not owner)
-							from .models_employee import BusinessEmployee
-							employee_record = BusinessEmployee.objects.filter(
-								user=user,
-								business_id=jwt_business_id,
-								is_active=True,
-								deleted_at__isnull=True
-							).first()
-							
-							if employee_record and employee_record.role != 'owner':
-								# Employee accessing business account - check permission
-								try:
-									check_employee_permission(user, business, 'manage_bank_accounts')
-								except PermissionDenied:
-									return UpdateBankInfo(
-										success=False,
-										error="You don't have permission to manage bank accounts for this business"
-									)
-			
-			# Validate identification requirement
-			if bank_info.country.requires_identification and not identification_number:
-				return UpdateBankInfo(
-					success=False,
-					error=f"{bank_info.country.identification_name} es requerido para cuentas bancarias en {bank_info.country.name}"
-				)
+        try:
+            # Get bank info and verify ownership
+            bank_info = BankInfo.objects.select_related('country', 'bank', 'account').get(
+                id=bank_info_id,
+                account__user=user
+            )
 
-			# Update bank info
-			bank_info.account_holder_name = account_holder_name.strip()
-			bank_info.account_number = account_number.strip()
-			bank_info.account_type = account_type
-			bank_info.identification_number = identification_number.strip() if identification_number else None
-			bank_info.is_default = is_default
+            # Check employee permissions for business accounts
+            if bank_info.account.account_type == 'business':
+                business = bank_info.account.business
+                if business:
+                    from .jwt_context import get_jwt_business_context_with_validation
+                    jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
+                    if jwt_context:
+                        jwt_business_id = jwt_context.get('business_id')
+                        if jwt_business_id and str(business.id) == str(jwt_business_id):
+                            from .models_employee import BusinessEmployee
+                            employee_record = BusinessEmployee.objects.filter(
+                                user=user,
+                                business_id=jwt_business_id,
+                                is_active=True,
+                                deleted_at__isnull=True
+                            ).first()
+                            if employee_record and employee_record.role != 'owner':
+                                try:
+                                    check_employee_permission(user, business, 'manage_bank_accounts')
+                                except PermissionDenied:
+                                    return UpdateBankInfo(
+                                        success=False,
+                                        error="You don't have permission to manage bank accounts for this business"
+                                    )
+
+            # Validate identification requirement
+            if bank_info.country.requires_identification and not identification_number:
+                return UpdateBankInfo(
+                    success=False,
+                    error=f"{bank_info.country.identification_name} es requerido para cuentas bancarias en {bank_info.country.name}"
+                )
+
+            # Update bank info
+            bank_info.account_holder_name = account_holder_name.strip()
+            bank_info.account_number = account_number.strip()
+            bank_info.account_type = account_type
+            bank_info.identification_number = identification_number.strip() if identification_number else None
+            bank_info.is_default = is_default
             bank_info.save()
 
-			return UpdateBankInfo(success=True, error=None, bank_info=bank_info)
+            return UpdateBankInfo(success=True, error=None, bank_info=bank_info)
 
-		except BankInfo.DoesNotExist:
-			return UpdateBankInfo(success=False, error="Información bancaria no encontrada")
-		except Exception as e:
-			logger.error(f"Error updating bank info: {str(e)}")
-			return UpdateBankInfo(success=False, error="Error interno del servidor")
+        except BankInfo.DoesNotExist:
+            return UpdateBankInfo(success=False, error="Información bancaria no encontrada")
+        except Exception as e:
+            logger.error(f"Error updating bank info: {str(e)}")
+            return UpdateBankInfo(success=False, error="Error interno del servidor")
 
 
 class DeleteBankInfo(graphene.Mutation):

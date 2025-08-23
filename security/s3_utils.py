@@ -39,9 +39,15 @@ def generate_presigned_put(
     _ensure_bucket()
 
     # Build client with optional explicit credentials
+    # Ensure we sign against the correct regional endpoint to avoid
+    # IllegalLocationConstraintException when the bucket is in a non-default region
+    region = settings.AWS_S3_REGION or 'us-east-1'
+    endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
+
     params = {
-        'region_name': settings.AWS_S3_REGION,
-        'config': Config(signature_version='s3v4')
+        'region_name': region,
+        'config': Config(signature_version='s3v4'),
+        'endpoint_url': endpoint,
     }
     if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
         params.update({
@@ -91,4 +97,3 @@ def public_s3_url(key: str) -> str:
     if region == 'us-east-1':
         return f"https://{bucket}.s3.amazonaws.com/{key}"
     return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
-
