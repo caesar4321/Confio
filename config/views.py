@@ -1,6 +1,7 @@
 from django.shortcuts import render
 from django.utils.translation import get_language_from_request
 from django.views.generic import TemplateView
+from django.http import HttpResponse
 import logging
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,14 @@ def privacy_view(request):
 	return render(request, 'privacy.html')
 
 def deletion_view(request):
-	"""View for Data Deletion page."""
-	return render(request, 'deletion.html')
+    """View for Data Deletion page."""
+    return render(request, 'deletion.html')
 
+
+def health_view(request):
+    """Ultra-light health endpoint for prewarm/keepalive.
+
+    Returns HTTP 200 with a short body and no heavy checks.
+    """
+    return HttpResponse('ok', content_type='text/plain')
 

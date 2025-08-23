@@ -8,7 +8,7 @@ from django.urls import path, include, re_path
 from django.views.decorators.csrf import csrf_exempt
 from django.contrib.admin.views.decorators import staff_member_required
 from graphene_django.views import GraphQLView
-from .views import terms_view, privacy_view, deletion_view
+from .views import terms_view, privacy_view, deletion_view, health_view
 from django.views.generic import TemplateView
 from django.conf import settings
 from django.conf.urls.static import static
@@ -106,6 +106,7 @@ from .admin_dashboard import confio_admin_site
 urlpatterns = [
     path('admin/', confio_admin_site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
+    path('health', health_view, name='health'),
     path('terms/', terms_view, name='terms'),
     path('privacy/', privacy_view, name='privacy'),
     path('deletion/', deletion_view, name='deletion'),

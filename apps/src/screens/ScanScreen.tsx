@@ -4,7 +4,7 @@ import { Camera, useCameraDevice, useCodeScanner, CameraPermissionStatus } from 
 import type { Code } from 'react-native-vision-camera';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAccount } from '../contexts/AccountContext';
-import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
+import { useRoute, RouteProp, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { BottomTabParamList } from '../types/navigation';
 import { useMutation } from '@apollo/client';
 import { GET_INVOICE } from '../apollo/queries';
@@ -160,6 +160,21 @@ export const ScanScreen = () => {
   const toggleFlash = useCallback(() => {
     setIsFlashOn((current) => !current);
   }, []);
+
+  // Prewarm network session on focus (HEAD /health now and every 20s)
+  useFocusEffect(useCallback(() => {
+    try {
+      const { getApiUrl } = require('../config/env');
+      const api: string = getApiUrl();
+      const health = api.replace(/\/graphql\/?$/, '/health');
+      const ping = () => { try { fetch(health, { method: 'HEAD', keepalive: true }).catch(() => {}); } catch {} };
+      ping();
+      const t = setInterval(ping, 20000);
+      return () => clearInterval(t);
+    } catch {
+      return () => {};
+    }
+  }, []));
 
   const handleClose = () => {
     navigation.goBack();
