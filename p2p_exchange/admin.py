@@ -17,7 +17,8 @@ from .models import (
     P2PDispute,
     P2PDisputeTransaction,
     P2PFavoriteTrader,
-    PremiumUpgradeRequest
+    PremiumUpgradeRequest,
+    P2PDisputeEvidence
 )
 
 @admin.register(P2PPaymentMethod)
@@ -1451,7 +1452,7 @@ class P2PTradeRatingAdmin(admin.ModelAdmin):
 class P2PDisputeAdmin(admin.ModelAdmin):
     list_display = [
         'trade_link', 'initiator_display', 'status_badge', 'priority_badge',
-        'duration_display', 'resolution_display', 'opened_at'
+        'evidence_code', 'duration_display', 'resolution_display', 'opened_at'
     ]
     list_filter = [
         'status', 'priority', 'resolution_type', 'opened_at', 'resolved_at',
@@ -1460,12 +1461,12 @@ class P2PDisputeAdmin(admin.ModelAdmin):
         ('resolved_by', admin.RelatedOnlyFieldListFilter),
     ]
     search_fields = [
-        'trade__id', 'reason', 'resolution_notes', 'admin_notes',
+        'trade__id', 'reason', 'resolution_notes', 'admin_notes', 'evidence_code',
         'initiator_user__username', 'initiator_business__name'
     ]
     readonly_fields = [
         'trade', 'opened_at', 'last_updated', 'duration_display', 
-        'trade_details', 'evidence_display', 'evidence_code', 'code_generated_at', 'code_expires_at'
+        'trade_details', 'evidence_code', 'code_generated_at', 'code_expires_at'
     ]
     
     def trade_link(self, obj):
@@ -1520,7 +1521,15 @@ class P2PDisputeAdmin(admin.ModelAdmin):
     
     def duration_display(self, obj):
         """Display how long the dispute has been open"""
-        hours = obj.duration_hours
+        try:
+            start = getattr(obj, 'opened_at', None)
+            end = getattr(obj, 'resolved_at', None) or timezone.now()
+            if not start:
+                return format_html('<span style="color: #999;">N/A</span>')
+            delta = end - start
+            hours = delta.total_seconds() / 3600.0
+        except Exception:
+            return format_html('<span style="color: #999;">N/A</span>')
         if hours < 1:
             return format_html('<span style="color: #10B981;">< 1 hora</span>')
         elif hours < 24:
@@ -1571,33 +1580,7 @@ class P2PDisputeAdmin(admin.ModelAdmin):
         )
     trade_details.short_description = 'Trade Details'
     
-    def evidence_display(self, obj):
-        """Display evidence with short-lived presigned URLs for private bucket"""
-        if not obj.evidence_urls:
-            return "No evidence submitted"
-
-        from security.s3_utils import key_from_url, generate_presigned_get
-        from django.conf import settings
-        dispute_bucket = getattr(settings, 'AWS_DISPUTE_BUCKET', None)
-
-        blocks = []
-        for i, url in enumerate(obj.evidence_urls):
-            key = key_from_url(url) or ''
-            signed = None
-            if key:
-                try:
-                    signed = generate_presigned_get(key=key, expires_in_seconds=300, bucket=dispute_bucket)
-                except Exception:
-                    signed = None
-            link = signed or url
-            if isinstance(url, str) and (url.lower().endswith('.mp4') or 'video' in url.lower()):
-                blocks.append(
-                    f'<div style="margin:6px 0"><video controls width="360" src="{link}">Your browser does not support video.</video></div>'
-                )
-            else:
-                blocks.append(f'<a href="{link}" target="_blank">Evidence {i+1}</a>')
-        return format_html('<br>'.join(blocks))
-    evidence_display.short_description = 'Evidence'
+    # Legacy evidence_display removed; rely on inline evidences
     
     fieldsets = (
         ('Dispute Information', {
@@ -1606,8 +1589,8 @@ class P2PDisputeAdmin(admin.ModelAdmin):
         ('Initiator', {
             'fields': ('initiator_user', 'initiator_business')
         }),
-        ('Evidence & Notes', {
-            'fields': ('evidence_urls', 'evidence_display', 'evidence_code', 'code_generated_at', 'code_expires_at', 'admin_notes')
+        ('Notes', {
+            'fields': ('evidence_code', 'code_generated_at', 'code_expires_at', 'admin_notes')
         }),
         ('Resolution', {
             'fields': ('resolution_type', 'resolution_amount', 'resolution_notes', 'resolved_by')
@@ -1621,66 +1604,84 @@ class P2PDisputeAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+class P2PDisputeEvidenceInline(admin.TabularInline):
+    model = P2PDisputeEvidence
+    extra = 0
+    readonly_fields = ['preview_link', 'uploaded_at', 'uploader_user', 'uploader_business', 'content_type', 'size_bytes', 'status']
+    fields = ['preview_link', 'content_type', 'size_bytes', 'status', 'uploaded_at', 'uploader_user', 'uploader_business']
+
+    def preview_link(self, obj):
+        try:
+            from security.s3_utils import key_from_url, generate_presigned_get
+            from django.conf import settings
+            key = obj.s3_key or key_from_url(obj.url)
+            if not key:
+                return '-'
+            signed = generate_presigned_get(key=key, expires_in_seconds=300, bucket=getattr(settings, 'AWS_DISPUTE_BUCKET', None))
+            return format_html("<a href='{}' target='_blank'>Abrir evidencia</a>", signed)
+        except Exception:
+            return '-'
+    preview_link.short_description = 'Preview'
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+# Attach inline to dispute admin
+existing_inlines = getattr(P2PDisputeAdmin, 'inlines', ())
+P2PDisputeAdmin.inlines = tuple(list(existing_inlines) + [P2PDisputeEvidenceInline])
+
+
+@admin.register(P2PDisputeEvidence)
+class P2PDisputeEvidenceAdmin(admin.ModelAdmin):
+    list_display = ['id', 'dispute_link', 'trade_link', 'uploader_user', 'uploader_business', 'content_type', 'size_bytes', 'status', 'uploaded_at']
+    list_filter = ['status', 'content_type', 'uploaded_at', ('uploader_user', admin.RelatedOnlyFieldListFilter), ('uploader_business', admin.RelatedOnlyFieldListFilter)]
+    search_fields = ['dispute__id', 'trade__id', 'uploader_user__username', 'uploader_business__name', 's3_key']
+    readonly_fields = ['preview_link', 'signed_url_link', 'dispute', 'trade', 'uploader_user', 'uploader_business', 's3_bucket', 's3_key', 'content_type', 'size_bytes', 'sha256', 'etag', 'confio_code', 'metadata', 'source', 'status', 'uploaded_at']
+    fields = ['preview_link', 'signed_url_link', 'dispute', 'trade', 'uploader_user', 'uploader_business', 'content_type', 'size_bytes', 'status', 'uploaded_at', 's3_bucket', 's3_key', 'sha256', 'etag', 'confio_code', 'source', 'metadata']
+
+    def dispute_link(self, obj):
+        url = reverse('admin:p2p_exchange_p2pdispute_change', args=[obj.dispute_id])
+        return format_html("<a href='{}'>#{}</a>", url, obj.dispute_id)
+    dispute_link.short_description = 'Dispute'
+
+    def trade_link(self, obj):
+        url = reverse('admin:p2p_exchange_p2ptrade_change', args=[obj.trade_id])
+        return format_html("<a href='{}'>#{}</a>", url, obj.trade_id)
+    trade_link.short_description = 'Trade'
+
+    def preview_link(self, obj):
+        try:
+            from security.s3_utils import key_from_url, generate_presigned_get
+            from django.conf import settings
+            key = obj.s3_key or key_from_url(obj.url)
+            if not key:
+                return '-'
+            signed = generate_presigned_get(key=key, expires_in_seconds=300, bucket=getattr(settings, 'AWS_DISPUTE_BUCKET', None))
+            return format_html("<a href='{}' target='_blank'>Abrir evidencia</a>", signed)
+        except Exception:
+            return '-'
     
-    actions = ['mark_under_review', 'resolve_refund_buyer', 'resolve_release_seller', 'escalate_dispute']
-    
-    def mark_under_review(self, request, queryset):
-        """Mark disputes as under review"""
-        updated = queryset.filter(status='OPEN').update(status='UNDER_REVIEW')
-        self.message_user(request, f'{updated} disputes marked as under review.')
-    mark_under_review.short_description = '👁️ Mark as Under Review'
-    
-    def resolve_refund_buyer(self, request, queryset):
-        """Resolve disputes with refund to buyer"""
-        from django.utils import timezone
-        updated = 0
-        for dispute in queryset.filter(status__in=['OPEN', 'UNDER_REVIEW']):
-            dispute.status = 'RESOLVED'
-            dispute.resolution_type = 'REFUND_BUYER'
-            dispute.resolved_at = timezone.now()
-            dispute.resolved_by = request.user
-            dispute.resolution_notes = f"Resolved by {request.user.username} via admin action"
-            dispute.save()
-            
-            # Update trade status
-            dispute.trade.status = 'CANCELLED'
-            dispute.trade.save()
-            
-            updated += 1
-            
-        self.message_user(request, f'{updated} disputes resolved with refund to buyer.')
-    resolve_refund_buyer.short_description = '💰 Resolve - Refund Buyer'
-    
-    def resolve_release_seller(self, request, queryset):
-        """Resolve disputes with release to seller"""
-        from django.utils import timezone
-        updated = 0
-        for dispute in queryset.filter(status__in=['OPEN', 'UNDER_REVIEW']):
-            dispute.status = 'RESOLVED'
-            dispute.resolution_type = 'RELEASE_TO_SELLER'
-            dispute.resolved_at = timezone.now()
-            dispute.resolved_by = request.user
-            dispute.resolution_notes = f"Resolved by {request.user.username} via admin action"
-            dispute.save()
-            
-            # Update trade status
-            dispute.trade.status = 'COMPLETED'
-            dispute.trade.completed_at = timezone.now()
-            dispute.trade.save()
-            
-            updated += 1
-            
-        self.message_user(request, f'{updated} disputes resolved with release to seller.')
-    resolve_release_seller.short_description = '✅ Resolve - Release to Seller'
-    
-    def escalate_dispute(self, request, queryset):
-        """Escalate disputes for higher level review"""
-        updated = queryset.filter(status__in=['OPEN', 'UNDER_REVIEW']).update(
-            status='ESCALATED',
-            priority=3  # Set to high priority
-        )
-        self.message_user(request, f'{updated} disputes escalated.')
-    escalate_dispute.short_description = '🚨 Escalate Dispute'
+    def signed_url_link(self, obj):
+        """Always present a temporary signed URL instead of raw URLField (private bucket)."""
+        try:
+            from security.s3_utils import key_from_url, generate_presigned_get
+            from django.conf import settings
+            key = obj.s3_key or key_from_url(obj.url)
+            if not key:
+                return '-'
+            signed = generate_presigned_get(key=key, expires_in_seconds=300, bucket=getattr(settings, 'AWS_DISPUTE_BUCKET', None))
+            return format_html("<a href='{}' target='_blank'>{}</a>", signed, 'URL (presigned)')
+        except Exception:
+            return '-'
+    signed_url_link.short_description = 'Signed URL'
+
 
 
 @admin.register(P2PDisputeTransaction)
