@@ -908,9 +908,16 @@ export const AccountDetailScreen = () => {
     const formattedDate = moment(transaction.date).format('DD/MM/YYYY');
     const formattedTime = transaction.time;
     
-    // Get contact name for sender or recipient
+    // Determine if counterparty is an external wallet (no phone + address present + no user)
+    const isExternalSent = transaction.type === 'sent' && !transaction.toPhone && transaction.recipientAddress && !(transaction as any).hasCounterpartyUser;
+    const isExternalReceived = transaction.type === 'received' && (
+      transaction.isExternalDeposit || (!transaction.fromPhone && transaction.senderAddress && !(transaction as any).hasCounterpartyUser)
+    );
+    // Get contact name for sender or recipient, falling back to "Billetera externa" for external wallets
     const phoneToCheck = transaction.type === 'received' ? transaction.fromPhone : transaction.toPhone;
-    const fallbackName = transaction.type === 'received' ? transaction.from : transaction.to;
+    const fallbackName = transaction.type === 'received' 
+      ? (isExternalReceived ? 'Billetera externa' : transaction.from)
+      : (isExternalSent ? 'Billetera externa' : transaction.to);
     const contactInfo = useContactNameSync(phoneToCheck, fallbackName);
     
     // Create enhanced transaction title with contact name

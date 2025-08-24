@@ -1,0 +1,24 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+  <h1>Reject selected verifications</h1>
+  <form method="post" style="max-width: 640px;">
+    {% csrf_token %}
+    <p>Please provide a reason for rejection. This reason will be sent to users.</p>
+    <div style="margin: 12px 0;">
+      <label for="reason"><strong>Reason</strong></label>
+      <textarea id="reason" name="reason" rows="4" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px;" placeholder="Document blurry / Name mismatch / Expired document, etc." required></textarea>
+    </div>
+    <input type="hidden" name="action" value="reject_verifications">
+    {% for obj in queryset %}
+      <input type="hidden" name="_selected_action" value="{{ obj.pk }}">
+    {% endfor %}
+    <input type="hidden" name="apply" value="True">
+    <div>
+      <button type="submit" class="button default" style="background: #dc3545; border-color: #dc3545; color: white;">Reject and Notify</button>
+      <a href="javascript:history.back()" class="button" style="margin-left: 8px;">Cancel</a>
+    </div>
+  </form>
+{% endblock %}
+

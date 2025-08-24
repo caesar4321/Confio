@@ -5,8 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
-import { useMutation } from '@apollo/client';
-import { UPDATE_USER_PROFILE, UPDATE_USERNAME } from '../apollo/queries';
+import { useMutation, useQuery } from '@apollo/client';
+import { UPDATE_USER_PROFILE, UPDATE_USERNAME, GET_ME, GET_MY_PERSONAL_KYC_STATUS, GET_MY_PERSONAL_VERIFIED_KYC } from '../apollo/queries';
 import { getCountryByIso } from '../utils/countries';
 
 // Colors from the design
@@ -54,9 +54,12 @@ export const EditProfileScreen = () => {
 
   const [updateProfile] = useMutation(UPDATE_USER_PROFILE);
   const [updateUsername] = useMutation(UPDATE_USERNAME);
+  const { data: meData } = useQuery(GET_ME, { fetchPolicy: 'network-only' });
+  const { data: personalKycData } = useQuery(GET_MY_PERSONAL_KYC_STATUS, { fetchPolicy: 'network-only' });
+  const { data: personalVerifiedKycData } = useQuery(GET_MY_PERSONAL_VERIFIED_KYC, { fetchPolicy: 'network-only' });
 
-  // Check if user is verified
-  const isVerified = userProfile?.isIdentityVerified || false;
+  // Treat user as verified only when backend reports isIdentityVerified
+  const isVerified = Boolean(meData?.me?.isIdentityVerified);
 
   // Initialize form with current user data
   useEffect(() => {
@@ -221,6 +224,11 @@ export const EditProfileScreen = () => {
 
   // If user is verified, show a different screen
   if (isVerified) {
+    const meLast = meData?.me?.lastVerifiedDate || null;
+    const kycLast = personalKycData?.myPersonalKycStatus?.verifiedAt || null;
+    const kycVerifiedLast = personalVerifiedKycData?.myPersonalVerifiedKyc?.verifiedAt || null;
+    const verifiedDateIso = meLast || kycVerifiedLast || kycLast || null;
+    console.log('[EditProfile] Verified status; personal dates', { meLast, kycVerifiedLast, kycLast });
     return (
       <View style={styles.container}>
         <View style={styles.header}>
@@ -245,11 +253,11 @@ export const EditProfileScreen = () => {
             <Text style={styles.currentInfoText}>
               {userProfile?.firstName} {userProfile?.lastName}
             </Text>
-            {userProfile?.lastVerifiedDate && (
+            {!!verifiedDateIso && (
               <>
                 <Text style={styles.currentInfoLabel}>Verificado el:</Text>
                 <Text style={styles.currentInfoText}>
-                  {new Date(userProfile.lastVerifiedDate).toLocaleDateString('es-ES', {
+                  {new Date(verifiedDateIso).toLocaleDateString('es-ES', {
                     year: 'numeric',
                     month: 'long',
                     day: 'numeric'

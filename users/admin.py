@@ -117,7 +117,8 @@ class AccountAdmin(admin.ModelAdmin):
 
 @admin.register(Business)
 class BusinessAdmin(admin.ModelAdmin):
-    list_display = ('name', 'category_display_name', 'owner_display', 'accounts_count', 'employees_count', 'business_registration_number', 'created_at')
+    list_display = ('name', 'category_display_name', 'owner_display', 'business_verification_badge', 'accounts_count', 'employees_count', 'business_registration_number', 'created_at')
+    list_filter = ('category', 'created_at', 'business_verified_filter')
     list_filter = ('category', 'created_at')
     search_fields = ('name', 'category', 'description', 'business_registration_number')
     readonly_fields = ('created_at', 'updated_at', 'owner_display')
@@ -157,6 +158,62 @@ class BusinessAdmin(admin.ModelAdmin):
                 return format_html('<a href="{}">{} employees</a>', url, active_count)
         return "0 employees"
     employees_count.short_description = "Employees"
+
+    def business_verification_badge(self, obj):
+        # Business verified if any IdentityVerification exists with business context and status verified
+        try:
+            from security.models import IdentityVerification
+            is_verified = IdentityVerification.objects.filter(
+                status='verified',
+                risk_factors__account_type='business',
+                risk_factors__business_id=str(obj.id)
+            ).exists()
+        except Exception:
+            is_verified = False
+        color = '#28A745' if is_verified else '#6B7280'
+        label = 'Verified' if is_verified else 'Unverified'
+        return format_html('<span style="background-color: {}; color: white; padding: 3px 8px; border-radius: 12px; font-size: 12px;">{}</span>', color, label)
+    business_verification_badge.short_description = 'Verification'
+
+    # Custom filter for verification status
+    def business_verified_filter(self, request, queryset):
+        return queryset
+    business_verified_filter.title = 'Verification'
+    business_verified_filter.parameter_name = 'verification'
+
+    def get_list_filter(self, request):
+        from django.contrib.admin import SimpleListFilter
+        class VerifiedFilter(SimpleListFilter):
+            title = 'Verification'
+            parameter_name = 'verified'
+
+            def lookups(self, request, model_admin):
+                return (
+                    ('yes', 'Verified'),
+                    ('no', 'Unverified'),
+                )
+
+            def queryset(self, request, queryset):
+                from security.models import IdentityVerification
+                val = self.value()
+                if val == 'yes':
+                    ids = IdentityVerification.objects.filter(
+                        status='verified',
+                        risk_factors__account_type='business'
+                    ).values_list('risk_factors__business_id', flat=True)
+                    return queryset.filter(id__in=[int(i) for i in ids if i])
+                if val == 'no':
+                    ids = IdentityVerification.objects.filter(
+                        status='verified',
+                        risk_factors__account_type='business'
+                    ).values_list('risk_factors__business_id', flat=True)
+                    return queryset.exclude(id__in=[int(i) for i in ids if i])
+                return queryset
+
+        # Merge existing filters with our custom filter
+        base_filters = list(super().get_list_filter(request))
+        base_filters.append(VerifiedFilter)
+        return base_filters
 
 
 @admin.register(Country)

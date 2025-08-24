@@ -1,5 +1,7 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
+from django.shortcuts import render
 from django.urls import reverse
 from django.utils import timezone
 from django.db.models import Count, Q
@@ -7,6 +9,9 @@ from .models import (
     IdentityVerification, SuspiciousActivity, UserBan,
     IPAddress, UserSession, DeviceFingerprint, UserDevice, AMLCheck, IPDeviceUser
 )
+from notifications.utils import create_notification
+from notifications.models import NotificationType as NotificationTypeChoices
+from users.models import Business
 
 
 @admin.register(IdentityVerification)
@@ -14,7 +19,8 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
     """Admin for identity verifications (KYC)"""
     list_display = (
         'user_link', 'verified_name', 'document_type', 'status_badge',
-        'risk_score_badge', 'verified_at', 'created_at'
+        'risk_score_badge', 'verified_at', 'created_at',
+        'front_url_link', 'back_url_link', 'selfie_url_link', 'payout_url_link'
     )
     list_filter = (
         'status', 'document_type', 'document_issuing_country',
@@ -27,7 +33,8 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
     )
     readonly_fields = (
         'created_at', 'updated_at', 'verified_at',
-        'risk_assessment_display', 'document_preview'
+        'risk_assessment_display', 'document_preview',
+        'external_document_links', 'context_badge'
     )
     
     fieldsets = (
@@ -56,13 +63,13 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
         ('Document Files', {
             'fields': (
                 'document_front_image', 'document_back_image',
-                'selfie_with_document'
+                'selfie_with_document', 'external_document_links'
             ),
             'classes': ('collapse',)
         }),
         ('Verification Details', {
             'fields': (
-                'verified_by', 'verified_at', 'rejected_reason',
+                'verified_by', 'verified_at', 'rejected_reason', 'context_badge',
                 'risk_assessment_display'
             )
         }),
@@ -72,15 +79,66 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
         })
     )
     
-    actions = ['approve_verifications', 'reject_verifications']
+    actions = ['approve_verifications', 'reject_verifications', 'ensure_personal_verified_records']
     
     def user_link(self, obj):
-        url = reverse('admin:users_user_change', args=[obj.user.id])
-        return format_html('<a href="{}">{}</a>', url, obj.user.username)
-    user_link.short_description = 'User'
+        # Show both Business and User links when business context is present
+        try:
+            risk = obj.risk_factors or {}
+        except Exception:
+            risk = {}
+
+        parts = []
+
+        business_id = risk.get('business_id')
+        if business_id:
+            try:
+                from users.models import Business
+                biz = Business.objects.get(id=business_id)
+                biz_url = reverse('admin:users_business_change', args=[biz.id])
+                parts.append(format_html('<a href="{}">🏢 {}</a>', biz_url, biz.name))
+            except Exception:
+                # If business lookup fails, ignore and still show user link
+                pass
+
+        # Always show user link (owner)
+        try:
+            user_url = reverse('admin:users_user_change', args=[obj.user.id])
+            # If business was shown, render user link in a lighter style underneath
+            if parts:
+                parts.append(format_html('<br><a href="{}" style="color:#6B7280;">👤 {}</a>', user_url, obj.user.username))
+            else:
+                parts.append(format_html('<a href="{}">👤 {}</a>', user_url, obj.user.username))
+        except Exception:
+            pass
+
+        return format_html('{}', mark_safe(''.join([str(p) for p in parts]) or '-'))
+    user_link.short_description = 'Owner'
     
     def verified_name(self, obj):
-        return f"{obj.verified_first_name} {obj.verified_last_name}"
+        # Determine context from risk_factors
+        rf = obj.risk_factors or {}
+        ctx = rf.get('account_type')
+        business_id = rf.get('business_id')
+        # Compute main display name based on context
+        if ctx == 'business' and business_id:
+            try:
+                from users.models import Business
+                biz = Business.objects.get(id=business_id)
+                main_name = biz.name
+            except Exception:
+                # Fallback to verified personal name if business lookup fails
+                main_name = f"{obj.verified_first_name} {obj.verified_last_name}".strip()
+        else:
+            main_name = f"{obj.verified_first_name} {obj.verified_last_name}".strip()
+
+        # Append context badge
+        if ctx == 'business':
+            badge = '<span style="background-color: #3B82F6; color: white; padding: 2px 6px; border-radius: 12px; font-size: 11px; margin-left: 6px;">Business</span>'
+        else:
+            badge = '<span style="background-color: #10B981; color: white; padding: 2px 6px; border-radius: 12px; font-size: 11px; margin-left: 6px;">Personal</span>'
+
+        return format_html('{}{}', main_name, mark_safe(badge))
     verified_name.short_description = 'Verified Name'
     
     def status_badge(self, obj):
@@ -91,8 +149,7 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
             'expired': '#6C757D'
         }
         return format_html(
-            '<span style="background-color: {}; color: white; padding: 3px 10px; '
-            'border-radius: 3px; font-weight: bold;">{}</span>',
+            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px; font-weight: bold;">{}</span>',
             colors.get(obj.status, '#6C757D'),
             obj.get_status_display()
         )
@@ -132,23 +189,283 @@ class IdentityVerificationAdmin(admin.ModelAdmin):
             )
         return "No document uploaded"
     document_preview.short_description = 'Document Preview'
+
+    def external_document_links(self, obj):
+        """Show external S3 links when URL fields are used instead of FileFields."""
+        rows = []
+        if getattr(obj, 'document_front_url', None):
+            rows.append(f"<li>Front: <a href='{obj.document_front_url}' target='_blank'>{obj.document_front_url}</a></li>")
+        if getattr(obj, 'document_back_url', None):
+            rows.append(f"<li>Back: <a href='{obj.document_back_url}' target='_blank'>{obj.document_back_url}</a></li>")
+        if getattr(obj, 'selfie_url', None):
+            rows.append(f"<li>Selfie: <a href='{obj.selfie_url}' target='_blank'>{obj.selfie_url}</a></li>")
+        # Payout method proof (integrated)
+        if getattr(obj, 'payout_method_label', None) or getattr(obj, 'payout_proof_url', None):
+            label = getattr(obj, 'payout_method_label', '') or ''
+            url = getattr(obj, 'payout_proof_url', '') or ''
+            if url:
+                rows.append(f"<li>Payout ({label}): <a href='{url}' target='_blank'>{url}</a></li>")
+        if not rows:
+            return "No external links"
+        return format_html(f"<ul>{''.join(rows)}</ul>")
+    external_document_links.short_description = 'External Document Links'
+
+    # Context badge also shown in detail view
+    def context_badge(self, obj):
+        ctx = (obj.risk_factors or {}).get('account_type')
+        if ctx == 'business':
+            return format_html('<span style="background-color: #3B82F6; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px;">Business</span>')
+        return format_html('<span style="background-color: #10B981; color: white; padding: 4px 8px; border-radius: 12px; font-size: 12px;">Personal</span>')
+    context_badge.short_description = 'Context'
+
+    def ensure_personal_verified_records(self, request, queryset):
+        """Admin action: For selected verified records, ensure a corresponding personal verified record exists.
+        If a record is in business context and the user has no personal verified record, clone minimal fields to personal.
+        Also set verified_at if missing.
+        """
+        from django.db.models import Q
+        from django.utils import timezone
+        created = 0
+        for iv in queryset:
+            try:
+                if iv.status != 'verified':
+                    continue
+                # If already personal, skip
+                if (iv.risk_factors or {}).get('account_type') != 'business':
+                    # Ensure verified_at exists
+                    if not iv.verified_at:
+                        iv.verified_at = timezone.now()
+                        iv.save(update_fields=['verified_at'])
+                    continue
+                has_personal = IdentityVerification.objects.filter(
+                    user=iv.user,
+                    status='verified'
+                ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
+                if not has_personal:
+                    IdentityVerification.objects.create(
+                        user=iv.user,
+                        verified_first_name=iv.verified_first_name,
+                        verified_last_name=iv.verified_last_name,
+                        verified_date_of_birth=iv.verified_date_of_birth,
+                        verified_nationality=iv.verified_nationality,
+                        verified_address=iv.verified_address,
+                        verified_city=iv.verified_city,
+                        verified_state=iv.verified_state,
+                        verified_country=iv.verified_country,
+                        verified_postal_code=iv.verified_postal_code,
+                        document_type=iv.document_type,
+                        document_number=iv.document_number,
+                        document_issuing_country=iv.document_issuing_country,
+                        document_expiry_date=iv.document_expiry_date,
+                        document_front_url=iv.document_front_url,
+                        document_back_url=iv.document_back_url,
+                        selfie_url=iv.selfie_url,
+                        payout_method_label=iv.payout_method_label,
+                        payout_proof_url=iv.payout_proof_url,
+                        status='verified',
+                        verified_by=iv.verified_by,
+                        verified_at=iv.verified_at or timezone.now(),
+                        risk_factors={},
+                    )
+                    created += 1
+            except Exception:
+                continue
+        self.message_user(request, f'Ensured personal verified records created: {created}')
+    ensure_personal_verified_records.short_description = 'Ensure personal verified record exists (clone from business when needed)'
+
+    # Quick links on list page
+    def front_url_link(self, obj):
+        url = getattr(obj, 'document_front_url', None)
+        if not url:
+            return '-'
+        try:
+            from .s3_utils import key_from_url, generate_presigned_get
+            key = key_from_url(url)
+            if not key:
+                return '-'
+            signed = generate_presigned_get(key=key, expires_in_seconds=300)
+            return format_html("<a href='{}' target='_blank'>Front</a>", signed)
+        except Exception:
+            return '-'
+    front_url_link.short_description = 'Front'
+
+    def back_url_link(self, obj):
+        url = getattr(obj, 'document_back_url', None)
+        if not url:
+            return '-'
+        try:
+            from .s3_utils import key_from_url, generate_presigned_get
+            key = key_from_url(url)
+            if not key:
+                return '-'
+            signed = generate_presigned_get(key=key, expires_in_seconds=300)
+            return format_html("<a href='{}' target='_blank'>Back</a>", signed)
+        except Exception:
+            return '-'
+    back_url_link.short_description = 'Back'
+
+    def selfie_url_link(self, obj):
+        url = getattr(obj, 'selfie_url', None)
+        if not url:
+            return '-'
+        try:
+            from .s3_utils import key_from_url, generate_presigned_get
+            key = key_from_url(url)
+            if not key:
+                return '-'
+            signed = generate_presigned_get(key=key, expires_in_seconds=300)
+            return format_html("<a href='{}' target='_blank'>Selfie</a>", signed)
+        except Exception:
+            return '-'
+    selfie_url_link.short_description = 'Selfie'
+
+    def payout_url_link(self, obj):
+        url = getattr(obj, 'payout_proof_url', None)
+        label = getattr(obj, 'payout_method_label', '') or ''
+        if not url:
+            return '-'
+        try:
+            from .s3_utils import key_from_url, generate_presigned_get
+            key = key_from_url(url)
+            if not key:
+                return '-'
+            signed = generate_presigned_get(key=key, expires_in_seconds=300)
+            label_html = f" ({label})" if label else ''
+            return format_html("<a href='{}' target='_blank'>Payout{}</a>", signed, label_html)
+        except Exception:
+            return '-'
+    payout_url_link.short_description = 'Payout'
     
     def approve_verifications(self, request, queryset):
         count = 0
-        for verification in queryset.filter(status='pending'):
+        for verification in queryset.select_related('user').filter(status='pending'):
             verification.approve_verification(request.user)
+            # Create in-app + push notification
+            try:
+                # Detect business context from risk_factors
+                business = None
+                try:
+                    bf_id = (verification.risk_factors or {}).get('business_id')
+                    if bf_id:
+                        business = Business.objects.filter(id=bf_id).first()
+                except Exception:
+                    business = None
+                create_notification(
+                    user=verification.user,
+                    business=business,
+                    notification_type=NotificationTypeChoices.ACCOUNT_VERIFIED,
+                    title='Cuenta verificada',
+                    message='Tu verificación de identidad ha sido aprobada. ¡Gracias!',
+                    data={'verification_id': str(verification.id)},
+                    related_object_type='IdentityVerification',
+                    related_object_id=str(verification.id),
+                    action_url='confio://verification'
+                )
+            except Exception as e:
+                # Don't break admin action due to notification errors
+                import logging
+                logging.getLogger(__name__).error(f"Failed to notify user {verification.user_id} about approval: {e}")
             count += 1
-        self.message_user(request, f"{count} verifications approved.")
+        self.message_user(request, f"{count} verifications approved and users notified.")
     approve_verifications.short_description = "Approve selected verifications"
     
     def reject_verifications(self, request, queryset):
-        count = queryset.filter(status='pending').update(
-            status='rejected',
-            verified_by=request.user,
-            rejected_reason='Bulk rejection by admin'
-        )
-        self.message_user(request, f"{count} verifications rejected.")
+        # Custom prompt for rejection reason
+        if 'apply' not in request.POST:
+            context = {
+                **self.admin_site.each_context(request),
+                'title': 'Reject verifications',
+                'queryset': queryset,
+            }
+            return render(request, 'admin/security/reject_verifications.html', context)
+
+        reason = request.POST.get('reason') or 'Rechazado por el administrador'
+        count = 0
+        for verification in queryset.select_related('user').filter(status='pending'):
+            # Use model helper to ensure timestamps updated
+            try:
+                verification.reject_verification(request.user, reason)
+            except Exception:
+                # fallback direct update
+                verification.status = 'rejected'
+                verification.verified_by = request.user
+                verification.rejected_reason = reason
+                verification.save(update_fields=['status', 'verified_by', 'rejected_reason', 'updated_at'])
+
+            # Create in-app + push notification
+            try:
+                business = None
+                try:
+                    bf_id = (verification.risk_factors or {}).get('business_id')
+                    if bf_id:
+                        business = Business.objects.filter(id=bf_id).first()
+                except Exception:
+                    business = None
+                create_notification(
+                    user=verification.user,
+                    business=business,
+                    notification_type=NotificationTypeChoices.SECURITY_ALERT,
+                    title='Verificación rechazada',
+                    message='Tu verificación de identidad fue rechazada. Revisa los requisitos e inténtalo nuevamente.',
+                    data={'verification_id': str(verification.id), 'reason': verification.rejected_reason or reason},
+                    related_object_type='IdentityVerification',
+                    related_object_id=str(verification.id),
+                    action_url='confio://verification'
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to notify user {verification.user_id} about rejection: {e}")
+            count += 1
+        self.message_user(request, f"{count} verifications rejected and users notified.")
     reject_verifications.short_description = "Reject selected verifications"
+
+    def ensure_personal_verified_records(self, request, queryset):
+        """Backfill: ensure a personal-context verified record exists for selected verifications.
+        Use this if a user shows Unverified even though at least one verification is Verified.
+        """
+        from .models import IdentityVerification as IV
+        from django.db.models import Q
+        created = 0
+        for verification in queryset.select_related('user').filter(status='verified'):
+            try:
+                has_personal = IV.objects.filter(
+                    user=verification.user,
+                    status='verified'
+                ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
+                if not has_personal:
+                    IV.objects.create(
+                        user=verification.user,
+                        verified_first_name=verification.verified_first_name,
+                        verified_last_name=verification.verified_last_name,
+                        verified_date_of_birth=verification.verified_date_of_birth,
+                        verified_nationality=verification.verified_nationality,
+                        verified_address=verification.verified_address,
+                        verified_city=verification.verified_city,
+                        verified_state=verification.verified_state,
+                        verified_country=verification.verified_country,
+                        verified_postal_code=verification.verified_postal_code,
+                        document_type=verification.document_type,
+                        document_number=verification.document_number,
+                        document_issuing_country=verification.document_issuing_country,
+                        document_expiry_date=verification.document_expiry_date,
+                        document_front_url=verification.document_front_url,
+                        document_back_url=verification.document_back_url,
+                        selfie_url=verification.selfie_url,
+                        payout_method_label=verification.payout_method_label,
+                        payout_proof_url=verification.payout_proof_url,
+                        status='verified',
+                        verified_by=verification.verified_by,
+                        verified_at=verification.verified_at or timezone.now(),
+                        risk_factors={},
+                    )
+                    created += 1
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(
+                    f"ensure_personal_verified_records failed for verification {verification.id}: {e}"
+                )
+        self.message_user(request, f"Ensured personal verified records. Created: {created}")
+    ensure_personal_verified_records.short_description = 'Backfill: ensure personal verified for selected'
 
 
 @admin.register(SuspiciousActivity)

@@ -25,6 +25,12 @@ class IdentityVerificationType(DjangoObjectType):
         fields = ('id', 'status', 'verified_at', 'verified_first_name', 
                  'verified_last_name', 'document_type', 'created_at')
 
+    def resolve_verified_at(self, info):
+        try:
+            return self.verified_at or getattr(self, 'updated_at', None) or getattr(self, 'created_at', None)
+        except Exception:
+            return None
+
 
 class UserDeviceType(DjangoObjectType):
     device_name = graphene.String()
@@ -244,6 +250,9 @@ class CheckKYCStatus(graphene.Mutation):
 class SecurityQuery(graphene.ObjectType):
     my_devices = graphene.List(UserDeviceType)
     my_kyc_status = graphene.Field(IdentityVerificationType)
+    my_personal_kyc_status = graphene.Field(IdentityVerificationType)
+    my_personal_verified_kyc = graphene.Field(IdentityVerificationType)
+    business_kyc_status = graphene.Field(IdentityVerificationType, business_id=graphene.ID(required=True))
     
     def resolve_my_devices(self, info):
         user = info.context.user
@@ -262,6 +271,36 @@ class SecurityQuery(graphene.ObjectType):
         return IdentityVerification.objects.filter(
             user=user
         ).order_by('-created_at').first()
+
+    def resolve_my_personal_kyc_status(self, info):
+        user = info.context.user
+        if not user.is_authenticated:
+            return None
+        # Exclude business-context verifications to reflect personal status only
+        return IdentityVerification.objects.filter(
+            user=user,
+            risk_factors__account_type__isnull=True
+        ).order_by('-created_at').first()
+
+    def resolve_business_kyc_status(self, info, business_id):
+        user = info.context.user
+        if not user.is_authenticated:
+            return None
+        # Return latest verification for the specified business context
+        return IdentityVerification.objects.filter(
+            risk_factors__account_type='business',
+            risk_factors__business_id=str(business_id)
+        ).order_by('-created_at').first()
+
+    def resolve_my_personal_verified_kyc(self, info):
+        user = info.context.user
+        if not user.is_authenticated:
+            return None
+        return IdentityVerification.objects.filter(
+            user=user,
+            status='verified',
+            risk_factors__account_type__isnull=True
+        ).order_by('-verified_at', '-updated_at', '-created_at').first()
 
 
 class SecurityMutation(graphene.ObjectType):

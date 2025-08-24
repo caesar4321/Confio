@@ -780,11 +780,12 @@ export const ExchangeScreen = () => {
       return ['Todos los métodos']; // Show default while loading
     }
     
-    if (!paymentMethodsData?.p2pPaymentMethods) {
+    const pmList = paymentMethodsData?.p2p_payment_methods || paymentMethodsData?.p2pPaymentMethods;
+    if (!pmList) {
       return ['Todos los métodos']; // Default when no data
     }
     
-    const serverMethods = paymentMethodsData.p2pPaymentMethods.map((pm: any) => pm.displayName);
+    const serverMethods = pmList.map((pm: any) => pm.displayName);
     return ['Todos los métodos', ...serverMethods];
   }, [paymentMethodsData, paymentMethodsLoading]); // Removed selectedCountry dependency
 
@@ -802,8 +803,9 @@ export const ExchangeScreen = () => {
     if (paymentMethodsData || selectedPaymentMethod === 'Todos los métodos') {
       // Convert display name to internal name inline
       let paymentMethodName = null;
-      if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
-        const method = paymentMethodsData.p2pPaymentMethods.find((pm: any) => pm.displayName === selectedPaymentMethod);
+      const pmList = paymentMethodsData?.p2p_payment_methods || paymentMethodsData?.p2pPaymentMethods;
+      if (selectedPaymentMethod !== 'Todos los métodos' && pmList) {
+        const method = pmList.find((pm: any) => pm.displayName === selectedPaymentMethod);
         paymentMethodName = method?.name || null;
       }
 
@@ -823,8 +825,9 @@ export const ExchangeScreen = () => {
   const handleSearch = React.useCallback(() => {
     // Convert display name to internal name inline
     let paymentMethodName = null;
-    if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
-      const method = paymentMethodsData.p2pPaymentMethods.find((pm: any) => pm.displayName === selectedPaymentMethod);
+    const pmList = paymentMethodsData?.p2p_payment_methods || paymentMethodsData?.p2pPaymentMethods;
+    if (selectedPaymentMethod !== 'Todos los métodos' && pmList) {
+      const method = pmList.find((pm: any) => pm.displayName === selectedPaymentMethod);
       paymentMethodName = method?.name || null;
     }
 
@@ -920,7 +923,7 @@ export const ExchangeScreen = () => {
       
       // 3. Filter by verification status (Verificados)
       if (filterVerified) {
-        const isVerified = offer.userStats?.isVerified || false;
+        const isVerified = offer.userStats?.isVerified === true;
         if (!isVerified) {
           return false;
         }
@@ -1410,7 +1413,8 @@ export const ExchangeScreen = () => {
     const userStats = offer.userStats || {};
     const completedTrades = userStats.completedTrades || 0;
     const successRate = parseFloat(userStats.successRate || '0');
-    const isVerified = userStats.isVerified || false;
+    // Use server-provided stats flag for verification (reflects real status)
+    const isVerified = userStats.isVerified === true;
     
     // Calculate activity status for lastSeen
     const getActivityText = () => {
@@ -1559,7 +1563,11 @@ export const ExchangeScreen = () => {
     const completedTrades = userStats.completedTrades || 0;
     const successRate = parseFloat(userStats.successRate || '0'); // Convert string to number
     const responseTime = userStats.avgResponseTime || offer.responseTimeMinutes || null;
-    const isVerified = userStats.isVerified || false;
+    const isVerified = (
+      (offer.offerBusiness?.isVerified === true) ||
+      (offer.offerUser?.isIdentityVerified === true) ||
+      (userStats.isVerified === true)
+    );
     const avgRating = parseFloat(userStats.avgRating || '0');
     const isNewTrader = completedTrades < 5;
     const isHighRated = avgRating >= 4.5 && completedTrades >= 10;
@@ -2949,8 +2957,8 @@ export const ExchangeScreen = () => {
                                         // Optional: Also refresh the base data from server
                                         // Convert display name to internal name inline
                                         let paymentMethodName = null;
-                                        if (selectedPaymentMethod !== 'Todos los métodos' && paymentMethodsData?.p2pPaymentMethods) {
-                                            const method = paymentMethodsData.p2pPaymentMethods.find((pm: any) => pm.displayName === selectedPaymentMethod);
+                                        if (selectedPaymentMethod !== 'Todos los métodos' && (paymentMethodsData?.p2p_payment_methods || paymentMethodsData?.p2pPaymentMethods)) {
+                                            const method = (paymentMethodsData?.p2p_payment_methods || paymentMethodsData?.p2pPaymentMethods).find((pm: any) => pm.displayName === selectedPaymentMethod);
                                             paymentMethodName = method?.name || null;
                                         }
 

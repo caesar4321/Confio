@@ -12,6 +12,7 @@ interface HeaderProps {
   isHomeScreen?: boolean;
   onProfilePress?: () => void;
   onNotificationPress?: () => void;
+  onBackPress?: () => void;
   backgroundColor?: string;
   isLight?: boolean;
   showBackButton?: boolean;
@@ -25,6 +26,7 @@ export const Header: React.FC<HeaderProps> = ({
   isHomeScreen = false,
   onProfilePress,
   onNotificationPress,
+  onBackPress,
   backgroundColor,
   isLight = false,
   showBackButton = true,
@@ -50,7 +52,7 @@ export const Header: React.FC<HeaderProps> = ({
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
         {showBackButton && !isHomeScreen && (
           <TouchableOpacity 
-            onPress={() => navigation.goBack()}
+            onPress={() => { if (onBackPress) { onBackPress(); } else { navigation.goBack(); } }}
             style={{ marginRight: 16 }}
           >
             <Icon name="arrow-left" size={24} color={textColor} />

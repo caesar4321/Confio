@@ -1448,15 +1448,25 @@ export const TransactionDetailScreen = () => {
     fallbackRecipientName: currentTx?.to || currentTx?.recipientName,
   });
   
+  // Detect external wallet counterparties to label them as "Billetera externa"
+  const isExternalSender = ((currentTx?.type === 'received' || currentTx?.type === 'deposit') && (
+    currentTx?.is_external_address || currentTx?.sourceAddress || (currentTx?.fromAddress && !senderPhone)
+  )) as boolean;
+  const isExternalRecipient = ((currentTx?.type === 'send' || currentTx?.type === 'sent' || currentTx?.type === 'withdrawal') && (
+    currentTx?.is_external_address || currentTx?.destinationAddress || ((currentTx?.toAddress || currentTx?.recipient_address) && !recipientPhone)
+  )) as boolean;
+
   // Don't use truncated addresses as fallback names
-  const senderFallbackName = currentTx?.from || currentTx?.senderName || currentTx?.sender_name;
+  const senderFallbackName = isExternalSender 
+    ? 'Billetera externa' 
+    : (currentTx?.from || currentTx?.senderName || currentTx?.sender_name);
   const recipientFallbackName = (() => {
     const name = currentTx?.to || currentTx?.recipientName || currentTx?.recipient_name;
     // If it's a truncated address, don't use it as a name
     if (name && name.includes('...') && name.startsWith('0x')) {
       return '';
     }
-    return name;
+    return isExternalRecipient ? 'Billetera externa' : name;
   })();
   
   const senderContactInfo = useContactNameSync(senderPhone, senderFallbackName);
@@ -1657,7 +1667,7 @@ export const TransactionDetailScreen = () => {
         } else if (tx.is_invited_friend && tx.recipient_phone) {
           return 'Enviado a amigo invitado';
         } else if (tx.is_external_address || (tx.toAddress && !tx.recipient_phone) || (tx.recipient_address && !tx.recipient_phone)) {
-          return 'Enviado a dirección externa';
+          return 'Enviado a billetera externa';
         }
         return 'Enviado';
       case 'exchange':
@@ -1950,14 +1960,14 @@ export const TransactionDetailScreen = () => {
                         
                         // For external addresses
                         if (currentTx.is_external_address || (currentTx.toAddress && !currentTx.recipient_phone && !displayToName)) {
-                          return 'Dirección externa';
+                          return 'Billetera externa';
                         }
                         
                         // Fallback - but don't use truncated addresses
                         const fallbackName = currentTx.to || currentTx.recipient_name || 'Desconocido';
                         // If the fallback looks like a truncated address, don't use it
                         if (fallbackName.includes('...') && fallbackName.startsWith('0x')) {
-                          return 'Dirección externa';
+                          return 'Billetera externa';
                         }
                         return fallbackName || `DEBUG FALLBACK ${new Date().getTime()}`;
                       })()}

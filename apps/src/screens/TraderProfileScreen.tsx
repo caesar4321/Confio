@@ -64,14 +64,26 @@ export const TraderProfileScreen: React.FC = () => {
       displayName = `${firstName}${lastInitial ? ' ' + lastInitial + '.' : ''}`;
     }
     
+    // Pull real stats from userStats when available
+    const stats = offer?.userStats || {};
+    const successRate = typeof stats.successRate === 'number' ? stats.successRate : parseFloat(stats.successRate || '0') || 0;
+    const avgRating = typeof stats.avgRating === 'number' ? stats.avgRating : parseFloat(stats.avgRating || '0') || 0;
+    const completedTrades = stats.completedTrades || stats.totalTrades || 0;
+    const avgResponse = stats.avgResponseTime; // minutes
+    const responseTime = typeof avgResponse === 'number' && avgResponse > 0
+      ? (avgResponse <= 15 ? 'Responde rápido' : avgResponse <= 60 ? 'Responde < 1h' : `~${Math.round(avgResponse/60)}h`)
+      : (offer?.responseTime || '< 1 hora');
+    const isVerified = stats.isVerified === true;
+
     return {
       ...offer,
       name: displayName,
-      successRate: offer?.successRate || 0,
-      completedTrades: offer?.completedTrades || 0,
-      responseTime: offer?.responseTime || '< 1 hora',
+      successRate,
+      completedTrades,
+      avgRating,
+      responseTime,
       isOnline: offer?.isOnline || false,
-      verified: offer?.verified || false,
+      verified: isVerified,
       lastSeen: offer?.lastSeen || 'Recientemente',
     };
   })();

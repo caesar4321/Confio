@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import Q
 from django.conf import settings
 from .country_codes import COUNTRY_CODES
 from django.db.models.signals import post_save
@@ -147,41 +148,92 @@ class User(AbstractUser, SoftDeleteModel):
 
     @property
     def verification_status(self):
-        """Get the current verification status based on verification records"""
-        latest_verification = self.latest_verification
-        if latest_verification and latest_verification.status == 'verified':
+        """Get the current verification status based on verification records
+        Priority: verified > pending > rejected > unverified
+        This avoids stale ordering issues when verified_at is null or when a
+        later rejected record exists after a previously verified one.
+        """
+        from security.models import IdentityVerification
+        # PERSONAL CONTEXT ONLY: exclude business-context verifications
+        # Business verifications should not mark personal user as verified
+        personal_verified = IdentityVerification.objects.filter(
+            user=self,
+            status='verified'
+        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+        if personal_verified.exists():
             return 'verified'
-        elif latest_verification and latest_verification.status == 'rejected':
-            return 'rejected'
-        elif latest_verification and latest_verification.status == 'pending':
+        # Otherwise reflect active pending (personal) submissions if any
+        personal_pending = IdentityVerification.objects.filter(
+            user=self,
+            status='pending'
+        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+        if personal_pending.exists():
             return 'pending'
+        # Otherwise if only rejected (personal) submissions exist
+        personal_rejected = IdentityVerification.objects.filter(
+            user=self,
+            status='rejected'
+        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+        if personal_rejected.exists():
+            return 'rejected'
         return 'unverified'
 
     @property
     def is_identity_verified(self):
-        """Check if user has any verified identity records"""
-        return self.security_verifications.filter(status='verified').exists()
+        """Check if user has any verified identity records (personal context only)
+        Excludes business-context verifications so personal accounts are not
+        marked verified when only a business account has been verified.
+        """
+        from security.models import IdentityVerification
+        return IdentityVerification.objects.filter(
+            user=self,
+            status='verified'
+        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
 
     @property
     def last_verified_date(self):
-        """Get the date of the latest verification"""
-        latest_verification = self.latest_verification
-        if latest_verification and latest_verification.status == 'verified':
-            return latest_verification.verified_at
-        return None
+        """Get the date of the latest successful verification"""
+        from security.models import IdentityVerification
+        latest_verified = (
+            IdentityVerification.objects
+            .filter(user=self, status='verified')
+            .exclude(risk_factors__account_type='business')
+            .order_by('-verified_at', '-updated_at', '-created_at')
+            .first()
+        )
+        if not latest_verified:
+            return None
+        # Prefer explicit verified_at when available; otherwise fall back to updated_at/created_at
+        return (
+            latest_verified.verified_at
+            or latest_verified.updated_at
+            or latest_verified.created_at
+        )
 
 
 
     @property
     def latest_verification(self):
-        """Get the latest verification record for this user"""
-        return self.security_verifications.order_by('-verified_at').first()
+        """Get the most recently updated verification record for this user"""
+        # PERSONAL CONTEXT ONLY by default to reflect user's own status
+        from security.models import IdentityVerification
+        return (
+            IdentityVerification.objects
+            .filter(user=self)
+            .filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business'))
+            .order_by('-updated_at', '-created_at')
+            .first()
+        )
 
     @property
     def is_verified(self):
         """Check if user has any verified identity records"""
         from security.models import IdentityVerification
-        return IdentityVerification.objects.filter(user=self, status='verified').exists()
+        # Personal verification only; exclude business-context records
+        return IdentityVerification.objects.filter(
+            user=self,
+            status='verified'
+        ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
     
     @property
     def is_phone_verified(self):

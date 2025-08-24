@@ -423,6 +423,50 @@ const authLink = setContext(async (operation, previousContext) => {
         };
       }
 
+      // Proactively refresh if access token is expired or near expiry
+      try {
+        const now = Math.floor(Date.now() / 1000);
+        const exp = (decoded as any)?.exp ?? 0;
+        const willExpireSoon = exp <= now + 30; // 30s safety window
+        if (willExpireSoon) {
+          if (AUTH_DEBUG) console.log('Access token expired/expiring, attempting proactive refresh');
+          const credentialsForRefresh = await Keychain.getGenericPassword({
+            service: AUTH_KEYCHAIN_SERVICE,
+            username: AUTH_KEYCHAIN_USERNAME
+          });
+          if (credentialsForRefresh && credentialsForRefresh.password) {
+            const stored = JSON.parse(credentialsForRefresh.password);
+            const rt = stored.refreshToken;
+            if (rt) {
+              // Avoid recursion on RefreshToken mutation
+              const { data } = await apolloClient.mutate({
+                mutation: REFRESH_TOKEN,
+                variables: { refreshToken: rt },
+                context: { skipAuth: true }
+              });
+              if (data?.refreshToken?.token) {
+                const newAccess = data.refreshToken.token;
+                await Keychain.setGenericPassword(
+                  AUTH_KEYCHAIN_USERNAME,
+                  JSON.stringify({ accessToken: newAccess, refreshToken: rt }),
+                  {
+                    service: AUTH_KEYCHAIN_SERVICE,
+                    username: AUTH_KEYCHAIN_USERNAME,
+                    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+                  }
+                );
+                // Replace local token/decoded with refreshed values
+                token = newAccess;
+                decoded = jwtDecode<CustomJwtPayload>(newAccess);
+                if (AUTH_DEBUG) console.log('Proactive refresh succeeded');
+              }
+            }
+          }
+        }
+      } catch (refreshError) {
+        console.error('Proactive refresh error:', refreshError);
+      }
+
       // Always include the token in the header for authenticated requests
       if (AUTH_DEBUG) console.log('Including JWT token in request header');
       

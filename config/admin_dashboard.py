@@ -617,7 +617,7 @@ from p2p_exchange.admin import (
     P2PPaymentMethodAdmin, P2POfferAdmin, P2PTradeAdmin, 
     P2PMessageAdmin, P2PUserStatsAdmin, P2PEscrowAdmin,
     P2PTradeRatingAdmin, P2PDisputeAdmin, P2PDisputeTransactionAdmin,
-    P2PFavoriteTraderAdmin
+    P2PFavoriteTraderAdmin, PremiumUpgradeRequestAdmin
 )
 from payments.admin import PaymentTransactionAdmin, InvoiceAdmin
 from send.admin import SendTransactionAdmin, PhoneInviteAdmin
@@ -682,7 +682,7 @@ confio_admin_site.register(UnifiedUSDCTransactionTable, UnifiedUSDCTransactionAd
 from p2p_exchange.models import (
     P2PPaymentMethod, P2POffer, P2PTrade, P2PMessage, 
     P2PUserStats, P2PEscrow, P2PTradeRating, P2PDispute,
-    P2PDisputeTransaction, P2PFavoriteTrader
+    P2PDisputeTransaction, P2PFavoriteTrader, PremiumUpgradeRequest
 )
 confio_admin_site.register(P2PPaymentMethod, P2PPaymentMethodAdmin)
 confio_admin_site.register(P2POffer, P2POfferAdmin)
@@ -694,6 +694,7 @@ confio_admin_site.register(P2PTradeRating, P2PTradeRatingAdmin)
 confio_admin_site.register(P2PDispute, P2PDisputeAdmin)
 confio_admin_site.register(P2PDisputeTransaction, P2PDisputeTransactionAdmin)
 confio_admin_site.register(P2PFavoriteTrader, P2PFavoriteTraderAdmin)
+confio_admin_site.register(PremiumUpgradeRequest, PremiumUpgradeRequestAdmin)
 
 # Payment models
 from payments.models import Invoice, PaymentTransaction
