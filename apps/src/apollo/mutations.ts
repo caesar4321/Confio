@@ -455,6 +455,8 @@ export const SUBMIT_P2P_OPEN_DISPUTE = gql`
 
 // Dispute evidence: request presigned upload URL (PUT to S3)
 export const REQUEST_DISPUTE_EVIDENCE_UPLOAD = gql`
+  # Dispute opening via HTTP is removed; use WebSocket for open_dispute.
+  # RequestDisputeEvidenceUpload remains available.
   mutation RequestDisputeEvidenceUpload($tradeId: ID!, $filename: String, $contentType: String, $sha256: String) {
     requestDisputeEvidenceUpload(tradeId: $tradeId, filename: $filename, contentType: $contentType, sha256: $sha256) {
       success

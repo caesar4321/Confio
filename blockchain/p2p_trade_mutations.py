@@ -1398,18 +1398,42 @@ class SubmitP2POpenDispute(graphene.Mutation):
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             txid = algod_client.send_transactions([stx0, user_stx])
             ref_txid = user_stx.get_txid()
-            transaction.wait_for_confirmation(algod_client, ref_txid, 8)
 
-            # Reflect in DB: set status and create dispute record
+            # Enqueue background confirmation via Celery and return immediately
             try:
-                trade = P2PTrade.objects.filter(id=trade_id).first()
-                if trade and trade.status not in ('DISPUTED', 'CANCELLED', 'COMPLETED'):
-                    trade.status = 'DISPUTED'
-                    trade.updated_at = timezone.now()
-                    trade.save(update_fields=['status', 'updated_at'])
-                # Create dispute record if missing
+                from blockchain.tasks import confirm_p2p_open_dispute
+                opener_user_id = getattr(user, 'id', None)
+                # Try to capture business context (if any)
+                opener_business_id = None
                 try:
                     from users.jwt_context import get_jwt_business_context_with_validation
+                    jwt_ctx = get_jwt_business_context_with_validation(info, required_permission=None) or {}
+                    if jwt_ctx.get('account_type') == 'business':
+                        opener_business_id = jwt_ctx.get('business_id')
+                except Exception:
+                    opener_business_id = None
+                confirm_p2p_open_dispute.delay(
+                    trade_id=str(trade_id),
+                    txid=ref_txid,
+                    opener_user_id=opener_user_id,
+                    opener_business_id=opener_business_id,
+                    reason=(reason or ''),
+                )
+            except Exception:
+                # If enqueue fails, we still return txid; scanner may pick it up later
+                pass
+
+            # Optimistic local update so the UI reflects dispute immediately
+            try:
+                trade = P2PTrade.objects.filter(id=trade_id).select_related('buyer_user', 'seller_user', 'buyer_business', 'seller_business').first()
+                if trade and trade.status not in ('DISPUTED', 'CANCELLED', 'COMPLETED'):
+                    from django.utils import timezone as dj_tz
+                    trade.status = 'DISPUTED'
+                    trade.updated_at = dj_tz.now()
+                    trade.save(update_fields=['status', 'updated_at'])
+
+                # Ensure dispute record exists for evidence uploads
+                if trade:
                     from p2p_exchange.models import P2PDispute
                     exists = False
                     try:
@@ -1417,45 +1441,46 @@ class SubmitP2POpenDispute(graphene.Mutation):
                         exists = True
                     except Exception:
                         exists = False
-                    if trade and not exists:
+                    if not exists:
+                        from users.jwt_context import get_jwt_business_context_with_validation
                         dispute_kwargs = {
                             'trade': trade,
-                            'reason': (reason or 'Dispute opened on-chain').strip(),
+                            'reason': (reason or 'Dispute opened').strip(),
                             'priority': 2,
                             'status': 'UNDER_REVIEW',
                         }
-                        jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-                        user = getattr(info.context, 'user', None)
-                        if jwt_context and jwt_context.get('account_type') == 'business' and jwt_context.get('business_id'):
-                            # Assign to buyer/seller business if matches
-                            try:
+                        try:
+                            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None) or {}
+                            if jwt_context.get('account_type') == 'business' and jwt_context.get('business_id'):
                                 if trade.buyer_business_id == jwt_context.get('business_id'):
                                     dispute_kwargs['initiator_business'] = trade.buyer_business
                                 elif trade.seller_business_id == jwt_context.get('business_id'):
                                     dispute_kwargs['initiator_business'] = trade.seller_business
-                                elif user and getattr(user, 'id', None):
+                                else:
                                     dispute_kwargs['initiator_user'] = user
-                            except Exception:
-                                if user and getattr(user, 'id', None):
-                                    dispute_kwargs['initiator_user'] = user
-                        else:
-                            if user and getattr(user, 'id', None):
+                            else:
                                 dispute_kwargs['initiator_user'] = user
-                        P2PDispute.objects.create(**dispute_kwargs)
-                except Exception:
-                    pass
-                # Record system message
+                        except Exception:
+                            dispute_kwargs['initiator_user'] = user
+                        try:
+                            P2PDispute.objects.create(**dispute_kwargs)
+                        except Exception:
+                            pass
+
+                # System message into chat
                 try:
                     from p2p_exchange.models import P2PMessage
-                    P2PMessage.objects.create(
-                        trade=trade,
-                        message='🚩 Disputa abierta en cadena',
-                        sender_type='system',
-                        message_type='system',
-                    )
+                    if trade:
+                        P2PMessage.objects.create(
+                            trade=trade,
+                            message='🚩 Disputa enviada a cadena',
+                            sender_type='system',
+                            message_type='system',
+                        )
                 except Exception:
                     pass
             except Exception:
+                # Non-fatal if local DB bookkeeping fails
                 pass
 
             return cls(success=True, txid=ref_txid)
