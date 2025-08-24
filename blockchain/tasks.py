@@ -810,6 +810,9 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     logger.warning(f"Notification error for SendTransaction {s.id}: {ne}")
                 processed += 1
 
+
+# P2P open_dispute confirmation task moved to bottom of file
+
         # P2P Escrow creations (escrowed funds)
         escrows = P2PEscrow.objects.filter(
             is_escrowed=False,
@@ -1228,4 +1231,122 @@ def scan_outbound_confirmations(max_batch: int = 50):
         return {'processed': processed}
     except Exception as e:
         logger.error(f"scan_outbound_confirmations failed: {e}")
+        raise
+
+
+# ================================
+# P2P open_dispute confirmation
+# ================================
+
+@shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 6})
+def confirm_p2p_open_dispute(self, *, trade_id: str, txid: str, opener_user_id: str = None, opener_business_id: str = None, reason: str = ""):
+    """
+    Waits for on-chain confirmation of an open_dispute group and updates DB.
+
+    Args:
+        trade_id: P2PTrade.id
+        txid: user-signed appcall txid for the group
+        opener_user_id: optional initiating user id
+        opener_business_id: optional initiating business id
+        reason: optional dispute reason
+    """
+    try:
+        client = AlgorandClient()
+        algod_client = client.algod
+
+        delays = [0.5, 1, 2, 4, 6, 8, 10]
+        confirmed_round = 0
+        pool_error = None
+
+        for d in delays:
+            try:
+                info = algod_client.pending_transaction_info(txid)
+            except Exception as e:
+                logger.warning(f"pending_transaction_info error for {txid}: {e}")
+                info = {}
+
+            confirmed_round = int(info.get('confirmed-round') or 0)
+            pool_error = info.get('pool-error') or info.get('pool_error')
+
+            if confirmed_round > 0 or pool_error:
+                break
+
+            try:
+                import time
+                time.sleep(d)
+            except Exception:
+                pass
+
+        # Load trade
+        trade = P2PTrade.objects.filter(id=trade_id).select_related('buyer_user', 'seller_user', 'buyer_business', 'seller_business').first()
+        if not trade:
+            logger.error(f"confirm_p2p_open_dispute: trade {trade_id} not found")
+            return {'status': 'missing'}
+
+        if pool_error:
+            logger.error(f"confirm_p2p_open_dispute: pool error for {txid}: {pool_error}")
+            return {'status': 'failed', 'pool_error': pool_error}
+
+        if confirmed_round > 0:
+            # Update status
+            if trade.status not in ('DISPUTED', 'CANCELLED', 'COMPLETED'):
+                from django.utils import timezone as dj_tz
+                trade.status = 'DISPUTED'
+                trade.updated_at = dj_tz.now()
+                try:
+                    trade.save(update_fields=['status', 'updated_at'])
+                except Exception:
+                    pass
+
+            # Ensure a dispute record exists
+            try:
+                from p2p_exchange.models import P2PDispute
+                exists = False
+                try:
+                    _ = trade.dispute_details
+                    exists = True
+                except Exception:
+                    exists = False
+                if not exists:
+                    kwargs = {
+                        'trade': trade,
+                        'reason': (reason or 'Dispute opened on-chain').strip(),
+                        'priority': 2,
+                        'status': 'UNDER_REVIEW',
+                    }
+                    try:
+                        if opener_business_id and (trade.buyer_business_id == opener_business_id or trade.seller_business_id == opener_business_id):
+                            from users.models import Business
+                            kwargs['initiator_business'] = Business.objects.filter(id=opener_business_id).first()
+                        elif opener_user_id:
+                            from users.models import User as _User
+                            kwargs['initiator_user'] = _User.objects.filter(id=opener_user_id).first()
+                    except Exception:
+                        pass
+                    try:
+                        P2PDispute.objects.create(**kwargs)
+                    except Exception as ce:
+                        logger.warning(f"confirm_p2p_open_dispute: failed to create dispute for trade {trade_id}: {ce}")
+            except Exception as e:
+                logger.warning(f"confirm_p2p_open_dispute: dispute ensure error: {e}")
+
+            # Record system message
+            try:
+                from p2p_exchange.models import P2PMessage
+                P2PMessage.objects.create(
+                    trade=trade,
+                    message='🚩 Disputa abierta en cadena',
+                    sender_type='system',
+                    message_type='system',
+                )
+            except Exception as e:
+                logger.warning(f"confirm_p2p_open_dispute: failed to create system message: {e}")
+
+            logger.info(f"confirm_p2p_open_dispute: trade {trade_id} confirmed in round {confirmed_round}")
+            return {'status': 'confirmed', 'round': confirmed_round}
+
+        # Not confirmed yet: schedule retry
+        raise Exception(f"Tx {txid} not yet confirmed; scheduling retry")
+    except Exception as e:
+        logger.warning(f"confirm_p2p_open_dispute error: {e}")
         raise

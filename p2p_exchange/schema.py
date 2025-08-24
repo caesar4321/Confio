@@ -2187,131 +2187,10 @@ class RateP2PTrade(graphene.Mutation):
                 errors=[str(e)]
             )
 
-class DisputeP2PTrade(graphene.Mutation):
-    class Arguments:
-        trade_id = graphene.ID(required=True)
-        reason = graphene.String(required=True)
-        
-    trade = graphene.Field(P2PTradeType)
-    success = graphene.Boolean()
-    errors = graphene.List(graphene.String)
-    
-    @classmethod
-    def mutate(cls, root, info, trade_id, reason):
-        user = getattr(info.context, 'user', None)
-        if not (user and getattr(user, 'is_authenticated', False)):
-            return DisputeP2PTrade(
-                trade=None,
-                success=False,
-                errors=["Authentication required"]
-            )
-        
-        try:
-            # Get trade and verify user is part of it
-            trade = P2PTrade.objects.filter(
-                id=trade_id
-            ).filter(
-                models.Q(buyer_user=user) | 
-                models.Q(seller_user=user) |
-                models.Q(buyer_business__accounts__user=user) |
-                models.Q(seller_business__accounts__user=user)
-            ).distinct().first()
-            
-            if not trade:
-                return DisputeP2PTrade(
-                    trade=None,
-                    success=False,
-                    errors=["Trade not found or access denied"]
-                )
-            
-            # Check if trade can be disputed
-            if trade.status in ['COMPLETED', 'CANCELLED', 'EXPIRED']:
-                return DisputeP2PTrade(
-                    trade=None,
-                    success=False,
-                    errors=[f"Cannot dispute a trade with status: {trade.status}"]
-                )
-            
-            # Check if already disputed
-            if trade.status == 'DISPUTED':
-                return DisputeP2PTrade(
-                    trade=trade,
-                    success=False,
-                    errors=["Trade is already disputed"]
-                )
-            
-            # Validate reason
-            if not reason or len(reason.strip()) < 10:
-                return DisputeP2PTrade(
-                    trade=None,
-                    success=False,
-                    errors=["Please provide a detailed reason for the dispute (minimum 10 characters)"]
-                )
-            
-            # Update trade status to disputed
-            from django.utils import timezone
-            trade.status = 'DISPUTED'
-            trade.save()
-            
-            # Create detailed dispute record
-            from .models import P2PDispute
-            
-            # Get JWT context with validation and permission check
-            from users.jwt_context import get_jwt_business_context_with_validation
-            jwt_context = get_jwt_business_context_with_validation(info, required_permission='manage_p2p')
-            if not jwt_context:
-                return DisputeP2PTrade(
-                    trade=None,
-                    success=False,
-                    errors=["No access or permission to manage P2P trades"]
-                )
-            active_account_type = jwt_context['account_type']
-            active_account_index = jwt_context['account_index']
-            business_id = jwt_context.get('business_id')
-            
-            dispute_kwargs = {
-                'trade': trade,
-                'reason': reason.strip(),
-                'priority': 2  # Default to medium priority
-            }
-            
-            # Determine which account is initiating the dispute
-            if active_account_type == 'business':
-                # Check if user is acting as buyer business or seller business
-                if trade.buyer_business and trade.buyer_business.accounts.filter(user=user, account_index=active_account_index).exists():
-                    dispute_kwargs['initiator_business'] = trade.buyer_business
-                elif trade.seller_business and trade.seller_business.accounts.filter(user=user, account_index=active_account_index).exists():
-                    dispute_kwargs['initiator_business'] = trade.seller_business
-                else:
-                    # Fallback to user if business not found
-                    dispute_kwargs['initiator_user'] = user
-            else:
-                # User is disputing as personal account
-                dispute_kwargs['initiator_user'] = user
-            
-            P2PDispute.objects.create(**dispute_kwargs)
-            
-            # Send system message about dispute
-            P2PMessage.objects.create(
-                trade=trade,
-                message_type='SYSTEM',
-                content=f"Trade disputed: {reason}"
-            )
-            
-            # TODO: Send notification to admin and other party
-            
-            return DisputeP2PTrade(
-                trade=trade,
-                success=True,
-                errors=[]
-            )
-            
-        except Exception as e:
-            return DisputeP2PTrade(
-                trade=None,
-                success=False,
-                errors=[str(e)]
-            )
+"""
+Removed: HTTP mutation for opening disputes.
+Clients must use WebSocket prepare/submit flow to open disputes on-chain.
+"""
 
 
 class PresignedUploadInfo(graphene.ObjectType):
@@ -3434,7 +3313,7 @@ class Mutation(graphene.ObjectType):
     update_p2p_trade_status = UpdateP2PTradeStatus.Field()
     send_p2p_message = SendP2PMessage.Field()
     rate_p2p_trade = RateP2PTrade.Field()
-    dispute_p2p_trade = DisputeP2PTrade.Field()
+    # dispute_p2p_trade removed: use WebSocket on-chain flow
     request_dispute_evidence_upload = RequestDisputeEvidenceUpload.Field()
     attach_dispute_evidence = AttachDisputeEvidence.Field()
     get_dispute_evidence_code = GetDisputeEvidenceCode.Field()
