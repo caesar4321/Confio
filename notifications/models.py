@@ -31,6 +31,7 @@ class NotificationType(models.TextChoices):
     P2P_TRADE_COMPLETED = 'P2P_TRADE_COMPLETED', 'P2P Trade Completed'
     P2P_TRADE_CANCELLED = 'P2P_TRADE_CANCELLED', 'P2P Trade Cancelled'
     P2P_TRADE_DISPUTED = 'P2P_TRADE_DISPUTED', 'P2P Trade Disputed'
+    P2P_DISPUTE_RESOLVED = 'P2P_DISPUTE_RESOLVED', 'P2P Dispute Resolved'
     
     # Conversion transactions
     CONVERSION_COMPLETED = 'CONVERSION_COMPLETED', 'Conversion Completed'

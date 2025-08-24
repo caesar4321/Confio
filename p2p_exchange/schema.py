@@ -3681,7 +3681,20 @@ class ResolveDispute(graphene.Mutation):
                     trade.status = 'CANCELLED'
             
             trade.save()
-            
+
+            # Send notifications to both parties about the resolution
+            try:
+                from notifications.utils import create_p2p_dispute_resolution_notifications
+                create_p2p_dispute_resolution_notifications(
+                    trade=trade,
+                    resolution_type=resolution_type,
+                    resolution_amount=str(getattr(trade, 'crypto_amount', '')),
+                    admin_notes=resolution_notes or '',
+                )
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception('Failed to send dispute resolution notifications')
+
             # Send system message to chat
             from .models import P2PMessage
             resolution_messages = {

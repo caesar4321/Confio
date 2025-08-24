@@ -952,6 +952,20 @@ class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
                 trade.updated_at = timezone.now()
                 trade.save()
 
+                # Notify both parties about the dispute resolution result
+                try:
+                    from notifications.utils import create_p2p_dispute_resolution_notifications
+                    resolved_type = 'REFUND_BUYER' if winner_side == 'BUYER' else 'RELEASE_TO_SELLER'
+                    create_p2p_dispute_resolution_notifications(
+                        trade=trade,
+                        resolution_type=resolved_type,
+                        resolution_amount=str(trade.crypto_amount),
+                        admin_notes=f"Resuelto en cadena por {request.user.username}",
+                    )
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception('Failed sending dispute resolution notifications')
+
                 successes += 1
             except Exception:
                 failures += 1
