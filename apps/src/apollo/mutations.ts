@@ -466,6 +466,7 @@ export const REQUEST_DISPUTE_EVIDENCE_UPLOAD = gql`
         headers
         fields
         expiresIn
+        confioCode
       }
     }
   }
@@ -478,6 +479,17 @@ export const ATTACH_DISPUTE_EVIDENCE = gql`
       success
       error
       dispute { id }
+    }
+  }
+`;
+
+export const GET_DISPUTE_EVIDENCE_CODE = gql`
+  mutation GetDisputeEvidenceCode($tradeId: ID!) {
+    getDisputeEvidenceCode(tradeId: $tradeId) {
+      success
+      error
+      confioCode
+      expiresAt
     }
   }
 `;
@@ -516,6 +528,7 @@ export const GET_UNIFIED_USDC_TRANSACTIONS = gql`
   query GetUnifiedUSDCTransactions($limit: Int, $offset: Int, $transactionType: String) {
     unifiedUsdcTransactions(limit: $limit, offset: $offset, transactionType: $transactionType) {
       transactionId
+      transactionHash
       transactionType
       actorType
       actorDisplayName
@@ -553,23 +566,7 @@ export const GET_UNIFIED_USDC_TRANSACTIONS = gql`
   }
 `;
 
-export const CREATE_USDC_WITHDRAWAL = gql`
-  mutation CreateUSDCWithdrawal($input: USDCWithdrawalInput!) {
-    createUsdcWithdrawal(input: $input) {
-      withdrawal {
-        id
-        withdrawalId
-        amount
-        destinationAddress
-        serviceFee
-        status
-        createdAt
-      }
-      success
-      errors
-    }
-  }
-`;
+// Removed: USDC withdrawals now use WebSocket ws/withdraw_session (prepare + submit)
 
 // Notification mutations
 export const MARK_NOTIFICATION_READ = gql`

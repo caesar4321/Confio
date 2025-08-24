@@ -1465,7 +1465,7 @@ class P2PDisputeAdmin(admin.ModelAdmin):
     ]
     readonly_fields = [
         'trade', 'opened_at', 'last_updated', 'duration_display', 
-        'trade_details', 'evidence_display'
+        'trade_details', 'evidence_display', 'evidence_code', 'code_generated_at', 'code_expires_at'
     ]
     
     def trade_link(self, obj):
@@ -1607,7 +1607,7 @@ class P2PDisputeAdmin(admin.ModelAdmin):
             'fields': ('initiator_user', 'initiator_business')
         }),
         ('Evidence & Notes', {
-            'fields': ('evidence_urls', 'evidence_display', 'admin_notes')
+            'fields': ('evidence_urls', 'evidence_display', 'evidence_code', 'code_generated_at', 'code_expires_at', 'admin_notes')
         }),
         ('Resolution', {
             'fields': ('resolution_type', 'resolution_amount', 'resolution_notes', 'resolved_by')
