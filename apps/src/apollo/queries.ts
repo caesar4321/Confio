@@ -18,6 +18,46 @@ export const GET_ME = gql`
   }
 `;
 
+// Live personal KYC status (latest record for current user)
+export const GET_MY_KYC_STATUS = gql`
+  query GetMyKycStatus {
+    myKycStatus {
+      id
+      status
+    }
+  }
+`;
+
+// Filtered KYC statuses
+export const GET_MY_PERSONAL_KYC_STATUS = gql`
+  query GetMyPersonalKycStatus {
+    myPersonalKycStatus {
+      id
+      status
+      verifiedAt
+    }
+  }
+`;
+
+export const GET_MY_PERSONAL_VERIFIED_KYC = gql`
+  query GetMyPersonalVerifiedKyc {
+    myPersonalVerifiedKyc {
+      id
+      status
+      verifiedAt
+    }
+  }
+`;
+
+export const GET_BUSINESS_KYC_STATUS = gql`
+  query GetBusinessKycStatus($businessId: ID!) {
+    businessKycStatus(businessId: $businessId) {
+      id
+      status
+    }
+  }
+`;
+
 // Check users by phone numbers
 export const CHECK_USERS_BY_PHONES = gql`
   query CheckUsersByPhones($phoneNumbers: [String!]!) {
@@ -98,6 +138,9 @@ export const GET_USER_ACCOUNTS = gql`
       business {
         id
         name
+        isVerified
+        lastVerifiedDate
+        verificationStatus
         category
         description
         address

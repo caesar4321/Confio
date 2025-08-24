@@ -16,7 +16,8 @@ from .models import (
     P2PTradeRating,
     P2PDispute,
     P2PDisputeTransaction,
-    P2PFavoriteTrader
+    P2PFavoriteTrader,
+    PremiumUpgradeRequest
 )
 
 @admin.register(P2PPaymentMethod)
@@ -1018,8 +1019,8 @@ class P2PMessageAdmin(admin.ModelAdmin):
 @admin.register(P2PUserStats)
 class P2PUserStatsAdmin(admin.ModelAdmin):
     list_display = [
-        'stats_entity_display', 'total_trades', 'completed_trades', 'success_rate', 
-        'avg_rating_display', 'rating_count', 'avg_response_time', 'is_verified'
+        'stats_entity_display', 'verification_level', 'is_verified', 'total_trades', 'completed_trades', 'success_rate', 
+        'avg_rating_display', 'rating_count', 'avg_response_time'
     ]
     list_filter = [
         'is_verified', 'verification_level', 'last_seen_online',
@@ -1164,19 +1165,17 @@ class P2PEscrowAdmin(admin.ModelAdmin):
                 'border-radius: 4px; font-weight: bold; font-size: 11px;">Released</span>'
             )
     status_badge.short_description = 'Status'
-    
+
     def release_type_badge(self, obj):
         """Display release type with colored badge"""
         if not obj.release_type:
             return format_html('<span style="color: #999;">-</span>')
-        
         colors = {
             'NORMAL': '#10B981',
             'REFUND': '#F59E0B',
             'PARTIAL_REFUND': '#8B5CF6',
             'DISPUTE_RELEASE': '#DC2626',
         }
-        
         return format_html(
             '<span style="background-color: {}; color: white; padding: 2px 6px; '
             'border-radius: 12px; font-size: 11px;">{}</span>',
@@ -1184,7 +1183,7 @@ class P2PEscrowAdmin(admin.ModelAdmin):
             obj.get_release_type_display() if obj.release_type else 'None'
         )
     release_type_badge.short_description = 'Release Type'
-    
+
     def dispute_indicator(self, obj):
         """Show if escrow was resolved by dispute"""
         if obj.resolved_by_dispute:
@@ -1199,6 +1198,86 @@ class P2PEscrowAdmin(admin.ModelAdmin):
                 return format_html('<span style="color: #DC2626;">🚨 Dispute</span>')
         return format_html('<span style="color: #10B981;">✓ Normal</span>')
     dispute_indicator.short_description = 'Resolution'
+
+
+@admin.register(PremiumUpgradeRequest)
+class PremiumUpgradeRequestAdmin(admin.ModelAdmin):
+    list_display = ['context_display', 'status_badge', 'created_at', 'reviewed_by', 'reviewed_at']
+    list_filter = ['status', ('user', admin.RelatedOnlyFieldListFilter), ('business', admin.RelatedOnlyFieldListFilter)]
+    search_fields = ['user__username', 'business__name', 'reason']
+    readonly_fields = ['created_at', 'updated_at', 'reviewed_at']
+    actions = ['approve_requests', 'reject_requests']
+
+    fieldsets = (
+        ('Context', {
+            'fields': ('user', 'business'),
+            'description': 'Request applies to either a personal user or a business account.'
+        }),
+        ('Request', {
+            'fields': ('reason',)
+        }),
+        ('Review', {
+            'fields': ('status', 'review_notes', 'reviewed_by', 'reviewed_at')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+    def context_display(self, obj):
+        if obj.business:
+            return f"🏢 {obj.business.name}"
+        if obj.user:
+            return f"👤 {obj.user.username}"
+        return 'Unknown'
+    context_display.short_description = 'Context'
+
+    def status_badge(self, obj):
+        color = {'pending': '#F59E0B', 'approved': '#10B981', 'rejected': '#EF4444'}.get(obj.status, '#6B7280')
+        label = obj.get_status_display()
+        return format_html('<span style="padding:2px 6px;border-radius:10px;background:{};color:white;">{}</span>', color, label)
+    status_badge.short_description = 'Status'
+
+    def approve_requests(self, request, queryset):
+        from django.utils import timezone
+        approved = 0
+        for req in queryset.select_related('user', 'business'):
+            try:
+                if req.status != 'pending':
+                    continue
+                # Upgrade stats to level 2 for the appropriate context
+                if req.business:
+                    stats, _ = P2PUserStats.objects.get_or_create(stats_business=req.business, defaults={'user': req.user or request.user})
+                else:
+                    stats, _ = P2PUserStats.objects.get_or_create(stats_user=req.user or request.user, defaults={'user': req.user or request.user})
+                if (stats.verification_level or 0) < 2:
+                    stats.verification_level = 2
+                    stats.save(update_fields=['verification_level'])
+
+                req.status = 'approved'
+                req.reviewed_by = request.user
+                req.reviewed_at = timezone.now()
+                req.save(update_fields=['status', 'reviewed_by', 'reviewed_at'])
+                approved += 1
+            except Exception:
+                continue
+        self.message_user(request, f'Approved {approved} premium requests.')
+    approve_requests.short_description = 'Approve selected requests (set level 2)'
+
+    def reject_requests(self, request, queryset):
+        from django.utils import timezone
+        rejected = 0
+        for req in queryset:
+            if req.status != 'pending':
+                continue
+            req.status = 'rejected'
+            req.reviewed_by = request.user
+            req.reviewed_at = timezone.now()
+            req.save(update_fields=['status', 'reviewed_by', 'reviewed_at'])
+            rejected += 1
+        self.message_user(request, f'Rejected {rejected} premium requests.')
+    reject_requests.short_description = 'Reject selected requests'
     
     fieldsets = (
         ('Escrow Information', {

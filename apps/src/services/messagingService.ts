@@ -663,6 +663,12 @@ class MessagingService {
     
     if (parts.length > 0) {
       switch (parts[0]) {
+        case 'verification':
+          // Navigate to Verification explanation screen
+          navigationRef.current?.navigate('Main' as never, {
+            screen: 'Verification'
+          } as never);
+          break;
         case 'transaction':
           if (parts[1]) {
             // Navigate with transaction data if available, otherwise minimal data

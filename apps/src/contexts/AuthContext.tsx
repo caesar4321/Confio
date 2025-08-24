@@ -2,7 +2,11 @@ import React, { createContext, useContext, useState, useEffect, RefObject } from
 import { AuthService } from '../services/authService';
 import { NavigationContainerRef } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
-import { useApolloClient } from '@apollo/client';
+import { useApolloClient, gql } from '@apollo/client';
+import * as Keychain from 'react-native-keychain';
+import { jwtDecode } from 'jwt-decode';
+import { AppState } from 'react-native';
+import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client';
 import { GET_ME, GET_BUSINESS_PROFILE } from '../apollo/queries';
 import { pushNotificationService } from '../services/pushNotificationService';
 
@@ -65,6 +69,16 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const apolloClient = useApolloClient();
+
+  // Mutation for token refresh (used on resume)
+  const REFRESH_TOKEN = gql`
+    mutation RefreshToken($refreshToken: String!) {
+      refreshToken(refreshToken: $refreshToken) {
+        token
+        refreshExpiresIn
+      }
+    }
+  `;
 
   // Set up navigation ready listener and check auth state
   useEffect(() => {
@@ -265,6 +279,49 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
     loadProfileForCurrentAccount();
   }, [isAuthenticated]);
 
+  // Refresh on resume to ensure valid access token before UI queries
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (state) => {
+      if (state === 'active') {
+        try {
+          const creds = await Keychain.getGenericPassword({
+            service: AUTH_KEYCHAIN_SERVICE,
+            username: AUTH_KEYCHAIN_USERNAME,
+          });
+          if (!creds || !creds.password) return;
+          const tokens = JSON.parse(creds.password);
+          const at = tokens.accessToken;
+          const rt = tokens.refreshToken;
+          if (!at || !rt) return;
+          const decoded: any = jwtDecode(at);
+          const now = Math.floor(Date.now() / 1000);
+          if ((decoded?.exp ?? 0) <= now + 30) {
+            const { data } = await apolloClient.mutate({
+              mutation: REFRESH_TOKEN,
+              variables: { refreshToken: rt },
+              context: { skipAuth: true },
+            });
+            const newAccess = data?.refreshToken?.token;
+            if (newAccess) {
+              await Keychain.setGenericPassword(
+                AUTH_KEYCHAIN_USERNAME,
+                JSON.stringify({ accessToken: newAccess, refreshToken: rt }),
+                {
+                  service: AUTH_KEYCHAIN_SERVICE,
+                  username: AUTH_KEYCHAIN_USERNAME,
+                  accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
+                }
+              );
+            }
+          }
+        } catch (e) {
+          console.error('[AuthContext] Refresh-on-resume failed:', e);
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [apolloClient]);
+
   const handleSuccessfulLogin = async (isPhoneVerified: boolean) => {
     try {
       console.log('Handling successful login...');
@@ -329,32 +386,85 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         try {
           const tokens = JSON.parse(credentials.password);
           const hasValidTokens = tokens.accessToken && tokens.refreshToken;
-          
           console.log('Has valid JWT tokens:', hasValidTokens);
-          
+
           if (hasValidTokens) {
-            // Decode access token to check if it's valid
+            // Ensure access token is valid (refresh if needed) BEFORE navigating
             const { jwtDecode } = await import('jwt-decode');
-            const decoded = jwtDecode(tokens.accessToken);
-            const now = Math.floor(Date.now() / 1000);
-            const isTokenValid = decoded.exp > now;
-            
-            console.log('JWT token validity:', {
-              exp: decoded.exp,
-              now: now,
-              isValid: isTokenValid
-            });
-            
-            if (isTokenValid || tokens.refreshToken) {
-              // Token is valid or we have a refresh token to get a new one
-              console.log('Valid authentication found, user is logged in');
-              setIsAuthenticated(true);
-              navigateToScreen('Main');
-            } else {
-              console.log('JWT tokens expired and no refresh token');
-              setIsAuthenticated(false);
-              navigateToScreen('Auth');
+            let accessToken = tokens.accessToken;
+            const refreshToken = tokens.refreshToken;
+            try {
+              const decoded: any = jwtDecode(accessToken);
+              const nowTs = Math.floor(Date.now() / 1000);
+              if (!decoded?.exp || decoded.exp <= nowTs + 30) {
+                // Refresh access token first
+                const { gql } = await import('@apollo/client');
+                const REFRESH_TOKEN = gql`
+                  mutation RefreshToken($refreshToken: String!) {
+                    refreshToken(refreshToken: $refreshToken) {
+                      token
+                      refreshExpiresIn
+                    }
+                  }
+                `;
+                const { apolloClient } = await import('../apollo/client');
+                const { data } = await apolloClient.mutate({
+                  mutation: REFRESH_TOKEN,
+                  variables: { refreshToken },
+                  context: { skipAuth: true },
+                });
+                if (data?.refreshToken?.token) {
+                  accessToken = data.refreshToken.token;
+                  await Keychain.setGenericPassword(
+                    'auth_tokens',
+                    JSON.stringify({ accessToken, refreshToken }),
+                    {
+                      service: 'com.confio.auth',
+                      username: 'auth_tokens',
+                      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
+                    }
+                  );
+                }
+              }
+            } catch (e) {
+              console.error('Pre-navigation refresh failed:', e);
             }
+
+            // Align access token context with active account before navigating
+            try {
+              const authService = AuthService.getInstance();
+              const accountContext = await authService.getActiveAccountContext();
+              if (accountContext.type === 'business' && accountContext.businessId) {
+                const { SWITCH_ACCOUNT_TOKEN } = await import('../apollo/queries');
+                const { apolloClient } = await import('../apollo/client');
+                const { data } = await apolloClient.mutate({
+                  mutation: SWITCH_ACCOUNT_TOKEN,
+                  variables: {
+                    accountType: accountContext.type,
+                    accountIndex: accountContext.index,
+                    businessId: accountContext.businessId,
+                  },
+                });
+                if (data?.switchAccountToken?.token) {
+                  // Store new access token with the same refresh token
+                  await Keychain.setGenericPassword(
+                    'auth_tokens',
+                    JSON.stringify({ accessToken: data.switchAccountToken.token, refreshToken }),
+                    {
+                      service: 'com.confio.auth',
+                      username: 'auth_tokens',
+                      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
+                    }
+                  );
+                }
+              }
+            } catch (syncErr) {
+              console.error('Failed to sync token to business context before navigation:', syncErr);
+            }
+
+            // Only now mark authenticated and go to Main
+            setIsAuthenticated(true);
+            navigateToScreen('Main');
           } else {
             console.log('Invalid token structure');
             setIsAuthenticated(false);

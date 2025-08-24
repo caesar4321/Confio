@@ -34,7 +34,7 @@ from .graphql_employee import (
 )
 from .referral_mutations import SetReferrer, CheckReferralStatus
 from django.conf import settings
-from security.s3_utils import generate_presigned_put, build_s3_key, public_s3_url
+from security.s3_utils import generate_presigned_put, build_s3_key, public_s3_url, generate_presigned_post
 # Removed circular import - P2PPaymentMethodType will be referenced by string
 
 User = get_user_model()
@@ -75,8 +75,22 @@ class UserType(DjangoObjectType):
 	def resolve_is_identity_verified(self, info):
 		return self.is_identity_verified
 	
-	def resolve_last_verified_date(self, info):
-		return self.last_verified_date
+		def resolve_last_verified_date(self, info):
+			# Compute directly from IdentityVerification to avoid any serialization edge cases
+			try:
+				from security.models import IdentityVerification
+				# Personal-context verified record ONLY — account_type key missing or null
+				iv = (
+					IdentityVerification.objects
+					.filter(user=self, status='verified', risk_factors__account_type__isnull=True)
+					.order_by('-verified_at', '-updated_at', '-created_at')
+					.first()
+				)
+				if not iv:
+					return None
+				return iv.verified_at or iv.updated_at or iv.created_at
+			except Exception:
+				return None
 	
 	def resolve_verification_status(self, info):
 		return self.verification_status
@@ -85,14 +99,69 @@ class UserType(DjangoObjectType):
 		return Account.objects.filter(user=self).select_related('business')
 
 class IdentityVerificationType(DjangoObjectType):
-	class Meta:
-		model = IdentityVerification
-		fields = ('id', 'user', 'verified_first_name', 'verified_last_name', 'verified_date_of_birth', 'verified_nationality', 'verified_address', 'verified_city', 'verified_state', 'verified_country', 'verified_postal_code', 'document_type', 'document_number', 'document_issuing_country', 'document_expiry_date', 'status', 'verified_by', 'verified_at', 'rejected_reason', 'created_at', 'updated_at')
+    class Meta:
+        model = IdentityVerification
+        fields = ('id', 'user', 'verified_first_name', 'verified_last_name', 'verified_date_of_birth', 'verified_nationality', 'verified_address', 'verified_city', 'verified_state', 'verified_country', 'verified_postal_code', 'document_type', 'document_number', 'document_issuing_country', 'document_expiry_date', 'status', 'verified_by', 'verified_at', 'rejected_reason', 'created_at', 'updated_at')
+
+    def resolve_verified_at(self, info):
+        # Fallback to updated_at/created_at if verified_at is missing
+        try:
+            return self.verified_at or self.updated_at or self.created_at
+        except Exception:
+            return None
 
 class BusinessType(DjangoObjectType):
-	class Meta:
-		model = Business
-		fields = ('id', 'name', 'description', 'category', 'business_registration_number', 'address', 'created_at', 'updated_at')
+    is_verified = graphene.Boolean()
+    verification_status = graphene.String()
+    last_verified_date = graphene.DateTime()
+
+    class Meta:
+        model = Business
+        fields = ('id', 'name', 'description', 'category', 'business_registration_number', 'address', 'created_at', 'updated_at')
+
+    def resolve_is_verified(self, info):
+        try:
+            from security.models import IdentityVerification
+            return IdentityVerification.objects.filter(
+                status='verified',
+                risk_factors__account_type='business',
+                risk_factors__business_id=str(self.id)
+            ).exists()
+        except Exception:
+            return False
+
+    def resolve_verification_status(self, info):
+        """Return business verification status: verified > pending > rejected > unverified"""
+        try:
+            from security.models import IdentityVerification
+            qs = IdentityVerification.objects.filter(
+                risk_factors__account_type='business',
+                risk_factors__business_id=str(self.id)
+            )
+            if qs.filter(status='verified').exists():
+                return 'verified'
+            if qs.filter(status='pending').exists():
+                return 'pending'
+            if qs.filter(status='rejected').exists():
+                return 'rejected'
+            return 'unverified'
+        except Exception:
+            return 'unverified'
+
+    def resolve_last_verified_date(self, info):
+        try:
+            from security.models import IdentityVerification
+            iv = (
+                IdentityVerification.objects
+                .filter(status='verified', risk_factors__account_type='business', risk_factors__business_id=str(self.id))
+                .order_by('-verified_at', '-updated_at', '-created_at')
+                .first()
+            )
+            if not iv:
+                return None
+            return iv.verified_at or iv.updated_at or iv.created_at
+        except Exception:
+            return None
 
 class EmployeePermissionsType(graphene.ObjectType):
 	"""Employee permissions object type"""
@@ -1413,56 +1482,65 @@ class SubmitIdentityVerification(graphene.Mutation):
 
 
 class PresignedUploadInfo(graphene.ObjectType):
-	url = graphene.String()
-	key = graphene.String()
-	method = graphene.String()
-	headers = graphene.JSONString()
-	expires_in = graphene.Int()
+    url = graphene.String()
+    key = graphene.String()
+    method = graphene.String()
+    headers = graphene.JSONString()
+    expires_in = graphene.Int()
+    fields = graphene.JSONString()  # For presigned POST
 
 
 class RequestIdentityUpload(graphene.Mutation):
-	class Arguments:
-		part = graphene.String(required=True, description="One of: front, back, selfie, payout")
-		filename = graphene.String(required=False)
-		content_type = graphene.String(required=False, default_value='image/jpeg')
-		sha256 = graphene.String(required=False)
+    class Arguments:
+        part = graphene.String(required=True, description="One of: front, back, selfie, payout, business")
+        filename = graphene.String(required=False)
+        content_type = graphene.String(required=False, default_value='image/jpeg')
+        sha256 = graphene.String(required=False)
 
-	upload = graphene.Field(PresignedUploadInfo)
-	success = graphene.Boolean()
-	error = graphene.String()
+    upload = graphene.Field(PresignedUploadInfo)
+    success = graphene.Boolean()
+    error = graphene.String()
 
-	@classmethod
-	def mutate(cls, root, info, part, filename=None, content_type='image/jpeg', sha256=None):
-		user = getattr(info.context, 'user', None)
-		if not (user and getattr(user, 'is_authenticated', False)):
-			return RequestIdentityUpload(upload=None, success=False, error="Authentication required")
+    @classmethod
+    def mutate(cls, root, info, part, filename=None, content_type='image/jpeg', sha256=None):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return RequestIdentityUpload(upload=None, success=False, error="Authentication required")
 
-		if part not in ['front', 'back', 'selfie', 'payout']:
-			return RequestIdentityUpload(upload=None, success=False, error="Invalid part")
-		# Allow PDF for payout proof
-		allowed = ['image/jpeg', 'image/png'] if part != 'payout' else ['image/jpeg', 'image/png', 'application/pdf']
-		if content_type not in allowed:
-			return RequestIdentityUpload(upload=None, success=False, error="Unsupported content type")
+        if part not in ['front', 'back', 'selfie', 'payout', 'business']:
+            return RequestIdentityUpload(upload=None, success=False, error="Invalid part")
 
-		prefix = getattr(settings, 'AWS_S3_ID_PREFIX', 'kyc/')
-		subdir = 'payouts' if part == 'payout' else ''
-		base = f"{prefix}{user.id}/{subdir}" if subdir else f"{prefix}{user.id}"
-		key = build_s3_key(f"{base}/{part}", filename or (f"{part}.pdf" if content_type == 'application/pdf' else f"{part}.jpg"))
-		metadata = {'user-id': str(user.id), 'part': part}
-		if sha256:
-			metadata['sha256'] = sha256
-		presigned = generate_presigned_put(key=key, content_type=content_type, metadata=metadata)
-		return RequestIdentityUpload(
-			upload=PresignedUploadInfo(
-				url=presigned['url'],
-				key=presigned['key'],
-				method=presigned['method'],
-				headers=presigned['headers'],
-				expires_in=presigned['expires_in'],
-			),
-			success=True,
-			error=None,
-		)
+        # Allow PDF for payout proof
+        allowed = ['image/jpeg', 'image/png'] if part not in ['payout'] else ['image/jpeg', 'image/png', 'application/pdf']
+        if content_type not in allowed:
+            return RequestIdentityUpload(upload=None, success=False, error="Unsupported content type")
+
+        prefix = getattr(settings, 'AWS_S3_ID_PREFIX', 'kyc/')
+        subdir = 'payouts' if part == 'payout' else ('business' if part == 'business' else '')
+        base = f"{prefix}{user.id}/{subdir}" if subdir else f"{prefix}{user.id}"
+        key = build_s3_key(f"{base}/{part}", filename or (f"{part}.pdf" if content_type == 'application/pdf' else f"{part}.jpg"))
+
+        metadata = {'user-id': str(user.id), 'part': part}
+        if sha256:
+            metadata['sha256'] = sha256
+
+        # Prefer presigned POST for mobile-friendly FormData uploads
+        try:
+            presigned = generate_presigned_post(key=key, content_type=content_type, metadata=metadata)
+            return RequestIdentityUpload(
+                upload=PresignedUploadInfo(
+                    url=presigned['url'],
+                    key=presigned['key'],
+                    method=presigned['method'],
+                    headers=None,
+                    fields=presigned.get('fields'),
+                    expires_in=presigned['expires_in'],
+                ),
+                success=True,
+                error=None,
+            )
+        except Exception as e:
+            return RequestIdentityUpload(upload=None, success=False, error=str(e))
 
 
 class SubmitIdentityVerificationS3(graphene.Mutation):
@@ -1485,6 +1563,7 @@ class SubmitIdentityVerificationS3(graphene.Mutation):
         back_key = graphene.String()
         payout_method_label = graphene.String()
         payout_proof_key = graphene.String()
+        business_key = graphene.String()
 
     success = graphene.Boolean()
     error = graphene.String()
@@ -1500,6 +1579,22 @@ class SubmitIdentityVerificationS3(graphene.Mutation):
             # Provide safe defaults for MVP if fields are missing
             def or_default(v, d):
                 return v if v not in [None, ''] else d
+
+            # Determine account context (personal vs business) from JWT
+            from users.jwt_context import get_jwt_business_context_with_validation
+            account_ctx = get_jwt_business_context_with_validation(info, required_permission=None) or {}
+            account_type = account_ctx.get('account_type')
+            business_id = account_ctx.get('business_id')
+            risk = {}
+            if account_type == 'business' and business_id:
+                risk['account_type'] = 'business'
+                risk['business_id'] = str(business_id)
+
+            # Build risk factors with optional business certificate URL
+            business_key = kwargs.get('business_key')
+            if business_key:
+                from security.s3_utils import public_s3_url as _public
+                risk['business_cert_url'] = _public(business_key)
 
             verification = IdentityVerification.objects.create(
                 user=user,
@@ -1522,6 +1617,7 @@ class SubmitIdentityVerificationS3(graphene.Mutation):
                 selfie_url=public_s3_url(kwargs['selfie_key']),
                 payout_method_label=kwargs.get('payout_method_label'),
                 payout_proof_url=public_s3_url(kwargs['payout_proof_key']) if kwargs.get('payout_proof_key') else None,
+                risk_factors=risk or {},
             )
             return SubmitIdentityVerificationS3(success=True, error=None, verification=verification)
         except Exception as e:
@@ -2141,11 +2237,14 @@ class RefreshToken(graphene.Mutation):
 			
 			# Create a mock context object with account info
 			class MockContext:
-				def __init__(self, account_type, account_index):
+				def __init__(self, account_type, account_index, business_id=None):
 					self.active_account_type = account_type
 					self.active_account_index = account_index
+					# IMPORTANT: pass through business_id so jwt_payload_handler
+					# can embed it for employee contexts
+					self.active_business_id = business_id
 			
-			context = MockContext(account_type, account_index)
+			context = MockContext(account_type, account_index, business_id)
 			
 			# Generate new access token with account context
 			from users.jwt import jwt_payload_handler
@@ -3054,6 +3153,90 @@ class SetDefaultBankInfo(graphene.Mutation):
 			logger.error(f"Error setting default bank info: {str(e)}")
 			return SetDefaultBankInfo(success=False, error="Error interno del servidor")
 
+class RequestPremiumUpgrade(graphene.Mutation):
+	class Arguments:
+		reason = graphene.String(required=False)
+
+	success = graphene.Boolean()
+	error = graphene.String()
+	verification_level = graphene.Int()
+
+	@classmethod
+	def mutate(cls, root, info, reason=None):
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return RequestPremiumUpgrade(success=False, error="Authentication required", verification_level=0)
+
+		try:
+			# Import here to avoid circular imports at module load
+			from .jwt_context import get_jwt_business_context_with_validation
+			from .models import Business
+			from p2p_exchange.models import P2PUserStats, PremiumUpgradeRequest
+
+			ctx = get_jwt_business_context_with_validation(info, required_permission=None) or {}
+			account_type = ctx.get('account_type')
+			business_id = ctx.get('business_id')
+
+			# Get or create stats object based on context
+			if account_type == 'business' and business_id:
+				biz = Business.objects.get(id=business_id)
+				stats, _ = P2PUserStats.objects.get_or_create(stats_business=biz, defaults={'user': user})
+			else:
+				stats, _ = P2PUserStats.objects.get_or_create(stats_user=user, defaults={'user': user})
+
+
+			# Guard: require verified identity (personal) or verified business when in business context
+			is_allowed = False
+			if account_type == 'business' and business_id:
+				try:
+					from security.models import IdentityVerification
+					is_allowed = IdentityVerification.objects.filter(
+						status='verified',
+						risk_factors__account_type='business',
+						risk_factors__business_id=str(business_id)
+					).exists()
+				except Exception:
+					is_allowed = False
+			else:
+				is_allowed = bool(getattr(user, 'is_identity_verified', False))
+
+			if not is_allowed:
+				return RequestPremiumUpgrade(
+					success=False,
+					error="Identity verification required",
+					verification_level=(stats.verification_level or 0)
+				)
+
+
+			# Create a pending Premium upgrade request instead of immediate upgrade
+			# Prevent duplicates if a pending request already exists for this context
+			existing = PremiumUpgradeRequest.objects.filter(
+				user=user if (account_type != 'business') else None,
+				business=Business.objects.get(id=business_id) if (account_type == 'business' and business_id) else None,
+				status='pending'
+			).first()
+			if existing:
+				return RequestPremiumUpgrade(
+					success=True,
+					error=None,
+					verification_level=(stats.verification_level or 0)
+				)
+
+			PremiumUpgradeRequest.objects.create(
+				user=user if (account_type != 'business') else None,
+				business=Business.objects.get(id=business_id) if (account_type == 'business' and business_id) else None,
+				reason=reason or ''
+			)
+
+			return RequestPremiumUpgrade(
+				success=True,
+				error=None,
+				verification_level=(stats.verification_level or 0)
+			)
+		except Exception as e:
+			return RequestPremiumUpgrade(success=False, error=str(e), verification_level=0)
+
+
 class Mutation(EmployeeMutations, graphene.ObjectType):
 	update_phone_number = UpdatePhoneNumber.Field()
 	update_username = UpdateUsername.Field()
@@ -3098,3 +3281,6 @@ class Mutation(EmployeeMutations, graphene.ObjectType):
 	# Unified referral system mutations
 	set_referrer = SetReferrer.Field()
 	check_referral_status = CheckReferralStatus.Field()
+
+	# Trader Premium upgrade (verification level 2) — camelCase only
+	requestPremiumUpgrade = RequestPremiumUpgrade.Field()

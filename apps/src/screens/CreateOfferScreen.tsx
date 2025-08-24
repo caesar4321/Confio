@@ -120,9 +120,10 @@ export const CreateOfferScreen = () => {
   
   // Debug payment methods
   React.useEffect(() => {
-    if (paymentMethodsData?.p2pPaymentMethods) {
+    const pmList = paymentMethodsData?.p2pPaymentMethods;
+    if (pmList) {
       console.log('[CreateOfferScreen] Available payment methods for', selectedCountry?.[0], ':', 
-        paymentMethodsData.p2pPaymentMethods.map((m: any) => ({
+        pmList.map((m: any) => ({
           id: m.id,
           name: m.displayName,
           isActive: m.isActive,
