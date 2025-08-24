@@ -100,6 +100,12 @@ class ConfioAdminSite(admin.AdminSite):
             status__in=['OPEN', 'UNDER_REVIEW']
         ).count()
         context['escalated_disputes'] = P2PDispute.objects.filter(status='ESCALATED').count()
+        # Ongoing/new disputes
+        context['ongoing_disputes'] = P2PDispute.objects.select_related('trade', 'initiator_user', 'initiator_business').filter(
+            status__in=['OPEN', 'UNDER_REVIEW']
+        ).annotate(
+            evidence_count=Count('evidences')
+        ).order_by('-opened_at')[:10]
         
         # Fraud Detection Statistics
         total_achievements = UserAchievement.objects.count()
@@ -112,7 +118,6 @@ class ConfioAdminSite(admin.AdminSite):
         
         # Count unique devices with multiple users from DeviceFingerprint model
         from security.models import DeviceFingerprint
-        from django.db.models import Count
         
         # Count devices that have more than one user
         multi_user_devices = DeviceFingerprint.objects.annotate(
@@ -236,6 +241,28 @@ class ConfioAdminSite(admin.AdminSite):
         context['recent_disputes'] = P2PDispute.objects.select_related(
             'trade', 'initiator_user'
         ).order_by('-opened_at')[:5]
+
+        # ID verifications (differentiate personal vs business)
+        context['pending_verifications_count'] = IdentityVerification.objects.filter(status='pending').count()
+        recent_verifs_qs = IdentityVerification.objects.select_related('user').order_by('-created_at')[:10]
+        recent_verifs = []
+        for v in recent_verifs_qs:
+            rf = v.risk_factors or {}
+            acct_type = rf.get('account_type') or 'personal'
+            biz = None
+            if acct_type == 'business':
+                try:
+                    biz_id = rf.get('business_id')
+                    if biz_id:
+                        biz = Business.objects.filter(id=biz_id).first()
+                except Exception:
+                    biz = None
+            recent_verifs.append({
+                'obj': v,
+                'context': acct_type,
+                'business': biz,
+            })
+        context['recent_verifications'] = recent_verifs
         
         # Presale metrics
         from presale.models import PresalePhase, PresalePurchase, PresaleSettings
@@ -616,7 +643,7 @@ from security.admin import IdentityVerificationAdmin, SuspiciousActivityAdmin
 from p2p_exchange.admin import (
     P2PPaymentMethodAdmin, P2POfferAdmin, P2PTradeAdmin, 
     P2PMessageAdmin, P2PUserStatsAdmin, P2PEscrowAdmin,
-    P2PTradeRatingAdmin, P2PDisputeAdmin, P2PDisputeTransactionAdmin,
+    P2PTradeRatingAdmin, P2PDisputeAdmin, P2PDisputeTransactionAdmin, P2PDisputeEvidenceAdmin,
     P2PFavoriteTraderAdmin, PremiumUpgradeRequestAdmin
 )
 from payments.admin import PaymentTransactionAdmin, InvoiceAdmin
@@ -681,7 +708,7 @@ confio_admin_site.register(UnifiedUSDCTransactionTable, UnifiedUSDCTransactionAd
 # P2P models
 from p2p_exchange.models import (
     P2PPaymentMethod, P2POffer, P2PTrade, P2PMessage, 
-    P2PUserStats, P2PEscrow, P2PTradeRating, P2PDispute,
+    P2PUserStats, P2PEscrow, P2PTradeRating, P2PDispute, P2PDisputeEvidence,
     P2PDisputeTransaction, P2PFavoriteTrader, PremiumUpgradeRequest
 )
 confio_admin_site.register(P2PPaymentMethod, P2PPaymentMethodAdmin)
@@ -693,6 +720,7 @@ confio_admin_site.register(P2PEscrow, P2PEscrowAdmin)
 confio_admin_site.register(P2PTradeRating, P2PTradeRatingAdmin)
 confio_admin_site.register(P2PDispute, P2PDisputeAdmin)
 confio_admin_site.register(P2PDisputeTransaction, P2PDisputeTransactionAdmin)
+confio_admin_site.register(P2PDisputeEvidence, P2PDisputeEvidenceAdmin)
 confio_admin_site.register(P2PFavoriteTrader, P2PFavoriteTraderAdmin)
 confio_admin_site.register(PremiumUpgradeRequest, PremiumUpgradeRequestAdmin)
 

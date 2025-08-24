@@ -1034,6 +1034,21 @@ export const GET_P2P_TRADE = gql`
         escrowedAt
         releasedAt
       }
+      dispute {
+        id
+        status
+        openedAt
+        evidenceUrls
+        evidences {
+          id
+          url
+          contentType
+          sizeBytes
+          uploadedAt
+        }
+      }
+      evidenceCount
+      hasEvidence
       hasRating
     }
   }

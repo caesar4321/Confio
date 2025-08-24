@@ -1043,34 +1043,64 @@ class P2PDispute(SoftDeleteModel):
     @property
     def is_resolved(self):
         return self.status == 'RESOLVED'
-    
-    @property
-    def duration_hours(self):
-        """Hours the dispute has been open"""
-        if self.resolved_at:
-            duration = self.resolved_at - self.opened_at
-        else:
-            from django.utils import timezone
-            duration = timezone.now() - self.opened_at
-        return duration.total_seconds() / 3600
-    
+
+
+class P2PDisputeEvidence(SoftDeleteModel):
+    """Track individual evidence objects uploaded for a dispute."""
+
+    SOURCE_CHOICES = [
+        ('mobile', 'Mobile App'),
+        ('web', 'Web Upload'),
+        ('email', 'Email Ingest'),
+    ]
+
+    STATUS_CHOICES = [
+        ('uploaded', 'Uploaded'),
+        ('validated', 'Validated'),
+        ('rejected', 'Rejected'),
+    ]
+
+    dispute = models.ForeignKey('P2PDispute', on_delete=models.CASCADE, related_name='evidences')
+    trade = models.ForeignKey('P2PTrade', on_delete=models.CASCADE, related_name='evidences')
+    uploader_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='uploaded_dispute_evidences'
+    )
+    uploader_business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='uploaded_dispute_evidences'
+    )
+
+    # S3 info
+    s3_bucket = models.CharField(max_length=100, blank=True)
+    s3_key = models.CharField(max_length=512)
+    url = models.URLField()
+    content_type = models.CharField(max_length=100, blank=True)
+    size_bytes = models.BigIntegerField(null=True, blank=True)
+    sha256 = models.CharField(max_length=80, blank=True)
+    etag = models.CharField(max_length=80, blank=True)
+    confio_code = models.CharField(max_length=16, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES, default='mobile')
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='uploaded')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
     class Meta:
-        ordering = ['-priority', '-opened_at']
+        ordering = ['-uploaded_at']
         indexes = [
-            models.Index(fields=['status', 'priority']),
-            models.Index(fields=['opened_at']),
-            models.Index(fields=['resolved_at']),
+            models.Index(fields=['dispute', 'uploaded_at']),
+            models.Index(fields=['trade', 'uploaded_at']),
         ]
-    
+
     def __str__(self):
-        return f"Dispute for Trade #{self.trade.id} - {self.get_status_display()}"
-    
-    def clean(self):
-        """Validate that either user or business initiated, not both"""
-        if not self.initiator_user and not self.initiator_business:
-            raise ValidationError("Either initiator_user or initiator_business must be set")
-        if self.initiator_user and self.initiator_business:
-            raise ValidationError("Cannot set both initiator_user and initiator_business")
+        return f"Evidence {self.id} for Dispute {self.dispute_id}"
 
 class P2PDisputeTransaction(SoftDeleteModel):
     """Track financial transactions resulting from dispute resolutions"""

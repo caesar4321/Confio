@@ -19,6 +19,7 @@ import {
   Image,
   ActivityIndicator,
   Linking,
+  Dimensions,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -41,6 +42,9 @@ import { GET_DISPUTE_EVIDENCE_CODE } from '../apollo/mutations';
 
 type ActiveTradeRouteProp = RouteProp<MainStackParamList, 'ActiveTrade'>;
 type ActiveTradeNavigationProp = NativeStackNavigationProp<MainStackParamList, 'ActiveTrade'>;
+
+const MODAL_MAX_HEIGHT = Math.floor(Dimensions.get('window').height * 0.85);
+const SCROLL_MAX_HEIGHT = Math.min(Math.floor(Dimensions.get('window').height * 0.6), 420);
 
 interface ActiveTrade {
   id: string;
@@ -168,6 +172,23 @@ export const ActiveTradeScreen: React.FC = () => {
     createdAt: fullTradeData.createdAt,
     completedAt: fullTradeData.completedAt,
   } : routeTrade;
+
+  // Compute current account's own evidence count safely (GraphQL may return JSON string for evidenceUrls)
+  const ownEvidenceCount = (() => {
+    try {
+      const ec: any = (fullTradeData as any)?.evidenceCount;
+      if (typeof ec === 'number') return ec;
+      const evs: any = (fullTradeData as any)?.dispute?.evidences;
+      if (Array.isArray(evs)) return evs.length;
+      const urls: any = (fullTradeData as any)?.dispute?.evidenceUrls;
+      if (Array.isArray(urls)) return urls.length;
+      if (typeof urls === 'string') {
+        const parsed = JSON.parse(urls);
+        if (Array.isArray(parsed)) return parsed.length;
+      }
+    } catch {}
+    return 0;
+  })();
   
   // Helper function to get step from trade status
   const getStepFromStatus = (status: string) => {
@@ -412,6 +433,7 @@ export const ActiveTradeScreen: React.FC = () => {
       if (!res.success) throw new Error(res.error || 'Fallo al subir la evidencia');
       Alert.alert('Evidencia subida', 'Tu video fue enviado correctamente para revisión.');
       setShowEvidenceSheet(false);
+      try { await refetch(); } catch {}
     } catch (e: any) {
       console.error('[Dispute] upload evidence error:', e?.message || e);
       Alert.alert('Error', e?.message || 'No se pudo subir la evidencia.');
@@ -1179,14 +1201,22 @@ export const ActiveTradeScreen: React.FC = () => {
           onRequestClose={() => setShowTechnicalDetails(false)}
         >
           <View style={styles.modalOverlay}>
-            <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+            <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Detalles técnicos</Text>
                 <TouchableOpacity onPress={() => setShowTechnicalDetails(false)} style={styles.modalCloseButton}>
                   <Icon name="x" size={20} color="#111827" />
                 </TouchableOpacity>
               </View>
-              <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+              <ScrollView
+                style={styles.modalScroll}
+                contentContainerStyle={styles.modalScrollContent}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={Platform.OS === 'ios' ? 'on-drag' : 'interactive'}
+                showsVerticalScrollIndicator={true}
+                nestedScrollEnabled
+                contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'always' : 'automatic'}
+              >
                   <View style={styles.modalSection}>
                     <Text style={styles.modalSectionTitle}>Transacción</Text>
                     <View style={styles.technicalRow}>
@@ -1341,6 +1371,13 @@ export const ActiveTradeScreen: React.FC = () => {
                 Hemos recibido tu solicitud y nuestro equipo especializado está trabajando para resolver 
                 este intercambio de manera justa. Tus fondos están completamente seguros durante este proceso.
               </Text>
+              {!!(fullTradeData?.hasEvidence || ownEvidenceCount > 0) && (
+                <View style={{ marginTop: 8, alignSelf: 'flex-start', backgroundColor: '#D1FAE5', borderColor: '#10B981', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 }}>
+                  <Text style={{ color: '#065F46', fontWeight: '600' }}>
+                    ✅ Evidencia enviada ({ownEvidenceCount})
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
           <TouchableOpacity 
@@ -1526,46 +1563,110 @@ export const ActiveTradeScreen: React.FC = () => {
       <Modal
         visible={showEvidenceSheet}
         animationType="slide"
-        transparent
+        transparent={Platform.OS !== 'ios'}
+        presentationStyle={Platform.OS === 'ios' ? 'overFullScreen' : undefined as any}
         onRequestClose={() => setShowEvidenceSheet(false)}
       >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-          <View style={styles.modalOverlay}>
-            <View style={[styles.modalContent, { maxHeight: '85%' }]}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Subir evidencia</Text>
-                <TouchableOpacity onPress={() => setShowEvidenceSheet(false)} style={styles.modalCloseButton}>
-                  <Icon name="x" size={24} color="#6B7280" />
-                </TouchableOpacity>
-              </View>
-              <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
-                <Text style={styles.modalDescription}>
-                  Solo se aceptan grabaciones de pantalla del app del banco/fintech (30–45s, máx. 200MB). Sigue esta lista:
-                </Text>
-                {!!confioCode && (
-                  <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 8, padding: 12, marginBottom: 12 }}>
-                    <Text style={{ color: '#065F46', fontSize: 14, marginBottom: 4 }}>Código Confío</Text>
-                    <Text style={{ color: '#065F46', fontSize: 20, fontWeight: 'bold' }}>{confioCode}</Text>
-                    {!!confioCodeExp && (
-                      <Text style={{ color: '#065F46', fontSize: 12, marginTop: 4 }}>Vence: {formatLocalDateTime(confioCodeExp)}</Text>
-                    )}
-                  </View>
-                )}
-                <Text style={styles.stepDescription}>1) Muestra el código de Confío en la pantalla de disputa</Text>
-                <Text style={styles.stepDescription}>2) Abre tu app bancaria y busca la transacción</Text>
-                <Text style={styles.stepDescription}>3) El memo debe incluir el código</Text>
-                <Text style={styles.stepDescription}>4) Haz pull-to-refresh para actualizar</Text>
-                <Text style={styles.stepDescription}>5) Desplázate para mostrar ID/importe/hora</Text>
-                <Text style={styles.stepDescription}>6) Regresa a Confío y sube el video</Text>
-              </ScrollView>
-              <View style={styles.modalActions}>
-                <TouchableOpacity style={styles.modalSubmitButton} onPress={pickScreenRecordingFromGallery}>
-                  <Text style={styles.modalSubmitButtonText}>Seleccionar video de pantalla</Text>
-                </TouchableOpacity>
+        {Platform.OS === 'ios' ? (
+          <SafeAreaView style={{ flex: 1, backgroundColor: '#00000066' }}>
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Subir evidencia</Text>
+                  <TouchableOpacity onPress={() => setShowEvidenceSheet(false)} style={styles.modalCloseButton}>
+                    <Icon name="x" size={24} color="#6B7280" />
+                  </TouchableOpacity>
+                </View>
+                <View style={{ maxHeight: SCROLL_MAX_HEIGHT }}>
+                  <ScrollView
+                    style={styles.modalScroll}
+                    contentContainerStyle={styles.modalScrollContent}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode={'on-drag'}
+                    showsVerticalScrollIndicator={true}
+                    contentInsetAdjustmentBehavior={'always'}
+                    directionalLockEnabled
+                    alwaysBounceVertical
+                  >
+                    <Text style={styles.modalDescription}>
+                      Solo se aceptan grabaciones de pantalla del app del banco/fintech (30–45s, máx. 200MB). Sigue esta lista:
+                    </Text>
+                  {!!confioCode && (
+                    <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+                      <Text style={{ color: '#065F46', fontSize: 14, marginBottom: 4 }}>Código Confío</Text>
+                      <Text style={{ color: '#065F46', fontSize: 20, fontWeight: 'bold' }}>{confioCode}</Text>
+                      {!!confioCodeExp && (
+                        <Text style={{ color: '#065F46', fontSize: 12, marginTop: 4 }}>Vence: {formatLocalDateTime(confioCodeExp)}</Text>
+                      )}
+                    </View>
+                  )}
+                  <Text style={styles.stepDescription}>1) Muestra el código de Confío en la pantalla de disputa</Text>
+                  <Text style={styles.stepDescription}>2) Abre tu app bancaria y busca la transacción</Text>
+                  <Text style={styles.stepDescription}>3) El memo debe incluir el código</Text>
+                  <Text style={styles.stepDescription}>4) Haz pull-to-refresh para actualizar</Text>
+                  <Text style={styles.stepDescription}>5) Desplázate para mostrar ID/importe/hora</Text>
+                  <Text style={styles.stepDescription}>6) Regresa a Confío y sube el video</Text>
+                  </ScrollView>
+                </View>
+                <View style={styles.modalActions}>
+                  <TouchableOpacity style={styles.modalSubmitButton} onPress={pickScreenRecordingFromGallery}>
+                    <Text style={styles.modalSubmitButtonText}>Seleccionar video de pantalla</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
+          </SafeAreaView>
+        ) : (
+          <View style={[styles.modalOverlay]} pointerEvents="box-none">
+            <View style={styles.modalContent}>
+                  <View style={styles.modalHeader}>
+                    <Text style={styles.modalTitle}>Subir evidencia</Text>
+                    <TouchableOpacity onPress={() => setShowEvidenceSheet(false)} style={styles.modalCloseButton}>
+                      <Icon name="x" size={24} color="#6B7280" />
+                    </TouchableOpacity>
+                  </View>
+                  <View style={{ maxHeight: SCROLL_MAX_HEIGHT }}>
+                    <ScrollView
+                      style={styles.modalScroll}
+                      contentContainerStyle={styles.modalScrollContent}
+                      keyboardShouldPersistTaps="handled"
+                      keyboardDismissMode={'interactive'}
+                      showsVerticalScrollIndicator={true}
+                      nestedScrollEnabled
+                      overScrollMode="always"
+                      scrollEventThrottle={16}
+                      decelerationRate="normal"
+                      directionalLockEnabled
+                      alwaysBounceVertical
+                    >
+                      <Text style={styles.modalDescription}>
+                        Solo se aceptan grabaciones de pantalla del app del banco/fintech (30–45s, máx. 200MB). Sigue esta lista:
+                      </Text>
+                      {!!confioCode && (
+                        <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+                          <Text style={{ color: '#065F46', fontSize: 14, marginBottom: 4 }}>Código Confío</Text>
+                          <Text style={{ color: '#065F46', fontSize: 20, fontWeight: 'bold' }}>{confioCode}</Text>
+                          {!!confioCodeExp && (
+                            <Text style={{ color: '#065F46', fontSize: 12, marginTop: 4 }}>Vence: {formatLocalDateTime(confioCodeExp)}</Text>
+                          )}
+                        </View>
+                      )}
+                      <Text style={styles.stepDescription}>1) Muestra el código de Confío en la pantalla de disputa</Text>
+                      <Text style={styles.stepDescription}>2) Abre tu app bancaria y busca la transacción</Text>
+                      <Text style={styles.stepDescription}>3) El memo debe incluir el código</Text>
+                      <Text style={styles.stepDescription}>4) Haz pull-to-refresh para actualizar</Text>
+                      <Text style={styles.stepDescription}>5) Desplázate para mostrar ID/importe/hora</Text>
+                      <Text style={styles.stepDescription}>6) Regresa a Confío y sube el video</Text>
+                    </ScrollView>
+                  </View>
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity style={styles.modalSubmitButton} onPress={pickScreenRecordingFromGallery}>
+                      <Text style={styles.modalSubmitButtonText}>Seleccionar video de pantalla</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
           </View>
-        </TouchableWithoutFeedback>
+        )}
       </Modal>
 
       {/* Simple video gallery modal */}
@@ -2222,7 +2323,7 @@ const styles = StyleSheet.create({
     maxHeight: 300,
   },
   modalScrollContent: {
-    paddingBottom: 8,
+    paddingBottom: 16,
   },
   modalHeader: {
     flexDirection: 'row',
