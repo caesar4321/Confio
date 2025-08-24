@@ -21,10 +21,10 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
 import { MainStackParamList } from '../types/navigation';
 import { useAccount } from '../contexts/AccountContext';
-import { useMutation, useQuery } from '@apollo/client';
-import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC, EXECUTE_PENDING_CONVERSION, GET_CONVERSION_TRANSACTIONS } from '../apollo/mutations';
+import { useQuery } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
-import { conversionService } from '../services/conversionService';
+import { ConvertWsSession } from '../services/convertWs';
+import algorandService from '../services/algorandService';
 import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
 import { oauthStorage } from '../services/oauthStorageService';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
@@ -76,11 +76,7 @@ export const USDCConversionScreen = () => {
     outputRange: ['0deg', '360deg'],
   });
 
-  // GraphQL mutations
-  const [convertUsdcToCusd] = useMutation(CONVERT_USDC_TO_CUSD);
-  const [convertCusdToUsdc] = useMutation(CONVERT_CUSD_TO_USDC);
-  const [executePendingConversion] = useMutation(EXECUTE_PENDING_CONVERSION);
-  const [getConversionTransactions] = useMutation(GET_CONVERSION_TRANSACTIONS);
+  // Legacy conversion GraphQL mutations removed in favor of WS two-step
 
   // Fetch real balances from GraphQL
   const { data: cusdBalanceData, loading: cusdLoading, refetch: refetchCusd } = useQuery(GET_ACCOUNT_BALANCE, {
@@ -142,62 +138,7 @@ export const USDCConversionScreen = () => {
     return true;
   };
 
-  const handleSignAndExecuteConversion = async (conversionId: string) => {
-    try {
-      setIsProcessing(true);
-      console.log('[USDCConversionScreen] Getting transactions for conversion:', conversionId);
-      
-      // First, get the unsigned transactions
-      const { data: txData } = await getConversionTransactions({
-        variables: { conversionId },
-      });
-      
-      if (!txData?.getConversionTransactions?.success) {
-        Alert.alert('Error', 'No se pudieron obtener las transacciones para firmar');
-        return;
-      }
-      
-      const transactions = txData.getConversionTransactions.transactions;
-      
-      // TODO: Implement actual signing with Web3Auth
-      // For now, we'll show a placeholder message
-      console.log('[USDCConversionScreen] Would sign transactions:', transactions);
-      
-      // In production, this would:
-      // 1. Use Web3Auth to get the user's private key
-      // 2. Sign the transactions
-      // 3. Execute the pending conversion
-      
-      // For demo purposes, show message
-      Alert.alert(
-        'Próximamente',
-        'La integración con Web3Auth para firmar transacciones se implementará próximamente.\n\nPor ahora, las conversiones requieren aprobación manual.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Navigate back to AccountDetail
-              navigation.navigate('AccountDetail' as never, {
-                accountType: 'cusd',
-                accountName: 'Confío Dollar',
-                accountSymbol: '$cUSD',
-                accountBalance: '0',
-                accountAddress: activeAccount?.algorandAddress || '',
-                refreshTimestamp: Date.now()
-              } as never);
-            },
-          },
-        ]
-      );
-      
-    } catch (error) {
-      console.error('[USDCConversionScreen] Error signing conversion:', error);
-      Alert.alert('Error', 'No se pudo completar la firma de la conversión');
-    } finally {
-      setIsProcessing(false);
-      setLoadingMessage('');
-    }
-  };
+  // Removed legacy sign/execute function
 
   const handleConversionSuccess = async () => {
     Alert.alert(
@@ -232,226 +173,89 @@ export const USDCConversionScreen = () => {
   };
 
   const handleConvert = async () => {
+    await handleConvertWS();
+  };
+
+  // New WS-based conversion handler (non-blocking two-step)
+  const handleConvertWS = async () => {
     if (!validateAmount()) return;
-    
-    // Check if user has Algorand address
+
     if (!activeAccount?.algorandAddress) {
-      Alert.alert(
-        'Cuenta no configurada',
-        'Tu cuenta necesita estar configurada con Algorand para realizar conversiones. Por favor, contacta soporte.',
-        [{ text: 'OK' }]
-      );
+      Alert.alert('Cuenta no configurada', 'Tu cuenta necesita estar configurada con Algorand para realizar conversiones. Por favor, contacta soporte.', [{ text: 'OK' }]);
       return;
     }
 
     setIsProcessing(true);
     setLoadingMessage('Preparando conversión...');
-    console.log('[USDCConversionScreen] Starting conversion:', { amount, conversionDirection, sourceCurrency, targetCurrency });
-    
+    console.log('[USDCConversionScreen] Starting conversion (WS):', { amount, conversionDirection, sourceCurrency, targetCurrency });
+
     try {
-      // Choose the appropriate mutation based on conversion direction
-      const mutation = conversionDirection === 'usdc_to_cusd' ? convertUsdcToCusd : convertCusdToUsdc;
-      
-      setLoadingMessage('Procesando conversión...');
-      console.log('[USDCConversionScreen] Calling mutation with amount:', amount);
-      const { data } = await mutation({
-        variables: { amount },
-      });
-      
-      console.log('[USDCConversionScreen] Mutation response:', data);
-      
-      // Check which mutation was called and get the result
-      const mutationResult = conversionDirection === 'usdc_to_cusd' 
-        ? data?.convertUsdcToCusd 
-        : data?.convertCusdToUsdc;
-      
-      if (mutationResult?.success) {
-        // Check if we have transactions to sign
-        const transactions = mutationResult.transactionsToSign;
-        const sponsorTransaction = mutationResult.sponsorTransaction;
-        const groupId = mutationResult.groupId;
-        
-        console.log('[USDCConversionScreen] Mutation result has sponsorTransaction:', !!sponsorTransaction);
-        
-        if (transactions && transactions.length > 0) {
-          // Automatically sign and submit transactions
-          console.log('[USDCConversionScreen] Processing conversion with transaction signing');
-          
+      const ws = new ConvertWsSession();
+      let pack: any;
+      try {
+        pack = await ws.prepare({ direction: conversionDirection, amount: amount });
+      } catch (e: any) {
+        if (String(e?.message) === 'requires_app_optin') {
           try {
-            // Ensure wallet is initialized for the current account
-            setLoadingMessage('Preparando wallet...');
-            const oauthData = await oauthStorage.getOAuthSubject();
-            
-            if (oauthData && oauthData.subject && oauthData.provider) {
-              console.log('[USDCConversionScreen] Restoring wallet for signing');
-              
-              // Determine OAuth parameters based on provider
-              const { GOOGLE_CLIENT_IDS } = await import('../config/env');
-              const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
-              const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
-              const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
-              
-              // Restore wallet with the current account context
-              await secureDeterministicWallet.createOrRestoreWallet(
-                iss,
-                oauthData.subject,
-                aud,
-                oauthData.provider,
-                activeAccount?.type || 'personal',
-                activeAccount?.index || 0,
-                activeAccount?.id?.startsWith('business_')
-                  ? (activeAccount.id.split('_')[1] || undefined)
-                  : undefined
-              );
-              
-              console.log('[USDCConversionScreen] Wallet restored, proceeding with signing');
-            } else {
-              console.log('[USDCConversionScreen] No OAuth data found, cannot restore wallet');
-            }
-            
-            // Use conversion service to sign and execute
-            setLoadingMessage('Firmando transacción...');
-            const result = await conversionService.processConversionResponse(
-              mutationResult,
-              mutationResult.conversion?.id,
-              activeAccount // Pass the current account to ensure wallet is initialized
-            );
-            
-            if (result.success) {
-              setLoadingMessage('Finalizando conversión...');
-              // Refresh balances
-              await refetchCusd();
-              await refetchUsdc();
-              
-              // Clear loading message before showing success
-              setLoadingMessage('');
-              // Show success
-              await handleConversionSuccess();
-            } else {
-              setLoadingMessage('');
-              Alert.alert('Error', result.error || 'No se pudo completar la conversión');
-            }
-            
-          } catch (error) {
-            console.error('[USDCConversionScreen] Error processing conversion:', error);
-            setLoadingMessage('');
-            Alert.alert('Error', 'No se pudo completar la conversión');
-          }
-        } else {
-          // Conversion completed successfully without needing signatures
-          setLoadingMessage('Finalizando conversión...');
-          // Refresh balances
-          await refetchCusd();
-          await refetchUsdc();
-          
-          // Clear loading message before showing success
-          setLoadingMessage('');
-          // Show success
-          await handleConversionSuccess();
-        }
-      } else {
-        // Check if it's an app opt-in issue
-        if (mutationResult?.requiresAppOptin) {
-          console.log('[USDCConversionScreen] App opt-in required, handling automatically...');
-          
-          try {
-            // Show loading modal for initial setup
-            setLoadingMessage('Configurando tu cuenta para cUSD...');
-            
-            // Ensure wallet is initialized first
-            setLoadingMessage('Preparando tu wallet...');
-            const oauthData = await oauthStorage.getOAuthSubject();
-            if (oauthData && oauthData.subject && oauthData.provider) {
-              const { GOOGLE_CLIENT_IDS } = await import('../config/env');
-              const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
-              const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
-              const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
-              
-              await secureDeterministicWallet.createOrRestoreWallet(
-                iss,
-                oauthData.subject,
-                aud,
-                oauthData.provider,
-                activeAccount?.type || 'personal',
-                activeAccount?.index || 0,
-                activeAccount?.id?.startsWith('business_')
-                  ? (activeAccount.id.split('_')[1] || undefined)
-                  : undefined
-              );
-            }
-            
-            // Handle the app opt-in automatically
             setLoadingMessage('Autorizando aplicación cUSD...');
+            const oauthData = await oauthStorage.getOAuthSubject();
+            if (oauthData && oauthData.subject && oauthData.provider) {
+              const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+              const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+              const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+              const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+              await secureDeterministicWallet.createOrRestoreWallet(iss, oauthData.subject, aud, oauthData.provider, activeAccount?.type || 'personal', activeAccount?.index || 0, activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined);
+            }
             const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
-            
-            if (optInResult.success) {
-              console.log('[USDCConversionScreen] App opt-in successful, retrying conversion...');
-              
-              // Retry the conversion automatically
-              setLoadingMessage('Procesando tu conversión...');
-              const mutation = conversionDirection === 'usdc_to_cusd' ? convertUsdcToCusd : convertCusdToUsdc;
-              const retryData = await mutation({
-                variables: { amount },
-              });
-              
-              const retryResult = conversionDirection === 'usdc_to_cusd' 
-                ? retryData.data?.convertUsdcToCusd 
-                : retryData.data?.convertCusdToUsdc;
-              
-              if (retryResult?.success && retryResult.transactionsToSign) {
-                // Process the conversion with signing
-                setLoadingMessage('Firmando transacción...');
-                const result = await conversionService.processConversionResponse(
-                  retryResult,
-                  retryResult.conversion?.id,
-                  activeAccount
-                );
-                
-                if (result.success) {
-                  // Clear loading message before showing success
-                  setLoadingMessage('');
-                  
-                  // Refresh balances
-                  await refetchCusd();
-                  await refetchUsdc();
-                  
-                  // Show success and navigate
-                  await handleConversionSuccess();
-                } else {
-                  setLoadingMessage('');
-                  Alert.alert('Error', result.error || 'No se pudo completar la conversión');
-                }
-              } else if (retryResult?.success) {
-                // Conversion succeeded without signing needed
-                setLoadingMessage('');
-                await refetchCusd();
-                await refetchUsdc();
-                await handleConversionSuccess();
-              } else {
-                setLoadingMessage('');
-                const errorMessage = retryResult?.errors?.join(', ') || 'No se pudo completar la conversión';
-                Alert.alert('Error', errorMessage);
-              }
-            } else {
-              // Opt-in failed, show error
+            if (!optInResult.success) {
               setLoadingMessage('');
               Alert.alert('Error', optInResult.error || 'No se pudo completar la configuración inicial');
+              return;
             }
-          } catch (error) {
-            console.error('[USDCConversionScreen] Error during automatic app opt-in:', error);
+            setLoadingMessage('Preparando conversión...');
+            pack = await ws.prepare({ direction: conversionDirection, amount: amount });
+          } catch (err) {
             setLoadingMessage('');
+            console.error('[USDCConversionScreen] App opt-in error', err);
             Alert.alert('Error', 'No se pudo completar la configuración inicial');
+            return;
           }
         } else {
-          // Show error from mutation only if there are actual errors
-          // Don't show error if it's just an app opt-in requirement (handled automatically above)
-          if (mutationResult?.errors && mutationResult.errors.length > 0) {
-            const errorMessage = mutationResult.errors.join(', ');
-            console.error('[USDCConversionScreen] Conversion failed:', errorMessage);
-            Alert.alert('Error', `No se pudo completar la conversión: ${errorMessage}`);
-          }
+          setLoadingMessage('');
+          Alert.alert('Error', String(e?.message || 'No se pudo preparar la conversión'));
+          return;
         }
       }
+
+      // Ensure wallet is ready for signing
+      setLoadingMessage('Preparando wallet...');
+      try {
+        const oauthData = await oauthStorage.getOAuthSubject();
+        if (oauthData && oauthData.subject && oauthData.provider) {
+          const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+          const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+          const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+          const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+          await secureDeterministicWallet.createOrRestoreWallet(iss, oauthData.subject, aud, oauthData.provider, activeAccount?.type || 'personal', activeAccount?.index || 0, activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined);
+        }
+      } catch {}
+
+      // Sign and submit group
+      setLoadingMessage('Firmando transacción...');
+      const unsignedTxs: string[] = pack?.transactions || [];
+      const signedUserTransactions: string[] = [];
+      for (const utxB64 of unsignedTxs) {
+        const bytes = Uint8Array.from(Buffer.from(utxB64, 'base64'));
+        const signed = await algorandService.signTransactionBytes(bytes);
+        signedUserTransactions.push(Buffer.from(signed).toString('base64'));
+      }
+      setLoadingMessage('Enviando conversión...');
+      await ws.submit({ conversionId: pack?.conversion_id, signedUserTransactions, sponsorTransactions: pack?.sponsor_transactions || [] });
+
+      setLoadingMessage('');
+      await refetchCusd();
+      await refetchUsdc();
+      await handleConversionSuccess();
     } catch (error) {
       console.error('[USDCConversionScreen] Conversion error:', error);
       Alert.alert('Error', 'No se pudo completar la conversión. Por favor intenta de nuevo.');
@@ -580,7 +384,7 @@ export const USDCConversionScreen = () => {
               styles.convertButton,
               (!isValidAmount || isProcessing) && styles.convertButtonDisabled
             ]}
-            onPress={handleConvert}
+            onPress={handleConvertWS}
             disabled={!isValidAmount || isProcessing}
           >
             {isProcessing ? (

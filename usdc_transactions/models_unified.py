@@ -17,6 +17,7 @@ class UnifiedUSDCTransactionTable(models.Model):
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
         ('PENDING_SIG', 'Pending Signature'),
+        ('SUBMITTED', 'Submitted'),
         ('PROCESSING', 'Processing'),
         ('COMPLETED', 'Completed'),
         ('FAILED', 'Failed'),
@@ -137,10 +138,20 @@ class UnifiedUSDCTransactionTable(models.Model):
         elif self.transaction_type == 'withdrawal':
             return f"Retiro USDC"
         elif self.transaction_type == 'conversion':
+            # Prefer actual conversion direction from related Conversion row if present
+            try:
+                conv = getattr(self, 'conversion', None)
+                if conv and getattr(conv, 'conversion_type', None):
+                    if conv.conversion_type == 'usdc_to_cusd':
+                        return "USDC → cUSD"
+                    elif conv.conversion_type == 'cusd_to_usdc':
+                        return "cUSD → USDC"
+            except Exception:
+                pass
+            # Fallback to inferring from stored currencies
             if self.secondary_currency:
                 return f"{self.currency} → {self.secondary_currency}"
-            else:
-                return "Conversión"
+            return "Conversión"
         return self.get_transaction_type_display()
     
     @property
@@ -164,3 +175,46 @@ class UnifiedUSDCTransactionTable(models.Model):
         elif self.transaction_type == 'conversion':
             return '#3B82F6'  # Blue
         return '#6B7280'  # Gray
+
+    @property
+    def signed_amount(self) -> str:
+        """Primary amount with sign for UI (+/- USDC)."""
+        try:
+            if self.transaction_type == 'deposit':
+                return f"+{self.amount}"
+            if self.transaction_type == 'withdrawal':
+                return f"-{self.amount}"
+            if self.transaction_type == 'conversion':
+                conv = getattr(self, 'conversion', None)
+                if conv and getattr(conv, 'conversion_type', None):
+                    # Primary is always USDC; sign depends on direction
+                    if conv.conversion_type == 'usdc_to_cusd':
+                        return f"-{self.amount}"  # USDC out
+                    elif conv.conversion_type == 'cusd_to_usdc':
+                        return f"+{self.amount}"  # USDC in
+                # Fallback: assume USDC out if secondary currency present is cUSD
+                if (self.secondary_currency or '').upper() == 'CUSD':
+                    return f"-{self.amount}"
+        except Exception:
+            pass
+        return str(self.amount)
+
+    @property
+    def signed_secondary_amount(self) -> str:
+        """Secondary amount (for conversions) with sign for UI (+/- cUSD). Empty for non-conversions."""
+        try:
+            if self.transaction_type != 'conversion' or not self.secondary_amount:
+                return ''
+            conv = getattr(self, 'conversion', None)
+            if conv and getattr(conv, 'conversion_type', None):
+                if conv.conversion_type == 'usdc_to_cusd':
+                    return f"+{self.secondary_amount}"  # cUSD in
+                elif conv.conversion_type == 'cusd_to_usdc':
+                    return f"-{self.secondary_amount}"  # cUSD out
+            # Fallback by currencies
+            if (self.secondary_currency or '').upper() == 'CUSD':
+                # If secondary is cUSD and primary is USDC, default to +cUSD
+                return f"+{self.secondary_amount}"
+        except Exception:
+            pass
+        return str(self.secondary_amount or '')

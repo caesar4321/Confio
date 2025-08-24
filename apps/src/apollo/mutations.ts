@@ -141,7 +141,8 @@ export const REFRESH_ACCOUNT_BALANCE = gql`
 
 // SEND_TOKENS removed - all sends now go through CREATE_SEND_TRANSACTION
 
-export const CONVERT_USDC_TO_CUSD = gql`
+/* Removed: use ws/convert_session */
+/* export const CONVERT_USDC_TO_CUSD = gql`
   mutation ConvertUSDCToCUSD($amount: String!) {
     convertUsdcToCusd(amount: $amount) {
       conversion {
@@ -166,9 +167,10 @@ export const CONVERT_USDC_TO_CUSD = gql`
       appId
     }
   }
-`;
+`; */
 
-export const CONVERT_CUSD_TO_USDC = gql`
+/* Removed: use ws/convert_session */
+/* export const CONVERT_CUSD_TO_USDC = gql`
   mutation ConvertCUSDToUSDC($amount: String!) {
     convertCusdToUsdc(amount: $amount) {
       conversion {
@@ -193,7 +195,7 @@ export const CONVERT_CUSD_TO_USDC = gql`
       appId
     }
   }
-`;
+`; */
 
 // Invite & Send — prepare invite for phone
 export const PREPARE_INVITE_FOR_PHONE = gql`
@@ -451,6 +453,35 @@ export const SUBMIT_P2P_OPEN_DISPUTE = gql`
   }
 `;
 
+// Dispute evidence: request presigned upload URL (PUT to S3)
+export const REQUEST_DISPUTE_EVIDENCE_UPLOAD = gql`
+  mutation RequestDisputeEvidenceUpload($tradeId: ID!, $filename: String, $contentType: String, $sha256: String) {
+    requestDisputeEvidenceUpload(tradeId: $tradeId, filename: $filename, contentType: $contentType, sha256: $sha256) {
+      success
+      error
+      upload {
+        url
+        key
+        method
+        headers
+        fields
+        expiresIn
+      }
+    }
+  }
+`;
+
+// Dispute evidence: attach uploaded object key to dispute
+export const ATTACH_DISPUTE_EVIDENCE = gql`
+  mutation AttachDisputeEvidence($tradeId: ID!, $key: String!, $size: Int, $sha256: String, $etag: String) {
+    attachDisputeEvidence(tradeId: $tradeId, key: $key, size: $size, sha256: $sha256, etag: $etag) {
+      success
+      error
+      dispute { id }
+    }
+  }
+`;
+
 export const GET_CONVERSIONS = gql`
   query GetConversions($limit: Int, $status: String) {
     conversions(limit: $limit, status: $status) {
@@ -516,6 +547,8 @@ export const GET_UNIFIED_USDC_TRANSACTIONS = gql`
       formattedTitle
       iconName
       iconColor
+      signedAmount
+      signedSecondaryAmount
     }
   }
 `;
@@ -608,7 +641,8 @@ export const UPDATE_NOTIFICATION_PREFERENCES = gql`
   }
 `;
 
-export const EXECUTE_PENDING_CONVERSION = gql`
+/* Removed legacy conversion execution */
+/* export const EXECUTE_PENDING_CONVERSION = gql`
   mutation ExecutePendingConversion($conversionId: ID!, $signedTransactions: String!) {
     executePendingConversion(conversionId: $conversionId, signedTransactions: $signedTransactions) {
       success
@@ -623,9 +657,10 @@ export const EXECUTE_PENDING_CONVERSION = gql`
       errors
     }
   }
-`;
+`; */
 
-export const GET_CONVERSION_TRANSACTIONS = gql`
+/* Removed legacy conversion tx fetch */
+/* export const GET_CONVERSION_TRANSACTIONS = gql`
   mutation GetConversionTransactions($conversionId: ID!) {
     getConversionTransactions(conversionId: $conversionId) {
       success
@@ -633,7 +668,7 @@ export const GET_CONVERSION_TRANSACTIONS = gql`
       errors
     }
   }
-`;
+`; */
 
 // Payment contract mutations for seamless sponsored payments to businesses
 // Note: Recipient business is determined from JWT context on server side

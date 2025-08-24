@@ -6,13 +6,31 @@ export interface PresignedUpload {
   key: string;
   method: string; // 'PUT'
   headers: Record<string, string>;
-  expires_in: number;
+  expiresIn: number;
 }
 
 // Removed: normalizeUriToPath and RNFS usage
 
-export async function uploadFileToPresigned(_url: string, _headers: Record<string, string>, _uri: string): Promise<void> {
-  throw new Error('PUT uploads disabled: use presigned POST (fields)');
+export async function uploadFileToPresigned(url: string, headers: Record<string, string>, uri: string): Promise<void> {
+  // Minimal PUT upload using fetch. Caller must ensure correct Content-Type header.
+  // RN's fetch supports file body via blob from uri when using RN >= 0.59.
+  // We fallback to FormData only for POST; for PUT, we stream the file directly.
+  // Some RN environments accept body as `{ uri, type, name }` even for PUT; here we use Blob for portability.
+  const body: any = (global as any).Blob
+    ? // @ts-ignore create blob from file URI when available
+      await (await fetch(uri)).blob()
+    : // Fallback: try RN-style file object
+      ({ uri, type: headers?.['Content-Type'] || 'application/octet-stream', name: 'evidence.mp4' } as any)
+
+  const resp = await fetch(url, {
+    method: 'PUT',
+    headers: headers || {},
+    body,
+  } as any)
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '')
+    throw new Error(`Upload failed (${resp.status}): ${text}`)
+  }
 }
 
 export async function uploadFileToPresignedForm(

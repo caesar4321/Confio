@@ -92,6 +92,8 @@ class UnifiedUSDCTransactionType(DjangoObjectType):
     formatted_title = graphene.String()
     icon_name = graphene.String()
     icon_color = graphene.String()
+    signed_amount = graphene.String()
+    signed_secondary_amount = graphene.String()
     
     def resolve_formatted_title(self, info):
         return self.formatted_title
@@ -101,6 +103,12 @@ class UnifiedUSDCTransactionType(DjangoObjectType):
     
     def resolve_icon_color(self, info):
         return self.icon_color
+
+    def resolve_signed_amount(self, info):
+        return self.signed_amount
+
+    def resolve_signed_secondary_amount(self, info):
+        return self.signed_secondary_amount
 
 
 class USDCDepositInput(graphene.InputObjectType):

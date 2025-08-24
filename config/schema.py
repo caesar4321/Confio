@@ -30,7 +30,6 @@ class Mutation(
 	payments_schema.Mutation,
 	p2p_exchange_schema.Mutation,
 	exchange_rates_schema.Mutation,
-	conversion_schema.Mutation,
 	usdc_transactions_schema.Mutation,
 	security_schema.Mutation,
 	presale_schema.PresaleMutations,
