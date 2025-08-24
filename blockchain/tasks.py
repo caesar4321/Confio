@@ -1005,7 +1005,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                 c.status = 'COMPLETED'
                 c.completed_at = dj_tz.now()
                 c.save(update_fields=['status', 'completed_at', 'updated_at'])
-                # Notification: conversion completed
+                # Notification: conversion completed (ensure a user for business accounts)
                 try:
                     from notifications.utils import create_transaction_notification
                     # Determine tokens and direction
@@ -1017,9 +1017,24 @@ def scan_outbound_confirmations(max_batch: int = 50):
                         from_token, to_token = 'cUSD', 'USDC'
                         amount_from = str(c.from_amount)
                         amount_to = str(c.to_amount)
-                    create_transaction_notification(
+
+                    # Ensure we have a concrete user to attach the notification to
+                    target_user = None
+                    try:
+                        if getattr(c, 'actor_user_id', None):
+                            target_user = c.actor_user
+                        elif getattr(c, 'actor_business_id', None):
+                            acct = c.actor_business.accounts.first()
+                            target_user = getattr(acct, 'user', None)
+                    except Exception:
+                        pass
+
+                    if not target_user:
+                        raise Exception('no_target_user')
+
+                    notif = create_transaction_notification(
                         transaction_type='conversion',
-                        sender_user=c.actor_user,
+                        sender_user=target_user,
                         business=c.actor_business,
                         amount=amount_to,
                         token_type=to_token,
@@ -1034,9 +1049,180 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             'conversion_type': c.conversion_type,
                         },
                     )
+                    if not notif:
+                        # Fallback to direct notification (should rarely happen)
+                        from notifications.utils import create_notification
+                        title = "Conversión completada"
+                        msg = f"Convertiste {amount_from} {from_token} a {amount_to} {to_token}"
+                        create_notification(
+                            user=target_user,
+                            business=c.actor_business,
+                            notification_type=NotificationTypeChoices.CONVERSION_COMPLETED,
+                            title=title,
+                            message=msg,
+                            data={
+                                'transaction_id': str(c.id),
+                                'from_amount': amount_from,
+                                'from_token': from_token,
+                                'to_amount': amount_to,
+                                'to_token': to_token,
+                                'transaction_hash': c.to_transaction_hash,
+                                'conversion_type': c.conversion_type,
+                            },
+                            related_object_type='Conversion',
+                            related_object_id=str(c.id),
+                            action_url=f"confio://transaction/{c.id}",
+                        )
                 except Exception as ne:
                     logger.warning(f"Conversion notification error for Conversion {c.id}: {ne}")
                 processed += 1
+
+        # USDC Withdrawals (tracked via unified table transaction_hash)
+        try:
+            from usdc_transactions.models_unified import UnifiedUSDCTransactionTable as UUT
+            from usdc_transactions.models import USDCWithdrawal
+            # Check both SUBMITTED and PROCESSING to be resilient to signal updates
+            w_qs = UUT.objects.filter(
+                transaction_type='withdrawal',
+                status__in=['SUBMITTED', 'PROCESSING']
+            ).exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
+            for u in w_qs:
+                txh = u.transaction_hash or ''
+                cr, pe = check_tx(txh)
+                if pe:
+                    # Mark source withdrawal failed
+                    try:
+                        w = u.usdc_withdrawal
+                        if w:
+                            w.status = 'FAILED'
+                            w.error_message = str(pe)
+                            w.save(update_fields=['status', 'error_message', 'updated_at'])
+                    except Exception:
+                        pass
+                    # Update unified as FAILED
+                    try:
+                        u.status = 'FAILED'
+                        u.error_message = str(pe)
+                        u.save(update_fields=['status', 'error_message', 'updated_at'])
+                    except Exception:
+                        pass
+                    # Notify user
+                    try:
+                        # Determine target user for notification (business fallback)
+                        target_user = None
+                        try:
+                            w = u.usdc_withdrawal
+                            if w and w.actor_user_id:
+                                target_user = w.actor_user
+                            elif w and w.actor_business_id:
+                                acct = w.actor_business.accounts.first()
+                                target_user = getattr(acct, 'user', None)
+                        except Exception:
+                            pass
+                        if not target_user:
+                            raise Exception('no_target_user')
+                        create_notification(
+                            user=target_user,
+                            business=u.actor_business,
+                            notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_FAILED,
+                            title="Retiro USDC fallido",
+                            message=f"Tu retiro de {u.amount} USDC falló",
+                            data={
+                                'transaction_id': str(u.transaction_id),
+                                'transaction_type': 'withdrawal',
+                                'type': 'withdrawal',
+                                'amount': str(u.amount),
+                                'currency': 'USDC',
+                                'destination_address': u.destination_address,
+                                'status': 'failed',
+                                'transaction_hash': txh,
+                            },
+                            related_object_type='USDCWithdrawal',
+                            related_object_id=str(getattr(u.usdc_withdrawal, 'id', '')),
+                            action_url=f"confio://transaction/{u.transaction_id}"
+                        )
+                    except Exception as ne:
+                        logger.warning(f"Withdrawal failure notification error for unified {u.id}: {ne}")
+                    processed += 1
+                    continue
+                if cr > 0:
+                    # Confirmed: mark models and notify
+                    from django.utils import timezone as dj_tz
+                    try:
+                        w = u.usdc_withdrawal
+                        if w:
+                            w.status = 'COMPLETED'
+                            if not w.completed_at:
+                                w.completed_at = dj_tz.now()
+                            w.save(update_fields=['status', 'completed_at', 'updated_at'])
+                    except Exception:
+                        pass
+                    try:
+                        u.status = 'COMPLETED'
+                        if not u.completed_at:
+                            u.completed_at = dj_tz.now()
+                        u.save(update_fields=['status', 'completed_at', 'updated_at'])
+                    except Exception:
+                        pass
+                    # Notification: withdrawal completed (mirror conversions pattern)
+                    try:
+                        # Determine target user for notification (business fallback)
+                        target_user = None
+                        try:
+                            w = u.usdc_withdrawal
+                            if w and w.actor_user_id:
+                                target_user = w.actor_user
+                            elif w and w.actor_business_id:
+                                acct = w.actor_business.accounts.first()
+                                target_user = getattr(acct, 'user', None)
+                        except Exception:
+                            pass
+                        if not target_user:
+                            raise Exception('no_target_user')
+                        from notifications.utils import create_transaction_notification
+                        logger.info(f"[OutboundScan] Creating withdrawal completed notification for user={getattr(target_user, 'id', None)} amount={u.amount}")
+                        notif = create_transaction_notification(
+                            transaction_type='withdrawal',
+                            sender_user=target_user,
+                            business=u.actor_business,
+                            amount=str(u.amount),
+                            token_type='USDC',
+                            transaction_id=str(u.transaction_id),
+                            transaction_model='USDCWithdrawal',
+                            additional_data={
+                                'transaction_hash': txh,
+                                'destination_address': u.destination_address,
+                                'status': 'COMPLETED',
+                            },
+                        )
+                        if not notif:
+                            # Fallback to direct notification
+                            logger.info("[OutboundScan] Fallback notification path for withdrawal completed")
+                            create_notification(
+                                user=target_user,
+                                business=u.actor_business,
+                                notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_COMPLETED,
+                                title="Retiro USDC completado",
+                                message=f"Tu retiro de {u.amount} USDC se ha completado",
+                                data={
+                                    'transaction_id': str(u.transaction_id),
+                                    'transaction_type': 'withdrawal',
+                                    'type': 'withdrawal',
+                                    'amount': str(u.amount),
+                                    'currency': 'USDC',
+                                    'destination_address': u.destination_address,
+                                    'status': 'completed',
+                                    'transaction_hash': txh,
+                                },
+                                related_object_type='USDCWithdrawal',
+                                related_object_id=str(getattr(u.usdc_withdrawal, 'id', '')),
+                                action_url=f"confio://transaction/{u.transaction_id}"
+                            )
+                    except Exception as ne:
+                        logger.warning(f"Withdrawal completion notification error for unified {u.id}: {ne}")
+                    processed += 1
+        except Exception as we:
+            logger.warning(f"[OutboundScan] Withdrawal scan error: {we}")
 
         logger.info(f"[OutboundScan] processed={processed} items")
         return {'processed': processed}

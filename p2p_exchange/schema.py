@@ -1,5 +1,8 @@
 import graphene
 from django.conf import settings
+from django.utils import timezone
+import random
+import string
 from graphene_django import DjangoObjectType
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -2252,6 +2255,7 @@ class PresignedUploadInfo(graphene.ObjectType):
     headers = graphene.JSONString()
     expires_in = graphene.Int()
     fields = graphene.JSONString()  # For presigned POST
+    confio_code = graphene.String()
 
 
 class RequestDisputeEvidenceUpload(graphene.Mutation):
@@ -2294,6 +2298,26 @@ class RequestDisputeEvidenceUpload(graphene.Mutation):
             }
             if sha256:
                 metadata['sha256'] = sha256
+            # Ensure dispute exists and code is available
+            from .models import P2PDispute
+            dispute = getattr(trade, 'dispute_details', None)
+            if not dispute:
+                dispute = P2PDispute.objects.create(
+                    trade=trade,
+                    initiator_user=user,
+                    reason='Evidence pending',
+                    priority=2,
+                )
+            code = dispute.evidence_code
+            now = timezone.now()
+            if not code or not dispute.code_expires_at or dispute.code_expires_at <= now:
+                code = f"D-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+                dispute.evidence_code = code
+                dispute.code_generated_at = now
+                # 2 hours validity
+                dispute.code_expires_at = now + timezone.timedelta(hours=2)
+                dispute.save(update_fields=['evidence_code', 'code_generated_at', 'code_expires_at', 'last_updated'])
+            metadata['confio-code'] = code
             dispute_bucket = getattr(settings, 'AWS_DISPUTE_BUCKET', None)
             # Prefer presigned POST for mobile-friendliness; client can also handle PUT if needed
             try:
@@ -2317,6 +2341,7 @@ class RequestDisputeEvidenceUpload(graphene.Mutation):
                     headers=presigned.get('headers'),
                     fields=presigned.get('fields'),
                     expires_in=presigned['expires_in'],
+                    confio_code=code,
                 ),
                 success=True,
                 error=None,
@@ -2385,6 +2410,9 @@ class AttachDisputeEvidence(graphene.Mutation):
             return AttachDisputeEvidence(dispute=None, success=False, error="Evidence does not match this trade")
         if md.get('uploader-id') != str(user.id):
             return AttachDisputeEvidence(dispute=None, success=False, error="Evidence uploader mismatch")
+        # Evidence code must match dispute's code if present
+        if dispute.evidence_code and md.get('confio-code') != dispute.evidence_code:
+            return AttachDisputeEvidence(dispute=None, success=False, error="Evidence code mismatch; please regenerate and record again")
         # If client provided sha256, ensure it matches metadata (if present)
         if sha256 and md.get('sha256') and md.get('sha256') != sha256:
             return AttachDisputeEvidence(dispute=None, success=False, error="Checksum mismatch for uploaded file")
@@ -2402,6 +2430,55 @@ class AttachDisputeEvidence(graphene.Mutation):
         dispute.save(update_fields=['evidence_urls', 'last_updated'])
 
         return AttachDisputeEvidence(dispute=dispute, success=True, error=None)
+
+
+class GetDisputeEvidenceCodePayload(graphene.ObjectType):
+    success = graphene.Boolean()
+    error = graphene.String()
+    confio_code = graphene.String()
+    expires_at = graphene.DateTime()
+
+
+class GetDisputeEvidenceCode(graphene.Mutation):
+    class Arguments:
+        trade_id = graphene.ID(required=True)
+
+    Output = GetDisputeEvidenceCodePayload
+
+    @classmethod
+    def mutate(cls, root, info, trade_id):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return GetDisputeEvidenceCodePayload(success=False, error="Authentication required")
+
+        trade = P2PTrade.objects.filter(id=trade_id).first()
+        if not trade:
+            return GetDisputeEvidenceCodePayload(success=False, error="Trade not found")
+        if user not in [trade.buyer_user, trade.seller_user]:
+            if not (
+                (trade.buyer_business and trade.buyer_business.accounts.filter(user=user).exists()) or
+                (trade.seller_business and trade.seller_business.accounts.filter(user=user).exists())
+            ):
+                return GetDisputeEvidenceCodePayload(success=False, error="Access denied")
+
+        from .models import P2PDispute
+        dispute = getattr(trade, 'dispute_details', None)
+        if not dispute:
+            dispute = P2PDispute.objects.create(
+                trade=trade,
+                initiator_user=user,
+                reason='Evidence pending',
+                priority=2,
+            )
+        now = timezone.now()
+        code = dispute.evidence_code
+        if not code or not dispute.code_expires_at or dispute.code_expires_at <= now:
+            code = f"D-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+            dispute.evidence_code = code
+            dispute.code_generated_at = now
+            dispute.code_expires_at = now + timezone.timedelta(hours=2)
+            dispute.save(update_fields=['evidence_code', 'code_generated_at', 'code_expires_at', 'last_updated'])
+        return GetDisputeEvidenceCodePayload(success=True, error=None, confio_code=code, expires_at=dispute.code_expires_at)
 
 class ConfirmP2PTradeStep(graphene.Mutation):
     class Arguments:
@@ -3266,6 +3343,7 @@ class Mutation(graphene.ObjectType):
     dispute_p2p_trade = DisputeP2PTrade.Field()
     request_dispute_evidence_upload = RequestDisputeEvidenceUpload.Field()
     attach_dispute_evidence = AttachDisputeEvidence.Field()
+    get_dispute_evidence_code = GetDisputeEvidenceCode.Field()
     confirm_p2p_trade_step = ConfirmP2PTradeStep.Field()
     toggle_favorite_trader = ToggleFavoriteTrader.Field()
 

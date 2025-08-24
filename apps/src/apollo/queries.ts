@@ -1029,6 +1029,8 @@ export const GET_P2P_TRADE = gql`
         tokenType
         isEscrowed
         isReleased
+        escrowTransactionHash
+        releaseTransactionHash
         escrowedAt
         releasedAt
       }
