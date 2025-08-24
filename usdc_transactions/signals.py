@@ -59,8 +59,16 @@ def create_unified_usdc_transaction_from_deposit(deposit):
 
 
 def create_unified_usdc_transaction_from_withdrawal(withdrawal):
-    """Create or update UnifiedUSDCTransactionTable from USDCWithdrawal"""
+    """Create or update UnifiedUSDCTransactionTable from USDCWithdrawal.
+
+    Preserve any existing transaction_hash previously set during WebSocket submit
+    so that post-save updates don't clear it.
+    """
     try:
+        # Preserve existing transaction_hash if a unified row already exists
+        existing = UnifiedUSDCTransactionTable.objects.filter(usdc_withdrawal=withdrawal).first()
+        existing_hash = getattr(existing, 'transaction_hash', None)
+
         unified, created = UnifiedUSDCTransactionTable.objects.update_or_create(
             usdc_withdrawal=withdrawal,
             defaults={
@@ -89,9 +97,9 @@ def create_unified_usdc_transaction_from_withdrawal(withdrawal):
                 'source_address': withdrawal.actor_address,
                 'destination_address': withdrawal.destination_address,
                 
-                # Transaction tracking
-                'transaction_hash': None,  # USDC withdrawals don't have transaction_hash field
-                'block_number': None,  # USDC withdrawals don't have block_number field
+                # Transaction tracking (preserve hash if previously set)
+                'transaction_hash': existing_hash if existing_hash else None,
+                'block_number': None,
                 'network': withdrawal.network,
                 
                 # Status

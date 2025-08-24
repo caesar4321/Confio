@@ -18,6 +18,7 @@ import {
   PermissionsAndroid,
   Image,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -34,6 +35,8 @@ import LoadingOverlay from '../components/LoadingOverlay';
 import { formatLocalDateTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
+import { apolloClient } from '../apollo/client';
+import { GET_DISPUTE_EVIDENCE_CODE } from '../apollo/mutations';
 
 
 type ActiveTradeRouteProp = RouteProp<MainStackParamList, 'ActiveTrade'>;
@@ -83,6 +86,9 @@ export const ActiveTradeScreen: React.FC = () => {
   const [showEvidenceSheet, setShowEvidenceSheet] = useState(false);
   const [showVideoGallery, setShowVideoGallery] = useState(false);
   const [videoItems, setVideoItems] = useState<{ uri: string; thumbUri: string; name?: string; duration?: number }[]>([]);
+  const [confioCode, setConfioCode] = useState<string | null>(null);
+  const [confioCodeExp, setConfioCodeExp] = useState<string | null>(null);
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   
   // Dispute now goes on-chain via prepare/submit using p2pSponsoredService
   
@@ -919,6 +925,90 @@ export const ActiveTradeScreen: React.FC = () => {
               <Text style={styles.secondaryButtonText}>Volver a Intercambios</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Technical details button for completed & rated trade (if hash available) */}
+          {(
+            <View style={styles.transactionDetailsCard}>
+              <TouchableOpacity 
+                onPress={() => setShowTechnicalDetails(true)}
+                style={styles.blockchainButton}
+              >
+                <Icon name="external-link" size={16} color="#6b7280" style={styles.blockchainIcon} />
+                <Text style={styles.blockchainButtonText}>Ver detalles técnicos</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Technical Details Modal */}
+          <Modal
+            visible={showTechnicalDetails}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setShowTechnicalDetails(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Detalles técnicos</Text>
+                  <TouchableOpacity onPress={() => setShowTechnicalDetails(false)} style={styles.modalCloseButton}>
+                    <Icon name="x" size={20} color="#111827" />
+                  </TouchableOpacity>
+                </View>
+                <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalSectionTitle}>Transacción</Text>
+                    <View style={styles.technicalRow}>
+                      <Text style={styles.technicalLabel}>Red</Text>
+                      <Text style={styles.technicalValue}>{__DEV__ ? 'Testnet' : 'Mainnet'}</Text>
+                    </View>
+                    <View style={styles.technicalRow}>
+                      <Text style={styles.technicalLabel}>Hash</Text>
+                      <Text style={styles.technicalValue} numberOfLines={1}>
+                        {(() => {
+                          const h = (
+                            fullTradeData?.escrow?.releaseTransactionHash ||
+                            fullTradeData?.escrow?.escrowTransactionHash ||
+                            fullTradeData?.cryptoTransactionHash ||
+                            ''
+                          ).toString();
+                          if (!h) return 'N/D';
+                          return h.replace(/(.{10}).+(.{6})/, '$1…$2');
+                        })()}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <TouchableOpacity
+                    style={[styles.explorerButton]}
+                    onPress={async () => {
+                      try {
+                        const txid = (
+                          fullTradeData?.escrow?.releaseTransactionHash ||
+                          fullTradeData?.escrow?.escrowTransactionHash ||
+                          fullTradeData?.cryptoTransactionHash ||
+                          ''
+                        ).toString();
+                        if (!txid) {
+                          Alert.alert('Sin hash', 'Aún no hay hash de transacción disponible.');
+                          return;
+                        }
+                        const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
+                        const url = `${base}/tx/${encodeURIComponent(txid)}/`;
+                        const canOpen = await Linking.canOpenURL(url);
+                        if (canOpen) await Linking.openURL(url);
+                        else Alert.alert('No se puede abrir', 'No se pudo abrir Pera Explorer.');
+                      } catch (e) {
+                        Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
+                      }
+                    }}
+                  >
+                    <Icon name="external-link" size={16} color="#fff" style={styles.explorerIcon} />
+                    <Text style={styles.explorerButtonText}>Abrir en Pera Explorer</Text>
+                  </TouchableOpacity>
+                </ScrollView>
+              </View>
+            </View>
+          </Modal>
         </View>
       );
     }
@@ -1067,6 +1157,90 @@ export const ActiveTradeScreen: React.FC = () => {
             <Text style={styles.secondaryButtonText}>Volver al Inicio</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Technical details button for completed trade (if hash available) */}
+        {(
+          <View style={styles.transactionDetailsCard}>
+            <TouchableOpacity 
+              onPress={() => setShowTechnicalDetails(true)}
+              style={styles.blockchainButton}
+            >
+              <Icon name="external-link" size={16} color="#6b7280" style={styles.blockchainIcon} />
+              <Text style={styles.blockchainButtonText}>Ver detalles técnicos</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Technical Details Modal */}
+        <Modal
+          visible={showTechnicalDetails}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowTechnicalDetails(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Detalles técnicos</Text>
+                <TouchableOpacity onPress={() => setShowTechnicalDetails(false)} style={styles.modalCloseButton}>
+                  <Icon name="x" size={20} color="#111827" />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+                  <View style={styles.modalSection}>
+                    <Text style={styles.modalSectionTitle}>Transacción</Text>
+                    <View style={styles.technicalRow}>
+                      <Text style={styles.technicalLabel}>Red</Text>
+                      <Text style={styles.technicalValue}>{__DEV__ ? 'Testnet' : 'Mainnet'}</Text>
+                    </View>
+                    <View style={styles.technicalRow}>
+                      <Text style={styles.technicalLabel}>Hash</Text>
+                      <Text style={styles.technicalValue} numberOfLines={1}>
+                        {(() => {
+                          const h = (
+                            fullTradeData?.escrow?.releaseTransactionHash ||
+                            fullTradeData?.escrow?.escrowTransactionHash ||
+                            fullTradeData?.cryptoTransactionHash ||
+                            ''
+                          ).toString();
+                          if (!h) return 'N/D';
+                          return h.replace(/(.{10}).+(.{6})/, '$1…$2');
+                        })()}
+                      </Text>
+                    </View>
+                  </View>
+
+                <TouchableOpacity
+                  style={[styles.explorerButton]}
+                  onPress={async () => {
+                    try {
+                      const txid = (
+                        fullTradeData?.escrow?.releaseTransactionHash ||
+                        fullTradeData?.escrow?.escrowTransactionHash ||
+                        fullTradeData?.cryptoTransactionHash ||
+                        ''
+                      ).toString();
+                      if (!txid) {
+                        Alert.alert('Sin hash', 'Aún no hay hash de transacción disponible.');
+                        return;
+                      }
+                      const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
+                      const url = `${base}/tx/${encodeURIComponent(txid)}/`;
+                      const canOpen = await Linking.canOpenURL(url);
+                      if (canOpen) await Linking.openURL(url);
+                      else Alert.alert('No se puede abrir', 'No se pudo abrir Pera Explorer.');
+                    } catch (e) {
+                      Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
+                    }
+                  }}
+                >
+                  <Icon name="external-link" size={16} color="#fff" style={styles.explorerIcon} />
+                  <Text style={styles.explorerButtonText}>Abrir en Pera Explorer</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
       </View>
     );
   };
@@ -1178,7 +1352,18 @@ export const ActiveTradeScreen: React.FC = () => {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.disputeChatButton, { marginTop: 8, backgroundColor: '#DCFCE7', borderColor: '#34D399' }]}
-            onPress={() => setShowEvidenceSheet(true)}
+            onPress={async () => {
+              try {
+                setConfioCode(null); setConfioCodeExp(null);
+                const { data } = await apolloClient.mutate({ mutation: GET_DISPUTE_EVIDENCE_CODE, variables: { tradeId: trade.id }, fetchPolicy: 'no-cache' });
+                const res = data?.getDisputeEvidenceCode;
+                if (res?.success) {
+                  setConfioCode(res.confioCode || null);
+                  setConfioCodeExp(res.expiresAt || null);
+                }
+              } catch {}
+              setShowEvidenceSheet(true);
+            }}
           >
             <Icon name="upload" size={16} color="#065F46" />
             <Text style={[styles.disputeChatButtonText, { color: '#065F46' }]}>⬆️ Subir evidencia (pantalla)</Text>
@@ -1355,8 +1540,17 @@ export const ActiveTradeScreen: React.FC = () => {
               </View>
               <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
                 <Text style={styles.modalDescription}>
-                  Solo se aceptan grabaciones de pantalla del app del banco/fintech (30–45s, máx. 50MB). Sigue esta lista:
+                  Solo se aceptan grabaciones de pantalla del app del banco/fintech (30–45s, máx. 200MB). Sigue esta lista:
                 </Text>
+                {!!confioCode && (
+                  <View style={{ backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+                    <Text style={{ color: '#065F46', fontSize: 14, marginBottom: 4 }}>Código Confío</Text>
+                    <Text style={{ color: '#065F46', fontSize: 20, fontWeight: 'bold' }}>{confioCode}</Text>
+                    {!!confioCodeExp && (
+                      <Text style={{ color: '#065F46', fontSize: 12, marginTop: 4 }}>Vence: {formatLocalDateTime(confioCodeExp)}</Text>
+                    )}
+                  </View>
+                )}
                 <Text style={styles.stepDescription}>1) Muestra el código de Confío en la pantalla de disputa</Text>
                 <Text style={styles.stepDescription}>2) Abre tu app bancaria y busca la transacción</Text>
                 <Text style={styles.stepDescription}>3) El memo debe incluir el código</Text>
@@ -2090,5 +2284,66 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  // Technical details styles
+  blockchainButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  blockchainIcon: {
+    marginRight: 4,
+  },
+  blockchainButtonText: {
+    fontSize: 14,
+    color: '#374151',
+    marginLeft: 8,
+  },
+  modalSection: {
+    marginBottom: 16,
+  },
+  modalSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    marginBottom: 8,
+  },
+  technicalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  technicalLabel: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  technicalValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#111827',
+    maxWidth: '65%',
+  },
+  explorerButton: {
+    backgroundColor: '#8B5CF6',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  explorerIcon: {
+    marginRight: 8,
+  },
+  explorerButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

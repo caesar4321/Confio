@@ -89,6 +89,8 @@ class UnifiedUSDCTransactionType(DjangoObjectType):
         )
     
     # Add custom fields
+    # Explicit alias for camelCase field expected by clients
+    transaction_hash_gql = graphene.String(name='transactionHash')
     formatted_title = graphene.String()
     icon_name = graphene.String()
     icon_color = graphene.String()
@@ -109,6 +111,13 @@ class UnifiedUSDCTransactionType(DjangoObjectType):
 
     def resolve_signed_secondary_amount(self, info):
         return self.signed_secondary_amount
+
+    def resolve_transaction_hash_gql(self, info):
+        # Expose model's transaction_hash as transactionHash for clients
+        try:
+            return getattr(self, 'transaction_hash', None)
+        except Exception:
+            return None
 
 
 class USDCDepositInput(graphene.InputObjectType):

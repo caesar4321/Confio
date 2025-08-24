@@ -14,9 +14,12 @@ import { useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
 import { useAccount } from '../contexts/AccountContext';
-import { useMutation, useQuery } from '@apollo/client';
-import { CREATE_USDC_WITHDRAWAL, GET_UNIFIED_USDC_TRANSACTIONS } from '../apollo/mutations';
+import { useQuery } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
+import { WithdrawWsSession } from '../services/withdrawWs';
+import algorandService from '../services/algorandService';
+import { oauthStorage } from '../services/oauthStorageService';
+import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
 
 const colors = {
   primary: '#34D399',
@@ -68,40 +71,19 @@ export const USDCWithdrawScreen = () => {
   };
   const networkFee = 0; // Network fee is covered by Confío
   
-  // Create withdrawal mutation
-  const [createWithdrawal] = useMutation(CREATE_USDC_WITHDRAWAL, {
-    onCompleted: (data) => {
-      console.log('Withdrawal mutation completed:', data);
-      if (data.createUsdcWithdrawal.success) {
-        // Clear form
-        setWithdrawAmount('');
-        setRecipientAddress('');
-        
-        Alert.alert(
-          'Retiro Iniciado',
-          `Se está procesando el retiro de ${withdrawAmount} USDC a tu wallet.\n\nID de transacción: ${data.createUsdcWithdrawal.withdrawal.withdrawalId}`,
-          [
-            {
-              text: 'Ver historial',
-              onPress: () => {
-                navigation.navigate('USDCHistory');
-              },
-            },
-            {
-              text: 'OK',
-              onPress: () => navigation.goBack(),
-            },
-          ]
-        );
-      } else {
-        Alert.alert('Error', data.createUsdcWithdrawal.errors?.join('\n') || 'No se pudo procesar el retiro');
-      }
-    },
-    onError: (error) => {
-      console.error('Mutation error:', error);
-      Alert.alert('Error', error.message || 'No se pudo procesar el retiro');
-    },
-  });
+  // Success helper after WS submit
+  const handleWithdrawSuccess = async (txid?: string) => {
+    setWithdrawAmount('');
+    setRecipientAddress('');
+    Alert.alert(
+      'Retiro enviado',
+      `Tu retiro de ${withdrawAmount} USDC fue enviado. Se confirmará en breve.${txid ? `\n\nTxID: ${txid}` : ''}`,
+      [
+        { text: 'Ver historial', onPress: () => navigation.navigate('USDCHistory' as never) },
+        { text: 'OK', onPress: () => navigation.goBack() },
+      ]
+    );
+  };
   
   const handleWithdraw = async () => {
     if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
@@ -109,8 +91,9 @@ export const USDCWithdrawScreen = () => {
       return;
     }
     
-    if (!recipientAddress || recipientAddress.length < 42) {
-      Alert.alert('Error', 'Por favor ingresa una dirección de Algorand válida');
+    const dest = (recipientAddress || '').trim().toUpperCase();
+    if (!dest || !/^[A-Z2-7]{58}$/.test(dest)) {
+      Alert.alert('Error', 'La dirección de Algorand debe tener 58 caracteres (A–Z y 2–7), sin espacios');
       return;
     }
     
@@ -126,33 +109,47 @@ export const USDCWithdrawScreen = () => {
       return;
     }
     
-    // Validate Algorand address format (basic validation)
-    if (!recipientAddress.startsWith('0x') || recipientAddress.length < 66) {
-      Alert.alert('Error', 'La dirección de Algorand debe tener 58 caracteres');
-      return;
-    }
+    // dest validated above using Algorand format
     
     setIsProcessing(true);
-    
     try {
-      console.log('Creating withdrawal with:', {
-        amount: withdrawAmount,
-        destinationAddress: recipientAddress,
-        serviceFee: '0',
+      // Prepare via WS
+      const ws = new WithdrawWsSession();
+      const pack = await ws.prepare({ amount: withdrawAmount, destinationAddress: dest });
+
+      // Ensure wallet is ready for signing
+      try {
+        const oauthData = await oauthStorage.getOAuthSubject();
+        if (oauthData && oauthData.subject && oauthData.provider) {
+          const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+          const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+          const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+          const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+          await secureDeterministicWallet.createOrRestoreWallet(iss, oauthData.subject, aud, oauthData.provider, activeAccount?.type || 'personal', activeAccount?.index || 0, activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined);
+        }
+      } catch {}
+
+      // Sign user transaction(s)
+      const unsignedTxs: string[] = pack?.transactions || [];
+      const signedUserTransactions: string[] = [];
+      for (const utxB64 of unsignedTxs) {
+        const bytes = Uint8Array.from(Buffer.from(utxB64, 'base64'));
+        const signed = await algorandService.signTransactionBytes(bytes);
+        signedUserTransactions.push(Buffer.from(signed).toString('base64'));
+      }
+
+      // Submit
+      const res = await ws.submit({
+        withdrawalId: String(pack?.withdrawal_id || ''),
+        signedUserTransactions,
+        sponsorTransactions: pack?.sponsor_transactions || [],
       });
-      
-      await createWithdrawal({
-        variables: {
-          input: {
-            amount: withdrawAmount,
-            destinationAddress: recipientAddress,
-            serviceFee: '0', // No service fee for now
-          },
-        },
-      });
-    } catch (error) {
-      console.error('Withdrawal error:', error);
-      Alert.alert('Error', 'No se pudo procesar el retiro. Por favor intenta de nuevo.');
+
+      await handleWithdrawSuccess(res?.txid);
+    } catch (error: any) {
+      console.error('[USDCWithdrawScreen] Withdraw error:', error);
+      const msg = String(error?.message || 'No se pudo procesar el retiro');
+      Alert.alert('Error', msg);
     } finally {
       setIsProcessing(false);
     }
@@ -223,12 +220,12 @@ export const USDCWithdrawScreen = () => {
               style={styles.addressInput}
               value={recipientAddress}
               onChangeText={setRecipientAddress}
-              placeholder="0x..."
+              placeholder="Dirección Algorand (58 caracteres)"
               placeholderTextColor="#9CA3AF"
               autoCapitalize="none"
               autoCorrect={false}
             />
-            <Text style={styles.inputHint}>Ingresa tu dirección de Algorand wallet</Text>
+            <Text style={styles.inputHint}>Pega la dirección exacta (A–Z y 2–7), sin espacios</Text>
           </View>
           
           {/* Minimum amount notice */}

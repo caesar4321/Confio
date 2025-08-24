@@ -35,6 +35,7 @@ const colors = {
 
 interface USDCTransactionRecord {
   transactionId: string;
+  transactionHash?: string;
   transactionType: 'deposit' | 'withdrawal' | 'conversion';
   actorType: 'user' | 'business';
   actorDisplayName: string;
@@ -58,7 +59,7 @@ interface USDCTransactionRecord {
   sourceAddress: string;
   destinationAddress: string;
   network: string;
-  status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+  status: 'PENDING' | 'SUBMITTED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
   errorMessage?: string;
   createdAt: string;
   updatedAt: string;
@@ -174,6 +175,7 @@ export const USDCHistoryScreen = () => {
       case 'COMPLETED':
         return colors.primary;
       case 'PENDING':
+      case 'SUBMITTED':
       case 'PROCESSING':
         return '#f59e0b';
       case 'FAILED':
@@ -189,8 +191,10 @@ export const USDCHistoryScreen = () => {
         return 'Completado';
       case 'PENDING':
         return 'Pendiente';
+      case 'SUBMITTED':
+        return 'Confirmando…';
       case 'PROCESSING':
-        return 'Procesando';
+        return 'Confirmando…';
       case 'FAILED':
         return 'Fallido';
       default:
@@ -230,7 +234,8 @@ export const USDCHistoryScreen = () => {
         toAddress: transaction.destinationAddress,
         date: moment.utc(transaction.createdAt).local().format('YYYY-MM-DD'),
         time: moment.utc(transaction.createdAt).local().format('HH:mm'),
-        hash: transaction.transactionId,
+        // Use real blockchain hash if available for correct Pera Explorer linking
+        hash: transaction.transactionHash || transaction.transactionId,
         network: transaction.network || 'ALGORAND',
       }
     });

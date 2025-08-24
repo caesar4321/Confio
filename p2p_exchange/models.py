@@ -1005,6 +1005,11 @@ class P2PDispute(SoftDeleteModel):
     evidence_urls = models.JSONField(default=list, blank=True, help_text="List of evidence URLs")
     admin_notes = models.TextField(blank=True, help_text="Internal notes from admin/support")
     
+    # One-time evidence code shown to user to include in bank memo
+    evidence_code = models.CharField(max_length=12, blank=True, null=True, help_text="One-time Confío code for evidence")
+    code_generated_at = models.DateTimeField(blank=True, null=True)
+    code_expires_at = models.DateTimeField(blank=True, null=True)
+    
     # Resolution
     resolution_type = models.CharField(max_length=20, choices=RESOLUTION_TYPE, null=True, blank=True)
     resolution_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)

@@ -188,7 +188,28 @@ def create_transaction_notification(
             related_object_id=transaction_id,
             action_url=f"confio://transaction/{transaction_id}"
         )
-    
+
+    elif transaction_type == 'withdrawal' and sender_user:
+        # USDC withdrawal completed
+        dest_mask = ''
+        try:
+            dest = data.get('destination_address') or data.get('destination') or ''
+            if dest:
+                dest_mask = f" a {dest[:6]}...{dest[-4:]}"
+        except Exception:
+            pass
+        return create_notification(
+            user=sender_user,
+            business=business,
+            notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_COMPLETED,
+            title="Retiro USDC completado",
+            message=f"Retiraste {amount} USDC{dest_mask}",
+            data=data,
+            related_object_type=transaction_model or 'USDCWithdrawal',
+            related_object_id=transaction_id,
+            action_url=f"confio://transaction/{transaction_id}"
+        )
+
     return None
 
 
