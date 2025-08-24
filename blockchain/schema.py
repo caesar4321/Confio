@@ -95,25 +95,8 @@ class Mutation(graphene.ObjectType):
     submit_invite_for_phone = SubmitInviteForPhone.Field()
     claim_invite_for_phone = ClaimInviteForPhoneField
 
-    # P2P Trade mutations
-    prepare_p2p_create_trade = P2PTradeMutations.prepare_p2p_create_trade
-    submit_p2p_create_trade = P2PTradeMutations.submit_p2p_create_trade
-    accept_p2p_trade = P2PTradeMutations.accept_p2p_trade
-    prepare_p2p_accept_trade = P2PTradeMutations.prepare_p2p_accept_trade
-    submit_p2p_accept_trade = P2PTradeMutations.submit_p2p_accept_trade
-    mark_p2p_trade_paid = P2PTradeMutations.mark_p2p_trade_paid
-    confirm_p2p_trade_received = P2PTradeMutations.confirm_p2p_trade_received
-    prepare_p2p_mark_paid = P2PTradePrepareMutations.prepare_p2p_mark_paid
-    prepare_p2p_confirm_received = P2PTradePrepareMutations.prepare_p2p_confirm_received
-    # Cancel expired trades
-    prepare_p2p_cancel = P2PTradePrepareMutations.prepare_p2p_cancel
-    cancel_p2p_trade = P2PTradeMutations.cancel_p2p_trade
-    # Dispute open/resolve
-    prepare_p2p_open_dispute = P2PTradePrepareMutations.prepare_p2p_open_dispute
-    submit_p2p_open_dispute = P2PTradeMutations.submit_p2p_open_dispute
-    prepare_p2p_resolve_dispute = P2PTradePrepareMutations.prepare_p2p_resolve_dispute
-    submit_p2p_resolve_dispute = P2PTradeMutations.submit_p2p_resolve_dispute
-    resolve_p2p_dispute_onchain = P2PTradeMutations.resolve_p2p_dispute_onchain
+    # P2P Trade: HTTP GraphQL mutations removed in favor of WebSocket session
+    # Use ws endpoint: /ws/p2p_session to prepare/submit P2P txns
 
 
 __all__ = ['Query', 'Mutation']

@@ -15,6 +15,9 @@ import {
   Platform,
   Keyboard,
   TouchableWithoutFeedback,
+  PermissionsAndroid,
+  Image,
+  ActivityIndicator,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -25,6 +28,8 @@ import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 import { useQuery } from '@apollo/client';
 import { GET_P2P_TRADE } from '../apollo/queries';
 import { p2pSponsoredService } from '../services/p2pSponsoredService';
+import { disputeEvidenceService } from '../services/disputeEvidenceService';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { formatLocalDateTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
@@ -74,6 +79,10 @@ export const ActiveTradeScreen: React.FC = () => {
   const [showDisputeModal, setShowDisputeModal] = useState(false);
   const [disputeReason, setDisputeReason] = useState('');
   const [isSubmittingDispute, setIsSubmittingDispute] = useState(false);
+  const [isUploadingEvidence, setIsUploadingEvidence] = useState(false);
+  const [showEvidenceSheet, setShowEvidenceSheet] = useState(false);
+  const [showVideoGallery, setShowVideoGallery] = useState(false);
+  const [videoItems, setVideoItems] = useState<{ uri: string; thumbUri: string; name?: string; duration?: number }[]>([]);
   
   // Dispute now goes on-chain via prepare/submit using p2pSponsoredService
   
@@ -332,6 +341,76 @@ export const ActiveTradeScreen: React.FC = () => {
       Alert.alert('Error', 'Ocurrió un error al iniciar la disputa. Por favor intenta de nuevo.');
     } finally {
       setIsSubmittingDispute(false);
+    }
+  };
+
+  const requestVideoPermission = async (): Promise<boolean> => {
+    if (Platform.OS !== 'android') return true;
+    try {
+      const sdk = Number(Platform.Version) || 0;
+      const perm = (PermissionsAndroid as any).PERMISSIONS?.READ_MEDIA_VIDEO || PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+      // @ts-ignore
+      const has = await PermissionsAndroid.check(perm);
+      if (has) return true;
+      // @ts-ignore
+      const result = await PermissionsAndroid.request(perm, {
+        title: 'Acceso a videos',
+        message: 'Confío necesita acceso a tus videos para subir la evidencia (grabación de pantalla).',
+        buttonPositive: 'Permitir',
+        buttonNegative: 'Cancelar',
+      });
+      // @ts-ignore
+      return result === PermissionsAndroid.RESULTS.GRANTED;
+    } catch (e) {
+      console.error('[Dispute] Video permission error:', e);
+      return false;
+    }
+  };
+
+  const pickScreenRecordingFromGallery = async () => {
+    try {
+      const allowed = await requestVideoPermission();
+      if (!allowed) {
+        Alert.alert('Permiso requerido', 'Debes permitir acceso a videos para seleccionar tu grabación de pantalla.');
+        return;
+      }
+      // Close the sheet before opening the gallery modal to avoid stacked transparent modals
+      setShowEvidenceSheet(false);
+      const vids = await CameraRoll.getPhotos({ first: 60, assetType: 'Videos' });
+      if (!vids.edges.length) {
+        Alert.alert('Sin videos', 'No se encontraron videos recientes en tu galería. Usa la grabación de pantalla del sistema.');
+        return;
+      }
+      setVideoItems(
+        vids.edges.map(e => ({
+          uri: e.node.image.uri,
+          thumbUri: e.node.image.uri,
+          name: (e.node.image as any)?.filename || 'Video',
+          duration: (e.node.image as any)?.playableDuration || (e.node as any)?.playableDuration || undefined,
+        }))
+      );
+      setShowVideoGallery(true);
+    } catch (e: any) {
+      console.error('[Dispute] pick video error:', e?.message || e);
+      Alert.alert('Error', 'No se pudo abrir la galería de videos.');
+    }
+  };
+
+  const handleSelectVideo = async (uri: string, name?: string) => {
+    setShowVideoGallery(false);
+    setIsUploadingEvidence(true);
+    try {
+      const lower = (name || uri || '').toLowerCase();
+      const contentType = lower.endsWith('.mov') ? 'video/quicktime' : 'video/mp4';
+      const res = await disputeEvidenceService.uploadEvidence(String(trade.id), uri, { contentType });
+      if (!res.success) throw new Error(res.error || 'Fallo al subir la evidencia');
+      Alert.alert('Evidencia subida', 'Tu video fue enviado correctamente para revisión.');
+      setShowEvidenceSheet(false);
+    } catch (e: any) {
+      console.error('[Dispute] upload evidence error:', e?.message || e);
+      Alert.alert('Error', e?.message || 'No se pudo subir la evidencia.');
+    } finally {
+      setIsUploadingEvidence(false);
     }
   };
 
@@ -1097,6 +1176,13 @@ export const ActiveTradeScreen: React.FC = () => {
             <Icon name="message-circle" size={16} color="#0F766E" />
             <Text style={styles.disputeChatButtonText}>💬 Continuar conversación</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.disputeChatButton, { marginTop: 8, backgroundColor: '#DCFCE7', borderColor: '#34D399' }]}
+            onPress={() => setShowEvidenceSheet(true)}
+          >
+            <Icon name="upload" size={16} color="#065F46" />
+            <Text style={[styles.disputeChatButtonText, { color: '#065F46' }]}>⬆️ Subir evidencia (pantalla)</Text>
+          </TouchableOpacity>
         </View>
       )}
       
@@ -1249,6 +1335,79 @@ export const ActiveTradeScreen: React.FC = () => {
       </Modal>
       {/* Global loading overlay for blockchain confirmation */}
       <LoadingOverlay visible={isSubmittingDispute} message="Confirmando disputa en blockchain…" />
+      <LoadingOverlay visible={isUploadingEvidence} message="Subiendo evidencia…" />
+
+      {/* Evidence bottom sheet (simple modal) */}
+      <Modal
+        visible={showEvidenceSheet}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowEvidenceSheet(false)}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Subir evidencia</Text>
+                <TouchableOpacity onPress={() => setShowEvidenceSheet(false)} style={styles.modalCloseButton}>
+                  <Icon name="x" size={24} color="#6B7280" />
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+                <Text style={styles.modalDescription}>
+                  Solo se aceptan grabaciones de pantalla del app del banco/fintech (30–45s, máx. 50MB). Sigue esta lista:
+                </Text>
+                <Text style={styles.stepDescription}>1) Muestra el código de Confío en la pantalla de disputa</Text>
+                <Text style={styles.stepDescription}>2) Abre tu app bancaria y busca la transacción</Text>
+                <Text style={styles.stepDescription}>3) El memo debe incluir el código</Text>
+                <Text style={styles.stepDescription}>4) Haz pull-to-refresh para actualizar</Text>
+                <Text style={styles.stepDescription}>5) Desplázate para mostrar ID/importe/hora</Text>
+                <Text style={styles.stepDescription}>6) Regresa a Confío y sube el video</Text>
+              </ScrollView>
+              <View style={styles.modalActions}>
+                <TouchableOpacity style={styles.modalSubmitButton} onPress={pickScreenRecordingFromGallery}>
+                  <Text style={styles.modalSubmitButtonText}>Seleccionar video de pantalla</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* Simple video gallery modal */}
+      <Modal
+        visible={showVideoGallery}
+        animationType="slide"
+        onRequestClose={() => setShowVideoGallery(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+          <View style={{ padding: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold' }}>Selecciona el video</Text>
+            <TouchableOpacity onPress={() => setShowVideoGallery(false)}>
+              <Icon name="x" size={24} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+            {videoItems.map((item, idx) => (
+              <TouchableOpacity key={idx} onPress={() => handleSelectVideo(item.uri, item.name)} style={{ width: '33.33%', padding: 2 }}>
+                <View>
+                  <Image source={{ uri: item.thumbUri }} style={{ width: '100%', aspectRatio: 1, backgroundColor: '#eee' }} />
+                  <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
+                    <Text style={{ color: '#fff', fontSize: 12 }}>
+                      {item.duration ? `${Math.floor(item.duration)}s` : 'Video'}
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            ))}
+            {videoItems.length === 0 && (
+              <View style={{ padding: 24, alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                <ActivityIndicator />
+              </View>
+            )}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 };
