@@ -338,6 +338,122 @@ def create_business_notification(
     )
 
 
+def create_p2p_dispute_resolution_notifications(
+    *,
+    trade,
+    resolution_type: str,
+    resolution_amount: Optional[str] = None,
+    admin_notes: Optional[str] = None,
+    send_push: bool = True,
+) -> None:
+    """Send dispute resolution notifications to both buyer and seller.
+
+    Args:
+        trade: P2PTrade instance
+        resolution_type: 'REFUND_BUYER' or 'RELEASE_TO_SELLER' (others ignored)
+        resolution_amount: Optional crypto amount string for message context
+        admin_notes: Optional admin notes to append
+        send_push: Whether to send push
+    """
+    try:
+        # Resolve users and business context for both parties
+        buyer_user = getattr(trade, 'buyer_user', None)
+        seller_user = getattr(trade, 'seller_user', None)
+        buyer_business = getattr(trade, 'buyer_business', None)
+        seller_business = getattr(trade, 'seller_business', None)
+
+        # Fallback to first account user for businesses if direct user is missing
+        if not buyer_user and buyer_business:
+            try:
+                acc = buyer_business.accounts.first()
+                buyer_user = acc.user if acc else None
+            except Exception:
+                buyer_user = None
+        if not seller_user and seller_business:
+            try:
+                acc = seller_business.accounts.first()
+                seller_user = acc.user if acc else None
+            except Exception:
+                seller_user = None
+
+        # Basic data
+        amount = resolution_amount or (str(getattr(trade, 'crypto_amount', '') or ''))
+        token_type = ''
+        try:
+            token_type = getattr(trade.offer, 'token_type', '') or ''
+        except Exception:
+            token_type = ''
+
+        data = {
+            'trade_id': str(getattr(trade, 'id', '')),
+            'amount': amount,
+            'token_type': token_type,
+            'resolution_type': resolution_type,
+            'fiat_amount': str(getattr(trade, 'fiat_amount', '') or ''),
+            'fiat_currency': getattr(trade, 'currency_code', '') or getattr(getattr(trade, 'offer', None), 'currency_code', ''),
+        }
+        if admin_notes:
+            data['admin_notes'] = admin_notes
+
+        # Messages
+        title = 'Disputa resuelta'
+        action_url = f"confio://p2p/trade/{data['trade_id']}"
+
+        # Compose per-party messages depending on outcome
+        if resolution_type == 'REFUND_BUYER':
+            buyer_msg = f"Ganaste la disputa: se te reembolsaron {amount} {token_type}."
+            seller_msg = f"Disputa resuelta: los fondos fueron reembolsados al comprador."
+        elif resolution_type == 'RELEASE_TO_SELLER':
+            buyer_msg = f"Disputa resuelta: los fondos fueron liberados al vendedor."
+            seller_msg = f"Ganaste la disputa: se liberaron {amount} {token_type} a tu cuenta."
+        else:
+            # Not a target resolution type; do not send to avoid confusion
+            logger.info(f"Skipping dispute resolution notifications for unsupported type: {resolution_type}")
+            return
+
+        if admin_notes:
+            buyer_msg = f"{buyer_msg}\n\nNotas del administrador: {admin_notes}"
+            seller_msg = f"{seller_msg}\n\nNotas del administrador: {admin_notes}"
+
+        # Send to buyer
+        if buyer_user:
+            try:
+                create_notification(
+                    user=buyer_user,
+                    business=buyer_business,
+                    notification_type=NotificationTypeChoices.P2P_DISPUTE_RESOLVED,
+                    title=title,
+                    message=buyer_msg,
+                    data=data,
+                    related_object_type='P2PTrade',
+                    related_object_id=data['trade_id'],
+                    action_url=action_url,
+                    send_push=send_push,
+                )
+            except Exception:
+                logger.exception("Failed to send buyer dispute resolution notification")
+
+        # Send to seller
+        if seller_user:
+            try:
+                create_notification(
+                    user=seller_user,
+                    business=seller_business,
+                    notification_type=NotificationTypeChoices.P2P_DISPUTE_RESOLVED,
+                    title=title,
+                    message=seller_msg,
+                    data=data,
+                    related_object_type='P2PTrade',
+                    related_object_id=data['trade_id'],
+                    action_url=action_url,
+                    send_push=send_push,
+                )
+            except Exception:
+                logger.exception("Failed to send seller dispute resolution notification")
+
+    except Exception:
+        logger.exception("Error while preparing dispute resolution notifications")
+
 def create_security_notification(
     user: User,
     notification_type: str,
