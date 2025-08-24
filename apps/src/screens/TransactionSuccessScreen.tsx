@@ -64,6 +64,7 @@ export const TransactionSuccessScreen = () => {
   console.log('TransactionSuccessScreen: isOnConfio value:', transactionData.isOnConfio);
 
   const [copied, setCopied] = useState(false);
+  const [showTechnical, setShowTechnical] = useState(false);
 
   // Helper function to format currency for display
   const formatCurrency = (currency: string): string => {
@@ -206,7 +207,7 @@ export const TransactionSuccessScreen = () => {
   };
 
   const handleViewTechnicalDetails = () => {
-    Alert.alert('Detalles Técnicos', 'Función de detalles técnicos en desarrollo');
+    setShowTechnical(true);
   };
 
   const handleGoHome = () => {

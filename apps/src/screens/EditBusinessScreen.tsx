@@ -45,6 +45,7 @@ export const EditBusinessScreen = () => {
   const { userProfile } = useAuth();
   const [updateBusiness] = useMutation(UPDATE_BUSINESS);
   const { refetch: refetchAccounts } = useQuery(GET_USER_ACCOUNTS);
+  const { data: accountsData, loading: accountsLoading } = useQuery(GET_USER_ACCOUNTS, { fetchPolicy: 'cache-and-network' });
 
   const [businessName, setBusinessName] = useState('');
   const [businessCategory, setBusinessCategory] = useState('');
@@ -127,7 +128,26 @@ export const EditBusinessScreen = () => {
     setShowCategoryPicker(false);
   };
 
+  // Determine if current business is verified (from server data)
+  const isBusinessVerified = (() => {
+    const list = accountsData?.userAccounts || [];
+    const currentBizId = activeAccount?.business?.id;
+    const match = list.find((acc: any) => acc.business?.id === currentBizId);
+    return !!match?.business?.isVerified;
+  })();
+
+  const businessVerifiedDate = (() => {
+    const list = accountsData?.userAccounts || [];
+    const currentBizId = activeAccount?.business?.id;
+    const match = list.find((acc: any) => acc.business?.id === currentBizId);
+    return match?.business?.lastVerifiedDate || null;
+  })();
+
   const handleSave = async () => {
+    if (isBusinessVerified) {
+      Alert.alert('No se puede editar', 'Este negocio ya ha sido verificado. No puedes cambiar la información verificada.');
+      return;
+    }
     if (!businessName.trim()) {
       Alert.alert('Error', 'El nombre del negocio es requerido');
       return;
@@ -186,6 +206,65 @@ export const EditBusinessScreen = () => {
     return (
       <View style={styles.container}>
         <Text style={styles.errorText}>Esta pantalla solo está disponible para cuentas de negocio</Text>
+      </View>
+    );
+  }
+
+  // If business is verified, block editing like EditProfileScreen
+  if (accountsLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text>Cargando negocio…</Text>
+      </View>
+    );
+  }
+
+  if (isBusinessVerified) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Icon name="arrow-left" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Editar Negocio</Text>
+          <View style={styles.placeholder} />
+        </View>
+
+        <View style={{ padding: 16, alignItems: 'center' }}>
+          <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: colors.success, justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
+            <Text style={{ color: 'white', fontSize: 28, fontWeight: 'bold' }}>✓</Text>
+          </View>
+          <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 6 }}>Negocio Verificado</Text>
+          <Text style={{ fontSize: 14, color: '#374151', textAlign: 'center' }}>
+            La información verificada del negocio no puede ser modificada.
+          </Text>
+          <View style={{ marginTop: 16, backgroundColor: colors.neutral, borderRadius: 8, padding: 12, alignSelf: 'stretch' }}>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Nombre:</Text>
+              <Text style={styles.infoValue}>{activeAccount?.business?.name || '-'}</Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Categoría:</Text>
+              <Text style={styles.infoValue}>{getCategoryDisplayName(activeAccount?.business?.category || '')}</Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Registro:</Text>
+              <Text style={styles.infoValue}>{activeAccount?.business?.businessRegistrationNumber || '-'}</Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Dirección:</Text>
+              <Text style={styles.infoValue}>{activeAccount?.business?.address || '-'}</Text>
+            </View>
+            {businessVerifiedDate && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Verificado el:</Text>
+                <Text style={styles.infoValue}>
+                  {new Date(businessVerifiedDate).toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
       </View>
     );
   }

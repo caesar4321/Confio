@@ -227,7 +227,7 @@ export const REQUEST_IDENTITY_UPLOAD = gql`
     requestIdentityUpload(part: $part, filename: $filename, contentType: $contentType, sha256: $sha256) {
       success
       error
-      upload { url key method headers expiresIn }
+      upload { url key method headers fields expiresIn }
     }
   }
 `;
@@ -238,18 +238,33 @@ export const SUBMIT_IDENTITY_VERIFICATION_S3 = gql`
     $selfieKey: String!,
     $backKey: String,
     $payoutMethodLabel: String,
-    $payoutProofKey: String
+    $payoutProofKey: String,
+    $verifiedDateOfBirth: Date
+    $businessKey: String
   ) {
     submitIdentityVerificationS3(
       frontKey: $frontKey,
       selfieKey: $selfieKey,
       backKey: $backKey,
       payoutMethodLabel: $payoutMethodLabel,
-      payoutProofKey: $payoutProofKey
+      payoutProofKey: $payoutProofKey,
+      verifiedDateOfBirth: $verifiedDateOfBirth,
+      businessKey: $businessKey
     ) {
       success
       error
       verification { id status }
+    }
+  }
+`;
+
+// Request upgrade to Trader Premium (verification level 2)
+export const REQUEST_PREMIUM_UPGRADE = gql`
+  mutation RequestPremiumUpgrade($reason: String) {
+    requestPremiumUpgrade(reason: $reason) {
+      success
+      error
+      verificationLevel
     }
   }
 `;

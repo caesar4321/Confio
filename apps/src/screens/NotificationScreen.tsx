@@ -80,8 +80,13 @@ export const NotificationScreen = () => {
       }
     }
 
-    // Handle navigation based on notification actionUrl or related object fallback
+    // Handle navigation based on notification type/actionUrl/related object
     const notifType = notification.notificationType;
+    // Verification notifications should go to Verification screen
+    if (notifType === 'ACCOUNT_VERIFIED' || notifType === 'SECURITY_ALERT') {
+      navigation.navigate('Verification');
+      return;
+    }
     let baseTxnType: any = 'send';
     if (notifType === 'INVITE_RECEIVED' || notifType === 'SEND_RECEIVED') baseTxnType = 'received';
     if (notifType === 'PAYMENT_RECEIVED' || notifType === 'PAYMENT_SENT' || notifType === 'INVOICE_PAID') baseTxnType = 'payment';
@@ -95,6 +100,10 @@ export const NotificationScreen = () => {
     if (notification.actionUrl) {
       // Parse deep link and navigate accordingly
       const url = notification.actionUrl;
+      if (url.includes('verification')) {
+        navigation.navigate('Verification');
+        return;
+      }
       if (url.includes('p2p/trade/')) {
         const tradeId = url.split('p2p/trade/')[1];
         navigation.navigate('ActiveTrade', { 
@@ -331,6 +340,12 @@ export const NotificationScreen = () => {
 
       // Parse data blob if available
       const fullData: any = parsedData;
+
+      // Identity verification related notifications -> Verification screen
+      if (type === 'IdentityVerification') {
+        navigation.navigate('Verification');
+        return;
+      }
 
       // If this is a SendTransaction fallback, construct AccountDetail-like payload
       if (type === 'SendTransaction' || notifType.startsWith('SEND_')) {

@@ -717,6 +717,57 @@ class P2PEscrow(SoftDeleteModel):
         return self
 
 
+class PremiumUpgradeRequest(SoftDeleteModel):
+    """Represents a request to upgrade to Trader Premium (verification level 2).
+
+    Requests can originate from a personal user context or a business context.
+    Admins can approve or reject; on approval, the stats.verification_level should be set to 2.
+    """
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending Review'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+
+    # Context
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='premium_upgrade_requests',
+        null=True,
+        blank=True,
+        help_text="Request in personal account context"
+    )
+    business = models.ForeignKey(
+        'users.Business',
+        on_delete=models.CASCADE,
+        related_name='premium_upgrade_requests',
+        null=True,
+        blank=True,
+        help_text="Request in business account context"
+    )
+
+    # Metadata
+    reason = models.TextField(blank=True)
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='pending')
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_premium_requests'
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        ctx = self.business.name if self.business else (self.user.username if self.user else 'Unknown')
+        return f"PremiumUpgradeRequest({ctx}) - {self.status}"
+
 class P2PTradeConfirmation(SoftDeleteModel):
     """
     Track confirmations for each step of a P2P trade.

@@ -1180,7 +1180,8 @@ class AlgorandService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${tokenData.accessToken}`
+          // Use GraphQL server's expected JWT scheme
+          'Authorization': `JWT ${tokenData.accessToken}`
         },
         body: JSON.stringify({
           query: `
@@ -1254,7 +1255,8 @@ class AlgorandService {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${tokenData.accessToken}`
+          // Use GraphQL server's expected JWT scheme
+          'Authorization': `JWT ${tokenData.accessToken}`
         },
         body: JSON.stringify({
           query: `
