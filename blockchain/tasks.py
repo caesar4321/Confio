@@ -17,6 +17,8 @@ from notifications.utils import create_notification
 from notifications.models import NotificationType as NotificationTypeChoices
 from send.models import SendTransaction
 from payments.models import PaymentTransaction
+from conversion.models import Conversion
+from p2p_exchange.models import P2PEscrow, P2PTrade
 from send.models import SendTransaction
 from notifications.models import NotificationType as NotifType
 
@@ -806,6 +808,234 @@ def scan_outbound_confirmations(max_batch: int = 50):
                         )
                 except Exception as ne:
                     logger.warning(f"Notification error for SendTransaction {s.id}: {ne}")
+                processed += 1
+
+        # P2P Escrow creations (escrowed funds)
+        escrows = P2PEscrow.objects.filter(
+            is_escrowed=False,
+            escrow_transaction_hash__isnull=False,
+        ).exclude(escrow_transaction_hash='')[:max_batch]
+        for e in escrows:
+            cr, pe = check_tx(e.escrow_transaction_hash)
+            if pe:
+                # No explicit failure field; log and continue
+                logger.warning(f"P2P escrow tx pool error for trade {getattr(e.trade, 'id', None)}: {pe}")
+                processed += 1
+                continue
+            if cr > 0:
+                try:
+                    from django.utils import timezone as dj_tz
+                    e.is_escrowed = True
+                    if not e.escrowed_at:
+                        e.escrowed_at = dj_tz.now()
+                    e.save(update_fields=['is_escrowed', 'escrowed_at', 'updated_at'])
+                except Exception as ue:
+                    logger.warning(f"Failed to mark P2P escrow confirmed for trade {getattr(e.trade, 'id', None)}: {ue}")
+                processed += 1
+
+        # P2P releases (normal release or refund/dispute)
+        releases = P2PEscrow.objects.filter(
+            is_released=False,
+            release_transaction_hash__isnull=False,
+        ).exclude(release_transaction_hash='')[:max_batch]
+        for e in releases:
+            cr, pe = check_tx(e.release_transaction_hash)
+            if pe:
+                logger.warning(f"P2P release tx pool error for trade {getattr(e.trade, 'id', None)}: {pe}")
+                processed += 1
+                continue
+            if cr > 0:
+                try:
+                    from django.utils import timezone as dj_tz
+                    tr = e.trade
+                    # Mark escrow released
+                    e.is_released = True
+                    if not e.release_amount:
+                        e.release_amount = e.escrow_amount
+                    if not e.release_type:
+                        e.release_type = 'NORMAL'
+                    e.released_at = dj_tz.now()
+                    e.save(update_fields=['is_released', 'release_amount', 'release_type', 'released_at', 'updated_at'])
+
+                    # Update trade status and send notifications depending on release_type
+                    if tr:
+                        from notifications.utils import create_p2p_notification
+                        from notifications.models import NotificationType as NotificationTypeChoices
+                        buyer_user = tr.buyer_user if tr.buyer_user else (tr.buyer_business.accounts.first().user if tr.buyer_business else None)
+                        seller_user = tr.seller_user if tr.seller_user else (tr.seller_business.accounts.first().user if tr.seller_business else None)
+
+                        if e.release_type == 'NORMAL':
+                            # Buyer received crypto
+                            try:
+                                tr.status = 'CRYPTO_RELEASED'
+                                tr.completed_at = dj_tz.now()
+                                tr.save(update_fields=['status', 'completed_at', 'updated_at'])
+                            except Exception:
+                                pass
+                            try:
+                                base = {
+                                    'amount': str(tr.crypto_amount),
+                                    'token_type': tr.offer.token_type if tr.offer else 'CUSD',
+                                    'trade_id': str(tr.id),
+                                    'fiat_amount': str(tr.fiat_amount),
+                                    'fiat_currency': tr.offer.currency_code if tr.offer else '',
+                                    'payment_method': tr.payment_method.name if getattr(tr, 'payment_method', None) else '',
+                                }
+                                if buyer_user:
+                                    create_p2p_notification(
+                                        notification_type=NotificationTypeChoices.P2P_CRYPTO_RELEASED,
+                                        user=buyer_user,
+                                        business=tr.buyer_business,
+                                        trade_id=str(tr.id),
+                                        amount=str(tr.crypto_amount),
+                                        token_type=base['token_type'],
+                                        counterparty_name=tr.seller_display_name,
+                                        additional_data=base,
+                                    )
+                                if seller_user:
+                                    create_p2p_notification(
+                                        notification_type=NotificationTypeChoices.P2P_CRYPTO_RELEASED,
+                                        user=seller_user,
+                                        business=tr.seller_business,
+                                        trade_id=str(tr.id),
+                                        amount=str(tr.crypto_amount),
+                                        token_type=base['token_type'],
+                                        counterparty_name=tr.buyer_display_name,
+                                        additional_data=base,
+                                    )
+                            except Exception as ne:
+                                logger.warning(f"P2P NORMAL release notification error for trade {getattr(tr, 'id', None)}: {ne}")
+
+                        elif e.release_type == 'REFUND':
+                            # Trade cancelled/refunded to buyer
+                            try:
+                                tr.status = 'CANCELLED'
+                                tr.save(update_fields=['status', 'updated_at'])
+                            except Exception:
+                                pass
+                            try:
+                                extra = {
+                                    'trade_id': str(tr.id),
+                                    'release_type': 'REFUND',
+                                    'refund_amount': str(e.release_amount or e.escrow_amount),
+                                    'fiat_amount': str(tr.fiat_amount),
+                                    'fiat_currency': tr.offer.currency_code if tr.offer else '',
+                                }
+                                if buyer_user:
+                                    create_p2p_notification(
+                                        notification_type=NotificationTypeChoices.P2P_TRADE_CANCELLED,
+                                        user=buyer_user,
+                                        business=tr.buyer_business,
+                                        trade_id=str(tr.id),
+                                        amount=str(tr.crypto_amount),
+                                        token_type=(tr.offer.token_type if tr.offer else 'CUSD'),
+                                        counterparty_name=tr.seller_display_name,
+                                        additional_data=extra,
+                                    )
+                                if seller_user:
+                                    create_p2p_notification(
+                                        notification_type=NotificationTypeChoices.P2P_TRADE_CANCELLED,
+                                        user=seller_user,
+                                        business=tr.seller_business,
+                                        trade_id=str(tr.id),
+                                        amount=str(tr.crypto_amount),
+                                        token_type=(tr.offer.token_type if tr.offer else 'CUSD'),
+                                        counterparty_name=tr.buyer_display_name,
+                                        additional_data=extra,
+                                    )
+                            except Exception as ne:
+                                logger.warning(f"P2P REFUND notification error for trade {getattr(tr, 'id', None)}: {ne}")
+
+                        else:
+                            # DISPUTE_RELEASE or PARTIAL_REFUND → dispute resolved
+                            try:
+                                tr.status = 'COMPLETED'
+                                tr.completed_at = dj_tz.now()
+                                tr.save(update_fields=['status', 'completed_at', 'updated_at'])
+                            except Exception:
+                                pass
+                            try:
+                                details = {
+                                    'trade_id': str(tr.id),
+                                    'release_type': e.release_type,
+                                    'refund_amount': str(e.release_amount or ''),
+                                    'fiat_amount': str(tr.fiat_amount),
+                                    'fiat_currency': tr.offer.currency_code if tr.offer else '',
+                                }
+                                if buyer_user:
+                                    create_p2p_notification(
+                                        notification_type=NotificationTypeChoices.P2P_TRADE_DISPUTED,
+                                        user=buyer_user,
+                                        business=tr.buyer_business,
+                                        trade_id=str(tr.id),
+                                        amount=str(tr.crypto_amount),
+                                        token_type=(tr.offer.token_type if tr.offer else 'CUSD'),
+                                        counterparty_name=tr.seller_display_name,
+                                        additional_data=details,
+                                    )
+                                if seller_user:
+                                    create_p2p_notification(
+                                        notification_type=NotificationTypeChoices.P2P_TRADE_DISPUTED,
+                                        user=seller_user,
+                                        business=tr.seller_business,
+                                        trade_id=str(tr.id),
+                                        amount=str(tr.crypto_amount),
+                                        token_type=(tr.offer.token_type if tr.offer else 'CUSD'),
+                                        counterparty_name=tr.buyer_display_name,
+                                        additional_data=details,
+                                    )
+                            except Exception as ne:
+                                logger.warning(f"P2P DISPUTE notification error for trade {getattr(tr, 'id', None)}: {ne}")
+                except Exception as ue:
+                    logger.warning(f"Failed to mark P2P release confirmed for trade {getattr(e.trade, 'id', None)}: {ue}")
+                processed += 1
+
+        # Conversions (cUSD <> USDC)
+        conv_qs = Conversion.objects.filter(status='SUBMITTED').exclude(to_transaction_hash__isnull=True).exclude(to_transaction_hash='')[:max_batch]
+        for c in conv_qs:
+            cr, pe = check_tx(c.to_transaction_hash or '')
+            if pe:
+                c.status = 'FAILED'
+                c.error_message = str(pe)
+                c.save(update_fields=['status', 'error_message', 'updated_at'])
+                processed += 1
+                continue
+            if cr > 0:
+                from django.utils import timezone as dj_tz
+                c.status = 'COMPLETED'
+                c.completed_at = dj_tz.now()
+                c.save(update_fields=['status', 'completed_at', 'updated_at'])
+                # Notification: conversion completed
+                try:
+                    from notifications.utils import create_transaction_notification
+                    # Determine tokens and direction
+                    if c.conversion_type == 'usdc_to_cusd':
+                        from_token, to_token = 'USDC', 'cUSD'
+                        amount_from = str(c.from_amount)
+                        amount_to = str(c.to_amount)
+                    else:
+                        from_token, to_token = 'cUSD', 'USDC'
+                        amount_from = str(c.from_amount)
+                        amount_to = str(c.to_amount)
+                    create_transaction_notification(
+                        transaction_type='conversion',
+                        sender_user=c.actor_user,
+                        business=c.actor_business,
+                        amount=amount_to,
+                        token_type=to_token,
+                        transaction_id=str(c.id),
+                        transaction_model='Conversion',
+                        additional_data={
+                            'from_amount': amount_from,
+                            'from_token': from_token,
+                            'to_amount': amount_to,
+                            'to_token': to_token,
+                            'transaction_hash': c.to_transaction_hash,
+                            'conversion_type': c.conversion_type,
+                        },
+                    )
+                except Exception as ne:
+                    logger.warning(f"Conversion notification error for Conversion {c.id}: {ne}")
                 processed += 1
 
         logger.info(f"[OutboundScan] processed={processed} items")

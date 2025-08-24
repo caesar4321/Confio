@@ -66,6 +66,8 @@ interface USDCTransactionRecord {
   formattedTitle: string;
   iconName: string;
   iconColor: string;
+  signedAmount?: string;
+  signedSecondaryAmount?: string;
 }
 
 const ITEMS_PER_PAGE = 20;
@@ -254,18 +256,26 @@ export const USDCHistoryScreen = () => {
             <Text style={styles.itemDate}>{formatDate(item.createdAt)}</Text>
           </View>
           <View style={styles.amountContainer}>
-          {item.transactionType.toLowerCase() === 'conversion' && item.secondaryAmount ? (
-            <>
+            {item.transactionType.toLowerCase() === 'conversion' ? (
+              <>
+                {/* Primary (USDC) with sign from backend */}
+                <Text style={(item.signedAmount || '').trim().startsWith('-') ? styles.fromAmount : styles.toAmount}>
+                  {(item.signedAmount || `${item.amount}`).trim()} {item.currency}
+                </Text>
+                {/* Secondary (cUSD) with sign from backend */}
+                {item.secondaryCurrency ? (
+                  <Text style={(item.signedSecondaryAmount || '').trim().startsWith('-') ? styles.fromAmount : styles.toAmount}>
+                    {(item.signedSecondaryAmount || `${item.secondaryAmount || ''}`).trim()} {item.secondaryCurrency}
+                  </Text>
+                ) : null}
+              </>
+            ) : item.transactionType.toLowerCase() === 'deposit' ? (
+              <Text style={styles.toAmount}>+{item.amount} {item.currency}</Text>
+            ) : (
               <Text style={styles.fromAmount}>-{item.amount} {item.currency}</Text>
-              <Text style={styles.toAmount}>+{item.secondaryAmount} {item.secondaryCurrency}</Text>
-            </>
-          ) : item.transactionType.toLowerCase() === 'deposit' ? (
-            <Text style={styles.toAmount}>+{item.amount} {item.currency}</Text>
-          ) : (
-            <Text style={styles.fromAmount}>-{item.amount} {item.currency}</Text>
-          )}
+            )}
+          </View>
         </View>
-      </View>
       
       <View style={styles.itemDetails}>
         {item.transactionType.toLowerCase() === 'conversion' && item.exchangeRate && (

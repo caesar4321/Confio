@@ -462,9 +462,20 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
               console.error('Failed to sync token to business context before navigation:', syncErr);
             }
 
-            // Only now mark authenticated and go to Main
+            // Mark authenticated and go to Main immediately to avoid splash hanging
             setIsAuthenticated(true);
             navigateToScreen('Main');
+
+            // Fire-and-forget prefetch of accounts to warm ProfileMenu
+            (async () => {
+              try {
+                const { GET_USER_ACCOUNTS } = await import('../apollo/queries');
+                await apolloClient.query({ query: GET_USER_ACCOUNTS, fetchPolicy: 'network-only' });
+                console.log('Prefetched userAccounts after navigating to Main');
+              } catch (prefetchErr) {
+                console.warn('Failed to prefetch userAccounts (post-nav):', prefetchErr);
+              }
+            })();
           } else {
             console.log('Invalid token structure');
             setIsAuthenticated(false);

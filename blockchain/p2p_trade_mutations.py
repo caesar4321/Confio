@@ -245,6 +245,24 @@ class PrepareP2PCreateTrade(graphene.Mutation):
             logger.info('[P2P Create] Env check: app_id=%s sponsor=%s...', builder.app_id, (builder.sponsor_address or '')[:8])
         except Exception:
             pass
+        # Additional idempotency: if we recently submitted an escrow tx for this trade, short-circuit
+        try:
+            tr = P2PTrade.objects.filter(id=trade_id).select_related('escrow').first()
+            if tr and getattr(tr, 'escrow', None):
+                esc = tr.escrow
+                if getattr(esc, 'escrow_transaction_hash', ''):
+                    # If a submit already occurred (even if not yet confirmed), avoid returning another build
+                    return P2PPreparedGroup(
+                        success=True,
+                        error=None,
+                        user_transactions=[],
+                        sponsor_transactions=[],
+                        group_id=None,
+                        trade_id=trade_id,
+                    )
+        except Exception:
+            pass
+
         res = builder.build_create_trade(acct.algorand_address, asset_type, amount_u, trade_id)
         if not res.success:
             return P2PPreparedGroup(success=False, error=res.error)
@@ -406,19 +424,17 @@ class SubmitP2PCreateTrade(graphene.Mutation):
             txid = algod_client.send_transactions(ordered)
             # Prefer the last transaction's txid (AppCall is built last by the builder)
             ref_txid = ordered[-1].get_txid()
-            transaction.wait_for_confirmation(algod_client, ref_txid, 8)
-            # Best-effort: mark escrow as funded/started on the trade
+
+            # Do NOT wait for confirmation here. Mark as submitted and return immediately.
+            # Celery scan_outbound_confirmations will confirm and update escrow+notifications.
             try:
                 trade = P2PTrade.objects.filter(id=trade_id).first()
-                if trade and hasattr(trade, 'escrow') and trade.escrow and not trade.escrow.is_escrowed:
+                if trade and hasattr(trade, 'escrow') and trade.escrow:
                     escrow = trade.escrow
-                    escrow.is_escrowed = True
-                    escrow.escrow_transaction_hash = ref_txid
-                    escrow.escrowed_at = timezone.now()
-                    escrow.save(update_fields=['is_escrowed', 'escrow_transaction_hash', 'escrowed_at', 'updated_at'])
-                    # Keep trade in PENDING until seller shares payment details
-            except Exception as _:
-                # Do not fail the mutation if local bookkeeping fails
+                    if not escrow.escrow_transaction_hash:
+                        escrow.escrow_transaction_hash = ref_txid
+                        escrow.save(update_fields=['escrow_transaction_hash', 'updated_at'])
+            except Exception:
                 pass
             return cls(success=True, txid=ref_txid)
         except Exception as e:
@@ -681,7 +697,7 @@ class MarkP2PTradePaid(graphene.Mutation):
             stx0 = tx.sign(sk)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             txid = algod_client.send_transactions([stx0, user_stx])
-            transaction.wait_for_confirmation(algod_client, user_stx.get_txid(), 8)
+            # Do not wait; respond immediately. Celery will confirm and extend expiry/notify.
             ref_txid = user_stx.get_txid()
         except Exception as e:
             return cls(success=False, error=str(e))
@@ -759,110 +775,21 @@ class ConfirmP2PTradeReceived(graphene.Mutation):
             stx0 = tx.sign(sk)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             txid = algod_client.send_transactions([stx0, user_stx])
-            # Wait for the AppCall confirmation (user_stx is the AppCall)
+            # Do not wait for confirmation. Record tx hash for Celery to confirm, respond immediately.
             ref_txid = user_stx.get_txid()
-            transaction.wait_for_confirmation(algod_client, ref_txid, 8)
-
-            # Reflect CRYPTO_RELEASED in DB, update escrow bookkeeping, and broadcast
             try:
-                from django.utils import timezone
                 trade = P2PTrade.objects.filter(id=trade_id).select_related('escrow').first()
-                if trade:
-                    # Update trade status and completion time
-                    trade.status = 'CRYPTO_RELEASED'
-                    trade.completed_at = timezone.now()
-                    trade.save(update_fields=['status', 'completed_at', 'updated_at'])
-
-                    # Update escrow bookkeeping if present
-                    try:
-                        escrow = getattr(trade, 'escrow', None)
-                        if escrow and escrow.is_escrowed and not escrow.is_released:
-                            escrow.is_released = True
-                            escrow.release_type = 'NORMAL'
-                            escrow.release_amount = escrow.escrow_amount
-                            escrow.release_transaction_hash = ref_txid
-                            escrow.released_at = timezone.now()
-                            escrow.save(update_fields=[
-                                'is_released', 'release_type', 'release_amount',
-                                'release_transaction_hash', 'released_at', 'updated_at'
-                            ])
-                    except Exception:
-                        # Do not fail the mutation if escrow update bookkeeping fails
-                        pass
-
-                    # Broadcast to trade chat room so clients can react immediately
-                    try:
-                        channel_layer = get_channel_layer()
-                        room_group_name = f'trade_chat_{trade.id}'
-                        async_to_sync(channel_layer.group_send)(
-                            room_group_name,
-                            {
-                                'type': 'trade_status_update',
-                                'status': 'CRYPTO_RELEASED',
-                                'updated_by': str(getattr(info.context.user, 'id', 'system')),
-                                'txid': ref_txid,
-                            },
-                        )
-                    except Exception:
-                        pass
-
-                    # Send success notifications to both parties
-                    try:
-                        from notifications.utils import create_p2p_notification
-                        from notifications.models import NotificationType as NotificationTypeChoices
-
-                        buyer_user = trade.buyer_user if trade.buyer_user else (trade.buyer_business.accounts.first().user if trade.buyer_business else None)
-                        seller_user = trade.seller_user if trade.seller_user else (trade.seller_business.accounts.first().user if trade.seller_business else None)
-                        notification_data = {
-                            'amount': str(trade.crypto_amount),
-                            'token_type': trade.offer.token_type if trade.offer else 'CUSD',
-                            'trade_id': str(trade.id),
-                            'counterparty_name': trade.seller_display_name if buyer_user else trade.buyer_display_name,
-                            'fiat_amount': str(trade.fiat_amount),
-                            'fiat_currency': trade.offer.currency_code if trade.offer else '',
-                            'payment_method': trade.payment_method.name if getattr(trade, 'payment_method', None) else '',
-                            'trader_name': trade.seller_display_name,
-                            'counterparty_phone': trade.buyer_user.phone_number if trade.buyer_user else None,
-                        }
-                        # Notify buyer that crypto was released
-                        if buyer_user:
-                            create_p2p_notification(
-                                notification_type=NotificationTypeChoices.P2P_CRYPTO_RELEASED,
-                                user=buyer_user,
-                                business=trade.buyer_business,
-                                trade_id=str(trade.id),
-                                amount=str(trade.crypto_amount),
-                                token_type=(trade.offer.token_type if trade.offer else 'CUSD'),
-                                counterparty_name=trade.seller_display_name,
-                                additional_data=notification_data,
-                            )
-                        # Optionally notify seller as well
-                        if seller_user:
-                            create_p2p_notification(
-                                notification_type=NotificationTypeChoices.P2P_CRYPTO_RELEASED,
-                                user=seller_user,
-                                business=trade.seller_business,
-                                trade_id=str(trade.id),
-                                amount=str(trade.crypto_amount),
-                                token_type=(trade.offer.token_type if trade.offer else 'CUSD'),
-                                counterparty_name=trade.buyer_display_name,
-                                additional_data=notification_data,
-                            )
-                    except Exception:
-                        pass
-            except Exception:
-                # Non-fatal if local DB bookkeeping fails
-                pass
-
-            # Ensure unified transaction row exists/updated for this P2P exchange
-            try:
-                from users.signals import create_unified_transaction_from_p2p_trade
-                trade_obj = P2PTrade.objects.filter(id=trade_id).first()
-                if trade_obj:
-                    create_unified_transaction_from_p2p_trade(trade_obj)
+                if trade and getattr(trade, 'escrow', None):
+                    escrow = trade.escrow
+                    escrow.release_transaction_hash = ref_txid
+                    # Hint Celery about the nature of release
+                    if not escrow.release_type:
+                        escrow.release_type = 'NORMAL'
+                    if not escrow.release_amount:
+                        escrow.release_amount = escrow.escrow_amount
+                    escrow.save(update_fields=['release_transaction_hash', 'release_type', 'release_amount', 'updated_at'])
             except Exception:
                 pass
-
             return cls(success=True, txid=ref_txid)
         except Exception as e:
             return cls(success=False, error=str(e))
@@ -973,8 +900,7 @@ class SubmitP2pAcceptTrade(graphene.Mutation):
             user_stx = transaction.SignedTransaction.undictify(user_dict)
 
             txid = algod_client.send_transactions([stx0, user_stx])
-            # Wait for confirmation
-            transaction.wait_for_confirmation(algod_client, user_stx.get_txid(), 8)
+            # Do not wait; respond immediately. Celery confirms and updates notifications.
             ref_txid = user_stx.get_txid()
         except Exception as e:
             return cls(success=False, error=str(e))
@@ -1650,38 +1576,17 @@ class SubmitP2PResolveDispute(graphene.Mutation):
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             txid = algod_client.send_transactions([stx0, user_stx])
             ref_txid = user_stx.get_txid()
-            transaction.wait_for_confirmation(algod_client, ref_txid, 8)
-
-            # Reflect resolution locally (best-effort)
+            # Do not wait for confirmation; record tx and return. Celery will confirm and update state/notifications.
             try:
                 trade = P2PTrade.objects.filter(id=trade_id).select_related('escrow').first()
-                if trade:
-                    # If escrow exists, mark as released
-                    try:
-                        escrow = getattr(trade, 'escrow', None)
-                        if escrow and escrow.is_escrowed and not escrow.is_released:
-                            escrow.is_released = True
-                            # Do not guess winner here; just mark disputed release
-                            escrow.release_type = 'DISPUTE_RELEASE'
-                            escrow.release_amount = escrow.escrow_amount
-                            escrow.release_transaction_hash = ref_txid
-                            escrow.released_at = timezone.now()
-                            escrow.save(update_fields=['is_released', 'release_type', 'release_amount', 'release_transaction_hash', 'released_at', 'updated_at'])
-                    except Exception:
-                        pass
-                    # Trade terminal status will be updated by the admin DB flow as well
-                    trade.updated_at = timezone.now()
-                    trade.save(update_fields=['updated_at'])
-                    try:
-                        from p2p_exchange.models import P2PMessage
-                        P2PMessage.objects.create(
-                            trade=trade,
-                            message='✅ Disputa resuelta en cadena',
-                            sender_type='system',
-                            message_type='system',
-                        )
-                    except Exception:
-                        pass
+                if trade and getattr(trade, 'escrow', None):
+                    escrow = trade.escrow
+                    escrow.release_transaction_hash = ref_txid
+                    if not escrow.release_type:
+                        escrow.release_type = 'DISPUTE_RELEASE'
+                    if not escrow.release_amount:
+                        escrow.release_amount = escrow.escrow_amount
+                    escrow.save(update_fields=['release_transaction_hash', 'release_type', 'release_amount', 'updated_at'])
             except Exception:
                 pass
 

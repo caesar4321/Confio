@@ -23,6 +23,7 @@ from .models import (
 )
 from .default_payment_methods import get_payment_methods_for_country
 from security.s3_utils import generate_presigned_put, public_s3_url, build_s3_key
+from django.conf import settings
 from security.utils import graphql_require_kyc, graphql_require_aml, perform_aml_check
 
 User = get_user_model()
@@ -1390,12 +1391,8 @@ class CreateP2PTrade(graphene.Mutation):
                 is_released=False
             )
             
-            # TODO: In production, initiate blockchain escrow transaction here
-            # and update is_escrowed=True when blockchain confirms
-            # For now, we'll simulate this by setting it to True immediately
-            escrow.is_escrowed = True
-            escrow.escrowed_at = timezone.now()
-            escrow.escrow_transaction_hash = f"simulated_tx_hash_{trade.id}"
+            # Escrow will be funded via on-chain transaction submitted by the client
+            # through WebSocket (p2p_session). We do not mark as escrowed here.
             escrow.save()
 
             # No available amount tracking; removed
@@ -2254,6 +2251,7 @@ class PresignedUploadInfo(graphene.ObjectType):
     method = graphene.String()
     headers = graphene.JSONString()
     expires_in = graphene.Int()
+    fields = graphene.JSONString()  # For presigned POST
 
 
 class RequestDisputeEvidenceUpload(graphene.Mutation):
@@ -2296,13 +2294,28 @@ class RequestDisputeEvidenceUpload(graphene.Mutation):
             }
             if sha256:
                 metadata['sha256'] = sha256
-            presigned = generate_presigned_put(key=key, content_type=content_type, metadata=metadata)
+            dispute_bucket = getattr(settings, 'AWS_DISPUTE_BUCKET', None)
+            # Prefer presigned POST for mobile-friendliness; client can also handle PUT if needed
+            try:
+                from security.s3_utils import generate_presigned_post
+                # Enforce max 200MB at S3 level
+                max_bytes = 200 * 1024 * 1024
+                presigned = generate_presigned_post(
+                    key=key,
+                    content_type=content_type,
+                    metadata=metadata,
+                    bucket=dispute_bucket,
+                    conditions=[["content-length-range", 0, max_bytes]],
+                )
+            except Exception:
+                presigned = generate_presigned_put(key=key, content_type=content_type, metadata=metadata, bucket=dispute_bucket)
             return RequestDisputeEvidenceUpload(
                 upload=PresignedUploadInfo(
                     url=presigned['url'],
                     key=presigned['key'],
                     method=presigned['method'],
-                    headers=presigned['headers'],
+                    headers=presigned.get('headers'),
+                    fields=presigned.get('fields'),
                     expires_in=presigned['expires_in'],
                 ),
                 success=True,
@@ -2350,7 +2363,39 @@ class AttachDisputeEvidence(graphene.Mutation):
                 priority=2,
             )
 
-        url = public_s3_url(key)
+        # Validate S3 object in dispute bucket before attaching
+        dispute_bucket = getattr(settings, 'AWS_DISPUTE_BUCKET', None)
+        try:
+            from security.s3_utils import head_object
+            head = head_object(key=key, bucket=dispute_bucket)
+        except Exception as e:
+            return AttachDisputeEvidence(dispute=None, success=False, error=f"Unable to read evidence object: {e}")
+
+        # Constraints: content type and size
+        allowed_types = ['video/mp4', 'video/quicktime']
+        if (head.get('content_type') or '') not in allowed_types:
+            return AttachDisputeEvidence(dispute=None, success=False, error="Unsupported content type; only screen recordings (mp4/mov) are accepted")
+        max_bytes = 200 * 1024 * 1024
+        if (head.get('content_length') or 0) > max_bytes:
+            return AttachDisputeEvidence(dispute=None, success=False, error="File too large; max 200MB")
+
+        # Require that object metadata matches trade and uploader
+        md = head.get('metadata') or {}
+        if md.get('trade-id') != str(trade_id):
+            return AttachDisputeEvidence(dispute=None, success=False, error="Evidence does not match this trade")
+        if md.get('uploader-id') != str(user.id):
+            return AttachDisputeEvidence(dispute=None, success=False, error="Evidence uploader mismatch")
+        # If client provided sha256, ensure it matches metadata (if present)
+        if sha256 and md.get('sha256') and md.get('sha256') != sha256:
+            return AttachDisputeEvidence(dispute=None, success=False, error="Checksum mismatch for uploaded file")
+
+        # Optional prefix check for key
+        expected_prefix = f"{getattr(settings, 'AWS_S3_DISPUTE_PREFIX', 'disputes/')}{trade_id}/"
+        if not str(key).startswith(expected_prefix):
+            return AttachDisputeEvidence(dispute=None, success=False, error="Invalid key for dispute evidence")
+
+        # Build URL pointing to the dispute bucket
+        url = public_s3_url(key, bucket=dispute_bucket)
         evidence = list(dispute.evidence_urls or [])
         evidence.append(url)
         dispute.evidence_urls = evidence

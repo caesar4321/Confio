@@ -6,14 +6,17 @@ import boto3
 from botocore.client import Config
 from django.conf import settings
 
-def _get_bucket() -> str:
-    """Resolve the verification bucket (required)."""
-    return getattr(settings, 'AWS_VERIFICATION_BUCKET', None)
+def _resolve_bucket(explicit_bucket: Optional[str] = None) -> str:
+    """Resolve target S3 bucket.
 
+    Priority: explicit argument > AWS_VERIFICATION_BUCKET (default).
+    """
+    bucket = explicit_bucket or getattr(settings, 'AWS_VERIFICATION_BUCKET', None)
+    return bucket
 
-def _ensure_bucket():
-    if not _get_bucket():
-        raise ValueError("AWS_VERIFICATION_BUCKET is not configured")
+def _ensure_bucket(bucket: Optional[str] = None):
+    if not _resolve_bucket(bucket):
+        raise ValueError("S3 bucket is not configured (missing AWS_VERIFICATION_BUCKET or explicit bucket)")
 
 
 def build_s3_key(prefix: str, filename_hint: str) -> str:
@@ -35,12 +38,13 @@ def generate_presigned_put(
     content_type: str,
     expires_in_seconds: int = 900,
     metadata: Optional[Dict[str, str]] = None,
+    bucket: Optional[str] = None,
 ) -> Dict[str, str]:
     """Generate a presigned URL for S3 PUT uploads.
 
     Returns a dict with url, method, headers, key and bucket.
     """
-    _ensure_bucket()
+    _ensure_bucket(bucket)
 
     # Build client with optional explicit credentials
     # Ensure we sign against the correct regional endpoint to avoid
@@ -60,8 +64,10 @@ def generate_presigned_put(
         })
     s3 = boto3.client('s3', **params)
 
+    target_bucket = _resolve_bucket(bucket)
+
     extra_params = {
-        'Bucket': _get_bucket(),
+        'Bucket': target_bucket,
         'Key': key,
         'ContentType': content_type,
     }
@@ -85,7 +91,7 @@ def generate_presigned_put(
             headers[f'x-amz-meta-{k}'] = str(v)
 
     return {
-        'bucket': _get_bucket(),
+        'bucket': target_bucket,
         'key': key,
         'url': url,
         'method': 'PUT',
@@ -94,21 +100,21 @@ def generate_presigned_put(
     }
 
 
-def public_s3_url(key: str) -> str:
+def public_s3_url(key: str, bucket: Optional[str] = None) -> str:
     """Return a direct HTTPS URL for the object (assuming public or signed retrieval elsewhere)."""
     region = settings.AWS_S3_REGION or 'us-east-1'
-    bucket = _get_bucket()
+    bucket = _resolve_bucket(bucket)
     if region == 'us-east-1':
         return f"https://{bucket}.s3.amazonaws.com/{key}"
     return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
 
-def generate_presigned_get(*, key: str, expires_in_seconds: int = 300) -> str:
+def generate_presigned_get(*, key: str, expires_in_seconds: int = 300, bucket: Optional[str] = None) -> str:
     """Generate a short-lived presigned GET URL to view/download an object.
 
     Used in admin to securely preview private verification files without
     making the bucket public.
     """
-    _ensure_bucket()
+    _ensure_bucket(bucket)
 
     region = settings.AWS_S3_REGION or 'us-east-1'
     endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
@@ -124,9 +130,11 @@ def generate_presigned_get(*, key: str, expires_in_seconds: int = 300) -> str:
         })
     s3 = boto3.client('s3', **params)
 
+    target_bucket = _resolve_bucket(bucket)
+
     return s3.generate_presigned_url(
         ClientMethod='get_object',
-        Params={'Bucket': _get_bucket(), 'Key': key},
+        Params={'Bucket': target_bucket, 'Key': key},
         ExpiresIn=expires_in_seconds,
         HttpMethod='GET'
     )
@@ -162,12 +170,13 @@ def generate_presigned_post(
     expires_in_seconds: int = 900,
     metadata: Optional[Dict[str, str]] = None,
     conditions: Optional[list] = None,
+    bucket: Optional[str] = None,
 ) -> Dict[str, str]:
     """Generate a presigned POST for multipart form uploads (mobile-friendly).
 
     Returns dict with url, fields, key, bucket, method='POST', expires_in.
     """
-    _ensure_bucket()
+    _ensure_bucket(bucket)
 
     region = settings.AWS_S3_REGION or 'us-east-1'
     endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
@@ -195,8 +204,10 @@ def generate_presigned_post(
         for k, v in metadata.items():
             conds.append({f'x-amz-meta-{k}': str(v)})
 
+    target_bucket = _resolve_bucket(bucket)
+
     post = s3.generate_presigned_post(
-        Bucket=_get_bucket(),
+        Bucket=target_bucket,
         Key=key,
         Fields=fields,
         Conditions=conds,
@@ -204,10 +215,36 @@ def generate_presigned_post(
     )
 
     return {
-        'bucket': _get_bucket(),
+        'bucket': target_bucket,
         'key': key,
         'url': post['url'],
         'method': 'POST',
         'fields': post['fields'],
         'expires_in': expires_in_seconds,
+    }
+
+
+def head_object(*, key: str, bucket: Optional[str] = None) -> Dict[str, any]:
+    """Return HEAD metadata for an S3 object (ContentLength, ContentType, ETag, Metadata)."""
+    _ensure_bucket(bucket)
+    region = settings.AWS_S3_REGION or 'us-east-1'
+    endpoint = f"https://s3.{region}.amazonaws.com" if region != 'us-east-1' else "https://s3.amazonaws.com"
+    params = {
+        'region_name': region,
+        'config': Config(signature_version='s3v4'),
+        'endpoint_url': endpoint,
+    }
+    if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
+        params.update({
+            'aws_access_key_id': settings.AWS_ACCESS_KEY_ID,
+            'aws_secret_access_key': settings.AWS_SECRET_ACCESS_KEY,
+        })
+    s3 = boto3.client('s3', **params)
+    target_bucket = _resolve_bucket(bucket)
+    resp = s3.head_object(Bucket=target_bucket, Key=key)
+    return {
+        'content_length': resp.get('ContentLength'),
+        'content_type': resp.get('ContentType'),
+        'etag': (resp.get('ETag') or '').strip('"'),
+        'metadata': resp.get('Metadata') or {},
     }

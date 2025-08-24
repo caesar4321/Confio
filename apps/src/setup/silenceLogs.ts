@@ -34,15 +34,22 @@
     const verboseEnv = String(env.EXPO_PUBLIC_VERBOSE_LOGS || env.VERBOSE_LOGS || '')
       .toLowerCase();
     const verboseFlag = (global as any).__CONFIO_VERBOSE_LOGS__ === true;
-    const verbose = verboseFlag || verboseEnv === '1' || verboseEnv === 'true' || verboseEnv === 'yes';
+    // Make verbose logs ON by default in development, can still be disabled via ConfioLogs.disable()
+    const verbose = true || verboseFlag || verboseEnv === '1' || verboseEnv === 'true' || verboseEnv === 'yes';
 
     if (__DEV__) {
       setSilenced(!verbose);
       // Expose a simple runtime toggle for developers
       try {
         (global as any).ConfioLogs = {
-          enable: () => setSilenced(false),
-          disable: () => setSilenced(true),
+          enable: () => {
+            try { (global as any).__CONFIO_VERBOSE_LOGS__ = true; } catch {}
+            setSilenced(false);
+          },
+          disable: () => {
+            try { (global as any).__CONFIO_VERBOSE_LOGS__ = false; } catch {}
+            setSilenced(true);
+          },
           status: () => ({ silenced: (console as any).__silenced__ === true })
         };
       } catch {}

@@ -1572,18 +1572,30 @@ class P2PDisputeAdmin(admin.ModelAdmin):
     trade_details.short_description = 'Trade Details'
     
     def evidence_display(self, obj):
-        """Display evidence URLs as clickable links"""
+        """Display evidence with short-lived presigned URLs for private bucket"""
         if not obj.evidence_urls:
             return "No evidence submitted"
-        
+
+        from security.s3_utils import key_from_url, generate_presigned_get
+        from django.conf import settings
+        dispute_bucket = getattr(settings, 'AWS_DISPUTE_BUCKET', None)
+
         blocks = []
         for i, url in enumerate(obj.evidence_urls):
+            key = key_from_url(url) or ''
+            signed = None
+            if key:
+                try:
+                    signed = generate_presigned_get(key=key, expires_in_seconds=300, bucket=dispute_bucket)
+                except Exception:
+                    signed = None
+            link = signed or url
             if isinstance(url, str) and (url.lower().endswith('.mp4') or 'video' in url.lower()):
                 blocks.append(
-                    f'<div style="margin:6px 0"><video controls width="360" src="{url}">Your browser does not support video.</video></div>'
+                    f'<div style="margin:6px 0"><video controls width="360" src="{link}">Your browser does not support video.</video></div>'
                 )
             else:
-                blocks.append(f'<a href="{url}" target="_blank">Evidence {i+1}</a>')
+                blocks.append(f'<a href="{link}" target="_blank">Evidence {i+1}</a>')
         return format_html('<br>'.join(blocks))
     evidence_display.short_description = 'Evidence'
     
