@@ -121,46 +121,6 @@ class P2PUserStatsType(DjangoObjectType):
             return str(self.last_seen_online)
         return None
 
-    def resolve_is_verified(self, info):
-        """Return live verification status from the primary DB source.
-        - For personal users: check IdentityVerification via User.is_identity_verified
-        - For business: check for any verified IdentityVerification submitted in business context
-          (risk_factors.account_type='business' and risk_factors.business_id matches)
-        Falls back to stored flag only if no owner entity is available.
-        """
-        try:
-            # Prefer new relations
-            if getattr(self, 'stats_user', None):
-                user = self.stats_user
-                # Use property that checks security_verifications table
-                return bool(getattr(user, 'is_identity_verified', False))
-            if getattr(self, 'stats_business', None):
-                business = self.stats_business
-                # Business verified if there exists a verified IdentityVerification submitted in business context
-                from security.models import IdentityVerification
-                try:
-                    return IdentityVerification.objects.filter(
-                        user__security_verifications__isnull=False,
-                        status='verified',
-                        risk_factors__account_type='business',
-                        risk_factors__business_id=str(business.id)
-                    ).exists() or IdentityVerification.objects.filter(
-                        user__in=[acc.user for acc in business.accounts.all()],
-                        status='verified',
-                        risk_factors__account_type='business',
-                        risk_factors__business_id=str(business.id)
-                    ).exists()
-                except Exception:
-                    return False
-            # Fallback to deprecated 'user' relation if present
-            if getattr(self, 'user', None):
-                user = self.user
-                return bool(getattr(user, 'is_identity_verified', False))
-        except Exception:
-            pass
-        # As a last resort, return stored flag
-        return bool(getattr(self, 'is_verified', False))
-
 class P2PFavoriteTraderType(DjangoObjectType):
     favorite_display_name = graphene.String()
     favorite_type = graphene.String()  # 'user' or 'business'
@@ -2294,7 +2254,6 @@ class PresignedUploadInfo(graphene.ObjectType):
     method = graphene.String()
     headers = graphene.JSONString()
     expires_in = graphene.Int()
-    fields = graphene.JSONString()  # for presigned POST compatibility (may be null)
 
 
 class RequestDisputeEvidenceUpload(graphene.Mutation):
@@ -2723,248 +2682,8 @@ class Query(graphene.ObjectType):
         limit=graphene.Int(default_value=10)
     )
     p2p_trade = graphene.Field(P2PTradeType, id=graphene.ID(required=True))
-    # Expose payment methods on Query (camelCase + snake_case)
-    p2p_payment_methods = graphene.List(P2PPaymentMethodType, country_code=graphene.String())
-    p2pPaymentMethods = graphene.List(P2PPaymentMethodType, countryCode=graphene.String())
-
-    # Resolvers for Query fields
-    def resolve_p2p_offers(self, info, exchange_type=None, token_type=None, payment_method=None, country_code=None, favorites_only=False):
-        queryset = P2POffer.objects.filter(status='ACTIVE').select_related('user')
-        if exchange_type:
-            queryset = queryset.filter(exchange_type=exchange_type)
-        if token_type:
-            queryset = queryset.filter(token_type=token_type)
-        if payment_method:
-            queryset = queryset.filter(payment_methods__name=payment_method)
-        if country_code:
-            queryset = queryset.filter(country_code=country_code)
-
-        if favorites_only:
-            user = getattr(info.context, 'user', None)
-            if user and getattr(user, 'is_authenticated', False):
-                from django.db.models import Q
-                from .models import P2PFavoriteTrader
-                from users.jwt_context import get_jwt_business_context_with_validation
-
-                try:
-                    jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-                    active_account_type = jwt_context['account_type']
-                    active_account_index = jwt_context['account_index']
-                except Exception:
-                    active_account_type = 'personal'
-                    active_account_index = 0
-
-                favoriter_business = None
-                if active_account_type == 'business':
-                    from users.models import Account
-                    active_account = Account.objects.filter(
-                        user=user,
-                        account_type='business',
-                        account_index=active_account_index
-                    ).first()
-                    if active_account and active_account.business:
-                        favoriter_business = active_account.business
-
-                if favoriter_business:
-                    favorite_users = P2PFavoriteTrader.objects.filter(
-                        user=user,
-                        favoriter_business=favoriter_business
-                    ).values_list('favorite_user_id', 'favorite_business_id')
-                else:
-                    favorite_users = P2PFavoriteTrader.objects.filter(
-                        user=user,
-                        favoriter_business__isnull=True
-                    ).values_list('favorite_user_id', 'favorite_business_id')
-
-                favorite_q = Q()
-                for fav_user_id, fav_business_id in favorite_users:
-                    if fav_user_id:
-                        favorite_q |= Q(offer_user_id=fav_user_id)
-                    if fav_business_id:
-                        favorite_q |= Q(offer_business_id=fav_business_id)
-
-                favorite_user_ids = [u[0] for u in favorite_users if u[0]]
-                if favorite_user_ids:
-                    favorite_q |= Q(user_id__in=favorite_user_ids, offer_business__isnull=True)
-
-                if favorite_q:
-                    queryset = queryset.filter(favorite_q)
-                else:
-                    return []
-
-        return queryset.order_by('-created_at')
-
-    def resolve_p2p_offer(self, info, id):
-        try:
-            return P2POffer.objects.get(id=id)
-        except P2POffer.DoesNotExist:
-            return None
-
-    def resolve_my_p2p_offers(self, info):
-        from users.jwt_context import get_jwt_business_context_with_validation
-        from django.db.models import Q
-        jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-        if not jwt_context:
-            return []
-        user = info.context.user
-        if not user or not user.is_authenticated:
-            return []
-        account_type = jwt_context['account_type']
-        business_id = jwt_context.get('business_id')
-        if account_type == 'business' and business_id:
-            from users.models import Business
-            try:
-                business = Business.objects.get(id=business_id)
-                return P2POffer.objects.filter(offer_business=business).order_by('-created_at')
-            except Business.DoesNotExist:
-                return []
-        else:
-            return P2POffer.objects.filter(
-                Q(offer_user=user) | Q(user=user)
-            ).exclude(offer_business__isnull=False).order_by('-created_at')
-
-    def resolve_my_p2p_trades(self, info, offset=0, limit=10):
-        try:
-            from users.jwt_context import get_jwt_business_context_with_validation
-            from users.models import Business
-            jwt_context = get_jwt_business_context_with_validation(info, required_permission=None)
-            if not jwt_context:
-                return P2PTradePaginatedType(trades=[], total_count=0, has_more=False, offset=offset, limit=limit, active_count=0)
-            user = info.context.user
-            if not user or not user.is_authenticated:
-                return P2PTradePaginatedType(trades=[], total_count=0, has_more=False, offset=offset, limit=limit, active_count=0)
-            account_type = jwt_context['account_type']
-            business_id = jwt_context.get('business_id')
-            if account_type == 'business' and business_id:
-                business = Business.objects.get(id=business_id)
-                base_trades = P2PTrade.objects.filter(
-                    models.Q(buyer_business=business) | models.Q(seller_business=business)
-                ).exclude(status='CANCELLED').prefetch_related('ratings')
-                trades = Query._get_sorted_trades_queryset(base_trades)
-                total_count = trades.count()
-                active_count = trades.exclude(status='COMPLETED').count()
-                trades_list = list(trades[offset:offset+limit])
-                return P2PTradePaginatedType(trades=trades_list, total_count=total_count, has_more=(offset+limit) < total_count, offset=offset, limit=limit, active_count=active_count)
-            else:
-                base_trades = P2PTrade.objects.filter(
-                    models.Q(buyer_user=user) | models.Q(seller_user=user)
-                ).exclude(status='CANCELLED').prefetch_related('ratings')
-                trades = Query._get_sorted_trades_queryset(base_trades)
-                total_count = trades.count()
-                active_count = trades.exclude(status='COMPLETED').count()
-                trades_list = list(trades[offset:offset+limit])
-                return P2PTradePaginatedType(trades=trades_list, total_count=total_count, has_more=(offset+limit) < total_count, offset=offset, limit=limit, active_count=active_count)
-        except Exception:
-            return P2PTradePaginatedType(trades=[], total_count=0, has_more=False, offset=offset, limit=limit, active_count=0)
-
-    def resolve_p2p_payment_methods(self, info, country_code=None):
-        import datetime, random
-        request_id = random.randint(1000, 9999)
-        # print debug trimmed
-        if country_code:
-            db_methods = P2PPaymentMethod.objects.filter(country_code=country_code, is_active=True).order_by('display_order', 'display_name')
-        else:
-            db_methods = P2PPaymentMethod.objects.none()
-        payment_methods = []
-        for db_method in db_methods:
-            payment_method = type('PaymentMethod', (), {
-                'id': str(db_method.id),
-                'name': db_method.name,
-                'display_name': db_method.display_name,
-                'icon': db_method.icon,
-                'is_active': db_method.is_active,
-                'provider_type': db_method.provider_type,
-                'requires_phone': db_method.requires_phone,
-                'requires_email': db_method.requires_email,
-                'requires_account_number': db_method.requires_account_number,
-                'country_code': db_method.country_code,
-                'bank': db_method.bank,
-                'country': db_method.country
-            })()
-            payment_methods.append(payment_method)
-        return payment_methods
-
-    def resolve_p2pPaymentMethods(self, info, countryCode=None):
-        # Implement directly to avoid relying on instance dispatch (root may be None)
-        import datetime, random
-        request_id = random.randint(1000, 9999)
-        # print(f"🔎 DEBUG [{datetime.datetime.now()}] REQ-{request_id}: resolve_p2pPaymentMethods called with countryCode: '{countryCode}'")
-        if countryCode:
-            db_methods = P2PPaymentMethod.objects.filter(
-                country_code=countryCode,
-                is_active=True
-            ).order_by('display_order', 'display_name')
-        else:
-            db_methods = P2PPaymentMethod.objects.none()
-
-        methods = []
-        for db_method in db_methods:
-            pm = type('PaymentMethod', (), {
-                'id': str(db_method.id),
-                'name': db_method.name,
-                'display_name': db_method.display_name,
-                'icon': db_method.icon,
-                'is_active': db_method.is_active,
-                'provider_type': db_method.provider_type,
-                'requires_phone': db_method.requires_phone,
-                'requires_email': db_method.requires_email,
-                'requires_account_number': db_method.requires_account_number,
-                'country_code': db_method.country_code,
-                'bank': db_method.bank,
-                'country': db_method.country
-            })()
-            methods.append(pm)
-        return methods
-
-
-# Mutations
-class RequestPremiumUpgrade(graphene.Mutation):
-    class Arguments:
-        reason = graphene.String(required=False)
-
-    success = graphene.Boolean()
-    error = graphene.String()
-    verification_level = graphene.Int()
-
-    @classmethod
-    def mutate(cls, root, info, reason=None):
-        user = getattr(info.context, 'user', None)
-        if not (user and getattr(user, 'is_authenticated', False)):
-            return RequestPremiumUpgrade(success=False, error="Authentication required", verification_level=0)
-
-        try:
-            # Determine context (personal/business)
-            from users.jwt_context import get_jwt_business_context_with_validation
-            ctx = get_jwt_business_context_with_validation(info, required_permission=None) or {}
-            account_type = ctx.get('account_type')
-            business_id = ctx.get('business_id')
-
-            # Get or create stats object
-            stats = None
-            if account_type == 'business' and business_id:
-                from users.models import Business
-                biz = Business.objects.get(id=business_id)
-                stats, _ = P2PUserStats.objects.get_or_create(stats_business=biz, defaults={'user': user})
-            else:
-                stats, _ = P2PUserStats.objects.get_or_create(stats_user=user, defaults={'user': user})
-
-            # Basic guard: only allow if user has verified identity
-            if not user.is_identity_verified:
-                return RequestPremiumUpgrade(success=False, error="Identity verification required", verification_level=stats.verification_level)
-
-            # Upgrade to level 2 (Trader Premium)
-            if (stats.verification_level or 0) < 2:
-                stats.verification_level = 2
-                stats.save(update_fields=['verification_level'])
-
-            return RequestPremiumUpgrade(success=True, error=None, verification_level=stats.verification_level)
-        except Exception as e:
-            return RequestPremiumUpgrade(success=False, error=str(e), verification_level=0)
-
-
-class Mutation(graphene.ObjectType):
-    # Premium upgrade mutation is defined in users.schema.Mutation
     p2p_trade_messages = graphene.List(P2PMessageType, trade_id=graphene.ID(required=True))
+    p2p_payment_methods = graphene.List(P2PPaymentMethodType, country_code=graphene.String())
 
     def resolve_p2p_offers(self, info, exchange_type=None, token_type=None, payment_method=None, country_code=None, favorites_only=False):
         queryset = P2POffer.objects.filter(status='ACTIVE').select_related('user')
@@ -3220,15 +2939,15 @@ class Mutation(graphene.ObjectType):
         from django.db.models import Case, When, IntegerField
         
         # Define status priority (lower number = higher priority)
-        # DISPUTED trades should appear at the top with high priority
+        # Prioritize ongoing trades over rating-only or completed
         status_ordering = Case(
             When(status='DISPUTED', then=1),
-            # Promote trades requiring rating to near the top
-            When(status='CRYPTO_RELEASED', then=2),
-            When(status='PENDING', then=3),
-            When(status='PAYMENT_PENDING', then=4),
-            When(status='PAYMENT_SENT', then=5),
-            When(status='PAYMENT_CONFIRMED', then=6),
+            When(status='PENDING', then=2),
+            When(status='PAYMENT_PENDING', then=3),
+            When(status='PAYMENT_SENT', then=4),
+            When(status='PAYMENT_CONFIRMED', then=5),
+            # Treat CRYPTO_RELEASED as near-complete (rating flow in legacy), after ongoing states
+            When(status='CRYPTO_RELEASED', then=6),
             When(status='COMPLETED', then=7),
             default=999,
             output_field=IntegerField()
@@ -3279,13 +2998,11 @@ class Mutation(graphene.ObjectType):
         except P2PTrade.DoesNotExist:
             return []
 
-    # Resolver moved to Query; leave a stub here to avoid misuse
     def resolve_p2p_payment_methods(self, info, country_code=None):
         import datetime
         import random
         request_id = random.randint(1000, 9999)
-        print(f"⚠️ DEBUG [{datetime.datetime.now()}] REQ-{request_id}: resolve_p2p_payment_methods called on Mutation. Delegating to Query.")
-        return Query.resolve_p2p_payment_methods(self, info, country_code=country_code)
+        print(f"🔍 DEBUG [{datetime.datetime.now()}] REQ-{request_id}: resolve_p2p_payment_methods called with country_code: '{country_code}'")
         
         # Get payment methods from database (only country-specific methods)
         # No global methods should exist per user requirements
@@ -3324,10 +3041,6 @@ class Mutation(graphene.ObjectType):
         
         print(f"✅ DEBUG REQ-{request_id}: Returning {len(payment_methods)} payment methods to GraphQL")
         return payment_methods
-
-    def resolve_p2pPaymentMethods(self, info, countryCode=None):
-        # CamelCase alias: delegate to snake_case resolver
-        return self.resolve_p2p_payment_methods(info, country_code=countryCode)
 
 # Mutations
 class ToggleFavoriteTrader(graphene.Mutation):
