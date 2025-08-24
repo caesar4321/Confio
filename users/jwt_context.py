@@ -111,33 +111,41 @@ def get_jwt_business_context_with_validation(info, required_permission=None):
     if not user or not user.is_authenticated:
         return None
     
-    # For business accounts, validate access through BusinessEmployee
+    # For business accounts, validate access through BusinessEmployee OR ownership
     if jwt_context['account_type'] == 'business' and jwt_context['business_id']:
         from .models_employee import BusinessEmployee
+        from .models import Account
         
-        logger.info(f"Validating business access: user_id={user.id}, business_id={jwt_context['business_id']}")
+        biz_id = jwt_context['business_id']
+        logger.info(f"Validating business access: user_id={user.id}, business_id={biz_id}")
         
-        # Check user's relationship to this business
+        # Check employee relationship
         employee_record = BusinessEmployee.objects.filter(
             user=user,
-            business_id=jwt_context['business_id'],
+            business_id=biz_id,
             deleted_at__isnull=True
         ).first()
         
-        if not employee_record:
-            logger.warning(f"User {user.id} has no relation to business {jwt_context['business_id']} - access denied")
-            return None
-        
-        logger.info(f"Found employee record: role={employee_record.role}, business_name={employee_record.business.name}")
-        
-        # Add employee record to context for permission checking
-        jwt_context['employee_record'] = employee_record
-        
-        # If a specific permission is required, check it
-        if required_permission:
-            if not check_role_permission(employee_record.role, required_permission):
+        if employee_record:
+            logger.info(f"Found employee record: role={employee_record.role}, business_name={employee_record.business.name}")
+            jwt_context['employee_record'] = employee_record
+            # If a specific permission is required, check it
+            if required_permission and not check_role_permission(employee_record.role, required_permission):
                 logger.warning(f"User {user.id} with role {employee_record.role} lacks permission '{required_permission}'")
                 return None
+        else:
+            # Allow business owners (have an Account record for this business)
+            is_owner = Account.objects.filter(
+                user=user,
+                business_id=biz_id,
+                account_type='business',
+                deleted_at__isnull=True
+            ).exists()
+            if not is_owner:
+                logger.warning(f"User {user.id} has no relation to business {biz_id} - access denied")
+                return None
+            logger.info(f"Ownership access granted for user {user.id} to business {biz_id}")
+            # Owners bypass role permission checks
     
     return jwt_context
 
