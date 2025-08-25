@@ -209,6 +209,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             # Inventory preflight: ensure app holds enough CONFIO for outstanding + (cap / price)
             try:
                 from algosdk.v2client import algod as _algod
+                from contracts.presale.admin_presale import PresaleAdmin as _PA
                 client = _algod.AlgodClient(
                     getattr(settings, 'ALGORAND_ALGOD_TOKEN', ''),
                     getattr(settings, 'ALGORAND_ALGOD_ADDRESS', '')
@@ -228,7 +229,10 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                         break
                 # Read outstanding obligations (sold - claimed) from contract state
                 try:
-                    state = pa.get_state()
+                    _pa = _PA(int(app_id), int(confio_id), int(cusd_id))
+                    # Use same client endpoint
+                    _pa.algod_client = client
+                    state = _pa.get_state()
                     total_sold = int(state.get('confio_sold', 0) or 0)
                     total_claimed = int(state.get('claimed_total', 0) or 0)
                     outstanding = max(0, total_sold - total_claimed)
