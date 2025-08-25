@@ -107,7 +107,7 @@ export const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const route = useRoute<any>();
   const { setCurrentAccountAvatar, profileMenu } = useHeader();
-  const { signOut, userProfile } = useAuth();
+  const { signOut, userProfile, isAuthenticated } = useAuth();
   const { userCountry, selectedCountry } = useCountry();
   const { currency, formatAmount, exchangeRate } = useCurrency();
   const { rate: marketRate, loading: rateLoading } = useSelectedCountryRate();
@@ -150,11 +150,12 @@ export const HomeScreen = () => {
     fetchPolicy: 'no-cache', // Completely bypass cache to ensure correct account context
   });
   
-  // Check if presale is globally active
+  // Check if presale is globally active / claims unlocked
   const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, {
     fetchPolicy: 'cache-and-network',
   });
   const isPresaleActive = presaleStatusData?.isPresaleActive === true;
+  const isPresaleClaimsUnlocked = presaleStatusData?.isPresaleClaimsUnlocked === true;
   const [presaleDismissed, setPresaleDismissed] = useState(false);
   
   // Refetch balances when active account changes
@@ -171,8 +172,24 @@ export const HomeScreen = () => {
       console.log('HomeScreen focused - refreshing balances');
       refetchCUSD();
       refetchConfio();
+      // Also nudge account refresh on focus in case auth just resumed
+      try { refreshAccounts(); } catch {}
     }, [refetchCUSD, refetchConfio])
   );
+
+  // On initial mount after auth, pull accounts once to avoid blank ProfileMenu
+  useEffect(() => {
+    if (isAuthenticated) {
+      console.log('HomeScreen - Authenticated on mount, refreshing accounts');
+      refreshAccounts();
+      // Retry once shortly after in case token just switched contexts
+      const t = setTimeout(() => {
+        console.log('HomeScreen - Retrying accounts refresh');
+        refreshAccounts();
+      }, 600);
+      return () => clearTimeout(t);
+    }
+  }, [isAuthenticated, refreshAccounts]);
   
   // Log any errors and data for debugging
   useEffect(() => {
@@ -828,8 +845,54 @@ export const HomeScreen = () => {
           </Animated.View>
         </Animated.View>
         
-        {/* CONFIO Presale Banner - Only show if presale is active and not dismissed */}
-        {isPresaleActive && !presaleDismissed && (
+        {/* CONFIO Presale Banner - Show claims unlocked (green) or presale active (purple) */}
+        {isPresaleClaimsUnlocked && !presaleDismissed && (
+          <Animated.View 
+          style={[
+            styles.presaleBanner,
+            {
+              opacity: fadeAnim,
+              transform: [
+                { 
+                  translateY: fadeAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [20, 0],
+                  })
+                }
+              ],
+            }
+          ]}
+        >
+          <View style={styles.presaleBannerContent}>
+            <View style={styles.presaleBannerLeft}>
+              <View style={[styles.presaleBadge, { backgroundColor: '#10b981' }]}>
+                <Text style={styles.presaleBadgeText}>🔓 RECLAMO</Text>
+              </View>
+              <Text style={styles.presaleBannerTitle}>¡Reclama tus $CONFIO!</Text>
+              <Text style={styles.presaleBannerSubtitle}>
+                Tus monedas ya están disponibles. Reclámalas en segundos.
+              </Text>
+              <TouchableOpacity
+                onPress={() => navigation.navigate('ConfioPresale')}
+                activeOpacity={0.7}
+                style={{ marginTop: 8 }}
+              >
+                <Text style={[styles.presaleDetailsLink, { color: '#10b981' }]}>Ir a reclamar</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.presaleBannerRight}>
+              <TouchableOpacity onPress={() => setPresaleDismissed(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ position: 'absolute', top: -6, right: -6 }}>
+                <Icon name="x" size={18} color="#10b981" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => navigation.navigate('ConfioPresale')} activeOpacity={0.9} style={{ alignItems: 'center' }}>
+                <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
+                <Icon name="chevron-right" size={20} color="#10b981" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Animated.View>
+        )}
+        {isPresaleActive && !isPresaleClaimsUnlocked && !presaleDismissed && (
           <Animated.View 
           style={[
             styles.presaleBanner,

@@ -39,6 +39,7 @@ export const NotificationScreen = () => {
     fetchPolicy: 'cache-and-network',
   });
   const isPresaleActive = presaleStatusData?.isPresaleActive === true;
+  const isPresaleClaimsUnlocked = presaleStatusData?.isPresaleClaimsUnlocked === true;
 
   // Query notifications
   const { data, loading, error, refetch, fetchMore } = useQuery(GET_NOTIFICATIONS, {
@@ -665,8 +666,30 @@ export const NotificationScreen = () => {
       {/* Pending Employee Invitations */}
       <PendingInvitationBanner />
       
-      {/* CONFIO Presale Banner - Only show if presale is active */}
-      {isPresaleActive && (
+      {/* CONFIO Presale Banner - Show either active presale or claims unlocked */}
+      {isPresaleClaimsUnlocked ? (
+        <View style={styles.presaleBanner}>
+          <TouchableOpacity 
+            style={styles.presaleBannerContent}
+            onPress={() => navigation.navigate('ConfioPresale')}
+            activeOpacity={0.9}
+          >
+            <View style={styles.presaleBannerLeft}>
+              <View style={[styles.presaleBadge, { backgroundColor: '#10b981' }]}>
+                <Text style={styles.presaleBadgeText}>🔓 RECLAMO</Text>
+              </View>
+              <Text style={styles.presaleBannerTitle}>¡Reclama tus $CONFIO!</Text>
+              <Text style={styles.presaleBannerSubtitle}>
+                Tus monedas ya están disponibles. Reclámalas en segundos.
+              </Text>
+            </View>
+            <View style={styles.presaleBannerRight}>
+              <Image source={CONFIOLogo} style={styles.presaleBannerLogo} />
+              <Icon name="chevron-right" size={20} color="#10b981" />
+            </View>
+          </TouchableOpacity>
+        </View>
+      ) : (isPresaleActive && (
         <View style={styles.presaleBanner}>
           <TouchableOpacity 
             style={styles.presaleBannerContent}
@@ -688,7 +711,7 @@ export const NotificationScreen = () => {
             </View>
           </TouchableOpacity>
         </View>
-      )}
+      ))}
     </>
   );
 

@@ -20,7 +20,7 @@ from decimal import Decimal, ROUND_DOWN
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from state_utils import decode_state, to_algorand_address, format_address
+from .state_utils import decode_state, to_algorand_address, format_address
 
 from algosdk import account, mnemonic, encoding
 from algosdk.v2client import algod
@@ -34,9 +34,9 @@ from algosdk.transaction import (
 )
 from algosdk.logic import get_application_address
 
-# Network configuration
-ALGOD_ADDRESS = os.getenv("ALGOD_ADDRESS", "http://localhost:4001")
-ALGOD_TOKEN = os.getenv("ALGOD_TOKEN", "a" * 64)
+# Network configuration (prefer ALGORAND_* envs)
+ALGOD_ADDRESS = os.getenv("ALGORAND_ALGOD_ADDRESS", os.getenv("ALGOD_ADDRESS", "http://localhost:4001"))
+ALGOD_TOKEN = os.getenv("ALGORAND_ALGOD_TOKEN", os.getenv("ALGOD_TOKEN", "a" * 64))
 
 class PresaleAdmin:
     """Admin interface for CONFIO presale management"""
@@ -94,6 +94,7 @@ class PresaleAdmin:
                 cusd_cap_int.to_bytes(8, 'big'),
                 max_per_addr_int.to_bytes(8, 'big')
             ],
+            foreign_assets=[int(self.confio_id), int(self.cusd_id)],
             on_complete=OnComplete.NoOpOC
         )
         
@@ -120,6 +121,7 @@ class PresaleAdmin:
             sp=params,
             index=self.app_id,
             app_args=[b"toggle_round"],
+            foreign_assets=[int(self.confio_id), int(self.cusd_id)],
             on_complete=OnComplete.NoOpOC
         )
         
@@ -150,6 +152,7 @@ class PresaleAdmin:
                 b"price", 
                 new_price.to_bytes(8, 'big')
             ],
+            foreign_assets=[int(self.confio_id), int(self.cusd_id)],
             on_complete=OnComplete.NoOpOC
         )
         
@@ -180,6 +183,7 @@ class PresaleAdmin:
                 b"cap", 
                 new_cap.to_bytes(8, 'big')
             ],
+            foreign_assets=[int(self.confio_id), int(self.cusd_id)],
             on_complete=OnComplete.NoOpOC
         )
         
@@ -210,6 +214,7 @@ class PresaleAdmin:
                 b"min", 
                 new_min.to_bytes(8, 'big')
             ],
+            foreign_assets=[int(self.confio_id), int(self.cusd_id)],
             on_complete=OnComplete.NoOpOC
         )
         
@@ -240,6 +245,7 @@ class PresaleAdmin:
                 b"max", 
                 new_max.to_bytes(8, 'big')
             ],
+            foreign_assets=[int(self.confio_id), int(self.cusd_id)],
             on_complete=OnComplete.NoOpOC
         )
         

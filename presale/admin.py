@@ -134,7 +134,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
         return f"{obj.progress_percentage:.2f}%"
     progress_display.short_description = 'Progress %'
     
-    actions = ['activate_phase', 'pause_phase', 'complete_phase']
+    actions = ['activate_phase', 'pause_phase', 'complete_phase', 'start_onchain_round', 'fund_app_with_confio']
     
     def activate_phase(self, request, queryset):
         updated = queryset.update(status='active')
@@ -150,6 +150,298 @@ class PresalePhaseAdmin(admin.ModelAdmin):
         updated = queryset.update(status='completed')
         self.message_user(request, f"{updated} phase(s) marked as completed.")
     complete_phase.short_description = "Complete selected phases"
+
+    def start_onchain_round(self, request, queryset):
+        """Start the selected presale phase on-chain using the contract, matching DB values.
+        Uses settings.ALGORAND_PRESALE_APP_ID, ALGORAND_CONFIO_ASSET_ID, ALGORAND_CUSD_ASSET_ID,
+        and admin mnemonic (ALGORAND_ADMIN_MNEMONIC or falls back to ALGORAND_SPONSOR_MNEMONIC).
+        """
+        from django.conf import settings
+        from decimal import Decimal
+        try:
+            app_id = getattr(settings, 'ALGORAND_PRESALE_APP_ID', 0)
+            confio_id = getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 0)
+            cusd_id = getattr(settings, 'ALGORAND_CUSD_ASSET_ID', 0)
+            if not app_id or not confio_id or not cusd_id:
+                self.message_user(request, 'Algorand PRESALE_APP_ID/ASSET_IDs not configured', level='error')
+                return
+            if queryset.count() != 1:
+                self.message_user(request, 'Select exactly one phase to start on-chain', level='error')
+                return
+            phase = queryset.first()
+            # Read values from DB
+            price = Decimal(phase.price_per_token)
+            db_cap = Decimal(phase.goal_amount)
+            # Compute on-chain cap more generously than DB goal (display)
+            cap_multiplier = getattr(settings, 'PRESALE_ONCHAIN_CAP_MULTIPLIER', 5)
+            try:
+                cap_multiplier = int(cap_multiplier)
+                if cap_multiplier < 1:
+                    cap_multiplier = 1
+            except Exception:
+                cap_multiplier = 5
+            cap = db_cap * cap_multiplier
+            max_per_addr = Decimal(phase.max_per_user or 0)
+            if not max_per_addr or max_per_addr <= 0:
+                # Fallback to max_purchase if per-user total limit not set
+                max_per_addr = Decimal(phase.max_purchase)
+            # Ensure per-address <= on-chain cap
+            if max_per_addr > cap:
+                max_per_addr = cap
+            # Build admin address from mnemonic
+            from algosdk import mnemonic as _mn, account as _acct, encoding as _enc
+            admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None) or getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+            if not admin_mn:
+                self.message_user(request, 'Admin/Sponsor mnemonic not configured', level='error')
+                return
+            admin_mn_norm = " ".join(str(admin_mn).strip().split())
+            admin_sk = _mn.to_private_key(admin_mn_norm)
+            # Derive the address from the private key using algosdk.account helper
+            admin_addr = _acct.address_from_private_key(admin_sk)
+            # Inventory preflight: ensure app holds enough CONFIO for (cap / price)
+            try:
+                from algosdk.v2client import algod as _algod
+                client = _algod.AlgodClient(
+                    getattr(settings, 'ALGORAND_ALGOD_TOKEN', ''),
+                    getattr(settings, 'ALGORAND_ALGOD_ADDRESS', '')
+                )
+                # Compute integer base units
+                price_int = int((price * (10**6)).to_integral_value())
+                cap_int = int((cap * (10**6)).to_integral_value())
+                confio_needed = (cap_int * (10**6)) // max(price_int, 1)  # micro CONFIO
+                # Read app address and balance
+                from algosdk.logic import get_application_address as _app_addr
+                app_addr = _app_addr(int(app_id))
+                acct = client.account_info(app_addr)
+                app_confio = 0
+                for a in (acct.get('assets') or []):
+                    if int(a.get('asset-id')) == int(confio_id):
+                        app_confio = int(a.get('amount') or 0)
+                        break
+                if app_confio < confio_needed:
+                    need = (confio_needed - app_confio) / 10**6
+                    have = app_confio / 10**6
+                    self.message_user(
+                        request,
+                        (
+                            f"Insufficient CONFIO in app for cap. Have {have:,.0f}, need {need:,.0f} more. "
+                            f"Fund app {app_addr} with CONFIO (ASA {confio_id}) and retry."
+                        ),
+                        level='error'
+                    )
+                    return
+            except Exception as inv_e:
+                self.message_user(request, f"Inventory preflight failed: {inv_e}", level='error')
+                return
+
+            # Call helper to start round
+            from contracts.presale.admin_presale import PresaleAdmin as _PresaleAdmin
+            from algosdk.v2client import algod as _algod
+            pa = _PresaleAdmin(int(app_id), int(confio_id), int(cusd_id))
+            # Ensure correct Algod endpoint (avoid localhost defaults inside module)
+            try:
+                pa.algod_client = _algod.AlgodClient(
+                    getattr(settings, 'ALGORAND_ALGOD_TOKEN', ''),
+                    getattr(settings, 'ALGORAND_ALGOD_ADDRESS', '')
+                )
+            except Exception:
+                pass
+
+            # Preflight: check assets and app exist on this node
+            try:
+                pa.algod_client.asset_info(int(confio_id))
+                pa.algod_client.asset_info(int(cusd_id))
+            except Exception as ae:
+                self.message_user(request, f"Node cannot see required assets (CONFIO {confio_id}, cUSD {cusd_id}): {ae}", level='error')
+                return
+            try:
+                app_info = pa.algod_client.application_info(int(app_id))
+            except Exception as ie:
+                self.message_user(request, f"Node cannot find presale app {app_id}: {ie}", level='error')
+                return
+
+            # Ensure app account is opted into both assets; if not, perform sponsored opt-ins
+            try:
+                from algosdk.logic import get_application_address as _app_addr
+                from algosdk.transaction import ApplicationCallTxn as _AppCall, PaymentTxn as _Pay, OnComplete as _OC, assign_group_id as _assign_gid
+                from algosdk import mnemonic as _mn2
+                app_addr = _app_addr(int(app_id))
+                acct = pa.algod_client.account_info(app_addr)
+                asset_ids = {int(a.get('asset-id')) for a in (acct.get('assets') or [])}
+                needs_confio = int(confio_id) not in asset_ids
+                needs_cusd = int(cusd_id) not in asset_ids
+                if needs_confio or needs_cusd:
+                    sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+                    sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
+                    if not sponsor_mn or not sponsor_addr:
+                        self.message_user(request, 'Sponsor mnemonic/address not configured; cannot opt-in assets', level='error')
+                        return
+                    sponsor_sk = _mn2.to_private_key(" ".join(str(sponsor_mn).strip().split()))
+                    params = pa.algod_client.suggested_params()
+                    min_fee = getattr(params, 'min_fee', 1000) or 1000
+                    # Sponsor bump (2 txns)
+                    sp_s = pa.algod_client.suggested_params(); sp_s.flat_fee = True; sp_s.fee = min_fee*2
+                    bump = _Pay(sender=sponsor_addr, sp=sp_s, receiver=sponsor_addr, amt=0)
+                    # App call (carries inner fees)
+                    sp_a = pa.algod_client.suggested_params(); sp_a.flat_fee = True; sp_a.fee = min_fee*3
+                    call = _AppCall(
+                        sender=admin_addr,
+                        sp=sp_a,
+                        index=int(app_id),
+                        app_args=[b'opt_in_assets'],
+                        foreign_assets=[int(confio_id), int(cusd_id)],
+                        on_complete=_OC.NoOpOC
+                    )
+                    _assign_gid([bump, call])
+                    stx0 = bump.sign(sponsor_sk)
+                    stx1 = call.sign(admin_sk)
+                    pa.algod_client.send_transactions([stx0, stx1])
+                    # best-effort short confirm
+                    try:
+                        from algosdk.transaction import wait_for_confirmation as _wfc
+                        _wfc(pa.algod_client, stx1.get_txid(), 4)
+                    except Exception:
+                        pass
+            except Exception as oe:
+                self.message_user(request, f"Preflight opt-in failed: {oe}", level='error')
+                return
+            pa.start_round(admin_address=admin_addr, admin_sk=admin_sk,
+                           price_cusd_per_confio=float(price),
+                           cusd_cap=float(cap), max_per_addr=float(max_per_addr))
+            # Update phase status and start_date
+            from django.utils import timezone as dj_tz
+            phase.status = 'active'
+            if not phase.start_date:
+                phase.start_date = dj_tz.now()
+            phase.save(update_fields=['status', 'start_date', 'updated_at'])
+            self.message_user(
+                request,
+                (
+                    f"On-chain round started for Phase {phase.phase_number} (App ID {app_id}). "
+                    f"DB goal={db_cap:,.0f} cUSD, on-chain cap={cap:,.0f} cUSD (x{cap_multiplier})."
+                )
+            )
+        except Exception as e:
+            self.message_user(request, f"Failed to start on-chain round: {e}", level='error')
+    start_onchain_round.short_description = "Start on-chain round (match DB values)"
+
+    def fund_app_with_confio(self, request, queryset):
+        """Fund the presale app address with CONFIO from the sponsor account to cover cap shortfall."""
+        from django.conf import settings
+        from decimal import Decimal
+        try:
+            app_id = getattr(settings, 'ALGORAND_PRESALE_APP_ID', 0)
+            confio_id = getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 0)
+            if not app_id or not confio_id:
+                self.message_user(request, 'PRESALE_APP_ID/CONFIO_ASSET_ID not configured', level='error')
+                return
+            if queryset.count() != 1:
+                self.message_user(request, 'Select exactly one phase to fund', level='error')
+                return
+            phase = queryset.first()
+            # Values from DB
+            price = Decimal(phase.price_per_token)
+            db_cap = Decimal(phase.goal_amount)
+            cap_multiplier = getattr(settings, 'PRESALE_ONCHAIN_CAP_MULTIPLIER', 5)
+            try:
+                cap_multiplier = int(cap_multiplier)
+                if cap_multiplier < 1:
+                    cap_multiplier = 1
+            except Exception:
+                cap_multiplier = 5
+            cap = db_cap * cap_multiplier
+
+            # Compute required CONFIO for cap
+            price_int = int((price * (10**6)).to_integral_value())
+            cap_int = int((cap * (10**6)).to_integral_value())
+            confio_needed = (cap_int * (10**6)) // max(price_int, 1)
+
+            # Setup Algod
+            from algosdk.v2client import algod as _algod
+            client = _algod.AlgodClient(
+                getattr(settings, 'ALGORAND_ALGOD_TOKEN', ''),
+                getattr(settings, 'ALGORAND_ALGOD_ADDRESS', '')
+            )
+            # Get app address + current CONFIO balance
+            from algosdk.logic import get_application_address as _app_addr
+            app_addr = _app_addr(int(app_id))
+            acct = client.account_info(app_addr)
+            app_confio = 0
+            for a in (acct.get('assets') or []):
+                if int(a.get('asset-id')) == int(confio_id):
+                    app_confio = int(a.get('amount') or 0)
+                    break
+            # Ensure app is opted into CONFIO; if not, perform sponsored opt-in
+            try:
+                has_confio = any(int(a.get('asset-id')) == int(confio_id) for a in (acct.get('assets') or []))
+                if not has_confio:
+                    admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None) or getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+                    sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
+                    sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+                    if not admin_mn or not sponsor_addr or not sponsor_mn:
+                        self.message_user(request, 'Missing admin/sponsor credentials for app opt-in', level='error')
+                        return
+                    from algosdk import mnemonic as _mn2
+                    from algosdk.transaction import ApplicationCallTxn as _AppCall, PaymentTxn as _Pay, OnComplete as _OC, assign_group_id as _assign
+                    admin_sk = _mn2.to_private_key(" ".join(str(admin_mn).strip().split()))
+                    # Derive admin address from sk
+                    from algosdk.account import address_from_private_key as _addr_from_sk
+                    admin_addr = _addr_from_sk(admin_sk)
+                    # Build sponsored bump + app call(opt_in_assets)
+                    params = client.suggested_params()
+                    min_fee = getattr(params, 'min_fee', 1000) or 1000
+                    sp_s = client.suggested_params(); sp_s.flat_fee = True; sp_s.fee = min_fee*2
+                    bump = _Pay(sender=sponsor_addr, sp=sp_s, receiver=sponsor_addr, amt=0)
+                    sp_a = client.suggested_params(); sp_a.flat_fee = True; sp_a.fee = min_fee*3
+                    call = _AppCall(sender=admin_addr, sp=sp_a, index=int(app_id), app_args=[b'opt_in_assets'], foreign_assets=[int(confio_id), int(getattr(settings,'ALGORAND_CUSD_ASSET_ID',0))], on_complete=_OC.NoOpOC)
+                    _assign([bump, call])
+                    sponsor_sk = _mn2.to_private_key(" ".join(str(sponsor_mn).strip().split()))
+                    stx0 = bump.sign(sponsor_sk)
+                    stx1 = call.sign(admin_sk)
+                    client.send_transactions([stx0, stx1])
+                    # Refresh account info
+                    try:
+                        from algosdk.transaction import wait_for_confirmation as _wfc
+                        _wfc(client, stx1.get_txid(), 4)
+                    except Exception:
+                        pass
+                    acct = client.account_info(app_addr)
+                    app_confio = 0
+                    for a in (acct.get('assets') or []):
+                        if int(a.get('asset-id')) == int(confio_id):
+                            app_confio = int(a.get('amount') or 0)
+                            break
+            except Exception as oe:
+                self.message_user(request, f"App opt-in failed: {oe}", level='error')
+                return
+            shortfall = max(0, confio_needed - app_confio)
+            if shortfall == 0:
+                self.message_user(request, 'App already has sufficient CONFIO for the configured cap.', level='info')
+                return
+
+            # Send ASA from sponsor to app
+            sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
+            sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+            if not sponsor_addr or not sponsor_mn:
+                self.message_user(request, 'Sponsor mnemonic/address not configured', level='error')
+                return
+            from algosdk import mnemonic as _mn
+            from algosdk.transaction import AssetTransferTxn as _Axfer
+            sponsor_sk = _mn.to_private_key(" ".join(str(sponsor_mn).strip().split()))
+            params = client.suggested_params()
+            txn = _Axfer(sender=sponsor_addr, sp=params, receiver=app_addr, amt=int(shortfall), index=int(confio_id))
+            stx = txn.sign(sponsor_sk)
+            txid = client.send_transaction(stx)
+            # best-effort confirm
+            try:
+                from algosdk.transaction import wait_for_confirmation as _wfc
+                _wfc(client, txid, 4)
+            except Exception:
+                pass
+            self.message_user(request, f"Funded app with {shortfall/10**6:,.0f} CONFIO (tx {txid[:10]}...).", level='success')
+        except Exception as e:
+            self.message_user(request, f"Failed to fund app: {e}", level='error')
+    fund_app_with_confio.short_description = "Fund app with CONFIO (from sponsor)"
 
 
 @admin.register(PresalePurchase)
@@ -360,19 +652,23 @@ class UserPresaleLimitAdmin(admin.ModelAdmin):
 
 @admin.register(PresaleSettings)
 class PresaleSettingsAdmin(admin.ModelAdmin):
-    list_display = ['is_presale_active', 'updated_at']
-    readonly_fields = ['created_at', 'updated_at']
+    list_display = ['is_presale_active', 'is_presale_claims_unlocked', 'presale_finished_at', 'claims_unlocked_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at', 'presale_finished_at', 'claims_unlocked_at']
     
     fieldsets = (
-        ('Global Presale Control', {
-            'fields': ('is_presale_active',),
-            'description': 'Master switch to enable/disable all presale features across the entire app'
-        }),
+        (
+            'Global Presale Control',
+            {
+                'fields': ('is_presale_active', 'is_presale_claims_unlocked', 'presale_finished_at', 'claims_unlocked_at'),
+                'description': 'Master switches. Use the action below to finish presale and unlock claims safely.'
+            }
+        ),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at'),
             'classes': ('collapse',)
         })
     )
+    actions = ['unlock_claims_and_finish_presale']
     
     def has_add_permission(self, request):
         # Only allow one instance
@@ -381,3 +677,45 @@ class PresaleSettingsAdmin(admin.ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         # Don't allow deletion
         return False
+
+    def unlock_claims_and_finish_presale(self, request, queryset):
+        """Mark all presale phases as completed, disable presale, unlock on-chain claims, and set timestamps."""
+        from django.utils import timezone
+        from django.conf import settings as dj_settings
+        try:
+            # Update DB first (idempotent)
+            from .models import PresalePhase, PresaleSettings
+            PresalePhase.objects.exclude(status='completed').update(status='completed')
+            settings_obj = PresaleSettings.get_settings()
+            settings_obj.is_presale_active = False
+            settings_obj.is_presale_claims_unlocked = True
+            if not settings_obj.presale_finished_at:
+                settings_obj.presale_finished_at = timezone.now()
+            settings_obj.claims_unlocked_at = timezone.now()
+            settings_obj.save()
+
+            # Attempt on-chain permanent unlock (best-effort; report errors clearly)
+            app_id = getattr(dj_settings, 'ALGORAND_PRESALE_APP_ID', 0)
+            confio_id = getattr(dj_settings, 'ALGORAND_CONFIO_ASSET_ID', 0)
+            cusd_id = getattr(dj_settings, 'ALGORAND_CUSD_ASSET_ID', 0)
+            admin_mn = getattr(dj_settings, 'ALGORAND_ADMIN_MNEMONIC', None) or getattr(dj_settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+            if not app_id or not confio_id or not cusd_id or not admin_mn:
+                self.message_user(request, 'On-chain unlock skipped: missing PRESALE APP/ASSET IDs or admin mnemonic', level='warning')
+            else:
+                try:
+                    from contracts.presale.admin_presale import PresaleAdmin as _PresaleAdmin
+                    from algosdk import mnemonic as _mn
+                    from algosdk.account import address_from_private_key as _addr_from_sk
+                    pa = _PresaleAdmin(int(app_id), int(confio_id), int(cusd_id))
+                    admin_sk = _mn.to_private_key(" ".join(str(admin_mn).strip().split()))
+                    admin_addr = _addr_from_sk(admin_sk)
+                    # Do not prompt (automation-friendly)
+                    pa.permanent_unlock(admin_address=admin_addr, admin_sk=admin_sk, skip_confirmation=True)
+                    self.message_user(request, 'On-chain permanent unlock executed successfully.')
+                except Exception as chain_e:
+                    self.message_user(request, f'On-chain unlock attempt failed: {chain_e}', level='error')
+
+            self.message_user(request, 'Presale marked finished and claims unlocked.')
+        except Exception as e:
+            self.message_user(request, f'Failed to unlock claims: {e}', level='error')
+    unlock_claims_and_finish_presale.short_description = 'Finish presale and unlock user claims (on-chain + DB)'

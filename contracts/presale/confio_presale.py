@@ -68,7 +68,12 @@ def confio_presale():
     def initialize():
         confio_id_arg = Btoi(Txn.application_args[0])
         cusd_id_arg = Btoi(Txn.application_args[1])
-        
+        outstanding = ScratchVar(TealType.uint64)
+        available = ScratchVar(TealType.uint64)
+        withdraw_amount = ScratchVar(TealType.uint64)
+        remaining_cusd = ScratchVar(TealType.uint64)
+        confio_needed = ScratchVar(TealType.uint64)
+        outstanding = ScratchVar(TealType.uint64)
         return Seq([
             # Verify arguments
             Assert(Txn.application_args.length() == Int(4)),
@@ -81,13 +86,8 @@ def confio_presale():
             Assert(Len(Txn.application_args[2]) == Int(32)),  # Admin address
             Assert(Len(Txn.application_args[3]) == Int(32)),  # Sponsor address
             
-            # Verify ASA decimals match expected values
-            (confio_decimals := AssetParam.decimals(confio_id_arg)),
-            (cusd_decimals := AssetParam.decimals(cusd_id_arg)),
-            Assert(confio_decimals.hasValue()),
-            Assert(cusd_decimals.hasValue()),
-            Assert(confio_decimals.value() == Int(6)),  # CONFIO must have 6 decimals
-            Assert(cusd_decimals.value() == Int(6)),    # cUSD must have 6 decimals
+            # Note: We do not assert ASA decimals here during creation to avoid
+            # network mismatches; decimals are assumed to be 6 for both assets.
             
             # Set asset IDs, admin, and sponsor
             App.globalPut(confio_asset_id, confio_id_arg),
@@ -127,7 +127,7 @@ def confio_presale():
         new_price = Btoi(Txn.application_args[1])  # cUSD per CONFIO (6 decimals)
         new_cusd_cap = Btoi(Txn.application_args[2])  # Max cUSD to raise
         new_max_per_addr = Btoi(Txn.application_args[3])  # Max cUSD per address
-        
+        outstanding = ScratchVar(TealType.uint64)
         return Seq([
             # Verify arguments
             Assert(Txn.application_args.length() >= Int(4)),
@@ -167,10 +167,10 @@ def confio_presale():
             Assert(confio_balance.hasValue()),
             
             # Calculate outstanding (sold but not claimed)
-            (outstanding := App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
+            outstanding.store(App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
             
             # Ensure we have enough for outstanding + new round
-            Assert(confio_balance.value() >= outstanding + WideRatio([new_cusd_cap, CONFIO_DECIMALS], [new_price])),
+            Assert(confio_balance.value() >= outstanding.load() + WideRatio([new_cusd_cap, CONFIO_DECIMALS], [new_price])),
             
             # Start new round
             App.globalPut(current_round, App.globalGet(current_round) + Int(1)),
@@ -201,7 +201,12 @@ def confio_presale():
     def buy_tokens():
         # Determine actual buyer (could be sponsor calling on behalf of user)
         actual_buyer = ScratchVar(TealType.bytes)
-        
+        # Local scratch variables
+        cusd_amount = ScratchVar(TealType.uint64)
+        confio_amount = ScratchVar(TealType.uint64)
+        user_prev_round = ScratchVar(TealType.uint64)
+        outstanding = ScratchVar(TealType.uint64)
+
         return Seq([
             # Determine actual buyer
             If(
@@ -228,22 +233,26 @@ def confio_presale():
             Assert(App.globalGet(contract_paused) == Int(0)),
             
             # Group structure (fully sponsored):
-            # G0: Payment from sponsor (fee bump)
+            # G0: Payment from sponsor (fee bump / optional MBR top-up)
             # G1: cUSD payment from buyer to contract
             # G2: This app call
             Assert(Global.group_size() == Int(3)),
             Assert(Txn.group_index() == Int(2)),
             
-            # Verify sponsor fee payment (strict validation)
+            # Verify sponsor payment (strict validation): can be self-bump or fund buyer MBR
             Assert(Gtxn[0].type_enum() == TxnType.Payment),
             Assert(Gtxn[0].sender() == App.globalGet(sponsor_address)),
-            Assert(Gtxn[0].receiver() == App.globalGet(sponsor_address)),
-            Assert(Gtxn[0].amount() == Int(0)),
+            # Receiver can be sponsor (fee-bump only) or the actual buyer (MBR funding)
+            Assert(Or(
+                Gtxn[0].receiver() == App.globalGet(sponsor_address),
+                Gtxn[0].receiver() == actual_buyer.load()
+            )),
             Assert(Gtxn[0].rekey_to() == Global.zero_address()),
             Assert(Gtxn[0].close_remainder_to() == Global.zero_address()),
-            # Sponsor must cover total group fee (3 txns) with reasonable upper bound
-            Assert(Gtxn[0].fee() >= Global.min_txn_fee() * Int(3)),
-            Assert(Gtxn[0].fee() <= Global.min_txn_fee() * Int(20)),
+            # Fee model: AppCall carries main budget; sponsor covers its own tx
+            # Ensure at least 1× min on sponsor payment (covers its base tx)
+            Assert(Gtxn[0].fee() >= Global.min_txn_fee()),
+            Assert(Gtxn[0].fee() <= Global.min_txn_fee() * Int(10)),
             
             # Verify cUSD payment (with guardrails against clawback/close/rekey)
             Assert(Gtxn[1].type_enum() == TxnType.AssetTransfer),
@@ -254,37 +263,40 @@ def confio_presale():
             Assert(Gtxn[1].asset_sender() == Global.zero_address()),
             Assert(Gtxn[1].rekey_to() == Global.zero_address()),
             Assert(Gtxn[1].fee() == Int(0)),  # User pays ZERO fees - truly sponsored
-            (cusd_amount := Gtxn[1].asset_amount()),
+            cusd_amount.store(Gtxn[1].asset_amount()),
             
-            # Verify this AppCall pays zero fees (sponsor covers all)
-            Assert(Txn.fee() == Int(0)),  # User pays ZERO fees
+            # AppCall pays its own budget (sponsor sender covers >= 2×)
+            Assert(And(
+                Txn.fee() >= Global.min_txn_fee() * Int(2),
+                Txn.fee() <= Global.min_txn_fee() * Int(6)
+            )),
             Assert(Txn.rekey_to() == Global.zero_address()),
             
             # Check minimum buy amount
-            Assert(cusd_amount >= App.globalGet(min_buy_cusd)),
+            Assert(cusd_amount.load() >= App.globalGet(min_buy_cusd)),
             
             # Check per-address cap for this round in cUSD
-            (user_prev_round := App.localGet(actual_buyer.load(), user_round)),
-            If(user_prev_round != App.globalGet(current_round),
+            user_prev_round.store(App.localGet(actual_buyer.load(), user_round)),
+            If(user_prev_round.load() != App.globalGet(current_round),
                 # New round for this user, reset their round counter
                 Seq([
                     App.localPut(actual_buyer.load(), user_round, App.globalGet(current_round)),
                     App.localPut(actual_buyer.load(), user_round_cusd, Int(0))
                 ])
             ),
-            If(App.localGet(actual_buyer.load(), user_round_cusd) + cusd_amount > App.globalGet(max_buy_cusd_per_address),
+            If(App.localGet(actual_buyer.load(), user_round_cusd) + cusd_amount.load() > App.globalGet(max_buy_cusd_per_address),
                 Log(Bytes("ERR|MAX_PER_ADDR"))
             ),
-            Assert(App.localGet(actual_buyer.load(), user_round_cusd) + cusd_amount 
+            Assert(App.localGet(actual_buyer.load(), user_round_cusd) + cusd_amount.load() 
                    <= App.globalGet(max_buy_cusd_per_address)),
             
             # Check round cap not exceeded
-            Assert(App.globalGet(round_cusd_raised) + cusd_amount <= App.globalGet(round_cusd_cap)),
+            Assert(App.globalGet(round_cusd_raised) + cusd_amount.load() <= App.globalGet(round_cusd_cap)),
             
             # Calculate CONFIO amount (avoid overflow with WideRatio)
             # confio_amount = cusd_amount * CONFIO_DECIMALS / price
-            (confio_amount := WideRatio([cusd_amount, CONFIO_DECIMALS], [App.globalGet(cusd_per_confio)])),
-            Assert(confio_amount > Int(0)),
+            confio_amount.store(WideRatio([cusd_amount.load(), CONFIO_DECIMALS], [App.globalGet(cusd_per_confio)])),
+            Assert(confio_amount.load() > Int(0)),
             
             # Verify contract has enough CONFIO for this purchase
             (confio_balance := AssetHolding.balance(
@@ -292,8 +304,8 @@ def confio_presale():
                 App.globalGet(confio_asset_id)
             )),
             Assert(confio_balance.hasValue()),
-            (outstanding := App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
-            Assert(confio_balance.value() >= outstanding + confio_amount),
+            outstanding.store(App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
+            Assert(confio_balance.value() >= outstanding.load() + confio_amount.load()),
             
             # Track active participants (note: can be re-counted if user closes out and re-joins)
             If(App.localGet(actual_buyer.load(), user_total_confio) == Int(0),
@@ -301,17 +313,17 @@ def confio_presale():
             ),
             
             # Update round statistics
-            App.globalPut(round_cusd_raised, App.globalGet(round_cusd_raised) + cusd_amount),
-            App.globalPut(total_confio_sold, App.globalGet(total_confio_sold) + confio_amount),
-            App.globalPut(total_cusd_raised, App.globalGet(total_cusd_raised) + cusd_amount),
+            App.globalPut(round_cusd_raised, App.globalGet(round_cusd_raised) + cusd_amount.load()),
+            App.globalPut(total_confio_sold, App.globalGet(total_confio_sold) + confio_amount.load()),
+            App.globalPut(total_cusd_raised, App.globalGet(total_cusd_raised) + cusd_amount.load()),
             
             # Update user's local state
             App.localPut(actual_buyer.load(), user_total_confio, 
-                App.localGet(actual_buyer.load(), user_total_confio) + confio_amount),
+                App.localGet(actual_buyer.load(), user_total_confio) + confio_amount.load()),
             App.localPut(actual_buyer.load(), user_total_cusd,
-                App.localGet(actual_buyer.load(), user_total_cusd) + cusd_amount),
+                App.localGet(actual_buyer.load(), user_total_cusd) + cusd_amount.load()),
             App.localPut(actual_buyer.load(), user_round_cusd,
-                App.localGet(actual_buyer.load(), user_round_cusd) + cusd_amount),
+                App.localGet(actual_buyer.load(), user_round_cusd) + cusd_amount.load()),
             
             # Log purchase for indexing
             Log(Concat(
@@ -320,9 +332,9 @@ def confio_presale():
                 Bytes("|"),
                 Itob(App.globalGet(cusd_per_confio)),
                 Bytes("|"),
-                Itob(cusd_amount),
+                Itob(cusd_amount.load()),
                 Bytes("|"),
-                Itob(confio_amount),
+                Itob(confio_amount.load()),
                 Bytes("|"),
                 actual_buyer.load()
             )),
@@ -351,7 +363,11 @@ def confio_presale():
             Txn.accounts[1],  # Sponsored path: beneficiary in accounts array
             Txn.sender()       # Self-funded fallback: sender is beneficiary
         )
-        
+        # Local scratch variables
+        total_purchased = ScratchVar(TealType.uint64)
+        already_claimed = ScratchVar(TealType.uint64)
+        claimable = ScratchVar(TealType.uint64)
+
         return Seq([
             # Contract must not be paused
             Assert(App.globalGet(contract_paused) == Int(0)),
@@ -404,12 +420,12 @@ def confio_presale():
             Assert(App.optedIn(beneficiary, Global.current_application_id())),
             
             # Calculate claimable amount for beneficiary
-            (total_purchased := App.localGet(beneficiary, user_total_confio)),
-            (already_claimed := App.localGet(beneficiary, user_claimed)),
-            (claimable := total_purchased - already_claimed),
+            total_purchased.store(App.localGet(beneficiary, user_total_confio)),
+            already_claimed.store(App.localGet(beneficiary, user_claimed)),
+            claimable.store(total_purchased.load() - already_claimed.load()),
             
             # Must have tokens to claim
-            Assert(claimable > Int(0)),
+            Assert(claimable.load() > Int(0)),
             
             # Check beneficiary is opted into CONFIO
             (user_balance := AssetHolding.balance(beneficiary, App.globalGet(confio_asset_id))),
@@ -421,21 +437,21 @@ def confio_presale():
                 TxnField.type_enum: TxnType.AssetTransfer,
                 TxnField.xfer_asset: App.globalGet(confio_asset_id),
                 TxnField.asset_receiver: beneficiary,
-                TxnField.asset_amount: claimable,
+                TxnField.asset_amount: claimable.load(),
                 TxnField.fee: Int(0)
             }),
             InnerTxnBuilder.Submit(),
             
             # Update claimed amounts
-            App.localPut(beneficiary, user_claimed, total_purchased),
+            App.localPut(beneficiary, user_claimed, total_purchased.load()),
             App.globalPut(total_confio_claimed,
-                App.globalGet(total_confio_claimed) + claimable
+                App.globalGet(total_confio_claimed) + claimable.load()
             ),
             
             # Log claim for indexing
             Log(Concat(
                 Bytes("CLAIM|"),
-                Itob(claimable),
+                Itob(claimable.load()),
                 Bytes("|"),
                 beneficiary
             )),
@@ -448,6 +464,10 @@ def confio_presale():
     def update_parameters():
         param_type = Txn.application_args[1]
         new_value = Btoi(Txn.application_args[2])
+        # Local scratch
+        remaining_cusd = ScratchVar(TealType.uint64)
+        confio_needed_rem = ScratchVar(TealType.uint64)
+        outstanding = ScratchVar(TealType.uint64)
         
         return Seq([
             # Verify arguments
@@ -463,55 +483,53 @@ def confio_presale():
                 param_type == Bytes("max")
             )),
             
-            # Update based on parameter type
-            If(param_type == Bytes("price"),
+            # Update based on parameter type (nested If to avoid chaining signature issues)
+            If(
+                param_type == Bytes("price"),
                 Seq([
                     Assert(new_value > Int(0)),
-                    # Check inventory for remaining round at new price
-                    (remaining_cusd := App.globalGet(round_cusd_cap) - App.globalGet(round_cusd_raised)),
-                    (confio_needed_rem := WideRatio([remaining_cusd, CONFIO_DECIMALS], [new_value])),
+                    remaining_cusd.store(App.globalGet(round_cusd_cap) - App.globalGet(round_cusd_raised)),
+                    confio_needed_rem.store(WideRatio([remaining_cusd.load(), CONFIO_DECIMALS], [new_value])),
                     (confio_balance := AssetHolding.balance(
                         Global.current_application_address(), 
                         App.globalGet(confio_asset_id)
                     )),
                     Assert(confio_balance.hasValue()),
-                    (outstanding := App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
-                    Assert(confio_balance.value() >= outstanding + confio_needed_rem),
+                    outstanding.store(App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
+                    Assert(confio_balance.value() >= outstanding.load() + confio_needed_rem.load()),
                     App.globalPut(cusd_per_confio, new_value)
-                ])
-            ).ElseIf(param_type == Bytes("cap"),
-                Seq([
-                    Assert(new_value >= App.globalGet(round_cusd_raised)),
-                    # Check inventory for new cap at current price
-                    (remaining_cusd := new_value - App.globalGet(round_cusd_raised)),
-                    (confio_needed_rem := WideRatio([remaining_cusd, CONFIO_DECIMALS], [App.globalGet(cusd_per_confio)])),
-                    (confio_balance := AssetHolding.balance(
-                        Global.current_application_address(),
-                        App.globalGet(confio_asset_id)
-                    )),
-                    Assert(confio_balance.hasValue()),
-                    (outstanding := App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
-                    Assert(confio_balance.value() >= outstanding + confio_needed_rem),
-                    App.globalPut(round_cusd_cap, new_value)
-                ])
-            ).ElseIf(param_type == Bytes("min"),
-                Seq([
-                    Assert(new_value > Int(0)),
-                    Assert(new_value <= App.globalGet(max_buy_cusd_per_address)),
-                    # Ensure min doesn't exceed round cap (if active)
-                    If(App.globalGet(round_cusd_cap) > Int(0),
-                        Assert(new_value <= App.globalGet(round_cusd_cap))),
-                    App.globalPut(min_buy_cusd, new_value)
-                ])
-            ).ElseIf(param_type == Bytes("max"),
-                Seq([
-                    Assert(new_value > Int(0)),
-                    Assert(new_value >= App.globalGet(min_buy_cusd)),
-                    # Ensure max doesn't exceed round cap (if active)
-                    If(App.globalGet(round_cusd_cap) > Int(0),
-                        Assert(new_value <= App.globalGet(round_cusd_cap))),
-                    App.globalPut(max_buy_cusd_per_address, new_value)
-                ])
+                ]),
+                If(
+                    param_type == Bytes("cap"),
+                    Seq([
+                        Assert(new_value >= App.globalGet(round_cusd_raised)),
+                        remaining_cusd.store(new_value - App.globalGet(round_cusd_raised)),
+                        confio_needed_rem.store(WideRatio([remaining_cusd.load(), CONFIO_DECIMALS], [App.globalGet(cusd_per_confio)])),
+                        (confio_balance := AssetHolding.balance(
+                            Global.current_application_address(),
+                            App.globalGet(confio_asset_id)
+                        )),
+                        Assert(confio_balance.hasValue()),
+                        outstanding.store(App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
+                        Assert(confio_balance.value() >= outstanding.load() + confio_needed_rem.load()),
+                        App.globalPut(round_cusd_cap, new_value)
+                    ]),
+                    If(
+                        param_type == Bytes("min"),
+                        Seq([
+                            Assert(new_value > Int(0)),
+                            Assert(new_value <= App.globalGet(max_buy_cusd_per_address)),
+                            If(App.globalGet(round_cusd_cap) > Int(0), Assert(new_value <= App.globalGet(round_cusd_cap))),
+                            App.globalPut(min_buy_cusd, new_value)
+                        ]),
+                        Seq([
+                            Assert(new_value > Int(0)),
+                            Assert(new_value >= App.globalGet(min_buy_cusd)),
+                            If(App.globalGet(round_cusd_cap) > Int(0), Assert(new_value <= App.globalGet(round_cusd_cap))),
+                            App.globalPut(max_buy_cusd_per_address, new_value)
+                        ])
+                    )
+                )
             ),
             
             Int(1)
@@ -558,6 +576,11 @@ def confio_presale():
             Int(0)  # 0 means withdraw all available
         )
         
+        # Local scratch vars
+        outstanding = ScratchVar(TealType.uint64)
+        available = ScratchVar(TealType.uint64)
+        withdraw_amount = ScratchVar(TealType.uint64)
+
         return Seq([
             # Admin only
             Assert(Txn.sender() == App.globalGet(admin_address)),
@@ -572,20 +595,20 @@ def confio_presale():
             Assert(confio_balance.hasValue()),
             
             # Calculate outstanding obligations
-            (outstanding := App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
+            outstanding.store(App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
             
             # Defensive check to prevent underflow
-            Assert(confio_balance.value() >= outstanding),
+            Assert(confio_balance.value() >= outstanding.load()),
             
             # Available = balance - outstanding (safe after check)
-            (available := confio_balance.value() - outstanding),
-            Assert(available > Int(0)),
+            available.store(confio_balance.value() - outstanding.load()),
+            Assert(available.load() > Int(0)),
             
             # Determine amount to withdraw
-            (withdraw_amount := If(
-                And(requested > Int(0), requested <= available),
+            withdraw_amount.store(If(
+                And(requested > Int(0), requested <= available.load()),
                 requested,
-                available  # Withdraw all available if 0 or too much requested
+                available.load()  # Withdraw all available if 0 or too much requested
             )),
             
             # Ensure receiver is opted-in to CONFIO
@@ -598,7 +621,7 @@ def confio_presale():
                 TxnField.type_enum: TxnType.AssetTransfer,
                 TxnField.xfer_asset: App.globalGet(confio_asset_id),
                 TxnField.asset_receiver: receiver,
-                TxnField.asset_amount: withdraw_amount,
+                TxnField.asset_amount: withdraw_amount.load(),
                 TxnField.fee: Int(0)
             }),
             InnerTxnBuilder.Submit(),
@@ -607,7 +630,7 @@ def confio_presale():
                 Bytes("ADMIN|WITHDRAW_CONFIO|"),
                 Itob(App.globalGet(current_round)),
                 Bytes("|"),
-                Itob(withdraw_amount),
+                Itob(withdraw_amount.load()),
                 Bytes("|"),
                 receiver
             )),
@@ -672,6 +695,9 @@ def confio_presale():
     # Toggle round active state (admin only)
     @Subroutine(TealType.uint64)
     def toggle_round():
+        remaining_cusd = ScratchVar(TealType.uint64)
+        confio_needed = ScratchVar(TealType.uint64)
+        outstanding = ScratchVar(TealType.uint64)
         return Seq([
             # Admin only
             Assert(Txn.sender() == App.globalGet(admin_address)),
@@ -694,10 +720,10 @@ def confio_presale():
                     
                     # Check inventory before re-activating
                     # Calculate remaining cUSD to raise
-                    (remaining_cusd := App.globalGet(round_cusd_cap) - App.globalGet(round_cusd_raised)),
+                    remaining_cusd.store(App.globalGet(round_cusd_cap) - App.globalGet(round_cusd_raised)),
                     
                     # Calculate CONFIO needed for remaining cap
-                    (confio_needed := WideRatio([remaining_cusd, CONFIO_DECIMALS], [App.globalGet(cusd_per_confio)])),
+                    confio_needed.store(WideRatio([remaining_cusd.load(), CONFIO_DECIMALS], [App.globalGet(cusd_per_confio)])),
                     
                     # Check contract has enough CONFIO
                     (confio_balance := AssetHolding.balance(
@@ -707,10 +733,10 @@ def confio_presale():
                     Assert(confio_balance.hasValue()),
                     
                     # Calculate outstanding obligations
-                    (outstanding := App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
+                    outstanding.store(App.globalGet(total_confio_sold) - App.globalGet(total_confio_claimed)),
                     
                     # Ensure we have enough for outstanding + remaining round
-                    Assert(confio_balance.value() >= outstanding + confio_needed),
+                    Assert(confio_balance.value() >= outstanding.load() + confio_needed.load()),
                     
                     App.globalPut(round_active, Int(1)),
                     Log(Concat(

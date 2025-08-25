@@ -12,6 +12,14 @@ from typing import Dict, Any
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from dotenv import load_dotenv
+    # Load .env from project root so mnemonics with spaces are parsed correctly
+    # Repo root is three levels up from this file
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    load_dotenv(os.path.join(repo_root, '.env'))
+except Exception:
+    pass
 
 from algosdk import account, mnemonic, encoding
 from algosdk.v2client import algod
@@ -30,9 +38,9 @@ from algosdk.logic import get_application_address
 from confio_presale import compile_presale
 from state_utils import decode_state
 
-# Network configuration
-ALGOD_ADDRESS = os.getenv("ALGOD_ADDRESS", "http://localhost:4001")
-ALGOD_TOKEN = os.getenv("ALGOD_TOKEN", "a" * 64)
+# Network configuration (prefer ALGORAND_* envs)
+ALGOD_ADDRESS = os.getenv("ALGORAND_ALGOD_ADDRESS", os.getenv("ALGOD_ADDRESS", "http://localhost:4001"))
+ALGOD_TOKEN = os.getenv("ALGORAND_ALGOD_TOKEN", os.getenv("ALGOD_TOKEN", "a" * 64))
 
 class PresaleDeployer:
     """Deploy and manage CONFIO presale contract"""
@@ -55,13 +63,41 @@ class PresaleDeployer:
         
         print("Deploying CONFIO Presale Contract...")
         
-        # Compile contract to bytecode
-        approval_program = self._compile(compile_presale())
+        # Compile contract to bytecode (fallback to prebuilt TEAL if PyTeal fails)
+        try:
+            approval_src = compile_presale()
+            approval_program = self._compile(approval_src)
+        except Exception as e:
+            print(f"PyTeal compile failed, falling back to approval.teal: {e}")
+            repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            fallback_path = os.path.join(repo_root, 'approval.teal')
+            if not os.path.exists(fallback_path):
+                raise
+            with open(fallback_path, 'r', encoding='utf-8') as f:
+                approval_teal_text = f.read()
+            approval_program = self._compile(approval_teal_text)
+
         clear_program = self._compile("#pragma version 8\nint 1")
         
         # Get suggested params
         params = self.algod_client.suggested_params()
         
+        # Determine extra pages needed for larger programs (page size 1024 bytes)
+        appr_len = len(approval_program)
+        clr_len = len(clear_program)
+        max_len = max(appr_len, clr_len)
+        page_size = 1024
+        extra_pages = 0
+        if max_len > page_size:
+            extra_pages = (max_len + page_size - 1) // page_size - 1
+
+        # If extra pages, increase flat fee accordingly
+        if extra_pages > 0:
+            params = self.algod_client.suggested_params()
+            params.flat_fee = True
+            # Base fee + 2000 per extra page (Algorand covers min_fee per page). Use a safe multiple
+            params.fee = max(getattr(params, 'min_fee', 1000), 1000) * (1 + extra_pages)
+
         # Create application
         txn = ApplicationCreateTxn(
             sender=creator_address,
@@ -76,7 +112,8 @@ class PresaleDeployer:
                 cusd_id.to_bytes(8, 'big'),
                 encoding.decode_address(admin_address),
                 encoding.decode_address(sponsor_address)  # Proper 32-byte public keys
-            ]
+            ],
+            extra_pages=extra_pages
         )
         
         # Sign and send
@@ -149,7 +186,8 @@ class PresaleDeployer:
             sp=sp_app,
             index=self.app_id,
             app_args=[b"opt_in_assets"],
-            on_complete=OnComplete.NoOpOC
+            on_complete=OnComplete.NoOpOC,
+            foreign_assets=[int(confio_id), int(cusd_id)]
         )
         
         # Group transactions
@@ -271,48 +309,58 @@ class PresaleDeployer:
         print("=" * 60)
 
 def main():
-    """Main deployment function"""
-    
-    # Example deployment (adjust for your setup)
+    """Env-driven deployment runner."""
     print("CONFIO Presale Contract Deployment")
     print("=" * 40)
-    
+
+    # Read env vars
+    from algosdk import mnemonic as _mn
+    confio_id = int(os.getenv('ALGORAND_CONFIO_ASSET_ID', '0') or '0')
+    cusd_id = int(os.getenv('ALGORAND_CUSD_ASSET_ID', '0') or '0')
+    sponsor_address = os.getenv('ALGORAND_SPONSOR_ADDRESS')
+    sponsor_mn = os.getenv('ALGORAND_SPONSOR_MNEMONIC')
+    admin_mn = os.getenv('ALGORAND_ADMIN_MNEMONIC') or sponsor_mn
+    # Normalize mnemonics (collapse whitespace, lowercase)
+    def _norm(m):
+        if not m:
+            return m
+        return " ".join(m.strip().split()).lower()
+    sponsor_mn = _norm(sponsor_mn)
+    admin_mn = _norm(admin_mn)
+    # Fallback if admin mnemonic malformed -> use sponsor
+    if not isinstance(admin_mn, str) or len(admin_mn.split()) != 25:
+        admin_mn = sponsor_mn
+
+    if not (confio_id and cusd_id and sponsor_address and sponsor_mn and admin_mn):
+        print('Missing env. Set ALGORAND_CONFIO_ASSET_ID, ALGORAND_CUSD_ASSET_ID, ALGORAND_SPONSOR_ADDRESS, ALGORAND_SPONSOR_MNEMONIC, ALGORAND_ADMIN_MNEMONIC(optional).')
+        return
+
+    admin_sk = _mn.to_private_key(admin_mn)
+    sponsor_sk = _mn.to_private_key(sponsor_mn)
+    # Use sponsor address as admin address (admin actions signed by same key as requested)
+    admin_address = sponsor_address
+
     deployer = PresaleDeployer()
-    
-    # You would get these from your configuration
-    # Example values:
-    creator_address = "YOUR_CREATOR_ADDRESS"
-    creator_sk = "YOUR_CREATOR_SK"
-    confio_id = 123456  # Your CONFIO asset ID
-    cusd_id = 123457    # Your cUSD asset ID
-    admin_address = creator_address  # Admin can be different
-    sponsor_address = "YOUR_SPONSOR_ADDRESS"  # Sponsor wallet for fees
-    
-    # Deploy contract
-    # app_id = deployer.deploy_contract(
-    #     creator_address, creator_sk,
-    #     confio_id, cusd_id, admin_address, sponsor_address
-    # )
-    
-    # Opt into assets (requires sponsor payment)
-    # deployer.opt_in_assets(admin_address, admin_sk, sponsor_address, sponsor_sk, confio_id, cusd_id)
-    
-    # Fund with CONFIO tokens
-    # deployer.fund_with_confio(
-    #     creator_address, creator_sk,
-    #     confio_id,
-    #     4_000_000 * 10**6  # 4M CONFIO for first round
-    # )
-    
-    # Start first presale round
-    # deployer.start_presale_round(
-    #     admin_address, admin_sk,
-    #     price=250_000,  # 0.25 cUSD per CONFIO (6 decimals)
-    #     cusd_cap=1_000_000 * 10**6,   # 1M cUSD cap
-    #     max_per_addr=10_000 * 10**6   # 10k cUSD per address
-    # )
-    
-    print("\nDeployment complete! Uncomment the code above to deploy.")
+    app_id = deployer.deploy_contract(
+        creator_address=admin_address,
+        creator_sk=admin_sk,
+        confio_id=confio_id,
+        cusd_id=cusd_id,
+        admin_address=admin_address,
+        sponsor_address=sponsor_address,
+    )
+
+    deployer.opt_in_assets(
+        admin_address=admin_address,
+        admin_sk=admin_sk,
+        sponsor_address=sponsor_address,
+        sponsor_sk=sponsor_sk,
+        confio_id=confio_id,
+        cusd_id=cusd_id,
+    )
+
+    deployer.display_contract_info()
+    print(f"\nSet in .env: ALGORAND_PRESALE_APP_ID={app_id}")
 
 if __name__ == "__main__":
     main()

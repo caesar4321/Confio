@@ -62,6 +62,9 @@ class NotificationType(models.TextChoices):
     PROMOTION = 'PROMOTION', 'Promotion'
     SYSTEM = 'SYSTEM', 'System Notification'
     ANNOUNCEMENT = 'ANNOUNCEMENT', 'Announcement'
+    
+    # Presale
+    PRESALE_PURCHASE_CONFIRMED = 'PRESALE_PURCHASE_CONFIRMED', 'Presale Purchase Confirmed'
 
 
 class Notification(models.Model):

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, SafeAreaView, Image, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { Buffer } from 'buffer';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -7,8 +8,10 @@ import { MainStackParamList } from '../types/navigation';
 import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 import CONFIOLogo from '../assets/png/CONFIO.png';
-import { useQuery, useMutation } from '@apollo/client';
-import { GET_ACTIVE_PRESALE, PURCHASE_PRESALE_TOKENS } from '../apollo/queries';
+import { useQuery } from '@apollo/client';
+import { GET_ACTIVE_PRESALE } from '../apollo/queries';
+import { PresaleWsSession } from '../services/presaleWs';
+import algorandService from '../services/algorandService';
 
 const colors = {
   primary: '#34d399',
@@ -42,30 +45,7 @@ export const ConfioPresaleParticipateScreen = () => {
     fetchPolicy: 'cache-and-network',
   });
 
-  // Purchase mutation
-  const [purchaseTokens, { loading: purchaseLoading }] = useMutation(PURCHASE_PRESALE_TOKENS, {
-    onCompleted: (data) => {
-      if (data.purchasePresaleTokens.success) {
-        Alert.alert(
-          '¡Intercambio Exitoso!',
-          `Has intercambiado ${amount} cUSD por ${formatWithLocale(parseFloat(data.purchasePresaleTokens.purchase.confioAmount), { minimumFractionDigits: 2 })} $CONFIO.\n\nLas monedas están en tu cuenta pero permanecerán bloqueadas mientras construimos juntos.`,
-          [
-            {
-              text: 'Ver Mi Cuenta',
-              onPress: () => {
-                navigation.navigate('BottomTabs', { screen: 'Home' });
-              },
-            },
-          ]
-        );
-        setAmount('');
-        refetch(); // Refresh presale data
-      }
-    },
-    onError: (error) => {
-      Alert.alert('Error', error.message);
-    }
-  });
+  const [busy, setBusy] = useState(false);
 
   // Get presale data from query
   const presale = data?.activePresalePhase;
@@ -91,11 +71,64 @@ export const ConfioPresaleParticipateScreen = () => {
   const isValidAmount = parsedAmount >= minAmount && parsedAmount <= maxAmount;
 
   const executeSwap = async () => {
-    purchaseTokens({
-      variables: {
-        cusdAmount: amount
+    try {
+      setBusy(true);
+      const session = new PresaleWsSession();
+      await session.open();
+
+      // 1) Try prepare purchase
+      let pack: any;
+      try {
+        pack = await session.preparePurchase(amount);
+      } catch (e: any) {
+        // If the server requires opt-in, perform it silently, then retry
+        if (String(e?.message || '').includes('requires_presale_app_optin')) {
+          const opt = await session.optinPrepare();
+          const txns = Array.isArray(opt?.transactions) ? opt.transactions : [];
+          if (txns.length > 0) {
+            // Find user txn to sign (index 1)
+            const user = txns.find((t: any) => t?.index === 1 && !t?.signed);
+            if (!user) throw new Error('optin_missing_user_txn');
+            const bytes = Buffer.from(user.transaction, 'base64');
+            const signed = await algorandService.signTransactionBytes(bytes);
+            const userSignedB64 = Buffer.from(signed).toString('base64');
+            await session.optinSubmit(userSignedB64, opt.sponsor_transactions || []);
+          }
+          // Retry purchase prepare after opt-in
+          pack = await session.preparePurchase(amount);
+        } else {
+          throw e;
+        }
       }
-    });
+
+      // 2) Sign user purchase txn (index 1)
+      const txns = Array.isArray(pack?.transactions) ? pack.transactions : [];
+      const sponsorTxns = (pack?.sponsor_transactions || []).slice();
+      const userToSign = txns.find((t: any) => t?.index === 1 && (t?.needs_signature || !t?.signed));
+      if (!userToSign) throw new Error('purchase_missing_user_txn');
+      const userBytes = Buffer.from(userToSign.transaction, 'base64');
+      const signedUser = await algorandService.signTransactionBytes(userBytes);
+      const signedUserB64 = Buffer.from(signedUser).toString('base64');
+
+      // 3) Submit group
+      const purchaseId = pack?.purchase_id || pack?.purchaseId;
+      if (!purchaseId) throw new Error('purchase_id_missing');
+      await session.submitPurchase(purchaseId, signedUserB64, sponsorTxns);
+
+      setBusy(false);
+      // Show success message (submission)
+      Alert.alert(
+        'Intercambio enviado',
+        'Tu intercambio fue enviado. Se confirmará en segundos.',
+        [{ text: 'Ok', onPress: () => navigation.navigate('BottomTabs', { screen: 'Home' }) }]
+      );
+      setAmount('');
+      refetch();
+    } catch (e: any) {
+      console.log('[Presale] swap error', e);
+      setBusy(false);
+      Alert.alert('Error', e?.message || 'No se pudo procesar el intercambio');
+    }
   };
 
   const handleSwap = async () => {
@@ -114,7 +147,7 @@ export const ConfioPresaleParticipateScreen = () => {
         },
         {
           text: 'Confirmar',
-          onPress: () => executeSwap(),
+            onPress: () => executeSwap(),
         },
       ]
     );
@@ -161,6 +194,11 @@ export const ConfioPresaleParticipateScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
+      {busy && (
+        <View style={styles.overlay}> 
+          <ActivityIndicator size="large" color="#fff" />
+        </View>
+      )}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Icon name="arrow-left" size={24} color="#fff" />
@@ -303,9 +341,9 @@ export const ConfioPresaleParticipateScreen = () => {
               (!isValidAmount || parsedAmount === 0) && styles.swapButtonDisabled
             ]}
             onPress={handleSwap}
-            disabled={!isValidAmount || parsedAmount === 0 || purchaseLoading}
+            disabled={!isValidAmount || parsedAmount === 0 || busy}
           >
-            {purchaseLoading ? (
+            {busy ? (
               <Text style={styles.swapButtonText}>Procesando Intercambio...</Text>
             ) : (
               <>
@@ -397,6 +435,17 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 20,
   },
   scrollView: {
     flex: 1,

@@ -1,0 +1,1829 @@
+# Presale Approval Program (TEAL)
+#pragma version 8
+txn ApplicationID
+int 0
+==
+bnz main_l40
+txn OnCompletion
+int OptIn
+==
+bnz main_l39
+txn OnCompletion
+int UpdateApplication
+==
+bnz main_l38
+txn OnCompletion
+int DeleteApplication
+==
+bnz main_l37
+txn OnCompletion
+int NoOp
+==
+txn NumAppArgs
+int 0
+==
+&&
+bnz main_l36
+txn OnCompletion
+int NoOp
+==
+txn NumAppArgs
+int 0
+>
+&&
+bnz main_l11
+txn OnCompletion
+int CloseOut
+==
+bnz main_l10
+int 1
+bnz main_l9
+err
+main_l9:
+int 0
+b main_l41
+main_l10:
+txn Sender
+byte "user_confio"
+app_local_get
+txn Sender
+byte "claimed"
+app_local_get
+==
+assert
+int 1
+b main_l41
+main_l11:
+txna ApplicationArgs 0
+byte "opt_in_assets"
+==
+bnz main_l35
+txna ApplicationArgs 0
+byte "start_round"
+==
+bnz main_l34
+txna ApplicationArgs 0
+byte "toggle_round"
+==
+bnz main_l33
+txna ApplicationArgs 0
+byte "update"
+==
+bnz main_l32
+txna ApplicationArgs 0
+byte "buy"
+==
+bnz main_l31
+txna ApplicationArgs 0
+byte "claim"
+==
+bnz main_l30
+txna ApplicationArgs 0
+byte "unlock"
+==
+bnz main_l29
+txna ApplicationArgs 0
+byte "withdraw"
+==
+bnz main_l28
+txna ApplicationArgs 0
+byte "withdraw_confio"
+==
+bnz main_l27
+txna ApplicationArgs 0
+byte "update_sponsor"
+==
+bnz main_l26
+txna ApplicationArgs 0
+byte "pause"
+==
+bnz main_l25
+txna ApplicationArgs 0
+byte "info"
+==
+bnz main_l24
+err
+main_l24:
+callsub getuserinfo_12
+b main_l41
+main_l25:
+callsub emergencypause_10
+b main_l41
+main_l26:
+callsub updatesponsor_9
+b main_l41
+main_l27:
+callsub withdrawconfio_6
+b main_l41
+main_l28:
+callsub withdrawcusd_7
+b main_l41
+main_l29:
+callsub permanentunlock_5
+b main_l41
+main_l30:
+callsub claimtokens_3
+b main_l41
+main_l31:
+callsub buytokens_2
+b main_l41
+main_l32:
+callsub updateparameters_4
+b main_l41
+main_l33:
+callsub toggleround_8
+b main_l41
+main_l34:
+callsub startround_1
+b main_l41
+main_l35:
+callsub optinassets_11
+b main_l41
+main_l36:
+int 0
+b main_l41
+main_l37:
+int 0
+b main_l41
+main_l38:
+int 0
+b main_l41
+main_l39:
+callsub optin_13
+b main_l41
+main_l40:
+callsub initialize_0
+main_l41:
+return
+
+// initialize
+initialize_0:
+proto 0 1
+txn NumAppArgs
+int 4
+==
+assert
+txna ApplicationArgs 0
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 1
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 2
+len
+int 32
+==
+assert
+txna ApplicationArgs 3
+len
+int 32
+==
+assert
+byte "confio_id"
+txna ApplicationArgs 0
+btoi
+app_global_put
+byte "cusd_id"
+txna ApplicationArgs 1
+btoi
+app_global_put
+byte "admin"
+txna ApplicationArgs 2
+app_global_put
+byte "sponsor"
+txna ApplicationArgs 3
+app_global_put
+byte "round"
+int 0
+app_global_put
+byte "active"
+int 0
+app_global_put
+byte "price"
+int 250000
+app_global_put
+byte "cusd_cap"
+int 0
+app_global_put
+byte "cusd_raised"
+int 0
+app_global_put
+byte "min_buy"
+int 10
+int 1000000
+*
+app_global_put
+byte "max_addr"
+int 100000
+int 1000000
+*
+app_global_put
+byte "locked"
+int 1
+app_global_put
+byte "unlock_time"
+int 0
+app_global_put
+byte "total_rounds"
+int 0
+app_global_put
+byte "confio_sold"
+int 0
+app_global_put
+byte "claimed_total"
+int 0
+app_global_put
+byte "total_raised"
+int 0
+app_global_put
+byte "participants"
+int 0
+app_global_put
+byte "paused"
+int 0
+app_global_put
+int 1
+retsub
+
+// start_round
+startround_1:
+proto 0 1
+txn NumAppArgs
+int 4
+>=
+assert
+txn Sender
+byte "admin"
+app_global_get
+==
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+byte "paused"
+app_global_get
+int 0
+==
+assert
+byte "active"
+app_global_get
+int 0
+==
+assert
+txna ApplicationArgs 1
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 2
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 3
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 2
+btoi
+byte "min_buy"
+app_global_get
+>=
+assert
+byte "min_buy"
+app_global_get
+txna ApplicationArgs 3
+btoi
+<=
+assert
+txna ApplicationArgs 3
+btoi
+txna ApplicationArgs 2
+btoi
+<=
+assert
+txna ApplicationArgs 2
+btoi
+int 1000000
+mulw
+int 0
+txna ApplicationArgs 1
+btoi
+divmodw
+pop
+pop
+swap
+!
+assert
+int 0
+>
+assert
+global CurrentApplicationAddress
+byte "confio_id"
+app_global_get
+asset_holding_get AssetBalance
+store 2
+store 1
+load 2
+assert
+byte "confio_sold"
+app_global_get
+byte "claimed_total"
+app_global_get
+-
+store 0
+load 1
+load 0
+txna ApplicationArgs 2
+btoi
+int 1000000
+mulw
+int 0
+txna ApplicationArgs 1
+btoi
+divmodw
+pop
+pop
+swap
+!
+assert
++
+>=
+assert
+byte "round"
+byte "round"
+app_global_get
+int 1
++
+app_global_put
+byte "active"
+int 1
+app_global_put
+byte "price"
+txna ApplicationArgs 1
+btoi
+app_global_put
+byte "cusd_cap"
+txna ApplicationArgs 2
+btoi
+app_global_put
+byte "cusd_raised"
+int 0
+app_global_put
+byte "max_addr"
+txna ApplicationArgs 3
+btoi
+app_global_put
+byte "total_rounds"
+byte "total_rounds"
+app_global_get
+int 1
++
+app_global_put
+byte "ADMIN|START_ROUND|"
+byte "round"
+app_global_get
+itob
+concat
+byte "|"
+concat
+txna ApplicationArgs 1
+btoi
+itob
+concat
+byte "|"
+concat
+txna ApplicationArgs 2
+btoi
+itob
+concat
+byte "|"
+concat
+txna ApplicationArgs 3
+btoi
+itob
+concat
+log
+int 1
+retsub
+
+// buy_tokens
+buytokens_2:
+proto 0 1
+byte "sponsor"
+app_global_get
+byte ""
+!=
+txn Sender
+byte "sponsor"
+app_global_get
+==
+&&
+txn NumAccounts
+int 0
+>
+&&
+bnz buytokens_2_l14
+txn Sender
+store 3
+buytokens_2_l2:
+load 3
+global CurrentApplicationID
+app_opted_in
+assert
+byte "active"
+app_global_get
+int 1
+!=
+bnz buytokens_2_l13
+buytokens_2_l3:
+byte "active"
+app_global_get
+int 1
+==
+assert
+byte "paused"
+app_global_get
+int 0
+!=
+bnz buytokens_2_l12
+buytokens_2_l4:
+byte "paused"
+app_global_get
+int 0
+==
+assert
+global GroupSize
+int 3
+==
+assert
+txn GroupIndex
+int 2
+==
+assert
+gtxn 0 TypeEnum
+int pay
+==
+assert
+gtxn 0 Sender
+byte "sponsor"
+app_global_get
+==
+assert
+gtxn 0 Receiver
+byte "sponsor"
+app_global_get
+==
+gtxn 0 Receiver
+load 3
+==
+||
+assert
+gtxn 0 RekeyTo
+global ZeroAddress
+==
+assert
+gtxn 0 CloseRemainderTo
+global ZeroAddress
+==
+assert
+gtxn 0 Fee
+global MinTxnFee
+>=
+assert
+gtxn 0 Fee
+global MinTxnFee
+int 10
+*
+<=
+assert
+gtxn 1 TypeEnum
+int axfer
+==
+assert
+gtxn 1 Sender
+load 3
+==
+assert
+gtxn 1 AssetReceiver
+global CurrentApplicationAddress
+==
+assert
+gtxn 1 XferAsset
+byte "cusd_id"
+app_global_get
+==
+assert
+gtxn 1 AssetCloseTo
+global ZeroAddress
+==
+assert
+gtxn 1 AssetSender
+global ZeroAddress
+==
+assert
+gtxn 1 RekeyTo
+global ZeroAddress
+==
+assert
+gtxn 1 Fee
+int 0
+==
+assert
+gtxn 1 AssetAmount
+store 4
+txn Fee
+global MinTxnFee
+int 2
+*
+>=
+txn Fee
+global MinTxnFee
+int 6
+*
+<=
+&&
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+load 4
+byte "min_buy"
+app_global_get
+>=
+assert
+load 3
+byte "user_round"
+app_local_get
+store 6
+load 6
+byte "round"
+app_global_get
+!=
+bnz buytokens_2_l11
+buytokens_2_l5:
+load 3
+byte "round_cusd"
+app_local_get
+load 4
++
+byte "max_addr"
+app_global_get
+>
+bnz buytokens_2_l10
+buytokens_2_l6:
+load 3
+byte "round_cusd"
+app_local_get
+load 4
++
+byte "max_addr"
+app_global_get
+<=
+assert
+byte "cusd_raised"
+app_global_get
+load 4
++
+byte "cusd_cap"
+app_global_get
+<=
+assert
+load 4
+int 1000000
+mulw
+int 0
+byte "price"
+app_global_get
+divmodw
+pop
+pop
+swap
+!
+assert
+store 5
+load 5
+int 0
+>
+assert
+global CurrentApplicationAddress
+byte "confio_id"
+app_global_get
+asset_holding_get AssetBalance
+store 9
+store 8
+load 9
+assert
+byte "confio_sold"
+app_global_get
+byte "claimed_total"
+app_global_get
+-
+store 7
+load 8
+load 7
+load 5
++
+>=
+assert
+load 3
+byte "user_confio"
+app_local_get
+int 0
+==
+bnz buytokens_2_l9
+buytokens_2_l7:
+byte "cusd_raised"
+byte "cusd_raised"
+app_global_get
+load 4
++
+app_global_put
+byte "confio_sold"
+byte "confio_sold"
+app_global_get
+load 5
++
+app_global_put
+byte "total_raised"
+byte "total_raised"
+app_global_get
+load 4
++
+app_global_put
+load 3
+byte "user_confio"
+load 3
+byte "user_confio"
+app_local_get
+load 5
++
+app_local_put
+load 3
+byte "user_cusd"
+load 3
+byte "user_cusd"
+app_local_get
+load 4
++
+app_local_put
+load 3
+byte "round_cusd"
+load 3
+byte "round_cusd"
+app_local_get
+load 4
++
+app_local_put
+byte "BUY|"
+byte "round"
+app_global_get
+itob
+concat
+byte "|"
+concat
+byte "price"
+app_global_get
+itob
+concat
+byte "|"
+concat
+load 4
+itob
+concat
+byte "|"
+concat
+load 5
+itob
+concat
+byte "|"
+concat
+load 3
+concat
+log
+byte "cusd_raised"
+app_global_get
+byte "cusd_cap"
+app_global_get
+>=
+bz buytokens_2_l15
+byte "active"
+int 0
+app_global_put
+byte "ADMIN|ROUND_ENDED_AT_CAP|"
+byte "round"
+app_global_get
+itob
+concat
+log
+b buytokens_2_l15
+buytokens_2_l9:
+byte "participants"
+byte "participants"
+app_global_get
+int 1
++
+app_global_put
+b buytokens_2_l7
+buytokens_2_l10:
+byte "ERR|MAX_PER_ADDR"
+log
+b buytokens_2_l6
+buytokens_2_l11:
+load 3
+byte "user_round"
+byte "round"
+app_global_get
+app_local_put
+load 3
+byte "round_cusd"
+int 0
+app_local_put
+b buytokens_2_l5
+buytokens_2_l12:
+byte "ERR|CONTRACT_PAUSED"
+log
+b buytokens_2_l4
+buytokens_2_l13:
+byte "ERR|ROUND_INACTIVE"
+log
+b buytokens_2_l3
+buytokens_2_l14:
+txna Accounts 0
+store 3
+b buytokens_2_l2
+buytokens_2_l15:
+int 1
+retsub
+
+// claim_tokens
+claimtokens_3:
+proto 0 1
+byte "paused"
+app_global_get
+int 0
+==
+assert
+byte "locked"
+app_global_get
+int 0
+==
+assert
+global GroupSize
+int 2
+==
+bnz claimtokens_3_l26
+global GroupSize
+int 1
+==
+assert
+txn Sender
+global GroupSize
+int 2
+==
+bnz claimtokens_3_l25
+txn Sender
+claimtokens_3_l3:
+==
+assert
+txn Fee
+global MinTxnFee
+int 2
+*
+>=
+txn Fee
+global MinTxnFee
+int 5
+*
+<=
+&&
+assert
+claimtokens_3_l4:
+txn RekeyTo
+global ZeroAddress
+==
+assert
+global GroupSize
+int 2
+==
+bnz claimtokens_3_l24
+txn Sender
+claimtokens_3_l6:
+global CurrentApplicationID
+app_opted_in
+assert
+global GroupSize
+int 2
+==
+bnz claimtokens_3_l23
+txn Sender
+claimtokens_3_l8:
+byte "user_confio"
+app_local_get
+store 10
+global GroupSize
+int 2
+==
+bnz claimtokens_3_l22
+txn Sender
+claimtokens_3_l10:
+byte "claimed"
+app_local_get
+store 11
+load 10
+load 11
+-
+store 12
+load 12
+int 0
+>
+assert
+global GroupSize
+int 2
+==
+bnz claimtokens_3_l21
+txn Sender
+claimtokens_3_l12:
+byte "confio_id"
+app_global_get
+asset_holding_get AssetBalance
+store 14
+store 13
+load 14
+assert
+itxn_begin
+int axfer
+itxn_field TypeEnum
+byte "confio_id"
+app_global_get
+itxn_field XferAsset
+global GroupSize
+int 2
+==
+bnz claimtokens_3_l20
+txn Sender
+claimtokens_3_l14:
+itxn_field AssetReceiver
+load 12
+itxn_field AssetAmount
+int 0
+itxn_field Fee
+itxn_submit
+global GroupSize
+int 2
+==
+bnz claimtokens_3_l19
+txn Sender
+claimtokens_3_l16:
+byte "claimed"
+load 10
+app_local_put
+byte "claimed_total"
+byte "claimed_total"
+app_global_get
+load 12
++
+app_global_put
+byte "CLAIM|"
+load 12
+itob
+concat
+byte "|"
+concat
+global GroupSize
+int 2
+==
+bnz claimtokens_3_l18
+txn Sender
+b claimtokens_3_l33
+claimtokens_3_l18:
+txna Accounts 1
+b claimtokens_3_l33
+claimtokens_3_l19:
+txna Accounts 1
+b claimtokens_3_l16
+claimtokens_3_l20:
+txna Accounts 1
+b claimtokens_3_l14
+claimtokens_3_l21:
+txna Accounts 1
+b claimtokens_3_l12
+claimtokens_3_l22:
+txna Accounts 1
+b claimtokens_3_l10
+claimtokens_3_l23:
+txna Accounts 1
+b claimtokens_3_l8
+claimtokens_3_l24:
+txna Accounts 1
+b claimtokens_3_l6
+claimtokens_3_l25:
+txna Accounts 1
+b claimtokens_3_l3
+claimtokens_3_l26:
+txn Sender
+byte "sponsor"
+app_global_get
+==
+assert
+txn GroupIndex
+int 1
+==
+assert
+txna Accounts 1
+global ZeroAddress
+!=
+assert
+gtxn 0 TypeEnum
+int pay
+==
+assert
+gtxn 0 Sender
+global GroupSize
+int 2
+==
+bnz claimtokens_3_l32
+txn Sender
+claimtokens_3_l28:
+==
+assert
+gtxn 0 Receiver
+global GroupSize
+int 2
+==
+bnz claimtokens_3_l31
+txn Sender
+claimtokens_3_l30:
+==
+assert
+gtxn 0 Amount
+int 0
+==
+assert
+gtxn 0 RekeyTo
+global ZeroAddress
+==
+assert
+gtxn 0 CloseRemainderTo
+global ZeroAddress
+==
+assert
+gtxn 0 Fee
+int 0
+==
+assert
+txn Fee
+global MinTxnFee
+int 2
+*
+>=
+txn Fee
+global MinTxnFee
+int 5
+*
+<=
+&&
+assert
+b claimtokens_3_l4
+claimtokens_3_l31:
+txna Accounts 1
+b claimtokens_3_l30
+claimtokens_3_l32:
+txna Accounts 1
+b claimtokens_3_l28
+claimtokens_3_l33:
+concat
+log
+int 1
+retsub
+
+// update_parameters
+updateparameters_4:
+proto 0 1
+txn NumAppArgs
+int 3
+>=
+assert
+txn Sender
+byte "admin"
+app_global_get
+==
+assert
+txna ApplicationArgs 1
+byte "price"
+==
+txna ApplicationArgs 1
+byte "cap"
+==
+||
+txna ApplicationArgs 1
+byte "min"
+==
+||
+txna ApplicationArgs 1
+byte "max"
+==
+||
+assert
+txna ApplicationArgs 1
+byte "price"
+==
+bnz updateparameters_4_l10
+txna ApplicationArgs 1
+byte "cap"
+==
+bnz updateparameters_4_l9
+txna ApplicationArgs 1
+byte "min"
+==
+bnz updateparameters_4_l6
+txna ApplicationArgs 2
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 2
+btoi
+byte "min_buy"
+app_global_get
+>=
+assert
+byte "cusd_cap"
+app_global_get
+int 0
+>
+bnz updateparameters_4_l5
+updateparameters_4_l4:
+byte "max_addr"
+txna ApplicationArgs 2
+btoi
+app_global_put
+b updateparameters_4_l11
+updateparameters_4_l5:
+txna ApplicationArgs 2
+btoi
+byte "cusd_cap"
+app_global_get
+<=
+assert
+b updateparameters_4_l4
+updateparameters_4_l6:
+txna ApplicationArgs 2
+btoi
+int 0
+>
+assert
+txna ApplicationArgs 2
+btoi
+byte "max_addr"
+app_global_get
+<=
+assert
+byte "cusd_cap"
+app_global_get
+int 0
+>
+bnz updateparameters_4_l8
+updateparameters_4_l7:
+byte "min_buy"
+txna ApplicationArgs 2
+btoi
+app_global_put
+b updateparameters_4_l11
+updateparameters_4_l8:
+txna ApplicationArgs 2
+btoi
+byte "cusd_cap"
+app_global_get
+<=
+assert
+b updateparameters_4_l7
+updateparameters_4_l9:
+txna ApplicationArgs 2
+btoi
+byte "cusd_raised"
+app_global_get
+>=
+assert
+txna ApplicationArgs 2
+btoi
+byte "cusd_raised"
+app_global_get
+-
+store 15
+load 15
+int 1000000
+mulw
+int 0
+byte "price"
+app_global_get
+divmodw
+pop
+pop
+swap
+!
+assert
+store 16
+global CurrentApplicationAddress
+byte "confio_id"
+app_global_get
+asset_holding_get AssetBalance
+store 21
+store 20
+load 21
+assert
+byte "confio_sold"
+app_global_get
+byte "claimed_total"
+app_global_get
+-
+store 17
+load 20
+load 17
+load 16
++
+>=
+assert
+byte "cusd_cap"
+txna ApplicationArgs 2
+btoi
+app_global_put
+b updateparameters_4_l11
+updateparameters_4_l10:
+txna ApplicationArgs 2
+btoi
+int 0
+>
+assert
+byte "cusd_cap"
+app_global_get
+byte "cusd_raised"
+app_global_get
+-
+store 15
+load 15
+int 1000000
+mulw
+int 0
+txna ApplicationArgs 2
+btoi
+divmodw
+pop
+pop
+swap
+!
+assert
+store 16
+global CurrentApplicationAddress
+byte "confio_id"
+app_global_get
+asset_holding_get AssetBalance
+store 19
+store 18
+load 19
+assert
+byte "confio_sold"
+app_global_get
+byte "claimed_total"
+app_global_get
+-
+store 17
+load 18
+load 17
+load 16
++
+>=
+assert
+byte "price"
+txna ApplicationArgs 2
+btoi
+app_global_put
+updateparameters_4_l11:
+int 1
+retsub
+
+// permanent_unlock
+permanentunlock_5:
+proto 0 1
+txn Sender
+byte "admin"
+app_global_get
+==
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+byte "locked"
+app_global_get
+int 1
+==
+assert
+byte "locked"
+int 0
+app_global_put
+byte "unlock_time"
+global LatestTimestamp
+app_global_put
+byte "ADMIN|UNLOCK|PERMANENT|"
+byte "round"
+app_global_get
+itob
+concat
+log
+int 1
+retsub
+
+// withdraw_confio
+withdrawconfio_6:
+proto 0 1
+txn Sender
+byte "admin"
+app_global_get
+==
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+global CurrentApplicationAddress
+byte "confio_id"
+app_global_get
+asset_holding_get AssetBalance
+store 26
+store 25
+load 26
+assert
+byte "confio_sold"
+app_global_get
+byte "claimed_total"
+app_global_get
+-
+store 22
+load 25
+load 22
+>=
+assert
+load 25
+load 22
+-
+store 23
+load 23
+int 0
+>
+assert
+txn NumAppArgs
+int 3
+>=
+bnz withdrawconfio_6_l19
+int 0
+withdrawconfio_6_l2:
+int 0
+>
+txn NumAppArgs
+int 3
+>=
+bnz withdrawconfio_6_l18
+int 0
+withdrawconfio_6_l4:
+load 23
+<=
+&&
+bnz withdrawconfio_6_l15
+load 23
+withdrawconfio_6_l6:
+store 24
+txn NumAppArgs
+int 2
+>=
+bnz withdrawconfio_6_l14
+byte "admin"
+app_global_get
+withdrawconfio_6_l8:
+byte "confio_id"
+app_global_get
+asset_holding_get AssetBalance
+store 28
+store 27
+load 28
+assert
+itxn_begin
+int axfer
+itxn_field TypeEnum
+byte "confio_id"
+app_global_get
+itxn_field XferAsset
+txn NumAppArgs
+int 2
+>=
+bnz withdrawconfio_6_l13
+byte "admin"
+app_global_get
+withdrawconfio_6_l10:
+itxn_field AssetReceiver
+load 24
+itxn_field AssetAmount
+int 0
+itxn_field Fee
+itxn_submit
+byte "ADMIN|WITHDRAW_CONFIO|"
+byte "round"
+app_global_get
+itob
+concat
+byte "|"
+concat
+load 24
+itob
+concat
+byte "|"
+concat
+txn NumAppArgs
+int 2
+>=
+bnz withdrawconfio_6_l12
+byte "admin"
+app_global_get
+b withdrawconfio_6_l20
+withdrawconfio_6_l12:
+txna ApplicationArgs 1
+b withdrawconfio_6_l20
+withdrawconfio_6_l13:
+txna ApplicationArgs 1
+b withdrawconfio_6_l10
+withdrawconfio_6_l14:
+txna ApplicationArgs 1
+b withdrawconfio_6_l8
+withdrawconfio_6_l15:
+txn NumAppArgs
+int 3
+>=
+bnz withdrawconfio_6_l17
+int 0
+b withdrawconfio_6_l6
+withdrawconfio_6_l17:
+txna ApplicationArgs 2
+btoi
+b withdrawconfio_6_l6
+withdrawconfio_6_l18:
+txna ApplicationArgs 2
+btoi
+b withdrawconfio_6_l4
+withdrawconfio_6_l19:
+txna ApplicationArgs 2
+btoi
+b withdrawconfio_6_l2
+withdrawconfio_6_l20:
+concat
+log
+int 1
+retsub
+
+// withdraw_cusd
+withdrawcusd_7:
+proto 0 1
+txn Sender
+byte "admin"
+app_global_get
+==
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+global CurrentApplicationAddress
+byte "cusd_id"
+app_global_get
+asset_holding_get AssetBalance
+store 30
+store 29
+load 30
+assert
+txn NumAppArgs
+int 2
+>=
+bnz withdrawcusd_7_l10
+byte "admin"
+app_global_get
+withdrawcusd_7_l2:
+byte "cusd_id"
+app_global_get
+asset_holding_get AssetBalance
+store 32
+store 31
+load 32
+assert
+load 29
+int 0
+>
+bz withdrawcusd_7_l11
+itxn_begin
+int axfer
+itxn_field TypeEnum
+byte "cusd_id"
+app_global_get
+itxn_field XferAsset
+txn NumAppArgs
+int 2
+>=
+bnz withdrawcusd_7_l9
+byte "admin"
+app_global_get
+withdrawcusd_7_l5:
+itxn_field AssetReceiver
+load 29
+itxn_field AssetAmount
+int 0
+itxn_field Fee
+itxn_submit
+byte "ADMIN|WITHDRAW_CUSD|"
+byte "round"
+app_global_get
+itob
+concat
+byte "|"
+concat
+load 29
+itob
+concat
+byte "|"
+concat
+txn NumAppArgs
+int 2
+>=
+bnz withdrawcusd_7_l8
+byte "admin"
+app_global_get
+withdrawcusd_7_l7:
+concat
+log
+b withdrawcusd_7_l11
+withdrawcusd_7_l8:
+txna ApplicationArgs 1
+b withdrawcusd_7_l7
+withdrawcusd_7_l9:
+txna ApplicationArgs 1
+b withdrawcusd_7_l5
+withdrawcusd_7_l10:
+txna ApplicationArgs 1
+b withdrawcusd_7_l2
+withdrawcusd_7_l11:
+int 1
+retsub
+
+// toggle_round
+toggleround_8:
+proto 0 1
+txn Sender
+byte "admin"
+app_global_get
+==
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+byte "active"
+app_global_get
+int 1
+==
+bnz toggleround_8_l2
+byte "paused"
+app_global_get
+int 0
+==
+assert
+byte "cusd_cap"
+app_global_get
+byte "cusd_raised"
+app_global_get
+-
+store 33
+load 33
+int 1000000
+mulw
+int 0
+byte "price"
+app_global_get
+divmodw
+pop
+pop
+swap
+!
+assert
+store 34
+global CurrentApplicationAddress
+byte "confio_id"
+app_global_get
+asset_holding_get AssetBalance
+store 37
+store 36
+load 37
+assert
+byte "confio_sold"
+app_global_get
+byte "claimed_total"
+app_global_get
+-
+store 35
+load 36
+load 35
+load 34
++
+>=
+assert
+byte "active"
+int 1
+app_global_put
+byte "ADMIN|TOGGLE|"
+byte "round"
+app_global_get
+itob
+concat
+byte "|1"
+concat
+log
+b toggleround_8_l3
+toggleround_8_l2:
+byte "active"
+int 0
+app_global_put
+byte "ADMIN|TOGGLE|"
+byte "round"
+app_global_get
+itob
+concat
+byte "|0"
+concat
+log
+toggleround_8_l3:
+int 1
+retsub
+
+// update_sponsor
+updatesponsor_9:
+proto 0 1
+txn Sender
+byte "admin"
+app_global_get
+==
+assert
+txna ApplicationArgs 1
+len
+int 32
+==
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+byte "sponsor"
+app_global_get
+store 38
+byte "sponsor"
+txna ApplicationArgs 1
+app_global_put
+byte "ADMIN|UPDATE_SPONSOR|"
+load 38
+concat
+byte "|"
+concat
+txna ApplicationArgs 1
+concat
+log
+int 1
+retsub
+
+// emergency_pause
+emergencypause_10:
+proto 0 1
+txn Sender
+byte "admin"
+app_global_get
+==
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+byte "paused"
+app_global_get
+int 0
+==
+bnz emergencypause_10_l2
+byte "paused"
+int 0
+app_global_put
+byte "ADMIN|PAUSE|0"
+log
+b emergencypause_10_l3
+emergencypause_10_l2:
+byte "paused"
+int 1
+app_global_put
+byte "ADMIN|PAUSE|1"
+log
+emergencypause_10_l3:
+int 1
+retsub
+
+// opt_in_assets
+optinassets_11:
+proto 0 1
+txn Sender
+byte "admin"
+app_global_get
+==
+assert
+global GroupSize
+int 2
+==
+assert
+txn GroupIndex
+int 1
+==
+assert
+gtxn 0 TypeEnum
+int pay
+==
+assert
+gtxn 0 Sender
+byte "sponsor"
+app_global_get
+==
+assert
+gtxn 0 Receiver
+byte "sponsor"
+app_global_get
+==
+assert
+gtxn 0 Amount
+int 0
+==
+assert
+gtxn 0 RekeyTo
+global ZeroAddress
+==
+assert
+gtxn 0 CloseRemainderTo
+global ZeroAddress
+==
+assert
+gtxn 0 Fee
+global MinTxnFee
+int 2
+*
+>=
+gtxn 0 Fee
+global MinTxnFee
+int 5
+*
+<=
+&&
+assert
+txn Fee
+global MinTxnFee
+int 3
+*
+>=
+txn Fee
+global MinTxnFee
+int 6
+*
+<=
+&&
+assert
+txn RekeyTo
+global ZeroAddress
+==
+assert
+itxn_begin
+int axfer
+itxn_field TypeEnum
+byte "confio_id"
+app_global_get
+itxn_field XferAsset
+global CurrentApplicationAddress
+itxn_field AssetReceiver
+int 0
+itxn_field AssetAmount
+int 0
+itxn_field Fee
+itxn_submit
+itxn_begin
+int axfer
+itxn_field TypeEnum
+byte "cusd_id"
+app_global_get
+itxn_field XferAsset
+global CurrentApplicationAddress
+itxn_field AssetReceiver
+int 0
+itxn_field AssetAmount
+int 0
+itxn_field Fee
+itxn_submit
+int 1
+retsub
+
+// get_user_info
+getuserinfo_12:
+proto 0 1
+txn Sender
+byte "user_confio"
+app_local_get
+itob
+log
+txn Sender
+byte "user_cusd"
+app_local_get
+itob
+log
+txn Sender
+byte "claimed"
+app_local_get
+itob
+log
+txn Sender
+byte "round_cusd"
+app_local_get
+itob
+log
+int 1
+retsub
+
+// opt_in
+optin_13:
+proto 0 1
+txn RekeyTo
+global ZeroAddress
+==
+assert
+global GroupSize
+int 2
+==
+bnz optin_13_l2
+global GroupSize
+int 1
+==
+assert
+txn Fee
+global MinTxnFee
+>=
+assert
+b optin_13_l3
+optin_13_l2:
+txn GroupIndex
+int 1
+==
+assert
+gtxn 0 TypeEnum
+int pay
+==
+assert
+gtxn 0 Sender
+byte "sponsor"
+app_global_get
+==
+assert
+gtxn 0 Receiver
+byte "sponsor"
+app_global_get
+==
+assert
+gtxn 0 Amount
+int 0
+==
+assert
+gtxn 0 RekeyTo
+global ZeroAddress
+==
+assert
+gtxn 0 CloseRemainderTo
+global ZeroAddress
+==
+assert
+gtxn 0 Fee
+global MinTxnFee
+int 2
+*
+>=
+assert
+txn Fee
+int 0
+==
+assert
+optin_13_l3:
+int 1
+retsub
+
+# Clear Program (always approve)
+#pragma version 8
+int 1

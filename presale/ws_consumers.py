@@ -59,6 +59,36 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         if t == "ping":
             await self.send_json({"type": "pong"})
             return
+        if t == "claim_prepare":
+            try:
+                pack = await self._claim_prepare()
+                if not pack.get("success"):
+                    await self.send_json({"type": "error", "message": pack.get("error", "claim_prepare_failed")})
+                    return
+                await self.send_json({
+                    "type": "prepare_ready",
+                    "pack": {
+                        "transactions": pack.get("transactions"),
+                        "sponsor_transactions": pack.get("sponsor_transactions"),
+                        "user_signing_indexes": [0],
+                        "group_id": pack.get("group_id"),
+                    },
+                })
+            except Exception as e:
+                await self.send_json({"type": "error", "message": str(e) or "claim_prepare_exception"})
+            return
+        if t == "claim_submit":
+            try:
+                signed = content.get("signed_transactions")
+                sponsors = content.get("sponsor_transactions") or []
+                res = await self._claim_submit(signed, sponsors)
+                if not res.get("success"):
+                    await self.send_json({"type": "error", "message": res.get("error", "claim_submit_failed")})
+                    return
+                await self.send_json({"type": "submit_ok", "transaction_id": res.get("txid")})
+            except Exception as e:
+                await self.send_json({"type": "error", "message": str(e) or "claim_submit_exception"})
+            return
         if t == "optin_prepare":
             try:
                 pack = await self._optin_prepare()
@@ -293,6 +323,113 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         }
 
     @database_sync_to_async
+    def _claim_prepare(self):
+        from presale.models import PresaleSettings
+        from users.models import Account
+        from blockchain.presale_transaction_builder import PresaleTransactionBuilder
+
+        # Check global switch for claims
+        settings_obj = PresaleSettings.get_settings()
+        if not settings_obj.is_presale_claims_unlocked:
+            return {"success": False, "error": "claims_locked"}
+
+        user = self.scope.get("user")
+        account = Account.objects.filter(user=user, account_type='personal', deleted_at__isnull=True).first()
+        if not account or not account.algorand_address or len(account.algorand_address) != 58:
+            return {"success": False, "error": "no_algorand_address"}
+
+        builder = PresaleTransactionBuilder()
+        tx_pack = builder.build_claim_group(account.algorand_address)
+        if not tx_pack.get('success'):
+            return {"success": False, "error": tx_pack.get('error', 'claim_prepare_failed')}
+
+        sponsors = tx_pack.get('sponsor_transactions') or []
+        user_tx = tx_pack.get('transactions_to_sign') or []
+        transactions = []
+        for ut in user_tx:
+            transactions.append({
+                "index": ut.get('index', 0),
+                "type": "payment",
+                "transaction": ut.get('txn'),
+                "signed": False,
+                "needs_signature": True,
+            })
+        for sp in sponsors:
+            transactions.append({
+                "index": sp.get('index', 1),
+                "type": "application",
+                "transaction": sp.get('signed') or sp.get('txn'),
+                "signed": bool(sp.get('signed')),
+                "needs_signature": not bool(sp.get('signed')),
+            })
+        return {
+            "success": True,
+            "transactions": transactions,
+            "sponsor_transactions": sponsors,
+            "group_id": tx_pack.get('group_id'),
+        }
+
+    @database_sync_to_async
+    def _claim_submit(self, signed_transactions, sponsor_transactions):
+        from algosdk.v2client import algod
+        from blockchain.algorand_account_manager import AlgorandAccountManager
+        import base64, json
+
+        if not isinstance(signed_transactions, list) or not signed_transactions:
+            return {"success": False, "error": "signed_transactions_required"}
+
+        # Extract user witness (index 0)
+        user_signed = None
+        for tx in signed_transactions:
+            try:
+                idx = int(tx.get('index'))
+                if idx == 0:
+                    user_signed = tx.get('transaction')
+                    break
+            except Exception:
+                if isinstance(tx, str) and not user_signed:
+                    user_signed = tx
+        if not user_signed:
+            return {"success": False, "error": "missing_user_signed"}
+
+        # Sponsor app call (index 1)
+        sponsor1 = None
+        try:
+            for e in (sponsor_transactions or []):
+                if isinstance(e, str):
+                    e = json.loads(e)
+                if int(e.get('index')) == 1:
+                    sponsor1 = e.get('signed') or e.get('txn')
+        except Exception:
+            pass
+
+        # If missing sponsor signature, rebuild and sign server-side
+        if not sponsor1:
+            try:
+                # Recreate pack for address from the witness (not trivial). Simpler: rebuild requires user address.
+                # We cannot derive user addr from signed bytes here robustly; rely on frontend/prepare flow to send sponsor txn.
+                return {"success": False, "error": "missing_sponsor_signed"}
+            except Exception:
+                return {"success": False, "error": "cannot_sign_sponsor"}
+
+        # Submit two txns combined
+        def b64_to_bytes(b64s: str) -> bytes:
+            missing = len(b64s) % 4
+            if missing:
+                b64s += '=' * (4 - missing)
+            return base64.b64decode(b64s)
+
+        algod_client = algod.AlgodClient(
+            AlgorandAccountManager.ALGOD_TOKEN,
+            AlgorandAccountManager.ALGOD_ADDRESS,
+        )
+        import base64 as _b64
+        group_bytes = b''.join([b64_to_bytes(user_signed), b64_to_bytes(sponsor1)])
+        combined_b64 = _b64.b64encode(group_bytes).decode('utf-8')
+        txid = algod_client.send_raw_transaction(combined_b64)
+        return {"success": True, "txid": txid}
+
+    @database_sync_to_async
     def _optin_submit(self, signed_transactions, sponsor_transactions):
         from algosdk.v2client import algod
         from blockchain.algorand_account_manager import AlgorandAccountManager
@@ -335,8 +472,11 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             AlgorandAccountManager.ALGOD_TOKEN,
             AlgorandAccountManager.ALGOD_ADDRESS,
         )
-        group = [b64_to_bytes(sponsor0), b64_to_bytes(user_signed)]
-        txid = algod_client.send_transactions(group)
+        # Concatenate to a single binary blob and base64-encode (SDK accepts base64 string)
+        import base64 as _b64
+        group_bytes = b''.join([b64_to_bytes(sponsor0), b64_to_bytes(user_signed)])
+        combined_b64 = _b64.b64encode(group_bytes).decode('utf-8')
+        txid = algod_client.send_raw_transaction(combined_b64)
         return {"success": True, "txid": txid}
 
     @database_sync_to_async
@@ -419,14 +559,15 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                     b64s += '=' * (4 - missing)
                 return base64.b64decode(b64s)
 
-            signed_group = [
+            # Submit as a single base64-encoded blob (align with other flows)
+            import base64 as _b64
+            group_bytes = b''.join([
                 b64_to_bytes(sponsor0_b64),
                 b64_to_bytes(user_signed_b64),
                 b64_to_bytes(sponsor2_b64),
-            ]
-
-            # Submit without waiting for confirmation
-            txid = algod_client.send_transactions(signed_group)
+            ])
+            combined_b64 = _b64.b64encode(group_bytes).decode('utf-8')
+            txid = algod_client.send_raw_transaction(combined_b64)
 
             # Save txid immediately (Celery will confirm and mark completed)
             purchase.transaction_hash = txid
