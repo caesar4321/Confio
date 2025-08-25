@@ -844,8 +844,8 @@ def scan_outbound_confirmations(max_batch: int = 50):
             if pe:
                 # Mark failed and continue
                 try:
-                    p.status = 'FAILED'
-                    p.save(update_fields=['status', 'updated_at'])
+                    p.status = 'failed'
+                    p.save(update_fields=['status'])
                 except Exception:
                     pass
                 processed += 1
@@ -857,7 +857,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     p.status = 'completed'
                     if not p.completed_at:
                         p.completed_at = dj_tz.now()
-                    p.save(update_fields=['status', 'completed_at', 'updated_at'])
+                    p.save(update_fields=['status', 'completed_at'])
 
                     # Update user's phase limit tally
                     try:
@@ -865,7 +865,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                         upl, _ = UserPresaleLimit.objects.get_or_create(user=p.user, phase=p.phase)
                         upl.total_purchased = (upl.total_purchased or Decimal('0')) + (p.cusd_amount or Decimal('0'))
                         upl.last_purchase_at = dj_tz.now()
-                        upl.save(update_fields=['total_purchased', 'last_purchase_at', 'updated_at'])
+                        upl.save(update_fields=['total_purchased', 'last_purchase_at'])
                     except Exception as le:
                         logger.warning(f"Failed updating presale user limit for {p.user_id}: {le}")
 
@@ -876,7 +876,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     except Exception:
                         pass
 
-                    # Notification (use SYSTEM type)
+                    # Notification (user-facing in Spanish; use "Preventa")
                     try:
                         amount_str = str(p.confio_amount)
                         from notifications.utils import create_notification
@@ -886,8 +886,8 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             account=None,
                             business=None,
                             notification_type=NotifType.PRESALE_PURCHASE_CONFIRMED,
-                            title="Presale completado",
-                            message=f"Tu compra de {amount_str} CONFIO fue confirmada",
+                            title="Preventa completada",
+                            message=f"Tu compra de Preventa ({amount_str} CONFIO) fue confirmada",
                             data={
                                 'transaction_hash': p.transaction_hash,
                                 'confio_amount': str(p.confio_amount),

@@ -11,6 +11,8 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useQuery } from '@apollo/client';
 import { GET_ACTIVE_PRESALE } from '../apollo/queries';
 import { PresaleWsSession } from '../services/presaleWs';
+import { LoadingOverlay } from '../components/LoadingOverlay';
+import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
 import algorandService from '../services/algorandService';
 
 const colors = {
@@ -70,30 +72,84 @@ export const ConfioPresaleParticipateScreen = () => {
   const tokensReceived = calculateTokens(parsedAmount);
   const isValidAmount = parsedAmount >= minAmount && parsedAmount <= maxAmount;
 
+  // Ensure user is opted into the presale app (explicit opt-in on enter and before swap)
+  const ensureOptedIn = async (session?: any) => {
+    try {
+      const s = session || new PresaleWsSession();
+      if (!session) await s.open();
+      const pack = await s.optinPrepare();
+      const txns = Array.isArray(pack?.transactions) ? pack.transactions : [];
+      if (txns.length === 0) return true; // already opted in
+      const user = txns.find((t: any) => t?.index === 1 && !t?.signed);
+      if (!user) return true; // nothing to sign
+      // Initialize deterministic wallet scope and sign (same pattern as USDC opt-in)
+      try {
+        const { oauthStorage } = await import('../services/oauthStorageService');
+        const oauth = await oauthStorage.getOAuthSubject();
+        if (oauth?.subject && oauth?.provider) {
+          const provider: 'google' | 'apple' = oauth.provider === 'apple' ? 'apple' : 'google';
+          const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+          const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+          const iss = provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+          const aud = provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+          // Bring active account context if available later
+          await secureDeterministicWallet.createOrRestoreWallet(
+            iss,
+            oauth.subject,
+            aud,
+            provider,
+            'personal',
+            0,
+            undefined
+          );
+        }
+      } catch {}
+      const userTxnBytes = Buffer.from(user.transaction, 'base64');
+      const signed = await secureDeterministicWallet.signTransaction(userTxnBytes);
+      const userSignedB64 = Buffer.from(signed).toString('base64');
+      await s.optinSubmit(userSignedB64, pack.sponsor_transactions || []);
+      return true;
+    } catch (e) {
+      console.log('[Presale] opt-in ensure failed', e);
+      return false;
+    }
+  };
+
+  const [initializing, setInitializing] = React.useState(true);
+  const [loadingMessage, setLoadingMessage] = React.useState('');
+  React.useEffect(() => {
+    (async () => {
+      try {
+        setLoadingMessage('Preparando preventa...');
+        const s = new PresaleWsSession();
+        await s.open();
+        await ensureOptedIn(s);
+      } catch (e) {
+        console.log('[Presale] initial opt-in skipped', e);
+      } finally {
+        setInitializing(false);
+        setLoadingMessage('');
+      }
+    })();
+  }, []);
+
   const executeSwap = async () => {
     try {
       setBusy(true);
       const session = new PresaleWsSession();
       await session.open();
 
-      // 1) Try prepare purchase
+      // 0) Ensure presale app opt-in explicitly before preparing
+      await ensureOptedIn(session);
+
+      // 1) Prepare purchase
       let pack: any;
       try {
         pack = await session.preparePurchase(amount);
       } catch (e: any) {
         // If the server requires opt-in, perform it silently, then retry
         if (String(e?.message || '').includes('requires_presale_app_optin')) {
-          const opt = await session.optinPrepare();
-          const txns = Array.isArray(opt?.transactions) ? opt.transactions : [];
-          if (txns.length > 0) {
-            // Find user txn to sign (index 1)
-            const user = txns.find((t: any) => t?.index === 1 && !t?.signed);
-            if (!user) throw new Error('optin_missing_user_txn');
-            const bytes = Buffer.from(user.transaction, 'base64');
-            const signed = await algorandService.signTransactionBytes(bytes);
-            const userSignedB64 = Buffer.from(signed).toString('base64');
-            await session.optinSubmit(userSignedB64, opt.sponsor_transactions || []);
-          }
+          await ensureOptedIn(session);
           // Retry purchase prepare after opt-in
           pack = await session.preparePurchase(amount);
         } else {
@@ -113,13 +169,34 @@ export const ConfioPresaleParticipateScreen = () => {
       // 3) Submit group
       const purchaseId = pack?.purchase_id || pack?.purchaseId;
       if (!purchaseId) throw new Error('purchase_id_missing');
-      await session.submitPurchase(purchaseId, signedUserB64, sponsorTxns);
+      try {
+        await session.submitPurchase(purchaseId, signedUserB64, sponsorTxns);
+      } catch (e: any) {
+        // If server requires opt-in at submit, auto opt-in and retry silently
+        if (String(e?.message || '').includes('requires_presale_app_optin')) {
+          // Ensure opt-in
+          await ensureOptedIn(session);
+          // Rebuild group and resubmit
+          const retryPack = await session.preparePurchase(amount);
+          const retryTxns = Array.isArray(retryPack?.transactions) ? retryPack.transactions : [];
+          const retrySponsorTxns = (retryPack?.sponsor_transactions || []).slice();
+          const retryUserToSign = retryTxns.find((t: any) => t?.index === 1 && (t?.needs_signature || !t?.signed));
+          if (!retryUserToSign) throw new Error('purchase_missing_user_txn');
+          const retryUserBytes = Buffer.from(retryUserToSign.transaction, 'base64');
+          const retrySignedUser = await algorandService.signTransactionBytes(retryUserBytes);
+          const retrySignedUserB64 = Buffer.from(retrySignedUser).toString('base64');
+          const retryPurchaseId = retryPack?.purchase_id || retryPack?.purchaseId;
+          await session.submitPurchase(retryPurchaseId, retrySignedUserB64, retrySponsorTxns);
+        } else {
+          throw e;
+        }
+      }
 
       setBusy(false);
-      // Show success message (submission)
+      // Show success message (simplified)
       Alert.alert(
-        'Intercambio enviado',
-        'Tu intercambio fue enviado. Se confirmará en segundos.',
+        'Compra exitosa',
+        'Tu compra fue exitosa.',
         [{ text: 'Ok', onPress: () => navigation.navigate('BottomTabs', { screen: 'Home' }) }]
       );
       setAmount('');
@@ -127,7 +204,10 @@ export const ConfioPresaleParticipateScreen = () => {
     } catch (e: any) {
       console.log('[Presale] swap error', e);
       setBusy(false);
-      Alert.alert('Error', e?.message || 'No se pudo procesar el intercambio');
+      // For opt-in race, we handled silently above. Only show other errors.
+      if (!String(e?.message || '').includes('requires_presale_app_optin')) {
+        Alert.alert('Error', e?.message || 'No se pudo procesar el intercambio');
+      }
     }
   };
 
@@ -194,6 +274,7 @@ export const ConfioPresaleParticipateScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
+      <LoadingOverlay visible={initializing || busy} message={loadingMessage || (busy ? 'Procesando intercambio...' : 'Preparando preventa...')} />
       {busy && (
         <View style={styles.overlay}> 
           <ActivityIndicator size="large" color="#fff" />
@@ -343,9 +424,7 @@ export const ConfioPresaleParticipateScreen = () => {
             onPress={handleSwap}
             disabled={!isValidAmount || parsedAmount === 0 || busy}
           >
-            {busy ? (
-              <Text style={styles.swapButtonText}>Procesando Intercambio...</Text>
-            ) : (
+            {busy ? null : (
               <>
                 <Icon name="refresh-cw" size={20} color="#fff" />
                 <Text style={styles.swapButtonText}>Intercambiar Ahora</Text>

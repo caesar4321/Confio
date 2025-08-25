@@ -76,6 +76,130 @@ class PresaleTransactionBuilder:
             logger.warning(f"Failed to check app opt-in for {user_address}: {e}")
         return False
 
+    def _app_has_assets(self) -> bool:
+        try:
+            app_addr = get_application_address(int(self.config.app_id))
+            info = self.algod.account_info(app_addr)
+            have_confio = any(int(a.get('asset-id')) == int(AlgorandAccountManager.CONFIO_ASSET_ID) for a in (info.get('assets') or []))
+            have_cusd = any(int(a.get('asset-id')) == int(self.config.cusd_asset_id) for a in (info.get('assets') or []))
+            return have_confio and have_cusd
+        except Exception as e:
+            logger.warning(f"Failed to check app assets: {e}")
+            return False
+
+    def _ensure_app_opted_in_assets(self) -> None:
+        """Ensure the app account is opted into CONFIO and cUSD (sponsor-funded)."""
+        try:
+            if not self.config.app_id:
+                return
+            if self._app_has_assets():
+                return
+            from django.conf import settings as _dj
+            admin_mn = getattr(_dj, 'ALGORAND_ADMIN_MNEMONIC', None) or AlgorandAccountManager.SPONSOR_MNEMONIC
+            sponsor_addr = AlgorandAccountManager.SPONSOR_ADDRESS
+            if not admin_mn or not sponsor_addr:
+                logger.warning("Cannot opt-in app assets: missing admin mnemonic or sponsor address")
+                return
+            from algosdk import mnemonic as _mn, account as _acct
+            admin_sk = _mn.to_private_key(" ".join(str(admin_mn).strip().split()))
+            admin_addr = _acct.address_from_private_key(admin_sk)
+            params = self.algod.suggested_params()
+            min_fee = getattr(params, 'min_fee', 1000) or 1000
+            sp_s = self.algod.suggested_params(); sp_s.flat_fee = True; sp_s.fee = min_fee * 2
+            bump = PaymentTxn(sender=sponsor_addr, sp=sp_s, receiver=sponsor_addr, amt=0)
+            sp_a = self.algod.suggested_params(); sp_a.flat_fee = True; sp_a.fee = min_fee * 3
+            # Include foreign assets so inner txns can reference IDs
+            foreign_assets_boot: List[int] = []
+            try:
+                if int(getattr(AlgorandAccountManager, 'CONFIO_ASSET_ID', 0) or 0):
+                    foreign_assets_boot.append(int(AlgorandAccountManager.CONFIO_ASSET_ID))
+            except Exception:
+                pass
+            try:
+                if int(self.config.cusd_asset_id or 0):
+                    foreign_assets_boot.append(int(self.config.cusd_asset_id))
+            except Exception:
+                pass
+            call = ApplicationNoOpTxn(
+                sender=admin_addr,
+                sp=sp_a,
+                index=int(self.config.app_id),
+                app_args=[b"opt_in_assets"],
+                foreign_assets=foreign_assets_boot,
+            )
+            gid = transaction.calculate_group_id([bump, call])
+            bump.group = gid; call.group = gid
+            try:
+                sk_sponsor = mnemonic.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
+            except Exception:
+                logger.warning("Cannot sign sponsor bump: missing/invalid SPONSOR_MNEMONIC")
+                return
+            stx0 = bump.sign(sk_sponsor)
+            stx1 = call.sign(admin_sk)
+            self.algod.send_transactions([stx0, stx1])
+            try:
+                from algosdk.transaction import wait_for_confirmation as _wfc
+                _wfc(self.algod, stx1.get_txid(), 4)
+            except Exception:
+                pass
+            logger.info("[PRESALE] Auto-opted app into CONFIO and cUSD via opt_in_assets")
+        except Exception as e:
+            logger.warning(f"Failed to auto opt-in app assets: {e}")
+
+    def _check_address_opted_in_app(self, address: str) -> bool:
+        """Generic checker for whether an address has opted into the presale app."""
+        try:
+            info = self.algod.account_info(address)
+            for ls in info.get('apps-local-state', []) or []:
+                if int(ls.get('id') or 0) == int(self.config.app_id):
+                    return True
+        except Exception as e:
+            logger.warning(f"Failed to check app opt-in for {address}: {e}")
+        return False
+
+    def _ensure_sponsor_opted_in_app(self) -> None:
+        """
+        Ensure the sponsor address is opted into the presale application.
+        The presale approval program asserts app_opted_in(Txn.Sender, CurrentApplicationID) for the app call,
+        so the sponsor (as sender) must be opted in. Perform a one-time opt-in if needed.
+        """
+        # Must have app id and sponsor credentials
+        if not self.config.app_id or not self.config.sponsor_address:
+            return
+        if self._check_address_opted_in_app(self.config.sponsor_address):
+            return
+        if not self.config.sponsor_mnemonic:
+            logger.error(
+                "Presale sponsor is not opted into app %s and SPONSOR_MNEMONIC is not configured; cannot auto opt-in",
+                self.config.app_id,
+            )
+            return
+        try:
+            # Build and submit a plain ApplicationOptIn from the sponsor
+            sp = self.algod.suggested_params()
+            sp.flat_fee = True
+            sp.fee = getattr(sp, 'min_fee', 1000) or 1000
+            app_opt_in = transaction.ApplicationOptInTxn(
+                sender=self.config.sponsor_address,
+                sp=sp,
+                index=int(self.config.app_id),
+            )
+            sk = mnemonic.to_private_key(self.config.sponsor_mnemonic)
+            stx = app_opt_in.sign(sk)
+            txid = self.algod.send_transaction(stx)
+            try:
+                from algosdk.transaction import wait_for_confirmation
+                wait_for_confirmation(self.algod, txid, 4)
+            except Exception:
+                pass
+            logger.info(
+                "[PRESALE] Auto-opted sponsor into app %s (txid=%s)",
+                self.config.app_id,
+                txid,
+            )
+        except Exception as e:
+            logger.error("Failed to auto opt-in sponsor to app %s: %s", self.config.app_id, e)
+
     def build_buy_group(self, user_address: str, cusd_amount_base: int) -> Dict[str, Any]:
         """
         Build the sponsored 3-txn group for buying CONFIO with cUSD.
@@ -93,6 +217,9 @@ class PresaleTransactionBuilder:
         if not self.config.app_id or not self.config.cusd_asset_id:
             return {"success": False, "error": "presale_not_configured"}
 
+        # Ensure app account has required assets
+        self._ensure_app_opted_in_assets()
+
         # Ensure user is opted into the presale app
         if not self._check_user_opted_in_app(user_address):
             return {
@@ -100,6 +227,10 @@ class PresaleTransactionBuilder:
                 "error": "requires_presale_app_optin",
                 "app_id": self.config.app_id,
             }
+
+        # Ensure sponsor (app call sender) is opted in as required by the approval program
+        # This is a one-time server-side action and is safe to perform here.
+        self._ensure_sponsor_opted_in_app()
 
         params = self.algod.suggested_params()
         min_fee = getattr(params, 'min_fee', 1000) or 1000
@@ -112,13 +243,17 @@ class PresaleTransactionBuilder:
             acct = self.algod.account_info(user_address)
             current_balance = int(acct.get('amount') or 0)
             min_balance = int(acct.get('min-balance') or 0)
-            # User must at least meet current MBR; fees are fully sponsored elsewhere
-            # Keep a small 50k buffer to reduce flapping if MBR nudges up
-            target = max(min_balance, 0) + 50_000
+            # Ensure the account stays above MBR even if an extra local state/box nudges it.
+            # Use a robust 250k headroom to avoid race-y underfunding.
+            SAFETY_BUFFER = 250_000
+            target = max(min_balance + SAFETY_BUFFER, 0)
             funding_needed = max(target - current_balance, 0)
+            # Ensure meaningful top-up if any shortfall is detected
+            if funding_needed > 0 and funding_needed < 200_000:
+                funding_needed = 200_000
             logger.info(
                 f"[PRESALE] MBR check user={user_address} bal={current_balance} min={min_balance} "
-                f"target={target} fund={funding_needed}"
+                f"buffer={SAFETY_BUFFER} target={target} fund={funding_needed}"
             )
         except Exception:
             # Conservative fallback top-up if account query fails
@@ -169,12 +304,26 @@ class PresaleTransactionBuilder:
             gh=params.gh,
             flat_fee=True,
         )
+        # Include foreign assets for contract reads (CONFIO balance) and inner txns if any
+        foreign_assets: List[int] = []
+        try:
+            if int(getattr(AlgorandAccountManager, 'CONFIO_ASSET_ID', 0) or 0):
+                foreign_assets.append(int(AlgorandAccountManager.CONFIO_ASSET_ID))
+        except Exception:
+            pass
+        try:
+            if int(self.config.cusd_asset_id or 0):
+                foreign_assets.append(int(self.config.cusd_asset_id))
+        except Exception:
+            pass
+
         app_call = ApplicationNoOpTxn(
             sender=self.config.sponsor_address,
             sp=sp2,
             index=int(self.config.app_id),
             app_args=[b"buy"],
             accounts=[user_address],  # passed so contract can attribute purchase to user
+            foreign_assets=foreign_assets,
         )
 
         # Group and (optionally) sign sponsor txns
@@ -223,7 +372,6 @@ class PresaleTransactionBuilder:
         params = self.algod.suggested_params()
         min_fee = getattr(params, 'min_fee', 1000) or 1000
 
-        # [0] Sponsor fee covers both txns (pooling) since user opt-in is fee=0
         sp0 = SuggestedParams(
             fee=min_fee * 2,
             first=params.first,
@@ -234,7 +382,7 @@ class PresaleTransactionBuilder:
         sponsor_bump = PaymentTxn(
             sender=self.config.sponsor_address,
             sp=sp0,
-            receiver=self.config.sponsor_address,
+            receiver=self.config.sponsor_address,  # Contract requires self-payment and amount==0
             amt=0,
             note=b"Presale app opt-in fee bump",
         )
@@ -316,12 +464,26 @@ class PresaleTransactionBuilder:
             gh=params.gh,
             flat_fee=True,
         )
+        # Include foreign assets for claim path (CONFIO; include cUSD for consistency)
+        foreign_assets_claim: List[int] = []
+        try:
+            if int(getattr(AlgorandAccountManager, 'CONFIO_ASSET_ID', 0) or 0):
+                foreign_assets_claim.append(int(AlgorandAccountManager.CONFIO_ASSET_ID))
+        except Exception:
+            pass
+        try:
+            if int(self.config.cusd_asset_id or 0):
+                foreign_assets_claim.append(int(self.config.cusd_asset_id))
+        except Exception:
+            pass
+
         app_call = ApplicationNoOpTxn(
             sender=self.config.sponsor_address,
             sp=sp1,
             index=int(self.config.app_id),
             app_args=[b"claim"],
             accounts=[user_address],
+            foreign_assets=foreign_assets_claim,
         )
 
         # Group

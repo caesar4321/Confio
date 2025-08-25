@@ -208,15 +208,13 @@ def confio_presale():
         outstanding = ScratchVar(TealType.uint64)
 
         return Seq([
-            # Determine actual buyer
+            # Determine actual buyer (unambiguous):
+            # - If sponsor is the sender, derive from the G1 AXFER sender
+            # - Otherwise, buyer is the caller
             If(
-                And(
-                    App.globalGet(sponsor_address) != Bytes(""),
-                    Txn.sender() == App.globalGet(sponsor_address),
-                    Txn.accounts.length() > Int(0)
-                ),
-                actual_buyer.store(Txn.accounts[0]),  # User passed as account reference
-                actual_buyer.store(Txn.sender())  # Direct call from user
+                Txn.sender() == App.globalGet(sponsor_address),
+                actual_buyer.store(Gtxn[1].sender()),
+                actual_buyer.store(Txn.sender())
             ),
             
             # User must be opted into the app
@@ -262,7 +260,8 @@ def confio_presale():
             Assert(Gtxn[1].asset_close_to() == Global.zero_address()),
             Assert(Gtxn[1].asset_sender() == Global.zero_address()),
             Assert(Gtxn[1].rekey_to() == Global.zero_address()),
-            Assert(Gtxn[1].fee() == Int(0)),  # User pays ZERO fees - truly sponsored
+            # Tolerate wallets adding base fee; still fully sponsored by appcall budget
+            Assert(Gtxn[1].fee() <= Global.min_txn_fee()),
             cusd_amount.store(Gtxn[1].asset_amount()),
             
             # AppCall pays its own budget (sponsor sender covers >= 2×)

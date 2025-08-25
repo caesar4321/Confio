@@ -71,6 +71,9 @@ class NotificationTypeEnum(graphene.Enum):
     # Achievements
     ACHIEVEMENT_EARNED = 'ACHIEVEMENT_EARNED'
 
+    # Presale
+    PRESALE_PURCHASE_CONFIRMED = 'PRESALE_PURCHASE_CONFIRMED'
+
 
 class NotificationType(DjangoObjectType):
     """GraphQL type for Notification model"""
