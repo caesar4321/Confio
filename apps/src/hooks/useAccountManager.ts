@@ -37,7 +37,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   const authService = AuthService.getInstance();
   const accountManager = AccountManager.getInstance();
   const apolloClient = useApolloClient();
-  const { profileData, refreshProfile, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { profileData, refreshProfile, isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
   
   // Debug profile loading
   console.log('useAccountManager - Profile state:', {
@@ -257,6 +257,14 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     loadInitialContext();
   }, [authService]);
 
+  // Whenever JWT account context changes (via AuthContext), force-refresh accounts from server
+  useEffect(() => {
+    if (isAuthenticated && !authLoading) {
+      console.log('useAccountManager - accountContextTick changed, refreshing accounts');
+      refreshAccounts();
+    }
+  }, [accountContextTick, isAuthenticated, authLoading, refreshAccounts]);
+
   const switchAccount = useCallback(async (accountId: string) => {
     try {
       console.log('useAccountManager - switchAccount called with:', accountId);
@@ -455,11 +463,28 @@ export const useAccountManager = (): UseAccountManagerReturn => {
 
   const refreshAccounts = useCallback(async () => {
     try {
-      // If the query was skipped initially, refetch may be a no-op. Force a network query.
+      console.log('refreshAccounts: forcing network fetch of userAccounts');
       const { GET_USER_ACCOUNTS } = await import('../apollo/queries');
-      const result = await apolloClient.query({ query: GET_USER_ACCOUNTS, fetchPolicy: 'network-only' });
-      const serverAccounts = result?.data?.userAccounts || [];
+
+      // First attempt
+      const result1 = await apolloClient.query({ query: GET_USER_ACCOUNTS, fetchPolicy: 'no-cache' });
+      const list1 = result1?.data?.userAccounts || [];
+      console.log('refreshAccounts: first result count =', list1.length);
+
+      let serverAccounts = list1;
+      if (serverAccounts.length === 0) {
+        // Retry quickly once to beat any just-switched-context race
+        await new Promise((r) => setTimeout(r, 300));
+        const result2 = await apolloClient.query({ query: GET_USER_ACCOUNTS, fetchPolicy: 'no-cache' });
+        const list2 = result2?.data?.userAccounts || [];
+        console.log('refreshAccounts: retry result count =', list2.length);
+        serverAccounts = list2;
+      }
+
       const converted = convertServerAccounts(serverAccounts);
+      console.log('refreshAccounts: converted accounts =', converted.map(a => a.id));
+
+      // Always provide at least one safe placeholder so header/menu never disappears
       setAccounts(converted.length > 0 ? converted : [
         {
           id: 'personal_0',
