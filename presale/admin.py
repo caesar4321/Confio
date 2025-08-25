@@ -162,7 +162,9 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
         'formatted_confio',
         'price_display',
         'status_colored',
-        'created_at'
+        'txid_short',
+        'created_at',
+        'completed_at'
     ]
     list_filter = ['status', 'phase', 'created_at']
     search_fields = ['user__username', 'user__email', 'transaction_hash']
@@ -222,6 +224,13 @@ class PresalePurchaseAdmin(admin.ModelAdmin):
     def price_display(self, obj):
         return f"${obj.price_per_token}"
     price_display.short_description = 'Price/Token'
+
+    def txid_short(self, obj):
+        if not obj.transaction_hash:
+            return '-'
+        txid = obj.transaction_hash
+        return format_html('<span style="font-family:monospace;">{}…{}</span>', txid[:8], txid[-6:])
+    txid_short.short_description = 'TxID'
     
     def status_colored(self, obj):
         colors = {

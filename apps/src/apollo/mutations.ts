@@ -406,28 +406,9 @@ export const CONFIRM_P2P_TRADE_RECEIVED = gql`
   }
 `;
 
-export const PREPARE_P2P_CANCEL = gql`
-  mutation PrepareP2pCancel($tradeId: String!) {
-    prepareP2pCancel(tradeId: $tradeId) {
-      success
-      error
-      userTransactions
-      sponsorTransactions { txn index }
-      groupId
-      tradeId
-    }
-  }
-`;
-
-export const CANCEL_P2P_TRADE = gql`
-  mutation CancelP2pTrade($tradeId: String!, $signedUserTxn: String!, $sponsorTransactions: [JSONString!]!) {
-    cancelP2pTrade(tradeId: $tradeId, signedUserTxn: $signedUserTxn, sponsorTransactions: $sponsorTransactions) {
-      success
-      error
-      txid
-    }
-  }
-`;
+// Recuperar/cancelar via HTTP GraphQL is disabled. Use WebSocket prepare/submit instead.
+// export const PREPARE_P2P_CANCEL = gql`...`;
+// export const CANCEL_P2P_TRADE = gql`...`;
 
 // P2P Trade — open dispute (buyer or seller)
 export const PREPARE_P2P_OPEN_DISPUTE = gql`

@@ -272,6 +272,16 @@ def create_p2p_notification(
             'message': f'Tu intercambio por ${amount} {display_token} se completó exitosamente',
             'action_url': f'confio://p2p/trade/{trade_id}'
         },
+        NotificationTypeChoices.P2P_TRADE_CANCELLED: {
+            'title': 'Intercambio Cancelado',
+            'message': f'El intercambio fue cancelado. Se reembolsaron ${amount} {display_token} al vendedor.',
+            'action_url': f'confio://p2p/trade/{trade_id}'
+        },
+        NotificationTypeChoices.P2P_TRADE_DISPUTED: {
+            'title': 'Intercambio en Disputa',
+            'message': f'El intercambio por ${amount} {display_token} está en disputa. Nuestro equipo revisará el caso.',
+            'action_url': f'confio://p2p/trade/{trade_id}'
+        },
     }
     
     config = notification_configs.get(notification_type, {})

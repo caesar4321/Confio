@@ -1233,59 +1233,41 @@ class CancelP2PTrade(graphene.Mutation):
             stx0 = tx.sign(sk)
             user_stx = transaction.SignedTransaction.undictify(user_dict)
             txid = algod_client.send_transactions([stx0, user_stx])
-            # Wait for the AppCall confirmation (user_stx is the AppCall)
+            # Return immediately; background scanner/celery will confirm and finalize
             ref_txid = user_stx.get_txid()
-            transaction.wait_for_confirmation(algod_client, ref_txid, 8)
-
-            # Reflect cancellation in DB and broadcast to clients
-            try:
-                trade = P2PTrade.objects.filter(id=trade_id).select_related('escrow').first()
-                if trade:
-                    # Update trade status
-                    trade.status = 'CANCELLED'
-                    trade.updated_at = timezone.now()
-                    trade.save(update_fields=['status', 'updated_at'])
-
-                    # Update escrow bookkeeping if present
-                    try:
-                        escrow = getattr(trade, 'escrow', None)
-                        if escrow and escrow.is_escrowed and not escrow.is_released:
-                            # Funds were in escrow on-chain and have been refunded to seller
-                            escrow.is_released = True
-                            escrow.release_type = 'REFUND'
-                            escrow.release_amount = escrow.escrow_amount
-                            escrow.release_transaction_hash = ref_txid
-                            escrow.released_at = timezone.now()
-                            escrow.save(update_fields=[
-                                'is_released', 'release_type', 'release_amount',
-                                'release_transaction_hash', 'released_at', 'updated_at'
-                            ])
-                    except Exception:
-                        # Do not fail the mutation if escrow update bookkeeping fails
-                        pass
-
-                    # Broadcast to trade room so clients can update immediately
-                    try:
-                        channel_layer = get_channel_layer()
-                        room_group_name = f'trade_chat_{trade.id}'
-                        async_to_sync(channel_layer.group_send)(
-                            room_group_name,
-                            {
-                                'type': 'trade_status_update',
-                                'status': 'CANCELLED',
-                                'updated_by': str(getattr(info.context.user, 'id', 'system')),
-                                'txid': ref_txid,
-                            },
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                # Non-fatal if local DB bookkeeping fails
-                pass
-
-            return cls(success=True, txid=ref_txid)
         except Exception as e:
             return cls(success=False, error=str(e))
+
+        # Optimistic bookkeeping: record release tx hash and system message
+        try:
+            trade = P2PTrade.objects.filter(id=trade_id).select_related('escrow').first()
+            if trade:
+                try:
+                    escrow = getattr(trade, 'escrow', None)
+                    if escrow and escrow.is_escrowed and not escrow.is_released:
+                        escrow.release_transaction_hash = ref_txid
+                        # Hint to scanner this is a refund to seller
+                        if not escrow.release_type:
+                            escrow.release_type = 'REFUND'
+                        escrow.save(update_fields=['release_transaction_hash', 'release_type', 'updated_at'])
+                except Exception:
+                    pass
+
+                # System chat message for visibility
+                try:
+                    from p2p_exchange.models import P2PMessage
+                    P2PMessage.objects.create(
+                        trade=trade,
+                        message='♻️ Recuperación enviada; esperando confirmación en cadena',
+                        sender_type='system',
+                        message_type='system',
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return cls(success=True, txid=ref_txid)
 
 class PrepareP2POpenDispute(graphene.Mutation):
     class Arguments:
@@ -1742,8 +1724,9 @@ class ResolveP2pDisputeOnchain(graphene.Mutation):
             logger.exception('[P2P Dispute] Backend resolve error: %r', e)
             return cls(success=False, error=str(e))
 # Late-bind fields that depend on classes defined earlier in the module
-P2PTradeMutations.cancel_p2p_trade = CancelP2PTrade.Field()
-P2PTradePrepareMutations.prepare_p2p_cancel = PrepareP2PCancel.Field()
+# Removed HTTP exposure for cancel (recuperar): use WebSocket prepare/submit only
+# P2PTradeMutations.cancel_p2p_trade = CancelP2PTrade.Field()
+# P2PTradePrepareMutations.prepare_p2p_cancel = PrepareP2PCancel.Field()
 P2PTradePrepareMutations.prepare_p2p_open_dispute = PrepareP2POpenDispute.Field()
 P2PTradeMutations.submit_p2p_open_dispute = SubmitP2POpenDispute.Field()
 P2PTradePrepareMutations.prepare_p2p_resolve_dispute = PrepareP2PResolveDispute.Field()

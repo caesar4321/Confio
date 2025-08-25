@@ -5,6 +5,7 @@ from payments.ws_consumers import PaySessionConsumer, SendSessionConsumer
 from conversion.ws_consumers import ConvertSessionConsumer
 from usdc_transactions.ws_consumers import WithdrawSessionConsumer
 from .ws_consumers import P2PSessionConsumer
+from presale.ws_consumers import PresaleSessionConsumer
 
 websocket_urlpatterns = [
     # GraphQL Subscriptions endpoint
@@ -23,4 +24,6 @@ websocket_urlpatterns = [
     re_path(r'ws/withdraw_session$', WithdrawSessionConsumer.as_asgi()),
     # P2P session (prepare + submit over WebSocket)
     re_path(r'ws/p2p_session$', P2PSessionConsumer.as_asgi()),
+    # Presale purchase session (prepare + submit, fully sponsored)
+    re_path(r'ws/presale_session$', PresaleSessionConsumer.as_asgi()),
 ]
