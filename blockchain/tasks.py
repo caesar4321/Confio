@@ -17,6 +17,7 @@ from notifications.utils import create_notification
 from notifications.models import NotificationType as NotificationTypeChoices
 from send.models import SendTransaction
 from payments.models import PaymentTransaction
+from presale.models import PresalePurchase
 from conversion.models import Conversion
 from p2p_exchange.models import P2PEscrow, P2PTrade
 from send.models import SendTransaction
@@ -836,6 +837,83 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     logger.warning(f"Failed to mark P2P escrow confirmed for trade {getattr(e.trade, 'id', None)}: {ue}")
                 processed += 1
 
+        # Presale purchases
+        presale_qs = PresalePurchase.objects.filter(status='processing').exclude(transaction_hash__isnull=True).exclude(transaction_hash='')[:max_batch]
+        for p in presale_qs:
+            cr, pe = check_tx(p.transaction_hash)
+            if pe:
+                # Mark failed and continue
+                try:
+                    p.status = 'FAILED'
+                    p.save(update_fields=['status', 'updated_at'])
+                except Exception:
+                    pass
+                processed += 1
+                continue
+            if cr > 0:
+                # Mark confirmed, set completed_at, send notification, mark balances stale
+                try:
+                    from django.utils import timezone as dj_tz
+                    p.status = 'completed'
+                    if not p.completed_at:
+                        p.completed_at = dj_tz.now()
+                    p.save(update_fields=['status', 'completed_at', 'updated_at'])
+
+                    # Update user's phase limit tally
+                    try:
+                        from presale.models import UserPresaleLimit
+                        upl, _ = UserPresaleLimit.objects.get_or_create(user=p.user, phase=p.phase)
+                        upl.total_purchased = (upl.total_purchased or Decimal('0')) + (p.cusd_amount or Decimal('0'))
+                        upl.last_purchase_at = dj_tz.now()
+                        upl.save(update_fields=['total_purchased', 'last_purchase_at', 'updated_at'])
+                    except Exception as le:
+                        logger.warning(f"Failed updating presale user limit for {p.user_id}: {le}")
+
+                    # Refresh phase stats (best-effort)
+                    try:
+                        if hasattr(p.phase, 'stats') and p.phase.stats_id:
+                            p.phase.stats.update_stats()
+                    except Exception:
+                        pass
+
+                    # Notification (use SYSTEM type)
+                    try:
+                        amount_str = str(p.confio_amount)
+                        from notifications.utils import create_notification
+                        from notifications.models import NotificationType as NotifType
+                        create_notification(
+                            user=p.user,
+                            account=None,
+                            business=None,
+                            notification_type=NotifType.SYSTEM,
+                            title="Presale completado",
+                            message=f"Tu compra de {amount_str} CONFIO fue confirmada",
+                            data={
+                                'transaction_hash': p.transaction_hash,
+                                'confio_amount': str(p.confio_amount),
+                                'cusd_amount': str(p.cusd_amount),
+                                'phase': getattr(p.phase, 'phase_number', None),
+                            },
+                            related_object_type='PresalePurchase',
+                            related_object_id=str(p.id),
+                            action_url=f"confio://presale/{p.id}",
+                        )
+                    except Exception as ne:
+                        logger.warning(f"Notification error for PresalePurchase {p.id}: {ne}")
+
+                    # Mark balances stale for quick refresh
+                    try:
+                        mark_transaction_balances_stale.delay(
+                            p.transaction_hash,
+                            sender_address=p.from_address,
+                            recipient_addresses=[]
+                        )
+                    except Exception:
+                        pass
+                except Exception as ue:
+                    logger.warning(f"Failed to mark PresalePurchase {p.id} confirmed: {ue}")
+                processed += 1
+
         # P2P releases (normal release or refund/dispute)
         releases = P2PEscrow.objects.filter(
             is_released=False,
@@ -967,7 +1045,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                 }
                                 if buyer_user:
                                     create_p2p_notification(
-                                        notification_type=NotificationTypeChoices.P2P_TRADE_DISPUTED,
+                                        notification_type=NotificationTypeChoices.P2P_DISPUTE_RESOLVED,
                                         user=buyer_user,
                                         business=tr.buyer_business,
                                         trade_id=str(tr.id),
@@ -978,7 +1056,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                                     )
                                 if seller_user:
                                     create_p2p_notification(
-                                        notification_type=NotificationTypeChoices.P2P_TRADE_DISPUTED,
+                                        notification_type=NotificationTypeChoices.P2P_DISPUTE_RESOLVED,
                                         user=seller_user,
                                         business=tr.seller_business,
                                         trade_id=str(tr.id),
