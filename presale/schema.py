@@ -56,10 +56,18 @@ class UserPresaleLimitType(DjangoObjectType):
         fields = '__all__'
 
 
+class PresaleOnchainInfo(graphene.ObjectType):
+    purchased = graphene.Float()
+    claimed = graphene.Float()
+    claimable = graphene.Float()
+    locked = graphene.Boolean()
+
+
 class PresaleQueries(graphene.ObjectType):
     """Queries for presale data"""
     
     is_presale_active = graphene.Boolean()
+    is_presale_claims_unlocked = graphene.Boolean()
     active_presale_phase = graphene.Field(PresalePhaseType)
     all_presale_phases = graphene.List(PresalePhaseType)
     presale_phase = graphene.Field(
@@ -71,11 +79,17 @@ class PresaleQueries(graphene.ObjectType):
         UserPresaleLimitType,
         phase_number=graphene.Int(required=True)
     )
+    my_presale_onchain_info = graphene.Field(PresaleOnchainInfo)
     
     def resolve_is_presale_active(self, info):
         """Check if presale is globally enabled - no login required for this check"""
         settings = PresaleSettings.get_settings()
         return settings.is_presale_active
+
+    def resolve_is_presale_claims_unlocked(self, info):
+        """Check if presale claims are globally unlocked - no login required for this check"""
+        settings = PresaleSettings.get_settings()
+        return settings.is_presale_claims_unlocked
     
     @login_required
     def resolve_active_presale_phase(self, info):
@@ -118,6 +132,44 @@ class PresaleQueries(graphene.ObjectType):
             return limit
         except PresalePhase.DoesNotExist:
             return None
+
+    @login_required
+    def resolve_my_presale_onchain_info(self, info):
+        """Get purchased/claimed/claimable and locked status from on-chain state"""
+        try:
+            from users.models import Account
+            from django.conf import settings as dj_settings
+            from algosdk.v2client import algod
+            from blockchain.algorand_account_manager import AlgorandAccountManager
+            from contracts.presale.state_utils import decode_state, decode_local_state
+
+            app_id = getattr(dj_settings, 'ALGORAND_PRESALE_APP_ID', None)
+            if not app_id:
+                return PresaleOnchainInfo(purchased=0.0, claimed=0.0, claimable=0.0, locked=True)
+
+            user = info.context.user
+            account = Account.objects.filter(user=user, account_type='personal', deleted_at__isnull=True).first()
+            if not account or not account.algorand_address:
+                return PresaleOnchainInfo(purchased=0.0, claimed=0.0, claimable=0.0, locked=True)
+
+            algod_client = algod.AlgodClient(
+                AlgorandAccountManager.ALGOD_TOKEN,
+                AlgorandAccountManager.ALGOD_ADDRESS,
+            )
+            # Global locked flag
+            app_info = algod_client.application_info(int(app_id))
+            global_state = decode_state(app_info['params']['global-state'])
+            locked = bool(global_state.get('locked', 1) == 1)
+
+            # Local state
+            acct_info = algod_client.account_info(account.algorand_address)
+            local = decode_local_state(acct_info, int(app_id)) or {}
+            purchased = float((local.get('user_confio', 0) or 0) / 10**6)
+            claimed = float((local.get('claimed', 0) or 0) / 10**6)
+            claimable = max(purchased - claimed, 0.0)
+            return PresaleOnchainInfo(purchased=purchased, claimed=claimed, claimable=claimable, locked=locked)
+        except Exception:
+            return PresaleOnchainInfo(purchased=0.0, claimed=0.0, claimable=0.0, locked=True)
 
 
 class PurchasePresaleTokens(graphene.Mutation):

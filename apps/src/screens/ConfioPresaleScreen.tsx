@@ -1,12 +1,15 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Image, SafeAreaView, Alert, ActivityIndicator } from 'react-native';
+import { Buffer } from 'buffer';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
 import CONFIOLogo from '../assets/png/CONFIO.png';
 import { useQuery } from '@apollo/client';
-import { GET_ALL_PRESALE_PHASES, GET_ACTIVE_PRESALE } from '../apollo/queries';
+import { GET_ALL_PRESALE_PHASES, GET_ACTIVE_PRESALE, GET_PRESALE_STATUS, GET_MY_PRESALE_ONCHAIN_INFO } from '../apollo/queries';
+import { PresaleWsSession } from '../services/presaleWs';
+import algorandService from '../services/algorandService';
 import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
 
@@ -39,6 +42,11 @@ export const ConfioPresaleScreen = () => {
   const { data: activePresaleData } = useQuery(GET_ACTIVE_PRESALE, {
     fetchPolicy: 'cache-and-network',
   });
+  const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, { fetchPolicy: 'cache-and-network' });
+  const isClaimsUnlocked = presaleStatusData?.isPresaleClaimsUnlocked === true;
+  const [busy, setBusy] = useState(false);
+  const { data: onchainInfoData, refetch: refetchOnchainInfo } = useQuery(GET_MY_PRESALE_ONCHAIN_INFO, { fetchPolicy: 'cache-and-network', skip: !isClaimsUnlocked });
+  const claimable = onchainInfoData?.myPresaleOnchainInfo?.claimable || 0;
 
   // Use server data
   const presalePhases = data?.allPresalePhases ? data.allPresalePhases.map((phase: any) => ({
@@ -82,6 +90,29 @@ export const ConfioPresaleScreen = () => {
       'Te notificaremos cuando la preventa esté disponible. ¡Mantente atento!',
       [{ text: 'Entendido', style: 'default' }]
     );
+  };
+
+  const handleClaim = async () => {
+    try {
+      setBusy(true);
+      const session = new PresaleWsSession();
+      await session.open();
+      const pack = await session.claimPrepare();
+      const txns = Array.isArray(pack?.transactions) ? pack.transactions : [];
+      // Find user witness txn at index 0
+      const userWitness = txns.find((t: any) => t?.index === 0 && (t?.needs_signature || !t?.signed));
+      if (!userWitness) throw new Error('claim_missing_user_txn');
+      const userBytes = Buffer.from(userWitness.transaction, 'base64');
+      const signed = await algorandService.signTransactionBytes(userBytes);
+      const signedB64 = Buffer.from(signed).toString('base64');
+      const sponsors = pack?.sponsor_transactions || [];
+      await session.claimSubmit(signedB64, sponsors);
+      setBusy(false);
+      Alert.alert('¡Listo!', 'Tu reclamo fue enviado. Se confirmará en segundos.');
+    } catch (e: any) {
+      setBusy(false);
+      Alert.alert('Error', e?.message || 'No se pudo reclamar tus $CONFIO');
+    }
   };
 
   if (loading) {
@@ -134,6 +165,11 @@ export const ConfioPresaleScreen = () => {
       </View>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {busy && (
+          <View style={styles.overlay}>
+            <ActivityIndicator size="large" color="#fff" />
+          </View>
+        )}
         {/* Hero Section */}
         <View style={styles.heroSection}>
           <View style={styles.tokenIcon}>
@@ -143,110 +179,146 @@ export const ConfioPresaleScreen = () => {
               resizeMode="contain"
             />
           </View>
-          <Text style={styles.heroTitle}>Preventa Exclusiva de $CONFIO</Text>
-          <Text style={styles.heroSubtitle}>
-            Sé parte del futuro financiero que estamos construyendo para nuestra gente
-          </Text>
-          
-          <View style={styles.comingSoonBadge}>
-            <Text style={styles.comingSoonText}>🚀 Lanzamiento Q1 2026</Text>
-          </View>
+          {isClaimsUnlocked ? (
+            <>
+              <Text style={styles.heroTitle}>¡Tus $CONFIO ya están listos! 🎉</Text>
+              <Text style={styles.heroSubtitle}>
+                Hemos desbloqueado los tokens de la preventa. Si participaste, ya puedes reclamarlos sin pagar comisiones.
+              </Text>
+              <View style={[styles.comingSoonBadge, { backgroundColor: '#10b981' }]}>
+                <Text style={styles.comingSoonText}>🔓 Tokens desbloqueados</Text>
+              </View>
+              <View style={styles.claimInfoCard}>
+                <Text style={styles.claimInfoTitle}>Listos para reclamar</Text>
+                <Text style={styles.claimInfoAmount}>{formatNumber(claimable, (selectedCountry?.[2] || 'VE'), { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $CONFIO</Text>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={styles.heroTitle}>Preventa Exclusiva de $CONFIO</Text>
+              <Text style={styles.heroSubtitle}>
+                Sé parte del futuro financiero que estamos construyendo para nuestra gente
+              </Text>
+              <View style={styles.comingSoonBadge}>
+                <Text style={styles.comingSoonText}>🚀 Lanzamiento Q1 2026</Text>
+              </View>
+            </>
+          )}
         </View>
 
-        {/* Vision & Future */}
+        {/* Vision & Claiming */}
         <View style={styles.benefitsSection}>
-          <Text style={styles.sectionTitle}>El Futuro que Construimos Juntos</Text>
-          
-          <View style={styles.benefitsList}>
-            <View style={styles.benefitItem}>
-              <Icon name="heart" size={24} color={colors.secondary} />
-              <View style={styles.benefitContent}>
-                <Text style={styles.benefitTitle}>Tu Dinero, Siempre Seguro</Text>
-                <Text style={styles.benefitDescription}>
-                  Una moneda digital que proteges tú mismo, sin bancos que te limiten o te cobren comisiones abusivas
-                </Text>
+          {isClaimsUnlocked ? (
+            <>
+              <Text style={styles.sectionTitle}>¿Cómo reclamar tus $CONFIO?</Text>
+              <View style={styles.benefitsList}>
+                <View style={styles.benefitItem}>
+                  <Icon name="unlock" size={24} color={colors.secondary} />
+                  <View style={styles.benefitContent}>
+                    <Text style={styles.benefitTitle}>1. Toca “Reclamar mis $CONFIO”</Text>
+                    <Text style={styles.benefitDescription}>Te guiamos con un paso rápido y seguro.</Text>
+                  </View>
+                </View>
+                <View style={styles.benefitItem}>
+                  <Icon name="edit-2" size={24} color={colors.secondary} />
+                  <View style={styles.benefitContent}>
+                    <Text style={styles.benefitTitle}>2. Confirma tu reclamo</Text>
+                    <Text style={styles.benefitDescription}>Sin costos ni pasos complicados. Nosotros nos encargamos en segundo plano.</Text>
+                  </View>
+                </View>
+                <View style={styles.benefitItem}>
+                  <Icon name="check-circle" size={24} color={colors.secondary} />
+                  <View style={styles.benefitContent}>
+                    <Text style={styles.benefitTitle}>3. Recibe tus monedas</Text>
+                    <Text style={styles.benefitDescription}>En segundos verás tus $CONFIO en tu balance dentro de la app.</Text>
+                  </View>
+                </View>
               </View>
-            </View>
-            
-            <View style={styles.benefitItem}>
-              <Icon name="zap" size={24} color={colors.secondary} />
-              <View style={styles.benefitContent}>
-                <Text style={styles.benefitTitle}>Pagos en Segundos</Text>
-                <Text style={styles.benefitDescription}>
-                  Envía dinero a tu familia o cobra por tu trabajo al instante, sin esperas ni papeleos
-                </Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.sectionTitle}>El Futuro que Construimos Juntos</Text>
+              <View style={styles.benefitsList}>
+                <View style={styles.benefitItem}>
+                  <Icon name="heart" size={24} color={colors.secondary} />
+                  <View style={styles.benefitContent}>
+                    <Text style={styles.benefitTitle}>Tu Dinero, Siempre Seguro</Text>
+                    <Text style={styles.benefitDescription}>Una moneda digital que proteges tú mismo, sin bancos que te limiten o te cobren comisiones abusivas</Text>
+                  </View>
+                </View>
+                <View style={styles.benefitItem}>
+                  <Icon name="zap" size={24} color={colors.secondary} />
+                  <View style={styles.benefitContent}>
+                    <Text style={styles.benefitTitle}>Pagos en Segundos</Text>
+                    <Text style={styles.benefitDescription}>Envía dinero a tu familia o cobra por tu trabajo al instante, sin esperas ni papeleos</Text>
+                  </View>
+                </View>
+                <View style={styles.benefitItem}>
+                  <Icon name="sunrise" size={24} color={colors.secondary} />
+                  <View style={styles.benefitContent}>
+                    <Text style={styles.benefitTitle}>Un Nuevo Amanecer Financiero</Text>
+                    <Text style={styles.benefitDescription}>Crecemos paso a paso, país por país, construyendo la economía del futuro desde nuestras raíces</Text>
+                  </View>
+                </View>
               </View>
-            </View>
-            
-            <View style={styles.benefitItem}>
-              <Icon name="sunrise" size={24} color={colors.secondary} />
-              <View style={styles.benefitContent}>
-                <Text style={styles.benefitTitle}>Un Nuevo Amanecer Financiero</Text>
-                <Text style={styles.benefitDescription}>
-                  Crecemos paso a paso, país por país, construyendo la economía del futuro desde nuestras raíces
-                </Text>
-              </View>
-            </View>
-          </View>
+            </>
+          )}
         </View>
 
-        {/* Presale Phases */}
-        <View style={styles.phasesSection}>
-          <Text style={styles.sectionTitle}>Fases de la Preventa</Text>
-          
-          {presalePhases.map((phase, index) => (
-            <View key={index} style={styles.phaseCard}>
-              <View style={styles.phaseHeader}>
-                <View style={styles.phaseInfo}>
-                  <Text style={styles.phaseNumber}>{phase.phase}</Text>
-                  <Text style={styles.phaseTitle}>{phase.title}</Text>
-                </View>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(phase.status) }]}>
-                  <Text style={styles.statusText}>{getStatusText(phase.status)}</Text>
-                </View>
-              </View>
-              
-              <Text style={styles.phaseDescription}>{phase.description}</Text>
-              
-              <View style={styles.phaseDetails}>
-                <View style={styles.priceInfo}>
-                  <Text style={styles.priceLabel}>Precio</Text>
-                  <Text style={styles.priceValue}>{phase.price}</Text>
-                  <Text style={styles.priceUnit}>por {phase.unit}</Text>
-                </View>
-                <View style={styles.goalInfo}>
-                  <Text style={styles.goalLabel}>Meta</Text>
-                  <Text style={styles.goalValue}>{phase.goal}</Text>
-                </View>
-                <View style={styles.targetInfo}>
-                  <Text style={styles.targetLabel}>Objetivo</Text>
-                  <Text style={styles.targetValue}>{phase.target}</Text>
-                </View>
-              </View>
-              
-              <View style={styles.locationContainer}>
-                <Text style={styles.locationText}>{phase.location}</Text>
-              </View>
-              
-              <View style={styles.visionTags}>
-                {phase.vision.map((item, idx) => (
-                  <View key={idx} style={styles.visionTag}>
-                    <Text style={styles.visionTagText}>{item}</Text>
+        {/* Presale Phases — hide once claims are unlocked */}
+        {!isClaimsUnlocked && (
+          <View style={styles.phasesSection}>
+            <Text style={styles.sectionTitle}>Fases de la Preventa</Text>
+            {presalePhases.map((phase, index) => (
+              <View key={index} style={styles.phaseCard}>
+                <View style={styles.phaseHeader}>
+                  <View style={styles.phaseInfo}>
+                    <Text style={styles.phaseNumber}>{phase.phase}</Text>
+                    <Text style={styles.phaseTitle}>{phase.title}</Text>
                   </View>
-                ))}
+                  <View style={[styles.statusBadge, { backgroundColor: getStatusColor(phase.status) }]}>
+                    <Text style={styles.statusText}>{getStatusText(phase.status)}</Text>
+                  </View>
+                </View>
+                <Text style={styles.phaseDescription}>{phase.description}</Text>
+                <View style={styles.phaseDetails}>
+                  <View style={styles.priceInfo}>
+                    <Text style={styles.priceLabel}>Precio</Text>
+                    <Text style={styles.priceValue}>{phase.price}</Text>
+                    <Text style={styles.priceUnit}>por {phase.unit}</Text>
+                  </View>
+                  <View style={styles.goalInfo}>
+                    <Text style={styles.goalLabel}>Meta</Text>
+                    <Text style={styles.goalValue}>{phase.goal}</Text>
+                  </View>
+                  <View style={styles.targetInfo}>
+                    <Text style={styles.targetLabel}>Objetivo</Text>
+                    <Text style={styles.targetValue}>{phase.target}</Text>
+                  </View>
+                </View>
+                <View style={styles.locationContainer}>
+                  <Text style={styles.locationText}>{phase.location}</Text>
+                </View>
+                <View style={styles.visionTags}>
+                  {phase.vision.map((item, idx) => (
+                    <View key={idx} style={styles.visionTag}>
+                      <Text style={styles.visionTagText}>{item}</Text>
+                    </View>
+                  ))}
+                </View>
               </View>
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        )}
 
         {/* CTA Section */}
         <View style={styles.ctaSection}>
           <Text style={styles.ctaTitle}>¿Listo para hacer historia?</Text>
           <Text style={styles.ctaSubtitle}>
-            Únete a miles de personas que ya creen en un futuro financiero mejor
+            {isClaimsUnlocked ? 'Reclama las monedas que compraste en la preventa' : 'Únete a miles de personas que ya creen en un futuro financiero mejor'}
           </Text>
           
-          {activePresaleData?.activePresalePhase ? (
+          {!isClaimsUnlocked && activePresaleData?.activePresalePhase ? (
             <TouchableOpacity 
               style={styles.ctaButton}
               onPress={() => navigation.navigate('ConfioPresaleParticipate')}
@@ -254,7 +326,7 @@ export const ConfioPresaleScreen = () => {
               <Icon name="star" size={20} color="#fff" />
               <Text style={styles.ctaButtonText}>Participar en la Preventa</Text>
             </TouchableOpacity>
-          ) : (
+          ) : (!isClaimsUnlocked ? (
             <TouchableOpacity 
               style={styles.ctaButton}
               onPress={handleJoinWaitlist}
@@ -262,23 +334,36 @@ export const ConfioPresaleScreen = () => {
               <Icon name="bell" size={20} color="#fff" />
               <Text style={styles.ctaButtonText}>Notificar</Text>
             </TouchableOpacity>
+          ) : null)}
+          
+          {isClaimsUnlocked && (
+            <TouchableOpacity 
+              style={[styles.ctaButton, { backgroundColor: '#10b981', marginTop: 12 }]}
+              onPress={async () => { await handleClaim(); refetchOnchainInfo && refetchOnchainInfo(); }}
+            >
+              <Icon name="unlock" size={20} color="#fff" />
+              <Text style={styles.ctaButtonText}>Reclamar mis $CONFIO</Text>
+            </TouchableOpacity>
           )}
           
-          <TouchableOpacity 
-            style={styles.secondaryButton}
-            onPress={() => navigation.navigate('ConfioTokenInfo')}
-          >
-            <Text style={styles.secondaryButtonText}>Ver el Futuro de $CONFIO</Text>
-            <Icon name="arrow-right" size={16} color={colors.secondary} />
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.tokenomicsButton}
-            onPress={() => navigation.navigate('ConfioTokenomics')}
-          >
-            <Icon name="pie-chart" size={16} color={colors.secondary} />
-            <Text style={styles.tokenomicsButtonText}>Tokenomics Transparentes</Text>
-          </TouchableOpacity>
+          {!isClaimsUnlocked && (
+            <>
+              <TouchableOpacity 
+                style={styles.secondaryButton}
+                onPress={() => navigation.navigate('ConfioTokenInfo')}
+              >
+                <Text style={styles.secondaryButtonText}>Ver el Futuro de $CONFIO</Text>
+                <Icon name="arrow-right" size={16} color={colors.secondary} />
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.tokenomicsButton}
+                onPress={() => navigation.navigate('ConfioTokenomics')}
+              >
+                <Icon name="pie-chart" size={16} color={colors.secondary} />
+                <Text style={styles.tokenomicsButtonText}>Tokenomics Transparentes</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         <View style={styles.bottomPadding} />
@@ -311,6 +396,36 @@ const styles = StyleSheet.create({
   },
   headerSpacer: {
     width: 40,
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 5,
+  },
+  claimInfoCard: {
+    marginTop: 16,
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+    borderWidth: 1,
+    padding: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  claimInfoTitle: {
+    fontSize: 12,
+    color: '#065F46',
+    marginBottom: 4,
+  },
+  claimInfoAmount: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#065F46',
   },
   scrollView: {
     flex: 1,

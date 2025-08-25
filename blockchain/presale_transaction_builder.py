@@ -107,9 +107,28 @@ class PresaleTransactionBuilder:
         # Addresses
         app_address = get_application_address(self.config.app_id)
 
-        # [0] Sponsor 0-ALGO self payment (fee bump for 3 txns)
+        # Check user balance vs min-balance; fund shortfall if needed
+        try:
+            acct = self.algod.account_info(user_address)
+            current_balance = int(acct.get('amount') or 0)
+            min_balance = int(acct.get('min-balance') or 0)
+            # User must at least meet current MBR; fees are fully sponsored elsewhere
+            # Keep a small 50k buffer to reduce flapping if MBR nudges up
+            target = max(min_balance, 0) + 50_000
+            funding_needed = max(target - current_balance, 0)
+            logger.info(
+                f"[PRESALE] MBR check user={user_address} bal={current_balance} min={min_balance} "
+                f"target={target} fund={funding_needed}"
+            )
+        except Exception:
+            # Conservative fallback top-up if account query fails
+            funding_needed = 200_000
+            logger.warning(f"[PRESALE] account_info failed; default funding_needed={funding_needed}")
+
+        # [0] Sponsor payment (MBR funding if needed, otherwise self-payment) and fee
+        # Contract now expects each txn to cover its base fee; AppCall carries extra
         sp0 = SuggestedParams(
-            fee=min_fee * 3,
+            fee=min_fee * 1,
             first=params.first,
             last=params.last,
             gh=params.gh,
@@ -118,9 +137,12 @@ class PresaleTransactionBuilder:
         sponsor_bump = PaymentTxn(
             sender=self.config.sponsor_address,
             sp=sp0,
-            receiver=self.config.sponsor_address,
-            amt=0,
-            note=b"CONFIO presale fee bump",
+            receiver=user_address if funding_needed > 0 else self.config.sponsor_address,
+            amt=int(funding_needed),
+            note=b"CONFIO presale sponsor",
+        )
+        logger.info(
+            f"[PRESALE] Sponsor bump fee={sp0.fee} recv={'user' if funding_needed>0 else 'sponsor'} amt={int(funding_needed)}"
         )
 
         # [1] User -> app cUSD transfer (fee 0; sponsored)
@@ -139,9 +161,9 @@ class PresaleTransactionBuilder:
             index=int(self.config.cusd_asset_id),
         )
 
-        # [2] Sponsor AppCall to buy (fee 0; contract enforces sponsor-only by group and zero fees)
+        # [2] Sponsor AppCall to buy – carries >=2× fee budget (sponsor covers)
         sp2 = SuggestedParams(
-            fee=0,
+            fee=min_fee * 2,
             first=params.first,
             last=params.last,
             gh=params.gh,
@@ -189,7 +211,7 @@ class PresaleTransactionBuilder:
     def build_app_opt_in(self, user_address: str) -> Dict[str, Any]:
         """
         Build SPONSORED opt-in for the presale application (local state opt-in).
-        Group: [0] sponsor 0-ALGO self-pay with fee>=2*min, [1] ApplicationOptIn (user) fee=0
+        Group: [0] sponsor 0-ALGO self-pay with fee>=1*min, [1] ApplicationOptIn (user) fee>=1*min
         """
         if not self.config.app_id:
             return {"success": False, "error": "presale_not_configured"}
@@ -201,7 +223,7 @@ class PresaleTransactionBuilder:
         params = self.algod.suggested_params()
         min_fee = getattr(params, 'min_fee', 1000) or 1000
 
-        # [0] Sponsor fee bump for 2 txns
+        # [0] Sponsor fee covers both txns (pooling) since user opt-in is fee=0
         sp0 = SuggestedParams(
             fee=min_fee * 2,
             first=params.first,
@@ -217,7 +239,7 @@ class PresaleTransactionBuilder:
             note=b"Presale app opt-in fee bump",
         )
 
-        # [1] User ApplicationOptInTx with fee=0 (sponsored)
+        # [1] User ApplicationOptInTx with fee=0 (strictly sponsored)
         sp1 = SuggestedParams(
             fee=0,
             first=params.first,
@@ -251,6 +273,78 @@ class PresaleTransactionBuilder:
             ],
             "transactions_to_sign": [
                 {"index": 1, "txn": algo_encoding.msgpack_encode(app_opt_in), "message": "User app opt-in"}
+            ],
+            "group_id": base64.b64encode(gid).decode(),
+        }
+
+    def build_claim_group(self, user_address: str) -> Dict[str, Any]:
+        """
+        Build a fully sponsored claim group for unlocked presale tokens.
+
+        Group layout:
+          [0] Payment user->user amount=0 fee=0 (user signature witness)
+          [1] AppCall (sender=sponsor) app_args=['claim'] accounts=[user] fee>=2*min
+        """
+        if not self.config.app_id:
+            return {"success": False, "error": "presale_not_configured"}
+
+        # Suggested params
+        params = self.algod.suggested_params()
+        min_fee = getattr(params, 'min_fee', 1000) or 1000
+
+        # [0] User witness 0-ALGO payment (fee=0; sponsored)
+        sp0 = SuggestedParams(
+            fee=0,
+            first=params.first,
+            last=params.last,
+            gh=params.gh,
+            flat_fee=True,
+        )
+        user_witness = PaymentTxn(
+            sender=user_address,
+            sp=sp0,
+            receiver=user_address,
+            amt=0,
+            note=b"CONFIO presale claim witness",
+        )
+
+        # [1] Sponsor AppCall to claim – covers fees incl. inner xfer
+        sp1 = SuggestedParams(
+            fee=min_fee * 2,
+            first=params.first,
+            last=params.last,
+            gh=params.gh,
+            flat_fee=True,
+        )
+        app_call = ApplicationNoOpTxn(
+            sender=self.config.sponsor_address,
+            sp=sp1,
+            index=int(self.config.app_id),
+            app_args=[b"claim"],
+            accounts=[user_address],
+        )
+
+        # Group
+        gid = transaction.calculate_group_id([user_witness, app_call])
+        user_witness.group = gid
+        app_call.group = gid
+
+        sponsor_signed_1 = None
+        if self.config.sponsor_mnemonic:
+            try:
+                sk = mnemonic.to_private_key(self.config.sponsor_mnemonic)
+                sponsor_signed_1 = algo_encoding.msgpack_encode(app_call.sign(sk))
+            except Exception as e:
+                logger.warning(f"Failed to pre-sign sponsor claim app call: {e}")
+                sponsor_signed_1 = None
+
+        return {
+            "success": True,
+            "sponsor_transactions": [
+                {"index": 1, "txn": algo_encoding.msgpack_encode(app_call), "signed": sponsor_signed_1},
+            ],
+            "transactions_to_sign": [
+                {"index": 0, "txn": algo_encoding.msgpack_encode(user_witness), "message": "User claim witness"}
             ],
             "group_id": base64.b64encode(gid).decode(),
         }

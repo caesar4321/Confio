@@ -4,6 +4,7 @@ from datetime import timedelta
 from users.models import User
 from achievements.models import UserAchievement
 from p2p_exchange.models import P2PTrade
+from presale.models import PresalePurchase, PresalePhase
 
 
 def admin_dashboard_stats(request):
@@ -92,10 +93,22 @@ def admin_dashboard_stats(request):
             )['total'] or 0,
         }
         
+        # Presale Statistics
+        presale_completed = PresalePurchase.objects.filter(status='completed')
+        presale_stats = {
+            'active_phase': PresalePhase.objects.filter(status='active').values('phase_number', 'name').first(),
+            'today_purchases': presale_completed.filter(created_at__gte=today_start).count(),
+            'week_purchases': presale_completed.filter(created_at__gte=week_start).count(),
+            'today_cusd': presale_completed.filter(created_at__gte=today_start).aggregate(total=Sum('cusd_amount'))['total'] or 0,
+            'week_cusd': presale_completed.filter(created_at__gte=week_start).aggregate(total=Sum('cusd_amount'))['total'] or 0,
+            'total_confio': presale_completed.aggregate(total=Sum('confio_amount'))['total'] or 0,
+        }
+
         return {
             'fraud_stats': fraud_stats,
             'user_stats': user_stats,
             'p2p_stats': p2p_stats,
+            'presale_stats': presale_stats,
         }
     except Exception as e:
         # Don't break the admin if stats fail
