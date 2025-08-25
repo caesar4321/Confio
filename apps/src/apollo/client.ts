@@ -53,6 +53,7 @@ const processQueue = (error: any = null, token: string | null = null) => {
 };
 
 const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: ErrorResponse): void | ApolloObservable<FetchResult> => {
+    console.log('[Apollo][onError] op:', operation.operationName);
     if (graphQLErrors) {
     for (const err of graphQLErrors) {
       console.error('[GraphQL error]:', {
@@ -198,7 +199,7 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
   }
 });
 
-const AUTH_DEBUG = false; // Toggle verbose auth logs
+const AUTH_DEBUG = true; // Toggle verbose auth logs
 const authLink = setContext(async (operation, previousContext) => {
   if (AUTH_DEBUG) console.log('AuthLink called for operation:', operation.operationName);
   
@@ -477,13 +478,17 @@ const authLink = setContext(async (operation, previousContext) => {
         business_id: decoded.business_id ?? 'not present'
       });
       
-      return {
+      const headerResult = {
         headers: {
           ...headers,
           Authorization: `JWT ${token}`
           // Account context is embedded in the JWT token
         }
       };
+      if (AUTH_DEBUG) {
+        console.log('[AuthLink] Attached Authorization for', operation.operationName, 'tokenLen=', (token || '').length);
+      }
+      return headerResult as any;
     } catch (error) {
       console.error('Error decoding token:', error);
       // v10 API: resetGenericPassword accepts options object

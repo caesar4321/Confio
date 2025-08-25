@@ -236,23 +236,33 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                   username: AUTH_KEYCHAIN_USERNAME
                 });
                 
-                if (credentials) {
-                  const tokens = JSON.parse(credentials.password);
-                  // Update with new access token while keeping refresh token
-                  await Keychain.setGenericPassword(
-                    AUTH_KEYCHAIN_USERNAME,
-                    JSON.stringify({
-                      accessToken: data.switchAccountToken.token,
-                      refreshToken: tokens.refreshToken
-                    }),
-                    {
-                      service: AUTH_KEYCHAIN_SERVICE,
-                      username: AUTH_KEYCHAIN_USERNAME,
-                      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-                    }
-                  );
-                  console.log('AuthContext - Stored updated JWT token with business context');
+              if (credentials) {
+                const tokens = JSON.parse(credentials.password);
+                // Update with new access token while keeping refresh token
+                await Keychain.setGenericPassword(
+                  AUTH_KEYCHAIN_USERNAME,
+                  JSON.stringify({
+                    accessToken: data.switchAccountToken.token,
+                    refreshToken: tokens.refreshToken
+                  }),
+                  {
+                    service: AUTH_KEYCHAIN_SERVICE,
+                    username: AUTH_KEYCHAIN_USERNAME,
+                    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+                  }
+                );
+                console.log('AuthContext - Stored updated JWT token with business context');
+
+                // Immediately warm user accounts using the new token/context
+                try {
+                  const { GET_USER_ACCOUNTS } = await import('../apollo/queries');
+                  const { apolloClient } = await import('../apollo/client');
+                  await apolloClient.query({ query: GET_USER_ACCOUNTS, fetchPolicy: 'network-only' });
+                  console.log('AuthContext - Prefetched userAccounts after switching to business context');
+                } catch (prefetchErr) {
+                  console.warn('AuthContext - Failed to prefetch userAccounts after switch:', prefetchErr);
                 }
+              }
               }
             } catch (syncError) {
               console.error('AuthContext - Error syncing JWT token on startup:', syncError);

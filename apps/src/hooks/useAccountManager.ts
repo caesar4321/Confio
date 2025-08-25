@@ -58,6 +58,51 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     notifyOnNetworkStatusChange: true,
   } as any);
 
+  // Convert raw server account objects to StoredAccount[]
+  const convertServerAccounts = useCallback((serverAccounts: any[]): StoredAccount[] => {
+    const converted: StoredAccount[] = serverAccounts
+      .filter((acc: any) => acc != null)
+      .map((serverAcc: any) => {
+        const displayName = serverAcc.displayName || 'Account';
+        const avatar = serverAcc.avatarLetter || displayName.charAt(0).toUpperCase();
+        const baseName = displayName.replace(/^(Personal|Negocio) - /, '');
+        const accountType = (serverAcc.accountType || 'personal').toLowerCase() as 'personal' | 'business';
+        let accountId: string;
+        if (accountType === 'personal') accountId = 'personal_0';
+        else if (serverAcc.business?.id) accountId = `business_${serverAcc.business.id}_0`;
+        else accountId = `${accountType}_${serverAcc.id}_0`;
+        const convertedAccount: StoredAccount = {
+          id: accountId,
+          name: baseName,
+          type: accountType,
+          index: 0,
+          phone: accountType === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
+          category: serverAcc.business?.category,
+          avatar,
+          algorandAddress: '',
+          createdAt: serverAcc.createdAt,
+          isActive: true,
+          isEmployee: serverAcc.isEmployee || false,
+          employeeRole: serverAcc.employeeRole,
+          employeePermissions: serverAcc.employeePermissions,
+          employeeRecordId: serverAcc.employeeRecordId,
+          business: serverAcc.business ? {
+            id: serverAcc.business.id,
+            name: serverAcc.business.name,
+            category: serverAcc.business.category,
+          } : undefined,
+        };
+        return convertedAccount;
+      });
+    // Sort accounts: personal first, then business by index
+    return converted.sort((a, b) => {
+      const aPriority = a.type === 'personal' ? 0 : 1;
+      const bPriority = b.type === 'personal' ? 0 : 1;
+      if (aPriority !== bPriority) return aPriority - bPriority;
+      return a.index - b.index;
+    });
+  }, [profileData?.userProfile?.phoneNumber]);
+
   const loadAccounts = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -76,97 +121,8 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       
       // Convert server accounts to StoredAccount format
       // Filter out any null accounts first
-      const convertedAccounts: StoredAccount[] = serverAccounts
-        .filter((acc: any) => acc != null)
-        .map((serverAcc: any) => {
-        // Use server-provided display_name and avatar_letter for all accounts
-        const displayName = serverAcc.displayName || 'Account';
-        const avatar = serverAcc.avatarLetter || displayName.charAt(0).toUpperCase();
-        
-        // Extract the base name without the "Personal -" or "Negocio -" prefix
-        const baseName = displayName.replace(/^(Personal|Negocio) - /, '');
-        
-        console.log('useAccountManager - Account conversion:', {
-          accountId: serverAcc.accountId,
-          accountType: serverAcc.accountType,
-          displayName,
-          baseName,
-          avatar,
-          serverDisplayName: serverAcc.displayName,
-          serverAvatarLetter: serverAcc.avatarLetter,
-          rawServerAccount: JSON.stringify(serverAcc, null, 2)
-        });
-        
-        // Ensure accountType is properly set and normalized
-        const accountType = serverAcc.accountType || 'personal';
-        const normalizedType = accountType.toLowerCase() as 'personal' | 'business';
-        
-        // Generate proper ID based on account type
-        let accountId: string;
-        if (normalizedType === 'personal') {
-          accountId = 'personal_0';
-        } else if (normalizedType === 'business' && serverAcc.business?.id) {
-          // For business accounts, include business_id to ensure uniqueness
-          accountId = `business_${serverAcc.business.id}_0`;
-        } else {
-          // Fallback - shouldn't happen
-          accountId = `${normalizedType}_${serverAcc.id}_0`;
-        }
-        
-        const convertedAccount: StoredAccount = {
-          id: accountId, // Use proper format with business_id for uniqueness
-          name: baseName, // Use the base name without the prefix for display
-          type: normalizedType,
-          index: 0, // Always 0 for both personal and business accounts
-          phone: normalizedType === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
-          category: serverAcc.business?.category,
-          avatar: avatar,
-          algorandAddress: '', // Client will compute this on-demand
-          createdAt: serverAcc.createdAt,
-          isActive: true,
-          isEmployee: serverAcc.isEmployee || false,
-          employeeRole: serverAcc.employeeRole,
-          employeePermissions: serverAcc.employeePermissions,
-          employeeRecordId: serverAcc.employeeRecordId,
-          business: serverAcc.business ? {
-            id: serverAcc.business.id,
-            name: serverAcc.business.name,
-            category: serverAcc.business.category,
-          } : undefined,
-        };
-        
-        console.log('useAccountManager - Converted account:', {
-          originalAccountType: serverAcc.accountType,
-          normalizedType,
-          convertedAccount: {
-            id: convertedAccount.id,
-            type: convertedAccount.type,
-            name: convertedAccount.name,
-            businessId: convertedAccount.business?.id,
-            isEmployee: convertedAccount.isEmployee,
-            employeeRole: convertedAccount.employeeRole,
-            employeePermissions: convertedAccount.employeePermissions
-          }
-        });
-        
-        return convertedAccount;
-      });
-      
-      // Sort accounts: personal first, then business by index
-      const sortedAccounts = convertedAccounts.sort((a, b) => {
-        // Personal accounts get priority (0), business accounts get lower priority (1)
-        const aPriority = a.type.toLowerCase() === 'personal' ? 0 : 1;
-        const bPriority = b.type.toLowerCase() === 'personal' ? 0 : 1;
-        
-        if (aPriority !== bPriority) {
-          return aPriority - bPriority;
-        }
-        
-        // If same type, sort by index
-        return a.index - b.index;
-      });
-      
-      setAccounts(sortedAccounts);
+      const convertedAccounts: StoredAccount[] = convertServerAccounts(serverAccounts);
+      setAccounts(convertedAccounts);
       
       // Get active account context BEFORE deciding to create default account
       const activeContext = await authService.getActiveAccountContext();
@@ -499,14 +455,29 @@ export const useAccountManager = (): UseAccountManagerReturn => {
 
   const refreshAccounts = useCallback(async () => {
     try {
-      // Just refetch server data - Apollo's cache updates automatically
-      await refetchServerAccounts();
-      // Removed loadAccounts() call - it causes the blink
-      // The useEffect watching serverAccountsData will handle updates automatically
+      // If the query was skipped initially, refetch may be a no-op. Force a network query.
+      const { GET_USER_ACCOUNTS } = await import('../apollo/queries');
+      const result = await apolloClient.query({ query: GET_USER_ACCOUNTS, fetchPolicy: 'network-only' });
+      const serverAccounts = result?.data?.userAccounts || [];
+      const converted = convertServerAccounts(serverAccounts);
+      setAccounts(converted.length > 0 ? converted : [
+        {
+          id: 'personal_0',
+          name: profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'Personal',
+          type: 'personal',
+          index: 0,
+          phone: profileData?.userProfile?.phoneNumber || undefined,
+          category: undefined,
+          avatar: (profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'P').charAt(0).toUpperCase(),
+          algorandAddress: '',
+          createdAt: new Date().toISOString(),
+          isActive: true,
+        }
+      ]);
     } catch (error) {
       console.error('Error refreshing accounts from server:', error);
     }
-  }, [refetchServerAccounts]);
+  }, [apolloClient, convertServerAccounts, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.userProfile?.phoneNumber]);
 
   const syncWithServer = useCallback(async (serverAccounts: any[]) => {
     try {

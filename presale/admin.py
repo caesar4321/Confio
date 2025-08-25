@@ -296,12 +296,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                     stx0 = bump.sign(sponsor_sk)
                     stx1 = call.sign(admin_sk)
                     pa.algod_client.send_transactions([stx0, stx1])
-                    # best-effort short confirm
-                    try:
-                        from algosdk.transaction import wait_for_confirmation as _wfc
-                        _wfc(pa.algod_client, stx1.get_txid(), 4)
-                    except Exception:
-                        pass
+                    # Do not wait; let background tasks/UX handle any confirmation
             except Exception as oe:
                 self.message_user(request, f"Preflight opt-in failed: {oe}", level='error')
                 return
@@ -399,12 +394,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                     stx0 = bump.sign(sponsor_sk)
                     stx1 = call.sign(admin_sk)
                     client.send_transactions([stx0, stx1])
-                    # Refresh account info
-                    try:
-                        from algosdk.transaction import wait_for_confirmation as _wfc
-                        _wfc(client, stx1.get_txid(), 4)
-                    except Exception:
-                        pass
+                    # Refresh account info without waiting
                     acct = client.account_info(app_addr)
                     app_confio = 0
                     for a in (acct.get('assets') or []):
@@ -432,12 +422,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             txn = _Axfer(sender=sponsor_addr, sp=params, receiver=app_addr, amt=int(shortfall), index=int(confio_id))
             stx = txn.sign(sponsor_sk)
             txid = client.send_transaction(stx)
-            # best-effort confirm
-            try:
-                from algosdk.transaction import wait_for_confirmation as _wfc
-                _wfc(client, txid, 4)
-            except Exception:
-                pass
+            # Do not wait; return to admin immediately
             self.message_user(request, f"Funded app with {shortfall/10**6:,.0f} CONFIO (tx {txid[:10]}...).", level='success')
         except Exception as e:
             self.message_user(request, f"Failed to fund app: {e}", level='error')

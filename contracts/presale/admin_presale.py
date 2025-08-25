@@ -559,7 +559,7 @@ class PresaleAdmin:
         signed_mbr = mbr_payment.sign(sponsor_sk)
         tx_id = self.algod_client.send_transaction(signed_mbr)
         wait_for_confirmation(self.algod_client, tx_id, 4)
-        print("   ✅ MBR funded (0.35 ALGO)")
+        print("   ✅ MBR funded (0.40 ALGO)")
         
         # Step 2: Opt into assets
         print("\n2️⃣ Opting into CONFIO and cUSD assets...")

@@ -65,7 +65,7 @@ export class PresaleWsSession {
   private resolve(key: string, v: any) { const r = this.resolvers[key]; if (r) { r(v); delete this.resolvers[key]; delete this.rejectors[key]; } }
   private rejectAll(err: any) { Object.values(this.rejectors).forEach(r => r(err)); this.resolvers = {}; this.rejectors = {}; }
 
-  async preparePurchase(amount: string | number, timeout = 8000): Promise<PreparePurchasePack> {
+  async preparePurchase(amount: string | number, timeout = 15000): Promise<PreparePurchasePack> {
     await this.open(); if (!this.ws) throw new Error('not_open');
     return new Promise((resolve, reject) => {
       this.resolvers['prepare'] = resolve as any; this.rejectors['prepare'] = reject as any;
@@ -74,7 +74,7 @@ export class PresaleWsSession {
     });
   }
 
-  async submitPurchase(purchaseId: string, signedUserTxn: string, sponsorTransactions: (string | { txn: string; signed?: string; index: number })[], timeout = 10000): Promise<SubmitResult> {
+  async submitPurchase(purchaseId: string, signedUserTxn: string, sponsorTransactions: (string | { txn: string; signed?: string; index: number })[], timeout = 20000): Promise<SubmitResult> {
     await this.open(); if (!this.ws) throw new Error('not_open');
     return new Promise((resolve, reject) => {
       this.resolvers['submit'] = resolve as any; this.rejectors['submit'] = reject as any;
@@ -86,7 +86,7 @@ export class PresaleWsSession {
     });
   }
 
-  async optinPrepare(timeout = 8000): Promise<PreparePurchasePack> {
+  async optinPrepare(timeout = 15000): Promise<PreparePurchasePack> {
     await this.open(); if (!this.ws) throw new Error('not_open');
     return new Promise((resolve, reject) => {
       this.resolvers['prepare'] = resolve as any; this.rejectors['prepare'] = reject as any;
@@ -95,7 +95,7 @@ export class PresaleWsSession {
     });
   }
 
-  async optinSubmit(signedUserTxn: string, sponsorTransactions: (string | { txn: string; signed?: string; index: number })[], timeout = 10000): Promise<SubmitResult> {
+  async optinSubmit(signedUserTxn: string, sponsorTransactions: (string | { txn: string; signed?: string; index: number })[], timeout = 20000): Promise<SubmitResult> {
     await this.open(); if (!this.ws) throw new Error('not_open');
     return new Promise((resolve, reject) => {
       this.resolvers['submit'] = resolve as any; this.rejectors['submit'] = reject as any;
@@ -107,7 +107,7 @@ export class PresaleWsSession {
     });
   }
 
-  async claimPrepare(timeout = 8000): Promise<PreparePurchasePack> {
+  async claimPrepare(timeout = 15000): Promise<PreparePurchasePack> {
     await this.open(); if (!this.ws) throw new Error('not_open');
     return new Promise((resolve, reject) => {
       this.resolvers['prepare'] = resolve as any; this.rejectors['prepare'] = reject as any;
@@ -116,7 +116,7 @@ export class PresaleWsSession {
     });
   }
 
-  async claimSubmit(signedUserTxn: string, sponsorTransactions: (string | { txn: string; signed?: string; index: number })[], timeout = 10000): Promise<SubmitResult> {
+  async claimSubmit(signedUserTxn: string, sponsorTransactions: (string | { txn: string; signed?: string; index: number })[], timeout = 20000): Promise<SubmitResult> {
     await this.open(); if (!this.ws) throw new Error('not_open');
     return new Promise((resolve, reject) => {
       this.resolvers['submit'] = resolve as any; this.rejectors['submit'] = reject as any;

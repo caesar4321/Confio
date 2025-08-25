@@ -39,6 +39,7 @@ import { AchievementsScreen } from '../screens/AchievementsScreen';
 import { ConfioTokenInfoScreen } from '../screens/ConfioTokenInfoScreen';
 import { ConfioPresaleScreen } from '../screens/ConfioPresaleScreen';
 import { ConfioPresaleParticipateScreen } from '../screens/ConfioPresaleParticipateScreen';
+import { LoadingOverlay } from '../components/LoadingOverlay';
 import { ConfioTokenomicsScreen } from '../screens/ConfioTokenomicsScreen';
 import { MiProgresoViralScreen } from '../screens/MiProgresoViralScreen';
 import { ViralTemplatesScreen } from '../screens/ViralTemplatesScreen';
