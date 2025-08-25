@@ -321,12 +321,11 @@ class PresaleAdmin:
             sp=params,
             index=self.app_id,
             app_args=app_args,
+            foreign_assets=[int(self.confio_id)],
             on_complete=OnComplete.NoOpOC
         )
-        
         signed_txn = txn.sign(admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
-        wait_for_confirmation(self.algod_client, tx_id, 4)
         
         print(f"✅ Withdrew {withdraw_amount / 10**6:,.0f} CONFIO")
         print(f"   Transaction: {tx_id}")
@@ -379,12 +378,11 @@ class PresaleAdmin:
             sp=params,
             index=self.app_id,
             app_args=app_args,
+            foreign_assets=[int(self.cusd_id)],
             on_complete=OnComplete.NoOpOC
         )
-        
         signed_txn = txn.sign(admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
-        wait_for_confirmation(self.algod_client, tx_id, 4)
         
         print(f"✅ Withdrew {cusd_balance / 10**6:.2f} cUSD")
         print(f"   Transaction: {tx_id}")
