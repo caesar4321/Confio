@@ -291,8 +291,21 @@ export const HomeScreen = () => {
     return acc;
   });
 
-  // Only use stored accounts - no mock accounts
-  const displayAccounts = accountMenuItems;
+  // Only use stored accounts normally; provide a safe placeholder on startup/race
+  const displayAccounts = accountMenuItems.length > 0
+    ? accountMenuItems
+    : (
+      userProfile
+        ? [{
+            id: 'personal_0',
+            name: userProfile.firstName || userProfile.username || 'Personal',
+            type: 'personal' as const,
+            phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
+            category: undefined,
+            avatar: (userProfile.firstName || userProfile.username || 'P').charAt(0).toUpperCase(),
+          }]
+        : []
+      );
 
   // Save balance visibility preference to Keychain
   const saveBalanceVisibility = async (isVisible: boolean) => {

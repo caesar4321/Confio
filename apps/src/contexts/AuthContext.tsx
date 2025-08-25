@@ -53,6 +53,7 @@ interface AuthContextType {
   // Direct access to user profile for backward compatibility
   userProfile?: UserProfile;
   isUserProfileLoading: boolean;
+  accountContextTick: number;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -68,6 +69,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const [isNavigationReady, setIsNavigationReady] = useState(false);
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const [isProfileLoading, setIsProfileLoading] = useState(false);
+  const [accountContextTick, setAccountContextTick] = useState(0);
   const apolloClient = useApolloClient();
 
   // Mutation for token refresh (used on resume)
@@ -252,6 +254,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                   }
                 );
                 console.log('AuthContext - Stored updated JWT token with business context');
+                setAccountContextTick((t) => t + 1);
 
                 // Immediately warm user accounts using the new token/context
                 try {
@@ -434,6 +437,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                       accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
                     }
                   );
+                  setAccountContextTick((t) => t + 1);
                 }
               }
             } catch (e) {
@@ -587,7 +591,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
       isProfileLoading, 
       refreshProfile,
       userProfile: profileData?.userProfile,
-      isUserProfileLoading: isProfileLoading && profileData?.currentAccountType === 'personal'
+      isUserProfileLoading: isProfileLoading && profileData?.currentAccountType === 'personal',
+      accountContextTick,
     }}>
       {children}
     </AuthContext.Provider>
