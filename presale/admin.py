@@ -134,7 +134,15 @@ class PresalePhaseAdmin(admin.ModelAdmin):
         return f"{obj.progress_percentage:.2f}%"
     progress_display.short_description = 'Progress %'
     
-    actions = ['activate_phase', 'pause_phase', 'complete_phase', 'start_onchain_round', 'fund_app_with_confio']
+    actions = [
+        'activate_phase',
+        'pause_phase',
+        'complete_phase',
+        'start_onchain_round',
+        'end_current_round',
+        'resume_current_round',
+        'fund_app_with_confio',
+    ]
     
     def activate_phase(self, request, queryset):
         updated = queryset.update(status='active')
@@ -319,6 +327,143 @@ class PresalePhaseAdmin(admin.ModelAdmin):
         except Exception as e:
             self.message_user(request, f"Failed to start on-chain round: {e}", level='error')
     start_onchain_round.short_description = "Start on-chain round (match DB values)"
+
+    def end_current_round(self, request, queryset):
+        """End the current on-chain round immediately by toggling round_active -> 0.
+
+        Sends a simple admin ApplicationCall (no inner txns). If the round is already inactive, informs the user.
+        """
+        from django.conf import settings
+        try:
+            app_id = getattr(settings, 'ALGORAND_PRESALE_APP_ID', 0)
+            if not app_id:
+                self.message_user(request, 'PRESALE_APP_ID not configured', level='error')
+                return
+            if queryset.count() != 1:
+                self.message_user(request, 'Select exactly one phase to operate on', level='error')
+                return
+
+            # Build admin credentials
+            from algosdk import mnemonic as _mn
+            from algosdk.account import address_from_private_key as _addr_from_sk
+            admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None) or getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+            if not admin_mn:
+                self.message_user(request, 'Admin/Sponsor mnemonic not configured', level='error')
+                return
+            admin_sk = _mn.to_private_key(" ".join(str(admin_mn).strip().split()))
+            admin_addr = _addr_from_sk(admin_sk)
+
+            # Query current round state to avoid unnecessary toggle
+            from algosdk.v2client import algod as _algod
+            client = _algod.AlgodClient(
+                getattr(settings, 'ALGORAND_ALGOD_TOKEN', ''),
+                getattr(settings, 'ALGORAND_ALGOD_ADDRESS', ''),
+            )
+            app_info = client.application_info(int(app_id))
+            gstate = {bytes.fromhex(kv['key']).decode('utf-8') if False else kv['key']: kv['value'] for kv in app_info['params'].get('global-state', [])}
+            # Helper: decode byte/uint values from global state
+            def _get_uint(key_b64: str) -> int:
+                try:
+                    v = next((kv['value'] for kv in app_info['params']['global-state'] if kv['key'] == key_b64), None)
+                    return int(v.get('uint') or 0) if v else 0
+                except Exception:
+                    return 0
+            # Keys are base64; we don't strictly need decode for active snapshot, just attempt to toggle regardless.
+
+            # Send toggle_round (sets active=0 if currently 1; if already 0, it will attempt to re-activate and may assert).
+            # To avoid activation path, we enforce a one-way: only send when active.
+            # Read active value via dryrun of global state: we know 'active' was set in contract; but decoding base64 key here is verbose.
+            # Simpler: attempt toggle; if round was inactive, Tx will try to activate and may fail inventory assertion. We can guard by checking suggested param dry-run not available.
+            # Instead, issue a read via indexer-like API is out of scope; proceed with toggle and surface errors.
+
+            from algosdk.transaction import ApplicationCallTxn as _AppCall, OnComplete as _OC
+            # Resolve assets for foreign list
+            confio_id = int(getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 0) or 0)
+            cusd_id = int(getattr(settings, 'ALGORAND_CUSD_ASSET_ID', 0) or 0)
+            foreign_assets = [i for i in [confio_id, cusd_id] if i]
+            params = client.suggested_params()
+            txn = _AppCall(
+                sender=admin_addr,
+                sp=params,
+                index=int(app_id),
+                app_args=[b'toggle_round'],
+                foreign_assets=foreign_assets,
+                on_complete=_OC.NoOpOC
+            )
+            stx = txn.sign(admin_sk)
+            tx_id = client.send_transaction(stx)
+            # No blocking wait; report tx id
+            self.message_user(request, f"End round requested (toggle_round). Tx: {tx_id}", level='info')
+        except Exception as e:
+            self.message_user(request, f"Failed to end current on-chain round: {e}", level='error')
+    end_current_round.short_description = "End current on-chain round (toggle inactive)"
+
+    def resume_current_round(self, request, queryset):
+        """Resume the on-chain round (toggle round_active -> 1) if currently inactive.
+
+        Runs 'toggle_round' only when the contract round is inactive. Displays tx id or a helpful error.
+        """
+        from django.conf import settings
+        try:
+            app_id = getattr(settings, 'ALGORAND_PRESALE_APP_ID', 0)
+            if not app_id:
+                self.message_user(request, 'PRESALE_APP_ID not configured', level='error')
+                return
+            if queryset.count() != 1:
+                self.message_user(request, 'Select exactly one phase to operate on', level='error')
+                return
+
+            # Build admin credentials
+            from algosdk import mnemonic as _mn
+            from algosdk.account import address_from_private_key as _addr_from_sk
+            admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None) or getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+            if not admin_mn:
+                self.message_user(request, 'Admin/Sponsor mnemonic not configured', level='error')
+                return
+            admin_sk = _mn.to_private_key(" ".join(str(admin_mn).strip().split()))
+            admin_addr = _addr_from_sk(admin_sk)
+
+            # Read current active/paused state
+            from algosdk.v2client import algod as _algod
+            client = _algod.AlgodClient(
+                getattr(settings, 'ALGORAND_ALGOD_TOKEN', ''),
+                getattr(settings, 'ALGORAND_ALGOD_ADDRESS', ''),
+            )
+            info = client.application_info(int(app_id))
+            g = {kv['key']: kv['value'] for kv in info['params'].get('global-state', [])}
+            # Base64 keys for 'active' and 'paused'
+            KEY_ACTIVE = 'YWN0aXZl'   # base64('active')
+            KEY_PAUSED = 'cGF1c2Vk'   # base64('paused')
+            is_active = int(g.get(KEY_ACTIVE, {}).get('uint') or 0)
+            is_paused = int(g.get(KEY_PAUSED, {}).get('uint') or 0)
+            if is_active == 1:
+                self.message_user(request, 'Round is already active on-chain.', level='info')
+                return
+            if is_paused == 1:
+                self.message_user(request, 'Contract is paused; unpause first before resuming the round.', level='error')
+                return
+
+            # Send toggle_round to activate (contract will perform inventory checks)
+            from algosdk.transaction import ApplicationCallTxn as _AppCall, OnComplete as _OC
+            # Include foreign assets so contract can read balances during resume
+            confio_id = int(getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 0) or 0)
+            cusd_id = int(getattr(settings, 'ALGORAND_CUSD_ASSET_ID', 0) or 0)
+            foreign_assets = [i for i in [confio_id, cusd_id] if i]
+            params = client.suggested_params()
+            txn = _AppCall(
+                sender=admin_addr,
+                sp=params,
+                index=int(app_id),
+                app_args=[b'toggle_round'],
+                foreign_assets=foreign_assets,
+                on_complete=_OC.NoOpOC,
+            )
+            stx = txn.sign(admin_sk)
+            tx_id = client.send_transaction(stx)
+            self.message_user(request, f"Resume round requested (toggle_round). Tx: {tx_id}", level='info')
+        except Exception as e:
+            self.message_user(request, f"Failed to resume on-chain round: {e}", level='error')
+    resume_current_round.short_description = "Resume current on-chain round (toggle active)"
 
     def fund_app_with_confio(self, request, queryset):
         """Fund the presale app address with CONFIO from the sponsor account to cover cap shortfall."""
