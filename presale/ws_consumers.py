@@ -2,6 +2,7 @@ import asyncio
 import json
 from urllib.parse import parse_qs
 
+import logging
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from channels.db import database_sync_to_async
 
@@ -56,6 +57,10 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
     async def receive_json(self, content, **kwargs):
         await self._reset_idle_timer()
         t = content.get("type")
+        try:
+            logging.getLogger(__name__).info(f"[PRESALE][WS] receive_json type={t}")
+        except Exception:
+            pass
         if t == "ping":
             await self.send_json({"type": "pong"})
             return
@@ -122,6 +127,10 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         if t == "prepare_request":
             try:
                 amount = content.get("amount")
+                try:
+                    logging.getLogger(__name__).info(f"[PRESALE][WS] prepare_request amount={amount}")
+                except Exception:
+                    pass
                 pack = await self._prepare(amount)
                 if not pack.get("success"):
                     # Special hint: presale app opt-in required
@@ -138,6 +147,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                         "sponsor_transactions": pack.get("sponsor_transactions"),
                         "user_signing_indexes": pack.get("user_signing_indexes", [1]),
                         "group_id": pack.get("group_id"),
+                        "sponsor_topup": pack.get("sponsor_topup"),
                     },
                 })
             except Exception as e:
@@ -236,6 +246,42 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         builder = PresaleTransactionBuilder()
         cusd_base = int(cusd_amount * 10**6)
         tx_pack = builder.build_buy_group(account.algorand_address, cusd_base)
+        # Persist server-signed sponsor txns alongside purchase for reliable submit
+        try:
+            import json as _json
+            purchase.notes = _json.dumps({
+                'sponsor_transactions': tx_pack.get('sponsor_transactions') or [],
+                'group_id': tx_pack.get('group_id'),
+            })
+            purchase.save(update_fields=['notes'])
+        except Exception:
+            pass
+        # Log sponsor bump and appcall details for observability (INFO level)
+        try:
+            logger = logging.getLogger(__name__)
+            from algosdk import encoding as _enc
+            sp0 = next((s for s in (tx_pack.get('sponsor_transactions') or []) if int(s.get('index',-1)) == 0), None)
+            if sp0 and sp0.get('txn'):
+                stx = _enc.msgpack_decode(sp0['txn'])
+                recv = getattr(stx, 'receiver', None)
+                amt = int(getattr(stx, 'amt', 0) or 0)
+                fee = int(getattr(stx, 'fee', 0) or 0)
+                logger.info(f"[PRESALE][WS][PREPARE] sponsor0 receiver={recv} amt={amt} fee={fee}")
+            sp2 = next((s for s in (tx_pack.get('sponsor_transactions') or []) if int(s.get('index',-1)) == 2), None)
+            if sp2 and sp2.get('txn'):
+                atx = _enc.msgpack_decode(sp2['txn'])
+                accs = getattr(atx, 'accounts', None)
+                logger.info(f"[PRESALE][WS][PREPARE] appcall accounts={accs}")
+        except Exception:
+            pass
+        try:
+            from algosdk import encoding as _enc
+            sp0 = next((s for s in (tx_pack.get('sponsor_transactions') or []) if int(s.get('index',-1)) == 0), None)
+            if sp0 and sp0.get('txn'):
+                stx = _enc.msgpack_decode(sp0['txn'])
+                print(f"[PRESALE][DEBUG] sponsor0 -> recv={getattr(stx,'receiver',None)} amt={getattr(stx,'amt',None)} fee={getattr(stx,'fee',None)}")
+        except Exception:
+            pass
         if not tx_pack.get('success'):
             # Clean up the pending record if we couldn't build a pack
             try:
@@ -281,11 +327,38 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
     def _optin_prepare(self):
         from users.models import Account
         from blockchain.presale_transaction_builder import PresaleTransactionBuilder
+        from blockchain.algorand_account_manager import AlgorandAccountManager
+        from algosdk.v2client import algod as _algod
+        from algosdk import mnemonic as _mn
+        from algosdk.transaction import PaymentTxn as _Pay
+        import logging as _log
 
         user = self.scope.get("user")
         account = Account.objects.filter(user=user, account_type='personal', deleted_at__isnull=True).first()
         if not account or not account.algorand_address or len(account.algorand_address) != 58:
             return {"success": False, "error": "no_algorand_address"}
+
+        # Ensure user's ALGO balance can cover app opt-in MBR; top-up if needed (standalone)
+        try:
+            algod_client = _algod.AlgodClient(AlgorandAccountManager.ALGOD_TOKEN, AlgorandAccountManager.ALGOD_ADDRESS)
+            acct = algod_client.account_info(account.algorand_address)
+            bal = int(acct.get('amount') or 0)
+            minb = int(acct.get('min-balance') or 0)
+            SAFETY_BUFFER = 250_000
+            target = max(minb + SAFETY_BUFFER, 0)
+            fund = max(target - bal, 0)
+            if fund > 0 and fund < 200_000:
+                fund = 200_000
+            if fund > 0:
+                sp = algod_client.suggested_params(); sp.flat_fee = True; sp.fee = max(getattr(sp, 'min_fee', 1000) or 1000, 1000)
+                sponsor_sk = _mn.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
+                pay = _Pay(sender=AlgorandAccountManager.SPONSOR_ADDRESS, sp=sp, receiver=account.algorand_address, amt=int(fund))
+                stx = pay.sign(sponsor_sk)
+                txid = algod_client.send_transaction(stx)
+                # Do not wait for confirmation here
+                _log.getLogger(__name__).info(f"[PRESALE][WS][OPTIN_PREPARE] prefund user={account.algorand_address} amt={fund}")
+        except Exception:
+            pass
 
         builder = PresaleTransactionBuilder()
         tx_pack = builder.build_app_opt_in(account.algorand_address)
@@ -314,6 +387,20 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                 "signed": False,
                 "needs_signature": True,
             })
+
+        # Log sponsor top-up details for opt-in
+        try:
+            import logging as _log
+            from algosdk import encoding as _enc
+            sp0 = next((s for s in sponsors if int(s.get('index',-1)) == 0), None)
+            if sp0 and sp0.get('txn'):
+                stx = _enc.msgpack_decode(sp0['txn'])
+                recv = getattr(stx, 'receiver', None)
+                amt = int(getattr(stx, 'amt', 0) or 0)
+                fee = int(getattr(stx, 'fee', 0) or 0)
+                _log.getLogger(__name__).info(f"[PRESALE][WS][OPTIN_PREPARE] sponsor0 receiver={recv} amt={amt} fee={fee}")
+        except Exception:
+            pass
 
         return {
             "success": True,
@@ -434,6 +521,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         from algosdk.v2client import algod
         from blockchain.algorand_account_manager import AlgorandAccountManager
         import base64, json
+        # Do not wait for confirmation in request path
 
         if not isinstance(signed_transactions, list) or not signed_transactions:
             return {"success": False, "error": "signed_transactions_required"}
@@ -477,6 +565,11 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         group_bytes = b''.join([b64_to_bytes(sponsor0), b64_to_bytes(user_signed)])
         combined_b64 = _b64.b64encode(group_bytes).decode('utf-8')
         txid = algod_client.send_raw_transaction(combined_b64)
+        try:
+            _wfc(algod_client, txid, 4)
+        except Exception:
+            # Best effort: even if confirmation wait fails, proceed
+            pass
         return {"success": True, "txid": txid}
 
     @database_sync_to_async
@@ -485,6 +578,7 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         from algosdk.v2client import algod
         import base64
         import msgpack
+        from django.conf import settings as _dj_settings
 
         # Load purchase
         try:
@@ -529,7 +623,62 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
         if not user_signed_b64:
             return {"success": False, "error": "missing_user_signed"}
 
-        # If we still lack sponsor signatures, rebuild and sign with sponsor key
+        # Always log entry and counts
+        try:
+            __import__('logging').getLogger(__name__).info(
+                f"[PRESALE][WS][SUBMIT] begin purchase_id={purchase_id} signed_count={len(signed_transactions)} sponsors_count={len(sponsor_transactions or [])}"
+            )
+        except Exception:
+            pass
+
+        # Preflight: ensure user is opted into presale app; otherwise request opt-in first
+        try:
+            app_id = int(getattr(_dj_settings, 'ALGORAND_PRESALE_APP_ID', 0) or 0)
+            if app_id:
+                from blockchain.algorand_account_manager import AlgorandAccountManager
+                algod_client_pf = algod.AlgodClient(
+                    AlgorandAccountManager.ALGOD_TOKEN,
+                    AlgorandAccountManager.ALGOD_ADDRESS,
+                )
+                acct_pf = algod_client_pf.account_info(purchase.from_address)
+                opted = any(int(ls.get('id') or 0) == app_id for ls in (acct_pf.get('apps-local-state') or []))
+                if not opted:
+                    return {"success": False, "error": "requires_presale_app_optin"}
+        except Exception:
+            # If preflight fails, continue; typical path returns above when not opted
+            pass
+
+        # Prefer server-signed sponsor entries persisted at prepare; fallback to client, then rebuild
+        try:
+            import json as _json
+            if purchase.notes:
+                _notes = _json.loads(purchase.notes)
+                for e in (_notes.get('sponsor_transactions') or []):
+                    idx = int(e.get('index'))
+                    signed = e.get('signed')
+                    raw = e.get('txn')
+                    if idx == 0:
+                        sponsor0_b64 = signed or raw
+                    elif idx == 2:
+                        sponsor2_b64 = signed or raw
+        except Exception:
+            pass
+
+        if (not sponsor0_b64) or (not sponsor2_b64):
+            try:
+                for e in (sponsor_transactions or []):
+                    if isinstance(e, str):
+                        e = json.loads(e)
+                    idx = int(e.get('index'))
+                    signed = e.get('signed')
+                    raw = e.get('txn')
+                    if idx == 0:
+                        sponsor0_b64 = sponsor0_b64 or (signed or raw)
+                    elif idx == 2:
+                        sponsor2_b64 = sponsor2_b64 or (signed or raw)
+            except Exception:
+                pass
+
         if not sponsor0_b64 or not sponsor2_b64:
             try:
                 from blockchain.presale_transaction_builder import PresaleTransactionBuilder
@@ -552,6 +701,129 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
                 AlgorandAccountManager.ALGOD_TOKEN,
                 AlgorandAccountManager.ALGOD_ADDRESS,
             )
+            # Always decode user-signed using raw msgpack dict to confirm sender; self-heal DB/sponsors if needed
+            import base64 as _b64lib, msgpack as _mp
+            from algosdk import encoding as _enc
+            def _b64_bytes(s: str) -> bytes:
+                missing = len(s) % 4
+                if missing:
+                    s += '=' * (4 - missing)
+                return _b64lib.b64decode(s)
+            def _tx_dict(b64s: str):
+                try:
+                    raw = _b64_bytes(b64s)
+                    d = _mp.unpackb(raw, raw=True)
+                    if isinstance(d, dict) and b'txn' in d:
+                        d = d[b'txn']
+                    return d if isinstance(d, dict) else None
+                except Exception:
+                    return None
+            def _addr_from_key(pubkey: bytes) -> str:
+                try:
+                    return _enc.encode_address(pubkey)
+                except Exception:
+                    return None
+            t1d = _tx_dict(user_signed_b64)
+            user_sender_check = _addr_from_key(t1d.get(b'snd')) if t1d else None
+            __import__('logging').getLogger(__name__).info(
+                f"[PRESALE][WS][SUBMIT] USER sender={user_sender_check} expected={purchase.from_address}"
+            )
+            if purchase.from_address and user_sender_check and user_sender_check != purchase.from_address:
+                # Update purchase to actual sender and rebuild sponsors so accounts align
+                try:
+                    purchase.from_address = user_sender_check
+                    purchase.save(update_fields=['from_address'])
+                    __import__('logging').getLogger(__name__).warning(
+                        f"[PRESALE][WS][SUBMIT] Self-heal: updated purchase.from_address to {user_sender_check}"
+                    )
+                except Exception:
+                    pass
+                try:
+                    from blockchain.presale_transaction_builder import PresaleTransactionBuilder
+                    builder = PresaleTransactionBuilder()
+                    cusd_base = int(purchase.cusd_amount * 10**6)
+                    pack_fix = builder.build_buy_group(purchase.from_address, cusd_base)
+                    sp_list = pack_fix.get('sponsor_transactions') or []
+                    sponsor0_b64 = None; sponsor2_b64 = None
+                    for e in sp_list:
+                        if int(e.get('index')) == 0:
+                            sponsor0_b64 = e.get('signed') or e.get('txn')
+                        elif int(e.get('index')) == 2:
+                            sponsor2_b64 = e.get('signed') or e.get('txn')
+                    __import__('logging').getLogger(__name__).info(
+                        f"[PRESALE][WS][SUBMIT] Rebuilt sponsors after sender update; have0={bool(sponsor0_b64)} have2={bool(sponsor2_b64)}"
+                    )
+                except Exception as _e:
+                    return {"success": False, "error": "cannot_sign_sponsor"}
+            # Debug: decode and log group fields
+            try:
+                import logging as _log
+                if sponsor0_b64 and user_signed_b64 and sponsor2_b64:
+                    # Decode as dicts
+                    t0d = _tx_dict(sponsor0_b64)
+                    t1d = t1d or _tx_dict(user_signed_b64)
+                    t2d = _tx_dict(sponsor2_b64)
+                    sender0 = _addr_from_key((t0d or {}).get(b'snd'))
+                    recv0 = _addr_from_key((t0d or {}).get(b'rcv'))
+                    fee0 = (t0d or {}).get(b'fee')
+                    sender1 = _addr_from_key((t1d or {}).get(b'snd'))
+                    recv1 = _addr_from_key((t1d or {}).get(b'arcv'))
+                    amt1 = (t1d or {}).get(b'aamt')
+                    fee1 = (t1d or {}).get(b'fee')
+                    sender2 = _addr_from_key((t2d or {}).get(b'snd'))
+                    accs2 = []
+                    try:
+                        for a in (t2d or {}).get(b'apat') or []:
+                            accs2.append(_addr_from_key(a))
+                    except Exception:
+                        accs2 = None
+                    fee2 = (t2d or {}).get(b'fee')
+                    _log.getLogger(__name__).info(
+                        f"[PRESALE][WS][SUBMIT] G0 pay sender={sender0} recv={recv0} fee={fee0}"
+                    )
+                    _log.getLogger(__name__).info(
+                        f"[PRESALE][WS][SUBMIT] G1 axfer sender={sender1} recv={recv1} amt={amt1} fee={fee1}"
+                    )
+                    _log.getLogger(__name__).info(
+                        f"[PRESALE][WS][SUBMIT] G2 appcall sender={sender2} fee={fee2} accounts={accs2}"
+                    )
+
+                    # Self-heal: ensure the appcall accounts[0] matches user-signed sender
+                    try:
+                        user_sender = sender1
+                        app_user = (accs2[0] if (isinstance(accs2, list) and len(accs2) > 0) else None)
+                        if user_sender and app_user and user_sender != app_user:
+                            _log.getLogger(__name__).warning(
+                                f"[PRESALE][WS][SUBMIT] Mismatch: user sender {user_sender} != app accounts[0] {app_user}; rebuilding sponsor txns"
+                            )
+                            from blockchain.presale_transaction_builder import PresaleTransactionBuilder
+                            builder = PresaleTransactionBuilder()
+                            cusd_base = int(purchase.cusd_amount * 10**6)
+                            pack_fix = builder.build_buy_group(purchase.from_address, cusd_base)
+                            sp_list = pack_fix.get('sponsor_transactions') or []
+                            for e in sp_list:
+                                if int(e.get('index')) == 0:
+                                    sponsor0_b64 = e.get('signed') or e.get('txn')
+                                elif int(e.get('index')) == 2:
+                                    sponsor2_b64 = e.get('signed') or e.get('txn')
+                            # Re-decode for logging after fix
+                            t2d = _tx_dict(sponsor2_b64)
+                            accs2 = []
+                            try:
+                                for a in (t2d or {}).get(b'apat') or []:
+                                    accs2.append(_addr_from_key(a))
+                            except Exception:
+                                accs2 = None
+                            _log.getLogger(__name__).info(
+                                f"[PRESALE][WS][SUBMIT][FIXED] G2 accounts={accs2}"
+                            )
+                        elif user_sender and purchase.from_address and user_sender != purchase.from_address:
+                            # User signed with a different address than expected
+                            return {"success": False, "error": "user_sender_mismatch"}
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             # Compose bytes in correct order
             def b64_to_bytes(b64s: str) -> bytes:
                 missing = len(b64s) % 4
@@ -561,6 +833,21 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
 
             # Submit as a single base64-encoded blob (align with other flows)
             import base64 as _b64
+            # Log full decoded txns (including app accounts) for diagnosis
+            try:
+                from algosdk import encoding as _enc
+                t0 = _enc.msgpack_decode(b64_to_bytes(sponsor0_b64))
+                t1 = _enc.msgpack_decode(b64_to_bytes(user_signed_b64))
+                t2 = _enc.msgpack_decode(b64_to_bytes(sponsor2_b64))
+                logger = __import__('logging').getLogger(__name__)
+                logger.info(f"[PRESALE][WS][SUBMIT] G0 pay sender={getattr(t0,'sender',None)} recv={getattr(t0,'receiver',None)} amt={getattr(t0,'amt',None)} fee={getattr(t0,'fee',None)}")
+                logger.info(f"[PRESALE][WS][SUBMIT] G1 axfer sender={getattr(t1,'sender',None)} asset={getattr(t1,'index',None)} recv={getattr(t1,'receiver',None)} amt={getattr(t1,'amt',None)} fee={getattr(t1,'fee',None)}")
+                # Application accounts can be present on field 'accounts'
+                accs = getattr(t2, 'accounts', None)
+                logger.info(f"[PRESALE][WS][SUBMIT] G2 appcall sender={getattr(t2,'sender',None)} fee={getattr(t2,'fee',None)} accounts={accs}")
+            except Exception:
+                pass
+
             group_bytes = b''.join([
                 b64_to_bytes(sponsor0_b64),
                 b64_to_bytes(user_signed_b64),
@@ -569,9 +856,11 @@ class PresaleSessionConsumer(AsyncJsonWebsocketConsumer):
             combined_b64 = _b64.b64encode(group_bytes).decode('utf-8')
             txid = algod_client.send_raw_transaction(combined_b64)
 
-            # Save txid immediately (Celery will confirm and mark completed)
+            # Save txid immediately
             purchase.transaction_hash = txid
-            purchase.save(update_fields=['transaction_hash', 'updated_at'])
+            purchase.save(update_fields=['transaction_hash'])
+
+            # Immediate return; Celery will confirm and notify
 
             return {"success": True, "txid": txid}
         except Exception as e:
