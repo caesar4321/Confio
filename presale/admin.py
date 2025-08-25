@@ -206,7 +206,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             admin_sk = _mn.to_private_key(admin_mn_norm)
             # Derive the address from the private key using algosdk.account helper
             admin_addr = _acct.address_from_private_key(admin_sk)
-            # Inventory preflight: ensure app holds enough CONFIO for (cap / price)
+            # Inventory preflight: ensure app holds enough CONFIO for outstanding + (cap / price)
             try:
                 from algosdk.v2client import algod as _algod
                 client = _algod.AlgodClient(
@@ -216,7 +216,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                 # Compute integer base units
                 price_int = int((price * (10**6)).to_integral_value())
                 cap_int = int((cap * (10**6)).to_integral_value())
-                confio_needed = (cap_int * (10**6)) // max(price_int, 1)  # micro CONFIO
+                confio_needed = (cap_int * (10**6)) // max(price_int, 1)  # micro CONFIO for new round
                 # Read app address and balance
                 from algosdk.logic import get_application_address as _app_addr
                 app_addr = _app_addr(int(app_id))
@@ -226,13 +226,22 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                     if int(a.get('asset-id')) == int(confio_id):
                         app_confio = int(a.get('amount') or 0)
                         break
-                if app_confio < confio_needed:
-                    need = (confio_needed - app_confio) / 10**6
+                # Read outstanding obligations (sold - claimed) from contract state
+                try:
+                    state = pa.get_state()
+                    total_sold = int(state.get('confio_sold', 0) or 0)
+                    total_claimed = int(state.get('claimed_total', 0) or 0)
+                    outstanding = max(0, total_sold - total_claimed)
+                except Exception:
+                    outstanding = 0
+                required_confio = outstanding + confio_needed
+                if app_confio < required_confio:
+                    need = (required_confio - app_confio) / 10**6
                     have = app_confio / 10**6
                     self.message_user(
                         request,
                         (
-                            f"Insufficient CONFIO in app for cap. Have {have:,.0f}, need {need:,.0f} more. "
+                            f"Insufficient CONFIO in app (need outstanding + round). Have {have:,.0f}, need {need:,.0f} more. "
                             f"Fund app {app_addr} with CONFIO (ASA {confio_id}) and retry."
                         ),
                         level='error'
@@ -491,7 +500,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                 cap_multiplier = 5
             cap = db_cap * cap_multiplier
 
-            # Compute required CONFIO for cap
+            # Compute required CONFIO for outstanding + cap
             price_int = int((price * (10**6)).to_integral_value())
             cap_int = int((cap * (10**6)).to_integral_value())
             confio_needed = (cap_int * (10**6)) // max(price_int, 1)
@@ -511,6 +520,17 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                 if int(a.get('asset-id')) == int(confio_id):
                     app_confio = int(a.get('amount') or 0)
                     break
+            # Include outstanding obligations
+            try:
+                from contracts.presale.admin_presale import PresaleAdmin as _PA
+                pa = _PA(int(app_id), int(confio_id), int(getattr(settings,'ALGORAND_CUSD_ASSET_ID',0)))
+                state = pa.get_state()
+                total_sold = int(state.get('confio_sold', 0) or 0)
+                total_claimed = int(state.get('claimed_total', 0) or 0)
+                outstanding = max(0, total_sold - total_claimed)
+            except Exception:
+                outstanding = 0
+            required_confio = outstanding + confio_needed
             # Ensure app is opted into CONFIO; if not, perform sponsored opt-in
             try:
                 has_confio = any(int(a.get('asset-id')) == int(confio_id) for a in (acct.get('assets') or []))
@@ -549,9 +569,9 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             except Exception as oe:
                 self.message_user(request, f"App opt-in failed: {oe}", level='error')
                 return
-            shortfall = max(0, confio_needed - app_confio)
+            shortfall = max(0, required_confio - app_confio)
             if shortfall == 0:
-                self.message_user(request, 'App already has sufficient CONFIO for the configured cap.', level='info')
+                self.message_user(request, 'App already has sufficient CONFIO for outstanding + configured cap.', level='info')
                 return
 
             # Send ASA from sponsor to app
