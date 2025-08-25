@@ -13,6 +13,21 @@ class PresaleSettings(models.Model):
         default=False,
         help_text="Master switch to enable/disable all presale features in the app"
     )
+    # When True, users are allowed to claim their CONFIO from the presale
+    is_presale_claims_unlocked = models.BooleanField(
+        default=False,
+        help_text="If enabled, users can claim their CONFIO presale tokens"
+    )
+    presale_finished_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when presale was marked finished"
+    )
+    claims_unlocked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when claims were unlocked"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

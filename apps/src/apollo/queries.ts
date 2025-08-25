@@ -2794,6 +2794,18 @@ export const ACCEPT_INVITATION = gql`
 export const GET_PRESALE_STATUS = gql`
   query GetPresaleStatus {
     isPresaleActive
+    isPresaleClaimsUnlocked
+  }
+`;
+
+export const GET_MY_PRESALE_ONCHAIN_INFO = gql`
+  query GetMyPresaleOnchainInfo {
+    myPresaleOnchainInfo {
+      purchased
+      claimed
+      claimable
+      locked
+    }
   }
 `;
 

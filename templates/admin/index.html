@@ -263,6 +263,34 @@
 </div>
 {% endif %}
 
+<!-- Presale Overview -->
+{% if presale_stats %}
+<div class="fraud-stats-section">
+    <h2 style="margin-top: 0; margin-bottom: 20px; color: #1f2937;">
+        🪙 Presale Overview
+        {% if presale_stats.active_phase %}
+            <span style="font-size: 14px; color: #6b7280; font-weight: 500;">(Phase {{ presale_stats.active_phase.phase_number }}: {{ presale_stats.active_phase.name }})</span>
+        {% endif %}
+    </h2>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value success">${{ presale_stats.today_cusd|default:"0"|floatformat:2 }}</div>
+            <div class="stat-label">Raised Today (cUSD)</div>
+            <div class="stat-sublabel">Purchases: {{ presale_stats.today_purchases|default:"0" }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value info">${{ presale_stats.week_cusd|default:"0"|floatformat:2 }}</div>
+            <div class="stat-label">Raised This Week (cUSD)</div>
+            <div class="stat-sublabel">Purchases: {{ presale_stats.week_purchases|default:"0" }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ presale_stats.total_confio|default:"0"|floatformat:0 }}</div>
+            <div class="stat-label">Total CONFIO Sold</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- P2P Exchange Activity -->
 {% if p2p_stats %}
 <div class="fraud-stats-section">

@@ -37,7 +37,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   const authService = AuthService.getInstance();
   const accountManager = AccountManager.getInstance();
   const apolloClient = useApolloClient();
-  const { profileData, refreshProfile } = useAuth();
+  const { profileData, refreshProfile, isAuthenticated, isLoading: authLoading } = useAuth();
   
   // Debug profile loading
   console.log('useAccountManager - Profile state:', {
@@ -51,10 +51,12 @@ export const useAccountManager = (): UseAccountManagerReturn => {
 
   // Fetch accounts from server using GraphQL
   const { data: serverAccountsData, loading: serverLoading, error: serverError, refetch: refetchServerAccounts } = useQuery(GET_USER_ACCOUNTS, {
-    fetchPolicy: 'cache-and-network', // Get cached data first, then update with fresh data
+    // Avoid issuing unauthenticated requests on app startup/resume
+    skip: !isAuthenticated || authLoading,
+    fetchPolicy: 'network-only',
     errorPolicy: 'all',
-    notifyOnNetworkStatusChange: false, // Prevent re-renders during background refetch
-  });
+    notifyOnNetworkStatusChange: true,
+  } as any);
 
   const loadAccounts = useCallback(async () => {
     try {
@@ -169,9 +171,9 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       // Get active account context BEFORE deciding to create default account
       const activeContext = await authService.getActiveAccountContext();
       
-      // Only create default personal account if no server accounts AND Keychain says personal
-      if (convertedAccounts.length === 0 && activeContext.type === 'personal') {
-        console.log('useAccountManager - No server accounts found AND Keychain says personal, creating default personal account');
+      // If no server accounts, create a temporary default personal account so UI isn't blank
+      if (convertedAccounts.length === 0) {
+        console.log('useAccountManager - No server accounts found, creating temporary default personal account for display');
         
         // Create a default personal account with user profile data
         const displayName = profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'Personal';
@@ -191,8 +193,6 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         
         convertedAccounts.push(defaultAccount);
         console.log('useAccountManager - Created default personal account:', defaultAccount);
-      } else if (convertedAccounts.length === 0) {
-        console.log('useAccountManager - No server accounts found but Keychain says', activeContext.type, '- waiting for server data');
       }
       
       // Generate the expected active account ID from context
