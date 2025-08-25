@@ -132,102 +132,11 @@ class PurchasePresaleTokens(graphene.Mutation):
     purchase = graphene.Field(PresalePurchaseType)
     
     @login_required
-    @transaction.atomic
     def mutate(self, info, cusd_amount, phase_number=None):
-        user = info.context.user
-        
-        # Get active phase or specified phase
-        if phase_number:
-            try:
-                phase = PresalePhase.objects.get(
-                    phase_number=phase_number,
-                    status='active'
-                )
-            except PresalePhase.DoesNotExist:
-                raise GraphQLError(f"Phase {phase_number} is not active")
-        else:
-            phase = PresalePhase.objects.filter(status='active').first()
-            if not phase:
-                raise GraphQLError("No active presale phase")
-        
-        # Validate amount
-        if cusd_amount < phase.min_purchase:
-            raise GraphQLError(
-                f"Minimum purchase is {phase.min_purchase} cUSD"
-            )
-        
-        if cusd_amount > phase.max_purchase:
-            raise GraphQLError(
-                f"Maximum purchase is {phase.max_purchase} cUSD"
-            )
-        
-        # Check user's total purchases for this phase
-        user_limit, _ = UserPresaleLimit.objects.get_or_create(
-            user=user,
-            phase=phase
-        )
-        
-        if phase.max_per_user:
-            if user_limit.total_purchased + cusd_amount > phase.max_per_user:
-                remaining = phase.max_per_user - user_limit.total_purchased
-                raise GraphQLError(
-                    f"This would exceed your limit for Phase {phase.phase_number}. "
-                    f"You can purchase up to {remaining} cUSD more."
-                )
-        
-        # Get user's cUSD account
-        try:
-            cusd_account = user.accounts.filter(
-                account_type='personal'
-            ).first()
-            
-            if not cusd_account:
-                raise GraphQLError("Personal account not found")
-        except Exception as e:
-            raise GraphQLError(f"Error finding account: {str(e)}")
-        
-        # Check cUSD balance (you'll need to implement this based on your balance tracking)
-        # For now, assuming you have a method to get balance
-        # cusd_balance = cusd_account.get_balance('cusd')
-        # if cusd_balance < cusd_amount:
-        #     raise GraphQLError("Insufficient cUSD balance")
-        
-        # Calculate CONFIO amount
-        confio_amount = cusd_amount / phase.price_per_token
-        
-        # Create purchase record
-        purchase = PresalePurchase.objects.create(
-            user=user,
-            phase=phase,
-            cusd_amount=cusd_amount,
-            confio_amount=confio_amount,
-            price_per_token=phase.price_per_token,
-            status='processing',
-            from_address=cusd_account.algorand_address
-        )
-        
-        # TODO: Execute blockchain transaction here
-        # For now, we'll simulate success
-        
-        # Update purchase status
-        purchase.complete_purchase(
-            transaction_hash="0x" + "0" * 64  # Placeholder
-        )
-        
-        # Update user's limit
-        user_limit.total_purchased += cusd_amount
-        user_limit.last_purchase_at = timezone.now()
-        user_limit.save()
-        
-        # Update phase stats (could be done async)
-        if hasattr(phase, 'stats'):
-            phase.stats.update_stats()
-        
-        return PurchasePresaleTokens(
-            success=True,
-            message=f"Successfully purchased {confio_amount} CONFIO tokens!",
-            purchase=purchase
-        )
+        # The presale purchase flow is implemented over WebSocket for a fully
+        # sponsored, two-step (prepare/submit) UX similar to Pay/Send/Conversion.
+        # Use ws endpoint /ws/presale_session to prepare and submit transactions.
+        raise GraphQLError("Use WebSocket /ws/presale_session for presale purchases (prepare + submit)")
 
 
 class PresaleMutations(graphene.ObjectType):
