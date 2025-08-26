@@ -904,6 +904,7 @@ class CreateP2POffer(graphene.Mutation):
         return COUNTRY_TO_CURRENCY.get(country_code, 'USD')  # Default to USD if unknown
 
     @classmethod
+    @graphql_require_aml()
     def mutate(cls, root, info, input):
         user = getattr(info.context, 'user', None)
         if not (user and getattr(user, 'is_authenticated', False)):
@@ -1014,6 +1015,22 @@ class CreateP2POffer(graphene.Mutation):
                 # Business offer using JWT business_id
                 try:
                     business = Business.objects.get(id=business_id)
+                    # Enforce verified business before allowing offer creation
+                    try:
+                        from security.models import IdentityVerification
+                        biz_verified = IdentityVerification.objects.filter(
+                            status='verified',
+                            risk_factors__account_type='business',
+                            risk_factors__business_id=str(business.id)
+                        ).exists()
+                    except Exception:
+                        biz_verified = False
+                    if not biz_verified:
+                        return CreateP2POffer(
+                            offer=None,
+                            success=False,
+                            errors=["Tu negocio debe estar verificado para publicar ofertas"]
+                        )
                     offer_kwargs['offer_business'] = business
                     print(f"CreateP2POffer - Creating business offer for business {business.name}")
                 except Business.DoesNotExist:
@@ -1024,6 +1041,19 @@ class CreateP2POffer(graphene.Mutation):
                     )
             else:
                 # Personal offer
+                # Enforce verified personal identity before allowing offer creation
+                try:
+                    is_verified_personal = bool(getattr(user, 'is_identity_verified', None) and user.is_identity_verified)
+                    if not is_verified_personal and hasattr(user, 'is_verified'):
+                        is_verified_personal = bool(user.is_verified)
+                except Exception:
+                    is_verified_personal = False
+                if not is_verified_personal:
+                    return CreateP2POffer(
+                        offer=None,
+                        success=False,
+                        errors=["Necesitas verificar tu identidad para publicar ofertas"]
+                    )
                 offer_kwargs['offer_user'] = user
                 print(f"CreateP2POffer - Creating personal offer for user {user.username}")
 
@@ -1572,6 +1602,40 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                 is_buyer = trade.buyer_user == user
                 is_seller = trade.seller_user == user
                 confirmer_user = user
+
+            # Restrict unsafe cancels here: prevent marking CANCELLED when escrow exists/on-chain
+            if input.status == 'CANCELLED':
+                try:
+                    escrow = getattr(trade, 'escrow', None)
+                    escrowed = bool(escrow and getattr(escrow, 'is_escrowed', False))
+                except Exception:
+                    escrow = None
+                    escrowed = False
+
+                # Best-effort on-chain check: if trade box exists, treat as escrowed
+                on_chain_box_exists = False
+                if not escrowed:
+                    try:
+                        from blockchain.p2p_trade_transaction_builder import P2PTradeTransactionBuilder
+                        from algosdk.v2client import algod
+                        from django.conf import settings
+                        builder = P2PTradeTransactionBuilder()
+                        algod_client_pref = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+                        algod_client_pref.application_box_by_name(builder.app_id, str(trade.id).encode('utf-8'))
+                        on_chain_box_exists = True
+                    except Exception:
+                        on_chain_box_exists = False
+
+                # If escrow already exists or trade progressed beyond PENDING, deny DB-only cancel
+                if escrowed or on_chain_box_exists or trade.status in ['PAYMENT_PENDING', 'PAYMENT_SENT', 'PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED', 'CRYPTO_RELEASED', 'COMPLETED', 'DISPUTED']:
+                    return UpdateP2PTradeStatus(
+                        trade=None,
+                        success=False,
+                        errors=["Este intercambio ya tiene custodia o está en progreso. Usa 'Cancelar y recuperar' o espera el vencimiento."]
+                    )
+
+                # Allow pre-escrow request deletion by either participant
+                # fall-through to perform status update below
 
             # Update trade
             trade.status = input.status
