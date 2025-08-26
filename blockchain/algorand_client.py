@@ -12,6 +12,7 @@ from django.conf import settings
 from django.core.cache import cache
 import logging
 import base64
+from contracts.presale.state_utils import decode_local_state
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +173,81 @@ class AlgorandClient:
             return Decimal('0')
         balances = await self.get_balance(address, self.CONFIO_ASSET_ID, skip_cache=skip_cache)
         return balances.get(str(self.CONFIO_ASSET_ID), Decimal('0'))
+
+    async def get_balances_snapshot(self, address: str, skip_cache: bool = False) -> Dict[str, Decimal]:
+        """Fetch cUSD, CONFIO, USDC, and presale-locked in one algod.account_info call.
+
+        Returns a dict with Decimal values in human units (6 decimals for all).
+        Keys: 'CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE'
+        """
+        try:
+            info = self.algod.account_info(address)
+        except Exception as e:
+            logger.error("[snapshot] failed to fetch account_info for %s: %s", address, e)
+            return {k: Decimal('0') for k in ['CUSD', 'CONFIO', 'USDC', 'CONFIO_PRESALE']}
+
+        def asset_amount(asset_id: Optional[int]) -> Decimal:
+            if not asset_id:
+                return Decimal('0')
+            for a in (info.get('assets') or []):
+                if a.get('asset-id') == asset_id:
+                    return Decimal(str(a.get('amount', 0))) / Decimal('1000000')
+            return Decimal('0')
+
+        cusd = asset_amount(self.CUSD_ASSET_ID)
+        confio = asset_amount(self.CONFIO_ASSET_ID)
+        usdc = asset_amount(self.USDC_ASSET_ID)
+
+        app_id = getattr(settings, 'ALGORAND_PRESALE_APP_ID', 0)
+        presale_locked = Decimal('0')
+        if app_id:
+            try:
+                local = decode_local_state(info, int(app_id))
+                user_confio = int(local.get('user_confio', 0) or 0)
+                claimed = int(local.get('claimed', 0) or 0)
+                locked = max(0, user_confio - claimed)
+                presale_locked = Decimal(str(locked)) / Decimal('1000000')
+            except Exception as e:
+                logger.error("[snapshot] presale decode error for %s: %s", address, e)
+
+        return {
+            'CUSD': cusd,
+            'CONFIO': confio,
+            'USDC': usdc,
+            'CONFIO_PRESALE': presale_locked,
+        }
+    
+    async def get_presale_locked_confio(self, address: str, skip_cache: bool = False) -> Decimal:
+        """Get presale-locked CONFIO amount for a user address.
+        Computed as user_confio - claimed from local state of the presale app.
+        """
+        from django.conf import settings
+        app_id = getattr(settings, 'ALGORAND_PRESALE_APP_ID', 0)
+        if not app_id:
+            logger.warning("[presale_locked] ALGORAND_PRESALE_APP_ID not configured; returning 0 for %s", address)
+            return Decimal('0')
+        cache_key = f"presale_locked_confio:{address}:{app_id}"
+        if not skip_cache:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        try:
+            account_info = self.algod.account_info(address)
+            local = decode_local_state(account_info, int(app_id))
+            user_confio = int(local.get('user_confio', 0) or 0)
+            claimed = int(local.get('claimed', 0) or 0)
+            locked = max(0, user_confio - claimed)
+            locked_dec = Decimal(str(locked)) / Decimal('1000000')
+            logger.info("[presale_locked] addr=%s app_id=%s user_confio=%s claimed=%s locked=%s",
+                        address, app_id, user_confio, claimed, locked)
+        except Exception as e:
+            logger.error("[presale_locked] error for %s: %s", address, e)
+            locked_dec = Decimal('0')
+        if not skip_cache:
+            cache.set(cache_key, locked_dec, 30)
+        else:
+            cache.delete(cache_key)
+        return locked_dec
     
     
     # ===== Transaction Building =====

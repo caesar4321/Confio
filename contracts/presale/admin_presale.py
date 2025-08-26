@@ -42,7 +42,13 @@ class PresaleAdmin:
     """Admin interface for CONFIO presale management"""
     
     def __init__(self, app_id: int, confio_id: int, cusd_id: int):
-        self.algod_client = algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS)
+        # Create algod client; support providers like Nodely (X-API-Key header)
+        ua = {'User-Agent': 'confio-admin/algosdk'}
+        if 'nodely' in (ALGOD_ADDRESS or '').lower() and (ALGOD_TOKEN or ''):
+            headers = {**ua, 'X-API-Key': ALGOD_TOKEN}
+            self.algod_client = algod.AlgodClient('', ALGOD_ADDRESS, headers=headers)
+        else:
+            self.algod_client = algod.AlgodClient(ALGOD_TOKEN, ALGOD_ADDRESS, headers=ua)
         self.app_id = app_id
         self.confio_id = confio_id
         self.cusd_id = cusd_id
@@ -281,7 +287,7 @@ class PresaleAdmin:
         
         if available <= 0:
             print("No unused CONFIO to withdraw")
-            return
+            return None
         
         print(f"\nCONFIO Withdrawal:")
         print(f"   Balance: {confio_balance / 10**6:,.0f}")
@@ -326,9 +332,13 @@ class PresaleAdmin:
         )
         signed_txn = txn.sign(admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
+        # Wait for confirmation so callers can surface definitive success/failure
+        confirmed = wait_for_confirmation(self.algod_client, tx_id, 4)
         
         print(f"✅ Withdrew {withdraw_amount / 10**6:,.0f} CONFIO")
         print(f"   Transaction: {tx_id}")
+        # Return details to callers (e.g., Django admin action)
+        return {"tx_id": tx_id, "amount": withdraw_amount, "receiver": receiver_addr, "confirmed": confirmed.get('confirmed-round')}
     
     def withdraw_cusd(self, admin_address: str, admin_sk: str, receiver: Optional[str] = None):
         """Withdraw all collected cUSD
@@ -348,7 +358,7 @@ class PresaleAdmin:
         
         if cusd_balance == 0:
             print("No cUSD to withdraw")
-            return
+            return None
         
         receiver_addr = receiver or admin_address
         
@@ -383,9 +393,11 @@ class PresaleAdmin:
         )
         signed_txn = txn.sign(admin_sk)
         tx_id = self.algod_client.send_transaction(signed_txn)
+        confirmed = wait_for_confirmation(self.algod_client, tx_id, 4)
         
         print(f"✅ Withdrew {cusd_balance / 10**6:.2f} cUSD")
         print(f"   Transaction: {tx_id}")
+        return {"tx_id": tx_id, "amount": cusd_balance, "receiver": receiver_addr, "confirmed": confirmed.get('confirmed-round')}
         
     def permanent_unlock(self, admin_address: str, admin_sk: str, skip_confirmation: bool = False):
         """

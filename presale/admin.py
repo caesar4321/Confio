@@ -1,4 +1,7 @@
 from django.contrib import admin
+import logging
+from django import forms
+from django.template.response import TemplateResponse
 from django.utils.html import format_html
 from django.urls import reverse
 from django.db.models import Sum, Count
@@ -66,6 +69,8 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         })
     )
+    
+    logger = logging.getLogger(__name__)
     
     def status_colored(self, obj):
         colors = {
@@ -141,6 +146,7 @@ class PresalePhaseAdmin(admin.ModelAdmin):
         'start_onchain_round',
         'end_current_round',
         'resume_current_round',
+        'withdraw_unsold_confio',
         'fund_app_with_confio',
     ]
     
@@ -210,6 +216,8 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             try:
                 from algosdk.v2client import algod as _algod
                 from contracts.presale.admin_presale import PresaleAdmin as _PA
+                from algosdk import mnemonic as _mn
+                from algosdk.transaction import AssetTransferTxn as _Axfer
                 client = _algod.AlgodClient(
                     getattr(settings, 'ALGORAND_ALGOD_TOKEN', ''),
                     getattr(settings, 'ALGORAND_ALGOD_ADDRESS', '')
@@ -233,24 +241,55 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                     # Use same client endpoint
                     _pa.algod_client = client
                     state = _pa.get_state()
+                    # Guard: do not allow starting new rounds after permanent unlock
+                    try:
+                        is_unlocked = int(state.get('locked', 1) or 0) == 0
+                    except Exception:
+                        is_unlocked = False
+                    if is_unlocked:
+                        self.message_user(
+                            request,
+                            'Tokens are permanently unlocked on-chain; starting a new round is disabled.',
+                            level='error'
+                        )
+                        return
                     total_sold = int(state.get('confio_sold', 0) or 0)
                     total_claimed = int(state.get('claimed_total', 0) or 0)
                     outstanding = max(0, total_sold - total_claimed)
                 except Exception:
                     outstanding = 0
                 required_confio = outstanding + confio_needed
-                if app_confio < required_confio:
-                    need = (required_confio - app_confio) / 10**6
-                    have = app_confio / 10**6
+                shortfall = max(0, required_confio - app_confio)
+                # Safety buffer: add small extra to avoid dust asserts
+                try:
+                    SAFETY_BUFFER_CONFIO = int(getattr(settings, 'PRESALE_FUND_SAFETY_BUFFER_CONFIO', 10_000))  # 0.01 CONFIO default (micro)
+                except Exception:
+                    SAFETY_BUFFER_CONFIO = 10_000
+                if shortfall > 0:
+                    sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
+                    sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+                    if not sponsor_addr or not sponsor_mn:
+                        self.message_user(request, 'Sponsor mnemonic/address not configured; cannot auto-fund app', level='error')
+                        return
+                    sponsor_sk = _mn.to_private_key(" ".join(str(sponsor_mn).strip().split()))
+                    amt = int(shortfall + SAFETY_BUFFER_CONFIO)
+                    params_tx = client.suggested_params()
+                    tx_fund = _Axfer(sender=sponsor_addr, sp=params_tx, receiver=app_addr, amt=amt, index=int(confio_id))
+                    stx_fund = tx_fund.sign(sponsor_sk)
+                    fund_txid = client.send_transaction(stx_fund)
+                    # Wait briefly to ensure balance reflects before start
+                    try:
+                        from algosdk.transaction import wait_for_confirmation as _wfc
+                        _wfc(client, fund_txid, 4)
+                    except Exception:
+                        pass
                     self.message_user(
                         request,
                         (
-                            f"Insufficient CONFIO in app (need outstanding + round). Have {have:,.0f}, need {need:,.0f} more. "
-                            f"Fund app {app_addr} with CONFIO (ASA {confio_id}) and retry."
+                            f"Auto-funded app with {(amt)/10**6:,.6f} CONFIO to cover outstanding + cap (tx {fund_txid[:10]}...)."
                         ),
-                        level='error'
+                        level='info'
                     )
-                    return
             except Exception as inv_e:
                 self.message_user(request, f"Inventory preflight failed: {inv_e}", level='error')
                 return
@@ -478,6 +517,220 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             self.message_user(request, f"Failed to resume on-chain round: {e}", level='error')
     resume_current_round.short_description = "Resume current on-chain round (toggle active)"
 
+    def withdraw_unsold_confio(self, request, queryset):
+        """Interactive admin action to withdraw unsold (non-locked) CONFIO.
+
+        - Shows current app CONFIO balance, outstanding, and available to withdraw.
+        - Lets admin enter optional amount (CONFIO, not micro) and receiver.
+        - Submits on-chain withdrawal via PresaleAdmin helper.
+        """
+        from django.conf import settings
+        if queryset.count() != 1:
+            self.message_user(request, 'Select exactly one phase to operate on', level='error')
+            context = dict(
+                self.admin_site.each_context(request),
+                title='Withdraw unsold CONFIO',
+                available_confio=0,
+                app_confio=0,
+                outstanding_confio=0,
+                phase=None,
+                form=None,
+                action='withdraw_unsold_confio',
+                queryset=queryset,
+                error_message='Select exactly one phase to operate on',
+            )
+            return TemplateResponse(request, 'admin/presale/withdraw_unsold_confio.html', context)
+        phase = queryset.first()
+
+        app_id = int(getattr(settings, 'ALGORAND_PRESALE_APP_ID', 0) or 0)
+        confio_id = int(getattr(settings, 'ALGORAND_CONFIO_ASSET_ID', 0) or 0)
+        cusd_id = int(getattr(settings, 'ALGORAND_CUSD_ASSET_ID', 0) or 0)
+        if not app_id or not confio_id:
+            self.message_user(request, 'PRESALE_APP_ID/CONFIO_ASSET_ID not configured', level='error')
+            context = dict(
+                self.admin_site.each_context(request),
+                title='Withdraw unsold CONFIO',
+                available_confio=0,
+                app_confio=0,
+                outstanding_confio=0,
+                phase=phase,
+                form=None,
+                action='withdraw_unsold_confio',
+                queryset=queryset,
+                error_message='PRESALE_APP_ID/CONFIO_ASSET_ID not configured',
+            )
+            return TemplateResponse(request, 'admin/presale/withdraw_unsold_confio.html', context)
+
+        # Build admin credentials
+        from algosdk import mnemonic as _mn
+        from algosdk.account import address_from_private_key as _addr_from_sk
+        admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None) or getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
+        if not admin_mn:
+            self.message_user(request, 'Admin/Sponsor mnemonic not configured', level='error')
+            context = dict(
+                self.admin_site.each_context(request),
+                title='Withdraw unsold CONFIO',
+                available_confio=0,
+                app_confio=0,
+                outstanding_confio=0,
+                phase=phase,
+                form=None,
+                action='withdraw_unsold_confio',
+                queryset=queryset,
+                error_message='Admin/Sponsor mnemonic not configured',
+            )
+            return TemplateResponse(request, 'admin/presale/withdraw_unsold_confio.html', context)
+        admin_sk = _mn.to_private_key(" ".join(str(admin_mn).strip().split()))
+        admin_addr = _addr_from_sk(admin_sk)
+
+        # Read current available amount via PresaleAdmin helper
+        from contracts.presale.admin_presale import PresaleAdmin as _PA
+        from algosdk.v2client import algod as _algod
+        pa = _PA(int(app_id), int(confio_id), int(cusd_id))
+        # Ensure correct endpoint
+        try:
+            # Build algod client with provider-aware headers (e.g., Nodely requires X-API-Key)
+            _addr = getattr(settings, 'ALGORAND_ALGOD_ADDRESS', '')
+            _tok = getattr(settings, 'ALGORAND_ALGOD_TOKEN', '')
+            ua = {'User-Agent': 'confio-admin/algosdk'}
+            if 'nodely' in (_addr or '').lower() and (_tok or ''):
+                headers = {**ua, 'X-API-Key': _tok}
+                pa.algod_client = _algod.AlgodClient('', _addr, headers=headers)
+            else:
+                pa.algod_client = _algod.AlgodClient(_tok, _addr, headers=ua)
+        except Exception:
+            pass
+        state = pa.get_state()
+        acct = pa.algod_client.account_info(pa.app_addr)
+        app_confio = 0
+        for a in (acct.get('assets') or []):
+            if int(a.get('asset-id')) == int(confio_id):
+                app_confio = int(a.get('amount') or 0)
+                break
+        sold = int(state.get('confio_sold', 0) or 0)
+        claimed = int(state.get('claimed_total', 0) or 0)
+        outstanding = max(0, sold - claimed)
+        available = max(0, app_confio - outstanding)
+
+        class WithdrawForm(forms.Form):
+            receiver = forms.CharField(
+                label='Receiver address', required=False,
+                help_text='Leave blank to send to admin address')
+            amount = forms.DecimalField(
+                label='Amount (CONFIO)', required=False, min_value=0,
+                help_text=f'Max available: {available/10**6:,.6f} CONFIO. Leave blank to withdraw all.')
+
+        if request.method == 'POST' and request.POST.get('apply') == '1':
+            form = WithdrawForm(request.POST)
+            if form.is_valid():
+                recv = form.cleaned_data.get('receiver') or admin_addr
+                amt_dec = form.cleaned_data.get('amount')
+                amt_micro = None
+                if amt_dec is not None:
+                    try:
+                        from decimal import Decimal, ROUND_DOWN
+                        amt_micro = int((Decimal(amt_dec) * (10**6)).to_integral_value(ROUND_DOWN))
+                    except Exception:
+                        amt_micro = None
+                # Guard: no available and no explicit amount
+                if amt_micro is None and available <= 0:
+                    self.message_user(request, 'No unused CONFIO available to withdraw.', level='info')
+                    # Render inline so logs remain visible
+                    context = dict(
+                        self.admin_site.each_context(request),
+                        title='Withdraw unsold CONFIO',
+                        available_confio=available/10**6,
+                        app_confio=app_confio/10**6,
+                        outstanding_confio=outstanding/10**6,
+                        phase=phase,
+                        form=form,
+                        action='withdraw_unsold_confio',
+                        queryset=queryset,
+                        result_message='No unused CONFIO available to withdraw.',
+                        result_level='info',
+                    )
+                    return TemplateResponse(request, 'admin/presale/withdraw_unsold_confio.html', context)
+                try:
+                    self.logger.info("Submitting withdraw_confio: receiver=%s amount_micro=%s", recv, amt_micro)
+                    result = pa.withdraw_confio(admin_address=admin_addr, admin_sk=admin_sk, receiver=recv, amount=amt_micro)
+                    tx_id = None
+                    withdrawn_amt = None
+                    confirmed_round = None
+                    if isinstance(result, dict):
+                        tx_id = result.get('tx_id')
+                        withdrawn_amt = result.get('amount')
+                        confirmed_round = result.get('confirmed')
+                    # Recompute balances after confirmation
+                    try:
+                        state = pa.get_state()
+                        acct = pa.algod_client.account_info(pa.app_addr)
+                        app_confio = 0
+                        for a in (acct.get('assets') or []):
+                            if int(a.get('asset-id')) == int(confio_id):
+                                app_confio = int(a.get('amount') or 0)
+                                break
+                        sold = int(state.get('confio_sold', 0) or 0)
+                        claimed = int(state.get('claimed_total', 0) or 0)
+                        outstanding = max(0, sold - claimed)
+                        available = max(0, app_confio - outstanding)
+                    except Exception:
+                        pass
+                    msg = "Withdraw confirmed" if confirmed_round else "Withdraw submitted"
+                    if tx_id:
+                        msg += f". Tx: {tx_id}"
+                    if withdrawn_amt is not None:
+                        msg += f". Amount: {withdrawn_amt/10**6:,.6f} CONFIO"
+                    if confirmed_round:
+                        msg += f". Round: {confirmed_round}"
+                    self.message_user(request, msg, level='success')
+                    context = dict(
+                        self.admin_site.each_context(request),
+                        title='Withdraw unsold CONFIO',
+                        available_confio=available/10**6,
+                        app_confio=app_confio/10**6,
+                        outstanding_confio=outstanding/10**6,
+                        phase=phase,
+                        form=form,
+                        action='withdraw_unsold_confio',
+                        queryset=queryset,
+                        tx_id=tx_id,
+                        withdrawn_confio=(withdrawn_amt/10**6 if withdrawn_amt is not None else None),
+                        receiver_addr=recv,
+                    )
+                    return TemplateResponse(request, 'admin/presale/withdraw_unsold_confio.html', context)
+                except Exception as e:
+                    self.logger.exception("withdraw_confio failed")
+                    self.message_user(request, f"Withdraw failed: {e}", level='error')
+                    context = dict(
+                        self.admin_site.each_context(request),
+                        title='Withdraw unsold CONFIO',
+                        available_confio=available/10**6,
+                        app_confio=app_confio/10**6,
+                        outstanding_confio=outstanding/10**6,
+                        phase=phase,
+                        form=form,
+                        action='withdraw_unsold_confio',
+                        queryset=queryset,
+                        error_message=str(e),
+                    )
+                    return TemplateResponse(request, 'admin/presale/withdraw_unsold_confio.html', context)
+        else:
+            form = WithdrawForm(initial={'receiver': admin_addr})
+
+        context = dict(
+            self.admin_site.each_context(request),
+            title='Withdraw unsold CONFIO',
+            available_confio=available/10**6,
+            app_confio=app_confio/10**6,
+            outstanding_confio=outstanding/10**6,
+            phase=phase,
+            form=form,
+            action='withdraw_unsold_confio',
+            queryset=queryset,
+        )
+        return TemplateResponse(request, 'admin/presale/withdraw_unsold_confio.html', context)
+    withdraw_unsold_confio.short_description = "Withdraw unsold CONFIO (interactive)"
+
     def fund_app_with_confio(self, request, queryset):
         """Fund the presale app address with CONFIO from the sponsor account to cover cap shortfall."""
         from django.conf import settings
@@ -574,9 +827,16 @@ class PresalePhaseAdmin(admin.ModelAdmin):
                 self.message_user(request, f"App opt-in failed: {oe}", level='error')
                 return
             shortfall = max(0, required_confio - app_confio)
-            if shortfall == 0:
-                self.message_user(request, 'App already has sufficient CONFIO for outstanding + configured cap.', level='info')
-                return
+            # Add small safety buffer to avoid integer/rounding/timing dust rejections
+            try:
+                SAFETY_BUFFER_CONFIO = int(getattr(settings, 'PRESALE_FUND_SAFETY_BUFFER_CONFIO', 10_000))  # 0.01 CONFIO default (micro)
+            except Exception:
+                SAFETY_BUFFER_CONFIO = 10_000
+            if shortfall > 0:
+                shortfall += SAFETY_BUFFER_CONFIO
+            else:
+                # Even when sufficient, fund a minimal safety buffer to avoid race/timing asserts in start_round
+                shortfall = SAFETY_BUFFER_CONFIO
 
             # Send ASA from sponsor to app
             sponsor_addr = getattr(settings, 'ALGORAND_SPONSOR_ADDRESS', None)
@@ -592,7 +852,14 @@ class PresalePhaseAdmin(admin.ModelAdmin):
             stx = txn.sign(sponsor_sk)
             txid = client.send_transaction(stx)
             # Do not wait; return to admin immediately
-            self.message_user(request, f"Funded app with {shortfall/10**6:,.0f} CONFIO (tx {txid[:10]}...).", level='success')
+            self.message_user(
+                request,
+                (
+                    f"Funded app with {(shortfall)/10**6:,.6f} CONFIO (includes safety buffer) "
+                    f"(tx {txid[:10]}...)."
+                ),
+                level='success'
+            )
         except Exception as e:
             self.message_user(request, f"Failed to fund app: {e}", level='error')
     fund_app_with_confio.short_description = "Fund app with CONFIO (from sponsor)"
@@ -861,6 +1128,19 @@ class PresaleSettingsAdmin(admin.ModelAdmin):
                     from algosdk import mnemonic as _mn
                     from algosdk.account import address_from_private_key as _addr_from_sk
                     pa = _PresaleAdmin(int(app_id), int(confio_id), int(cusd_id))
+                    # Ensure algod client uses Django settings (works with hosted providers)
+                    try:
+                        from algosdk.v2client import algod as _algod
+                        _addr = getattr(dj_settings, 'ALGORAND_ALGOD_ADDRESS', '')
+                        _tok = getattr(dj_settings, 'ALGORAND_ALGOD_TOKEN', '')
+                        ua = {'User-Agent': 'confio-admin/algosdk'}
+                        if 'nodely' in (_addr or '').lower() and (_tok or ''):
+                            headers = {**ua, 'X-API-Key': _tok}
+                            pa.algod_client = _algod.AlgodClient('', _addr, headers=headers)
+                        else:
+                            pa.algod_client = _algod.AlgodClient(_tok, _addr, headers=ua)
+                    except Exception:
+                        pass
                     admin_sk = _mn.to_private_key(" ".join(str(admin_mn).strip().split()))
                     admin_addr = _addr_from_sk(admin_sk)
                     # Do not prompt (automation-friendly)

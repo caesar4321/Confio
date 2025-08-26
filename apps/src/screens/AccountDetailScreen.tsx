@@ -32,7 +32,7 @@ import CONFIOLogo from '../assets/png/CONFIO.png';
 import USDCLogo from '../assets/png/USDC.png';
 import { useNumberFormat } from '../utils/numberFormatting';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS, GET_ACCOUNT_BALANCE } from '../apollo/queries';
+import { GET_UNIFIED_TRANSACTIONS, GET_CURRENT_ACCOUNT_TRANSACTIONS, GET_PRESALE_STATUS, GET_ACCOUNT_BALANCE, GET_MY_BALANCES } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE } from '../apollo/mutations';
 // import { CONVERT_USDC_TO_CUSD, CONVERT_CUSD_TO_USDC } from '../apollo/mutations'; // Removed - handled in USDCConversion screen
 import { TransactionItemSkeleton } from '../components/SkeletonLoader';
@@ -230,14 +230,27 @@ export const AccountDetailScreen = () => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const searchAnim = useRef(new Animated.Value(0)).current;
 
-  // Fetch real-time balance for the account
-  const { data: balanceData, refetch: refetchBalance } = useQuery(GET_ACCOUNT_BALANCE, {
-    variables: { tokenType: route.params.accountType === 'cusd' ? 'cUSD' : 'CONFIO' },
+  // Fetch balances in one query to avoid UI flicker (live + presale-locked)
+  const isCusd = route.params.accountType === 'cusd';
+  const isConfio = route.params.accountType !== 'cusd';
+  const { data: balancesData, refetch: refetchBalances, loading: balancesLoading } = useQuery(GET_MY_BALANCES, {
     fetchPolicy: 'no-cache',
   });
   
   // Use real-time balance if available, otherwise fallback to route params
-  const currentBalance = balanceData?.accountBalance || route.params.accountBalance;
+  const confioLive = React.useMemo(() => parseFloat(balancesData?.myBalances?.confio || '0'), [balancesData?.myBalances?.confio]);
+  const confioLocked = React.useMemo(() => (isConfio ? parseFloat(balancesData?.myBalances?.confioPresaleLocked || '0') : 0), [balancesData?.myBalances?.confioPresaleLocked, isConfio]);
+  const cusdLive = React.useMemo(() => parseFloat(balancesData?.myBalances?.cusd || '0'), [balancesData?.myBalances?.cusd]);
+  const currentBalance = React.useMemo(() => {
+    if (isCusd) {
+      const v = cusdLive;
+      if (!isFinite(v)) return route.params.accountBalance;
+      return v.toFixed(2);
+    }
+    const v = confioLive + confioLocked;
+    if (!isFinite(v)) return route.params.accountBalance;
+    return v.toFixed(2);
+  }, [isCusd, cusdLive, confioLive, confioLocked, route.params.accountBalance]);
   
   // Account data from navigation params
   const accountAddress = route.params.accountAddress || '';
@@ -391,7 +404,7 @@ export const AccountDetailScreen = () => {
       
       // Then refresh balance, USDC (if applicable), and transactions
       const promises = [
-        refetchBalance(),
+        refetchBalances(),
         refetchUnified({
           accountType: activeAccount?.type || 'personal',
           accountIndex: activeAccount?.index || 0,
@@ -402,13 +415,12 @@ export const AccountDetailScreen = () => {
             ['CONFIO']
         })
       ];
-      
       // Add USDC refresh if applicable
       if (shouldFetchUSDC) {
         promises.push(refetchUSDC());
       }
       
-      const [balanceResult, { data }] = await Promise.all(promises);
+      const [_, { data }] = await Promise.all(promises);
       setAllTransactions(data?.currentAccountTransactions || []);
       setTransactionLimit(20);
       setTransactionOffset(0);
@@ -418,7 +430,7 @@ export const AccountDetailScreen = () => {
     } finally {
       setRefreshing(false);
     }
-  }, [refetchUnified, refetchBalance, activeAccount, route.params.accountType]);
+  }, [refetchUnified, refetchBalances, activeAccount, route.params.accountType]);
 
   // NEW: Transform unified transactions into the format expected by the UI
   const formatUnifiedTransactions = () => {
@@ -1422,13 +1434,13 @@ export const AccountDetailScreen = () => {
             <View style={styles.lockedStatusRow}>
               <Icon name="lock" size={14} color="#fbbf24" />
               <Text style={styles.lockedStatusText}>
-                Bloqueado: ${formatBalanceDisplay(account.balance)} $CONFIO
+                Bloqueado: ${formatBalanceDisplay(confioLocked)} $CONFIO
               </Text>
             </View>
             <View style={styles.lockedStatusRow}>
               <Icon name="unlock" size={14} color="#ffffff" style={{ opacity: 0.5 }} />
               <Text style={styles.lockedStatusText}>
-                Disponible: $0.00 $CONFIO
+                Disponible: ${formatBalanceDisplay(confioLive)} $CONFIO
               </Text>
             </View>
             <Text style={styles.lockedStatusDescription}>

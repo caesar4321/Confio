@@ -12,6 +12,7 @@ import { PresaleWsSession } from '../services/presaleWs';
 import algorandService from '../services/algorandService';
 import { formatNumber } from '../utils/numberFormatting';
 import { useCountry } from '../contexts/CountryContext';
+import { LoadingOverlay } from '../components/LoadingOverlay';
 
 const colors = {
   primary: '#34d399',
@@ -45,6 +46,7 @@ export const ConfioPresaleScreen = () => {
   const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, { fetchPolicy: 'cache-and-network' });
   const isClaimsUnlocked = presaleStatusData?.isPresaleClaimsUnlocked === true;
   const [busy, setBusy] = useState(false);
+  const [claimNotice, setClaimNotice] = useState('');
   const { data: onchainInfoData, refetch: refetchOnchainInfo } = useQuery(GET_MY_PRESALE_ONCHAIN_INFO, { fetchPolicy: 'cache-and-network', skip: !isClaimsUnlocked });
   const claimable = onchainInfoData?.myPresaleOnchainInfo?.claimable || 0;
 
@@ -94,6 +96,11 @@ export const ConfioPresaleScreen = () => {
 
   const handleClaim = async () => {
     try {
+      // Guard: no claimable balance
+      if (!isClaimsUnlocked || (claimable ?? 0) <= 0) {
+        setClaimNotice('No tienes $CONFIO para reclamar');
+        return;
+      }
       setBusy(true);
       const session = new PresaleWsSession();
       await session.open();
@@ -108,10 +115,15 @@ export const ConfioPresaleScreen = () => {
       const sponsors = pack?.sponsor_transactions || [];
       await session.claimSubmit(signedB64, sponsors);
       setBusy(false);
-      Alert.alert('¡Listo!', 'Tu reclamo fue enviado. Se confirmará en segundos.');
+      // Keep success feedback minimal and clear
+      Alert.alert('Reclamado');
+      setClaimNotice('');
     } catch (e: any) {
       setBusy(false);
-      Alert.alert('Error', e?.message || 'No se pudo reclamar tus $CONFIO');
+      // Do not show alert on error; log to console for debugging
+      console.error('Error al reclamar $CONFIO:', e);
+      // Show a helpful inline message if it's clearly a no-claimable case
+      if ((claimable ?? 0) <= 0) setClaimNotice('No tienes $CONFIO para reclamar');
     }
   };
 
@@ -165,11 +177,7 @@ export const ConfioPresaleScreen = () => {
       </View>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {busy && (
-          <View style={styles.overlay}>
-            <ActivityIndicator size="large" color="#fff" />
-          </View>
-        )}
+        <LoadingOverlay visible={busy} message="Procesando reclamo..." />
         {/* Hero Section */}
         <View style={styles.heroSection}>
           <View style={styles.tokenIcon}>
@@ -338,13 +346,22 @@ export const ConfioPresaleScreen = () => {
           
           {isClaimsUnlocked && (
             <TouchableOpacity 
-              style={[styles.ctaButton, { backgroundColor: '#10b981', marginTop: 12 }]}
+              style={[
+                styles.ctaButton,
+                { backgroundColor: '#10b981', marginTop: 12 },
+                (busy || (claimable ?? 0) <= 0) && styles.ctaButtonDisabled,
+              ]}
               onPress={async () => { await handleClaim(); refetchOnchainInfo && refetchOnchainInfo(); }}
+              disabled={busy || (claimable ?? 0) <= 0}
             >
               <Icon name="unlock" size={20} color="#fff" />
               <Text style={styles.ctaButtonText}>Reclamar mis $CONFIO</Text>
             </TouchableOpacity>
           )}
+
+          {isClaimsUnlocked && claimNotice ? (
+            <Text style={styles.claimNoticeText}>{claimNotice}</Text>
+          ) : null}
           
           {!isClaimsUnlocked && (
             <>
@@ -672,6 +689,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  ctaButtonDisabled: {
+    opacity: 0.6,
+  },
+  claimNoticeText: {
+    marginTop: 8,
+    color: '#DC2626',
+    fontSize: 14,
+    textAlign: 'center',
   },
   secondaryButton: {
     flexDirection: 'row',
