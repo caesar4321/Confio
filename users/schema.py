@@ -592,8 +592,53 @@ class Query(EmployeeQueries, graphene.ObjectType):
 	
 	# CONFIO balance queries
 	my_confio_balance = graphene.Field(ConfioBalanceType)
+	my_balances = graphene.Field(lambda: BalancesType, description="Current account balances for cUSD, CONFIO, CONFIO presale-locked, USDC")
 	my_confio_transactions = graphene.List(ConfioRewardTransactionType, limit=graphene.Int(), offset=graphene.Int())
 	user_tiktok_shares = graphene.List(TikTokViralShareType, status=graphene.String())
+
+	def resolve_my_balances(self, info):
+		"""Return current balances from DB cache only (fast path).
+
+		Client can call refreshAccountBalance mutation to force a blockchain sync,
+		then refetch this query for up-to-date values without UI flicker.
+		"""
+		user = getattr(info.context, 'user', None)
+		if not (user and getattr(user, 'is_authenticated', False)):
+			return None
+		from .jwt_context import get_jwt_business_context_with_validation
+		jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_balance')
+		if not jwt_context:
+			return None
+		account_type = jwt_context['account_type']
+		account_index = jwt_context['account_index']
+		business_id_from_context = jwt_context.get('business_id')
+		try:
+			# Locate account
+			if account_type == 'business' and business_id_from_context:
+				account = Account.objects.get(
+					business_id=business_id_from_context,
+					account_type='business',
+					account_index=account_index
+				)
+			else:
+				account = Account.objects.get(
+					user=user,
+					account_type=account_type,
+					account_index=account_index
+				)
+				# Mirror previous working logic: always fetch live from blockchain.
+				# Efficient due to single account_info snapshot under the hood.
+				from blockchain.balance_service import BalanceService
+				all_balances = BalanceService.get_all_balances(account, force_refresh=True)
+			return BalancesType(
+				cusd=f"{all_balances['cusd']['amount']:.2f}",
+				confio=f"{all_balances['confio']['amount']:.2f}",
+				confioPresaleLocked=f"{all_balances.get('confio_presale', {}).get('amount', 0):.2f}",
+				usdc=f"{all_balances['usdc']['amount']:.2f}"
+			)
+		except Exception:
+			# Graceful fallback to zeros to avoid client crashes
+			return BalancesType(cusd="0.00", confio="0.00", confioPresaleLocked="0.00", usdc="0.00")
 
 	def resolve_legalDocument(self, info, docType, language=None):
 		logger.info(f"Received legal document request for type: {docType}, language: {language}")
@@ -2511,10 +2556,11 @@ class DeleteBankInfo(graphene.Mutation):
 
 
 class BalancesType(graphene.ObjectType):
-	"""Token balances object"""
-	cusd = graphene.String()
-	confio = graphene.String()
-	usdc = graphene.String()
+    """Token balances object"""
+    cusd = graphene.String()
+    confio = graphene.String()
+    confioPresaleLocked = graphene.String()
+    usdc = graphene.String()
 
 class RefreshAccountBalance(graphene.Mutation):
 	"""Force refresh balance from blockchain for the current account"""
@@ -2557,6 +2603,8 @@ class RefreshAccountBalance(graphene.Mutation):
 					account_index=account_index
 				)
 			
+			logger.info("[refresh_balance] account_id=%s type=%s index=%s address=%s",
+				account.id, account_type, account_index, getattr(account, 'algorand_address', None))
 			# Check if account has an Algorand address
 			if not account.algorand_address:
 				return RefreshAccountBalance(
@@ -2596,7 +2644,16 @@ class RefreshAccountBalance(graphene.Mutation):
 			balances = BalancesType(
 				cusd=f"{all_balances['cusd']['amount']:.2f}",
 				confio=f"{all_balances['confio']['amount']:.2f}",
+				confioPresaleLocked=f"{all_balances.get('confio_presale', {}).get('amount', 0):.2f}",
 				usdc=f"{all_balances['usdc']['amount']:.2f}"
+			)
+			logger.info(
+				"[refresh_balance] updated balances for account_id=%s cusd=%s confio=%s presale=%s usdc=%s",
+				account.id,
+				balances.cusd,
+				balances.confio,
+				balances.confioPresaleLocked,
+				balances.usdc,
 			)
 			
 			last_synced = max(

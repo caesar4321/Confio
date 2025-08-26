@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Modal } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
-import { useAccountManager } from '../hooks/useAccountManager';
+import { useAccount } from '../contexts/AccountContext';
 import { getCountryByIso } from '../utils/countries';
 
 // Utility function to format phone number with country code
@@ -50,7 +50,7 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
   onCreateBusinessAccount,
 }) => {
   const { userProfile, isUserProfileLoading } = useAuth();
-  const { isLoading: accountsLoading } = useAccountManager();
+  const { isLoading: accountsLoading } = useAccount();
 
   // For personal accounts, only format phone number with country code
   const displayAccounts = accounts.map(acc => {
@@ -62,7 +62,7 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
     }
     return acc;
   });
-  const currentAccount = displayAccounts.find(acc => acc.id === selectedAccount);
+  const currentAccount = displayAccounts.find(acc => acc.id === selectedAccount) || displayAccounts[0];
 
   // Debug logging
   console.log('ProfileMenu render:', { 

@@ -130,6 +130,7 @@ export const REFRESH_ACCOUNT_BALANCE = gql`
       balances {
         cusd
         confio
+        confioPresaleLocked
         usdc
       }
       lastSynced

@@ -280,7 +280,7 @@ class PresaleTransactionBuilder:
             f"[PRESALE] Sponsor bump fee={sp0.fee} recv={'user' if funding_needed>0 else 'sponsor'} amt={int(funding_needed)}"
         )
 
-        # [1] User -> app cUSD transfer (fee 0; sponsored)
+        # [1] User -> app cUSD transfer is fully sponsored; allow fee=0
         sp1 = SuggestedParams(
             fee=0,
             first=params.first,
@@ -387,7 +387,7 @@ class PresaleTransactionBuilder:
             note=b"Presale app opt-in fee bump",
         )
 
-        # [1] User ApplicationOptInTx with fee=0 (strictly sponsored)
+        # [1] User ApplicationOptInTx is sponsored; allow fee=0 (group budget carried by sponsor bump)
         sp1 = SuggestedParams(
             fee=0,
             first=params.first,
@@ -440,7 +440,7 @@ class PresaleTransactionBuilder:
         params = self.algod.suggested_params()
         min_fee = getattr(params, 'min_fee', 1000) or 1000
 
-        # [0] User witness 0-ALGO payment (fee=0; sponsored)
+        # [0] User witness 0-ALGO payment must be fee=0 (contract asserts Gtxn[0].fee()==0)
         sp0 = SuggestedParams(
             fee=0,
             first=params.first,
@@ -457,8 +457,10 @@ class PresaleTransactionBuilder:
         )
 
         # [1] Sponsor AppCall to claim – covers fees incl. inner xfer
+        # App call must cover: its own base fee + inner xfer fee + pooled min for user witness
+        # Use 3× min to safely cover (2 outer txns + 1 inner)
         sp1 = SuggestedParams(
-            fee=min_fee * 2,
+            fee=min_fee * 3,
             first=params.first,
             last=params.last,
             gh=params.gh,

@@ -4456,7 +4456,13 @@ type RefreshAccountBalance {
 type BalancesType {
   cusd: String
   confio: String
+  confioPresaleLocked: String
   usdc: String
+}
+
+extend type Query {
+  """Current account balances for cUSD, CONFIO, CONFIO presale-locked, USDC"""
+  myBalances: BalancesType
 }
 
 """
