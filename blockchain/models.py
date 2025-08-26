@@ -9,6 +9,7 @@ class Balance(models.Model):
     token = models.CharField(max_length=20, choices=[
         ('CUSD', 'cUSD'),
         ('CONFIO', 'CONFIO'),
+        ('CONFIO_PRESALE', 'CONFIO_PRESALE'),
         ('USDC', 'USDC'),
     ])
     amount = models.DecimalField(max_digits=36, decimal_places=18)

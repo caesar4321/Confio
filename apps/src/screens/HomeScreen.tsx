@@ -36,7 +36,8 @@ import { AccountSwitchOverlay } from '../components/AccountSwitchOverlay';
 import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_ACCOUNT_BALANCE, GET_PRESALE_STATUS } from '../apollo/queries';
+import { GET_PRESALE_STATUS, GET_MY_BALANCES } from '../apollo/queries';
+import { REFRESH_ACCOUNT_BALANCE } from '../apollo/mutations';
 import { useCountry } from '../contexts/CountryContext';
 import { useCurrency } from '../hooks/useCurrency';
 import { useSelectedCountryRate } from '../hooks/useExchangeRate';
@@ -107,7 +108,7 @@ export const HomeScreen = () => {
   const navigation = useNavigation<HomeScreenNavigationProp>();
   const route = useRoute<any>();
   const { setCurrentAccountAvatar, profileMenu } = useHeader();
-  const { signOut, userProfile, isAuthenticated } = useAuth();
+  const { signOut, userProfile, isAuthenticated, profileData } = useAuth() as any;
   const { userCountry, selectedCountry } = useCountry();
   const { currency, formatAmount, exchangeRate } = useCurrency();
   const { rate: marketRate, loading: rateLoading } = useSelectedCountryRate();
@@ -130,6 +131,7 @@ export const HomeScreen = () => {
     isLoading: accountsLoading,
     createAccount,
     refreshAccounts,
+    getActiveAccountContext,
   } = useAccount();
   
   // Use atomic account switching
@@ -139,16 +141,13 @@ export const HomeScreen = () => {
     isAccountSwitchInProgress 
   } = useAtomicAccountSwitch();
   
-  // Fetch real balances - use no-cache to ensure we always get the correct account balance
-  const { data: cUSDBalanceData, loading: cUSDLoading, error: cUSDError, refetch: refetchCUSD } = useQuery(GET_ACCOUNT_BALANCE, {
-    variables: { tokenType: 'cUSD' },
-    fetchPolicy: 'no-cache', // Completely bypass cache to ensure correct account context
+  // Fetch all balances in a single call to avoid flicker
+  const { data: myBalancesData, loading: myBalancesLoading, error: myBalancesError, refetch: refetchMyBalances } = useQuery(GET_MY_BALANCES, {
+    fetchPolicy: 'network-only',
+    nextFetchPolicy: 'network-only',
+    notifyOnNetworkStatusChange: true,
   });
-  
-  const { data: confioBalanceData, loading: confioLoading, error: confioError, refetch: refetchConfio } = useQuery(GET_ACCOUNT_BALANCE, {
-    variables: { tokenType: 'CONFIO' },
-    fetchPolicy: 'no-cache', // Completely bypass cache to ensure correct account context
-  });
+  const [refreshAccountBalance] = useMutation(REFRESH_ACCOUNT_BALANCE);
   
   // Check if presale is globally active / claims unlocked
   const { data: presaleStatusData } = useQuery(GET_PRESALE_STATUS, {
@@ -161,21 +160,28 @@ export const HomeScreen = () => {
   // Refetch balances when active account changes
   useEffect(() => {
     if (activeAccount) {
-      refetchCUSD();
-      refetchConfio();
+      refetchMyBalances();
     }
-  }, [activeAccount?.id, activeAccount?.type, activeAccount?.index, refetchCUSD, refetchConfio]);
+  }, [activeAccount?.id, activeAccount?.type, activeAccount?.index, refetchMyBalances]);
 
   // Force refresh balances when navigating to this screen
   useFocusEffect(
     useCallback(() => {
       console.log('HomeScreen focused - refreshing balances');
-      refetchCUSD();
-      refetchConfio();
+      refetchMyBalances();
       // Also nudge account refresh on focus in case auth just resumed
       try { refreshAccounts(); } catch {}
-    }, [refetchCUSD, refetchConfio])
+    }, [refetchMyBalances])
   );
+
+  // Extra guard: subscribe to navigation focus event to refetch
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      console.log('HomeScreen navigation focus - refetching balances');
+      refetchMyBalances();
+    });
+    return unsubscribe;
+  }, [navigation, refetchMyBalances]);
 
   // On initial mount after auth, pull accounts once to avoid blank ProfileMenu
   useEffect(() => {
@@ -195,37 +201,29 @@ export const HomeScreen = () => {
   useEffect(() => {
     console.log('Balance query status:', {
       isInitialized,
-      cUSDLoading,
-      confioLoading,
-      cUSDData: cUSDBalanceData,
-      confioData: confioBalanceData,
-      cUSDError: cUSDError?.message,
-      confioError: confioError?.message,
+      loading: myBalancesLoading,
+      data: myBalancesData,
+      error: myBalancesError?.message,
     });
-    
-    if (cUSDError) {
-      console.error('Error fetching cUSD balance:', cUSDError);
+    if (myBalancesError) {
+      console.error('Error fetching balances:', myBalancesError);
     }
-    if (confioError) {
-      console.error('Error fetching CONFIO balance:', confioError);
-    }
-    if (cUSDBalanceData) {
-      console.log('cUSD balance data:', cUSDBalanceData);
-    }
-    if (confioBalanceData) {
-      console.log('CONFIO balance data:', confioBalanceData);
-    }
-  }, [isInitialized, cUSDLoading, confioLoading, cUSDError, confioError, cUSDBalanceData, confioBalanceData]);
+  }, [isInitialized, myBalancesLoading, myBalancesData, myBalancesError]);
   
   // Parse balances safely - memoized for performance
   const cUSDBalance = React.useMemo(() => 
-    parseFloat(cUSDBalanceData?.accountBalance || '0'), 
-    [cUSDBalanceData?.accountBalance]
+    parseFloat(myBalancesData?.myBalances?.cusd || '0'), 
+    [myBalancesData?.myBalances?.cusd]
   );
-  const confioBalance = React.useMemo(() => 
-    parseFloat(confioBalanceData?.accountBalance || '0'), 
-    [confioBalanceData?.accountBalance]
+  const confioLive = React.useMemo(() => 
+    parseFloat(myBalancesData?.myBalances?.confio || '0'), 
+    [myBalancesData?.myBalances?.confio]
   );
+  const confioPresaleLocked = React.useMemo(() => 
+    parseFloat(myBalancesData?.myBalances?.confioPresaleLocked || '0'), 
+    [myBalancesData?.myBalances?.confioPresaleLocked]
+  );
+  const confioTotal = React.useMemo(() => confioLive + confioPresaleLocked, [confioLive, confioPresaleLocked]);
 
   // Display helpers to avoid overstating balances (flooring instead of rounding)
   const floorToDecimals = React.useCallback((value: number, decimals: number) => {
@@ -291,21 +289,103 @@ export const HomeScreen = () => {
     return acc;
   });
 
-  // Only use stored accounts normally; provide a safe placeholder on startup/race
+  // Bootstrap placeholder accounts if server/state not ready yet
+  const [bootstrapAccounts, setBootstrapAccounts] = useState<Account[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!isAuthenticated) {
+          if (!cancelled) setBootstrapAccounts([]);
+          return;
+        }
+        // Only attempt bootstrap when nothing to show
+        if (accountMenuItems.length > 0) {
+          if (!cancelled) setBootstrapAccounts([]);
+          return;
+        }
+        const ctx = await getActiveAccountContext();
+        if (cancelled) return;
+        if (ctx.type === 'business' && ctx.businessId) {
+          const bp = profileData?.businessProfile;
+          const name = bp?.name || 'Negocio';
+          const avatar = (name || 'N').charAt(0).toUpperCase();
+          setBootstrapAccounts([
+            {
+              id: `business_${ctx.businessId}_${ctx.index}`,
+              name,
+              type: 'business',
+              avatar,
+              category: bp?.category,
+            } as Account,
+          ]);
+        } else {
+          const name = userProfile?.firstName || userProfile?.username || 'Personal';
+          const avatar = (name || 'P').charAt(0).toUpperCase();
+          setBootstrapAccounts([
+            {
+              id: `personal_${ctx.index}`,
+              name,
+              type: 'personal',
+              avatar,
+              phone: userProfile ? formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry) : undefined,
+            } as Account,
+          ]);
+        }
+      } catch (e) {
+        // As a last resort, show a generic personal placeholder
+        setBootstrapAccounts([
+          { id: 'personal_0', name: 'Personal', type: 'personal', avatar: 'P' } as Account,
+        ]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isAuthenticated, accountMenuItems.length, getActiveAccountContext, userProfile?.firstName, userProfile?.username, userProfile?.phoneNumber, userProfile?.phoneCountry, profileData?.businessProfile?.id, profileData?.businessProfile?.name, profileData?.businessProfile?.category]);
+
+  // Only use stored accounts normally; provide safe placeholder on startup/race
   const displayAccounts = accountMenuItems.length > 0
     ? accountMenuItems
-    : (
-      userProfile
-        ? [{
-            id: 'personal_0',
-            name: userProfile.firstName || userProfile.username || 'Personal',
-            type: 'personal' as const,
-            phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
-            category: undefined,
-            avatar: (userProfile.firstName || userProfile.username || 'P').charAt(0).toUpperCase(),
-          }]
-        : []
+    : (bootstrapAccounts.length > 0
+        ? bootstrapAccounts
+        : (() => {
+            const bp = profileData?.businessProfile;
+            if (bp && bp.id && bp.name) {
+              return [{
+                id: `business_${bp.id}_0`,
+                name: bp.name,
+                type: 'business' as const,
+                phone: undefined,
+                category: bp.category,
+                avatar: (bp.name || 'N').charAt(0).toUpperCase(),
+                isEmployee: false,
+              }];
+            }
+            if (userProfile) {
+              return [{
+                id: 'personal_0',
+                name: userProfile.firstName || userProfile.username || 'Personal',
+                type: 'personal' as const,
+                phone: formatPhoneNumber(userProfile.phoneNumber, userProfile.phoneCountry),
+                category: undefined,
+                avatar: (userProfile.firstName || userProfile.username || 'P').charAt(0).toUpperCase(),
+                isEmployee: false,
+              }];
+            }
+            return [];
+          })()
       );
+
+  // Debug display accounts
+  console.log('HomeScreen - Display accounts:', {
+    accountsLength: accounts.length,
+    accountMenuItemsLength: accountMenuItems.length,
+    bootstrapAccountsLength: bootstrapAccounts.length,
+    displayAccountsLength: displayAccounts.length,
+    displayAccounts: displayAccounts.map(acc => ({ id: acc.id, name: acc.name, avatar: acc.avatar, type: acc.type })),
+    activeAccountId: activeAccount?.id,
+    activeAccountType: activeAccount?.type,
+  });
 
   // Save balance visibility preference to Keychain
   const saveBalanceVisibility = async (isVisible: boolean) => {
@@ -406,15 +486,15 @@ export const HomeScreen = () => {
       // Force refresh balances from blockchain (bypass cache)
       await Promise.all([
         refreshAccounts(),
-        refetchCUSD(),
-        refetchConfio(),
+        refreshAccountBalance(), // Force blockchain sync
       ]);
+      await refetchMyBalances();
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
       setRefreshing(false);
     }
-  }, [refreshAccounts, refetchCUSD, refetchConfio]);
+  }, [refreshAccounts, refetchMyBalances]);
   
   // Quick actions configuration - filter based on permissions
   const quickActionsData: QuickAction[] = [
@@ -641,10 +721,10 @@ export const HomeScreen = () => {
       accountType: 'confio',
       accountName: 'Confío',
       accountSymbol: '$CONFIO',
-      accountBalance: confioBalance.toFixed(2),
+      accountBalance: confioTotal.toFixed(2),
       accountAddress: activeAccount?.algorandAddress || ''
     });
-  }, [navigation, confioBalance, activeAccount?.algorandAddress]);
+  }, [navigation, confioTotal, activeAccount?.algorandAddress]);
   
   useFocusEffect(
     React.useCallback(() => {
@@ -679,8 +759,7 @@ export const HomeScreen = () => {
         console.log('HomeScreen - Account switch successful');
         // Refresh balances after successful switch
         await Promise.all([
-          refetchCUSD(),
-          refetchConfio(),
+          refetchMyBalances(),
         ]);
         return true;
       } else {
@@ -1023,7 +1102,7 @@ export const HomeScreen = () => {
         <View style={styles.walletsSection}>
           <Text style={styles.walletsTitle}>Mis Billeteras</Text>
           
-          {cUSDLoading || confioLoading ? (
+          {myBalancesLoading ? (
             <>
               <WalletCardSkeleton />
               <WalletCardSkeleton />
@@ -1091,7 +1170,7 @@ export const HomeScreen = () => {
                       {/* Hide balance for employees without viewBalance permission */}
                       {(activeAccount?.isEmployee && !activeAccount?.employeePermissions?.viewBalance)
                         ? '••••'
-                        : showBalance ? formatFixedFloor(confioBalance, 2) : '••••'}
+                        : showBalance ? formatFixedFloor(confioTotal, 2) : '••••'}
                     </Text>
                     <Icon name="chevron-right" size={20} color="#9ca3af" />
                   </View>

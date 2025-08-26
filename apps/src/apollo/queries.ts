@@ -534,6 +534,17 @@ export const GET_ACCOUNT_BALANCE = gql`
   }
 `;
 
+export const GET_MY_BALANCES = gql`
+  query GetMyBalances {
+    myBalances {
+      cusd
+      confio
+      confioPresaleLocked
+      usdc
+    }
+  }
+`;
+
 export const GET_INVOICES = gql`
   query GetInvoices {
     invoices {
