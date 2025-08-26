@@ -56,6 +56,12 @@ if [ -d "web/build" ]; then
     cp -r web/build $TEMP_DIR/web/
 fi
 
+# Include .well-known for Universal Links / App Links
+if [ -d "web/.well-known" ]; then
+    mkdir -p $TEMP_DIR/web
+    cp -r web/.well-known $TEMP_DIR/web/
+fi
+
 # Copy essential files
 cp manage.py requirements.txt $TEMP_DIR/
 if [ -f "db.sqlite3" ]; then cp db.sqlite3 $TEMP_DIR/; fi
@@ -93,6 +99,34 @@ server {
     gzip_vary on;
     gzip_min_length 1024;
     gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
+
+    # Well-known endpoints for iOS/Android app linking
+    # Serve both extensionless AASA and assetlinks.json with correct content-type
+    location = /.well-known/apple-app-site-association {
+        alias /opt/confio/web/.well-known/apple-app-site-association;
+        default_type application/json;
+        add_header Access-Control-Allow-Origin "*" always;
+        try_files $uri =404;
+    }
+    location = /apple-app-site-association {
+        alias /opt/confio/web/.well-known/apple-app-site-association;
+        default_type application/json;
+        add_header Access-Control-Allow-Origin "*" always;
+        try_files $uri =404;
+    }
+    location = /.well-known/assetlinks.json {
+        alias /opt/confio/web/.well-known/assetlinks.json;
+        default_type application/json;
+        add_header Access-Control-Allow-Origin "*" always;
+        try_files $uri =404;
+    }
+    # Fallback for any other .well-known files (if added later)
+    location ^~ /.well-known/ {
+        alias /opt/confio/web/.well-known/;
+        default_type application/json;
+        add_header Access-Control-Allow-Origin "*" always;
+        try_files $uri =404;
+    }
     
     # Static files from React build
     location /static/ {

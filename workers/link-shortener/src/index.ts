@@ -37,12 +37,14 @@ export default {
     if (url.pathname === '/.well-known/apple-app-site-association' || 
         url.pathname === '/apple-app-site-association') {
       const appleConfig = {
-        "applinks": {
-          "apps": [],
-          "details": [
+        applinks: {
+          apps: [],
+          details: [
             {
-              "appID": `${env.APPLE_APP_ID}.${env.IOS_BUNDLE_ID}`,
-              "paths": [
+              appID: `${env.APPLE_APP_ID}.${env.IOS_BUNDLE_ID}`,
+              paths: [
+                "/@",
+                "/@*",
                 "/app/*",
                 "/referral/*",
                 "/achievement/*",
@@ -51,16 +53,13 @@ export default {
               ]
             }
           ]
-        },
-        "webcredentials": {
-          "apps": [`${env.APPLE_APP_ID}.${env.IOS_BUNDLE_ID}`]
         }
-      };
+      } as const;
       
       return new Response(JSON.stringify(appleConfig, null, 2), {
         headers: {
           'Content-Type': 'application/json',
-          'Cache-Control': 'public, max-age=3600'
+          'Cache-Control': 'public, max-age=300'
         }
       });
     }
