@@ -81,6 +81,9 @@ export const TradeChatScreen: React.FC = () => {
   // Busy overlay for critical actions
   const [busy, setBusy] = useState(false);
   const [busyText, setBusyText] = useState<string>('');
+  // Dispute modal state (for seller and buyer)
+  const [showDisputeModal, setShowDisputeModal] = useState(false);
+  const [disputeReason, setDisputeReason] = useState('');
   const withBusy = async <T,>(text: string, fn: () => Promise<T>): Promise<T> => {
     setBusyText(text);
     setBusy(true);
@@ -1482,20 +1485,34 @@ export const TradeChatScreen: React.FC = () => {
 
   const handleAbandonTrade = () => {
     Alert.alert(
-      '¿Abandonar intercambio?',
-      'Esta acción cancelará el intercambio y no podrás recuperarlo. ¿Estás seguro?',
+      '¿Eliminar solicitud?',
+      'Esto eliminará la solicitud y el chat. No hay fondos reservados.',
       [
         {
           text: 'Cancelar',
           style: 'cancel',
         },
         {
-          text: 'Abandonar',
+          text: 'Eliminar solicitud',
           style: 'destructive',
           onPress: () => {
-            // Here you would typically call an API to cancel the trade
-            Alert.alert('Intercambio cancelado', 'El intercambio ha sido cancelado.');
-            navigation.navigate('BottomTabs', { screen: 'Exchange' });
+            // Close request in backend (no escrow yet)
+            withBusy('Eliminando solicitud…', async () => {
+              try {
+                const { data } = await updateTradeStatus({
+                  variables: { input: { tradeId: tradeId, status: 'CANCELLED' } },
+                });
+                if (!data?.updateP2pTradeStatus?.success) {
+                  const err = data?.updateP2pTradeStatus?.errors?.join(', ') || 'No se pudo eliminar la solicitud';
+                  Alert.alert('Error', err);
+                  return;
+                }
+                Alert.alert('Solicitud eliminada', 'Se eliminó la solicitud y el chat.');
+                navigation.navigate('BottomTabs', { screen: 'Exchange' });
+              } catch (e) {
+                Alert.alert('Error', 'No se pudo eliminar la solicitud.');
+              }
+            });
           },
         },
       ]
@@ -1875,6 +1892,35 @@ export const TradeChatScreen: React.FC = () => {
     }
   };
 
+  // Open dispute modal (seller or eligible buyer)
+  const handleOpenDispute = () => {
+    try { Keyboard.dismiss(); } catch {}
+    // Pre-fill a helpful hint based on role if empty
+    if (!disputeReason.trim()) {
+      setDisputeReason(iAmSellerNow ? 'No recibí el pago en mi cuenta.' : 'Pagué pero no han liberado los fondos.');
+    }
+    setShowDisputeModal(true);
+  };
+
+  const handleSubmitDispute = async () => {
+    const reason = disputeReason.trim();
+    if (reason.length < 10) {
+      Alert.alert('Descripción requerida', 'Por favor describe el problema (mínimo 10 caracteres).');
+      return;
+    }
+    try {
+      await withBusy('Abriendo disputa…', async () => {
+        const res = await p2pSponsoredService.openDispute(String(tradeId), reason);
+        if (!res.success) throw new Error(res.error || 'No se pudo abrir la disputa');
+      });
+      setShowDisputeModal(false);
+      setDisputeReason('');
+      Alert.alert('Disputa abierta', 'Se abrió la disputa. El equipo revisará el caso y podrás subir evidencia.');
+    } catch (e) {
+      Alert.alert('Error', 'No se pudo abrir la disputa. Intenta de nuevo.');
+    }
+  };
+
   const handleSendMessage = async () => {
     if (message.trim() && tradeId && !sendingMessage) {
       const messageContent = message.trim();
@@ -2189,47 +2235,109 @@ export const TradeChatScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* Right: Abandonar Button - Hidden during disputes */}
-        {!isTradeDisputed && (
-          timeRemaining > 0 || !iAmSellerNow ? (
-            // Default action: Abandonar (both roles), while active or for buyers always
-            <TouchableOpacity 
-              style={styles.abandonButton}
-              onPress={handleAbandonTrade}
-            >
-              <Text style={styles.abandonButtonText}>Abandonar</Text>
-            </TouchableOpacity>
-          ) : (
-            // Seller-only after expiry: Recuperar fondos
-            secondsSinceExpiry >= GRACE_SECONDS ? (
-              <TouchableOpacity 
+        {/* Right actions per policy */}
+        {!isTradeDisputed && (() => {
+          // D1) Buyer marked paid: put Disputar in header (seller)
+          if (currentTradeStep === 3 && iAmSellerNow) {
+            return (
+              <TouchableOpacity
+                style={styles.abandonButton}
+                onPress={handleOpenDispute}
+              >
+                <Text style={styles.abandonButtonText}>Disputar</Text>
+              </TouchableOpacity>
+            );
+          }
+
+          // D2) Buyer marked paid and time expired (+grace): allow buyer to Disputar from header
+          if (currentTradeStep === 3 && !iAmSellerNow && timeRemaining <= 0 && secondsSinceExpiry >= GRACE_SECONDS) {
+            return (
+              <TouchableOpacity
+                style={styles.abandonButton}
+                onPress={handleOpenDispute}
+              >
+                <Text style={styles.abandonButtonText}>Disputar</Text>
+              </TouchableOpacity>
+            );
+          }
+
+          // Determine escrow/accept states
+          const hasEscrow = hasEscrowOnChainOrLocal;
+          const isAccepted = currentTradeStep >= 2; // PAYMENT_PENDING or beyond
+          const buyerMarkedPaid = currentTradeStep >= 3; // PAYMENT_SENT or beyond
+
+          // A) No escrow yet AND still in step 1 (PENDING): both can Eliminar solicitud
+          if (!hasEscrow && currentTradeStep === 1) {
+            return (
+              <TouchableOpacity style={styles.abandonButton} onPress={handleAbandonTrade}>
+                <Text style={styles.abandonButtonText}>Eliminar solicitud</Text>
+              </TouchableOpacity>
+            );
+          }
+
+          // After escrow exists, never show close button for buyer
+          if (!iAmSellerNow) {
+            return null;
+          }
+
+          // B) Escrowed but not accepted: seller can Cancelar y recuperar (immediate)
+          if (hasEscrow && !isAccepted) {
+            return (
+              <TouchableOpacity
                 style={styles.abandonButton}
                 onPress={async () => {
                   try {
-                    const { p2pSponsoredService } = await import('../services/p2pSponsoredService');
-                    await withBusy('Recuperando fondos…', async () => {
+                    await withBusy('Cancelando y recuperando…', async () => {
                       const res = await p2pSponsoredService.cancelExpired(String(tradeId));
-                      if (!res.success) {
-                        Alert.alert('Error', res.error || 'No se pudo recuperar los fondos');
-                        return;
-                      }
+                      if (!res.success) throw new Error(res.error || 'No se pudo cancelar');
                     });
-                    Alert.alert('Listo', 'Fondos recuperados correctamente.');
+                    Alert.alert('Intercambio cancelado', 'Fondos recuperados y chat cerrado.');
                     navigation.navigate('BottomTabs', { screen: 'Exchange' });
                   } catch (e) {
-                    Alert.alert('Error', 'No se pudo recuperar los fondos');
+                    Alert.alert('Error', 'No se pudo cancelar y recuperar.');
                   }
                 }}
               >
-                <Text style={styles.abandonButtonText}>Recuperar fondos</Text>
+                <Text style={styles.abandonButtonText}>Cancelar y recuperar</Text>
+              </TouchableOpacity>
+            );
+          }
+
+          // C) Accepted and clock running: no close while time activa
+          if (isAccepted && !buyerMarkedPaid && timeRemaining > 0) {
+            return null;
+          }
+
+          // C) After expiry and not paid: show Cancelar por tiempo agotado (seller)
+          if (isAccepted && !buyerMarkedPaid && timeRemaining <= 0) {
+            return secondsSinceExpiry >= GRACE_SECONDS ? (
+              <TouchableOpacity
+                style={styles.abandonButton}
+                onPress={async () => {
+                  try {
+                    await withBusy('Cancelando por tiempo agotado…', async () => {
+                      const res = await p2pSponsoredService.cancelExpired(String(tradeId));
+                      if (!res.success) throw new Error(res.error || 'No se pudo cancelar');
+                    });
+                    Alert.alert('Cancelado', 'Tiempo agotado. Fondos recuperados y chat cerrado.');
+                    navigation.navigate('BottomTabs', { screen: 'Exchange' });
+                  } catch (e) {
+                    Alert.alert('Error', 'No se pudo cancelar por tiempo agotado.');
+                  }
+                }}
+              >
+                <Text style={styles.abandonButtonText}>Cancelar por tiempo agotado</Text>
               </TouchableOpacity>
             ) : (
               <View style={[styles.abandonButton, { backgroundColor: '#F3F4F6' }]}>
-                <Text style={[styles.abandonButtonText, { color: '#6B7280' }]}>Recuperar en {formatTime(GRACE_SECONDS - secondsSinceExpiry)}</Text>
+                <Text style={[styles.abandonButtonText, { color: '#6B7280' }]}>Cancelar en {formatTime(GRACE_SECONDS - secondsSinceExpiry)}</Text>
               </View>
-            )
-          )
-        )}
+            );
+          }
+
+          // D) Buyer marked as paid: no cancelar/reclamar here
+          return null;
+        })()}
       </View>
 
       {/* Trade Status Banner */}
@@ -2324,7 +2432,7 @@ export const TradeChatScreen: React.FC = () => {
         </TouchableWithoutFeedback>
       )}
       
-      {/* For Sellers - Release Funds - Key prop added to force re-render */}
+      {/* For Sellers - After buyer marked paid: single CTA in banner */}
       {currentTradeStep === 3 && iAmSellerNow && (
         <TouchableWithoutFeedback key={`release-funds-${currentTradeStep}-${forceUpdate}`} onPress={Keyboard.dismiss}>
           <View style={[styles.paymentActionBanner, { backgroundColor: '#D1FAE5' }]}>
@@ -2562,6 +2670,50 @@ export const TradeChatScreen: React.FC = () => {
                 onPress={confirmMarkAsPaid}
               >
                 <Text style={{ color: '#fff', fontWeight: '600' }}>Sí, ya pagué</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Dispute Reason Modal */}
+      <Modal
+        visible={showDisputeModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDisputeModal(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 20, width: '88%' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+              <Icon name="alert-triangle" size={18} color="#DC2626" style={{ marginRight: 8 }} />
+              <Text style={{ fontWeight: '700', fontSize: 16, color: '#111827' }}>Abrir disputa</Text>
+            </View>
+            <Text style={{ color: '#6B7280', fontSize: 14, marginBottom: 12 }}>
+              Explica brevemente el problema. Podrás adjuntar evidencia luego desde este chat.
+            </Text>
+            <TextInput
+              value={disputeReason}
+              onChangeText={setDisputeReason}
+              placeholder={iAmSellerNow ? 'Ej: No veo el pago reflejado en mi cuenta.' : 'Ej: Envié el pago y no liberan los fondos.'}
+              placeholderTextColor="#9CA3AF"
+              multiline
+              style={{
+                minHeight: 100,
+                borderWidth: 1,
+                borderColor: '#E5E7EB',
+                borderRadius: 12,
+                padding: 12,
+                color: '#111827',
+                textAlignVertical: 'top'
+              }}
+            />
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 12 }}>
+              <TouchableOpacity onPress={() => setShowDisputeModal(false)} style={{ paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#F3F4F6', marginRight: 10 }}>
+                <Text style={{ color: '#374151', fontWeight: '600' }}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleSubmitDispute} style={{ paddingVertical: 10, paddingHorizontal: 14, borderRadius: 8, backgroundColor: '#DC2626' }}>
+                <Text style={{ color: '#fff', fontWeight: '700' }}>Disputar</Text>
               </TouchableOpacity>
             </View>
           </View>
