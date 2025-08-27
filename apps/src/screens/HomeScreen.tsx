@@ -19,6 +19,7 @@ import { AuthService } from '../services/authService';
 import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '../contexts/AuthContext';
+import { waitForAuthReady } from '../contexts/AuthContext';
 import { useHeader } from '../contexts/HeaderContext';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
@@ -35,8 +36,8 @@ import { PushNotificationService } from '../services/pushNotificationService';
 import { AccountSwitchOverlay } from '../components/AccountSwitchOverlay';
 import { getCountryByIso } from '../utils/countries';
 import { WalletCardSkeleton } from '../components/SkeletonLoader';
-import { useQuery, useMutation } from '@apollo/client';
-import { GET_PRESALE_STATUS, GET_MY_BALANCES } from '../apollo/queries';
+import { useQuery, useMutation, useApolloClient } from '@apollo/client';
+import { GET_PRESALE_STATUS, GET_MY_BALANCES, GET_USER_ACCOUNTS } from '../apollo/queries';
 import { REFRESH_ACCOUNT_BALANCE } from '../apollo/mutations';
 import { useCountry } from '../contexts/CountryContext';
 import { useCurrency } from '../hooks/useCurrency';
@@ -112,6 +113,7 @@ export const HomeScreen = () => {
   const { userCountry, selectedCountry } = useCountry();
   const { currency, formatAmount, exchangeRate } = useCurrency();
   const { rate: marketRate, loading: rateLoading } = useSelectedCountryRate();
+  const apollo = useApolloClient();
   const [algorandAddress, setAlgorandAddress] = React.useState<string>('');
   // Show local currency by default if not in US and rate is available
   const [showLocalCurrency, setShowLocalCurrency] = useState(false);
@@ -132,6 +134,7 @@ export const HomeScreen = () => {
     createAccount,
     refreshAccounts,
     getActiveAccountContext,
+    syncWithServer,
   } = useAccount();
   
   // Use atomic account switching
@@ -386,6 +389,112 @@ export const HomeScreen = () => {
     activeAccountId: activeAccount?.id,
     activeAccountType: activeAccount?.type,
   });
+
+  // One-time hard hydrate of accounts from server right after mount/auth
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!isAuthenticated) return;
+        // Only if we still have just a placeholder or nothing
+        if (accounts.length > 1) return;
+        // Ensure we only hydrate after a fresh/finalized token is in place
+        try { await waitForAuthReady(); } catch {}
+        console.log('HomeScreen - Hydrating accounts via GET_USER_ACCOUNTS');
+        const result = await apollo.query({ 
+          query: GET_USER_ACCOUNTS, 
+          fetchPolicy: 'no-cache',
+          context: { skipProactiveRefresh: true },
+        });
+        const list = result?.data?.userAccounts || [];
+        console.log('HomeScreen - GET_USER_ACCOUNTS result count:', list.length);
+        if (!cancelled && list.length >= 1) {
+          try { await syncWithServer(list as any[]); } catch (e) { console.log('HomeScreen - syncWithServer failed', e); }
+        } else if (!cancelled && list.length === 0) {
+          // Fallback: derive accounts from profileData to populate menu promptly
+          const derived: any[] = [];
+          if (profileData?.userProfile) {
+            derived.push({
+              id: 'personal_0',
+              accountType: 'personal',
+              accountIndex: 0,
+              displayName: profileData.userProfile.firstName || profileData.userProfile.username || 'Personal',
+              avatarLetter: (profileData.userProfile.firstName || profileData.userProfile.username || 'P').charAt(0).toUpperCase(),
+              isEmployee: false,
+              employeeRole: null,
+              employeePermissions: null,
+              business: null,
+            });
+          }
+          if (profileData?.businessProfile?.id && profileData.businessProfile.name) {
+            derived.push({
+              id: `business_${profileData.businessProfile.id}_0`,
+              accountType: 'business',
+              accountIndex: 0,
+              displayName: profileData.businessProfile.name,
+              avatarLetter: (profileData.businessProfile.name || 'N').charAt(0).toUpperCase(),
+              isEmployee: false,
+              employeeRole: null,
+              employeePermissions: null,
+              business: {
+                id: profileData.businessProfile.id,
+                name: profileData.businessProfile.name,
+                category: profileData.businessProfile.category,
+              }
+            });
+          }
+          if (derived.length > 0) {
+            console.log('HomeScreen - Using derived accounts from profileData:', derived.length);
+            try { await syncWithServer(derived); } catch (e) { console.log('HomeScreen - derived syncWithServer failed', e); }
+          }
+      }
+    } catch (e) {
+      console.warn('HomeScreen - GET_USER_ACCOUNTS hydrate failed:', (e as any)?.message || e);
+    }
+  })();
+  return () => { cancelled = true; };
+  }, [isAuthenticated, accounts.length, apollo, syncWithServer, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.businessProfile?.id, profileData?.businessProfile?.name, profileData?.businessProfile?.category]);
+
+  // Fallback: if accounts are still empty shortly after auth/profile are ready, derive from profileData immediately
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (accounts.length > 0) return;
+    // Try to populate from profileData without waiting on network
+    const derived: any[] = [];
+    if (profileData?.userProfile) {
+      derived.push({
+        id: 'personal_0',
+        accountType: 'personal',
+        accountIndex: 0,
+        displayName: profileData.userProfile.firstName || profileData.userProfile.username || 'Personal',
+        avatarLetter: (profileData.userProfile.firstName || profileData.userProfile.username || 'P').charAt(0).toUpperCase(),
+        isEmployee: false,
+        employeeRole: null,
+        employeePermissions: null,
+        business: null,
+      });
+    }
+    if (profileData?.businessProfile?.id && profileData.businessProfile.name) {
+      derived.push({
+        id: `business_${profileData.businessProfile.id}_0`,
+        accountType: 'business',
+        accountIndex: 0,
+        displayName: profileData.businessProfile.name,
+        avatarLetter: (profileData.businessProfile.name || 'N').charAt(0).toUpperCase(),
+        isEmployee: false,
+        employeeRole: null,
+        employeePermissions: null,
+        business: {
+          id: profileData.businessProfile.id,
+          name: profileData.businessProfile.name,
+          category: profileData.businessProfile.category,
+        }
+      });
+    }
+    if (derived.length > 0) {
+      (async () => { try { await syncWithServer(derived); } catch {} })();
+    }
+  }, [isAuthenticated, accounts.length, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.businessProfile?.id, profileData?.businessProfile?.name, profileData?.businessProfile?.category, syncWithServer]);
 
   // Save balance visibility preference to Keychain
   const saveBalanceVisibility = async (isVisible: boolean) => {

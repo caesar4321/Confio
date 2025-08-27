@@ -10,6 +10,20 @@ import { AUTH_KEYCHAIN_SERVICE, AUTH_KEYCHAIN_USERNAME } from '../apollo/client'
 import { GET_ME, GET_BUSINESS_PROFILE } from '../apollo/queries';
 import { pushNotificationService } from '../services/pushNotificationService';
 
+// Simple auth readiness gate to coordinate token-dependent queries
+let __authReady = false;
+const __authReadyResolvers: Array<() => void> = [];
+export function signalAuthReady() {
+  __authReady = true;
+  while (__authReadyResolvers.length) {
+    try { __authReadyResolvers.pop()?.(); } catch {}
+  }
+}
+export async function waitForAuthReady() {
+  if (__authReady) return;
+  await new Promise<void>(res => __authReadyResolvers.push(res));
+}
+
 interface UserProfile {
   id: string;
   username: string;
@@ -71,6 +85,26 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
   const [isProfileLoading, setIsProfileLoading] = useState(false);
   const [accountContextTick, setAccountContextTick] = useState(0);
   const apolloClient = useApolloClient();
+
+  // Reset auth gate on mount so cold starts don't inherit a stale ready state
+  useEffect(() => {
+    try { (function resetGate(){ /* scoped */ })(); __authReady = false; } catch {}
+  }, []);
+
+  // Helper to prefetch accounts immediately after auth is aligned
+  const prefetchUserAccounts = async (reason: string) => {
+    try {
+      const { GET_USER_ACCOUNTS } = await import('../apollo/queries');
+      await apolloClient.query({ 
+        query: GET_USER_ACCOUNTS, 
+        fetchPolicy: 'network-only',
+        context: { skipProactiveRefresh: true },
+      });
+      console.log('AuthContext - Prefetched userAccounts (' + reason + ')');
+    } catch (prefetchErr) {
+      console.warn('AuthContext - Failed to prefetch userAccounts (' + reason + '):', prefetchErr);
+    }
+  };
 
   // Mutation for token refresh (used on resume)
   const REFRESH_TOKEN = gql`
@@ -255,16 +289,10 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
                 );
                 console.log('AuthContext - Stored updated JWT token with business context');
                 setAccountContextTick((t) => t + 1);
-
-                // Immediately warm user accounts using the new token/context
-                try {
-                  const { GET_USER_ACCOUNTS } = await import('../apollo/queries');
-                  const { apolloClient } = await import('../apollo/client');
-                  await apolloClient.query({ query: GET_USER_ACCOUNTS, fetchPolicy: 'network-only' });
-                  console.log('AuthContext - Prefetched userAccounts after switching to business context');
-                } catch (prefetchErr) {
-                  console.warn('AuthContext - Failed to prefetch userAccounts after switch:', prefetchErr);
-                }
+                // Now signal that auth is ready: final token is aligned with stored business context
+                try { signalAuthReady(); } catch {}
+                // Warm user accounts using the new token/context
+                prefetchUserAccounts('post-business-switch');
               }
               }
             } catch (syncError) {
@@ -279,10 +307,15 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           } else {
             await refreshProfile('personal');
           }
+          // By this point, token is either aligned to business (signaled above) or personal; unblock dependents.
+          try { signalAuthReady(); } catch {}
+          prefetchUserAccounts('post-profile-load');
         } catch (error) {
           console.error('Error determining account type for profile loading:', error);
           // Fallback to personal profile
           await refreshProfile('personal');
+          try { signalAuthReady(); } catch {}
+          prefetchUserAccounts('post-profile-fallback');
         }
       } else {
         setProfileData(null);
@@ -353,6 +386,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           // Don't block login if FCM registration fails
         }
         
+        try { signalAuthReady(); } catch {}
+        prefetchUserAccounts('post-login');
         navigateToScreen('Main');
       } else {
         console.log('User needs phone verification');
@@ -478,6 +513,7 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
 
             // Mark authenticated and go to Main immediately to avoid splash hanging
             setIsAuthenticated(true);
+            // Do NOT signal authReady here on cold resume; signal after token is aligned to stored context
             navigateToScreen('Main');
 
             // Fire-and-forget prefetch of accounts to warm ProfileMenu
@@ -573,6 +609,8 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
         // Don't block navigation if FCM registration fails
       }
       
+      try { signalAuthReady(); } catch {}
+      prefetchUserAccounts('post-phone-verification');
       navigateToScreen('Main');
     } catch (error) {
       console.error('Error completing phone verification:', error);

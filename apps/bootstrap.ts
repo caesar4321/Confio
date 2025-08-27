@@ -3,9 +3,7 @@ import './src/setup/polyfills';   // URL, crypto, slice, Buffer - MUST be first
 import './src/setup/silenceLogs'; // Silence noisy logs early in app boot
 
 // Apollo Client setup and error messages (after polyfills)
-import { ApolloClient, InMemoryCache, ApolloProvider } from '@apollo/client';
 import { loadErrorMessages, loadDevMessages } from "@apollo/client/dev";
-import { getApiUrl } from './src/config/env';
 
 // @ts-ignore
 if (__DEV__) {
@@ -14,24 +12,7 @@ if (__DEV__) {
   loadErrorMessages();
 }
 
-// Create Apollo Client instance
-const client = new ApolloClient({
-  uri: getApiUrl(),
-  cache: new InMemoryCache(),
-  defaultOptions: {
-    watchQuery: {
-      fetchPolicy: 'network-only',
-      errorPolicy: 'all',
-    },
-    query: {
-      fetchPolicy: 'network-only',
-      errorPolicy: 'all',
-    },
-    mutate: {
-      errorPolicy: 'all',
-    },
-  },
-});
+// Apollo is provided inside App.tsx using the project-authenticated client
 
 // Import React Native components
 import { AppRegistry, Platform, UIManager } from 'react-native';
@@ -48,15 +29,8 @@ suiUtils.toB64 = (bytes) => Buffer.from(bytes).toString('base64');
 import App from './src/App';
 import React from 'react';
 
-// Wrap your app with ApolloProvider
-const AppWithApollo = () => (
-  React.createElement(ApolloProvider, { client: client },
-    React.createElement(App, null)
-  )
-);
-
 // Register the app
-AppRegistry.registerComponent(appName, () => AppWithApollo);
+AppRegistry.registerComponent(appName, () => App);
 
 // Configure react-native-screens defensively to avoid sheet prop crashes
 try {

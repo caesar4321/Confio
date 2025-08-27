@@ -75,10 +75,8 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
     accounts: displayAccounts.map(acc => ({ id: acc.id, name: acc.name, avatar: acc.avatar, type: acc.type }))
   });
 
-  if (!currentAccount) {
-    console.log('ProfileMenu: No current account found, returning null');
-    return null;
-  }
+  // Do not return null — render with a safe placeholder so the menu never disappears mid-hydration
+  const headerAccount = currentAccount || ({ id: 'personal_0', name: 'Personal', type: 'personal', avatar: 'P' } as Account);
 
   return (
     <Modal
@@ -97,12 +95,12 @@ export const ProfileMenu: React.FC<ProfileMenuProps> = ({
           <View style={styles.header}>
             <View style={styles.accountInfo}>
               <View style={styles.avatarContainer}>
-                <Text style={styles.avatarText}>{currentAccount.avatar}</Text>
+                <Text style={styles.avatarText}>{headerAccount.avatar}</Text>
               </View>
               <View style={styles.accountDetails}>
-                <Text style={styles.accountName}>{currentAccount.name}</Text>
+                <Text style={styles.accountName}>{headerAccount.name}</Text>
                 <Text style={styles.accountType}>
-                  {currentAccount.type.toLowerCase() === "personal" 
+                  {headerAccount.type.toLowerCase() === "personal" 
                     ? "Personal"
                     : "Negocio"}
                 </Text>
