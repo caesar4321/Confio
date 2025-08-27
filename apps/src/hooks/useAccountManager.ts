@@ -4,6 +4,7 @@ import { GET_USER_ACCOUNTS } from '../apollo/queries';
 import { AuthService } from '../services/authService';
 import { AccountManager, StoredAccount, AccountContext } from '../utils/accountManager';
 import { useAuth } from '../contexts/AuthContext';
+import { waitForAuthReady } from '../contexts/AuthContext';
 
 export interface UseAccountManagerReturn {
   // Account state
@@ -33,11 +34,33 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   const [accounts, setAccounts] = useState<StoredAccount[]>([]);
   const [isLoading, setIsLoading] = useState(false); // Start as false since query handles loading
   const [activeAccountContext, setActiveAccountContext] = useState<AccountContext | null>(null);
+  const [authGatePassed, setAuthGatePassed] = useState(false);
 
   const authService = AuthService.getInstance();
   const accountManager = AccountManager.getInstance();
   const apolloClient = useApolloClient();
   const { profileData, refreshProfile, isAuthenticated, isLoading: authLoading, accountContextTick } = useAuth();
+
+  // Helpers
+  const dedupeById = useCallback((list: StoredAccount[]): StoredAccount[] => {
+    const m = new Map<string, StoredAccount>();
+    list.forEach(a => m.set(a.id, a));
+    return Array.from(m.values());
+  }, []);
+
+  const ensureActiveAccountFrom = useCallback(async (list: StoredAccount[]) => {
+    try {
+      const ctx = await authService.getActiveAccountContext();
+      const expectedId = ctx.type === 'business' && ctx.businessId
+        ? `business_${ctx.businessId}_${ctx.index}`
+        : `personal_${ctx.index}`;
+      const pick = list.find(a => a.id === expectedId) || list[0];
+      if (pick) {
+        const addr = await authService.getAlgorandAddress();
+        setActiveAccount({ ...pick, algorandAddress: addr ?? '' });
+      }
+    } catch {}
+  }, [authService]);
   
   // Debug profile loading
   console.log('useAccountManager - Profile state:', {
@@ -49,13 +72,20 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     businessProfileId: profileData?.businessProfile?.id
   });
 
+  // Delay any server-bound account queries until the auth gate is truly ready
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try { await waitForAuthReady(); } catch {}
+      if (!cancelled) setAuthGatePassed(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // Fetch accounts from server using GraphQL
   const { data: serverAccountsData, loading: serverLoading, error: serverError, refetch: refetchServerAccounts } = useQuery(GET_USER_ACCOUNTS, {
-    // Avoid issuing unauthenticated requests on app startup/resume
-    skip: !isAuthenticated || authLoading,
-    fetchPolicy: 'network-only',
-    errorPolicy: 'all',
-    notifyOnNetworkStatusChange: true,
+    // Fully disable the implicit watch on cold start; we'll drive hydration manually
+    skip: true,
   } as any);
 
   // Convert raw server account objects to StoredAccount[]
@@ -106,6 +136,8 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   const loadAccounts = useCallback(async () => {
     try {
       setIsLoading(true);
+      // Ensure we have a fresh, finalized access token before reading/using server data
+      try { await waitForAuthReady(); } catch {}
       
       // Get server accounts
       const serverAccounts = serverAccountsData?.userAccounts || [];
@@ -121,7 +153,7 @@ export const useAccountManager = (): UseAccountManagerReturn => {
       
       // Convert server accounts to StoredAccount format
       // Filter out any null accounts first
-      const convertedAccounts: StoredAccount[] = convertServerAccounts(serverAccounts);
+      const convertedAccounts: StoredAccount[] = dedupeById(convertServerAccounts(serverAccounts));
       setAccounts(convertedAccounts);
       
       // Get active account context BEFORE deciding to create default account
@@ -205,6 +237,8 @@ export const useAccountManager = (): UseAccountManagerReturn => {
         );
         // Do NOT reset to null here; keep the old value until we know more
         console.log('loadAccounts - Keeping existing activeAccount, not setting to null');
+        // As a safety, ensure we still have a valid activeAccount selection
+        await ensureActiveAccountFrom(convertedAccounts);
       }
       
       // Debug the active account state
@@ -225,15 +259,61 @@ export const useAccountManager = (): UseAccountManagerReturn => {
     } finally {
       setIsLoading(false);
     }
-  }, [authService, accountManager, serverAccountsData, profileData]);
+  }, [authService, accountManager, serverAccountsData, profileData, dedupeById, ensureActiveAccountFrom]);
 
   // Load accounts on mount and when server data changes
   useEffect(() => {
-    // Load accounts when server data is available or error occurs
-    if (!serverLoading && (serverAccountsData || serverError)) {
-      loadAccounts();
+    if (authGatePassed && isAuthenticated && !authLoading) {
+      // Kick a manual refresh as the single source of truth
+      refreshAccounts();
     }
-  }, [serverAccountsData, serverLoading, serverError, loadAccounts]);
+  }, [authGatePassed, isAuthenticated, authLoading, refreshAccounts]);
+
+  // Late-arriving business profile: if we only have personal (or nothing), add a business placeholder
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const bp: any = (profileData as any)?.businessProfile;
+    if (!bp?.id || !bp?.name) return;
+    setAccounts(prev => {
+      const hasBusiness = prev.some(a => a.type === 'business');
+      if (hasBusiness) return prev;
+      if (prev.length > 1) return prev; // already populated sufficiently
+      const placeholder = {
+        id: `business_${bp.id}_0`,
+        name: bp.name,
+        type: 'business' as const,
+        index: 0,
+        phone: undefined,
+        category: bp.category,
+        avatar: (bp.name || 'N').charAt(0).toUpperCase(),
+        algorandAddress: '',
+        createdAt: new Date().toISOString(),
+        isActive: true,
+      } as StoredAccount;
+      return [...prev, placeholder];
+    });
+    (async () => {
+      try {
+        const ctx = await authService.getActiveAccountContext();
+        if (ctx.type === 'business' && ctx.businessId) {
+          const expectedId = `business_${ctx.businessId}_${ctx.index}`;
+          const addr = await authService.getAlgorandAddress();
+          setActiveAccount(prev => prev && prev.id === expectedId ? prev : ({
+            id: expectedId,
+            name: bp.name,
+            type: 'business',
+            index: ctx.index,
+            phone: undefined,
+            category: bp.category,
+            avatar: (bp.name || 'N').charAt(0).toUpperCase(),
+            algorandAddress: addr ?? '',
+            createdAt: new Date().toISOString(),
+            isActive: true,
+          } as StoredAccount));
+        }
+      } catch {}
+    })();
+  }, [isAuthenticated, profileData?.businessProfile?.id, profileData?.businessProfile?.name, profileData?.businessProfile?.category]);
 
   // Reload accounts when active account context changes (for account switching)
   useEffect(() => {
@@ -464,55 +544,146 @@ export const useAccountManager = (): UseAccountManagerReturn => {
   const refreshAccounts = useCallback(async () => {
     try {
       console.log('refreshAccounts: forcing network fetch of userAccounts');
+      // Ensure tokens are fresh/finalized before forcing any network fetch
+      try { await waitForAuthReady(); } catch {}
+      // Seed fast placeholder into AccountContext so UI never empties
+      try {
+        const ctx = await authService.getActiveAccountContext();
+        const seedName = ctx.type === 'business'
+          ? (profileData?.businessProfile?.name || 'Negocio')
+          : (profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'Personal');
+        const seedAvatar = (seedName || 'N').charAt(0).toUpperCase();
+        const seedId = ctx.type === 'business' && ctx.businessId
+          ? `business_${ctx.businessId}_${ctx.index}`
+          : `personal_${ctx.index}`;
+        const seed: StoredAccount = {
+          id: seedId,
+          name: seedName,
+          type: ctx.type,
+          index: ctx.index,
+          phone: ctx.type === 'personal' ? profileData?.userProfile?.phoneNumber : undefined,
+          category: profileData?.businessProfile?.category,
+          avatar: seedAvatar,
+          algorandAddress: '',
+          createdAt: new Date().toISOString(),
+          isActive: true,
+        } as StoredAccount;
+        setAccounts(prev => (prev.length === 0 ? [seed] : prev));
+      } catch {}
       const { GET_USER_ACCOUNTS } = await import('../apollo/queries');
 
       // First attempt
-      const result1 = await apolloClient.query({ query: GET_USER_ACCOUNTS, fetchPolicy: 'no-cache' });
+      const result1 = await apolloClient.query({
+        query: GET_USER_ACCOUNTS,
+        fetchPolicy: 'no-cache',
+        errorPolicy: 'all',
+        context: { fetchOptions: { cache: 'no-store' } as any, skipProactiveRefresh: true },
+      });
       const list1 = result1?.data?.userAccounts || [];
       console.log('refreshAccounts: first result count =', list1.length);
+      if ((result1 as any)?.errors?.length) {
+        console.warn('GET_USER_ACCOUNTS errors:', (result1 as any).errors.map((e: any) => e.message));
+      }
 
       let serverAccounts = list1;
       if (serverAccounts.length === 0) {
         // Retry quickly once to beat any just-switched-context race
         await new Promise((r) => setTimeout(r, 300));
-        const result2 = await apolloClient.query({ query: GET_USER_ACCOUNTS, fetchPolicy: 'no-cache' });
+        const result2 = await apolloClient.query({
+          query: GET_USER_ACCOUNTS,
+          fetchPolicy: 'no-cache',
+          errorPolicy: 'all',
+          context: { fetchOptions: { cache: 'no-store' } as any, skipProactiveRefresh: true },
+        });
         const list2 = result2?.data?.userAccounts || [];
         console.log('refreshAccounts: retry result count =', list2.length);
+        if ((result2 as any)?.errors?.length) {
+          console.warn('GET_USER_ACCOUNTS retry errors:', (result2 as any).errors.map((e: any) => e.message));
+        }
         serverAccounts = list2;
       }
 
-      const converted = convertServerAccounts(serverAccounts);
+      const converted = dedupeById(convertServerAccounts(serverAccounts));
       console.log('refreshAccounts: converted accounts =', converted.map(a => a.id));
 
-      // Always provide at least one safe placeholder so header/menu never disappears
-      setAccounts(converted.length > 0 ? converted : [
-        {
-          id: 'personal_0',
-          name: profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'Personal',
-          type: 'personal',
-          index: 0,
-          phone: profileData?.userProfile?.phoneNumber || undefined,
-          category: undefined,
-          avatar: (profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'P').charAt(0).toUpperCase(),
-          algorandAddress: '',
-          createdAt: new Date().toISOString(),
-          isActive: true,
+      // Always provide at least one safe placeholder so header/menu never disappears.
+      // If we have a business profile available, include it too so the menu shows both entries.
+      if (converted.length > 0) {
+        setAccounts(converted);
+        try {
+          await ensureActiveAccountFrom(converted);
+        } catch {}
+      } else {
+        const personalName = profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'Personal';
+        const personalAvatar = (personalName || 'P').charAt(0).toUpperCase();
+        const placeholders: StoredAccount[] = [
+          {
+            id: 'personal_0',
+            name: personalName,
+            type: 'personal',
+            index: 0,
+            phone: profileData?.userProfile?.phoneNumber || undefined,
+            category: undefined,
+            avatar: personalAvatar,
+            algorandAddress: '',
+            createdAt: new Date().toISOString(),
+            isActive: true,
+          }
+        ];
+        const bp = (profileData as any)?.businessProfile;
+        if (bp?.id && bp?.name) {
+          placeholders.push({
+            id: `business_${bp.id}_0`,
+            name: bp.name,
+            type: 'business',
+            index: 0,
+            phone: undefined,
+            category: bp.category,
+            avatar: (bp.name || 'N').charAt(0).toUpperCase(),
+            algorandAddress: '',
+            createdAt: new Date().toISOString(),
+            isActive: true,
+          } as StoredAccount);
         }
-      ]);
+        setAccounts(prev => (prev.length > 0 ? prev : placeholders));
+        try {
+          await ensureActiveAccountFrom(placeholders);
+        } catch {}
+      }
     } catch (error) {
       console.error('Error refreshing accounts from server:', error);
     }
-  }, [apolloClient, convertServerAccounts, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.userProfile?.phoneNumber]);
+  }, [apolloClient, convertServerAccounts, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.userProfile?.phoneNumber, dedupeById, ensureActiveAccountFrom]);
 
   const syncWithServer = useCallback(async (serverAccounts: any[]) => {
     try {
-      // Since we're now fetching directly from the server, we just need to refetch
-      await refetchServerAccounts();
+      // Convert and populate context immediately
+      const converted = convertServerAccounts(serverAccounts || []);
+      if (converted.length > 0) {
+        setAccounts(converted);
+        try { await ensureActiveAccountFrom(converted); } catch {}
+      } else {
+        // Maintain at least a minimal placeholder
+        setAccounts(prev => prev.length > 0 ? prev : [
+          {
+            id: 'personal_0',
+            name: profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'Personal',
+            type: 'personal',
+            index: 0,
+            phone: profileData?.userProfile?.phoneNumber || undefined,
+            category: undefined,
+            avatar: (profileData?.userProfile?.firstName || profileData?.userProfile?.username || 'P').charAt(0).toUpperCase(),
+            algorandAddress: '',
+            createdAt: new Date().toISOString(),
+            isActive: true,
+          }
+        ]);
+      }
     } catch (error) {
       console.error('Error syncing with server:', error);
       throw error;
     }
-  }, [refetchServerAccounts]);
+  }, [convertServerAccounts, authService, profileData?.userProfile?.firstName, profileData?.userProfile?.username, profileData?.userProfile?.phoneNumber]);
 
   // Combine loading states
   const combinedLoading = isLoading || serverLoading;

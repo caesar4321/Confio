@@ -626,10 +626,11 @@ class Query(EmployeeQueries, graphene.ObjectType):
 					account_type=account_type,
 					account_index=account_index
 				)
-				# Mirror previous working logic: always fetch live from blockchain.
-				# Efficient due to single account_info snapshot under the hood.
-				from blockchain.balance_service import BalanceService
-				all_balances = BalanceService.get_all_balances(account, force_refresh=True)
+
+			# Mirror previous working logic: always fetch live from blockchain.
+			# Efficient due to single account_info snapshot under the hood.
+			from blockchain.balance_service import BalanceService
+			all_balances = BalanceService.get_all_balances(account, force_refresh=True)
 			return BalancesType(
 				cusd=f"{all_balances['cusd']['amount']:.2f}",
 				confio=f"{all_balances['confio']['amount']:.2f}",

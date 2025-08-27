@@ -38,19 +38,47 @@ const httpLink = createHttpLink({
   uri: getApiUrl(),
 });
 
-let isRefreshing = false;
-let pendingRequests: any[] = [];
+// Single-flight refresh mutex shared across links
+let refreshPromise: Promise<string> | null = null;
 
-const processQueue = (error: any = null, token: string | null = null) => {
-  pendingRequests.forEach(callback => {
-    if (error) {
-      callback(error);
-    } else {
-      callback(token);
+async function getStoredTokens(): Promise<{ accessToken?: string; refreshToken?: string; } | null> {
+  try {
+    const credentials = await Keychain.getGenericPassword({
+      service: AUTH_KEYCHAIN_SERVICE,
+      username: AUTH_KEYCHAIN_USERNAME
+    });
+    if (!credentials) return null;
+    const parsed = JSON.parse((credentials as any).password || '{}');
+    return { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken };
+  } catch (e) {
+    return null;
+  }
+}
+
+async function performRefreshWithFetch(rt: string): Promise<string> {
+  const body = {
+    query: `mutation RefreshToken($refreshToken: String!) {\n      refreshToken(refreshToken: $refreshToken) {\n        token\n        payload\n        refreshExpiresIn\n      }\n    }`,
+    variables: { refreshToken: rt },
+  };
+  const res = await fetch(getApiUrl(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, // no Authorization
+    body: JSON.stringify(body),
+  } as any);
+  const json = await res.json();
+  const newAccess = json?.data?.refreshToken?.token;
+  if (!newAccess) throw new Error('Failed to refresh token');
+  await Keychain.setGenericPassword(
+    AUTH_KEYCHAIN_USERNAME,
+    JSON.stringify({ accessToken: newAccess, refreshToken: rt }),
+    {
+      service: AUTH_KEYCHAIN_SERVICE,
+      username: AUTH_KEYCHAIN_USERNAME,
+      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
     }
-  });
-  pendingRequests = [];
-};
+  );
+  return newAccess as string;
+}
 
 const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: ErrorResponse): void | ApolloObservable<FetchResult> => {
     console.log('[Apollo][onError] op:', operation.operationName);
@@ -71,106 +99,42 @@ const errorLink = onError(({ graphQLErrors, networkError, operation, forward }: 
       }
 
       if (err.message === 'Signature has expired' || err.message === 'Invalid payload') {
-        // Token has expired or is invalid, try to refresh
-        if (!isRefreshing) {
-          isRefreshing = true;
-          
-          return new ApolloObservable<FetchResult>((observer) => {
-            (async () => {
-              try {
-                const credentials = await Keychain.getGenericPassword({
-                  service: AUTH_KEYCHAIN_SERVICE,
-                  username: AUTH_KEYCHAIN_USERNAME
-                });
-                
-                if (!credentials) {
-                  throw new Error('No refresh token found');
-                }
+        // Token has expired or is invalid, perform a single-flight refresh
+        return new ApolloObservable<FetchResult>((observer) => {
+          (async () => {
+            try {
+              const stored = await getStoredTokens();
+              const rt = stored?.refreshToken;
+              if (!rt) throw new Error('No refresh token found');
 
-                // Parse tokens from JSON
-                const tokens = JSON.parse(credentials.password);
-                if (!tokens.refreshToken) {
-                  throw new Error('No refresh token found in stored data');
-                }
-                const refreshToken = tokens.refreshToken;
-                const decoded = jwtDecode<CustomJwtPayload>(refreshToken);
-                
-                if (decoded.type !== 'refresh') {
-                  throw new Error('Invalid refresh token type');
-                }
-
-                // Check if refresh token is expired
-                const currentTime = Date.now() / 1000;
-                if (decoded.exp && decoded.exp < currentTime) {
-                  throw new Error('Refresh token expired');
-                }
-
-                const { data } = await apolloClient.mutate({
-                  mutation: REFRESH_TOKEN,
-                  variables: { refreshToken: refreshToken }
-                });
-
-                if (data?.refreshToken?.token) {
-                  // Store new access token while keeping the existing refresh token
-                  const newTokens = {
-                    accessToken: data.refreshToken.token,
-                    refreshToken: refreshToken
-                  };
-                  
-                  await Keychain.setGenericPassword(
-                    AUTH_KEYCHAIN_USERNAME,
-                    JSON.stringify(newTokens),
-                    {
-                      service: AUTH_KEYCHAIN_SERVICE,
-                      username: AUTH_KEYCHAIN_USERNAME,
-                      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-                    }
-                  );
-                  
-                  // Add the first request to the queue and process all requests
-                  pendingRequests.push((token: string | null) => {
-                    if (token) {
-                      forward(operation).subscribe(observer);
-                    } else {
-                      observer.error(new Error('Token refresh failed'));
-                    }
-                  });
-                  processQueue(null, data.refreshToken.token);
-                } else {
-                  throw new Error('Failed to refresh token');
-                }
-              } catch (error) {
-                processQueue(error);
-                // Only clear tokens if refresh token is expired or invalid
-                if (error instanceof Error && 
-                    (error.message === 'Refresh token expired' || 
-                     error.message === 'Invalid refresh token type' ||
-                     error.message === 'No refresh token found' ||
-                     error.message.includes('Invalid refresh token') ||
-                     error.message === 'Invalid payload')) {
-                  // v10 API: resetGenericPassword accepts options object
-                  await Keychain.resetGenericPassword({
-                    service: AUTH_KEYCHAIN_SERVICE
-                  });
-                }
-                observer.error(error);
-              } finally {
-                isRefreshing = false;
+              if (!refreshPromise) {
+                refreshPromise = (async () => {
+                  try {
+                    return await performRefreshWithFetch(rt);
+                  } finally {
+                    // Do not null here; let awaiters read the resolved token and then clear below
+                  }
+                })();
               }
-            })();
-          });
-        } else {
-          // Add request to pending queue
-          return new ApolloObservable<FetchResult>((observer) => {
-            pendingRequests.push((token: string | null) => {
-              if (token) {
-                forward(operation).subscribe(observer);
-              } else {
-                observer.error(new Error('Token refresh failed'));
+
+              const newToken = await refreshPromise;
+              // Clear the promise for next time
+              refreshPromise = null;
+
+              // Retry the original operation with new token. Auth link will attach it.
+              forward(operation).subscribe(observer);
+            } catch (error) {
+              // Only clear tokens if refresh token is expired or invalid
+              if (error instanceof Error && 
+                  (error.message.includes('expired') ||
+                   error.message.includes('Invalid refresh token') ||
+                   error.message.includes('No refresh token found'))) {
+                await Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE });
               }
-            });
-          });
-        }
+              observer.error(error);
+            }
+          })();
+        });
       }
     }
     }
@@ -221,7 +185,7 @@ const authLink = setContext(async (operation, previousContext) => {
     };
   }
 
-  // Skip token refresh for the refresh token mutation itself
+  // Skip token refresh/auth for the refresh token mutation itself
   if (operation.operationName === 'RefreshToken') {
     if (AUTH_DEBUG) console.log('Skipping token refresh for RefreshToken operation');
     return { 
@@ -314,95 +278,49 @@ const authLink = setContext(async (operation, previousContext) => {
 
     // Check if token is expired or about to expire (within 5 minutes)
     try {
-      const decoded = jwtDecode<CustomJwtPayload>(token);
+      let decoded = jwtDecode<CustomJwtPayload>(token);
       if (AUTH_DEBUG) console.log('Decoded token payload:', {
         user_id: decoded.user_id,
         exp: decoded.exp,
         type: decoded.type,
         currentTime: Date.now() / 1000
       });
+      // Determine per-operation refresh behavior as early as possible
+      const ctx = (typeof (operation as any).getContext === 'function') ? (operation as any).getContext() : previousContext;
+      const hardSkipForAccounts = operation.operationName === 'GetUserAccounts';
+      const shouldSkipProactive = hardSkipForAccounts || !!(ctx?.skipProactiveRefresh);
+      if (AUTH_DEBUG) {
+        console.log('[AuthLink] Flags for', operation.operationName, {
+          hardSkipForAccounts,
+          skipProactiveRefreshCtx: !!(ctx?.skipProactiveRefresh),
+        });
+      }
       
       const currentTime = Date.now() / 1000;
       const fiveMinutes = 5 * 60; // 5 minutes in seconds
       
-      if (decoded.exp && (decoded.exp < currentTime || decoded.exp - currentTime < fiveMinutes)) {
+      // For GetUserAccounts we do not refresh here; allow request to hit server first
+      if (!hardSkipForAccounts && decoded.exp && (decoded.exp < currentTime || decoded.exp - currentTime < fiveMinutes)) {
         if (AUTH_DEBUG) console.log('Token expired or about to expire, refreshing...');
-        
-        // Only refresh if we're not already refreshing
-        if (!isRefreshing) {
-          isRefreshing = true;
-          
-          try {
-            const { data } = await apolloClient.mutate({
-              mutation: REFRESH_TOKEN,
-              variables: { refreshToken: refreshToken }
-            });
-
-            if (data?.refreshToken?.token) {
-              // Store new tokens in JSON format
-              await Keychain.setGenericPassword(
-                AUTH_KEYCHAIN_USERNAME,
-                JSON.stringify({
-                  accessToken: data.refreshToken.token,
-                  refreshToken: refreshToken // Keep the existing refresh token
-                }),
-                {
-                  service: AUTH_KEYCHAIN_SERVICE,
-                  username: AUTH_KEYCHAIN_USERNAME,
-                  accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-                }
-              );
-              
-              // Use the new token for this request
-              return {
-                headers: {
-                  ...headers,
-                  Authorization: `JWT ${data.refreshToken.token}`
-                  // Account context is embedded in the JWT token
-                }
-              };
-            } else {
-              throw new Error('Failed to refresh token');
-            }
-          } catch (error) {
-            console.error('Token refresh failed:', error);
-            // Only clear tokens if refresh token is expired or invalid
-            if (error instanceof Error && 
-                (error.message === 'Refresh token expired' || 
-                 error.message === 'Invalid refresh token type' ||
-                 error.message === 'No refresh token found' ||
-                 error.message.includes('Invalid refresh token'))) {
-              await Keychain.resetGenericPassword({ 
-                service: AUTH_KEYCHAIN_SERVICE,
-                username: AUTH_KEYCHAIN_USERNAME
-              });
-            }
-            return { 
-              headers: {
-                ...headers,
-                'Content-Type': 'application/json',
-              }
-            };
-          } finally {
-            isRefreshing = false;
+        try {
+          if (!refreshPromise) {
+            refreshPromise = (async () => {
+              return await performRefreshWithFetch(refreshToken);
+            })();
           }
-        } else {
-          // If we're already refreshing, wait for the refresh to complete
-          return new Promise((resolve) => {
-            pendingRequests.push((token: string | null) => {
-              if (token) {
-                resolve({
-                  headers: {
-                    ...headers,
-                    Authorization: `JWT ${token}`
-                    // Account context is embedded in the JWT token
-                  }
-                });
-              } else {
-                resolve({ headers });
-              }
-            });
-          });
+          const newAccess = await refreshPromise;
+          // Clear the promise so a later need can refresh again
+          refreshPromise = null;
+          return {
+            headers: {
+              ...headers,
+              Authorization: `JWT ${newAccess}`
+            }
+          };
+        } catch (error) {
+          console.error('Token refresh failed:', error);
+          try { await Keychain.resetGenericPassword({ service: AUTH_KEYCHAIN_SERVICE }); } catch {}
+          return { headers: { ...headers, 'Content-Type': 'application/json' } };
         }
       }
 
@@ -425,47 +343,67 @@ const authLink = setContext(async (operation, previousContext) => {
       }
 
       // Proactively refresh if access token is expired or near expiry
-      try {
-        const now = Math.floor(Date.now() / 1000);
-        const exp = (decoded as any)?.exp ?? 0;
-        const willExpireSoon = exp <= now + 30; // 30s safety window
-        if (willExpireSoon) {
-          if (AUTH_DEBUG) console.log('Access token expired/expiring, attempting proactive refresh');
-          const credentialsForRefresh = await Keychain.getGenericPassword({
-            service: AUTH_KEYCHAIN_SERVICE,
-            username: AUTH_KEYCHAIN_USERNAME
-          });
-          if (credentialsForRefresh && credentialsForRefresh.password) {
-            const stored = JSON.parse(credentialsForRefresh.password);
-            const rt = stored.refreshToken;
-            if (rt) {
-              // Avoid recursion on RefreshToken mutation
-              const { data } = await apolloClient.mutate({
-                mutation: REFRESH_TOKEN,
-                variables: { refreshToken: rt },
-                context: { skipAuth: true }
-              });
-              if (data?.refreshToken?.token) {
-                const newAccess = data.refreshToken.token;
-                await Keychain.setGenericPassword(
-                  AUTH_KEYCHAIN_USERNAME,
-                  JSON.stringify({ accessToken: newAccess, refreshToken: rt }),
-                  {
-                    service: AUTH_KEYCHAIN_SERVICE,
-                    username: AUTH_KEYCHAIN_USERNAME,
-                    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
-                  }
-                );
-                // Replace local token/decoded with refreshed values
-                token = newAccess;
-                decoded = jwtDecode<CustomJwtPayload>(newAccess);
-                if (AUTH_DEBUG) console.log('Proactive refresh succeeded');
+      // Allow callers to opt-out (e.g., critical bootstraps like GetUserAccounts)
+      // For GetUserAccounts specifically, avoid any refresh inside authLink
+      // to guarantee the operation reaches httpLink (server can trigger refresh flow if needed).
+      if (hardSkipForAccounts) {
+        if (AUTH_DEBUG) console.log('[AuthLink] Hard-skip ALL refresh for GetUserAccounts, attaching existing token only');
+        return {
+          headers: {
+            ...headers,
+            Authorization: `JWT ${token}`,
+          }
+        } as any;
+      }
+      if (!shouldSkipProactive) {
+        try {
+          const now = Math.floor(Date.now() / 1000);
+          const exp = (decoded as any)?.exp ?? 0;
+          const willExpireSoon = exp <= now + 30; // 30s safety window
+          if (willExpireSoon) {
+            if (AUTH_DEBUG) console.log('Access token expired/expiring, attempting proactive refresh');
+            const credentialsForRefresh = await Keychain.getGenericPassword({
+              service: AUTH_KEYCHAIN_SERVICE,
+              username: AUTH_KEYCHAIN_USERNAME
+            });
+            if (credentialsForRefresh && (credentialsForRefresh as any).password) {
+              const stored = JSON.parse((credentialsForRefresh as any).password);
+              const rt = stored.refreshToken;
+              if (rt) {
+                // Avoid recursion on RefreshToken mutation
+                const { data } = await apolloClient.mutate({
+                  mutation: REFRESH_TOKEN,
+                  variables: { refreshToken: rt },
+                  context: { skipAuth: true }
+                });
+                if (data?.refreshToken?.token) {
+                  const newAccess = data.refreshToken.token;
+                  await Keychain.setGenericPassword(
+                    AUTH_KEYCHAIN_USERNAME,
+                    JSON.stringify({ accessToken: newAccess, refreshToken: rt }),
+                    {
+                      service: AUTH_KEYCHAIN_SERVICE,
+                      username: AUTH_KEYCHAIN_USERNAME,
+                      accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED
+                    }
+                  );
+                  // Replace local token/decoded with refreshed values
+                  token = newAccess;
+                  decoded = jwtDecode<CustomJwtPayload>(newAccess);
+                  if (AUTH_DEBUG) console.log('Proactive refresh succeeded');
+                }
               }
             }
           }
+        } catch (refreshError) {
+          console.error('Proactive refresh error:', refreshError);
         }
-      } catch (refreshError) {
-        console.error('Proactive refresh error:', refreshError);
+      } else if (AUTH_DEBUG) {
+        console.log(
+          hardSkipForAccounts
+            ? 'Skipping proactive refresh (hard) for GetUserAccounts'
+            : 'Skipping proactive refresh per request context for ' + operation.operationName
+        );
       }
 
       // Always include the token in the header for authenticated requests
