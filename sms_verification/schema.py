@@ -57,6 +57,23 @@ def _sns_client():
     return boto3.client('sns', **kwargs)
 
 
+def _should_use_sender_id(iso_code: str) -> bool:
+    sid = getattr(settings, 'SMS_SENDER_ID', None)
+    if not sid:
+        return False
+    mode = getattr(settings, 'SMS_SENDER_ID_MODE', 'default_on').lower()
+    if mode == 'never':
+        return False
+    if mode == 'always':
+        return True
+    if mode == 'allowlist':
+        allowed = set(getattr(settings, 'SMS_SENDER_ID_COUNTRIES', set()))
+        return iso_code.upper() in allowed
+    # default_on
+    deny = set(getattr(settings, 'SMS_SENDER_ID_DENYLIST', set()))
+    return iso_code.upper() not in deny
+
+
 class SMSVerificationType(DjangoObjectType):
     class Meta:
         model = SMSVerification
@@ -104,15 +121,26 @@ class InitiateSMSVerification(graphene.Mutation):
             attrs = {
                 'AWS.SNS.SMS.SMSType': {'DataType': 'String', 'StringValue': 'Transactional'}
             }
-            sid = getattr(settings, 'SMS_SENDER_ID', None)
+            iso_upper = country_code.upper()
+            if _should_use_sender_id(iso_upper):
+                sid = getattr(settings, 'SMS_SENDER_ID', None)
+                if sid:
+                    attrs['AWS.SNS.SMS.SenderID'] = {'DataType': 'String', 'StringValue': sid}
             ono = getattr(settings, 'SMS_ORIGINATION_NUMBER', None)
-            if sid:
-                attrs['AWS.SNS.SMS.SenderID'] = {'DataType': 'String', 'StringValue': sid}
             if ono:
                 attrs['AWS.SNS.SMS.OriginationNumber'] = {'DataType': 'String', 'StringValue': ono}
 
             client = _sns_client()
-            resp = client.publish(PhoneNumber=phone_e164, Message=msg, MessageAttributes=attrs)
+            try:
+                resp = client.publish(PhoneNumber=phone_e164, Message=msg, MessageAttributes=attrs)
+            except Exception as e:
+                emsg = str(e)
+                # Fallback: retry without SenderID if country rejects identity
+                if 'INVALID_IDENTITY_FOR_DESTINATION_COUNTRY' in emsg or 'InvalidIdentityForDestinationCountry' in emsg:
+                    attrs.pop('AWS.SNS.SMS.SenderID', None)
+                    resp = client.publish(PhoneNumber=phone_e164, Message=msg, MessageAttributes=attrs)
+                else:
+                    raise
             logger.info("SNS publish MessageId=%s", resp.get('MessageId'))
 
             return InitiateSMSVerification(success=True, error=None)
