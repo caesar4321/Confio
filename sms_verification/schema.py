@@ -1,0 +1,219 @@
+import graphene
+from graphene_django import DjangoObjectType
+from django.utils import timezone
+from datetime import timedelta
+from django.conf import settings
+from django.db import IntegrityError
+import boto3
+import hmac
+import hashlib
+import secrets
+import logging
+import re
+
+from .models import SMSVerification
+from users.country_codes import COUNTRY_CODES
+from users.phone_utils import normalize_phone
+from users.models import Account
+from blockchain.invite_send_mutations import ClaimInviteForPhone
+
+logger = logging.getLogger(__name__)
+
+
+def _validate_country_iso(iso_code: str) -> bool:
+    return any(row[2] == iso_code for row in COUNTRY_CODES)
+
+
+def _numeric_code_for_iso(iso_code: str) -> str:
+    for row in COUNTRY_CODES:
+        if row[2] == iso_code:
+            return row[1].replace('+', '')
+    return ''
+
+
+def _format_e164(local_phone: str, iso_code: str) -> str:
+    digits = re.sub(r"\D", "", local_phone or "")
+    cc = _numeric_code_for_iso(iso_code)
+    return f"+{cc}{digits}"
+
+
+def _hmac_code(phone_e164: str, code: str) -> str:
+    key = (getattr(settings, 'OTP_HASH_KEY', None) or settings.SECRET_KEY).encode()
+    return hmac.new(key, f"{phone_e164}:{code}".encode(), hashlib.sha256).hexdigest()
+
+
+def _gen_code(n: int = 6) -> str:
+    return f"{secrets.randbelow(10**n):0{n}d}"
+
+
+def _sns_client():
+    region = getattr(settings, 'SMS_SNS_REGION', 'eu-central-2')
+    kwargs = {'region_name': region}
+    if getattr(settings, 'AWS_ACCESS_KEY_ID', None) and getattr(settings, 'AWS_SECRET_ACCESS_KEY', None):
+        kwargs.update(
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        )
+    return boto3.client('sns', **kwargs)
+
+
+class SMSVerificationType(DjangoObjectType):
+    class Meta:
+        model = SMSVerification
+        fields = ('id', 'phone_number', 'created_at', 'expires_at', 'is_verified')
+
+
+class InitiateSMSVerification(graphene.Mutation):
+    class Arguments:
+        phone_number = graphene.String(required=True)
+        country_code = graphene.String(required=True)  # ISO alpha-2
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, phone_number, country_code):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return InitiateSMSVerification(success=False, error="Authentication required")
+
+        if not _validate_country_iso(country_code):
+            return InitiateSMSVerification(success=False, error="Invalid country code")
+
+        phone_e164 = _format_e164(phone_number, country_code)
+        ttl_sec = getattr(settings, 'SMS_CODE_TTL_SECONDS', 600)
+
+        try:
+            # Generate and store (hashed)
+            code = _gen_code(6)
+            code_hash = _hmac_code(phone_e164, code)
+
+            # Clean up previous unverified for this phone
+            SMSVerification.objects.filter(user=user, phone_number=phone_e164, is_verified=False).delete()
+
+            v = SMSVerification.objects.create(
+                user=user,
+                phone_number=phone_e164,
+                code_hash=code_hash,
+                expires_at=timezone.now() + timedelta(seconds=ttl_sec),
+            )
+
+            # Send SMS via SNS
+            brand = getattr(settings, 'SMS_BRAND', 'CONFIO')
+            msg = f"{brand}: Tu código es {code}. Caduca en 5 minutos."
+            attrs = {
+                'AWS.SNS.SMS.SMSType': {'DataType': 'String', 'StringValue': 'Transactional'}
+            }
+            sid = getattr(settings, 'SMS_SENDER_ID', None)
+            ono = getattr(settings, 'SMS_ORIGINATION_NUMBER', None)
+            if sid:
+                attrs['AWS.SNS.SMS.SenderID'] = {'DataType': 'String', 'StringValue': sid}
+            if ono:
+                attrs['AWS.SNS.SMS.OriginationNumber'] = {'DataType': 'String', 'StringValue': ono}
+
+            client = _sns_client()
+            resp = client.publish(PhoneNumber=phone_e164, Message=msg, MessageAttributes=attrs)
+            logger.info("SNS publish MessageId=%s", resp.get('MessageId'))
+
+            return InitiateSMSVerification(success=True, error=None)
+        except Exception as e:
+            logger.exception("Failed to initiate SMS verification: %s", e)
+            return InitiateSMSVerification(success=False, error="Failed to send SMS")
+
+
+class VerifySMSCode(graphene.Mutation):
+    class Arguments:
+        phone_number = graphene.String(required=True)
+        country_code = graphene.String(required=True)
+        code = graphene.String(required=True)
+
+    success = graphene.Boolean()
+    error = graphene.String()
+
+    @classmethod
+    def mutate(cls, root, info, phone_number, country_code, code):
+        user = getattr(info.context, 'user', None)
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return VerifySMSCode(success=False, error="Authentication required")
+
+        if not _validate_country_iso(country_code):
+            return VerifySMSCode(success=False, error="Invalid country code")
+
+        phone_e164 = _format_e164(phone_number, country_code)
+        ver = SMSVerification.objects.filter(
+            user=user,
+            phone_number=phone_e164,
+            is_verified=False,
+            expires_at__gt=timezone.now(),
+        ).order_by('-created_at').first()
+
+        if not ver:
+            return VerifySMSCode(success=False, error="No active verification request found")
+
+        # Attempts control
+        max_attempts = 5
+        if ver.attempts >= max_attempts:
+            return VerifySMSCode(success=False, error="Maximum number of verification attempts exceeded")
+
+        # Verify code
+        try:
+            is_ok = hmac.compare_digest(ver.code_hash, _hmac_code(phone_e164, code))
+        except Exception:
+            is_ok = False
+
+        if not is_ok:
+            ver.attempts = ver.attempts + 1
+            ver.save(update_fields=['attempts'])
+            return VerifySMSCode(success=False, error="Invalid verification code")
+
+        # Valid code — update user phone (avoid duplicates)
+        try:
+            phone_key = normalize_phone(phone_number, country_code)
+            from users.models import User as UserModel
+            duplicate_exists = UserModel.objects.filter(
+                phone_key=phone_key,
+                deleted_at__isnull=True
+            ).exclude(id=user.id).exists()
+            if duplicate_exists:
+                return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+
+            user.phone_number = phone_number  # store without calling code
+            user.phone_country = country_code
+            user.save()
+
+            ver.is_verified = True
+            ver.save(update_fields=['is_verified'])
+
+            # Cleanup other pending records for this phone
+            SMSVerification.objects.filter(
+                user=user, phone_number=phone_e164, is_verified=False
+            ).exclude(id=ver.id).delete()
+
+            # Best-effort auto-claim invitation as in Telegram flow
+            try:
+                acct = Account.objects.filter(user=user, account_type='personal', account_index=0, deleted_at__isnull=True).first()
+                recipient_addr = getattr(acct, 'algorand_address', None)
+                if recipient_addr:
+                    from send.models import PhoneInvite
+                    pk = normalize_phone(phone_number, country_code)
+                    inv = PhoneInvite.objects.filter(
+                        phone_key=pk,
+                        status='pending',
+                        deleted_at__isnull=True
+                    ).order_by('-created_at').first()
+                    if inv:
+                        ClaimInviteForPhone.mutate(None, info, recipient_address=recipient_addr, invitation_id=inv.invitation_id)
+            except Exception as ce:
+                logger.exception('Auto-claim invite failed: %s', ce)
+
+            return VerifySMSCode(success=True, error=None)
+        except IntegrityError:
+            return VerifySMSCode(success=False, error="Este número ya está registrado en Confío. Inicia sesión o recupera tu cuenta.")
+        except Exception as e:
+            logger.exception("Verification failed: %s", e)
+            return VerifySMSCode(success=False, error="Ocurrió un error al verificar el código")
+
+
+class Mutation(graphene.ObjectType):
+    initiate_sms_verification = InitiateSMSVerification.Field()
+    verify_sms_code = VerifySMSCode.Field()
