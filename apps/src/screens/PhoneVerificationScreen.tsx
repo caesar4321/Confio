@@ -23,7 +23,7 @@ import Feather from 'react-native-vector-icons/Feather';
 import TelegramLogo from '../assets/svg/TelegramLogo.svg';
 import { countries, Country } from '../utils/countries';
 import { useMutation } from '@apollo/client';
-import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE, UPDATE_PHONE_NUMBER } from '../apollo/queries';
+import { INITIATE_TELEGRAM_VERIFICATION, VERIFY_TELEGRAM_CODE, UPDATE_PHONE_NUMBER, INITIATE_SMS_VERIFICATION, VERIFY_SMS_CODE } from '../apollo/queries';
 import { useAuth } from '../contexts/AuthContext';
 import { useCountrySelection } from '../hooks/useCountrySelection';
 import { AuthStackParamList, MainStackParamList } from '../types/navigation';
@@ -50,6 +50,8 @@ const PhoneVerificationScreen = () => {
   const [initiateTelegramVerification, { loading: loadingInitiate }] = useMutation(INITIATE_TELEGRAM_VERIFICATION);
   const [verifyTelegramCode, { loading: loadingVerify }] = useMutation(VERIFY_TELEGRAM_CODE);
   const [updatePhoneNumber] = useMutation(UPDATE_PHONE_NUMBER);
+  const [initiateSmsVerification] = useMutation(INITIATE_SMS_VERIFICATION);
+  const [verifySmsCode] = useMutation(VERIFY_SMS_CODE);
 
   // Colors from the design
   const colors = {
@@ -75,7 +77,11 @@ const PhoneVerificationScreen = () => {
     if (currentScreen === 'phone') {
       setCurrentScreen('method');
     } else if (currentScreen === 'method') {
-      setCurrentScreen('code');
+      if (verificationMethod === 'sms') {
+        await handleSendSmsCode();
+      } else {
+        setCurrentScreen('code');
+      }
     } else if (currentScreen === 'code') {
       await handleVerifyCode();
     }
@@ -176,17 +182,70 @@ const PhoneVerificationScreen = () => {
           Alert.alert('Error', data.verifyTelegramCode.error || 'Verification failed');
         }
       } else if (verificationMethod === 'sms') {
-        // TODO: Implement SMS verification once the mutation is available
-        Alert.alert('Success', 'Phone number verified!');
-        if (userProfile) {
-          // Main flow - navigate back
-          navigation.goBack();
+        const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
+        const { data } = await verifySmsCode({
+          variables: {
+            phoneNumber: cleanPhoneNumber,
+            countryCode: selectedCountry?.[2] || 'VE',
+            code: verificationCode.join(''),
+          },
+        });
+        if (data?.verifySmsCode?.success) {
+          const isProfileUpdateFlow = !!userProfile;
+          if (isProfileUpdateFlow) {
+            const { data: updateData } = await updatePhoneNumber({
+              variables: {
+                countryCode: selectedCountry?.[1] || '+58',
+                phoneNumber: cleanPhoneNumber,
+              },
+            });
+            if (updateData?.updatePhoneNumber?.success) {
+              Alert.alert('Éxito', 'Número de teléfono actualizado correctamente', [
+                { text: 'OK', onPress: () => { refreshProfile('personal'); navigation.goBack(); } },
+              ]);
+            } else {
+              Alert.alert('Error', updateData?.updatePhoneNumber?.error || 'Failed to update phone number');
+            }
+          } else {
+            Alert.alert('Success', 'Phone number verified!');
+            await completePhoneVerification();
+            try {
+              const state: any = (navigation as any).getState?.();
+              const hasBottomTabs = Array.isArray(state?.routeNames) && state.routeNames.includes('BottomTabs');
+              if (hasBottomTabs) {
+                (navigation as any).navigate('BottomTabs', { screen: 'Home', params: { checkInviteReceipt: true } });
+              } else {
+                (navigation as any).navigate('Main' as never, { screen: 'Home', params: { checkInviteReceipt: true } } as never);
+              }
+            } catch (e) {
+              try { (navigation as any).navigate('Main' as never); } catch {}
+            }
+          }
         } else {
-          // Auth flow - complete phone verification
-          await completePhoneVerification();
+          Alert.alert('Error', data?.verifySmsCode?.error || 'Verification failed');
         }
       } else {
         Alert.alert('Error', 'Invalid verification method');
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Network error');
+    }
+  };
+
+  const handleSendSmsCode = async () => {
+    try {
+      const countryCode = selectedCountry?.[2] || 'VE';
+      const cleanPhoneNumber = phoneNumber.replace(/[\s-]/g, '');
+      const { data } = await initiateSmsVerification({
+        variables: {
+          phoneNumber: cleanPhoneNumber,
+          countryCode,
+        },
+      });
+      if (data?.initiateSmsVerification?.success) {
+        setCurrentScreen('code');
+      } else {
+        Alert.alert('Error', data?.initiateSmsVerification?.error || 'Failed to send SMS');
       }
     } catch (e) {
       Alert.alert('Error', 'Network error');
@@ -326,9 +385,9 @@ const PhoneVerificationScreen = () => {
 
       <TouchableOpacity
         style={styles.smsButton}
-        onPress={() => {
+        onPress={async () => {
           setVerificationMethod('sms');
-          handleContinue();
+          await handleSendSmsCode();
         }}
       >
         <Text style={styles.smsButtonText}>Recibir a través de SMS</Text>
