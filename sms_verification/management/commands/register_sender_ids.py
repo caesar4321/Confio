@@ -53,7 +53,7 @@ class Command(BaseCommand):
         failed = 0
         for iso in targets:
             try:
-                resp = client.create_sender_id(
+                resp = client.request_sender_id(
                     SenderId=sender_id,
                     IsoCountryCode=iso,
                     MessageTypes=['TRANSACTIONAL'],
@@ -63,14 +63,16 @@ class Command(BaseCommand):
                 status = resp.get('Status', 'PENDING') if isinstance(resp, dict) else 'PENDING'
                 self.stdout.write(self.style.SUCCESS(f"Requested Sender ID '{sender_id}' for {iso} → status: {status}"))
                 ok += 1
-            except client.exceptions.ConflictException:
-                self.stdout.write(self.style.WARNING(f"Already exists/registered for {iso}; skipping."))
-                skipped += 1
             except Exception as e:
-                self.stdout.write(self.style.ERROR(f"Failed for {iso}: {e}"))
-                failed += 1
+                # If already exists or duplicate, treat as skipped
+                msg = str(e)
+                if 'ConflictException' in msg or 'already exists' in msg or 'Duplicate' in msg:
+                    self.stdout.write(self.style.WARNING(f"Already exists/registered for {iso}; skipping."))
+                    skipped += 1
+                else:
+                    self.stdout.write(self.style.ERROR(f"Failed for {iso}: {e}"))
+                    failed += 1
             if opts['sleep']:
                 time.sleep(opts['sleep'])
 
         self.stdout.write(self.style.SUCCESS(f"Done. ok={ok}, skipped={skipped}, failed={failed}"))
-
