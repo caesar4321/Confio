@@ -208,6 +208,25 @@ export const VERIFY_TELEGRAM_CODE = gql`
   }
 `;
 
+// SMS Verification
+export const INITIATE_SMS_VERIFICATION = gql`
+  mutation InitiateSMSVerification($phoneNumber: String!, $countryCode: String!) {
+    initiateSmsVerification(phoneNumber: $phoneNumber, countryCode: $countryCode) {
+      success
+      error
+    }
+  }
+`;
+
+export const VERIFY_SMS_CODE = gql`
+  mutation VerifySMSCode($phoneNumber: String!, $countryCode: String!, $code: String!) {
+    verifySmsCode(phoneNumber: $phoneNumber, countryCode: $countryCode, code: $code) {
+      success
+      error
+    }
+  }
+`;
+
 // User Profile Mutations
 export const UPDATE_PHONE_NUMBER = gql`
   mutation UpdatePhoneNumber($countryCode: String!, $phoneNumber: String!) {

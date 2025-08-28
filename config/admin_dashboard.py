@@ -772,3 +772,13 @@ from blockchain.admin import BalanceAdmin, ProcessedIndexerTransactionAdmin, Ind
 confio_admin_site.register(Balance, BalanceAdmin)
 confio_admin_site.register(ProcessedIndexerTransaction, ProcessedIndexerTransactionAdmin)
 confio_admin_site.register(IndexerAssetCursor, IndexerAssetCursorAdmin)
+
+# SMS Verification
+from sms_verification.models import SMSVerification
+from sms_verification.admin import SMSVerificationAdmin
+confio_admin_site.register(SMSVerification, SMSVerificationAdmin)
+
+# Telegram Verification
+from telegram_verification.models import TelegramVerification
+from telegram_verification.admin import TelegramVerificationAdmin
+confio_admin_site.register(TelegramVerification, TelegramVerificationAdmin)
