@@ -40,8 +40,8 @@ const LegalDocumentScreen = () => {
   });
 
   const handleTelegramPress = async () => {
-    const telegramUrl = 'tg://resolve?domain=FansDeJulian';
-    const webUrl = 'https://t.me/FansDeJulian/13765';
+    const telegramUrl = 'tg://resolve?domain=confio4world';
+    const webUrl = 'https://t.me/confio4world';
     try {
       const canOpen = await Linking.canOpenURL(telegramUrl);
       if (canOpen) {
@@ -78,10 +78,10 @@ const LegalDocumentScreen = () => {
 
   const renderContent = (content: ContentType) => {
     if (typeof content === 'string') {
-      if (content.includes('t.me/FansDeJulian')) {
+      if (content.includes('t.me/FansDeJulian') || content.includes('t.me/confio4world')) {
         return (
           <TouchableOpacity onPress={handleTelegramPress}>
-            <Text style={[styles.paragraph, styles.link]}>t.me/FansDeJulian</Text>
+            <Text style={[styles.paragraph, styles.link]}>t.me/confio4world</Text>
           </TouchableOpacity>
         );
       }
@@ -125,7 +125,7 @@ const LegalDocumentScreen = () => {
               </Text>
               {key === 'telegram' ? (
                 <TouchableOpacity onPress={handleTelegramPress}>
-                  <Text style={[styles.paragraph, styles.link]}>{value}</Text>
+                  <Text style={[styles.paragraph, styles.link]}>t.me/confio4world</Text>
                 </TouchableOpacity>
               ) : (
                 renderContent(value)

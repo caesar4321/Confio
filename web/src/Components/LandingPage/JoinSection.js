@@ -25,7 +25,7 @@ const JoinSection = () => {
         >
           <div className={styles.socialButtons}>
             <a
-              href="https://t.me/FansDeJulian"
+              href="https://t.me/confio4world"
               target="_blank"
               rel="noopener noreferrer"
               className={styles.telegramButton}

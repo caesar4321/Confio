@@ -6,7 +6,7 @@ import telegramLogo from '../../images/Telegram.png';
 const FloatingTelegramButton = () => {
   return (
     <motion.a
-      href="https://t.me/FansDeJulian"
+      href="https://t.me/confio4world"
       target="_blank"
       rel="noopener noreferrer"
       className={styles.floatingButton}
