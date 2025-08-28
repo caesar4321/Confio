@@ -4,14 +4,13 @@ from django.utils import timezone
 from datetime import timedelta
 from django.conf import settings
 from django.db import IntegrityError
-import boto3
 import hmac
 import hashlib
-import secrets
 import logging
 import re
 
 from .models import SMSVerification
+from .twilio_verify import send_verification_sms, check_verification, TwilioVerifyError
 from users.country_codes import COUNTRY_CODES
 from users.phone_utils import normalize_phone
 from users.models import Account
@@ -46,15 +45,10 @@ def _gen_code(n: int = 6) -> str:
     return f"{secrets.randbelow(10**n):0{n}d}"
 
 
-def _sns_client():
-    region = getattr(settings, 'SMS_SNS_REGION', 'eu-central-2')
-    kwargs = {'region_name': region}
-    if getattr(settings, 'AWS_ACCESS_KEY_ID', None) and getattr(settings, 'AWS_SECRET_ACCESS_KEY', None):
-        kwargs.update(
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        )
-    return boto3.client('sns', **kwargs)
+"""
+Twilio Verify migration: SNS client no longer used for OTP delivery.
+Left here intentionally removed.
+"""
 
 
 def _should_use_sender_id(iso_code: str) -> bool:
@@ -101,49 +95,27 @@ class InitiateSMSVerification(graphene.Mutation):
         ttl_sec = getattr(settings, 'SMS_CODE_TTL_SECONDS', 600)
 
         try:
-            # Generate and store (hashed)
-            code = _gen_code(6)
-            code_hash = _hmac_code(phone_e164, code)
-
-            # Clean up previous unverified for this phone
+            # Clean up previous unverified for this phone (housekeeping)
             SMSVerification.objects.filter(user=user, phone_number=phone_e164, is_verified=False).delete()
 
-            v = SMSVerification.objects.create(
+            # Start Twilio Verify SMS
+            verification_sid, status = send_verification_sms(phone_e164)
+            logger.info("Twilio Verify started sid=%s status=%s", verification_sid, status)
+
+            # Create a placeholder record to track expiry/state (code_hash not used with Twilio)
+            # Use HMAC of phone+sid to satisfy non-null constraint and keep schema stable
+            code_hash = _hmac_code(phone_e164, verification_sid or 'sid')
+            SMSVerification.objects.create(
                 user=user,
                 phone_number=phone_e164,
                 code_hash=code_hash,
                 expires_at=timezone.now() + timedelta(seconds=ttl_sec),
             )
 
-            # Send SMS via SNS
-            brand = getattr(settings, 'SMS_BRAND', 'CONFIO')
-            msg = f"{brand}: Tu código es {code}. Caduca en 5 minutos."
-            attrs = {
-                'AWS.SNS.SMS.SMSType': {'DataType': 'String', 'StringValue': 'Transactional'}
-            }
-            iso_upper = country_code.upper()
-            if _should_use_sender_id(iso_upper):
-                sid = getattr(settings, 'SMS_SENDER_ID', None)
-                if sid:
-                    attrs['AWS.SNS.SMS.SenderID'] = {'DataType': 'String', 'StringValue': sid}
-            ono = getattr(settings, 'SMS_ORIGINATION_NUMBER', None)
-            if ono:
-                attrs['AWS.SNS.SMS.OriginationNumber'] = {'DataType': 'String', 'StringValue': ono}
-
-            client = _sns_client()
-            try:
-                resp = client.publish(PhoneNumber=phone_e164, Message=msg, MessageAttributes=attrs)
-            except Exception as e:
-                emsg = str(e)
-                # Fallback: retry without SenderID if country rejects identity
-                if 'INVALID_IDENTITY_FOR_DESTINATION_COUNTRY' in emsg or 'InvalidIdentityForDestinationCountry' in emsg:
-                    attrs.pop('AWS.SNS.SMS.SenderID', None)
-                    resp = client.publish(PhoneNumber=phone_e164, Message=msg, MessageAttributes=attrs)
-                else:
-                    raise
-            logger.info("SNS publish MessageId=%s", resp.get('MessageId'))
-
             return InitiateSMSVerification(success=True, error=None)
+        except TwilioVerifyError as e:
+            logger.exception("Twilio Verify error: %s", e)
+            return InitiateSMSVerification(success=False, error="Failed to send SMS")
         except Exception as e:
             logger.exception("Failed to initiate SMS verification: %s", e)
             return InitiateSMSVerification(success=False, error="Failed to send SMS")
@@ -178,18 +150,21 @@ class VerifySMSCode(graphene.Mutation):
         if not ver:
             return VerifySMSCode(success=False, error="No active verification request found")
 
-        # Attempts control
+        # Attempts control (retain local rate limit)
         max_attempts = 5
         if ver.attempts >= max_attempts:
             return VerifySMSCode(success=False, error="Maximum number of verification attempts exceeded")
 
-        # Verify code
+        # Verify via Twilio Verify
         try:
-            is_ok = hmac.compare_digest(ver.code_hash, _hmac_code(phone_e164, code))
-        except Exception:
-            is_ok = False
+            approved, status = check_verification(phone_e164, code)
+        except TwilioVerifyError as e:
+            logger.exception("Twilio Verify check error: %s", e)
+            ver.attempts = ver.attempts + 1
+            ver.save(update_fields=['attempts'])
+            return VerifySMSCode(success=False, error="Invalid verification code")
 
-        if not is_ok:
+        if not approved:
             ver.attempts = ver.attempts + 1
             ver.save(update_fields=['attempts'])
             return VerifySMSCode(success=False, error="Invalid verification code")

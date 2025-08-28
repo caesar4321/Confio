@@ -7,7 +7,8 @@ from config.admin_mixins import EnhancedAdminMixin, ExportCsvMixin, ExportJsonMi
 from .models import SMSVerification
 
 # Reuse helpers from schema for consistent behavior
-from .schema import _sns_client, _gen_code, _hmac_code
+from .schema import _hmac_code
+from .twilio_verify import send_verification_sms, TwilioVerifyError
 from django.conf import settings
 
 
@@ -50,10 +51,6 @@ class SMSVerificationAdmin(EnhancedAdminMixin, ExportCsvMixin, ExportJsonMixin, 
             self.message_user(request, f'Por seguridad, límite de {max_batch} por lote. Seleccionados: {count}.', messages.WARNING)
             queryset = queryset[:max_batch]
 
-        client = _sns_client()
-        brand = getattr(settings, 'SMS_BRAND', 'CONFIO')
-        sid = getattr(settings, 'SMS_SENDER_ID', None)
-        ono = getattr(settings, 'SMS_ORIGINATION_NUMBER', None)
         ttl = getattr(settings, 'SMS_CODE_TTL_SECONDS', 600)
 
         sent = 0
@@ -63,23 +60,16 @@ class SMSVerificationAdmin(EnhancedAdminMixin, ExportCsvMixin, ExportJsonMixin, 
                 if ver.is_verified:
                     skipped += 1
                     continue
-                code = _gen_code(6)
-                ver.code_hash = _hmac_code(ver.phone_number, code)
-                ver.expires_at = timezone.now() + timezone.timedelta(seconds=ttl)
-                ver.attempts = 0
-                ver.save(update_fields=['code_hash', 'expires_at', 'attempts'])
-
-                attrs = {'AWS.SNS.SMS.SMSType': {'DataType': 'String', 'StringValue': 'Transactional'}}
-                if sid:
-                    attrs['AWS.SNS.SMS.SenderID'] = {'DataType': 'String', 'StringValue': sid}
-                if ono:
-                    attrs['AWS.SNS.SMS.OriginationNumber'] = {'DataType': 'String', 'StringValue': ono}
-
-                msg = f"{brand}: Tu código es {code}. Caduca en 5 minutos."
+                # Trigger a fresh Twilio Verify SMS (Twilio handles code generation)
                 try:
-                    client.publish(PhoneNumber=ver.phone_number, Message=msg, MessageAttributes=attrs)
+                    verification_sid, status = send_verification_sms(ver.phone_number)
+                    # Refresh local TTL/attempt tracking; store HMAC(phone+sid) as placeholder
+                    ver.code_hash = _hmac_code(ver.phone_number, verification_sid or 'sid')
+                    ver.expires_at = timezone.now() + timezone.timedelta(seconds=ttl)
+                    ver.attempts = 0
+                    ver.save(update_fields=['code_hash', 'expires_at', 'attempts'])
                     sent += 1
-                except Exception as e:
+                except TwilioVerifyError as e:
                     self.message_user(request, f'Fallo al reenviar a {ver.phone_number}: {e}', messages.ERROR)
 
         self.message_user(request, f'OTP reenviado a {sent} registro(s); omitidos {skipped}.', messages.SUCCESS)
@@ -88,4 +78,3 @@ class SMSVerificationAdmin(EnhancedAdminMixin, ExportCsvMixin, ExportJsonMixin, 
     def mark_as_verified(self, request, queryset):
         updated = queryset.update(is_verified=True)
         self.message_user(request, f'{updated} registro(s) marcados como verificados.', messages.SUCCESS)
-
