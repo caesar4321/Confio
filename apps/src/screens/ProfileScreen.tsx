@@ -99,8 +99,8 @@ export const ProfileScreen = () => {
   };
 
   const handleTelegramPress = async () => {
-    const telegramUrl = 'tg://resolve?domain=FansDeJulian';
-    const webUrl = 'https://t.me/FansDeJulian';
+    const telegramUrl = 'tg://resolve?domain=confio4world';
+    const webUrl = 'https://t.me/confio4world';
     try {
       const canOpen = await Linking.canOpenURL(telegramUrl);
       if (canOpen) {
@@ -354,7 +354,7 @@ export const ProfileScreen = () => {
           >
             <Icon name="message-circle" size={18} color="#6B7280" />
             <Text style={styles.cardOptionText}>Grupo Telegram</Text>
-            <Text style={styles.cardOptionSubtext}>@FansDeJulian</Text>
+            <Text style={styles.cardOptionSubtext}>@confio4world</Text>
             <Icon name="chevron-right" size={16} color="#9CA3AF" />
           </TouchableOpacity>
         </View>
