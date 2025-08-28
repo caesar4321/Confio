@@ -4,6 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 from django.conf import settings
 from sms_verification.models import SMSVerification
+from sms_verification.schema import _should_use_sender_id
 import boto3
 import hmac
 import hashlib
@@ -80,12 +81,19 @@ class Command(BaseCommand):
         attrs = {'AWS.SNS.SMS.SMSType': {'DataType': 'String', 'StringValue': 'Transactional'}}
         sid = getattr(settings, 'SMS_SENDER_ID', None)
         ono = getattr(settings, 'SMS_ORIGINATION_NUMBER', None)
-        if sid:
+        if sid and _should_use_sender_id(iso):
             attrs['AWS.SNS.SMS.SenderID'] = {'DataType': 'String', 'StringValue': sid}
         if ono:
             attrs['AWS.SNS.SMS.OriginationNumber'] = {'DataType': 'String', 'StringValue': ono}
 
-        resp = client.publish(PhoneNumber=phone_e164, Message=msg, MessageAttributes=attrs)
+        try:
+            resp = client.publish(PhoneNumber=phone_e164, Message=msg, MessageAttributes=attrs)
+        except Exception as e:
+            if 'INVALID_IDENTITY_FOR_DESTINATION_COUNTRY' in str(e):
+                attrs.pop('AWS.SNS.SMS.SenderID', None)
+                resp = client.publish(PhoneNumber=phone_e164, Message=msg, MessageAttributes=attrs)
+            else:
+                raise
 
         self.stdout.write(self.style.SUCCESS(f"Published SMS to {phone_e164}. MessageId={resp.get('MessageId')}"))
         if getattr(settings, 'DEBUG', False):
