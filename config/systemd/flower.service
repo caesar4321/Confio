@@ -1,0 +1,18 @@
+[Unit]
+Description=Celery Flower Monitor for Confio
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/confio
+Environment=DJANGO_SETTINGS_MODULE=config.settings
+EnvironmentFile=/opt/confio/.env
+ExecStart=/opt/confio/venv/bin/celery -A config flower --port=5555
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

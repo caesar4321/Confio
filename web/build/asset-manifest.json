@@ -1,23 +1,18 @@
 {
   "files": {
-    "main.css": "/static/css/main.414bcf69.css",
-    "main.js": "/static/js/main.efe0bf4f.js",
-    "static/media/PioneroBeta.png": "/static/media/PioneroBeta.59c04919ae1b1db5221d.png",
-    "static/media/Instagram.png": "/static/media/Instagram.d73dfe4d4e63e305e0de.png",
+    "main.css": "/static/css/main.31bea7d5.css",
+    "main.js": "/static/js/main.3d63e2a3.js",
     "static/media/JulianMoon_Founder.jpeg": "/static/media/JulianMoon_Founder.77611b65ceb3c7457238.jpeg",
     "static/media/cUSD.png": "/static/media/cUSD.661eddfa58b01fe037d4.png",
     "static/media/TikTok.png": "/static/media/TikTok.c0aae623631b10c441d6.png",
-    "static/media/Telegram.png": "/static/media/Telegram.d3e76dd5d32093b7e448.png",
-    "static/media/YouTube.png": "/static/media/YouTube.839b674d069cea2b362b.png",
     "static/media/CONFIO.png": "/static/media/CONFIO.e77f3e4c08a252bdbb03.png",
     "static/media/ConfioApp.png": "/static/media/ConfioApp.751f5fd28f52567e4290.png",
     "index.html": "/index.html",
-    "static/media/TelegramLogo.svg": "/static/media/TelegramLogo.d524ce60a5271a2d84bbeb6759286b02.svg",
-    "main.414bcf69.css.map": "/static/css/main.414bcf69.css.map",
-    "main.efe0bf4f.js.map": "/static/js/main.efe0bf4f.js.map"
+    "main.31bea7d5.css.map": "/static/css/main.31bea7d5.css.map",
+    "main.3d63e2a3.js.map": "/static/js/main.3d63e2a3.js.map"
   },
   "entrypoints": [
-    "static/css/main.414bcf69.css",
-    "static/js/main.efe0bf4f.js"
+    "static/css/main.31bea7d5.css",
+    "static/js/main.3d63e2a3.js"
   ]
 }

@@ -4,7 +4,9 @@ import styles from '../../styles/FriendlyHeroSection.module.css';
 import confioLogo from '../../images/CONFIO.png';
 import confioAppMockup from '../../images/ConfioApp.png';
 import cUSDLogo from '../../images/cUSD.png';
-import pioneroBadge from '../../images/PioneroBeta.png';
+// Fallback to existing asset to avoid missing file during build
+// Resolve badge from public folder so we don't depend on importable asset
+const pioneroBadge = process.env.PUBLIC_URL + '/images/PioneroBeta.png';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const FriendlyHeroSection = () => {

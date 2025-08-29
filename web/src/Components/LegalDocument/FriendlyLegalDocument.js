@@ -72,14 +72,28 @@ const FriendlyLegalDocument = ({ type }) => {
     if (typeof content === 'object') {
       return (
         <div className={styles.contentObject}>
-          {Object.entries(content).map(([key, value]) => (
-            <div key={key} className={styles.subsection}>
-              <h3 className={styles.subsectionTitle}>
-                {key.replace(/_/g, ' ').toUpperCase()}
-              </h3>
-              {renderContent(value)}
-            </div>
-          ))}
+          {Object.entries(content).map(([key, value]) => {
+            const title = key.replace(/_/g, ' ').toUpperCase();
+            if (key.toLowerCase() === 'telegram') {
+              const raw = String(value || '').trim();
+              const handle = raw.replace(/^https?:\/\//, '').replace(/^t\.me\//, '');
+              const href = `https://t.me/${handle}`;
+              return (
+                <div key={key} className={styles.subsection}>
+                  <h3 className={styles.subsectionTitle}>{title}</h3>
+                  <p className={styles.paragraph}>
+                    <a href={href} target="_blank" rel="noopener noreferrer">{href}</a>
+                  </p>
+                </div>
+              );
+            }
+            return (
+              <div key={key} className={styles.subsection}>
+                <h3 className={styles.subsectionTitle}>{title}</h3>
+                {renderContent(value)}
+              </div>
+            );
+          })}
         </div>
       );
     }
