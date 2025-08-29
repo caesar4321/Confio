@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { useInView } from 'react-intersection-observer';
 import styles from '../../styles/FriendlyBetaProgram.module.css';
-import pioneroBadge from '../../images/PioneroBeta.png';
+const pioneroBadge = process.env.PUBLIC_URL + '/images/PioneroBeta.png';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const FriendlyBetaProgram = () => {

@@ -1,8 +1,9 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import App from './App';
-import './App.css'
+import FriendlyApp from './FriendlyApp';
 
 const container = document.getElementById('root');
-const root = createRoot(container); // createRoot(container!) if you use TypeScript
-root.render(<App />);
+const root = createRoot(container);
+
+// Always render the Friendly version
+root.render(<FriendlyApp />);
