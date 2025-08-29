@@ -55,7 +55,7 @@ TERMS = {
             'title': '7. Contacto',
             'content': {
                 'email': 'legal@confio.lat',
-                'telegram': 't.me/FansDeJulian'
+                'telegram': 'https://t.me/confio4world'
             }
         }
     ]
@@ -144,7 +144,7 @@ PRIVACY = {
             'title': '7. Contacto',
             'content': {
                 'email': 'privacy@confio.lat',
-                'telegram': 't.me/FansDeJulian'
+                'telegram': 'https://t.me/confio4world'
             }
         }
     ]
@@ -201,8 +201,8 @@ DELETION = {
             'title': '6. Contacto',
             'content': {
                 'email': 'privacy@confio.lat',
-                'telegram': 't.me/FansDeJulian'
+                'telegram': 'https://t.me/confio4world'
             }
         }
     ]
-} 
+}

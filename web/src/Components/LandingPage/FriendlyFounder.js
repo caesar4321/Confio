@@ -4,9 +4,11 @@ import { useInView } from 'react-intersection-observer';
 import styles from '../../styles/FriendlyFounder.module.css';
 import julianImage from '../../images/JulianMoon_Founder.jpeg';
 import tiktokIcon from '../../images/TikTok.png';
-import instagramIcon from '../../images/Instagram.png';
-import youtubeIcon from '../../images/YouTube.png';
-import telegramIcon from '../../images/TelegramLogo.svg';
+// Use existing assets as placeholders to avoid missing file errors
+// Load icons from public folder to avoid importing outside CRA src
+const instagramIcon = process.env.PUBLIC_URL + '/images/Instagram.png';
+const youtubeIcon = process.env.PUBLIC_URL + '/images/YouTube.png';
+const telegramIcon = process.env.PUBLIC_URL + '/images/TelegramLogo.svg';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 const FriendlyFounder = () => {
