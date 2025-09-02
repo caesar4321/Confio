@@ -1,4 +1,4 @@
-.PHONY: runserver runserver-dev runserver-wsgi migrate makemigrations shell test clean db-setup db-migrate db-reset collectstatic celery-worker celery-beat
+.PHONY: runserver runserver-dev runserver-wsgi migrate makemigrations migrate-fake-initial migrate-fake-contrib migrate-reset-fake migrate-reset-history reset-migrations rebuild-clean shell test clean db-setup db-migrate db-reset collectstatic celery-worker celery-beat
 
 # Virtual environment path
 VENV_PATH = ./myvenv
@@ -37,9 +37,47 @@ runserver-wsgi:
 migrate:
 	$(PYTHON) manage.py migrate
 
+# Run migrations and mark existing tables as applied (no data loss)
+migrate-fake-initial:
+	$(PYTHON) manage.py migrate --fake-initial
+
+# Mark contrib apps as fully applied (no-op SQL), useful after history reset
+migrate-fake-contrib:
+	$(PYTHON) manage.py migrate contenttypes --fake
+	$(PYTHON) manage.py migrate auth --fake
+	$(PYTHON) manage.py migrate sessions --fake
+	$(PYTHON) manage.py migrate admin --fake
+
+# Force-reset migration history (fake-unapply to zero), then mark initial as applied.
+# WARNING: This does NOT drop tables; it only rewrites migration history.
+migrate-reset-fake:
+	@APPS="users achievements security telegram_verification sms_verification send payments p2p_exchange exchange_rates conversion usdc_transactions presale notifications blockchain"; \
+	for app in $$APPS; do \
+		echo "[fake-unapply] $$app -> zero"; \
+		$(PYTHON) manage.py migrate $$app zero --fake || exit 1; \
+	done; \
+	echo "[apply] migrate --fake-initial"; \
+	$(PYTHON) manage.py migrate --fake-initial
+
+# Reset migration history rows in django_migrations (no table drops), then mark initial applied
+migrate-reset-history:
+	$(PYTHON) manage.py reset_migration_history --noinput --apps "admin,auth,contenttypes,sessions,users,achievements,security,telegram_verification,sms_verification,send,payments,p2p_exchange,exchange_rates,conversion,usdc_transactions,presale,notifications,blockchain"
+	$(PYTHON) manage.py migrate --fake-initial
+
 # Create new migrations
 makemigrations:
 	$(PYTHON) manage.py makemigrations
+
+# Remove all migration files (keep __init__.py) and regenerate 0001s
+reset-migrations:
+	./scripts/reset_migrations.sh
+	$(PYTHON) manage.py makemigrations
+
+# Reset migrations, then apply with --fake-initial (DB must be intact)
+rebuild-clean:
+	./scripts/reset_migrations.sh
+	$(PYTHON) manage.py makemigrations
+	$(PYTHON) manage.py migrate --fake-initial
 
 # Open Django shell
 shell:

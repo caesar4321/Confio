@@ -10,6 +10,7 @@ from django.contrib.admin.views.decorators import staff_member_required
 from graphene_django.views import GraphQLView
 from .views import terms_view, privacy_view, deletion_view
 from django.views.generic import TemplateView
+from django.views.generic.base import RedirectView
 from django.conf import settings
 from django.conf.urls.static import static
 import json
@@ -104,6 +105,8 @@ class LoggingGraphQLView(GraphQLView):
 from .admin_dashboard import confio_admin_site
 
 urlpatterns = [
+    # Ensure /admin (no trailing slash) redirects to /admin/
+    path('admin', RedirectView.as_view(url='/admin/', permanent=True)),
     path('admin/', confio_admin_site.urls),
     path('graphql/', csrf_exempt(LoggingGraphQLView.as_view(graphiql=True))),
     path('terms/', terms_view, name='terms'),
