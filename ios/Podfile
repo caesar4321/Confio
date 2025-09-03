@@ -5,5 +5,27 @@ prepare_react_native_project!
 
 target 'Confio' do
   config = use_native_modules!
-  use_react_native!(:path => config[:reactNativePath])
-end 
+
+  # Prefer static frameworks to avoid missing dSYMs for dynamic pods like Hermes
+  use_frameworks! :linkage => :static
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # Be explicit about Hermes to ensure consistent setup across RN versions
+    :hermes_enabled => true
+  )
+end
+
+# Ensure proper post install steps and that Release generates dSYMs
+post_install do |installer|
+  react_native_post_install(installer, :mac_catalyst_enabled => false)
+
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      # Ensure dSYMs are produced for all pods in Release/Profile
+      if %w(Release Profile).include?(config.name)
+        config.build_settings['DEBUG_INFORMATION_FORMAT'] = 'dwarf-with-dsym'
+      end
+    end
+  end
+end
