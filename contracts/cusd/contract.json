@@ -254,6 +254,14 @@
             "desc": "Verify that USDC reserves match or exceed cUSD supply\nReturns (is_backed, actual_usdc_balance)"
         },
         {
+            "name": "verify_policy_target",
+            "args": [],
+            "returns": {
+                "type": "(bool,uint64)"
+            },
+            "desc": "Telemetry: verify coverage against policy target (collateral_ratio)\nReturns (meets_target, actual_usdc_balance)"
+        },
+        {
             "name": "is_frozen",
             "args": [
                 {

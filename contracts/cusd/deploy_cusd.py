@@ -304,31 +304,7 @@ def set_sponsor_address(app_id, admin_private_key, admin_address, sponsor_addres
     
     return True
 
-def verify_post_deploy(app_id: int, app_address: str, expected_cusd: int, expected_usdc: int, expected_sponsor: str) -> None:
-    """Verify global-state values and app opt-ins match expectations."""
-    import base64
-    # Verify global state
-    app_info = algod_client.application_info(app_id)
-    g = {base64.b64decode(kv['key']).decode('utf-8','ignore'): kv['value'] for kv in app_info.get('params',{}).get('global-state',[])}
-    cusd_id = int(g.get('cusd_asset_id',{}).get('uint', 0))
-    usdc_id = int(g.get('usdc_asset_id',{}).get('uint', 0))
-    sponsor_b = g.get('sponsor_address')
-    sponsor_addr = None
-    if sponsor_b and sponsor_b.get('type') == 1:
-        raw = base64.b64decode(sponsor_b.get('bytes',''))
-        from algosdk import encoding as e
-        sponsor_addr = e.encode_address(raw)
-    if cusd_id != expected_cusd or usdc_id != expected_usdc:
-        raise SystemExit(f"Verification failed: global asset IDs mismatch (got cUSD={cusd_id},USDC={usdc_id}; expected {expected_cusd},{expected_usdc})")
-    if sponsor_addr and expected_sponsor and sponsor_addr != expected_sponsor:
-        raise SystemExit(f"Verification failed: sponsor_address mismatch (got {sponsor_addr}, expected {expected_sponsor})")
-    # Verify app is opted-in to both assets
-    acct = algod_client.account_info(app_address)
-    aset_ids = {a.get('asset-id') for a in acct.get('assets', [])}
-    missing = [aid for aid in (expected_cusd, expected_usdc) if aid not in aset_ids]
-    if missing:
-        raise SystemExit(f"Verification failed: app not opted in to assets {missing}")
-    print("✓ Post-deploy verification passed for cUSD app")
+# (Duplicate verify_post_deploy removed)
 
 def create_cusd_asset(creator_private_key, creator_address, app_address):
     """Create the cUSD asset (ASA) with app holding all reserve"""
@@ -346,7 +322,7 @@ def create_cusd_asset(creator_private_key, creator_address, app_address):
         default_frozen=False,
         unit_name="cUSD",
         asset_name="Confío Dollar",
-        manager=creator_address,  # Can update asset config
+        manager=creator_address,  # Temporary manager; will be locked to zero post-create
         reserve=app_address,      # CONTRACT holds ALL supply - no backdoor!
         freeze=app_address,       # App controls freezing
         clawback=app_address,     # App controls clawback for minting
@@ -375,6 +351,7 @@ def create_cusd_asset(creator_private_key, creator_address, app_address):
     print(f"Reserve field: {app_address}")
     print(f"Clawback: {app_address}")
     print(f"Freeze: {app_address}")
+    print(f"Manager: {creator_address} (will be locked to zero)")
     
     # IMPORTANT: Transfer all tokens to the app
     print(f"\n🔄 Transferring all cUSD to contract...")
@@ -382,7 +359,7 @@ def create_cusd_asset(creator_private_key, creator_address, app_address):
     
     # First, app needs to opt-in to the asset (will be done in setup_assets)
     # The transfer will happen after setup_assets
-    
+
     return asset_id
 
 def setup_assets(app_id, app_address, cusd_asset_id, usdc_asset_id, admin_private_key, admin_address):
@@ -446,6 +423,49 @@ def setup_assets(app_id, app_address, cusd_asset_id, usdc_asset_id, admin_privat
     print(f"Transaction IDs: {result.tx_ids}")
     
     return result
+
+def lock_manager_zero(asset_id: int, admin_private_key: str, admin_address: str, app_address: str) -> None:
+    """Reconfigure ASA to lock manager to zero. Must be signed by current manager."""
+    # Fetch current ASA params
+    info = algod_client.asset_info(asset_id)
+    params = info.get("params", {})
+    current_manager = params.get("manager") or ""
+    reserve = params.get("reserve")
+    freeze = params.get("freeze")
+    clawback = params.get("clawback")
+
+    if not current_manager:
+        print(f"Manager already zero for asset {asset_id}; skipping lock.")
+        return
+    if current_manager != admin_address:
+        raise SystemExit(f"Cannot lock manager: signer {admin_address} is not current manager {current_manager}")
+
+    # Check rekey status
+    acct = algod_client.account_info(current_manager)
+    auth = acct.get("auth-addr")
+    if auth:
+        raise SystemExit(f"Manager account is rekeyed (auth-addr={auth}); sign with the auth account instead.")
+
+    sp = algod_client.suggested_params()
+    # Set only the field we are changing: manager -> zero (None means zero address in SDK)
+    txn = AssetConfigTxn(
+        sender=admin_address,
+        sp=sp,
+        index=asset_id,
+        manager=None,                  # clear manager → zero
+        reserve=reserve or app_address,
+        freeze=freeze or app_address,
+        clawback=clawback or app_address,
+        strict_empty_address_check=False,
+    )
+    stx = txn.sign(admin_private_key)
+    txid = algod_client.send_transaction(stx)
+    print(f"Lock manager TX: {txid}")
+    wait_for_confirmation(algod_client, txid, 4)
+    # Verify
+    p2 = algod_client.asset_info(asset_id).get("params", {})
+    assert not p2.get("manager"), "Manager not zero after reconfig"
+    print(f"\n🔒 Manager locked to zero address")
 
 def main():
     """Main deployment function"""
@@ -574,6 +594,9 @@ def main():
         if cusd_holding and cusd_holding['amount'] == MAX_UINT64:
             print(f"✅ Verified: Contract holds {cusd_holding['amount']:,} cUSD units")
             print(f"🔒 Security achieved - no backdoor minting possible!")
+
+            # Step 5: Lock manager to zero (immutability)
+            lock_manager_zero(cusd_asset_id, private_key, address, app_address)
         else:
             print(f"⚠️ WARNING: Contract balance verification failed!")
             if cusd_holding:
