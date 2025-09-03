@@ -241,7 +241,16 @@ ssh -o StrictHostKeyChecking=no -i $KEY_PATH $EC2_USER@$EC2_IP << 'ENDSSH'
 SECRET_KEY=your-secret-key-here-change-this-in-production
 DEBUG=False
 ALLOWED_HOSTS=confio.lat,www.confio.lat,51.96.174.134,localhost
-DATABASE_URL=sqlite:////opt/confio/db.sqlite3
+
+# RDS Postgres defaults (update these)
+DB_NAME=confio
+DB_USER=confio_app
+DB_PASSWORD=change-me
+DB_HOST=your-rds-endpoint.rds.amazonaws.com
+DB_PORT=5432
+DB_SSLMODE=require
+
+# Static/Media paths
 STATIC_ROOT=/opt/confio/staticfiles
 MEDIA_ROOT=/opt/confio/media
 EOF

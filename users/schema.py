@@ -1949,12 +1949,22 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
                             error="Solo el dueño del negocio puede actualizar la dirección de Algorand. Los empleados no pueden cambiar esta configuración."
                         )
             else:
-                # Personal account
-                account = Account.objects.get(
-                    user=user,
-                    account_type=account_type,
-                    account_index=account_index
-                )
+                # Personal account. If missing (first login), create it on the fly.
+                try:
+                    account = Account.objects.get(
+                        user=user,
+                        account_type=account_type,
+                        account_index=account_index
+                    )
+                except Account.DoesNotExist:
+                    if account_type == 'personal':
+                        account = Account.objects.create(
+                            user=user,
+                            account_type='personal',
+                            account_index=account_index
+                        )
+                    else:
+                        return UpdateAccountAlgorandAddress(success=False, error="Cuenta no encontrada")
 
             # Update the Algorand address
             account.algorand_address = algorand_address
