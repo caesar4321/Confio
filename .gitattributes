@@ -51,3 +51,12 @@ workers/link-shortener/setup-default-links.js filter=git-crypt diff=git-crypt
 Julian_accessKeys.csv filter=git-crypt diff=git-crypt
 Julian_credentials.csv filter=git-crypt diff=git-crypt
 apps/android/app/google-services.json filter=git-crypt diff=git-crypt
+
+# Exclude build/vendor folders from GitHub Linguist language stats
+myvenv/** linguist-vendored
+myvenv_old_py39/** linguist-vendored
+venv/** linguist-vendored
+.venv/** linguist-vendored
+env/** linguist-vendored
+web/build/** linguist-generated
+contracts/**/build/** linguist-generated
