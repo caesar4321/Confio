@@ -31,7 +31,18 @@ def _numeric_code_for_iso(iso_code: str) -> str:
 
 
 def _format_e164(local_phone: str, iso_code: str) -> str:
-    digits = re.sub(r"\D", "", local_phone or "")
+    """Format input into E.164.
+
+    - If `local_phone` already starts with '+', treat it as E.164 and just strip
+      non-digits after the '+' to avoid duplicating the calling code.
+    - Otherwise, prepend the calling code derived from `iso_code`.
+    """
+    s = (local_phone or '').strip()
+    if s.startswith('+'):
+        # Already E.164-like; normalize by removing non-digits after '+'
+        digits = re.sub(r"\D", "", s)
+        return f"+{digits}"
+    digits = re.sub(r"\D", "", s)
     cc = _numeric_code_for_iso(iso_code)
     return f"+{cc}{digits}"
 
