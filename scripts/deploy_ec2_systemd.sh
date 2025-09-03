@@ -96,7 +96,20 @@ echo "==> Ensure base directories"
 sudo mkdir -p "$APP_DIR"
 sudo mkdir -p "$APP_DIR/media" "$APP_DIR/staticfiles"
 
-echo "==> Extract release"
+echo "==> Extract release (clean old code, keep env/media/static/venv)"
+# Preserve .env, media, staticfiles, venv if present
+sudo mkdir -p "$APP_DIR"
+sudo mkdir -p "$APP_DIR/media" "$APP_DIR/staticfiles"
+if [[ -f "$APP_DIR/.env" ]]; then sudo cp "$APP_DIR/.env" /tmp/.env.confio.bak.$$; fi
+
+# Remove old app code to avoid stale migrations/files lingering
+sudo find "$APP_DIR" -mindepth 1 -maxdepth 1 \
+  \( -name venv -o -name media -o -name staticfiles -o -name ".env" \) -prune -o -exec rm -rf {} +
+
+# Restore .env if we preserved it
+if [[ -f /tmp/.env.confio.bak.$$ ]]; then sudo mv /tmp/.env.confio.bak.$$ "$APP_DIR/.env"; fi
+
+# Extract new package
 sudo tar -xzf /tmp/confio-deploy.tar.gz -C "$APP_DIR"
 
 echo "==> Python venv and requirements"
@@ -118,16 +131,27 @@ fi
 sudo "$APP_DIR/venv/bin/pip" install --upgrade pip wheel
 sudo "$APP_DIR/venv/bin/pip" install -r "$APP_DIR/requirements.txt"
 
-echo "==> Create env file if missing"
+echo "==> Create env file if missing (defaults to RDS Postgres)"
 if [[ ! -f "$APP_DIR/.env" ]]; then
   sudo tee "$APP_DIR/.env" >/dev/null <<EOF
 DJANGO_SETTINGS_MODULE=config.settings
 SECRET_KEY=change-me
 DEBUG=False
 ALLOWED_HOSTS=localhost,127.0.0.1
-DATABASE_URL=sqlite:////opt/confio/db.sqlite3
+
+# RDS Postgres (defaults / placeholders)
+DB_NAME=confio
+DB_USER=confio_app
+DB_PASSWORD=change-me
+DB_HOST=your-rds-endpoint.rds.amazonaws.com
+DB_PORT=5432
+DB_SSLMODE=require
+
+# Static/media
 STATIC_ROOT=/opt/confio/staticfiles
 MEDIA_ROOT=/opt/confio/media
+
+# Redis (optional)
 REDIS_URL=redis://127.0.0.1:6379/0
 EOF
 fi
