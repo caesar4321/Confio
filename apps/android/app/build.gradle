@@ -72,7 +72,7 @@ android {
         applicationId "com.Confio.Confio"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode 3
         versionName "1.0"
         buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", rootProject.ext.newArchEnabled.toString()
         if (rootProject.ext.newArchEnabled) {
@@ -99,18 +99,34 @@ android {
             }
         }
     }
+    // Validate keystore env and configure signing
+    def keystoreFileName = envProperties['KEYSTORE_FILE']
+    def keystorePassword = envProperties['KEYSTORE_PASSWORD']
+    def keyAliasName     = envProperties['KEY_ALIAS']
+    def keyPasswordVal   = envProperties['KEY_PASSWORD']
+
+    if (!keystoreFileName || !keystorePassword || !keyAliasName || !keyPasswordVal) {
+        throw new GradleException("Missing keystore: ensure KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD are set in apps/android/.env")
+    }
+
+    def resolvedKeystore = file("${projectDir}/${keystoreFileName}")
+    if (!resolvedKeystore.exists()) {
+        throw new GradleException("Keystore file not found at: ${resolvedKeystore}. Place the file there or update KEYSTORE_FILE in apps/android/.env")
+    }
+
     signingConfigs {
+        // Use the same custom keystore for both variants (required for your Firebase setup)
         debug {
-            storeFile file("${envProperties['KEYSTORE_FILE']}")
-            storePassword "${envProperties['KEYSTORE_PASSWORD']}"
-            keyAlias "${envProperties['KEY_ALIAS']}"
-            keyPassword "${envProperties['KEY_PASSWORD']}"
+            storeFile resolvedKeystore
+            storePassword keystorePassword
+            keyAlias keyAliasName
+            keyPassword keyPasswordVal
         }
         release {
-            storeFile file("${envProperties['KEYSTORE_FILE']}")
-            storePassword "${envProperties['KEYSTORE_PASSWORD']}"
-            keyAlias "${envProperties['KEY_ALIAS']}"
-            keyPassword "${envProperties['KEY_PASSWORD']}"
+            storeFile resolvedKeystore
+            storePassword keystorePassword
+            keyAlias keyAliasName
+            keyPassword keyPasswordVal
         }
     }
     buildTypes {
@@ -119,6 +135,7 @@ android {
         }
         release {
             signingConfig signingConfigs.release
+            debuggable false
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
