@@ -34,6 +34,8 @@ local.properties
 *.keystore
 !debug.keystore
 !confio.keystore
+# ignore keystore backups
+*.keystore.*
 .kotlin/
 
 # Platform-specific files that should not be committed
