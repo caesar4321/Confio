@@ -87,8 +87,33 @@ class AlgorandAccountManager:
                 # Account already exists with Algorand address
                 logger.info(f"Existing Algorand account found for user {user.email}: {account.algorand_address}")
                 
-                # Check opt-in status
-                opted_in_assets = cls._check_opt_ins(account.algorand_address)
+                # Check current opt-in status
+                currently_opted_in = cls._check_opt_ins(account.algorand_address)
+                logger.info(f"User currently opted into assets: {currently_opted_in}")
+                
+                # Check for missing opt-ins and perform them
+                from blockchain.algorand_client import get_algod_client
+                algod_client = get_algod_client()
+                
+                # Auto opt-in to CONFIO if missing
+                if cls.CONFIO_ASSET_ID and cls.CONFIO_ASSET_ID not in currently_opted_in:
+                    logger.info(f"User needs CONFIO opt-in, attempting auto opt-in...")
+                    opt_in_success = cls._opt_in_to_asset(algod_client, account.algorand_address, cls.CONFIO_ASSET_ID)
+                    if opt_in_success:
+                        opted_in_assets.append(cls.CONFIO_ASSET_ID)
+                        logger.info(f"Successfully auto-opted existing user into CONFIO")
+                    else:
+                        errors.append(f"Failed to auto opt-in to CONFIO (Asset ID: {cls.CONFIO_ASSET_ID})")
+                
+                # Auto opt-in to cUSD if missing
+                if cls.CUSD_ASSET_ID and cls.CUSD_ASSET_ID not in currently_opted_in:
+                    logger.info(f"User needs cUSD opt-in, attempting auto opt-in...")
+                    opt_in_success = cls._opt_in_to_asset(algod_client, account.algorand_address, cls.CUSD_ASSET_ID)
+                    if opt_in_success:
+                        opted_in_assets.append(cls.CUSD_ASSET_ID)
+                        logger.info(f"Successfully auto-opted existing user into cUSD")
+                    else:
+                        errors.append(f"Failed to auto opt-in to cUSD (Asset ID: {cls.CUSD_ASSET_ID})")
                 
                 return {
                     'account': account,
