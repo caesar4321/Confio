@@ -183,6 +183,20 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     logger.error(f"Error awarding Pionero Beta achievement: {e}")
                     # Don't fail authentication if achievement awarding fails
             
+            # If no address provided, try to use stored personal account address
+            if not algorand_address:
+                try:
+                    existing_account = Account.objects.filter(
+                        user=user,
+                        account_type='personal',
+                        account_index=0
+                    ).first()
+                    if existing_account and existing_account.algorand_address:
+                        algorand_address = existing_account.algorand_address
+                        logger.info(f"Using stored Algorand address for user {user.email}: {algorand_address}")
+                except Exception as e:
+                    logger.warning(f"Could not determine Algorand address from account: {e}")
+
             # Create/update Algorand account if address provided
             if algorand_address:
                 # Use AlgorandAccountManager to ensure auto opt-ins happen
