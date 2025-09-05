@@ -117,7 +117,8 @@ class AlgorandAccountManager:
             account.save()
             
             # Initialize Algod client
-            algod_client = algod.AlgodClient(cls.ALGOD_TOKEN, cls.ALGOD_ADDRESS)
+            from blockchain.algorand_client import get_algod_client
+            algod_client = get_algod_client()
             
             # Fund the account
             funded = cls._fund_account(algod_client, algorand_address)
@@ -234,7 +235,7 @@ class AlgorandAccountManager:
             asyncio.set_event_loop(loop)
             try:
                 result = loop.run_until_complete(
-                    algorand_sponsor_service.auto_opt_in_user(address, asset_id)
+                    algorand_sponsor_service.execute_server_side_opt_in(address, asset_id)
                 )
                 
                 if result.get('success'):
@@ -291,7 +292,8 @@ class AlgorandAccountManager:
     def _check_opt_ins(cls, address: str) -> list:
         """Check which assets an account is opted into"""
         try:
-            algod_client = algod.AlgodClient(cls.ALGOD_TOKEN, cls.ALGOD_ADDRESS)
+            from blockchain.algorand_client import get_algod_client
+            algod_client = get_algod_client()
             account_info = algod_client.account_info(address)
             assets = account_info.get('assets', [])
             
@@ -352,7 +354,8 @@ class AlgorandAccountManager:
                 }
             
             # Initialize Algod client
-            algod_client = algod.AlgodClient(cls.ALGOD_TOKEN, cls.ALGOD_ADDRESS)
+            from blockchain.algorand_client import get_algod_client
+            algod_client = get_algod_client()
             
             # Opt-in to USDC
             if cls.USDC_ASSET_ID:
