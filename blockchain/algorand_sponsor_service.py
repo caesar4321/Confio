@@ -511,14 +511,15 @@ class AlgorandSponsorService:
             logger.info(f"User transaction bytes length: {len(user_stxn)}")
             logger.info(f"Sponsor transaction bytes length: {len(sponsor_stxn)}")
             
-            # Submit the atomic group to the network using raw msgpack bytes
-            # py-algorand-sdk accepts a list of signed transaction bytes and concatenates internally
+            # Submit the atomic group to the network using concatenated signed bytes
+            # Some SDK versions expect a single bytes payload rather than a list
             try:
                 logger.info(f"About to submit atomic group (sponsor first) to Algorand network...")
                 logger.info(f"Algod endpoint: {self.algod_address}")
                 import time
                 start_time = time.time()
-                tx_id = self.algod.send_raw_transaction([sponsor_stxn, user_stxn])
+                combined_txns = sponsor_stxn + user_stxn
+                tx_id = self.algod.send_raw_transaction(combined_txns)
                 elapsed_time = time.time() - start_time
                 logger.info(f"Successfully submitted atomic group, tx_id: {tx_id}, took {elapsed_time:.2f} seconds")
             except Exception as e:
