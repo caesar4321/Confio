@@ -232,7 +232,8 @@ class ConvertSessionConsumer(AsyncJsonWebsocketConsumer):
                 ordered.append(user_signed[u_ptr])
                 u_ptr += 1
 
-        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        from blockchain.algorand_client import get_algod_client
+        algod_client = get_algod_client()
         txid = algod_client.send_transactions(ordered)
         ref_txid = ordered[-1].get_txid()
 

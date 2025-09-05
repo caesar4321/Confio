@@ -31,6 +31,7 @@ import com.mrousavy.camera.react.CameraPackage
 import com.worklets.WorkletsPackage
 import com.rt2zz.reactnativecontacts.ReactNativeContacts
 import com.learnium.RNDeviceInfo.RNDeviceInfo
+import com.Confio.Confio.MediaPickerPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -60,7 +61,8 @@ class MainApplication : Application(), ReactApplication {
             CameraPackage(),
             WorkletsPackage(),
             ReactNativeContacts(),
-            RNDeviceInfo()
+            RNDeviceInfo(),
+            MediaPickerPackage()
           )
         }
 

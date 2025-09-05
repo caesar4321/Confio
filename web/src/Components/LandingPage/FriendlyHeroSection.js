@@ -111,14 +111,24 @@ const FriendlyHeroSection = () => {
               transition={{ duration: 0.6, delay: 0.4 }}
               className={styles.ctaButtons}
             >
-              <a href="#" className={styles.storeButton}>
+              <a
+                href="https://play.google.com/store/apps/details?id=com.Confio.Confio"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.storeButton}
+              >
                 <img 
                   src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg" 
                   alt="Get it on Google Play" 
                   className={styles.storeBadge}
                 />
               </a>
-              <a href="#" className={styles.storeButton}>
+              <a
+                href="https://apps.apple.com/app/confio/id6473710976"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.storeButton}
+              >
                 <img 
                   src="https://upload.wikimedia.org/wikipedia/commons/3/3c/Download_on_the_App_Store_Badge.svg" 
                   alt="Download on the App Store" 

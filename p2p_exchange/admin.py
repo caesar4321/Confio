@@ -1,4 +1,5 @@
 from django.contrib import admin
+from blockchain.algorand_client import get_algod_client
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
@@ -399,7 +400,7 @@ class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         try:
             from django.conf import settings
             from algosdk.v2client import algod
-            client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            client = get_algod_client()
             app_id = getattr(settings, 'ALGORAND_P2P_TRADE_APP_ID', 0)
             if not app_id:
                 return mark_safe('<span style="color:#6B7280;">Config sin app_id</span>')
@@ -732,7 +733,7 @@ class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         try:
             from django.conf import settings
             from algosdk.v2client import algod
-            client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            client = get_algod_client()
             app_id = getattr(settings, 'ALGORAND_P2P_TRADE_APP_ID', 0)
             if not app_id:
                 return mark_safe('<span style="color:#6B7280;">Config sin app_id</span>')
@@ -804,7 +805,7 @@ class P2PTradeAdmin(EnhancedAdminMixin, admin.ModelAdmin):
         sponsor_sk = mnemonic.to_private_key(sponsor_mn)
         sponsor_addr = algo_account.address_from_private_key(sponsor_sk)
 
-        client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        client = get_algod_client()
         builder = P2PTradeTransactionBuilder()
 
         # Preflight: verify on-chain admin and sponsor match env

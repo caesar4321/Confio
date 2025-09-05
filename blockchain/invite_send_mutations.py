@@ -1,4 +1,5 @@
 """
+from blockchain.algorand_client import get_algod_client
 Invite & Send GraphQL Mutations
 
 Server builds fully sponsored groups for invite creation.
@@ -89,7 +90,7 @@ class PrepareInviteForPhone(graphene.Mutation):
             return cls(success=False, error='Unsupported asset type')
 
         # Normalize phone for DB persistence; do not enforce single-invite per phone on-chain
-        client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        client = get_algod_client()
         phone_key_canonical = builder.normalize_phone(phone, phone_country)
         if not phone_key_canonical or ':' not in phone_key_canonical:
             return cls(success=False, error='Proporciona un número en formato internacional (+CC ...) o un país válido para normalizar el teléfono.')
@@ -98,7 +99,7 @@ class PrepareInviteForPhone(graphene.Mutation):
 
         # Insufficient balance check for inviter before building
         try:
-            client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            client = get_algod_client()
             asset_info = client.asset_info(asset_id)
             decimals = int(asset_info.get('params', {}).get('decimals', 6) or 6)
             acct_info = client.account_asset_info(acct.algorand_address, asset_id)
@@ -269,7 +270,7 @@ class SubmitInviteForPhone(graphene.Mutation):
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
 
-        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        algod_client = get_algod_client()
 
         # Base64 decode tolerant of urlsafe and missing padding
         def _b64_to_bytes(s: str) -> bytes:
@@ -464,7 +465,7 @@ class ClaimInviteForPhone(graphene.Mutation):
         # Use admin mnemonic; only fall back to sponsor if sponsor == admin on-chain.
         admin_mn = getattr(settings, 'ALGORAND_ADMIN_MNEMONIC', None)
         sponsor_mn = getattr(settings, 'ALGORAND_SPONSOR_MNEMONIC', None)
-        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        algod_client = get_algod_client()
         builder = InviteSendTransactionBuilder()
         contract = builder.contract
         method = next((m for m in contract.methods if m.name == 'claim_invitation'), None)
@@ -808,7 +809,7 @@ def get_invite_receipt_for_phone(user_phone: str, user_country: str | None):
     a simple client API keyed by phone.
     """
     builder = InviteSendTransactionBuilder()
-    client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+    client = get_algod_client()
     try:
         from users.phone_utils import normalize_phone as _norm
         from send.models import PhoneInvite

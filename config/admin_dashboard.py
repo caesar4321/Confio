@@ -556,8 +556,9 @@ class ConfioAdminSite(admin.AdminSite):
         algod_health = {'ok': False}
         indexer_health = {'ok': False}
         try:
-            from algosdk.v2client import algod as _algod, indexer as _indexer
-            algod_client = _algod.AlgodClient(getattr(settings, 'ALGORAND_ALGOD_TOKEN', ''), context['algod_url'])
+            from algosdk.v2client import indexer as _indexer
+            from blockchain.algorand_client import get_algod_client
+            algod_client = get_algod_client()
             status = algod_client.status()
             algod_health = {
                 'ok': True,
@@ -567,7 +568,8 @@ class ConfioAdminSite(admin.AdminSite):
         except Exception:
             pass
         try:
-            idx_client = _indexer.IndexerClient(getattr(settings, 'ALGORAND_INDEXER_TOKEN', ''), context['indexer_url'])
+            from blockchain.algorand_client import get_indexer_client
+            idx_client = get_indexer_client()
             h = idx_client.health()
             indexer_health = {'ok': True, 'round': h.get('round')}
         except Exception:

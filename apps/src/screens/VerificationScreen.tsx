@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, StatusBar, Modal, Image, TextInput, ActivityIndicator, PermissionsAndroid, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, StatusBar, Modal, Image, TextInput, ActivityIndicator, Alert } from 'react-native';
 import { Camera, useCameraDevice } from 'react-native-vision-camera';
 import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
@@ -8,7 +8,8 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
 import { useMutation, useQuery, useApolloClient } from '@apollo/client';
 import { REQUEST_IDENTITY_UPLOAD, SUBMIT_IDENTITY_VERIFICATION_S3, REQUEST_PREMIUM_UPGRADE } from '../apollo/mutations';
-import { CameraRoll } from '@react-native-camera-roll/camera-roll';
+// Gallery access now uses Android Photo Picker via a small native module
+import { pickImageUri } from '../native/MediaPicker';
 import { uploadFileToPresigned, uploadFileToPresignedForm } from '../services/uploadService';
 import { GET_ME, GET_USER_ACCOUNTS, GET_MY_PERSONAL_KYC_STATUS, GET_BUSINESS_KYC_STATUS, GET_MY_KYC_STATUS } from '../apollo/queries';
 import { useAccountManager } from '../hooks/useAccountManager';
@@ -72,9 +73,7 @@ const VerificationScreen = () => {
   const cameraRef = useRef<Camera | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [cameraPurpose, setCameraPurpose] = useState<'front'|'selfie'|'payout'|'business'>('front');
-  const [showGallery, setShowGallery] = useState(false);
-  const [galleryPurpose, setGalleryPurpose] = useState<'front'|'selfie'|'payout'>('front');
-  const [galleryUris, setGalleryUris] = useState<string[]>([]);
+  // Removed custom gallery; we use system picker on Android
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [previewPurpose, setPreviewPurpose] = useState<'front'|'back'|'selfie'|'payout'|'business'>('front');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -115,54 +114,15 @@ const VerificationScreen = () => {
     return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6)}`;
   };
 
-  const requestGalleryPermission = async (): Promise<boolean> => {
-    if (Platform.OS !== 'android') return true;
-    try {
-      const sdk = Number(Platform.Version) || 0;
-      const perm = sdk >= 33
-        ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
-        : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
-      // Check existing permission
-      const has = await PermissionsAndroid.check(perm);
-      if (has) return true;
-      const result = await PermissionsAndroid.request(perm, {
-        title: 'Acceso a Fotos',
-        message: 'Confío necesita acceso a tus fotos para subir el comprobante y documentos.',
-        buttonPositive: 'Permitir',
-        buttonNegative: 'Cancelar',
-      });
-      return result === PermissionsAndroid.RESULTS.GRANTED;
-    } catch (e) {
-      console.error('[Verification] Gallery permission error:', e);
-      return false;
-    }
-  };
-
   const pickFromGallery = async (purpose: 'front' | 'selfie' | 'payout') => {
     try {
-      const allowed = await requestGalleryPermission();
-      if (!allowed) {
-        console.warn('[Verification] Gallery permission not granted');
-        return;
-      }
-      const photos = await CameraRoll.getPhotos({ first: 60, assetType: 'Photos' });
-      if (!photos.edges.length) {
-        console.warn('[Verification] No photos found in gallery');
-        return;
-      }
-      setGalleryPurpose(purpose);
-      setGalleryUris(photos.edges.map(e => e.node.image.uri));
-      setShowGallery(true);
+      const uri = await pickImageUri();
+      if (!uri) return;
+      setPreviewPurpose(purpose);
+      setPreviewUri(uri);
     } catch (e: any) {
       console.error('[Verification] Upload failed:', e?.message || e);
     }
-  };
-
-  const handleGalleryPick = async (uri: string) => {
-    setShowGallery(false);
-    const purpose = galleryPurpose as 'front'|'selfie'|'payout';
-    setPreviewPurpose(purpose);
-    setPreviewUri(uri);
   };
 
   const handleSubmitVerification = async () => {
@@ -801,7 +761,7 @@ const VerificationScreen = () => {
     const handleBackInFlow = () => {
       // If any modal is open, close it first
       if (showCamera) { setShowCamera(false); return; }
-      if (showGallery) { setShowGallery(false); return; }
+      // No custom gallery now
       if (previewUri) { setPreviewUri(null); return; }
       // Step-wise back navigation
       if (uploadStep > 1) {
@@ -841,26 +801,6 @@ const VerificationScreen = () => {
               >
                 <Text style={{ fontSize: 16, fontWeight: '500', color: 'white' }}>Entendido</Text>
               </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
-        {/* Simple gallery picker modal */}
-        <Modal visible={showGallery} transparent animationType="slide" onRequestClose={() => setShowGallery(false)}>
-          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', paddingTop: 60 }}>
-            <View style={{ backgroundColor: 'white', borderTopLeftRadius: 12, borderTopRightRadius: 12, flex: 1 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 12 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600' }}>Selecciona una imagen</Text>
-                <TouchableOpacity onPress={() => setShowGallery(false)}>
-                  <Icon name="x" size={22} color="#111827" />
-                </TouchableOpacity>
-              </View>
-              <ScrollView contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-                {galleryUris.map((u, idx) => (
-                  <TouchableOpacity key={idx} onPress={() => handleGalleryPick(u)}>
-                    <Image source={{ uri: u }} style={{ width: 110, height: 110, margin: 2 }} />
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
             </View>
           </View>
         </Modal>

@@ -1617,10 +1617,10 @@ class UpdateP2PTradeStatus(graphene.Mutation):
                 if not escrowed:
                     try:
                         from blockchain.p2p_trade_transaction_builder import P2PTradeTransactionBuilder
-                        from algosdk.v2client import algod
+                        from blockchain.algorand_client import get_algod_client
                         from django.conf import settings
                         builder = P2PTradeTransactionBuilder()
-                        algod_client_pref = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+                        algod_client_pref = get_algod_client()
                         algod_client_pref.application_box_by_name(builder.app_id, str(trade.id).encode('utf-8'))
                         on_chain_box_exists = True
                     except Exception:
