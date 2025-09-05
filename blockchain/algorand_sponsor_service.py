@@ -74,7 +74,8 @@ class AlgorandSponsorService:
     def algod(self) -> algod.AlgodClient:
         """Get algod client instance"""
         if not self._algod_client:
-            self._algod_client = algod.AlgodClient(self.algod_token, self.algod_address)
+            from blockchain.algorand_client import get_algod_client
+            self._algod_client = get_algod_client()
         return self._algod_client
     
     @property
