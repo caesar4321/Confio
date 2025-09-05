@@ -511,32 +511,18 @@ class AlgorandSponsorService:
             logger.info(f"User transaction bytes length: {len(user_stxn)}")
             logger.info(f"Sponsor transaction bytes length: {len(sponsor_stxn)}")
             
-            # Combine transactions for atomic group submission
-            # ALWAYS put sponsor first to ensure proper fee payment and MBR funding
-            logger.info(f"Combining transactions with sponsor first (proper sponsorship pattern)")
-            combined_txns = sponsor_stxn + user_stxn
-            logger.info(f"Combined transaction bytes length: {len(combined_txns)}")
-            
-            # Submit the atomic group to the network
-            # For Algorand atomic groups, the standard is to concatenate the signed transactions
-            # The send_raw_transaction expects base64 encoded string, not raw bytes
+            # Submit the atomic group to the network using raw msgpack bytes
+            # py-algorand-sdk accepts a list of signed transaction bytes and concatenates internally
             try:
-                # Encode the combined transactions to base64
-                combined_b64 = base64.b64encode(combined_txns).decode('utf-8')
-                logger.info(f"About to submit atomic group to Algorand network...")
-                logger.info(f"Combined transaction size: {len(combined_b64)} characters")
+                logger.info(f"About to submit atomic group (sponsor first) to Algorand network...")
                 logger.info(f"Algod endpoint: {self.algod_address}")
-                
-                # Add timeout to the algod call
                 import time
                 start_time = time.time()
-                tx_id = self.algod.send_raw_transaction(combined_b64)
+                tx_id = self.algod.send_raw_transaction([sponsor_stxn, user_stxn])
                 elapsed_time = time.time() - start_time
                 logger.info(f"Successfully submitted atomic group, tx_id: {tx_id}, took {elapsed_time:.2f} seconds")
-                    
             except Exception as e:
                 logger.error(f"Failed to submit atomic group: {e}")
-                # Try to provide more detail about the error
                 if "msgpack decode error" in str(e):
                     logger.error("Transaction format error - transactions may not be properly encoded")
                     logger.error(f"First 20 bytes of user txn: {user_stxn[:20].hex() if len(user_stxn) >= 20 else user_stxn.hex()}")
