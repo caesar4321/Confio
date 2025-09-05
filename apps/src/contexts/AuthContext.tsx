@@ -386,6 +386,51 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
           // Don't block login if FCM registration fails
         }
         
+        // Handle auto opt-in after successful login
+        try {
+          console.log('[AuthContext] Checking for required asset opt-ins...');
+          
+          // Check if user needs opt-ins
+          const GENERATE_OPT_IN_TRANSACTIONS = gql`
+            mutation GenerateOptInTransactions {
+              generateOptInTransactions {
+                success
+                error
+                transactions
+              }
+            }
+          `;
+          
+          const { data } = await apolloClient.mutate({
+            mutation: GENERATE_OPT_IN_TRANSACTIONS
+          });
+          
+          if (data?.generateOptInTransactions?.success && data?.generateOptInTransactions?.transactions) {
+            console.log('[AuthContext] Opt-in transactions needed, processing...');
+            
+            // Parse transactions
+            const transactions = JSON.parse(data.generateOptInTransactions.transactions);
+            
+            // Use AlgorandService to process opt-in
+            const { default: algorandService } = await import('../services/algorandService');
+            const optInSuccess = await algorandService.processSponsoredOptIn(transactions);
+            
+            if (optInSuccess) {
+              console.log('[AuthContext] Auto opt-in completed successfully');
+            } else {
+              console.error('[AuthContext] Auto opt-in failed');
+            }
+          } else if (data?.generateOptInTransactions?.success) {
+            console.log('[AuthContext] User already opted into all required assets');
+          } else {
+            console.error('[AuthContext] Failed to generate opt-in transactions:', data?.generateOptInTransactions?.error);
+          }
+          
+        } catch (optInError) {
+          console.error('[AuthContext] Error during auto opt-in:', optInError);
+          // Don't block login if opt-in fails
+        }
+
         try { signalAuthReady(); } catch {}
         prefetchUserAccounts('post-login');
         navigateToScreen('Main');

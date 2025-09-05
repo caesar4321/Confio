@@ -445,14 +445,12 @@ class AddAlgorandWalletMutation(graphene.Mutation):
             
             # Check what assets need opt-in from frontend
             from algosdk.v2client import algod
+            from blockchain.algorand_client import get_algod_client
             needs_opt_in = []
             algo_balance = 0.0
             
             try:
-                algod_client = algod.AlgodClient(
-                    AlgorandAccountManager.ALGOD_TOKEN,
-                    AlgorandAccountManager.ALGOD_ADDRESS
-                )
+                algod_client = get_algod_client()
                 account_info = algod_client.account_info(algorand_address)
                 algo_balance = account_info.get('amount', 0) / 1_000_000  # Convert to ALGO
                 
