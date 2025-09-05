@@ -56,7 +56,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
     access_token = graphene.String()
     refresh_token = graphene.String()
     user = graphene.Field(Web3AuthUserType)
-    needs_opt_in = graphene.List(graphene.Int)  # Asset IDs that need opt-in
+    needs_opt_in = graphene.List(graphene.String)  # Asset IDs that need opt-in (use String to avoid 32-bit Int limits)
     opt_in_transactions = graphene.JSONString()  # Unsigned transactions for opt-in
     
     @classmethod
@@ -251,11 +251,11 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     
                     # Calculate how many NEW assets we need to opt into
                     assets_to_opt_in = []
-                    if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_asset_ids:
-                        assets_to_opt_in.append(AlgorandAccountManager.CONFIO_ASSET_ID)
+                        if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_asset_ids:
+                            assets_to_opt_in.append(str(AlgorandAccountManager.CONFIO_ASSET_ID))
                         logger.info(f"User needs to opt into CONFIO: {AlgorandAccountManager.CONFIO_ASSET_ID}")
-                    if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_asset_ids:
-                        assets_to_opt_in.append(AlgorandAccountManager.CUSD_ASSET_ID)
+                        if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_asset_ids:
+                            assets_to_opt_in.append(str(AlgorandAccountManager.CUSD_ASSET_ID))
                         logger.info(f"User needs to opt into cUSD: {AlgorandAccountManager.CUSD_ASSET_ID}")
                     
                     logger.info(f"Account {algorand_address}: balance={balance}, current_assets={num_assets}, need_opt_in={len(assets_to_opt_in)}")
@@ -403,7 +403,7 @@ class AddAlgorandWalletMutation(graphene.Mutation):
     is_new_wallet = graphene.Boolean()
     opted_in_assets = graphene.List(graphene.Int)
     opt_in_errors = graphene.List(graphene.String)
-    needs_opt_in = graphene.List(graphene.Int)  # Assets that need frontend opt-in
+    needs_opt_in = graphene.List(graphene.String)  # Assets that need frontend opt-in (use String to avoid 32-bit Int limits)
     algo_balance = graphene.Float()  # Current ALGO balance
     
     @classmethod
