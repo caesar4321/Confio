@@ -185,30 +185,55 @@ class Web3AuthLoginMutation(graphene.Mutation):
             
             # Create/update Algorand account if address provided
             if algorand_address:
-                account, _ = Account.objects.get_or_create(
+                # Use AlgorandAccountManager to ensure auto opt-ins happen
+                from blockchain.algorand_account_manager import AlgorandAccountManager
+                
+                # Check if account already exists
+                existing_account = Account.objects.filter(
                     user=user,
                     account_type='personal',
-                    defaults={
-                        'algorand_address': algorand_address,
-                    }
-                )
-                if account.algorand_address != algorand_address:
-                    account.algorand_address = algorand_address
-                    account.save()
+                    account_index=0
+                ).first()
+                
+                if existing_account:
+                    # Update existing account
+                    if existing_account.algorand_address != algorand_address:
+                        existing_account.algorand_address = algorand_address
+                        existing_account.save()
+                    account = existing_account
+                    
+                    # For existing accounts, check and perform missing opt-ins
+                    logger.info(f"Checking opt-ins for existing account: {algorand_address}")
+                    result = AlgorandAccountManager.get_or_create_algorand_account(user, algorand_address)
+                    account = result['account']
+                    opted_in_assets = result.get('opted_in_assets', [])
+                    opt_in_errors = result.get('errors', [])
+                    
+                    if opted_in_assets:
+                        logger.info(f"Auto-opted user {user.email} into assets: {opted_in_assets}")
+                    if opt_in_errors:
+                        logger.warning(f"Opt-in errors for {user.email}: {opt_in_errors}")
+                else:
+                    # Create new account with auto opt-ins
+                    logger.info(f"Creating new account with auto opt-ins: {algorand_address}")
+                    result = AlgorandAccountManager.get_or_create_algorand_account(user, algorand_address)
+                    account = result['account']
+                    opted_in_assets = result.get('opted_in_assets', [])
+                    opt_in_errors = result.get('errors', [])
+                    
+                    if opted_in_assets:
+                        logger.info(f"Auto-opted new user {user.email} into assets: {opted_in_assets}")
+                    if opt_in_errors:
+                        logger.warning(f"Opt-in errors for new user {user.email}: {opt_in_errors}")
                 
                 # Update last login timestamp for the account
                 account.last_login_at = timezone.now()
                 account.save(update_fields=['last_login_at'])
                 
                 # Check balance and auto-fund if needed
-                from blockchain.algorand_account_manager import AlgorandAccountManager
-                from algosdk.v2client import algod
-                
                 try:
-                    algod_client = algod.AlgodClient(
-                        AlgorandAccountManager.ALGOD_TOKEN,
-                        AlgorandAccountManager.ALGOD_ADDRESS
-                    )
+                    from blockchain.algorand_client import get_algod_client
+                    algod_client = get_algod_client()
                     
                     # Try to get account info - new accounts might not exist on chain yet
                     try:
