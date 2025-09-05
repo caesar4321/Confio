@@ -42,15 +42,19 @@ class AlgorandClient:
         """Async context manager entry"""
         # Add a friendly User-Agent; pass token separately per SDK signature
         ua = {'User-Agent': 'confio-backend/algosdk'}
-        # Nodely uses X-API-Key instead of X-Algo-API-Token (even if empty for free tier)
+        # Nodely uses X-API-Key; do NOT send an empty header on free tier
         if 'nodely' in (self.algod_address or '').lower():
-            algod_headers = {**ua, 'X-API-Key': self.algod_token or ''}
-            self._algod_client = algod.AlgodClient('', self.algod_address, headers=algod_headers)
+            headers = dict(ua)
+            if self.algod_token:
+                headers['X-API-Key'] = self.algod_token
+            self._algod_client = algod.AlgodClient('', self.algod_address, headers=headers)
         else:
             self._algod_client = algod.AlgodClient(self.algod_token or '', self.algod_address, headers=ua)
         if 'nodely' in (self.indexer_address or '').lower():
-            indexer_headers = {**ua, 'X-API-Key': self.indexer_token or ''}
-            self._indexer_client = indexer.IndexerClient('', self.indexer_address, headers=indexer_headers)
+            headers = dict(ua)
+            if self.indexer_token:
+                headers['X-API-Key'] = self.indexer_token
+            self._indexer_client = indexer.IndexerClient('', self.indexer_address, headers=headers)
         else:
             self._indexer_client = indexer.IndexerClient(self.indexer_token or '', self.indexer_address, headers=ua)
         return self
@@ -66,7 +70,9 @@ class AlgorandClient:
         if not self._algod_client:
             ua = {'User-Agent': 'confio-backend/algosdk'}
             if 'nodely' in (self.algod_address or '').lower():
-                headers = {**ua, 'X-API-Key': self.algod_token or ''}
+                headers = dict(ua)
+                if self.algod_token:
+                    headers['X-API-Key'] = self.algod_token
                 self._algod_client = algod.AlgodClient('', self.algod_address, headers=headers)
             else:
                 self._algod_client = algod.AlgodClient(self.algod_token or '', self.algod_address, headers=ua)
@@ -78,7 +84,9 @@ class AlgorandClient:
         if not self._indexer_client:
             ua = {'User-Agent': 'confio-backend/algosdk'}
             if 'nodely' in (self.indexer_address or '').lower():
-                headers = {**ua, 'X-API-Key': self.indexer_token or ''}
+                headers = dict(ua)
+                if self.indexer_token:
+                    headers['X-API-Key'] = self.indexer_token
                 self._indexer_client = indexer.IndexerClient('', self.indexer_address, headers=headers)
             else:
                 self._indexer_client = indexer.IndexerClient(self.indexer_token or '', self.indexer_address, headers=ua)
@@ -595,7 +603,9 @@ def get_algod_client():
     
     ua = {'User-Agent': 'confio-backend/algosdk'}
     if 'nodely' in (algod_address or '').lower():
-        headers = {**ua, 'X-API-Key': algod_token or ''}
+        headers = dict(ua)
+        if algod_token:
+            headers['X-API-Key'] = algod_token
         return algod.AlgodClient('', algod_address, headers=headers)
     else:
         return algod.AlgodClient(algod_token or '', algod_address, headers=ua)
@@ -616,7 +626,9 @@ def get_indexer_client():
     
     ua = {'User-Agent': 'confio-backend/algosdk'}
     if 'nodely' in (indexer_address or '').lower():
-        headers = {**ua, 'X-API-Key': indexer_token or ''}
+        headers = dict(ua)
+        if indexer_token:
+            headers['X-API-Key'] = indexer_token
         return indexer.IndexerClient('', indexer_address, headers=headers)
     else:
         return indexer.IndexerClient(indexer_token or '', indexer_address, headers=ua)
