@@ -514,7 +514,7 @@ class AlgorandSponsorService:
             # Submit atomic group as base64-concatenated signed bytes (previous working behavior)
             try:
                 logger.info(f"About to submit atomic group to Algorand network (base64 payload)...")
-                import time, base64
+                import time
                 start_time = time.time()
                 combined_b64 = base64.b64encode(sponsor_stxn + user_stxn).decode('utf-8')
                 tx_id = self.algod.send_raw_transaction(combined_b64)
