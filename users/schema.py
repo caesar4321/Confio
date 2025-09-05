@@ -1971,7 +1971,8 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
             account.save()
 
             # After setting address, check/fund and prepare asset opt-ins for CONFIO and cUSD
-            needs_opt_in = []
+            needs_opt_in = []  # String IDs for GraphQL return
+            needs_ids_int = []  # Int IDs for internal use
             opt_in_transactions = []
             try:
                 from blockchain.algorand_account_manager import AlgorandAccountManager
@@ -1994,17 +1995,19 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
 
                 # Only track CONFIO and cUSD assets (exclude app opt-ins here)
                 if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_asset_ids:
-                    needs_opt_in.append(str(AlgorandAccountManager.CONFIO_ASSET_ID))
+                    needs_ids_int.append(AlgorandAccountManager.CONFIO_ASSET_ID)
                 if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_asset_ids:
-                    needs_opt_in.append(str(AlgorandAccountManager.CUSD_ASSET_ID))
+                    needs_ids_int.append(AlgorandAccountManager.CUSD_ASSET_ID)
+                # Prepare string list for GraphQL response
+                needs_opt_in = [str(a) for a in needs_ids_int]
 
                 # Fund to cover asset MBR only (100_000 microAlgos per asset)
                 try:
                     current_min_balance = account_info.get('min-balance', 0) if 'account_info' in locals() else 0
                 except Exception:
                     current_min_balance = 0
-                new_min_balance = current_min_balance + (len(needs_opt_in) * 100000)
-                if balance < new_min_balance and len(needs_opt_in) > 0:
+                new_min_balance = current_min_balance + (len(needs_ids_int) * 100000)
+                if balance < new_min_balance and len(needs_ids_int) > 0:
                     from algosdk import mnemonic
                     from algosdk.transaction import PaymentTxn, wait_for_confirmation
                     sponsor_private_key = mnemonic.to_private_key(AlgorandAccountManager.SPONSOR_MNEMONIC)
@@ -2020,7 +2023,7 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
                     wait_for_confirmation(algod_client, tx_id, 4)
 
                 # Prepare atomic opt-in transactions for needed assets
-                if len(needs_opt_in) > 0:
+                if len(needs_ids_int) > 0:
                     try:
                         from blockchain.mutations import GenerateOptInTransactionsMutation
                         class MockInfo:
@@ -2031,7 +2034,7 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
                                 self.context = self.Context(user)
                         mock_info = MockInfo(user)
                         result = GenerateOptInTransactionsMutation.mutate(
-                            None, mock_info, asset_ids=needs_opt_in
+                            None, mock_info, asset_ids=needs_ids_int
                         )
                         if getattr(result, 'success', False) and getattr(result, 'transactions', None):
                             opt_in_transactions = result.transactions
