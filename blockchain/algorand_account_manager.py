@@ -211,8 +211,8 @@ class AlgorandAccountManager:
     @classmethod
     def _opt_in_to_asset(cls, algod_client, address: str, asset_id: int) -> bool:
         """
-        Opt-in an account to an asset.
-        For Web3Auth wallets, we generate unsigned transactions for the frontend to sign.
+        Opt-in an account to an asset using sponsored transactions.
+        This automatically performs the opt-in without requiring user signature.
         """
         try:
             # Check if already opted in
@@ -223,16 +223,32 @@ class AlgorandAccountManager:
                 logger.info(f"Account {address} already opted into asset {asset_id}")
                 return True
             
-            # Since Web3Auth holds the keys on frontend, we can't auto opt-in
-            # Instead, we'll return instructions for the frontend
-            logger.info(f"Account {address} needs frontend opt-in for asset {asset_id}")
+            # Use sponsored opt-in service for automatic opt-in
+            logger.info(f"Account {address} needs opt-in for asset {asset_id}, using sponsored service")
             
-            # The frontend will need to:
-            # 1. Call our optInToAsset mutation to get unsigned transaction
-            # 2. Sign with Web3Auth
-            # 3. Submit to Algorand
+            from blockchain.algorand_sponsor_service import algorand_sponsor_service
+            import asyncio
             
-            return False
+            # Create and run async opt-in
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    algorand_sponsor_service.auto_opt_in_user(address, asset_id)
+                )
+                
+                if result.get('success'):
+                    logger.info(f"Successfully auto-opted {address} into asset {asset_id}")
+                    return True
+                else:
+                    logger.warning(f"Auto opt-in failed for {address} to asset {asset_id}: {result.get('error')}")
+                    return False
+                    
+            except Exception as e:
+                logger.error(f"Error during sponsored opt-in for {address} to asset {asset_id}: {e}")
+                return False
+            finally:
+                loop.close()
             
         except Exception as e:
             logger.error(f"Failed to check opt-in for {address} to asset {asset_id}: {e}")
