@@ -91,6 +91,10 @@ class Web3AuthLoginMutation(graphene.Mutation):
             sign_in_provider = provider_data.get('sign_in_provider', '')
             provider = 'google' if 'google' in sign_in_provider else 'apple' if 'apple' in sign_in_provider else 'unknown'
             
+            # Initialize variables that need to be available for return statement
+            opt_in_transactions = []
+            assets_to_opt_in = []
+            
             # Find or create user based on Firebase UID
             user, created = User.objects.get_or_create(
                 firebase_uid=firebase_uid,
@@ -389,8 +393,8 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 access_token=access_token,
                 refresh_token=refresh_token,
                 user=user,
-                needs_opt_in=[str(a) for a in assets_to_opt_in] if 'assets_to_opt_in' in locals() else [],
-                opt_in_transactions=opt_in_transactions if 'opt_in_transactions' in locals() else []
+                needs_opt_in=[str(a) for a in assets_to_opt_in],
+                opt_in_transactions=opt_in_transactions
             )
             
         except Exception as e:
