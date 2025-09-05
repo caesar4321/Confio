@@ -1,4 +1,5 @@
 """
+from blockchain.algorand_client import get_algod_client
 P2P Trade GraphQL Mutations (Algorand)
 
 Server builds fully sponsored groups for P2P trades via the p2p_trade app.
@@ -79,7 +80,7 @@ def accept_trade_for_trade_id(trade_id: str) -> tuple[bool, str | None]:
         try:
             asset_id = builder._asset_id_for_type(str(trade.offer.token_type).upper()) if trade.offer and trade.offer.token_type else None
             if asset_id:
-                algod_client_pref = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+                algod_client_pref = get_algod_client()
                 logger.info('[P2P AutoAccept] Preflight: buyer=%s asset_id=%s', acct.algorand_address, asset_id)
                 algod_client_pref.account_asset_info(acct.algorand_address, asset_id)
         except Exception:
@@ -93,7 +94,7 @@ def accept_trade_for_trade_id(trade_id: str) -> tuple[bool, str | None]:
         if not sponsor_mn:
             return False, 'Server missing ALGORAND_SPONSOR_MNEMONIC'
         sk = mnemonic.to_private_key(sponsor_mn)
-        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        algod_client = get_algod_client()
 
         signed = []
         for e in (res.sponsor_transactions or []):
@@ -228,7 +229,7 @@ class PrepareP2PCreateTrade(graphene.Mutation):
             pass
         # Idempotency: if box already exists on-chain, short-circuit success
         try:
-            algod_client_pref = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            algod_client_pref = get_algod_client()
             try:
                 algod_client_pref.application_box_by_name(builder.app_id, trade_id.encode('utf-8'))
                 logger.info('[P2P Create] Box already exists for trade_id=%s; returning success without building group', trade_id)
@@ -315,7 +316,7 @@ class SubmitP2PCreateTrade(graphene.Mutation):
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
 
-        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        algod_client = get_algod_client()
 
         # Decode signed user transactions (AXFER and AppCall)
         try:
@@ -442,7 +443,7 @@ class SubmitP2PCreateTrade(graphene.Mutation):
             # Idempotency: if the trade box exists on-chain after failure, treat as success
             try:
                 builder = P2PTradeTransactionBuilder()
-                algod_client_pref = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+                algod_client_pref = get_algod_client()
                 algod_client_pref.application_box_by_name(builder.app_id, trade_id.encode('utf-8'))
                 logger.warning('[P2P Submit] Box exists after failure; returning success trade_id=%s', trade_id)
                 return cls(success=True, txid=None)
@@ -560,7 +561,7 @@ class AcceptP2PTrade(graphene.Mutation):
             if trade_obj and trade_obj.offer and trade_obj.offer.token_type:
                 token = str(trade_obj.offer.token_type).upper()
                 asset_id = builder._asset_id_for_type(token)
-                algod_client_pref = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+                algod_client_pref = get_algod_client()
                 try:
                     algod_client_pref.account_asset_info(acct.algorand_address, asset_id)
                 except Exception:
@@ -604,7 +605,7 @@ class AcceptP2PTrade(graphene.Mutation):
             if not sponsor_mn:
                 return cls(success=False, error='Server missing ALGORAND_SPONSOR_MNEMONIC')
             sk = mnemonic.to_private_key(sponsor_mn)
-            algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            algod_client = get_algod_client()
 
             # Decode and sign
             signed = []
@@ -670,7 +671,7 @@ class MarkP2PTradePaid(graphene.Mutation):
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
 
-        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        algod_client = get_algod_client()
         # Decode buyer-signed app call
         try:
             user_signed = _b64_to_bytes(signed_user_txn)
@@ -748,7 +749,7 @@ class ConfirmP2PTradeReceived(graphene.Mutation):
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
 
-        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        algod_client = get_algod_client()
         # Decode seller-signed app call
         try:
             user_signed = _b64_to_bytes(signed_user_txn)
@@ -840,7 +841,7 @@ class PrepareP2pAcceptTrade(graphene.Mutation):
 
         # Idempotency: if trade already ACTIVE, short-circuit
         try:
-            algod_client_pref = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            algod_client_pref = get_algod_client()
             bx = algod_client_pref.application_box_by_name(builder.app_id, trade_id.encode('utf-8'))
             import base64 as _b64
             raw = _b64.b64decode((bx or {}).get('value', ''))
@@ -875,7 +876,7 @@ class SubmitP2pAcceptTrade(graphene.Mutation):
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
 
-        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        algod_client = get_algod_client()
         # Decode user-signed AppCall
         try:
             user_b = _b64_to_bytes(signed_user_txn)
@@ -986,7 +987,7 @@ class PrepareP2PMarkPaid(graphene.Mutation):
             pass
         # Preflight: validate status ACTIVE and buyer account matches current wallet; log sponsor config
         try:
-            algod_client_pref = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            algod_client_pref = get_algod_client()
             app_info = algod_client_pref.application_info(builder.app_id)
             gs = { }
             for kv in app_info.get('params', {}).get('global-state', []) or []:
@@ -1127,7 +1128,7 @@ class PrepareP2PCancel(graphene.Mutation):
         # Preflight: read on-chain box and validate authorization conditions with friendly errors
         try:
             from django.utils import timezone
-            algod_client_pref = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            algod_client_pref = get_algod_client()
             # 1) Trade box must exist (seller escrowed)
             try:
                 bx = algod_client_pref.application_box_by_name(builder.app_id, trade_id.encode('utf-8'))
@@ -1208,7 +1209,7 @@ class CancelP2PTrade(graphene.Mutation):
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
 
-        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        algod_client = get_algod_client()
         try:
             user_signed = _b64_to_bytes(signed_user_txn)
             user_dict = msgpack.unpackb(user_signed, raw=False)
@@ -1353,7 +1354,7 @@ class SubmitP2POpenDispute(graphene.Mutation):
         if not user.is_authenticated:
             return cls(success=False, error='Not authenticated')
 
-        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        algod_client = get_algod_client()
 
         # Decode user-signed AppCall
         try:
@@ -1558,7 +1559,7 @@ class SubmitP2PResolveDispute(graphene.Mutation):
         if not (user.is_staff or user.is_superuser):
             return cls(success=False, error='Admin privileges required')
 
-        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        algod_client = get_algod_client()
 
         try:
             user_signed = _b64_to_bytes(signed_user_txn)
@@ -1697,7 +1698,7 @@ class ResolveP2pDisputeOnchain(graphene.Mutation):
             appcall_tx = transaction.Transaction.undictify(msgpack.unpackb(base64.b64decode(appcall_b64), raw=False))
             stx1 = appcall_tx.sign(admin_sk)
 
-            algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+            algod_client = get_algod_client()
             txid = algod_client.send_transactions([stx0, stx1])
             ref_txid = stx1.get_txid()
             try:

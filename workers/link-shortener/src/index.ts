@@ -164,14 +164,8 @@ function getRedirectUrl(platform: string, linkData: LinkData, env: Env): string 
   
   switch (platform) {
     case 'ios':
-      // For iOS, use Universal Links during closed beta
-      // After app store launch, this will be the App Store URL
-      if (linkData.type === 'referral' || linkData.type === 'influencer') {
-        // TestFlight with deep link path
-        return `${env.TESTFLIGHT_URL}?referrer=${encodedPayload}`;
-      }
-      // For other types, use universal link
-      return `https://confio.lat/app/${linkData.type}/${encodedPayload}`;
+      // Always send iOS users to TestFlight during beta
+      return `${env.TESTFLIGHT_URL}?referrer=${encodedPayload}`;
       
     case 'android':
       // Android Play Store with referrer parameter

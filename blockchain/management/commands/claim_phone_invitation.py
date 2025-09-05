@@ -31,7 +31,8 @@ class Command(BaseCommand):
             self.stderr.write(self.style.ERROR('ALGORAND_ADMIN_MNEMONIC is not set in settings'))
             return
 
-        algod_client = algod.AlgodClient(settings.ALGORAND_ALGOD_TOKEN, settings.ALGORAND_ALGOD_ADDRESS)
+        from blockchain.algorand_client import get_algod_client
+        algod_client = get_algod_client()
         builder = InviteSendTransactionBuilder()
 
         # Find invitation_id by probing canonical and legacy keys

@@ -1,0 +1,11 @@
+{
+  "network": "testnet",
+  "asset_id": 3198329568,
+  "asset_name": "Conf\u00edo",
+  "unit_name": "CONFIO",
+  "decimals": 6,
+  "total_supply": 1000000000000000,
+  "creator_address": "PFFGG74A3BTBMPOJSTJALIIF4PO3JQJCS3WKYYXDQQ73J35EG2QOSCQRSY",
+  "transaction_id": "NXPX2UYDJIFCWHCM6OFMKFVOFHD7LJSHONRA7UEF5XCN5TWSLXTQ",
+  "url": "https://confio.lat"
+}
