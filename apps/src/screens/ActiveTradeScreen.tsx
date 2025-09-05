@@ -15,7 +15,6 @@ import {
   Platform,
   Keyboard,
   TouchableWithoutFeedback,
-  PermissionsAndroid,
   Image,
   ActivityIndicator,
   Linking,
@@ -31,7 +30,7 @@ import { useQuery } from '@apollo/client';
 import { GET_P2P_TRADE } from '../apollo/queries';
 import { p2pSponsoredService } from '../services/p2pSponsoredService';
 import { disputeEvidenceService } from '../services/disputeEvidenceService';
-import { CameraRoll } from '@react-native-camera-roll/camera-roll';
+import { pickVideoUri } from '../native/MediaPicker';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { formatLocalDateTime } from '../utils/dateUtils';
 import { useAuth } from '../contexts/AuthContext';
@@ -88,8 +87,7 @@ export const ActiveTradeScreen: React.FC = () => {
   const [isSubmittingDispute, setIsSubmittingDispute] = useState(false);
   const [isUploadingEvidence, setIsUploadingEvidence] = useState(false);
   const [showEvidenceSheet, setShowEvidenceSheet] = useState(false);
-  const [showVideoGallery, setShowVideoGallery] = useState(false);
-  const [videoItems, setVideoItems] = useState<{ uri: string; thumbUri: string; name?: string; duration?: number }[]>([]);
+  // Gallery preview removed; we call system picker directly
   const [confioCode, setConfioCode] = useState<string | null>(null);
   const [confioCodeExp, setConfioCodeExp] = useState<string | null>(null);
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
@@ -371,52 +369,12 @@ export const ActiveTradeScreen: React.FC = () => {
     }
   };
 
-  const requestVideoPermission = async (): Promise<boolean> => {
-    if (Platform.OS !== 'android') return true;
-    try {
-      const sdk = Number(Platform.Version) || 0;
-      const perm = (PermissionsAndroid as any).PERMISSIONS?.READ_MEDIA_VIDEO || PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
-      // @ts-ignore
-      const has = await PermissionsAndroid.check(perm);
-      if (has) return true;
-      // @ts-ignore
-      const result = await PermissionsAndroid.request(perm, {
-        title: 'Acceso a videos',
-        message: 'Confío necesita acceso a tus videos para subir la evidencia (grabación de pantalla).',
-        buttonPositive: 'Permitir',
-        buttonNegative: 'Cancelar',
-      });
-      // @ts-ignore
-      return result === PermissionsAndroid.RESULTS.GRANTED;
-    } catch (e) {
-      console.error('[Dispute] Video permission error:', e);
-      return false;
-    }
-  };
-
   const pickScreenRecordingFromGallery = async () => {
     try {
-      const allowed = await requestVideoPermission();
-      if (!allowed) {
-        Alert.alert('Permiso requerido', 'Debes permitir acceso a videos para seleccionar tu grabación de pantalla.');
-        return;
-      }
-      // Close the sheet before opening the gallery modal to avoid stacked transparent modals
       setShowEvidenceSheet(false);
-      const vids = await CameraRoll.getPhotos({ first: 60, assetType: 'Videos' });
-      if (!vids.edges.length) {
-        Alert.alert('Sin videos', 'No se encontraron videos recientes en tu galería. Usa la grabación de pantalla del sistema.');
-        return;
-      }
-      setVideoItems(
-        vids.edges.map(e => ({
-          uri: e.node.image.uri,
-          thumbUri: e.node.image.uri,
-          name: (e.node.image as any)?.filename || 'Video',
-          duration: (e.node.image as any)?.playableDuration || (e.node as any)?.playableDuration || undefined,
-        }))
-      );
-      setShowVideoGallery(true);
+      const uri = await pickVideoUri();
+      if (!uri) return;
+      await handleSelectVideo(uri);
     } catch (e: any) {
       console.error('[Dispute] pick video error:', e?.message || e);
       Alert.alert('Error', 'No se pudo abrir la galería de videos.');
@@ -1669,40 +1627,6 @@ export const ActiveTradeScreen: React.FC = () => {
         )}
       </Modal>
 
-      {/* Simple video gallery modal */}
-      <Modal
-        visible={showVideoGallery}
-        animationType="slide"
-        onRequestClose={() => setShowVideoGallery(false)}
-      >
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
-          <View style={{ padding: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 18, fontWeight: 'bold' }}>Selecciona el video</Text>
-            <TouchableOpacity onPress={() => setShowVideoGallery(false)}>
-              <Icon name="x" size={24} color="#6B7280" />
-            </TouchableOpacity>
-          </View>
-          <ScrollView contentContainerStyle={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-            {videoItems.map((item, idx) => (
-              <TouchableOpacity key={idx} onPress={() => handleSelectVideo(item.uri, item.name)} style={{ width: '33.33%', padding: 2 }}>
-                <View>
-                  <Image source={{ uri: item.thumbUri }} style={{ width: '100%', aspectRatio: 1, backgroundColor: '#eee' }} />
-                  <View style={{ position: 'absolute', bottom: 4, right: 4, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
-                    <Text style={{ color: '#fff', fontSize: 12 }}>
-                      {item.duration ? `${Math.floor(item.duration)}s` : 'Video'}
-                    </Text>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            ))}
-            {videoItems.length === 0 && (
-              <View style={{ padding: 24, alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-                <ActivityIndicator />
-              </View>
-            )}
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
     </SafeAreaView>
   );
 };
