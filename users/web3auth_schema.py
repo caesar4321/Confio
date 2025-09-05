@@ -375,7 +375,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 access_token=access_token,
                 refresh_token=refresh_token,
                 user=user,
-                needs_opt_in=assets_to_opt_in if 'assets_to_opt_in' in locals() else [],
+                needs_opt_in=[str(a) for a in assets_to_opt_in] if 'assets_to_opt_in' in locals() else [],
                 opt_in_transactions=opt_in_transactions if 'opt_in_transactions' in locals() else []
             )
             
