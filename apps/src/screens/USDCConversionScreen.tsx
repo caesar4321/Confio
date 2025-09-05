@@ -21,13 +21,40 @@ import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
 import { MainStackParamList } from '../types/navigation';
 import { useAccount } from '../contexts/AccountContext';
-import { useQuery } from '@apollo/client';
+import { useQuery, useMutation, gql } from '@apollo/client';
 import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 import { ConvertWsSession } from '../services/convertWs';
 import algorandService from '../services/algorandService';
 import { secureDeterministicWallet } from '../services/secureDeterministicWallet';
 import { oauthStorage } from '../services/oauthStorageService';
 import { cusdAppOptInService } from '../services/cusdAppOptInService';
+
+// GraphQL mutation for USDC opt-in (reused from DepositScreen)
+const OPT_IN_TO_USDC = gql`
+  mutation OptInToAsset($assetType: String!) {
+    optInToAssetByType(assetType: $assetType) {
+      success
+      error
+      alreadyOptedIn
+      requiresUserSignature
+      userTransaction
+      sponsorTransaction
+      groupId
+      assetId
+      assetName
+    }
+  }
+`;
+
+// GraphQL query to check current opt-ins
+const CHECK_ASSET_OPT_INS = gql`
+  query CheckAssetOptIns {
+    checkAssetOptIns {
+      optedInAssets
+      assetDetails
+    }
+  }
+`;
 
 const colors = {
   primary: '#34D399',
@@ -50,6 +77,12 @@ export const USDCConversionScreen = () => {
   const [conversionDirection, setConversionDirection] = useState<'usdc_to_cusd' | 'cusd_to_usdc'>('usdc_to_cusd');
   const [isProcessing, setIsProcessing] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
+  
+  // USDC opt-in mutation
+  const [optInToUsdc] = useMutation(OPT_IN_TO_USDC);
+  
+  // Query to check opt-in status  
+  const { refetch: refetchOptIns } = useQuery(CHECK_ASSET_OPT_INS);
   
   // Animation for loading spinner
   const spinValue = useRef(new Animated.Value(0)).current;
@@ -140,6 +173,57 @@ export const USDCConversionScreen = () => {
 
   // Removed legacy sign/execute function
 
+  // Helper function to handle USDC asset opt-in (reused from DepositScreen pattern)
+  const handleUSDCOptIn = async (): Promise<boolean> => {
+    try {
+      setLoadingMessage('Configurando acceso a USDC...');
+      console.log('[USDCConversionScreen] Calling optInToAsset mutation for USDC...');
+      
+      const { data, errors } = await optInToUsdc({
+        variables: { assetType: 'USDC' }
+      });
+      
+      if (errors) {
+        console.error('[USDCConversionScreen] GraphQL errors:', errors);
+        return false;
+      }
+      
+      console.log('[USDCConversionScreen] USDC opt-in mutation response:', data);
+      
+      if (data?.optInToAssetByType?.alreadyOptedIn) {
+        console.log('[USDCConversionScreen] User already opted in to USDC');
+        await refetchOptIns();
+        return true;
+      }
+      
+      if (data?.optInToAssetByType?.success && data.optInToAssetByType.requiresUserSignature) {
+        const userTxn = data.optInToAssetByType.userTransaction;
+        const sponsorTxn = data.optInToAssetByType.sponsorTransaction;
+        
+        console.log('[USDCConversionScreen] Signing and submitting USDC opt-in...');
+        const txId = await algorandService.signAndSubmitSponsoredTransaction(
+          userTxn,
+          sponsorTxn
+        );
+        
+        if (txId) {
+          console.log('[USDCConversionScreen] Successfully opted in to USDC:', txId);
+          await refetchOptIns();
+          return true;
+        } else {
+          console.error('[USDCConversionScreen] Failed to submit USDC opt-in transaction');
+          return false;
+        }
+      } else {
+        console.error('[USDCConversionScreen] Failed to generate USDC opt-in transaction:', data?.optInToAssetByType?.error);
+        return false;
+      }
+    } catch (error) {
+      console.error('[USDCConversionScreen] Error during USDC opt-in:', error);
+      return false;
+    }
+  };
+
   const handleConversionSuccess = async () => {
     Alert.alert(
       'Conversión exitosa',
@@ -192,39 +276,77 @@ export const USDCConversionScreen = () => {
     try {
       const ws = new ConvertWsSession();
       let pack: any;
-      try {
-        pack = await ws.prepare({ direction: conversionDirection, amount: amount });
-      } catch (e: any) {
-        if (String(e?.message) === 'requires_app_optin') {
-          try {
-            setLoadingMessage('Autorizando aplicación cUSD...');
-            const oauthData = await oauthStorage.getOAuthSubject();
-            if (oauthData && oauthData.subject && oauthData.provider) {
-              const { GOOGLE_CLIENT_IDS } = await import('../config/env');
-              const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
-              const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
-              const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
-              await secureDeterministicWallet.createOrRestoreWallet(iss, oauthData.subject, aud, oauthData.provider, activeAccount?.type || 'personal', activeAccount?.index || 0, activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined);
-            }
-            const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
-            if (!optInResult.success) {
+      let retryCount = 0;
+      const maxRetries = 2; // Allow for both cUSD app opt-in and USDC asset opt-in
+      
+      while (retryCount <= maxRetries) {
+        try {
+          pack = await ws.prepare({ direction: conversionDirection, amount: amount });
+          break; // Success, exit retry loop
+        } catch (e: any) {
+          const errorMessage = String(e?.message);
+          console.log('[USDCConversionScreen] Conversion prepare error:', errorMessage);
+          
+          if (errorMessage === 'requires_app_optin') {
+            // Handle cUSD app opt-in
+            try {
+              setLoadingMessage('Autorizando aplicación cUSD...');
+              const oauthData = await oauthStorage.getOAuthSubject();
+              if (oauthData && oauthData.subject && oauthData.provider) {
+                const { GOOGLE_CLIENT_IDS } = await import('../config/env');
+                const GOOGLE_WEB_CLIENT_ID = GOOGLE_CLIENT_IDS.production.web;
+                const iss = oauthData.provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com';
+                const aud = oauthData.provider === 'google' ? GOOGLE_WEB_CLIENT_ID : 'com.confio.app';
+                await secureDeterministicWallet.createOrRestoreWallet(iss, oauthData.subject, aud, oauthData.provider, activeAccount?.type || 'personal', activeAccount?.index || 0, activeAccount?.id?.startsWith('business_') ? (activeAccount.id.split('_')[1] || undefined) : undefined);
+              }
+              const optInResult = await cusdAppOptInService.handleAppOptIn(activeAccount);
+              if (!optInResult.success) {
+                setLoadingMessage('');
+                Alert.alert('Error', optInResult.error || 'No se pudo completar la configuración inicial');
+                return;
+              }
+              retryCount++;
+              setLoadingMessage('Preparando conversión...');
+              continue; // Retry the prepare call
+            } catch (err) {
               setLoadingMessage('');
-              Alert.alert('Error', optInResult.error || 'No se pudo completar la configuración inicial');
+              console.error('[USDCConversionScreen] App opt-in error', err);
+              Alert.alert('Error', 'No se pudo completar la configuración inicial');
               return;
             }
-            setLoadingMessage('Preparando conversión...');
-            pack = await ws.prepare({ direction: conversionDirection, amount: amount });
-          } catch (err) {
+          } else if (errorMessage.includes('not opted') || errorMessage.includes('USDC') || errorMessage.includes('asset') || errorMessage.includes('Please opt-in to USDC and cUSD assets first')) {
+            // Handle USDC asset opt-in - try to auto opt-in gracefully
+            try {
+              console.log('[USDCConversionScreen] Attempting auto USDC opt-in...');
+              const usdcOptInSuccess = await handleUSDCOptIn();
+              if (usdcOptInSuccess) {
+                retryCount++;
+                setLoadingMessage('Preparando conversión...');
+                continue; // Retry the prepare call
+              } else {
+                // USDC opt-in failed, but don't show error - just break out
+                console.log('[USDCConversionScreen] USDC opt-in failed, stopping conversion gracefully');
+                setLoadingMessage('');
+                return;
+              }
+            } catch (usdcErr) {
+              console.error('[USDCConversionScreen] USDC opt-in error', usdcErr);
+              setLoadingMessage('');
+              return;
+            }
+          } else {
+            // Other errors - show the original error
             setLoadingMessage('');
-            console.error('[USDCConversionScreen] App opt-in error', err);
-            Alert.alert('Error', 'No se pudo completar la configuración inicial');
+            Alert.alert('Error', String(e?.message || 'No se pudo preparar la conversión'));
             return;
           }
-        } else {
-          setLoadingMessage('');
-          Alert.alert('Error', String(e?.message || 'No se pudo preparar la conversión'));
-          return;
         }
+      }
+      
+      if (!pack) {
+        setLoadingMessage('');
+        Alert.alert('Error', 'No se pudo preparar la conversión después de varios intentos');
+        return;
       }
 
       // Ensure wallet is ready for signing
@@ -256,9 +378,21 @@ export const USDCConversionScreen = () => {
       await refetchCusd();
       await refetchUsdc();
       await handleConversionSuccess();
-    } catch (error) {
+    } catch (error: any) {
       console.error('[USDCConversionScreen] Conversion error:', error);
-      Alert.alert('Error', 'No se pudo completar la conversión. Por favor intenta de nuevo.');
+      const errorMessage = String(error?.message || error);
+      
+      // Handle opt-in related errors gracefully without showing alerts
+      if (errorMessage.includes('not opted') || 
+          errorMessage.includes('opt-in') || 
+          errorMessage.includes('Please opt-in to USDC and cUSD assets first') ||
+          errorMessage.includes('requires_app_optin')) {
+        console.log('[USDCConversionScreen] Conversion failed due to opt-in issue - handled gracefully');
+        // Don't show error alert for opt-in issues - they should be handled automatically
+      } else {
+        // Show error only for non-opt-in related issues
+        Alert.alert('Error', 'No se pudo completar la conversión. Por favor intenta de nuevo.');
+      }
     } finally {
       setIsProcessing(false);
       setLoadingMessage('');
