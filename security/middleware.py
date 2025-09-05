@@ -437,10 +437,11 @@ class SecurityMiddleware:
             
             # Create suspicious activity record
             from .models import SuspiciousActivity
-            SuspiciousActivity.objects.get_or_create(
-                user=user,
-                activity_type='multiple_accounts',
-                defaults={
+            try:
+                SuspiciousActivity.objects.get_or_create(
+                    user=user,
+                    activity_type='multiple_accounts',
+                    defaults={
                     'detection_data': {
                         'device_fingerprint': device.fingerprint,
                         'total_users': device.total_users,
@@ -450,6 +451,9 @@ class SecurityMiddleware:
                     'status': 'pending'
                 }
             )
+            except Exception as e:
+                logger.warning(f"Could not create suspicious activity record: {e}")
+                # Don't fail the request if security tracking fails
     
     def check_session_suspicious_patterns(self, session: UserSession, request):
         """Check for suspicious session patterns"""
