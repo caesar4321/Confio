@@ -1903,7 +1903,7 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
     error = graphene.String()
     account = graphene.Field(AccountType)
     # New: merge CheckAssetOptIns semantics for CONFIO and cUSD
-    needs_opt_in = graphene.List(graphene.Int)
+    needs_opt_in = graphene.List(graphene.String)
     opt_in_transactions = graphene.JSONString()
 
     @classmethod
@@ -1994,9 +1994,9 @@ class UpdateAccountAlgorandAddress(graphene.Mutation):
 
                 # Only track CONFIO and cUSD assets (exclude app opt-ins here)
                 if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_asset_ids:
-                    needs_opt_in.append(AlgorandAccountManager.CONFIO_ASSET_ID)
+                    needs_opt_in.append(str(AlgorandAccountManager.CONFIO_ASSET_ID))
                 if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_asset_ids:
-                    needs_opt_in.append(AlgorandAccountManager.CUSD_ASSET_ID)
+                    needs_opt_in.append(str(AlgorandAccountManager.CUSD_ASSET_ID))
 
                 # Fund to cover asset MBR only (100_000 microAlgos per asset)
                 try:
