@@ -116,11 +116,9 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             from algosdk.transaction import AssetTransferTxn
             import base64
             import msgpack
+            from blockchain.algorand_client import get_algod_client
             
-            algod_client = algod.AlgodClient(
-                AlgorandAccountManager.ALGOD_TOKEN,
-                AlgorandAccountManager.ALGOD_ADDRESS
-            )
+            algod_client = get_algod_client()
             
             # Check current opt-ins
             account_info = algod_client.account_info(account.algorand_address)
