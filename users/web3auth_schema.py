@@ -251,11 +251,11 @@ class Web3AuthLoginMutation(graphene.Mutation):
                     
                     # Calculate how many NEW assets we need to opt into
                     assets_to_opt_in = []
-                        if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_asset_ids:
-                            assets_to_opt_in.append(str(AlgorandAccountManager.CONFIO_ASSET_ID))
+                    if AlgorandAccountManager.CONFIO_ASSET_ID and AlgorandAccountManager.CONFIO_ASSET_ID not in current_asset_ids:
+                        assets_to_opt_in.append(str(AlgorandAccountManager.CONFIO_ASSET_ID))
                         logger.info(f"User needs to opt into CONFIO: {AlgorandAccountManager.CONFIO_ASSET_ID}")
-                        if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_asset_ids:
-                            assets_to_opt_in.append(str(AlgorandAccountManager.CUSD_ASSET_ID))
+                    if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_asset_ids:
+                        assets_to_opt_in.append(str(AlgorandAccountManager.CUSD_ASSET_ID))
                         logger.info(f"User needs to opt into cUSD: {AlgorandAccountManager.CUSD_ASSET_ID}")
                     
                     logger.info(f"Account {algorand_address}: balance={balance}, current_assets={num_assets}, need_opt_in={len(assets_to_opt_in)}")
