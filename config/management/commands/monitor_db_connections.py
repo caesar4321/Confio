@@ -18,8 +18,7 @@ class Command(BaseCommand):
                     count(*) FILTER (WHERE state = 'idle in transaction') as idle_in_transaction,
                     max(now() - query_start) as longest_query_time,
                     (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_connections
-                FROM pg_stat_activity 
-                WHERE pid <> pg_backend_pid();
+                FROM pg_stat_activity;
             """)
             
             result = cursor.fetchone()
@@ -47,12 +46,11 @@ class Command(BaseCommand):
             # Get top queries by connection count
             cursor.execute("""
                 SELECT 
-                    usename,
-                    application_name,
+                    COALESCE(usename, 'system') as username,
+                    COALESCE(application_name, 'unknown') as application_name,
                     count(*) as connection_count,
-                    string_agg(DISTINCT state, ', ') as states
+                    string_agg(DISTINCT COALESCE(state, 'unknown'), ', ') as states
                 FROM pg_stat_activity 
-                WHERE pid <> pg_backend_pid()
                 GROUP BY usename, application_name
                 ORDER BY connection_count DESC
                 LIMIT 10;
