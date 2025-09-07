@@ -60,13 +60,7 @@
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.DEFAULT" />
             <category android:name="android.intent.category.BROWSABLE" />
-            <data android:scheme="com.googleusercontent.apps.1001709244115-2h2k3sdvr3ggr1t5pgob4pkb3k92ug1p" />
-        </intent-filter>
-        <intent-filter>
-            <action android:name="android.intent.action.VIEW" />
-            <category android:name="android.intent.category.DEFAULT" />
-            <category android:name="android.intent.category.BROWSABLE" />
-            <data android:scheme="com.googleusercontent.apps.730050241347-ft2v34hm2okng97rb4on37kr9qt9lbhp" />
+            <!-- Removed legacy Google OAuth redirect schemes to avoid config confusion -->
         </intent-filter>
         <!-- Telegram deep linking -->
         <intent-filter>
