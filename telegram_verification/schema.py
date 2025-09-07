@@ -4,6 +4,7 @@ from django.utils import timezone
 from datetime import timedelta
 import requests
 from django.conf import settings
+from django.core.cache import cache
 from .models import TelegramVerification
 from users.country_codes import COUNTRY_CODES
 import logging
@@ -69,13 +70,13 @@ class InitiateTelegramVerification(graphene.Mutation):
         # Validate country code
         if not validate_country_code(country_code):
             logger.error('Invalid country code: %s', country_code)
-            return InitiateTelegramVerification(success=False, error="Invalid country code")
+            return InitiateTelegramVerification(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
         
         # Get numeric country code for formatting
         numeric_code = get_country_code(country_code)
         if not numeric_code:
             logger.error('Could not find numeric code for ISO: %s', country_code)
-            return InitiateTelegramVerification(success=False, error="Invalid country code")
+            return InitiateTelegramVerification(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
         
         # Format phone number to E.164
         formatted_phone = f"+{numeric_code}{phone_number}"
@@ -87,7 +88,7 @@ class InitiateTelegramVerification(graphene.Mutation):
         
         if not (user and getattr(user, 'is_authenticated', False)):
             logger.warning('User not authenticated')
-            return InitiateTelegramVerification(success=False, error="Authentication required")
+            return InitiateTelegramVerification(success=False, error="Por favor inicia sesión para verificar tu número de teléfono.")
 
         # Check if user exists in database
         User = get_user_model()
@@ -96,7 +97,7 @@ class InitiateTelegramVerification(graphene.Mutation):
             logger.info('Found user in database: %s', user)
         except User.DoesNotExist:
             logger.error('User not found in database: id=%s', info.context.user.id)
-            return InitiateTelegramVerification(success=False, error="User not found. Please log in again.")
+            return InitiateTelegramVerification(success=False, error="Sesión expirada. Por favor inicia sesión nuevamente.")
 
         TELEGRAM_GATEWAY_TOKEN = settings.TELEGRAM_API_TOKEN
         logger.info('Telegram API Token available: %s', bool(TELEGRAM_GATEWAY_TOKEN))
@@ -104,6 +105,35 @@ class InitiateTelegramVerification(graphene.Mutation):
         
         logger.info('Initiating Telegram verification for phone number: %s', formatted_phone)
         logger.info('Using Telegram Gateway Token: %s...', TELEGRAM_GATEWAY_TOKEN[:10] if TELEGRAM_GATEWAY_TOKEN else 'None')
+        
+        # Rate limiting: Check if user has made a request recently or is in flood wait
+        rate_limit_key = f"telegram_verification_rate_limit:{user.id}:{formatted_phone}"
+        flood_limit_key = f"telegram_flood_wait:{user.id}:{formatted_phone}"
+        
+        # Check for flood wait first (higher priority)
+        flood_wait_time = cache.get(flood_limit_key)
+        if flood_wait_time:
+            return InitiateTelegramVerification(
+                success=False, 
+                error="Se enviaron demasiadas solicitudes recientemente. Por favor inténtalo más tarde."
+            )
+        
+        # Check normal rate limit
+        last_request_time = cache.get(rate_limit_key)
+        if last_request_time:
+            time_since_last = time.time() - last_request_time
+            min_interval = 60  # 60 seconds minimum between requests
+            
+            if time_since_last < min_interval:
+                remaining_wait = int(min_interval - time_since_last)
+                logger.warning(f'Rate limit exceeded for user {user.id}, phone {formatted_phone}. Wait {remaining_wait}s')
+                return InitiateTelegramVerification(
+                    success=False, 
+                    error=f"Por favor espera {remaining_wait} segundos antes de solicitar otro código"
+                )
+        
+        # Set rate limit cache entry (expires after 60 seconds)
+        cache.set(rate_limit_key, time.time(), 60)
         
         try:
             request_url = 'https://gatewayapi.telegram.org/sendVerificationMessage'
@@ -133,6 +163,25 @@ class InitiateTelegramVerification(graphene.Mutation):
             if not data.get('ok'):
                 error_msg = data.get('error', 'Unknown error')
                 logger.error('Telegram API error: %s', error_msg)
+                
+                # Handle FLOOD_WAIT errors specifically
+                if error_msg.startswith('FLOOD_WAIT_'):
+                    try:
+                        wait_seconds = int(error_msg.split('_')[-1])
+                        wait_minutes = wait_seconds // 60
+                        if wait_minutes > 0:
+                            friendly_msg = f"Demasiadas solicitudes. Por favor espera {wait_minutes} minutos antes de intentar nuevamente."
+                        else:
+                            friendly_msg = f"Demasiadas solicitudes. Por favor espera {wait_seconds} segundos antes de intentar nuevamente."
+                        
+                        # Also set a longer rate limit for this user due to flood wait
+                        flood_limit_key = f"telegram_flood_wait:{user.id}:{formatted_phone}"
+                        cache.set(flood_limit_key, time.time(), wait_seconds)
+                        
+                        return InitiateTelegramVerification(success=False, error=friendly_msg)
+                    except (ValueError, IndexError):
+                        return InitiateTelegramVerification(success=False, error="Demasiadas solicitudes. Por favor inténtalo más tarde.")
+                
                 return InitiateTelegramVerification(success=False, error=error_msg)
             
             request_id = data['result']['request_id']
@@ -154,7 +203,7 @@ class InitiateTelegramVerification(graphene.Mutation):
             
         except Exception as e:
             logger.exception('Failed to send verification: %s', str(e))
-            return InitiateTelegramVerification(success=False, error=f"Failed to send verification: {str(e)}")
+            return InitiateTelegramVerification(success=False, error="No se pudo enviar el código de verificación. Por favor verifica tu número de teléfono e inténtalo nuevamente.")
 
 class VerifyTelegramCode(graphene.Mutation):
     class Arguments:
@@ -170,16 +219,16 @@ class VerifyTelegramCode(graphene.Mutation):
         user = getattr(info.context, 'user', None)
         logger.info('User: %s, Is authenticated: %s', user, getattr(user, 'is_authenticated', False))
         if not (user and getattr(user, 'is_authenticated', False)):
-            return VerifyTelegramCode(success=False, error="Authentication required")
+            return VerifyTelegramCode(success=False, error="Por favor inicia sesión para verificar tu código.")
         try:
             # Validate country code
             if not validate_country_code(country_code):
-                return VerifyTelegramCode(success=False, error="Invalid country code")
+                return VerifyTelegramCode(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
             
             # Get numeric country code
             numeric_code = get_country_code(country_code)
             if not numeric_code:
-                return VerifyTelegramCode(success=False, error="Invalid country code")
+                return VerifyTelegramCode(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
             
             # Format phone number to E.164
             formatted_phone = f"+{numeric_code}{phone_number}"
@@ -193,7 +242,7 @@ class VerifyTelegramCode(graphene.Mutation):
             ).order_by('-created_at').first()
             
             if not verification:
-                return VerifyTelegramCode(success=False, error="No active verification request found.")
+                return VerifyTelegramCode(success=False, error="No se encontró una solicitud de verificación activa. Por favor solicita un nuevo código.")
             
             # Clean up old verification records
             TelegramVerification.objects.filter(
@@ -233,40 +282,40 @@ class VerifyTelegramCode(graphene.Mutation):
                 if not data.get('ok'):
                     error_msg = data.get('error', 'Unknown error')
                     logger.error('Telegram API error: %s', error_msg)
-                    return VerifyTelegramCode(success=False, error=error_msg)
+                    return VerifyTelegramCode(success=False, error=f"Error del servicio de verificación: {error_msg}")
                 
                 # Check if the response has the expected structure
                 if 'result' not in data:
                     logger.error('Invalid response structure: missing "result" field')
-                    return VerifyTelegramCode(success=False, error="Invalid response from verification service")
+                    return VerifyTelegramCode(success=False, error="Respuesta inválida del servicio de verificación. Por favor inténtalo nuevamente.")
                 
                 result = data['result']
                 
                 # First check delivery status
                 if 'delivery_status' not in result:
                     logger.error('Invalid response structure: missing "delivery_status" field in result')
-                    return VerifyTelegramCode(success=False, error="Invalid response from verification service")
+                    return VerifyTelegramCode(success=False, error="Respuesta inválida del servicio de verificación. Por favor inténtalo nuevamente.")
                 
                 delivery_status = result['delivery_status']
                 if 'status' not in delivery_status:
                     logger.error('Invalid response structure: missing "status" field in delivery_status')
-                    return VerifyTelegramCode(success=False, error="Invalid response from verification service")
+                    return VerifyTelegramCode(success=False, error="Respuesta inválida del servicio de verificación. Por favor inténtalo nuevamente.")
                 
                 # Check if message was delivered
                 if delivery_status['status'] not in ['delivered', 'read']:
-                    return VerifyTelegramCode(success=False, error=f"Message not delivered. Status: {delivery_status['status']}")
+                    return VerifyTelegramCode(success=False, error=f"Mensaje no entregado. Estado: {delivery_status['status']}. Por favor verifica que tienes Telegram instalado.")
                 
                 # Now check verification status
                 if 'verification_status' not in result:
                     attempt += 1
-                    last_error = "Waiting for verification status..."
+                    last_error = "Esperando estado de verificación..."
                     logger.info('Attempt %d: %s', attempt, last_error)
                     continue
                 
                 verification_status = result['verification_status']
                 if 'status' not in verification_status:
                     logger.error('Invalid response structure: missing "status" field in verification_status')
-                    return VerifyTelegramCode(success=False, error="Invalid response from verification service")
+                    return VerifyTelegramCode(success=False, error="Respuesta inválida del servicio de verificación. Por favor inténtalo nuevamente.")
                 
                 status = verification_status['status']
                 logger.info('Verification status received: %s', status)
@@ -334,25 +383,125 @@ class VerifyTelegramCode(graphene.Mutation):
                         return VerifyTelegramCode(success=False, error="Ocurrió un error al guardar tu número. Inténtalo de nuevo.")
                 elif status == 'code_invalid':
                     logger.info('Code verification failed: invalid code')
-                    return VerifyTelegramCode(success=False, error="Invalid verification code")
+                    return VerifyTelegramCode(success=False, error="Código de verificación inválido. Por favor verifica el código e inténtalo nuevamente.")
                 elif status == 'code_max_attempts_exceeded':
                     logger.info('Code verification failed: max attempts exceeded')
-                    return VerifyTelegramCode(success=False, error="Maximum number of verification attempts exceeded")
+                    return VerifyTelegramCode(success=False, error="Excediste el número máximo de intentos de verificación. Por favor solicita un nuevo código.")
                 elif status == 'expired':
                     logger.info('Code verification failed: code expired')
-                    return VerifyTelegramCode(success=False, error="Verification code has expired")
+                    return VerifyTelegramCode(success=False, error="El código de verificación ha expirado. Por favor solicita un nuevo código.")
                 else:
                     logger.error('Unknown verification status: %s', status)
-                    return VerifyTelegramCode(success=False, error=f"Verification failed: unknown status '{status}'")
+                    return VerifyTelegramCode(success=False, error=f"Verificación falló: estado desconocido '{status}'. Por favor inténtalo nuevamente.")
             
             # If we've exhausted all attempts and still no verification status
             logger.error('Verification failed after %d attempts: %s', max_attempts, last_error)
-            return VerifyTelegramCode(success=False, error=f"Verification status not available after {max_attempts} attempts. {last_error}")
+            return VerifyTelegramCode(success=False, error=f"Estado de verificación no disponible después de {max_attempts} intentos. {last_error}")
             
         except Exception as e:
             logger.exception('Verification failed: %s', str(e))
-            return VerifyTelegramCode(success=False, error=f"Verification failed: {str(e)}")
+            return VerifyTelegramCode(success=False, error=f"Verificación falló: {str(e)}")
+
+class CheckTelegramDeliveryStatus(graphene.Mutation):
+    class Arguments:
+        phone_number = graphene.String(required=True)
+        country_code = graphene.String(required=True)
+        
+    success = graphene.Boolean()
+    delivery_status = graphene.String()
+    error = graphene.String()
+    can_retry = graphene.Boolean()
+    
+    @classmethod
+    def mutate(cls, root, info, phone_number, country_code):
+        user = getattr(info.context, 'user', None)
+        logger.info('CheckTelegramDeliveryStatus called for user: %s', user)
+        
+        if not (user and getattr(user, 'is_authenticated', False)):
+            return CheckTelegramDeliveryStatus(success=False, error="Autenticación requerida. Por favor inicia sesión.")
+            
+        # Validate country code
+        if not validate_country_code(country_code):
+            return CheckTelegramDeliveryStatus(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
+        
+        # Get numeric country code for formatting
+        numeric_code = get_country_code(country_code)
+        if not numeric_code:
+            return CheckTelegramDeliveryStatus(success=False, error="Código de país inválido. Por favor selecciona un país válido.")
+        
+        # Format phone number to E.164
+        formatted_phone = f"+{numeric_code}{phone_number}"
+        
+        try:
+            # Find the most recent verification request for this user and phone
+            verification = TelegramVerification.objects.filter(
+                user=user,
+                phone_number=formatted_phone,
+                deleted_at__isnull=True
+            ).order_by('-created_at').first()
+            
+            if not verification:
+                return CheckTelegramDeliveryStatus(
+                    success=False, 
+                    error="No se encontró solicitud de verificación. Por favor inicia el proceso de verificación.", 
+                    can_retry=True
+                )
+            
+            # Check if verification has expired
+            if timezone.now() > verification.expires_at:
+                return CheckTelegramDeliveryStatus(
+                    success=True, 
+                    delivery_status="expired", 
+                    error="La verificación ha expirado. Por favor solicita un nuevo código.", 
+                    can_retry=True
+                )
+            
+            # Query Telegram API for delivery status
+            TELEGRAM_GATEWAY_TOKEN = settings.TELEGRAM_API_TOKEN
+            request_url = f'https://gatewayapi.telegram.org/checkVerificationStatus?request_id={verification.request_id}'
+            request_headers = {'Authorization': f'Bearer {TELEGRAM_GATEWAY_TOKEN}'}
+            
+            response = requests.get(request_url, headers=request_headers)
+            logger.info('Telegram delivery check response: %s', response.text)
+            
+            if response.status_code != 200:
+                return CheckTelegramDeliveryStatus(
+                    success=False, 
+                    error="Error al verificar el estado de entrega. Por favor inténtalo nuevamente.", 
+                    can_retry=True
+                )
+            
+            data = response.json()
+            if not data.get('ok'):
+                return CheckTelegramDeliveryStatus(
+                    success=False, 
+                    error=f"Error del servicio: {data.get('error', 'Error desconocido')}", 
+                    can_retry=True
+                )
+            
+            result = data.get('result', {})
+            delivery_status = result.get('delivery_status', {})
+            status = delivery_status.get('status', 'unknown')
+            
+            # Determine if user can retry based on status
+            can_retry = status in ['failed', 'expired', 'unknown']
+            
+            return CheckTelegramDeliveryStatus(
+                success=True,
+                delivery_status=status,
+                error=None,
+                can_retry=can_retry
+            )
+            
+        except Exception as e:
+            logger.exception('Failed to check delivery status: %s', str(e))
+            return CheckTelegramDeliveryStatus(
+                success=False, 
+                error=f"Error al verificar el estado de entrega: {str(e)}", 
+                can_retry=True
+            )
 
 class Mutation(graphene.ObjectType):
     initiate_telegram_verification = InitiateTelegramVerification.Field()
-    verify_telegram_code = VerifyTelegramCode.Field() 
+    verify_telegram_code = VerifyTelegramCode.Field()
+    check_telegram_delivery_status = CheckTelegramDeliveryStatus.Field() 
