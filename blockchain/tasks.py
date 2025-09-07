@@ -1,11 +1,12 @@
 from celery import shared_task
 from django.core.cache import cache
-from django.db import transaction
+from django.db import transaction, connection
 from django.db.models import Q
 from django.utils import timezone
 from datetime import timedelta
 from decimal import Decimal
 import logging
+from functools import wraps
 
 from users.models import Account
 from .models import Balance
@@ -24,6 +25,19 @@ from send.models import SendTransaction
 from notifications.models import NotificationType as NotifType
 
 logger = logging.getLogger(__name__)
+
+
+def ensure_db_connection_closed(func):
+    """Decorator to ensure database connections are properly closed after task execution"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+            return result
+        finally:
+            # Explicitly close database connections to prevent accumulation
+            connection.close()
+    return wrapper
 
 
 """
@@ -87,6 +101,7 @@ def update_user_balances(self, account_id):
 
 
 @shared_task
+@ensure_db_connection_closed
 def update_address_cache():
     """Update cached user addresses for polling"""
     addresses = set(
@@ -147,6 +162,7 @@ def reconcile_all_balances():
 
 
 @shared_task
+@ensure_db_connection_closed
 def refresh_stale_balances():
     """
     Refresh balances marked as stale
@@ -238,6 +254,7 @@ def _amount_from_base(amount_base: int, decimals: int) -> Decimal:
 
 
 @shared_task(name='blockchain.scan_inbound_deposits')
+@ensure_db_connection_closed
 def scan_inbound_deposits():
     """
     Asset-centric scanner:
@@ -692,6 +709,7 @@ def confirm_payment_transaction(self, payment_id: str, txid: str):
 
 
 @shared_task(name='blockchain.scan_outbound_confirmations')
+@ensure_db_connection_closed
 def scan_outbound_confirmations(max_batch: int = 50):
     """
     Worker-side autonomous scanner for any SUBMITTED outbound txns.
@@ -1427,4 +1445,51 @@ def confirm_p2p_open_dispute(self, *, trade_id: str, txid: str, opener_user_id: 
         raise Exception(f"Tx {txid} not yet confirmed; scheduling retry")
     except Exception as e:
         logger.warning(f"confirm_p2p_open_dispute error: {e}")
+        raise
+
+
+@shared_task(name='blockchain.monitor_db_connections')
+def monitor_db_connections():
+    """Monitor PostgreSQL database connections and log warnings if usage is high"""
+    from django.db import connection
+    
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT 
+                    count(*) as total_connections,
+                    count(*) FILTER (WHERE state = 'active') as active_connections,
+                    count(*) FILTER (WHERE state = 'idle') as idle_connections,
+                    count(*) FILTER (WHERE state = 'idle in transaction') as idle_in_transaction,
+                    (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_connections
+                FROM pg_stat_activity 
+                WHERE pid <> pg_backend_pid();
+            """)
+            
+            result = cursor.fetchone()
+            total, active, idle, idle_in_txn, max_conns = result
+            usage_pct = (total / max_conns) * 100
+            
+            message = (
+                f"DB Connections: {total}/{max_conns} ({usage_pct:.1f}%) | "
+                f"Active: {active}, Idle: {idle}, Idle in txn: {idle_in_txn}"
+            )
+            
+            if usage_pct > 80:
+                logger.error(f"HIGH CONNECTION USAGE: {message}")
+            elif usage_pct > 60:
+                logger.warning(f"ELEVATED CONNECTION USAGE: {message}")
+            else:
+                logger.info(f"Connection usage normal: {message}")
+                
+            return {
+                'total_connections': total,
+                'max_connections': max_conns,
+                'usage_percentage': usage_pct,
+                'active': active,
+                'idle': idle,
+                'idle_in_transaction': idle_in_txn
+            }
+    except Exception as e:
+        logger.error(f"monitor_db_connections error: {e}")
         raise
