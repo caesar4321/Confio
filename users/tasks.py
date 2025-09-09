@@ -6,11 +6,27 @@ from django.utils import timezone
 from datetime import timedelta
 from django.core.management import call_command
 import logging
+from functools import wraps
+from django.db import connection
 
 logger = logging.getLogger(__name__)
 
 
+def ensure_db_connection_closed(func):
+    """Decorator to ensure database connections are properly closed after task execution"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+            return result
+        finally:
+            # Explicitly close database connections to prevent accumulation
+            connection.close()
+    return wrapper
+
+
 @shared_task(name='users.check_hodler_achievements')
+@ensure_db_connection_closed
 def check_hodler_achievements():
     """
     Daily task to check and award Hodler achievements
@@ -37,6 +53,7 @@ def check_hodler_achievements():
 
 
 @shared_task(name='users.cleanup_expired_referrals')
+@ensure_db_connection_closed
 def cleanup_expired_referrals():
     """
     Clean up expired referral windows (users who didn't complete first transaction)
@@ -75,6 +92,7 @@ def cleanup_expired_referrals():
 
 
 @shared_task(name='users.achievement_stats_report')
+@ensure_db_connection_closed
 def achievement_stats_report():
     """
     Generate weekly achievement statistics report
