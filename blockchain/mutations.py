@@ -766,10 +766,12 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                 recipient_addr = ''
                 token_type = 'CUSD'
                 amount_dec = Decimal('0')
+                parsed_type = None
 
                 if isinstance(d, dict):
                     td = d.get('txn', {})
                     t = td.get('type')
+                    parsed_type = t
                     if t == 'axfer':
                         snd = td.get('snd')
                         arcv = td.get('arcv')
@@ -800,6 +802,18 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                         recipient_addr = encode_address(rcv) if rcv else ''
                         token_type = 'ALGO'
                         amount_dec = Decimal(amt) / Decimal(1_000_000)
+
+                # Only persist sends for real asset transfers with non-zero amount
+                if not (parsed_type == 'axfer' and amount_dec > 0):
+                    logger.info(
+                        f"Skipping SendTransaction persist for tx {result.get('tx_id')} (type={parsed_type}, amount={amount_dec})"
+                    )
+                    return cls(
+                        success=True,
+                        transaction_id=result['tx_id'],
+                        confirmed_round=result['confirmed_round'] or 0,
+                        fees_saved=result.get('fees_saved') or 0.0
+                    )
 
                 # Resolve recipient user if known by Algorand address
                 recipient_user = None
