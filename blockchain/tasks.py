@@ -332,6 +332,14 @@ def scan_inbound_deposits():
             aamt = inner.get('amount', 0)
             txid = axfer_tx.get('id')
 
+            # Ignore zero-amount asset transfers (opt-ins, no-op clawbacks)
+            try:
+                if int(aamt or 0) <= 0:
+                    skipped += 1
+                    return
+            except Exception:
+                pass
+
             # Determine deposit target (receiver or close-to)
             to_addr = receiver or close_to
             if not to_addr or to_addr not in addresses:
