@@ -47,6 +47,7 @@ have been removed. Algorand deposits are handled by scan_inbound_deposits below.
 
 
 @shared_task(bind=True, max_retries=3)
+@ensure_db_connection_closed
 def update_user_balances(self, account_id):
     """Update all token balances for a user"""
     try:
@@ -118,6 +119,7 @@ def update_address_cache():
 
 
 @shared_task
+@ensure_db_connection_closed
 def reconcile_all_balances():
     """
     Reconcile all user balances with blockchain
@@ -194,6 +196,7 @@ def refresh_stale_balances():
 
 
 @shared_task
+@ensure_db_connection_closed
 def mark_transaction_balances_stale(tx_hash, sender_address=None, recipient_addresses=None):
     """
     Mark balances as stale after detecting a transaction
@@ -563,6 +566,7 @@ def scan_inbound_deposits():
 # ================================
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 6})
+@ensure_db_connection_closed
 def confirm_payment_transaction(self, payment_id: str, txid: str):
     """
     Poll algod for a submitted payment transaction until confirmed, then
@@ -1335,6 +1339,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
 # ================================
 
 @shared_task(bind=True, autoretry_for=(Exception,), retry_backoff=5, retry_kwargs={"max_retries": 6})
+@ensure_db_connection_closed
 def confirm_p2p_open_dispute(self, *, trade_id: str, txid: str, opener_user_id: str = None, opener_business_id: str = None, reason: str = ""):
     """
     Waits for on-chain confirmation of an open_dispute group and updates DB.
@@ -1449,6 +1454,7 @@ def confirm_p2p_open_dispute(self, *, trade_id: str, txid: str, opener_user_id: 
 
 
 @shared_task(name='blockchain.monitor_db_connections')
+@ensure_db_connection_closed
 def monitor_db_connections():
     """Monitor PostgreSQL database connections and log warnings if usage is high"""
     from django.db import connection
