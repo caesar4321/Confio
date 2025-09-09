@@ -1,15 +1,15 @@
 [Unit]
 Description=Celery Beat Scheduler for Confio
-After=network-online.target postgresql.service redis-server.service
-Wants=network-online.target postgresql.service redis-server.service
+After=network-online.target postgresql.service redis.service redis6.service
+Wants=network-online.target postgresql.service redis.service redis6.service
 
 [Service]
 Type=simple
-User=www-data
+User=nginx
 WorkingDirectory=/opt/confio
 Environment=DJANGO_SETTINGS_MODULE=config.settings
 EnvironmentFile=/opt/confio/.env
-ExecStart=/opt/confio/venv/bin/celery -A config beat --loglevel=INFO --pidfile=/run/celery/beat.pid --schedule /var/lib/confio/celerybeat-schedule
+ExecStart=/opt/confio/myvenv/bin/celery -A config beat --loglevel=INFO --pidfile=/run/celery/beat.pid --schedule /var/lib/confio/celerybeat-schedule
 RuntimeDirectory=celery
 RuntimeDirectoryMode=0755
 StateDirectory=confio
