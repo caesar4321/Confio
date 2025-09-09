@@ -268,6 +268,14 @@ def scan_inbound_deposits():
     - Idempotent via (txid, intra) markers.
     - Create USDCDeposit for USDC; send notifications for all assets.
     """
+    # Prevent overlapping runs (in case of slow scans or multiple workers)
+    from django.core.cache import cache as _cache
+    _lock_key = 'locks:scan_inbound_deposits'
+    # Fail-safe TTL; lock is explicitly released in finally
+    if not _cache.add(_lock_key, '1', timeout=60):
+        logger.info('[IndexerScan] Skipping run: another scan_inbound_deposits is active')
+        return {'skipped': True, 'reason': 'locked'}
+
     try:
         # Load user addresses from cache or DB (Set for O(1) lookups)
         addresses: set[str] = cache.get('user_addresses') or set(
@@ -567,6 +575,11 @@ def scan_inbound_deposits():
     except Exception as e:
         logger.error(f"scan_inbound_deposits failed: {e}")
         raise
+    finally:
+        try:
+            _cache.delete(_lock_key)
+        except Exception:
+            pass
 
 
 # ================================
@@ -728,6 +741,13 @@ def scan_outbound_confirmations(max_batch: int = 50):
     - Confirms PaymentTransaction and SendTransaction by polling algod.
     - Avoids reliance on direct enqueue from API path.
     """
+    # Prevent overlapping runs
+    from django.core.cache import cache as _cache
+    _lock_key = 'locks:scan_outbound_confirmations'
+    if not _cache.add(_lock_key, '1', timeout=30):
+        logger.info('[OutboundScan] Skipping run: another scan_outbound_confirmations is active')
+        return {'skipped': True, 'reason': 'locked'}
+
     try:
         client = AlgorandClient()
         algod_client = client.algod
@@ -1340,6 +1360,11 @@ def scan_outbound_confirmations(max_batch: int = 50):
     except Exception as e:
         logger.error(f"scan_outbound_confirmations failed: {e}")
         raise
+    finally:
+        try:
+            _cache.delete(_lock_key)
+        except Exception:
+            pass
 
 
 # ================================

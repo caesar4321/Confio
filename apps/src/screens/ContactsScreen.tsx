@@ -510,20 +510,9 @@ export const ContactsScreen = () => {
     } else {
       setHasContactPermission(false);
       await contactService.storePermissionStatus('denied');
-      
-      // On iOS, if permission is denied, we need to guide user to settings
-      if (Platform.OS === 'ios') {
-        setTimeout(() => {
-          Alert.alert(
-            'Permisos de Contactos',
-            'Para usar esta función, ve a Configuración > Confío > Contactos y activa el acceso.',
-            [
-              { text: 'Cancelar', style: 'cancel' },
-              { text: 'Abrir Configuración', onPress: () => Linking.openSettings() }
-            ]
-          );
-        }, 500);
-      }
+      // Do not immediately redirect users to Settings after denial.
+      // If the user later tries to use a feature that requires contacts,
+      // we can inform them and provide a Settings link at that time.
     }
   };
 

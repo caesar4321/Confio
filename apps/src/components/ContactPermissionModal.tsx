@@ -44,15 +44,14 @@ const GradientBackground: React.FC<{
 interface ContactPermissionModalProps {
   visible: boolean;
   onAllow: () => void;
-  onDeny: () => void;
-  onClose: () => void;
+  // onDeny and onClose kept for backward compatibility but intentionally unused to comply with iOS guidelines
+  onDeny?: () => void;
+  onClose?: () => void;
 }
 
 export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
   visible,
   onAllow,
-  onDeny,
-  onClose,
 }) => {
   const insets = useSafeAreaInsets();
   
@@ -61,19 +60,12 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
       visible={visible}
       transparent
       animationType="slide"
-      onRequestClose={onClose}
+      // Prevent dismissing the explainer without proceeding to the system prompt
+      onRequestClose={() => {}}
     >
       <View style={styles.modalOverlay}>
-        <TouchableOpacity 
-          style={styles.backdrop} 
-          activeOpacity={1} 
-          onPress={onClose}
-        />
-        <View style={[styles.modalContent, { paddingBottom: insets.bottom || 20 }]}>
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Icon name="x" size={24} color="#6B7280" />
-          </TouchableOpacity>
-
+        <View style={styles.backdrop} />
+        <View style={[styles.modalContent, { paddingBottom: insets.bottom || 20 }]}> 
           <ScrollView 
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}
@@ -176,18 +168,10 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
               >
                 <GradientBackground width={screenWidth - 48} height={52} borderRadius={12}>
                   <View style={styles.allowButtonContent}>
-                    <Icon name="check" size={20} color="#fff" style={{ marginRight: 8 }} />
-                    <Text style={styles.allowButtonText}>Permitir acceso</Text>
+                    <Icon name="arrow-right" size={20} color="#fff" style={{ marginRight: 8 }} />
+                    <Text style={styles.allowButtonText}>Continuar</Text>
                   </View>
                 </GradientBackground>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.denyButton}
-                onPress={onDeny}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.denyButtonText}>Ahora no</Text>
               </TouchableOpacity>
             </View>
 
@@ -233,16 +217,10 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     maxHeight: Dimensions.get('window').height * 0.9,
   },
-  closeButton: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    zIndex: 1,
-    padding: 8,
-  },
+  // Removed close button to prevent dismissing before system prompt
   scrollContent: {
     padding: 24,
-    paddingTop: 48, // More space at top for close button and breathing room
+    paddingTop: 48,
     paddingBottom: 40, // Extra space at bottom for safe scrolling
   },
   iconContainer: {
@@ -368,15 +346,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-  denyButton: {
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  denyButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
+  // Removed deny button to ensure users proceed to the permission request
   footerNote: {
     fontSize: 12,
     color: '#9CA3AF',
