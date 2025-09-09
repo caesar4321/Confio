@@ -1,11 +1,27 @@
 from celery import shared_task
 from celery.utils.log import get_task_logger
 from .services import exchange_rate_service
+from functools import wraps
+from django.db import connection
 
 logger = get_task_logger(__name__)
 
 
+def ensure_db_connection_closed(func):
+    """Decorator to ensure database connections are properly closed after task execution"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+            return result
+        finally:
+            # Explicitly close database connections to prevent accumulation
+            connection.close()
+    return wrapper
+
+
 @shared_task(bind=True, max_retries=3)
+@ensure_db_connection_closed
 def fetch_exchange_rates(self):
     """
     Celery task to fetch exchange rates from all sources
@@ -53,6 +69,7 @@ def fetch_exchange_rates(self):
 
 
 @shared_task
+@ensure_db_connection_closed
 def fetch_dolartoday_rates():
     """
     Task to fetch only DolarToday rates (most reliable for VES)
@@ -67,6 +84,7 @@ def fetch_dolartoday_rates():
 
 
 @shared_task
+@ensure_db_connection_closed
 def cleanup_old_rates():
     """
     Task to clean up old exchange rate records
