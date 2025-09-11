@@ -1,5 +1,5 @@
 """
-from blockchain.algorand_client import get_algod_client
+from blockchain.algorand_config import get_algod_client
 Invite & Send GraphQL Mutations
 
 Server builds fully sponsored groups for invite creation.

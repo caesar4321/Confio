@@ -51,7 +51,7 @@ class Query(graphene.ObjectType):
     def resolve_p2p_trade_box_exists(self, info, trade_id: str):
         """Return True if the P2P trade box exists on-chain for the given trade_id."""
         try:
-            from blockchain.algorand_client import get_algod_client
+            from blockchain.algorand_config import get_algod_client
             client = get_algod_client()
             app_id = getattr(settings, 'ALGORAND_P2P_TRADE_APP_ID', 0)
             if not app_id:
