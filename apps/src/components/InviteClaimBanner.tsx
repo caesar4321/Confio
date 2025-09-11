@@ -4,21 +4,22 @@ import Icon from 'react-native-vector-icons/Feather';
 
 type Props = {
   amountMicros: number;
-  assetId: number;
+  assetId: string;
   onPressDetails: () => void;
   onDismiss: () => void;
   style?: any;
 };
 
 // Map known asset IDs to display symbols/colors
-function resolveAsset(assetId: number): { symbol: string; bg: string; fg: string } {
+function resolveAsset(assetId: string): { symbol: string; bg: string; fg: string } {
+  const idNum = parseInt(assetId, 10);
   // Known asset IDs per current network (testnet)
   const CUSD_IDS = [744151197, 744368179];
   const CONFIO_IDS = [744150851];
-  if (CUSD_IDS.includes(assetId)) {
+  if (CUSD_IDS.includes(idNum)) {
     return { symbol: 'cUSD', bg: '#ecfeff', fg: '#0e7490' };
   }
-  if (CONFIO_IDS.includes(assetId)) {
+  if (CONFIO_IDS.includes(idNum)) {
     return { symbol: 'CONFIO', bg: '#f5f3ff', fg: '#6d28d9' };
   }
   return { symbol: 'ASA', bg: '#f1f5f9', fg: '#0f172a' };

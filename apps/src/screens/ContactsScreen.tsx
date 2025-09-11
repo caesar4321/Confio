@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Platform, Modal, Image, RefreshControl, ActivityIndicator, SectionList, Alert, Linking } from 'react-native';
+import Contacts from 'react-native-contacts';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MainStackParamList } from '../types/navigation';
@@ -1218,8 +1219,20 @@ export const ContactsScreen = () => {
           <TouchableOpacity 
             style={styles.permissionPrompt}
             onPress={async () => {
-              const status = await contactService.getStoredPermissionStatus();
-              if (status === 'denied' && Platform.OS === 'ios') {
+              // Always check real system status to avoid stale stored flags after reinstall
+              const sysStatus = await Contacts.checkPermission();
+              if (sysStatus === 'undefined') {
+                // Show explainer and then trigger system prompt
+                setShowPermissionModal(true);
+                return;
+              }
+              if (sysStatus === 'authorized') {
+                setHasContactPermission(true);
+                await syncContacts();
+                return;
+              }
+              // sysStatus is 'denied' or 'restricted' on iOS -> guide to Settings
+              if (Platform.OS === 'ios') {
                 Alert.alert(
                   'Permisos de Contactos',
                   'Para ver los nombres de tus amigos, ve a Configuración > Confío > Contactos y activa el acceso.',
@@ -1229,6 +1242,7 @@ export const ContactsScreen = () => {
                   ]
                 );
               } else {
+                // On Android, re-request via modal flow
                 setShowPermissionModal(true);
               }
             }}
@@ -1404,10 +1418,19 @@ export const ContactsScreen = () => {
               <TouchableOpacity 
                 style={styles.permissionButton}
                 onPress={async () => {
-                  // Check if permission was previously denied
-                  const status = await contactService.getStoredPermissionStatus();
-                  if (status === 'denied' && Platform.OS === 'ios') {
-                    // On iOS, guide to settings
+                  // Use actual system status to decide next step
+                  const sysStatus = await Contacts.checkPermission();
+                  if (sysStatus === 'undefined') {
+                    setShowPermissionModal(true);
+                    return;
+                  }
+                  if (sysStatus === 'authorized') {
+                    setHasContactPermission(true);
+                    await syncContacts();
+                    return;
+                  }
+                  // sysStatus is 'denied' or 'restricted'
+                  if (Platform.OS === 'ios') {
                     Alert.alert(
                       'Permisos de Contactos',
                       'Para usar los contactos, ve a Configuración > Confío > Contactos y activa el acceso.',
@@ -1417,7 +1440,6 @@ export const ContactsScreen = () => {
                       ]
                     );
                   } else {
-                    // First time or Android, show modal
                     setShowPermissionModal(true);
                   }
                 }}

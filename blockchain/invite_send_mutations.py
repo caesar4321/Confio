@@ -798,7 +798,8 @@ ClaimInviteForPhoneField = ClaimInviteForPhone.Field()
 class InviteReceiptType(graphene.ObjectType):
     exists = graphene.Boolean()
     status_code = graphene.Int()
-    asset_id = graphene.Int()
+    # Use String to avoid GraphQL Int overflow for large ASA IDs
+    asset_id = graphene.String()
     amount = graphene.Int()
     timestamp = graphene.Int()
 
@@ -829,7 +830,7 @@ def get_invite_receipt_for_phone(user_phone: str, user_country: str | None):
             asset_id = int.from_bytes(b[8:16], 'big')
             amount = int.from_bytes(b[16:24], 'big')
             ts = int.from_bytes(b[24:32], 'big')
-            return {'exists': True, 'status_code': status, 'asset_id': asset_id, 'amount': amount, 'timestamp': ts}
+            return {'exists': True, 'status_code': status, 'asset_id': str(asset_id), 'amount': amount, 'timestamp': ts}
         except Exception:
             return {'exists': False}
     except Exception:
