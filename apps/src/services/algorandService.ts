@@ -411,7 +411,13 @@ class AlgorandService {
       });
       
       if (!data?.submitSponsoredGroup?.success) {
-        console.error('[AlgorandService] Failed to submit sponsored transaction:', data?.submitSponsoredGroup?.error);
+        const errMsg: string = data?.submitSponsoredGroup?.error || '';
+        console.error('[AlgorandService] Failed to submit sponsored transaction:', errMsg);
+        // Consider idempotent success if network reports already opted in / already done
+        if (/already\s+opted\s+in|already\s+opted/i.test(errMsg)) {
+          console.log('[AlgorandService] Treating "already opted in" as success');
+          return 'already_opted_in';
+        }
         return null;
       }
 
