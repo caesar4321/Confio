@@ -1181,7 +1181,6 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     )
                     if not notif:
                         # Fallback to direct notification (should rarely happen)
-                        from notifications import utils as notif_utils
                         title = "Conversión completada"
                         msg = f"Convertiste {amount_from} {from_token} a {amount_to} {to_token}"
                         notif_utils.create_notification(
