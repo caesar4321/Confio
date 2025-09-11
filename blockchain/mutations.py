@@ -28,15 +28,24 @@ class EnsureAlgorandReadyMutation(graphene.Mutation):
     newly_opted_in = graphene.List(graphene.String)
     errors = graphene.List(graphene.String)
     
+    class Arguments:
+        account_id = graphene.ID(required=False, description="Explicit Account ID to ensure (personal or business)")
+
     @classmethod
-    def mutate(cls, root, info):
+    def mutate(cls, root, info, account_id=None):
         try:
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
-            # Use the AlgorandAccountManager to ensure account is ready
-            result = AlgorandAccountManager.ensure_user_algorand_ready(user)
+            # Resolve a specific account if provided; otherwise default to personal index 0
+            if account_id:
+                from users.jwt_context import resolve_account_for_write
+                acc = resolve_account_for_write(info, account_id=account_id)
+                result = AlgorandAccountManager.ensure_account_ready(acc)
+            else:
+                # Backward-compatible path
+                result = AlgorandAccountManager.ensure_user_algorand_ready(user)
             
             if not result['account']:
                 return cls(

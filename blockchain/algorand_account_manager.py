@@ -75,10 +75,11 @@ class AlgorandAccountManager:
         logger.info(f"  USDC Asset ID: {cls.USDC_ASSET_ID}")
         
         try:
-            # Get or create the user's personal account
+            # Get or create the user's personal account (index 0)
             account, created = Account.objects.get_or_create(
                 user=user,
                 account_type='personal',
+                account_index=0,
                 defaults={}
             )
             
@@ -192,6 +193,61 @@ class AlgorandAccountManager:
                 'algorand_address': None,
                 'opted_in_assets': [],
                 'errors': errors
+            }
+
+    @classmethod
+    def ensure_account_ready(cls, account: Account, *, existing_address: Optional[str] = None) -> Dict:
+        """Ensure the provided Account row (personal or business) has an Algorand address and basic opt-ins.
+
+        This method operates ONLY on the given account, preventing accidental updates to other rows.
+        """
+        try:
+            user = getattr(account, 'user', None)
+            # If already has address, reuse and top-up/opt-in as needed
+            if account.algorand_address and len(account.algorand_address) == 58:
+                addr = account.algorand_address
+            else:
+                addr = existing_address if (existing_address and len(existing_address) == 58) else None
+                if not addr:
+                    # Generate a new address if none provided
+                    private_key, addr = account.generate_account()
+                    mnem = mnemonic.from_private_key(private_key)
+                    logger.debug("Generated mnemonic for account %s (secure this): %s", account.id, mnem)
+                # Persist the address strictly on this account row
+                old = account.algorand_address or ''
+                account.algorand_address = addr
+                account.save(update_fields=['algorand_address'])
+                logger.info("Updated account %s (%s/%s) address %s -> %s", account.id, account.account_type, account.account_index, old, addr)
+
+            from blockchain.algorand_client import get_algod_client
+            algod_client = get_algod_client()
+
+            # Fund and opt-in minimal assets (CONFIO/cUSD if configured)
+            _ = cls._fund_account(algod_client, addr)
+
+            opted = []
+            if cls.CONFIO_ASSET_ID:
+                if cls._opt_in_to_asset(algod_client, addr, cls.CONFIO_ASSET_ID):
+                    opted.append(cls.CONFIO_ASSET_ID)
+            if cls.CUSD_ASSET_ID:
+                if cls._opt_in_to_asset(algod_client, addr, cls.CUSD_ASSET_ID):
+                    opted.append(cls.CUSD_ASSET_ID)
+
+            return {
+                'account': account,
+                'created': False,
+                'algorand_address': addr,
+                'opted_in_assets': opted,
+                'errors': [],
+            }
+        except Exception as e:
+            logger.exception("ensure_account_ready failed")
+            return {
+                'account': account,
+                'created': False,
+                'algorand_address': getattr(account, 'algorand_address', None),
+                'opted_in_assets': [],
+                'errors': [str(e)],
             }
     
     @classmethod
