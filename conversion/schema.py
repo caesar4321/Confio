@@ -59,7 +59,7 @@ class ConvertUSDCToCUSD(graphene.Mutation):
     sponsor_transactions = graphene.List(graphene.JSONString, description="Sponsor transactions (pre-signed)")
     group_id = graphene.String(description="Transaction group ID")
     requires_app_optin = graphene.Boolean(description="Whether user needs to opt into the app")
-    app_id = graphene.Int(description="Application ID for opt-in")
+    app_id = graphene.String(description="Application ID for opt-in")
     
     @classmethod
     def mutate(cls, root, info, amount):
@@ -227,7 +227,7 @@ class ConvertUSDCToCUSD(graphene.Mutation):
                                 success=False,
                                 errors=[],  # Empty errors - frontend handles this
                                 requires_app_optin=True,
-                                app_id=tx_result.get('app_id')
+                                app_id=str(tx_result.get('app_id')) if tx_result.get('app_id') is not None else None
                             )
                         conversion.status = 'FAILED'
                         conversion.save()
@@ -304,7 +304,7 @@ class ConvertCUSDToUSDC(graphene.Mutation):
     sponsor_transactions = graphene.List(graphene.JSONString, description="Sponsor transactions (pre-signed)")
     group_id = graphene.String(description="Transaction group ID")
     requires_app_optin = graphene.Boolean(description="Whether user needs to opt into the app")
-    app_id = graphene.Int(description="Application ID for opt-in")
+    app_id = graphene.String(description="Application ID for opt-in")
     
     @classmethod
     def mutate(cls, root, info, amount):
@@ -461,7 +461,7 @@ class ConvertCUSDToUSDC(graphene.Mutation):
                                 success=False,
                                 errors=[],  # Empty errors - frontend handles this
                                 requires_app_optin=True,
-                                app_id=tx_result.get('app_id')
+                                app_id=str(tx_result.get('app_id')) if tx_result.get('app_id') is not None else None
                             )
                         conversion.status = 'FAILED'
                         conversion.save()
