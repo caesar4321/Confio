@@ -52,7 +52,7 @@ export const ADD_ALGORAND_WALLET = gql`
 `;
 
 export const GENERATE_OPT_IN_TRANSACTIONS = gql`
-  mutation GenerateOptInTransactions($assetIds: [Int]) {
+  mutation GenerateOptInTransactions($assetIds: [String]) {
     generateOptInTransactions(assetIds: $assetIds) {
       success
       error
@@ -90,7 +90,7 @@ export const ALGORAND_SPONSORED_SEND = gql`
 `;
 
 export const ALGORAND_SPONSORED_OPT_IN = gql`
-  mutation AlgorandSponsoredOptIn($assetId: Int) {
+  mutation AlgorandSponsoredOptIn($assetId: String) {
     algorandSponsoredOptIn(assetId: $assetId) {
       success
       error

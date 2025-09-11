@@ -73,7 +73,8 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
     """
     
     class Arguments:
-        asset_ids = graphene.List(graphene.Int, required=False)  # If not provided, uses default assets
+        # Use String to avoid GraphQL 32-bit limits; coerce to int internally
+        asset_ids = graphene.List(graphene.String, required=False)  # If not provided, uses default assets
     
     success = graphene.Boolean()
     error = graphene.String()
@@ -135,8 +136,16 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
                 if AlgorandAccountManager.CUSD_ASSET_ID and AlgorandAccountManager.CUSD_ASSET_ID not in current_assets:
                     asset_ids.append(AlgorandAccountManager.CUSD_ASSET_ID)
             
+            # Coerce incoming string IDs to ints
+            coerced_ids = []
+            for aid in asset_ids:
+                try:
+                    coerced_ids.append(int(aid))
+                except Exception:
+                    continue
+            
             # Filter out assets already opted into
-            assets_to_opt_in = [aid for aid in asset_ids if aid not in current_assets]
+            assets_to_opt_in = [aid for aid in coerced_ids if aid not in current_assets]
             
             if not assets_to_opt_in:
                 logger.info(f"User already opted into all requested assets")
@@ -272,7 +281,8 @@ class OptInToAssetMutation(graphene.Mutation):
     """
     
     class Arguments:
-        asset_id = graphene.Int(required=True)
+        # Use String to avoid GraphQL Int 32-bit limit
+        asset_id = graphene.String(required=True)
     
     success = graphene.Boolean()
     error = graphene.String()
@@ -323,10 +333,16 @@ class OptInToAssetMutation(graphene.Mutation):
             account_info = algod_client.account_info(active_account.algorand_address)
             assets = account_info.get('assets', [])
             
-            if any(asset['asset-id'] == asset_id for asset in assets):
+            # Coerce asset_id to int for on-chain comparison
+            try:
+                asset_id_int = int(asset_id)
+            except Exception:
+                return cls(success=False, error='Invalid asset ID format')
+
+            if any(asset['asset-id'] == asset_id_int for asset in assets):
                 return cls(
                     success=True,
-                    message=f'Already opted into asset {asset_id}'
+                    message=f'Already opted into asset {asset_id_int}'
                 )
             
             # Generate unsigned opt-in transaction
@@ -341,7 +357,7 @@ class OptInToAssetMutation(graphene.Mutation):
                 sp=params,
                 receiver=active_account.algorand_address,
                 amt=0,
-                index=asset_id
+                index=asset_id_int
             )
             
             # Encode transaction for client
@@ -351,17 +367,17 @@ class OptInToAssetMutation(graphene.Mutation):
             
             # Determine asset name
             asset_name = "Unknown"
-            if asset_id == AlgorandAccountManager.CONFIO_ASSET_ID:
+            if asset_id_int == AlgorandAccountManager.CONFIO_ASSET_ID:
                 asset_name = "CONFIO"
-            elif asset_id == AlgorandAccountManager.USDC_ASSET_ID:
+            elif asset_id_int == AlgorandAccountManager.USDC_ASSET_ID:
                 asset_name = "USDC"
-            elif asset_id == AlgorandAccountManager.CUSD_ASSET_ID:
+            elif asset_id_int == AlgorandAccountManager.CUSD_ASSET_ID:
                 asset_name = "cUSD"
             
             return cls(
                 success=True,
                 unsigned_transaction=unsigned_txn,
-                message=f'Please sign this transaction to opt into {asset_name} (Asset ID: {asset_id})'
+                message=f'Please sign this transaction to opt into {asset_name} (Asset ID: {asset_id_int})'
             )
             
         except Exception as e:

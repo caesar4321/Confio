@@ -105,7 +105,7 @@ class InviteSendService {
   }
 
   async getInviteReceiptNotice(phone: string, phoneCountry?: string): Promise<
-    { exists: true; amount: number; assetId: number; timestamp: number } | { exists: false }
+    { exists: true; amount: number; assetId: string; timestamp: number } | { exists: false }
   > {
     const { data } = await apolloClient.query({
       query: INVITE_RECEIPT_FOR_PHONE,
@@ -114,7 +114,7 @@ class InviteSendService {
     })
     const r = data?.inviteReceiptForPhone
     if (!r?.exists) return { exists: false }
-    return { exists: true, amount: r.amount, assetId: r.assetId, timestamp: r.timestamp }
+    return { exists: true, amount: r.amount, assetId: String(r.assetId), timestamp: r.timestamp }
   }
 
   async claimInviteForPhone(phone: string | undefined, phoneCountry: string | undefined, recipientAddress: string, invitationId?: string): Promise<{ success: boolean; error?: string; txid?: string }> {
