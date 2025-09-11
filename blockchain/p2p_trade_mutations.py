@@ -1,11 +1,12 @@
 """
-from blockchain.algorand_client import get_algod_client
 P2P Trade GraphQL Mutations (Algorand)
 
 Server builds fully sponsored groups for P2P trades via the p2p_trade app.
 Client signs only their own tx(s) where required; server signs sponsor
 transactions and submits the complete group.
 """
+
+from blockchain.algorand_config import get_algod_client
 
 from __future__ import annotations
 
