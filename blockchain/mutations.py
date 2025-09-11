@@ -1177,7 +1177,8 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
     """
     
     class Arguments:
-        app_id = graphene.Int(required=False)  # Defaults to cUSD app
+        # Use String to avoid GraphQL 32-bit int limits
+        app_id = graphene.String(required=False)  # Defaults to cUSD app
     
     success = graphene.Boolean()
     error = graphene.String()
@@ -1185,7 +1186,8 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
     user_transaction = graphene.String()  # Base64 encoded unsigned user transaction
     sponsor_transaction = graphene.String()  # Base64 encoded signed sponsor transaction
     group_id = graphene.String()
-    app_id = graphene.Int()
+    # Return app_id as String to avoid 32-bit limits
+    app_id = graphene.String()
     
     @classmethod
     def mutate(cls, root, info, app_id=None):
@@ -1219,9 +1221,15 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
             
             # Default to cUSD app if not specified
             if not app_id:
-                app_id = AlgorandAccountManager.CUSD_APP_ID
+                app_id_int = AlgorandAccountManager.CUSD_APP_ID
+            else:
+                # Coerce provided string app_id to int
+                try:
+                    app_id_int = int(app_id)
+                except Exception:
+                    return cls(success=False, error='Invalid app ID format')
                 
-            if not app_id:
+            if not app_id_int:
                 return cls(success=False, error='No app ID specified and cUSD app not configured')
             
             # Check if already opted in
@@ -1234,12 +1242,12 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
             account_info = algod_client.account_info(account.algorand_address)
             apps_local_state = account_info.get('apps-local-state', [])
             
-            if any(app['id'] == app_id for app in apps_local_state):
-                logger.info(f"Account already opted into app {app_id}")
+            if any(app['id'] == app_id_int for app in apps_local_state):
+                logger.info(f"Account already opted into app {app_id_int}")
                 return cls(
                     success=True,
                     already_opted_in=True,
-                    app_id=app_id
+                    app_id=str(app_id_int)
                 )
             
             # Check user's current balance and min balance requirement
@@ -1314,7 +1322,7 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
             app_opt_in = ApplicationOptInTxn(
                 sender=account.algorand_address,
                 sp=opt_in_params,
-                index=app_id,
+                index=app_id_int,
                 app_args=[opt_in_selector]  # Required for Beaker router
             )
             
@@ -1344,7 +1352,7 @@ class GenerateAppOptInTransactionMutation(graphene.Mutation):
                 user_transaction=user_txn_encoded,
                 sponsor_transaction=sponsor_signed_encoded,
                 group_id=base64.b64encode(group_id).decode(),
-                app_id=app_id
+                app_id=str(app_id_int)
             )
             
         except Exception as e:
