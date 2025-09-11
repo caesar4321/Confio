@@ -1,10 +1,11 @@
 """
-from blockchain.algorand_config import get_algod_client
 Invite & Send GraphQL Mutations
 
 Server builds fully sponsored groups for invite creation.
 Client signs only the AXFER; server signs sponsor txns and submits.
 """
+
+from blockchain.algorand_config import get_algod_client
 
 import base64
 import graphene
