@@ -10,7 +10,7 @@ class CUSDAppOptInService {
   /**
    * Check if user needs to opt into cUSD app and handle the opt-in flow with sponsored transactions
    */
-  async handleAppOptIn(account?: any, appId?: number): Promise<{ success: boolean; error?: string }> {
+  async handleAppOptIn(account?: any, appId?: number | string): Promise<{ success: boolean; error?: string }> {
     try {
       console.log('[CUSDAppOptInService] Starting sponsored app opt-in flow');
       
@@ -46,7 +46,9 @@ class CUSDAppOptInService {
       // Step 1: Generate the sponsored opt-in transaction from server
       const optInResult = await apolloClient.mutate({
         mutation: GENERATE_APP_OPT_IN,
-        variables: { appId } // Will default to cUSD app if not provided
+        variables: (appId === undefined || appId === null)
+          ? {}
+          : { appId: String(appId) } // Will default to cUSD app if not provided
       });
       
       const optInData = optInResult.data?.generateAppOptInTransaction;

@@ -1,7 +1,7 @@
 import { gql } from '@apollo/client';
 
 export const GENERATE_APP_OPT_IN = gql`
-  mutation GenerateAppOptIn($appId: Int) {
+  mutation GenerateAppOptIn($appId: String) {
     generateAppOptInTransaction(appId: $appId) {
       success
       error
