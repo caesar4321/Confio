@@ -14,7 +14,7 @@ from django.conf import settings
 from .algorand_client import AlgorandClient
 from .models import ProcessedIndexerTransaction, IndexerAssetCursor
 from usdc_transactions.models import USDCDeposit
-from notifications.utils import create_notification
+from notifications import utils as notif_utils
 from notifications.models import NotificationType as NotificationTypeChoices
 from send.models import SendTransaction
 from payments.models import PaymentTransaction
@@ -408,7 +408,7 @@ def scan_inbound_deposits():
                         **kwargs,
                     )
                     try:
-                        create_notification(
+                        notif_utils.create_notification(
                             user=account.user,
                             account=account,
                             business=account.business if account.account_type == 'business' else None,
@@ -438,7 +438,7 @@ def scan_inbound_deposits():
                 # cUSD or CONFIO inbound notification
                 token_name = 'cUSD' if xaid == CUSD_ID else 'CONFIO'
                 try:
-                    create_notification(
+                    notif_utils.create_notification(
                         user=account.user,
                         account=account,
                         business=account.business if account.account_type == 'business' else None,
@@ -679,7 +679,7 @@ def confirm_payment_transaction(self, payment_id: str, txid: str):
 
             try:
                 merchant_acct = payment_tx.merchant_account
-                create_notification(
+                notif_utils.create_notification(
                     user=payment_tx.merchant_account_user,
                     account=merchant_acct,
                     business=payment_tx.merchant_business,
@@ -700,7 +700,7 @@ def confirm_payment_transaction(self, payment_id: str, txid: str):
                 logger.warning(f"Could not create merchant notification for {payment_id}: {e}")
 
             try:
-                create_notification(
+                notif_utils.create_notification(
                     user=payment_tx.payer_user,
                     account=payment_tx.payer_account,
                     business=payment_tx.payer_business,
@@ -823,7 +823,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     )
                     # Recipient notification
                     if s.recipient_user_id:
-                        create_notification(
+                        notif_utils.create_notification(
                             user=s.recipient_user,
                             account=None,
                             business=s.recipient_business,
@@ -841,7 +841,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                         )
                     # Sender notification
                     if s.sender_user_id:
-                        create_notification(
+                        notif_utils.create_notification(
                             user=s.sender_user,
                             account=None,
                             business=s.sender_business,
@@ -929,9 +929,8 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     # Notification (user-facing in Spanish; use "Preventa")
                     try:
                         amount_str = str(p.confio_amount)
-                        from notifications.utils import create_notification
                         from notifications.models import NotificationType as NotifType
-                        create_notification(
+                        notif_utils.create_notification(
                             user=p.user,
                             account=None,
                             business=None,
@@ -1182,10 +1181,10 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     )
                     if not notif:
                         # Fallback to direct notification (should rarely happen)
-                        from notifications.utils import create_notification
+                        from notifications import utils as notif_utils
                         title = "Conversión completada"
                         msg = f"Convertiste {amount_from} {from_token} a {amount_to} {to_token}"
-                        create_notification(
+                        notif_utils.create_notification(
                             user=target_user,
                             business=c.actor_business,
                             notification_type=NotificationTypeChoices.CONVERSION_COMPLETED,
@@ -1252,7 +1251,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                             pass
                         if not target_user:
                             raise Exception('no_target_user')
-                        create_notification(
+                        notif_utils.create_notification(
                             user=target_user,
                             business=u.actor_business,
                             notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_FAILED,
@@ -1329,7 +1328,7 @@ def scan_outbound_confirmations(max_batch: int = 50):
                         if not notif:
                             # Fallback to direct notification
                             logger.info("[OutboundScan] Fallback notification path for withdrawal completed")
-                            create_notification(
+                            notif_utils.create_notification(
                                 user=target_user,
                                 business=u.actor_business,
                                 notification_type=NotificationTypeChoices.USDC_WITHDRAWAL_COMPLETED,
