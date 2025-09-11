@@ -6,9 +6,9 @@ Client signs only their own tx(s) where required; server signs sponsor
 transactions and submits the complete group.
 """
 
-from blockchain.algorand_config import get_algod_client
-
 from __future__ import annotations
+
+from blockchain.algorand_config import get_algod_client
 
 import base64
 import json
