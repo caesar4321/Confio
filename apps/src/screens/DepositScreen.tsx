@@ -205,6 +205,13 @@ const DepositScreen = () => {
   // Query to check opt-in status
   const { data: optInData, loading: loadingOptIns, refetch: refetchOptIns } = useQuery(CHECK_ASSET_OPT_INS, {
     fetchPolicy: 'network-only',
+    onError: (err) => {
+      // If the opt-in status query fails (e.g., auth race), default to showing the activation CTA
+      console.warn('[DepositScreen] CHECK_ASSET_OPT_INS error:', err?.message || err);
+      setIsOptedIn(false);
+      setNeedsWalletSetup(false);
+      setCheckingOptIn(false);
+    }
   });
 
   // Check if user is opted in to USDC and whether additional setup is needed
@@ -665,7 +672,7 @@ const styles = StyleSheet.create({
             <ActivityIndicator size="large" color={config.color} />
             <Text style={styles.loadingText}>Verificando configuración...</Text>
           </View>
-        ) : tokenType === 'usdc' && (isOptedIn === false || needsWalletSetup === true) ? (
+        ) : tokenType === 'usdc' && ((isOptedIn !== true) || needsWalletSetup === true) ? (
           /* Single friendly CTA for USDC; background handles everything else */
           <View style={styles.optInContainer}>
             <View style={[styles.optInIcon, { backgroundColor: config.color + '20' }]}>
