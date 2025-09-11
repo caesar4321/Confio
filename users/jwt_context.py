@@ -8,6 +8,7 @@ for GraphQL queries that should automatically use the user's active account cont
 import logging
 from graphql_jwt.utils import jwt_decode
 from graphql_jwt.exceptions import PermissionDenied
+from graphql import GraphQLError
 
 logger = logging.getLogger(__name__)
 
@@ -245,3 +246,51 @@ def require_business_permission(info, permission):
         raise PermissionDenied(f"Your role ({employee_record.role}) does not have permission to {permission}")
     
     return context
+
+
+def resolve_account_for_write(info, *, account_id, expected_type=None):
+    """Resolve an Account row for write operations with strict ownership checks.
+
+    - If personal: must belong to the authenticated user.
+    - If business: user must be owner or an employee with access via JWT context.
+    - If expected_type is provided, enforce exact match.
+    """
+    try:
+        from users.models import Account
+        user = info.context.user
+        if not user or not user.is_authenticated:
+            raise GraphQLError("Not authenticated")
+
+        acc = Account.objects.filter(id=account_id, deleted_at__isnull=True).first()
+        if not acc:
+            raise GraphQLError("Account not found")
+
+        if expected_type and acc.account_type != expected_type:
+            raise GraphQLError("Account type mismatch for operation")
+
+        if acc.account_type == 'personal':
+            if acc.user_id != user.id:
+                raise GraphQLError("Unauthorized: personal account does not belong to user")
+        elif acc.account_type == 'business':
+            # Validate via JWT context (owner or employee)
+            ctx = get_jwt_business_context_with_validation(info, required_permission=None)
+            if not ctx or str(ctx.get('business_id') or '') != str(acc.business_id or ''):
+                # Allow owners without employee record
+                from users.models import Account as Acc
+                is_owner = Acc.objects.filter(
+                    user_id=user.id,
+                    business_id=acc.business_id,
+                    account_type='business',
+                    deleted_at__isnull=True,
+                ).exists()
+                if not is_owner:
+                    raise GraphQLError("Unauthorized: no access to business account")
+        else:
+            raise GraphQLError("Unsupported account type")
+
+        return acc
+    except GraphQLError:
+        raise
+    except Exception:
+        logger.exception("Failed to resolve account for write")
+        raise GraphQLError("Failed to resolve account for write")
