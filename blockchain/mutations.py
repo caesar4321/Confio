@@ -23,8 +23,9 @@ class EnsureAlgorandReadyMutation(graphene.Mutation):
     success = graphene.Boolean()
     error = graphene.String()
     algorand_address = graphene.String()
-    opted_in_assets = graphene.List(graphene.Int)
-    newly_opted_in = graphene.List(graphene.Int)
+    # Use String for ASA IDs to avoid GraphQL Int 32-bit limits
+    opted_in_assets = graphene.List(graphene.String)
+    newly_opted_in = graphene.List(graphene.String)
     errors = graphene.List(graphene.String)
     
     @classmethod
@@ -55,8 +56,8 @@ class EnsureAlgorandReadyMutation(graphene.Mutation):
             return cls(
                 success=True,
                 algorand_address=result['algorand_address'],
-                opted_in_assets=current_opt_ins,
-                newly_opted_in=newly_opted_in,
+                opted_in_assets=[str(a) for a in current_opt_ins],
+                newly_opted_in=[str(a) for a in newly_opted_in],
                 errors=result['errors']
             )
             
@@ -373,7 +374,8 @@ class CheckAssetOptInsQuery(graphene.ObjectType):
     Query to check which assets a user is opted into
     """
     algorand_address = graphene.String()
-    opted_in_assets = graphene.List(graphene.Int)
+    # Use String for ASA IDs to avoid GraphQL Int overflow
+    opted_in_assets = graphene.List(graphene.String)
     asset_details = graphene.JSONString()
     
     def resolve_algorand_address(self, info):
@@ -412,7 +414,8 @@ class CheckAssetOptInsQuery(graphene.ObjectType):
         if not address or len(address) != 58:
             return []
         
-        return AlgorandAccountManager._check_opt_ins(address)
+        # Cast to strings to safely cross GraphQL boundary
+        return [str(a) for a in AlgorandAccountManager._check_opt_ins(address)]
     
     def resolve_asset_details(self, info):
         opted_in = self.resolve_opted_in_assets(info)

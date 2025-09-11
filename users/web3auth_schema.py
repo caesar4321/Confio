@@ -419,7 +419,8 @@ class AddAlgorandWalletMutation(graphene.Mutation):
     error = graphene.String()
     user = graphene.Field(Web3AuthUserType)
     is_new_wallet = graphene.Boolean()
-    opted_in_assets = graphene.List(graphene.Int)
+    # Use String for ASA IDs to avoid GraphQL Int 32-bit limits
+    opted_in_assets = graphene.List(graphene.String)
     opt_in_errors = graphene.List(graphene.String)
     needs_opt_in = graphene.List(graphene.String)  # Assets that need frontend opt-in (use String to avoid 32-bit Int limits)
     algo_balance = graphene.Float()  # Current ALGO balance
@@ -445,7 +446,7 @@ class AddAlgorandWalletMutation(graphene.Mutation):
             
             account = result['account']
             is_new = result['created']
-            opted_in_assets = result['opted_in_assets']
+            opted_in_assets = [str(a) for a in result['opted_in_assets']]
             opt_in_errors = result['errors']
             
             # TODO: Store Web3Auth metadata when needed
@@ -492,7 +493,7 @@ class AddAlgorandWalletMutation(graphene.Mutation):
                 is_new_wallet=is_new,
                 opted_in_assets=opted_in_assets,
                 opt_in_errors=opt_in_errors,
-                needs_opt_in=needs_opt_in,
+                needs_opt_in=[str(a) for a in needs_opt_in],
                 algo_balance=algo_balance
             )
             
