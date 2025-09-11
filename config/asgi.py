@@ -11,7 +11,7 @@ import os
 from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
-from channels.security.websocket import AllowedHostsOriginValidator
+from channels.security.websocket import OriginValidator
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
@@ -22,13 +22,18 @@ django_asgi_app = get_asgi_application()
 from p2p_exchange.routing import websocket_urlpatterns
 from p2p_exchange.middleware import JWTAuthMiddleware
 
+# Allowed origins for WebSocket connections (explicit list avoids 403 on valid clients)
+allowed_ws_origins = [
+    "https://confio.lat",
+    "https://www.confio.lat",
+]
+
 application = ProtocolTypeRouter({
     "http": django_asgi_app,
-    "websocket": AllowedHostsOriginValidator(
+    "websocket": OriginValidator(
         JWTAuthMiddleware(
-            URLRouter(
-                websocket_urlpatterns
-            )
-        )
+            URLRouter(websocket_urlpatterns)
+        ),
+        allowed_ws_origins
     ),
 })
