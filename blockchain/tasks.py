@@ -929,7 +929,6 @@ def scan_outbound_confirmations(max_batch: int = 50):
                     # Notification (user-facing in Spanish; use "Preventa")
                     try:
                         amount_str = str(p.confio_amount)
-                        from notifications.models import NotificationType as NotifType
                         notif_utils.create_notification(
                             user=p.user,
                             account=None,
