@@ -420,27 +420,33 @@ class CheckAssetOptInsQuery(graphene.ObjectType):
     def resolve_asset_details(self, info):
         opted_in = self.resolve_opted_in_assets(info)
         details = {}
-        
-        for asset_id in opted_in:
-            if asset_id == AlgorandAccountManager.CONFIO_ASSET_ID:
-                details[asset_id] = {
+
+        # Coerce ASA IDs (which may be strings) to ints for comparison
+        for aid in opted_in:
+            try:
+                asset_id_int = int(aid)
+            except Exception:
+                continue
+
+            if asset_id_int == AlgorandAccountManager.CONFIO_ASSET_ID:
+                details[asset_id_int] = {
                     'name': 'CONFIO',
                     'symbol': 'CONFIO',
                     'decimals': 6
                 }
-            elif asset_id == AlgorandAccountManager.USDC_ASSET_ID:
-                details[asset_id] = {
+            elif asset_id_int == AlgorandAccountManager.USDC_ASSET_ID:
+                details[asset_id_int] = {
                     'name': 'USD Coin',
                     'symbol': 'USDC',
                     'decimals': 6
                 }
-            elif asset_id == AlgorandAccountManager.CUSD_ASSET_ID:
-                details[asset_id] = {
+            elif asset_id_int == AlgorandAccountManager.CUSD_ASSET_ID:
+                details[asset_id_int] = {
                     'name': 'Confío Dollar',
                     'symbol': 'cUSD',
                     'decimals': 6
                 }
-        
+
         return details
 
 
