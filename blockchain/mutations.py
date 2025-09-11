@@ -1013,7 +1013,7 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
     user_transaction = graphene.String()  # Base64 encoded unsigned user transaction
     sponsor_transaction = graphene.String()  # Base64 encoded signed sponsor transaction
     group_id = graphene.String()
-    asset_id = graphene.Int()
+    asset_id = graphene.String()
     asset_name = graphene.String()
     
     @classmethod
@@ -1150,7 +1150,7 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
                 return cls(
                     success=True,
                     already_opted_in=True,
-                    asset_id=asset_id,
+                    asset_id=str(asset_id),
                     asset_name=asset_type
                 )
             
@@ -1161,7 +1161,7 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
                 user_transaction=result.get('user_transaction'),
                 sponsor_transaction=result.get('sponsor_transaction'),
                 group_id=result.get('group_id'),
-                asset_id=asset_id,
+                asset_id=str(asset_id),
                 asset_name=asset_type
             )
             
@@ -1367,7 +1367,8 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
     """
     
     class Arguments:
-        asset_id = graphene.Int(required=False)  # Defaults to CONFIO
+        # Use String to avoid 32-bit GraphQL Int limit for large ASA IDs
+        asset_id = graphene.String(required=False)  # Defaults to CONFIO
     
     success = graphene.Boolean()
     error = graphene.String()
@@ -1376,7 +1377,7 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
     user_transaction = graphene.String()  # Base64 encoded unsigned user transaction
     sponsor_transaction = graphene.String()  # Base64 encoded signed sponsor transaction
     group_id = graphene.String()
-    asset_id = graphene.Int()
+    asset_id = graphene.String()
     asset_name = graphene.String()
     
     @classmethod
@@ -1403,17 +1404,22 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
             # Default to CONFIO if no asset specified
             if not asset_id:
                 asset_id = AlgorandAccountManager.CONFIO_ASSET_ID
-                
-            if not asset_id:
+            # Coerce string asset_id to int for on-chain ops
+            try:
+                asset_id_int = int(asset_id)
+            except Exception:
+                return cls(success=False, error='Invalid asset ID format')
+
+            if not asset_id_int:
                 return cls(success=False, error='No asset ID specified and CONFIO not configured')
             
             # Determine asset name
             asset_name = "Unknown"
-            if asset_id == AlgorandAccountManager.CONFIO_ASSET_ID:
+            if asset_id_int == AlgorandAccountManager.CONFIO_ASSET_ID:
                 asset_name = "CONFIO"
-            elif asset_id == AlgorandAccountManager.USDC_ASSET_ID:
+            elif asset_id_int == AlgorandAccountManager.USDC_ASSET_ID:
                 asset_name = "USDC"
-            elif asset_id == AlgorandAccountManager.CUSD_ASSET_ID:
+            elif asset_id_int == AlgorandAccountManager.CUSD_ASSET_ID:
                 asset_name = "cUSD"
             
             # Execute sponsored opt-in using async function
@@ -1424,7 +1430,7 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
                 result = loop.run_until_complete(
                     algorand_sponsor_service.execute_server_side_opt_in(
                         user_address=user_account.algorand_address,
-                        asset_id=asset_id
+                        asset_id=asset_id_int
                     )
                 )
             finally:
@@ -1440,14 +1446,14 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
             # Log the opt-in request
             logger.info(
                 f"Created sponsored opt-in for user {user.id}: "
-                f"Asset {asset_name} (ID: {asset_id}), Address: {user_account.algorand_address[:10]}..."
+                f"Asset {asset_name} (ID: {asset_id_int}), Address: {user_account.algorand_address[:10]}..."
             )
             
             if result.get('already_opted_in'):
                 return cls(
                     success=True,
                     already_opted_in=True,
-                    asset_id=asset_id,
+                    asset_id=str(asset_id_int),
                     asset_name=asset_name
                 )
             
@@ -1458,7 +1464,7 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
                 user_transaction=result.get('user_transaction'),
                 sponsor_transaction=result.get('sponsor_transaction'),
                 group_id=result.get('group_id'),
-                asset_id=asset_id,
+                asset_id=str(asset_id_int),
                 asset_name=asset_name
             )
             
