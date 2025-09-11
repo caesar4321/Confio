@@ -164,12 +164,14 @@ class CUSDAppOptInService {
           success: true
         };
       } else {
-        console.error('[CUSDAppOptInService] Failed to submit sponsored group:', 
-          executeResult.data?.submitSponsoredGroup?.error);
-        return {
-          success: false,
-          error: executeResult.data?.submitSponsoredGroup?.error || 'Failed to submit opt-in transaction'
-        };
+        const errMsg: string = executeResult.data?.submitSponsoredGroup?.error || '';
+        console.error('[CUSDAppOptInService] Failed to submit sponsored group:', errMsg);
+        // Idempotency: treat "already opted in" as success
+        if (/already\s+opted\s+in/i.test(errMsg)) {
+          console.log('[CUSDAppOptInService] Treating "already opted in" as success');
+          return { success: true };
+        }
+        return { success: false, error: errMsg || 'Failed to submit opt-in transaction' };
       }
       
     } catch (error) {
