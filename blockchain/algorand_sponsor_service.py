@@ -545,10 +545,26 @@ class AlgorandSponsorService:
             }
             
         except Exception as e:
-            logger.error(f"Error submitting sponsored group: {e}")
+            msg = str(e)
+            logger.error(f"Error submitting sponsored group: {msg}")
+            # Idempotency: treat duplicate/already-opted-in app calls as success
+            if (
+                'has already opted in to app' in msg
+                or 'already opted in' in msg.lower()
+            ):
+                logger.info("Treating 'already opted in' submission error as success (idempotent app opt-in)")
+                return {
+                    'success': True,
+                    'tx_id': None,
+                    'confirmed_round': None,
+                    'sponsored': True,
+                    'fees_saved': 0.0,
+                    'already_opted_in': True,
+                    'pending': False,
+                }
             return {
                 'success': False,
-                'error': str(e)
+                'error': msg
             }
     
     async def _sign_transaction(self, txn: Transaction) -> Optional[str]:
