@@ -198,49 +198,6 @@ class IdentityVerification(SoftDeleteModel):
         self.user.first_name = self.verified_first_name
         self.user.last_name = self.verified_last_name
         self.user.save(update_fields=['first_name', 'last_name'])
-
-        # Ensure the personal account reflects a verified record so user-facing
-        # flows (EditProfile, personal limits, etc.) see the verified status.
-        # If the current record is business-context or otherwise not counted as
-        # personal, clone a personal-context verified record when missing.
-        try:
-            from security.models import IdentityVerification as IV
-            # If this record is already personal (no business account_type), skip clone
-            if (self.risk_factors or {}).get('account_type') != 'business':
-                return
-            has_personal_verified = IV.objects.filter(
-                user=self.user,
-                status='verified'
-            ).filter(Q(risk_factors__account_type__isnull=True) | ~Q(risk_factors__account_type='business')).exists()
-            if not has_personal_verified:
-                IV.objects.create(
-                    user=self.user,
-                    verified_first_name=self.verified_first_name,
-                    verified_last_name=self.verified_last_name,
-                    verified_date_of_birth=self.verified_date_of_birth,
-                    verified_nationality=self.verified_nationality,
-                    verified_address=self.verified_address,
-                    verified_city=self.verified_city,
-                    verified_state=self.verified_state,
-                    verified_country=self.verified_country,
-                    verified_postal_code=self.verified_postal_code,
-                    document_type=self.document_type,
-                    document_number=self.document_number,
-                    document_issuing_country=self.document_issuing_country,
-                    document_expiry_date=self.document_expiry_date,
-                    document_front_url=self.document_front_url,
-                    document_back_url=self.document_back_url,
-                    selfie_url=self.selfie_url,
-                    payout_method_label=self.payout_method_label,
-                    payout_proof_url=self.payout_proof_url,
-                    status='verified',
-                    verified_by=approved_by,
-                    verified_at=timezone.now(),
-                    risk_factors={},  # Explicitly personal context
-                )
-        except Exception:
-            # Do not fail approval flow if cloning fails
-            pass
     
     def reject_verification(self, rejected_by, reason):
         """Reject the verification"""
@@ -281,31 +238,46 @@ def ensure_personal_verified_on_save(sender, instance: 'IdentityVerification', c
             return
 
         # Create a personal-context verified record to back personal status
-        IdentityVerification.objects.create(
-            user=instance.user,
-            verified_first_name=instance.verified_first_name,
-            verified_last_name=instance.verified_last_name,
-            verified_date_of_birth=instance.verified_date_of_birth,
-            verified_nationality=instance.verified_nationality,
-            verified_address=instance.verified_address,
-            verified_city=instance.verified_city,
-            verified_state=instance.verified_state,
-            verified_country=instance.verified_country,
-            verified_postal_code=instance.verified_postal_code,
-            document_type=instance.document_type,
-            document_number=instance.document_number,
-            document_issuing_country=instance.document_issuing_country,
-            document_expiry_date=instance.document_expiry_date,
-            document_front_url=instance.document_front_url,
-            document_back_url=instance.document_back_url,
-            selfie_url=instance.selfie_url,
-            payout_method_label=instance.payout_method_label,
-            payout_proof_url=instance.payout_proof_url,
-            status='verified',
-            verified_by=instance.verified_by,
-            verified_at=instance.verified_at or timezone.now(),
-            risk_factors={},  # Explicitly personal context
-        )
+        # Do this after the outer transaction commits and idempotently to avoid duplicates
+        from django.db import transaction
+        def create_personal_clone():
+            try:
+                IdentityVerification.objects.get_or_create(
+                    user=instance.user,
+                    status='verified',
+                    document_number=instance.document_number,
+                    # Personal context explicitly stored as empty dict
+                    risk_factors={},
+                    defaults={
+                        'verified_first_name': instance.verified_first_name,
+                        'verified_last_name': instance.verified_last_name,
+                        'verified_date_of_birth': instance.verified_date_of_birth,
+                        'verified_nationality': instance.verified_nationality,
+                        'verified_address': instance.verified_address,
+                        'verified_city': instance.verified_city,
+                        'verified_state': instance.verified_state,
+                        'verified_country': instance.verified_country,
+                        'verified_postal_code': instance.verified_postal_code,
+                        'document_type': instance.document_type,
+                        'document_issuing_country': instance.document_issuing_country,
+                        'document_expiry_date': instance.document_expiry_date,
+                        'document_front_url': instance.document_front_url,
+                        'document_back_url': instance.document_back_url,
+                        'selfie_url': instance.selfie_url,
+                        'payout_method_label': instance.payout_method_label,
+                        'payout_proof_url': instance.payout_proof_url,
+                        'verified_by': instance.verified_by,
+                        'verified_at': instance.verified_at or timezone.now(),
+                    }
+                )
+            except Exception:
+                # Never break save due to this helper
+                pass
+        try:
+            transaction.on_commit(create_personal_clone)
+        except Exception:
+            # Fallback: attempt immediate creation if on_commit unavailable
+            create_personal_clone()
     except Exception:
         # Never break save due to this helper
         pass
