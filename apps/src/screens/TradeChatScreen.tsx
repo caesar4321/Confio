@@ -2108,10 +2108,40 @@ export const TradeChatScreen: React.FC = () => {
       } else {
         const msg = res?.error || 'No se pudo habilitar el intercambio.';
         console.error('[P2P][EnableEscrow][ERROR]', { tradeId, token, amount: amt, error: msg });
+        // Friendlier copy for insufficient balance
+        const sanitized = (msg || '').replace(/\son\s(mainnet|testnet).*/i, '').trim();
+        const insuffMatch = sanitized.match(/Insufficient\s+([A-Z]+)\s+balance:\s*need\s*([\d.]+),\s*have\s*([\d.]+)/i);
+        if (insuffMatch) {
+          const tokenSym = (insuffMatch[1] || token || '').toUpperCase();
+          const readableToken = tokenSym === 'CUSD' ? 'cUSD' : tokenSym;
+          const need = parseFloat(insuffMatch[2] || '0');
+          const have = parseFloat(insuffMatch[3] || '0');
+          Alert.alert(
+            'Saldo insuficiente',
+            `No tienes suficiente saldo en ${readableToken} para habilitar el intercambio.\n\nNecesitas: ${need.toFixed(6)} ${readableToken}\nDisponible: ${have.toFixed(6)} ${readableToken}\n\nRecarga tu saldo o intenta con un monto menor.`
+          );
+        } else {
+          Alert.alert('No se pudo habilitar', 'Ocurrió un problema al habilitar el intercambio. Intenta de nuevo en unos segundos.');
+        }
       }
     } catch (e: any) {
       setEnablingTrade(false);
       console.error('[P2P][EnableEscrow][ERROR]', { tradeId, error: String(e?.message || e) });
+      const raw = String(e?.message || '');
+      const sanitized = raw.replace(/\son\s(mainnet|testnet).*/i, '').trim();
+      const insuffMatch = sanitized.match(/Insufficient\s+([A-Z]+)\s+balance:\s*need\s*([\d.]+),\s*have\s*([\d.]+)/i);
+      if (insuffMatch) {
+        const tokenSym = (insuffMatch[1] || '').toUpperCase();
+        const readableToken = tokenSym === 'CUSD' ? 'cUSD' : tokenSym;
+        const need = parseFloat(insuffMatch[2] || '0');
+        const have = parseFloat(insuffMatch[3] || '0');
+        Alert.alert(
+          'Saldo insuficiente',
+          `No tienes suficiente saldo en ${readableToken} para habilitar el intercambio.\n\nNecesitas: ${need.toFixed(6)} ${readableToken}\nDisponible: ${have.toFixed(6)} ${readableToken}\n\nRecarga tu saldo o intenta con un monto menor.`
+        );
+      } else {
+        Alert.alert('No se pudo habilitar', 'Ocurrió un problema al habilitar el intercambio. Intenta de nuevo.');
+      }
     }
   };
 
@@ -2207,12 +2237,12 @@ export const TradeChatScreen: React.FC = () => {
         <View style={styles.headerCenter}>
           <View style={styles.traderInfo}>
             <View style={styles.avatarContainer}>
-              <Text style={styles.avatarText}>{trader.name.charAt(0)}</Text>
+              <Text style={styles.avatarText}>{trader.name?.charAt(0) || 'U'}</Text>
               {trader.isOnline && <View style={styles.onlineIndicator} />}
             </View>
             <View style={styles.traderDetails}>
               <View style={styles.traderNameRow}>
-                <Text style={styles.traderName}>{trader.name}</Text>
+                <Text style={styles.traderName}>{trader.name || 'Usuario'}</Text>
                 {trader.verified && (
                   <Icon name="shield" size={16} color={colors.accent} style={styles.verifiedIcon} />
                 )}

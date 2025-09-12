@@ -409,6 +409,13 @@ export const ContactsScreen = () => {
         }
         
         // No automatic sync - users will use pull-to-refresh or sync button
+        // iOS: if permission exists but explicit upload consent hasn't been granted yet, show consent modal
+        if (Platform.OS === 'ios') {
+          const consent = await contactService.hasUploadConsent();
+          if (!consent) {
+            setShowPermissionModal(true);
+          }
+        }
       } else {
         // Check if user has previously denied
         const storedStatus = await contactService.getStoredPermissionStatus();
@@ -502,6 +509,10 @@ export const ContactsScreen = () => {
   // Handle permission allow
   const handlePermissionAllow = async () => {
     setShowPermissionModal(false);
+    // Record explicit upload consent for iOS before requesting OS permission
+    if (Platform.OS === 'ios') {
+      await contactService.setUploadConsent(true);
+    }
     const granted = await contactService.requestContactPermission();
     
     if (granted) {
@@ -520,8 +531,14 @@ export const ContactsScreen = () => {
   // Handle permission deny
   const handlePermissionDeny = async () => {
     setShowPermissionModal(false);
-    setHasContactPermission(false);
-    await contactService.storePermissionStatus('denied');
+    // If system permission is not granted, this denial refers to OS permission
+    if (!hasContactPermission) {
+      setHasContactPermission(false);
+      await contactService.storePermissionStatus('denied');
+    }
+    if (Platform.OS === 'ios') {
+      await contactService.setUploadConsent(false);
+    }
   };
 
   // Handle test user creation (DEBUG only)
@@ -547,6 +564,16 @@ export const ContactsScreen = () => {
     setContactsData({ friends: [], nonConfioFriends: [], allContacts: [], isLoaded: false });
     
     if (hasContactPermission) {
+      // On iOS, ensure we have explicit upload consent before triggering a sync that may upload data
+      if (Platform.OS === 'ios') {
+        const consent = await contactService.hasUploadConsent();
+        if (!consent) {
+          setRefreshing(false);
+          setIsLoadingContacts(false);
+          setShowPermissionModal(true);
+          return;
+        }
+      }
       // Manual refresh - always sync
       console.log('[SYNC] Manual refresh - syncing contacts');
       const success = await contactService.syncContacts(apolloClient);

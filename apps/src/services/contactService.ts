@@ -24,6 +24,8 @@ interface ContactMap {
 const CONTACTS_KEYCHAIN_SERVICE = 'com.confio.contacts';
 const CONTACTS_KEYCHAIN_KEY = 'user_contacts';
 const CONTACT_PERMISSION_STATUS_KEY = 'contact_permission_status';
+const CONTACTS_PRIVACY_SERVICE = 'com.confio.contacts_privacy';
+const CONTACTS_UPLOAD_CONSENT_KEY = 'contacts_upload_consent';
 
 export class ContactService {
   private static instance: ContactService;
@@ -126,8 +128,9 @@ export class ContactService {
    */
   async storePermissionStatus(status: 'granted' | 'denied' | 'pending'): Promise<void> {
     try {
+      // Store under dedicated privacy service to avoid overwriting contacts data
       await Keychain.setInternetCredentials(
-        CONTACTS_KEYCHAIN_SERVICE,
+        CONTACTS_PRIVACY_SERVICE,
         CONTACT_PERMISSION_STATUS_KEY,
         status
       );
@@ -141,7 +144,7 @@ export class ContactService {
    */
   async getStoredPermissionStatus(): Promise<'granted' | 'denied' | 'pending' | null> {
     try {
-      const credentials = await Keychain.getInternetCredentials(CONTACTS_KEYCHAIN_SERVICE);
+      const credentials = await Keychain.getInternetCredentials(CONTACTS_PRIVACY_SERVICE);
       if (credentials && credentials.username === CONTACT_PERMISSION_STATUS_KEY) {
         return credentials.password as 'granted' | 'denied' | 'pending';
       }
@@ -149,6 +152,34 @@ export class ContactService {
     } catch (error) {
       console.error('Error getting permission status:', error);
       return null;
+    }
+  }
+
+  /**
+   * Store and check explicit upload consent (iOS requirement)
+   */
+  async setUploadConsent(consented: boolean): Promise<void> {
+    try {
+      await Keychain.setInternetCredentials(
+        CONTACTS_PRIVACY_SERVICE,
+        CONTACTS_UPLOAD_CONSENT_KEY,
+        consented ? 'true' : 'false'
+      );
+    } catch (error) {
+      console.error('Error storing upload consent:', error);
+    }
+  }
+
+  async hasUploadConsent(): Promise<boolean> {
+    try {
+      const credentials = await Keychain.getInternetCredentials(CONTACTS_PRIVACY_SERVICE);
+      if (credentials && credentials.username === CONTACTS_UPLOAD_CONSENT_KEY) {
+        return credentials.password === 'true';
+      }
+      return false;
+    } catch (error) {
+      console.error('Error reading upload consent:', error);
+      return false;
     }
   }
 
@@ -286,7 +317,15 @@ export class ContactService {
       }
       
       // Check which contacts are Confío users
-      if (apolloClient && allPhoneNumbers.length > 0) {
+      let canUpload = true;
+      if (Platform.OS === 'ios') {
+        canUpload = await this.hasUploadConsent();
+        if (!canUpload) {
+          console.log('[PRIVACY] iOS upload consent not granted — skipping server match');
+        }
+      }
+
+      if (apolloClient && allPhoneNumbers.length > 0 && canUpload) {
         console.log(`[SYNC] Checking ${allPhoneNumbers.length} phone numbers against Confío database...`);
         const startCheck = Date.now();
         const confioUsersMap = await this.checkConfioUsers(allPhoneNumbers, apolloClient);

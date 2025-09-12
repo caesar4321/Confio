@@ -76,6 +76,12 @@ COUNTRY_PAYMENT_METHODS = {
             'icon': 'credit-card',
             'is_active': True,
         },
+        {
+            'name': 'wally',
+            'display_name': 'Wally',
+            'icon': 'smartphone',
+            'is_active': True,
+        },
     ],
     'US': [  # United States
         {

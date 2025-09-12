@@ -621,8 +621,9 @@ export const AccountDetailScreen = () => {
           fromPhone: isConversion ? undefined : (tx.direction === 'received' ? fromPhoneKey : undefined),
           toPhone: isConversion ? undefined : (tx.direction === 'sent' ? toPhoneKey : undefined),
           amount: isConversion ? conversionAmount : tx.displayAmount,
+          // For conversions, show the currency of the amount displayed: the destination token for '+' and source for '-'
           currency: isConversion 
-            ? (conversionType === 'usdc_to_cusd' ? 'USDC' : conversionType === 'cusd_to_usdc' ? 'cUSD' : undefined) 
+            ? (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined) 
             : (((tx.tokenType || '').toUpperCase() === 'CUSD') ? 'cUSD' : (tx.tokenType || '')),
           secondaryCurrency: isConversion ? (conversionType === 'usdc_to_cusd' ? 'cUSD' : conversionType === 'cusd_to_usdc' ? 'USDC' : undefined) : undefined,
           conversionType: conversionType || tx.conversionType,

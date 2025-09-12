@@ -48,6 +48,7 @@ const PAYMENT_METHOD_ICONS: { [key: string]: string } = {
   // Digital wallets
   'paypal': 'dollar-sign',
   'zelle': 'send',
+  'wally': 'smartphone',
   'venmo': 'dollar-sign',
   'cashapp': 'dollar-sign',
   'binance': 'trending-up',

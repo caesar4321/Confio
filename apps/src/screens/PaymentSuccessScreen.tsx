@@ -389,11 +389,9 @@ export const PaymentSuccessScreen = () => {
                     return;
                   }
                   const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
-                  const url = `${base}/tx/${encodeURIComponent(txid)}/`;
+                  const url = `${base}/tx/${encodeURIComponent(txid)}`;
                   try {
-                    const canOpen = await Linking.canOpenURL(url);
-                    if (canOpen) await Linking.openURL(url);
-                    else Alert.alert('No se puede abrir', 'No se pudo abrir Pera Explorer.');
+                    await Linking.openURL(url);
                   } catch {
                     Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
                   }

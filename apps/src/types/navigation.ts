@@ -5,6 +5,7 @@ export type AuthStackParamList = {
   Login: undefined;
   PhoneVerification: undefined;
   Registration: undefined;
+  LegalDocument: { docType: 'terms' | 'privacy' | 'deletion' };
 };
 
 // Bottom Tab Navigator - Main app tabs

@@ -973,10 +973,9 @@ export const ActiveTradeScreen: React.FC = () => {
                           return;
                         }
                         const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
-                        const url = `${base}/tx/${encodeURIComponent(txid)}/`;
-                        const canOpen = await Linking.canOpenURL(url);
-                        if (canOpen) await Linking.openURL(url);
-                        else Alert.alert('No se puede abrir', 'No se pudo abrir Pera Explorer.');
+                    const url = `${base}/tx/${encodeURIComponent(txid)}`;
+                    try { await Linking.openURL(url); }
+                    catch { Alert.alert('Error', 'No se pudo abrir Pera Explorer.'); }
                       } catch (e) {
                         Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
                       }
@@ -1213,10 +1212,9 @@ export const ActiveTradeScreen: React.FC = () => {
                         return;
                       }
                       const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
-                      const url = `${base}/tx/${encodeURIComponent(txid)}/`;
-                      const canOpen = await Linking.canOpenURL(url);
-                      if (canOpen) await Linking.openURL(url);
-                      else Alert.alert('No se puede abrir', 'No se pudo abrir Pera Explorer.');
+                      const url = `${base}/tx/${encodeURIComponent(txid)}`;
+                      try { await Linking.openURL(url); }
+                      catch { Alert.alert('Error', 'No se pudo abrir Pera Explorer.'); }
                     } catch (e) {
                       Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
                     }

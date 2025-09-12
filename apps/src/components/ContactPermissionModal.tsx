@@ -109,13 +109,21 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
               />
             </View>
 
-            {/* Privacy Notice */}
+            {/* Privacy / Data Use Notice */}
             <View style={styles.privacyNotice}>
               <Icon name="lock" size={16} color="#10b981" style={styles.privacyIcon} />
-              <Text style={styles.privacyText}>
-                Tu privacidad es nuestra prioridad. Los contactos se procesan localmente 
-                en tu dispositivo y nunca se envían a nuestros servidores.
-              </Text>
+              {Platform.OS === 'ios' ? (
+                <Text style={styles.privacyText}>
+                  Tu privacidad es nuestra prioridad. Para identificar qué contactos usan Confío, 
+                  si aceptas, subiremos los números de teléfono de tus contactos a nuestros 
+                  servidores únicamente con este fin. No compartimos esta información con terceros.
+                </Text>
+              ) : (
+                <Text style={styles.privacyText}>
+                  Tu privacidad es nuestra prioridad. Usamos tus contactos para mostrar nombres 
+                  y mejorar tu experiencia.
+                </Text>
+              )}
             </View>
 
             {/* How it works */}
@@ -151,10 +159,17 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
                   <Text style={styles.stepNumberText}>3</Text>
                 </View>
                 <View style={styles.stepContent}>
-                  <Text style={styles.stepTitle}>Coincidencia privada</Text>
-                  <Text style={styles.stepDescription}>
-                    Cuando recibes o envías dinero, mostramos el nombre del contacto si coincide
-                  </Text>
+                  <Text style={styles.stepTitle}>Coincidencia</Text>
+                  {Platform.OS === 'ios' ? (
+                    <Text style={styles.stepDescription}>
+                      Con tu consentimiento, subimos los números de tus contactos para comprobar 
+                      quién usa Confío y mostrar nombres en tus transacciones.
+                    </Text>
+                  ) : (
+                    <Text style={styles.stepDescription}>
+                      Mostramos el nombre del contacto cuando hay coincidencia.
+                    </Text>
+                  )}
                 </View>
               </View>
             </View>
@@ -346,7 +361,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-  // Removed deny button to ensure users proceed to the permission request
   footerNote: {
     fontSize: 12,
     color: '#9CA3AF',
