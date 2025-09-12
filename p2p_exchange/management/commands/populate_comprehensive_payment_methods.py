@@ -492,6 +492,7 @@ class Command(BaseCommand):
                     ('reserve', 'Reserve'),
                     ('zinli', 'Zinli'),
                     ('pipol_pay', 'Pipol Pay'),
+                    ('wally', 'Wally'),
                 ]
             },
             

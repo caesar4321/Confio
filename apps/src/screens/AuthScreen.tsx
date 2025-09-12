@@ -8,6 +8,7 @@ import GoogleLogo from '../assets/svg/GoogleLogo.svg';
 import AppleLogo from '../assets/svg/AppleLogo.svg';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { AuthStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Text as SvgText, RadialGradient, Ellipse } from 'react-native-svg';
 
@@ -21,12 +22,7 @@ const colors = {
   lightGray: '#F3F4F6',
 };
 
-type RootStackParamList = {
-  Auth: undefined;
-  Home: undefined;
-};
-
-type NavigationProp = NativeStackNavigationProp<RootStackParamList, 'Auth'>;
+type NavigationProp = NativeStackNavigationProp<AuthStackParamList, 'Login'>;
 
 export const AuthScreen = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -119,6 +115,14 @@ export const AuthScreen = () => {
     } catch (error) {
       console.error('Apple Sign-In Error:', error);
       setIsLoading(false);
+    }
+  };
+
+  const handleLegalDocumentPress = (docType: 'terms' | 'privacy') => {
+    try {
+      navigation.navigate('LegalDocument', { docType });
+    } catch (e) {
+      console.warn('Failed to navigate to legal document:', e);
     }
   };
 
@@ -223,9 +227,9 @@ export const AuthScreen = () => {
         <View style={styles.termsWrapper}>
           <Text style={styles.termsText}>Al continuar, aceptas</Text>
           <Text style={styles.termsLinks}>
-            <Text style={styles.termsLink}>Términos de Servicio</Text>
+            <Text style={styles.termsLink} onPress={() => handleLegalDocumentPress('terms')}>Términos de Servicio</Text>
             <Text style={{ color: '#6B7280', fontWeight: 'normal' }}> y </Text>
-            <Text style={styles.termsLink}>Política de Privacidad</Text>
+            <Text style={styles.termsLink} onPress={() => handleLegalDocumentPress('privacy')}>Política de Privacidad</Text>
           </Text>
         </View>
       </View>

@@ -31,6 +31,8 @@
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>We need your location to show you nearby services</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Confío uses your contacts to show names in your transactions and to check which of your contacts are on Confío. If you consent, the phone numbers from your contacts will be uploaded to our servers to perform this matching. You can change this later in Settings.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

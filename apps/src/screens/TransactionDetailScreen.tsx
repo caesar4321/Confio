@@ -117,8 +117,8 @@ const computeConfioFee = (amountLike: string | number | undefined): number => {
       ? parseFloat(amountLike.replace(/[+-]/g, '')) 
       : Number(amountLike);
     if (!isFinite(amt)) return 0;
-    // 0.9% fee charged to the merchant (informational here)
-    return parseFloat((amt * 0.009).toFixed(2));
+    // 0.9% fee charged to the merchant (keep high precision; display may round)
+    return parseFloat((amt * 0.009).toFixed(6));
   } catch {
     return 0;
   }
@@ -1322,7 +1322,7 @@ export const TransactionDetailScreen = () => {
         ? '' : transactionData.to,
       from: (transactionData.from && transactionData.from.includes('...') && transactionData.from.startsWith('0x')) 
         ? '' : transactionData.from,
-      // For conversions
+      // For conversions (will override currency below based on direction)
       currency: transactionData.from_token || transactionData.token_type || transactionData.currency || 'USDC',
       secondaryCurrency: transactionData.to_token || 'cUSD',
       // For conversions: cUSD -> USDC should be negative (money out), USDC -> cUSD should be positive (money in)
@@ -1350,11 +1350,18 @@ export const TransactionDetailScreen = () => {
     if (transactionData?.notification_type === 'INVITE_RECEIVED') {
       normalizedTransactionData.type = 'received';
     }
-
+    
     // Normalize currency symbol casing and cUSD mapping
     if (typeof normalizedTransactionData.currency === 'string') {
       const cur = (normalizedTransactionData.currency as string).toUpperCase();
       if (cur === 'CUSD') normalizedTransactionData.currency = 'cUSD';
+    }
+
+    // Override conversion currency to match displayed amount
+    if (transactionData.conversion_type === 'usdc_to_cusd') {
+      normalizedTransactionData.currency = 'cUSD';
+    } else if (transactionData.conversion_type === 'cusd_to_usdc') {
+      normalizedTransactionData.currency = 'USDC';
     }
 
     // Fallback timestamp if missing
@@ -2164,13 +2171,18 @@ export const TransactionDetailScreen = () => {
                   </View>
                 </View>
 
-                {currentTx.type === 'payment' && (currentTx.amount?.startsWith('+')) && (() => {
-                  // Only the seller (amount starts with '+') sees the Confío fee
-                  const fee = computeConfioFee(currentTx.amount);
+                {currentTx.type === 'payment' && (() => {
+                  // Show merchant fee only for the receiver (credit). Some payloads omit '+', so treat any non-negative as credit.
+                  const amt = currentTx.amount;
+                  const isDebit = typeof amt === 'string' ? amt.trim().startsWith('-') : Number(amt) < 0;
+                  if (isDebit) return null;
+                  const fee = computeConfioFee(amt);
                   return fee > 0 ? (
                     <View style={styles.feeRow}>
                       <Text style={styles.feeLabel}>Comisión Confío (0.9%)</Text>
-                      <Text style={styles.feeAmount}>- {fee.toFixed(2)} {currentTx.currency || 'cUSD'}</Text>
+                      <Text style={styles.feeAmount}>
+                        - {(fee < 0.01 && fee > 0) ? '< 0.01' : fee.toFixed(2)} {currentTx.currency || 'cUSD'}
+                      </Text>
                     </View>
                   ) : null;
                 })()}
@@ -2403,6 +2415,29 @@ export const TransactionDetailScreen = () => {
             </View>
           )}
 
+          {/* Merchant Support Message for Payments */}
+          {currentTx.type === 'payment' && (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Apoyamos negocios venezolanos</Text>
+              <View style={styles.valuePropositionOuter}>
+                <View style={styles.valueRow}>
+                  <Icon name="shopping-bag" size={20} color={colors.secondary} style={styles.valueIcon} />
+                  <Text style={styles.valueTitle}>Comisión justa para comercios</Text>
+                </View>
+                <Text style={styles.valueDescription}>
+                  Paga y cobra en segundos con una comisión baja y transparente.
+                </Text>
+                <View style={styles.valueHighlightBox}>
+                  <Text style={styles.valueHighlightText}>
+                    💡 <Text style={styles.bold}>Confío: 0.9% para comerciantes</Text>{'\n'}
+                    vs. tarjetas y POS tradicionales <Text style={styles.bold}>(3%–8%)</Text>{'\n'}
+                    Apoyamos a los comerciantes venezolanos 🇻🇪
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
           {/* Blockchain Details Button */}
           <View style={styles.card}>
             <TouchableOpacity 
@@ -2544,10 +2579,8 @@ export const TransactionDetailScreen = () => {
                       return;
                     }
                     const base = __DEV__ ? 'https://testnet.explorer.perawallet.app' : 'https://explorer.perawallet.app';
-                    const url = `${base}/tx/${encodeURIComponent(txid)}/`;
-                    const canOpen = await Linking.canOpenURL(url);
-                    if (canOpen) await Linking.openURL(url);
-                    else Alert.alert('No se puede abrir', 'No se pudo abrir Pera Explorer.');
+                    const url = `${base}/tx/${encodeURIComponent(txid)}`;
+                    await Linking.openURL(url);
                   } catch (e) {
                     Alert.alert('Error', 'No se pudo abrir Pera Explorer.');
                   }

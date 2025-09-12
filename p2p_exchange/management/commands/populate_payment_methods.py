@@ -71,6 +71,19 @@ class Command(BaseCommand):
                 'display_order': 10,
                 'is_active': True,
             },
+            {
+                'name': 'wally',
+                'display_name': 'Wally',
+                'provider_type': 'fintech',
+                'country_code': 'VE',
+                'icon': 'smartphone',
+                'description': 'Billetera digital Wally (Venezuela)',
+                'requires_phone': True,
+                'requires_email': False,
+                'requires_account_number': False,
+                'display_order': 11,
+                'is_active': True,
+            },
             # Colombia
             {
                 'name': 'nequi',
