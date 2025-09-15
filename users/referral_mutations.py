@@ -138,7 +138,6 @@ class SetReferrer(graphene.Mutation):
                 referral = InfluencerReferral.objects.create(
                     referred_user=user,
                     referrer_identifier=referrer_username,
-                    referral_type=referral_type,
                     influencer_user=referrer if referral_type == 'friend' else None,
                     status='pending',
                     attribution_data={

@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Platform, StatusBar } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { NavigationProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
@@ -33,6 +34,9 @@ export const Header: React.FC<HeaderProps> = ({
   unreadNotifications = 0,
   currentAccountAvatar = 'U',
 }) => {
+  const insets = useSafeAreaInsets();
+  // Provide a bit of extra breathing room beyond the status bar
+  const topPadding = (insets.top || (StatusBar.currentHeight || 0)) + 12;
   const isLightTheme = isLight || isHomeScreen;
   const textColor = isLightTheme ? '#FFFFFF' : '#1F2937';
   
@@ -40,7 +44,7 @@ export const Header: React.FC<HeaderProps> = ({
     <View
       style={{
         backgroundColor: backgroundColor ? backgroundColor : (isHomeScreen ? '#34d399' : '#F3F4F6'),
-        paddingTop: Platform.OS === 'ios' ? 48 : (StatusBar.currentHeight || 32),
+        paddingTop: topPadding,
         paddingBottom: 8,
         paddingHorizontal: 20,
         minHeight: HEADER_HEIGHT,

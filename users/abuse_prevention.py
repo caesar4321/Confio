@@ -219,15 +219,35 @@ class AbusePreventionService:
     def log_suspicious_activity(cls, user, action: str, flags: List[str], metadata: Dict):
         """Log suspicious activity for review"""
         from security.models import SuspiciousActivity
-        
-        SuspiciousActivity.objects.create(
-            user=user,
-            action=action,
-            flags=flags,
-            metadata=metadata,
-            ip_address=metadata.get('ip_address'),
-            device_fingerprint=metadata.get('device_fingerprint'),
-        )
+        # Map generic flags/actions to SuspiciousActivity fields
+        # Choose a primary activity_type based on known flags
+        activity_type = 'unusual_pattern'
+        if 'multiple_accounts_per_device' in flags:
+            activity_type = 'duplicate_device'
+        elif 'rapid_referral_submission' in flags:
+            activity_type = 'rapid_referrals'
+
+        # Build detection payload with rich context
+        detection_payload = {
+            'action': action,
+            'flags': flags,
+            'metadata': metadata,
+            'ip_address': metadata.get('ip_address'),
+            'device_fingerprint': metadata.get('device_fingerprint'),
+        }
+
+        try:
+            SuspiciousActivity.objects.create(
+                user=user,
+                activity_type=activity_type,
+                detection_data=detection_payload,
+                severity_score=max(1, min(10, len(flags) or 1)),
+                related_ips=[metadata.get('ip_address')] if metadata.get('ip_address') else [],
+            )
+        except Exception:
+            # Never block business logic due to logging errors
+            logger = logging.getLogger(__name__)
+            logger.warning('Failed to log suspicious activity', exc_info=True)
         
         # Alert admins if critical flags
         critical_flags = ['multiple_accounts_per_device', 'high_transaction_velocity']
@@ -327,5 +347,4 @@ class AbusePreventionService:
             score += 10
         
         return min(100, score)
-
 
