@@ -417,6 +417,8 @@ export const ContactsScreen = () => {
           }
         }
       } else {
+        // Explicitly reflect denied status in state so UI can react properly
+        setHasContactPermission(false);
         // Check if user has previously denied
         const storedStatus = await contactService.getStoredPermissionStatus();
         if (!storedStatus || storedStatus === 'pending') {

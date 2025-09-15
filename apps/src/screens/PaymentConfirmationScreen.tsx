@@ -7,10 +7,10 @@ import {
   ScrollView,
   Alert,
   Dimensions,
-  SafeAreaView,
   Platform,
   StatusBar,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, useRoute, RouteProp, StackActions, useFocusEffect } from '@react-navigation/native';
 import { useCallback } from 'react';
