@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   StatusBar,
-  SafeAreaView,
   TextInput,
   Alert,
   KeyboardAvoidingView,
@@ -16,6 +15,7 @@ import {
   Keyboard,
   FlatList,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import LoadingOverlay from '../components/LoadingOverlay';
 import { p2pSponsoredService } from '../services/p2pSponsoredService';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -2222,12 +2222,12 @@ export const TradeChatScreen: React.FC = () => {
   }, [DEBUG, sellerStepOne, dbEscrowed, onChainBoxExists, sellerNeedsEnable, currentTradeStep, computedTradeType]);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['bottom']}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       <LoadingOverlay visible={busy} message={busyText || 'Procesando…'} />
       
       {/* Header */}
-      <View style={styles.headerRow}>
+      <View style={[styles.headerRow, { paddingTop: (insets.top || 0) + 12 }]}>
         {/* Left: Back Button */}
         <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
           <Icon name="arrow-left" size={24} color="#374151" />
@@ -3461,3 +3461,4 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
 }); 
+  const insets = useSafeAreaInsets();

@@ -297,9 +297,11 @@ export const AchievementsScreen = () => {
     console.log('handleShare called with:', achievement?.name, achievement?.status);
     
     // Allow sharing for earned, claimed, or pending referral achievements
+    const slug = achievement?.achievementType?.slug;
+    const isReferralSlug = slug === 'referido_exitoso' || slug === 'successful_referral';
     if (achievement.status?.toLowerCase() !== 'earned' && 
         achievement.status?.toLowerCase() !== 'claimed' &&
-        !(achievement?.achievementType?.slug === 'referido_exitoso' && achievement?.status?.toLowerCase() === 'pending')) {
+        !(isReferralSlug && achievement?.status?.toLowerCase() === 'pending')) {
       console.log('handleShare returning early - status check failed');
       return;
     }
@@ -571,7 +573,7 @@ export const AchievementsScreen = () => {
 
               {categoryAchievements.map(achievement => {
                 // Debug logging for referral achievement
-                if (achievement?.achievementType?.slug === 'referido_exitoso') {
+                if (achievement?.achievementType?.slug === 'referido_exitoso' || achievement?.achievementType?.slug === 'successful_referral') {
                   console.log('Found referral achievement:', {
                     slug: achievement.achievementType.slug,
                     status: achievement.status,
@@ -585,7 +587,7 @@ export const AchievementsScreen = () => {
                   style={[
                     styles.achievementCard,
                     (achievement.status?.toLowerCase() === 'earned' || achievement.status?.toLowerCase() === 'claimed') && styles.achievementCardCompleted,
-                    (achievement?.achievementType?.slug === 'referido_exitoso' && achievement?.status?.toLowerCase() === 'pending') && styles.achievementCardReferral,
+                    ((achievement?.achievementType?.slug === 'referido_exitoso' || achievement?.achievementType?.slug === 'successful_referral') && achievement?.status?.toLowerCase() === 'pending') && styles.achievementCardReferral,
                     achievement?.achievementType?.slug === 'pionero_beta' && styles.achievementCardPionero
                   ]}
                   onPress={() => {
@@ -615,7 +617,7 @@ export const AchievementsScreen = () => {
                       handleShare(achievement);
                     }
                   }}
-                  disabled={!achievement || (achievement.status?.toLowerCase() === 'pending' && achievement?.achievementType?.slug !== 'referido_exitoso' && achievement?.achievementType?.slug !== 'pionero_beta')}
+                  disabled={!achievement || (achievement.status?.toLowerCase() === 'pending' && (achievement?.achievementType?.slug !== 'referido_exitoso' && achievement?.achievementType?.slug !== 'successful_referral' && achievement?.achievementType?.slug !== 'pionero_beta'))}
                 >
                   <View style={[
                     styles.achievementIcon,
@@ -656,7 +658,7 @@ export const AchievementsScreen = () => {
                         <Icon name="check-circle" size={16} color={colors.primary} />
                       )}
                       {/* Show share hint for pending referral achievement */}
-                      {achievement?.achievementType?.slug === 'referido_exitoso' && achievement?.status?.toLowerCase() === 'pending' && (
+                      {(achievement?.achievementType?.slug === 'referido_exitoso' || achievement?.achievementType?.slug === 'successful_referral') && achievement?.status?.toLowerCase() === 'pending' && (
                         <View style={styles.shareHintBadge}>
                           <Icon name="share-2" size={12} color="#fff" />
                           <Text style={styles.shareHintText}>Compartir</Text>
@@ -699,14 +701,14 @@ export const AchievementsScreen = () => {
 
                   {/* Show action button for earned/claimed achievements OR for pending referral achievement */}
                   {((achievement?.status?.toLowerCase() === 'earned' || achievement?.status?.toLowerCase() === 'claimed') || 
-                    (achievement?.achievementType?.slug === 'referido_exitoso' && achievement?.status?.toLowerCase() === 'pending')) && (
+                    ((achievement?.achievementType?.slug === 'referido_exitoso' || achievement?.achievementType?.slug === 'successful_referral') && achievement?.status?.toLowerCase() === 'pending')) && (
                     <TouchableOpacity 
                       style={styles.actionButton}
                       onPress={() => {
                         if (achievement?.status?.toLowerCase() === 'earned') {
                           handleClaimReward(achievement);
                         } else if (achievement?.status?.toLowerCase() === 'claimed' || 
-                                  (achievement?.achievementType?.slug === 'referido_exitoso' && achievement?.status?.toLowerCase() === 'pending')) {
+                                  ((achievement?.achievementType?.slug === 'referido_exitoso' || achievement?.achievementType?.slug === 'successful_referral') && achievement?.status?.toLowerCase() === 'pending')) {
                           handleShare(achievement);
                         }
                       }}
