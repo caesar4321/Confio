@@ -139,6 +139,12 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
         # Normalize inputs
         destination_address = (destination_address or '').strip()
         amount_str = (amount or '').strip()
+        # Accept locale formats: if only comma present, treat as decimal separator; otherwise strip commas
+        if ',' in amount_str and '.' not in amount_str:
+            amount_str = amount_str.replace(',', '.')
+        else:
+            amount_str = amount_str.replace(',', '')
+        amount_str = amount_str.replace(' ', '')
 
         # Robust Algorand address validation using SDK
         try:
@@ -191,7 +197,7 @@ class WithdrawSessionConsumer(AsyncJsonWebsocketConsumer):
         # User USDC transfer with 0 fee (sponsored)
         sp_user = algo_txn.SuggestedParams(fee=0, first=params.first, last=params.last, gh=params.gh, gen=params.gen, flat_fee=True)
         usdc_id = int(getattr(settings, 'ALGORAND_USDC_ASSET_ID', 0) or 0)
-        aamt = int(Decimal(str(amount)) * Decimal(1_000_000))
+        aamt = int(Decimal(str(amount_str)) * Decimal(1_000_000))
         user_axfer = algo_txn.AssetTransferTxn(
             sender=acct.algorand_address,
             sp=sp_user,
