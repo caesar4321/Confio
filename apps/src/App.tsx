@@ -1,6 +1,9 @@
 import React, { useRef, useEffect } from 'react';
 import { ApolloProvider } from '@apollo/client';
 import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'react-native';
+import { colors } from './config/theme';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, ActivityIndicator, Text } from 'react-native';
 import apolloClient from './apollo/client';
@@ -91,21 +94,28 @@ const Navigation: React.FC = () => {
 
 const AppContent: React.FC = () => {
   return (
-    <NavigationContainer ref={navigationRef}>
-      <AuthProvider 
-        navigationRef={navigationRef as any}
-      >
-        <AccountProvider>
-          <CountryProvider>
-            <HeaderProvider>
-              <ScanProvider>
-              <Navigation />
-              </ScanProvider>
-            </HeaderProvider>
-          </CountryProvider>
-        </AccountProvider>
-      </AuthProvider>
-    </NavigationContainer>
+    <SafeAreaProvider>
+      {/* Global default status bar; individual screens can override */}
+      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" translucent={false} />
+      {/* Apply bottom safe area globally; leave top to headers/screens */}
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.neutralDark }} edges={['bottom']}>
+        <NavigationContainer ref={navigationRef}>
+          <AuthProvider 
+            navigationRef={navigationRef as any}
+          >
+            <AccountProvider>
+              <CountryProvider>
+                <HeaderProvider>
+                  <ScanProvider>
+                    <Navigation />
+                  </ScanProvider>
+                </HeaderProvider>
+              </CountryProvider>
+            </AccountProvider>
+          </AuthProvider>
+        </NavigationContainer>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 };
 
