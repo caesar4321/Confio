@@ -85,6 +85,18 @@ export const USDCWithdrawScreen = () => {
     );
   };
   
+  // Normalize user input: replace comma decimal with dot; strip invalid characters
+  const normalizeAmountInput = (txt: string) => {
+    if (!txt) return '';
+    let t = txt.replace(',', '.');
+    // keep only digits and dot
+    t = t.replace(/[^0-9.]/g, '');
+    // allow only a single dot
+    const parts = t.split('.');
+    if (parts.length > 2) t = parts[0] + '.' + parts.slice(1).join('');
+    return t;
+  };
+
   const handleWithdraw = async () => {
     if (!withdrawAmount || parseFloat(withdrawAmount) <= 0) {
       Alert.alert('Error', 'Por favor ingresa una cantidad válida');
@@ -97,7 +109,7 @@ export const USDCWithdrawScreen = () => {
       return;
     }
     
-    const amount = parseFloat(withdrawAmount);
+    const amount = parseFloat(normalizeAmountInput(withdrawAmount));
     if (amount > usdcBalance) {
       Alert.alert('Error', 'Saldo insuficiente');
       return;
@@ -115,7 +127,7 @@ export const USDCWithdrawScreen = () => {
     try {
       // Prepare via WS
       const ws = new WithdrawWsSession();
-      const pack = await ws.prepare({ amount: withdrawAmount, destinationAddress: dest });
+      const pack = await ws.prepare({ amount: normalizeAmountInput(withdrawAmount), destinationAddress: dest });
 
       // Ensure wallet is ready for signing
       try {
@@ -198,14 +210,14 @@ export const USDCWithdrawScreen = () => {
               <TextInput
                 style={styles.amountInput}
                 value={withdrawAmount}
-                onChangeText={setWithdrawAmount}
+                onChangeText={(txt) => setWithdrawAmount(normalizeAmountInput(txt))}
                 placeholder="0.00"
                 keyboardType="decimal-pad"
                 placeholderTextColor="#9CA3AF"
               />
               <TouchableOpacity
                 style={styles.maxButton}
-                onPress={() => setWithdrawAmount(formatFixedFloor(usdcBalance, 2))}
+                onPress={() => setWithdrawAmount(usdcBalance.toFixed(2))}
                 disabled={balanceLoading || usdcBalance === 0}
               >
                 <Text style={styles.maxButtonText}>MAX</Text>

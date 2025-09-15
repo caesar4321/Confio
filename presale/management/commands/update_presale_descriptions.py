@@ -20,10 +20,10 @@ class Command(BaseCommand):
             phase2.save()
             self.stdout.write(self.style.SUCCESS(f'Updated Phase 2 description'))
         
-        # Update Phase 3
+        # Update Phase 3 (LatAm focus)
         phase3 = PresalePhase.objects.filter(phase_number=3).first()
         if phase3:
-            phase3.description = 'Confío conquista América con el respaldo de inversores internacionales. Todo el continente 🌎'
+            phase3.description = 'Confío crece en Latinoamérica con el respaldo de la comunidad. Todo el continente 🌎'
             phase3.save()
             self.stdout.write(self.style.SUCCESS(f'Updated Phase 3 description'))
         
