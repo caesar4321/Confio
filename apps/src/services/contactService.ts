@@ -25,6 +25,8 @@ const CONTACTS_KEYCHAIN_SERVICE = 'com.confio.contacts';
 const CONTACTS_KEYCHAIN_KEY = 'user_contacts';
 const CONTACT_PERMISSION_STATUS_KEY = 'contact_permission_status';
 const CONTACTS_PRIVACY_SERVICE = 'com.confio.contacts_privacy';
+// Use a dedicated keychain service for upload consent to avoid overwriting permission status
+const CONTACTS_CONSENT_SERVICE = 'com.confio.contacts_upload_consent';
 const CONTACTS_UPLOAD_CONSENT_KEY = 'contacts_upload_consent';
 
 export class ContactService {
@@ -161,7 +163,7 @@ export class ContactService {
   async setUploadConsent(consented: boolean): Promise<void> {
     try {
       await Keychain.setInternetCredentials(
-        CONTACTS_PRIVACY_SERVICE,
+        CONTACTS_CONSENT_SERVICE,
         CONTACTS_UPLOAD_CONSENT_KEY,
         consented ? 'true' : 'false'
       );
@@ -172,7 +174,7 @@ export class ContactService {
 
   async hasUploadConsent(): Promise<boolean> {
     try {
-      const credentials = await Keychain.getInternetCredentials(CONTACTS_PRIVACY_SERVICE);
+      const credentials = await Keychain.getInternetCredentials(CONTACTS_CONSENT_SERVICE);
       if (credentials && credentials.username === CONTACTS_UPLOAD_CONSENT_KEY) {
         return credentials.password === 'true';
       }

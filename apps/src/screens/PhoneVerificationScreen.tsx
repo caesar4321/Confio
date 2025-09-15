@@ -11,11 +11,11 @@ import {
   Keyboard,
   Modal,
   FlatList,
-  SafeAreaView,
   ScrollView,
   Button,
   Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { CompositeNavigationProp } from '@react-navigation/native';

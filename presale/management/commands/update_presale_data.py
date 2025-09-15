@@ -19,7 +19,7 @@ class Command(BaseCommand):
         phase2 = PresalePhase.objects.filter(phase_number=2).first()
         if phase2:
             phase2.target_audience = 'Nuevos mercados'
-            phase2.location_emoji = '🌎 Creciendo juntos'
+            phase2.location_emoji = '🌿 Creciendo juntos'
             phase2.vision_points = ['Red entre países', 'Más oportunidades', 'Economía conectada']
             phase2.save()
             self.stdout.write(self.style.SUCCESS('Updated Phase 2'))

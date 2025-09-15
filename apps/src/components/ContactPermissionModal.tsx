@@ -94,8 +94,8 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
               />
               <BenefitItem
                 icon="shield"
-                title="100% Privado"
-                description="Tus contactos se almacenan localmente, nunca en nuestros servidores"
+                title="Privacidad primero"
+                description="Con tu consentimiento, subimos solo los números para verificar quién usa Confío — nunca nombres ni otros datos"
               />
               <BenefitItem
                 icon="zap"
@@ -112,18 +112,11 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
             {/* Privacy / Data Use Notice */}
             <View style={styles.privacyNotice}>
               <Icon name="lock" size={16} color="#10b981" style={styles.privacyIcon} />
-              {Platform.OS === 'ios' ? (
-                <Text style={styles.privacyText}>
-                  Tu privacidad es nuestra prioridad. Para identificar qué contactos usan Confío, 
-                  si aceptas, subiremos los números de teléfono de tus contactos a nuestros 
-                  servidores únicamente con este fin. No compartimos esta información con terceros.
-                </Text>
-              ) : (
-                <Text style={styles.privacyText}>
-                  Tu privacidad es nuestra prioridad. Usamos tus contactos para mostrar nombres 
-                  y mejorar tu experiencia.
-                </Text>
-              )}
+              <Text style={styles.privacyText}>
+                Tu privacidad es nuestra prioridad. Para identificar qué contactos usan Confío, si aceptas, subimos
+                únicamente los números de teléfono a nuestros servidores para realizar la comprobación. Nunca
+                subimos nombres ni otra información de tus contactos, y no compartimos estos datos con terceros.
+              </Text>
             </View>
 
             {/* How it works */}
@@ -160,16 +153,10 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
                 </View>
                 <View style={styles.stepContent}>
                   <Text style={styles.stepTitle}>Coincidencia</Text>
-                  {Platform.OS === 'ios' ? (
-                    <Text style={styles.stepDescription}>
-                      Con tu consentimiento, subimos los números de tus contactos para comprobar 
-                      quién usa Confío y mostrar nombres en tus transacciones.
-                    </Text>
-                  ) : (
-                    <Text style={styles.stepDescription}>
-                      Mostramos el nombre del contacto cuando hay coincidencia.
-                    </Text>
-                  )}
+                  <Text style={styles.stepDescription}>
+                    Con tu consentimiento, subimos únicamente los números de tus contactos para comprobar quién usa
+                    Confío y mostrar nombres en tus transacciones. Nunca subimos nombres ni otra información.
+                  </Text>
                 </View>
               </View>
             </View>
