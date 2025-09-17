@@ -115,14 +115,31 @@ export default {
       return fetch(request);
     }
     
-    // Get link data from KV
+    // Get link data from KV (with safe fallback for some first-party slugs)
+    let linkData: LinkData | null = null;
     const linkDataStr = await env.LINKS.get(slug);
-    if (!linkDataStr) {
-      // Pass through to origin if link not found - let Django handle it
-      return fetch(request);
+    if (linkDataStr) {
+      linkData = JSON.parse(linkDataStr) as LinkData;
+    } else {
+      // Fallbacks for predefined first-party slugs when KV hasn't been warmed up yet
+      const fallbackMap: Record<string, LinkData> = {
+        youtube: {
+          payload: 'youtube-channel',
+          type: 'testflight',
+          createdAt: new Date().toISOString(),
+          clicks: 0,
+          metadata: { campaign: 'youtube-channel', source: 'youtube', medium: 'video', description: 'YouTube channel (platform-aware)' },
+        },
+      };
+      if (fallbackMap[slug]) {
+        linkData = fallbackMap[slug];
+        // Persist fallback to KV for future requests
+        ctx.waitUntil(env.LINKS.put(slug, JSON.stringify(linkData)));
+      } else {
+        // Pass through to origin if link not found - let Django handle it
+        return fetch(request);
+      }
     }
-    
-    const linkData: LinkData = JSON.parse(linkDataStr);
     
     // Detect platform
     const userAgent = request.headers.get('user-agent') || '';
