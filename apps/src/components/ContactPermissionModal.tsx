@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -53,7 +53,6 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
   visible,
   onAllow,
 }) => {
-  const insets = useSafeAreaInsets();
   
   return (
     <Modal
@@ -65,7 +64,7 @@ export const ContactPermissionModal: React.FC<ContactPermissionModalProps> = ({
     >
       <View style={styles.modalOverlay}>
         <View style={styles.backdrop} />
-        <View style={[styles.modalContent, { paddingBottom: insets.bottom || 20 }]}> 
+        <View style={[styles.modalContent, { paddingBottom: 20 }]}> 
           <ScrollView 
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}

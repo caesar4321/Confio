@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, Platform, ScrollView, TouchableOpacity, Alert, Clipboard, Linking, Share, Modal } from 'react-native';
 import WhatsAppLogo from '../assets/svg/WhatsApp.svg';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
 import { SHARE_LINKS } from '../config/shareLinks';
@@ -47,7 +46,6 @@ export const TransactionSuccessScreen = () => {
   console.log('TransactionSuccessScreen: Component mounted');
   const navigation = useNavigation();
   const route = useRoute();
-  const insets = useSafeAreaInsets();
   
   const transactionData: TransactionData = (route.params as any)?.transactionData || {
     type: 'sent',
@@ -227,7 +225,7 @@ export const TransactionSuccessScreen = () => {
     <>
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {/* Success Header */}
-      <View style={[styles.header, { backgroundColor: colors.primary, paddingTop: insets.top + 8 }]}>
+      <View style={[styles.header, { backgroundColor: colors.primary, paddingTop: 8 }]}> 
         <View style={styles.headerContent}>
           {/* Success Animation */}
           <View style={styles.successCircle}>
