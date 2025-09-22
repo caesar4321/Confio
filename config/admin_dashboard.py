@@ -56,6 +56,7 @@ class ConfioAdminSite(admin.AdminSite):
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         last_24h = now - timedelta(hours=24)
         week_start = today_start - timedelta(days=today_start.weekday())
+        last_7_start = now - timedelta(days=7)
         month_start = today_start.replace(day=1)
         
         # User metrics
@@ -133,7 +134,7 @@ class ConfioAdminSite(admin.AdminSite):
 
         # Remove Nones and set the metric
         context['active_users_today'] = len({uid for uid in active_user_ids if uid})
-        context['new_users_this_week'] = User.objects.filter(created_at__gte=week_start).count()
+        context['new_users_last_7_days'] = User.objects.filter(created_at__gte=last_7_start).count()
         context['verified_users'] = IdentityVerification.objects.filter(status='verified').count()
         
         # Account metrics
@@ -233,8 +234,8 @@ class ConfioAdminSite(admin.AdminSite):
         context['conversions_today'] = Conversion.objects.filter(
             created_at__gte=today_start
         ).count()
-        context['conversions_this_week'] = Conversion.objects.filter(
-            created_at__gte=week_start
+        context['conversions_last_7_days'] = Conversion.objects.filter(
+            created_at__gte=last_7_start
         ).count()
         
         # Notification metrics
