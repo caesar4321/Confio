@@ -1996,25 +1996,30 @@ export const AccountDetailScreen = () => {
               onPress={() => {
                 setShowMoreOptionsModal(false);
                 Alert.alert(
-                  'Tutorial de USDC',
-                  'Mira nuestro video tutorial sobre cómo usar USDC en Confío',
+                  'Tutorial de USDC ↔ cUSD',
+                  'Mira nuestro video tutorial sobre cómo convertir entre USDC y cUSD en Confío',
                   [
                     {
                       text: 'Cancelar',
                       style: 'cancel',
                     },
                     {
-                      text: 'Ver Tutorial',
+                      text: 'Ver tutorial',
                       onPress: async () => {
-                        // Replace with your actual TikTok video URL
-                        const tiktokUrl = 'https://www.tiktok.com/@confioapp/video/YOUR_VIDEO_ID';
-                        const canOpen = await Linking.canOpenURL(tiktokUrl);
-                        if (canOpen) {
-                          await Linking.openURL(tiktokUrl);
-                        } else {
+                        try {
+                          const videoId = 'WCpoBZzgMyY';
+                          const appUrl = `youtube://watch?v=${videoId}`; // iOS YouTube URL scheme
+                          const webUrl = 'https://www.youtube.com/watch?v=WCpoBZzgMyY';
+                          const appSupported = await Linking.canOpenURL(appUrl);
+                          if (appSupported) {
+                            await Linking.openURL(appUrl);
+                            return;
+                          }
+                          await Linking.openURL(webUrl);
+                        } catch (e) {
                           Alert.alert(
                             'Error',
-                            'No se pudo abrir el video tutorial. Por favor, busca @confioapp en TikTok.'
+                            'No se pudo abrir el video tutorial. Copia y pega: https://youtu.be/WCpoBZzgMyY'
                           );
                         }
                       },

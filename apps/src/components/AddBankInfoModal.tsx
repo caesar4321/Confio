@@ -21,7 +21,7 @@ import {
   CREATE_BANK_INFO,
   UPDATE_BANK_INFO
 } from '../apollo/queries';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { getPaymentMethodIcon } from '../utils/paymentMethodIcons';
 
 // Colors matching app design
@@ -150,7 +150,7 @@ export const AddBankInfoModal = ({
   accountId,
   editingBankInfo
 }: AddBankInfoModalProps) => {
-  const insets = useSafeAreaInsets();
+  // Safe area insets not required; use fixed padding where needed
   const isEditing = !!editingBankInfo;
   const apolloClient = useApolloClient();
 
@@ -581,7 +581,7 @@ export const AddBankInfoModal = ({
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+      <View style={[styles.header, { paddingTop: 8 }]}> 
         <View style={styles.headerContent}>
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
             <Icon name="x" size={24} color={colors.text.primary} />

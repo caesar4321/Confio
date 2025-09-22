@@ -127,7 +127,7 @@ const computeConfioFee = (amountLike: string | number | undefined): number => {
 export const TransactionDetailScreen = () => {
   const navigation = useNavigation<TransactionDetailScreenNavigationProp>();
   const route = useRoute<TransactionDetailScreenRouteProp>();
-  const insets = useSafeAreaInsets();
+  // const insets = useSafeAreaInsets();
   const [copied, setCopied] = useState('');
   const [showBlockchainDetails, setShowBlockchainDetails] = useState(false);
 
@@ -156,7 +156,7 @@ export const TransactionDetailScreen = () => {
       flex: 1,
     },
     header: {
-      paddingTop: insets.top,
+      paddingTop: 8,
       paddingHorizontal: 20,
       paddingBottom: 30,
       backgroundColor: colors.primary,

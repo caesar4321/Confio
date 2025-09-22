@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Share, Platform, TextInput, Alert, Linking, Image } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
@@ -70,7 +70,6 @@ type AchievementType = {
 
 export const AchievementsScreen = () => {
   const navigation = useNavigation();
-  const insets = useSafeAreaInsets();
   const { userProfile } = useAuth();
   const { activeAccount } = useAccount();
   const [showReferralModal, setShowReferralModal] = useState(false);
@@ -166,6 +165,33 @@ export const AchievementsScreen = () => {
       return mockAchievements || [];
     }
   }, [achievementTypes, userAchievementMap, mockAchievements]);
+
+  // Ensure referral-share card is always available: inject a pending "Referido Exitoso" if missing
+  const displayAchievements: Achievement[] = React.useMemo(() => {
+    const list = Array.isArray(achievements) ? [...achievements] : [];
+    const hasReferral = list.some(a => {
+      const slug = a?.achievementType?.slug?.toLowerCase?.();
+      return slug === 'referido_exitoso' || slug === 'successful_referral';
+    });
+    if (!hasReferral) {
+      list.push({
+        id: 'referral-pending',
+        name: 'Referido Exitoso',
+        description: 'Invita amigos y gana 4 CONFIO cuando completen su primera transacción',
+        iconEmoji: '🤝',
+        status: 'pending',
+        achievementType: {
+          slug: 'referido_exitoso',
+          name: 'Referido Exitoso',
+          description: 'Gana 4 CONFIO por cada referido exitoso',
+          category: 'ambassador',
+          confioReward: 4,
+          displayOrder: 1000,
+        }
+      } as Achievement);
+    }
+    return list;
+  }, [achievements]);
 
   const mockAchievements = React.useMemo<Achievement[]>(() => [
     // Fallback mock data when GraphQL is loading or unavailable
@@ -392,14 +418,14 @@ export const AchievementsScreen = () => {
     return Math.min((current / target) * 100, 100);
   };
 
-  const completedCount = (achievements || []).filter(a => a.status?.toLowerCase() === 'earned' || a.status?.toLowerCase() === 'claimed').length;
+  const completedCount = (displayAchievements || []).filter(a => a.status?.toLowerCase() === 'earned' || a.status?.toLowerCase() === 'claimed').length;
   
   // Use actual CONFIO balance from database
   const confioBalance = confioBalanceData?.myConfioBalance;
   const totalConfioEarned = confioBalance?.totalLocked || 0;
   
   // Calculate pending rewards (earned but not claimed)
-  const pendingConfio = (achievements || [])
+  const pendingConfio = (displayAchievements || [])
     .filter(a => a.status?.toLowerCase() === 'earned')
     .reduce((sum, a) => sum + (a.achievementType?.confioReward || 0), 0);
 
@@ -417,8 +443,8 @@ export const AchievementsScreen = () => {
   
   if (isInitialLoading) {
     return (
-      <SafeAreaView style={styles.container} edges={['bottom']}>
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+      <SafeAreaView style={styles.container} edges={['top','bottom']}>
+        <View style={[styles.header, { paddingTop: 12 }]}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Icon name="arrow-left" size={24} color="#fff" />
           </TouchableOpacity>
@@ -433,8 +459,8 @@ export const AchievementsScreen = () => {
   }
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+    <SafeAreaView style={styles.container} edges={['top','bottom']}>
+      <View style={[styles.header, { paddingTop: 12 }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Icon name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
@@ -551,7 +577,7 @@ export const AchievementsScreen = () => {
 
         {/* Categories */}
         {categories.map(category => {
-          const categoryAchievements = (achievements || []).filter(a => a.achievementType?.category?.toLowerCase() === category.key);
+          const categoryAchievements = (displayAchievements || []).filter(a => a.achievementType?.category?.toLowerCase() === category.key);
           const categoryCompleted = categoryAchievements.filter(a => a.status?.toLowerCase() === 'earned' || a.status?.toLowerCase() === 'claimed').length;
           
           // Skip empty categories

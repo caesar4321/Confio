@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Platform, StatusBar } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import { NavigationProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
@@ -34,25 +34,27 @@ export const Header: React.FC<HeaderProps> = ({
   unreadNotifications = 0,
   currentAccountAvatar = 'U',
 }) => {
-  const insets = useSafeAreaInsets();
-  // Provide a bit of extra breathing room beyond the status bar
-  const topPadding = (insets.top || (StatusBar.currentHeight || 0)) + 12;
+  // On iOS, SafeAreaView will handle the notch/status bar; add a small baseline padding.
+  // On Android, add StatusBar height + baseline padding.
+  const topPadding = (Platform.OS === 'ios' ? 12 : (StatusBar.currentHeight || 0) + 12);
   const isLightTheme = isLight || isHomeScreen;
   const textColor = isLightTheme ? '#FFFFFF' : '#1F2937';
   
+  const bg = backgroundColor ? backgroundColor : (isHomeScreen ? '#34d399' : '#F3F4F6');
   return (
-    <View
-      style={{
-        backgroundColor: backgroundColor ? backgroundColor : (isHomeScreen ? '#34d399' : '#F3F4F6'),
-        paddingTop: topPadding,
-        paddingBottom: 8,
-        paddingHorizontal: 20,
-        minHeight: HEADER_HEIGHT,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-      }}
-    >
+    <SafeAreaView edges={['top']} style={{ backgroundColor: bg }}>
+      <View
+        style={{
+          backgroundColor: bg,
+          paddingTop: topPadding,
+          paddingBottom: 8,
+          paddingHorizontal: 20,
+          minHeight: HEADER_HEIGHT,
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
         {showBackButton && !isHomeScreen && (
           <TouchableOpacity 
@@ -136,6 +138,7 @@ export const Header: React.FC<HeaderProps> = ({
           </TouchableOpacity>
         </View>
       )}
-    </View>
+      </View>
+    </SafeAreaView>
   );
-}; 
+};

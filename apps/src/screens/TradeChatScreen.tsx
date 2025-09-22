@@ -2222,12 +2222,12 @@ export const TradeChatScreen: React.FC = () => {
   }, [DEBUG, sellerStepOne, dbEscrowed, onChainBoxExists, sellerNeedsEnable, currentTradeStep, computedTradeType]);
 
   return (
-    <SafeAreaView style={styles.container} edges={['bottom']}>
+    <SafeAreaView style={styles.container} edges={['top','bottom']}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
       <LoadingOverlay visible={busy} message={busyText || 'Procesando…'} />
       
       {/* Header */}
-      <View style={[styles.headerRow, { paddingTop: (insets.top || 0) + 12 }]}>
+      <View style={[styles.headerRow, { paddingTop: 12 }]}>
         {/* Left: Back Button */}
         <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
           <Icon name="arrow-left" size={24} color="#374151" />
@@ -3461,4 +3461,3 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
 }); 
-  const insets = useSafeAreaInsets();
