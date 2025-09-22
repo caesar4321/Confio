@@ -54,75 +54,84 @@ class ConfioAdminSite(admin.AdminSite):
         # Time ranges
         now = timezone.now()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        last_24h = now - timedelta(hours=24)
         week_start = today_start - timedelta(days=today_start.weekday())
         month_start = today_start.replace(day=1)
         
         # User metrics
         context['total_users'] = User.objects.count()
-        # Active users today: union of users with any account activity today OR
-        # users who performed trade/send/payment actions today (either side)
-        active_user_ids = set(
+        # Active users (24h): union of users with any activity in the last 24 hours
+        active_user_ids = set()
+
+        # Account activity (app usage)
+        active_user_ids.update(
             Account.objects
-            .filter(last_login_at__gte=today_start)
+            .filter(last_login_at__gte=last_24h)
             .values_list('user_id', flat=True)
         )
 
-        # Fallback: include users who logged in via Django auth today
+        # Auth logins
         active_user_ids.update(
             User.objects
-            .filter(last_login__gte=today_start)
+            .filter(last_login__gte=last_24h)
             .values_list('id', flat=True)
         )
 
-        # Include P2P trade participants created today (buyer/seller users; include legacy fields)
-        active_user_ids.update(
-            P2PTrade.objects
-            .filter(created_at__gte=today_start, buyer_user__isnull=False)
-            .values_list('buyer_user_id', flat=True)
-        )
-        active_user_ids.update(
-            P2PTrade.objects
-            .filter(created_at__gte=today_start, seller_user__isnull=False)
-            .values_list('seller_user_id', flat=True)
-        )
+        # P2P Trades (created in last 24h)
+        q_trades = P2PTrade.objects.filter(created_at__gte=last_24h)
+        active_user_ids.update(q_trades.filter(buyer_user__isnull=False).values_list('buyer_user_id', flat=True))
+        active_user_ids.update(q_trades.filter(seller_user__isnull=False).values_list('seller_user_id', flat=True))
+        # Legacy fields
+        active_user_ids.update(q_trades.filter(buyer__isnull=False).values_list('buyer_id', flat=True))
+        active_user_ids.update(q_trades.filter(seller__isnull=False).values_list('seller_id', flat=True))
 
-        # Legacy buyer/seller fields
+        # P2P Messages (chat activity)
+        from p2p_exchange.models import P2PMessage, P2PTradeConfirmation
         active_user_ids.update(
-            P2PTrade.objects
-            .filter(created_at__gte=today_start, buyer__isnull=False)
-            .values_list('buyer_id', flat=True)
-        )
-        active_user_ids.update(
-            P2PTrade.objects
-            .filter(created_at__gte=today_start, seller__isnull=False)
-            .values_list('seller_id', flat=True)
-        )
-
-        # Include direct send participants today (sender and recipient users)
-        active_user_ids.update(
-            SendTransaction.objects
-            .filter(created_at__gte=today_start, sender_user__isnull=False)
+            P2PMessage.objects
+            .filter(created_at__gte=last_24h, sender_user__isnull=False)
             .values_list('sender_user_id', flat=True)
         )
+        # Legacy sender
         active_user_ids.update(
-            SendTransaction.objects
-            .filter(created_at__gte=today_start, recipient_user__isnull=False)
-            .values_list('recipient_user_id', flat=True)
+            P2PMessage.objects
+            .filter(created_at__gte=last_24h, sender__isnull=False)
+            .values_list('sender_id', flat=True)
         )
 
-        # Include payment participants today (payer and merchant account users)
+        # P2P Confirmations (actions on trades)
         active_user_ids.update(
-            PaymentTransaction.objects
-            .filter(created_at__gte=today_start)
-            .values_list('payer_user_id', flat=True)
-        )
-        active_user_ids.update(
-            PaymentTransaction.objects
-            .filter(created_at__gte=today_start, merchant_account_user__isnull=False)
-            .values_list('merchant_account_user_id', flat=True)
+            P2PTradeConfirmation.objects
+            .filter(created_at__gte=last_24h, confirmer_user__isnull=False)
+            .values_list('confirmer_user_id', flat=True)
         )
 
-        # Remove possible Nones and count unique
+        # Direct Sends
+        q_sends = SendTransaction.objects.filter(created_at__gte=last_24h)
+        active_user_ids.update(q_sends.filter(sender_user__isnull=False).values_list('sender_user_id', flat=True))
+        active_user_ids.update(q_sends.filter(recipient_user__isnull=False).values_list('recipient_user_id', flat=True))
+
+        # Merchant Payments
+        q_payments = PaymentTransaction.objects.filter(created_at__gte=last_24h)
+        active_user_ids.update(q_payments.values_list('payer_user_id', flat=True))
+        active_user_ids.update(q_payments.filter(merchant_account_user__isnull=False).values_list('merchant_account_user_id', flat=True))
+
+        # Conversions
+        from conversion.models import Conversion
+        active_user_ids.update(
+            Conversion.objects
+            .filter(created_at__gte=last_24h, actor_user__isnull=False)
+            .values_list('actor_user_id', flat=True)
+        )
+
+        # Achievements earned today
+        active_user_ids.update(
+            UserAchievement.objects
+            .filter(earned_at__gte=last_24h)
+            .values_list('user_id', flat=True)
+        )
+
+        # Remove Nones and set the metric
         context['active_users_today'] = len({uid for uid in active_user_ids if uid})
         context['new_users_this_week'] = User.objects.filter(created_at__gte=week_start).count()
         context['verified_users'] = IdentityVerification.objects.filter(status='verified').count()
