@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, TextInput, Image, Modal } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import USDCLogo from '../assets/png/USDC.png';
 import cUSDLogo from '../assets/png/cUSD.png';
@@ -34,7 +34,7 @@ const colors = {
 
 const USDCManageScreen = () => {
   const navigation = useNavigation();
-  const insets = useSafeAreaInsets();
+  // Safe area handled with SafeAreaView
   const [activeTab, setActiveTab] = useState('exchange'); // 'exchange' or 'withdraw'
   const [exchangeDirection, setExchangeDirection] = useState('usdc-to-cusd');
   const [exchangeAmount, setExchangeAmount] = useState('');
@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.neutral,
   },
   header: {
-      paddingTop: insets.top + 8,
+      paddingTop: 8,
     paddingBottom: 32,
     paddingHorizontal: 16,
   },
@@ -764,6 +764,7 @@ const styles = StyleSheet.create({
   return (
     <View style={styles.container}>
       {/* Header */}
+      <SafeAreaView edges={['top']} style={{ backgroundColor: showWithdrawSection ? colors.secondary : (isUSDCToCUSD ? colors.primary : colors.accent) }}>
       <View style={[styles.header, { backgroundColor: showWithdrawSection ? colors.secondary : (isUSDCToCUSD ? colors.primary : colors.accent) }]}>
         <View style={styles.headerContent}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -791,6 +792,7 @@ const styles = StyleSheet.create({
           </Text>
         </View>
       </View>
+      </SafeAreaView>
 
       {/* Toggle Switch */}
       <View style={styles.toggleContainer}>

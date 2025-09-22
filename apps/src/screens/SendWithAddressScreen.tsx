@@ -7,7 +7,7 @@ import { GET_ACCOUNT_BALANCE } from '../apollo/queries';
 import { apolloClient } from '../apollo/client';
 import cUSDLogo from '../assets/png/cUSD.png';
 import CONFIOLogo from '../assets/png/CONFIO.png';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNumberFormat } from '../utils/numberFormatting';
 
 const colors = {
@@ -56,7 +56,7 @@ const tokenConfig = {
 export const SendWithAddressScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const insets = useSafeAreaInsets();
+  // Safe area handled with SafeAreaView
   const { formatNumber } = useNumberFormat();
   const tokenType: TokenType = (route.params as any)?.tokenType || 'cusd';
   const prefilledAddress = (route.params as any)?.prefilledAddress || '';
@@ -226,7 +226,8 @@ export const SendWithAddressScreen = () => {
     <View style={styles.container}>
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {/* Header */}
-        <View style={[styles.header, { backgroundColor: config.color, paddingTop: insets.top + 8 }]}> 
+        <SafeAreaView edges={['top']} style={{ backgroundColor: config.color }}>
+        <View style={[styles.header, { backgroundColor: config.color, paddingTop: 8 }]}> 
           <View style={styles.headerContent}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
               <Icon name="arrow-left" size={24} color="#ffffff" />
@@ -242,6 +243,7 @@ export const SendWithAddressScreen = () => {
             <Text style={styles.headerDescription}>{config.description}</Text>
           </View>
         </View>
+        </SafeAreaView>
 
         {/* Available Balance */}
         <View style={styles.balanceCard}>
@@ -317,7 +319,7 @@ export const SendWithAddressScreen = () => {
       </ScrollView>
 
       {/* Send Button */}
-      <View style={[styles.footer, { paddingBottom: insets.bottom + 20 }]}>
+      <View style={[styles.footer, { paddingBottom: 20 }]}>
         <TouchableOpacity
           style={[
             styles.sendButton,

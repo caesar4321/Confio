@@ -59,7 +59,52 @@ class ConfioAdminSite(admin.AdminSite):
         
         # User metrics
         context['total_users'] = User.objects.count()
-        context['active_users_today'] = User.objects.filter(last_login__gte=today_start).count()
+        # Active users today: union of users with any account activity today OR
+        # users who performed trade/send/payment actions today (either side)
+        active_user_ids = set(
+            Account.objects
+            .filter(last_login_at__gte=today_start)
+            .values_list('user_id', flat=True)
+        )
+
+        # Include P2P trade participants created today (buyer and seller users)
+        active_user_ids.update(
+            P2PTrade.objects
+            .filter(created_at__gte=today_start, buyer_user__isnull=False)
+            .values_list('buyer_user_id', flat=True)
+        )
+        active_user_ids.update(
+            P2PTrade.objects
+            .filter(created_at__gte=today_start, seller_user__isnull=False)
+            .values_list('seller_user_id', flat=True)
+        )
+
+        # Include direct send participants today (sender and recipient users)
+        active_user_ids.update(
+            SendTransaction.objects
+            .filter(created_at__gte=today_start, sender_user__isnull=False)
+            .values_list('sender_user_id', flat=True)
+        )
+        active_user_ids.update(
+            SendTransaction.objects
+            .filter(created_at__gte=today_start, recipient_user__isnull=False)
+            .values_list('recipient_user_id', flat=True)
+        )
+
+        # Include payment participants today (payer and merchant account users)
+        active_user_ids.update(
+            PaymentTransaction.objects
+            .filter(created_at__gte=today_start)
+            .values_list('payer_user_id', flat=True)
+        )
+        active_user_ids.update(
+            PaymentTransaction.objects
+            .filter(created_at__gte=today_start, merchant_account_user__isnull=False)
+            .values_list('merchant_account_user_id', flat=True)
+        )
+
+        # Remove possible Nones and count unique
+        context['active_users_today'] = len({uid for uid in active_user_ids if uid})
         context['new_users_this_week'] = User.objects.filter(created_at__gte=week_start).count()
         context['verified_users'] = IdentityVerification.objects.filter(status='verified').count()
         
@@ -399,7 +444,14 @@ class ConfioAdminSite(admin.AdminSite):
         activity_metrics = []
         for label, days in active_ranges:
             cutoff = timezone.now() - timedelta(days=days)
-            count = User.objects.filter(last_login__gte=cutoff).count()
+            # Use account activity timestamps, counting distinct users
+            count = (
+                Account.objects
+                .filter(last_login_at__gte=cutoff)
+                .values('user_id')
+                .distinct()
+                .count()
+            )
             activity_metrics.append({
                 'label': label,
                 'count': count,

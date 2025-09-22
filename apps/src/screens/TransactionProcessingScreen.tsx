@@ -53,7 +53,7 @@ export const TransactionProcessingScreen = () => {
   console.log('TransactionProcessingScreen: Component mounted');
   const navigation = useNavigation();
   const route = useRoute();
-  const insets = useSafeAreaInsets();
+  // const insets = useSafeAreaInsets();
   
   const transactionData: TransactionData = (route.params as any)?.transactionData || {
     type: 'sent',
@@ -542,7 +542,7 @@ export const TransactionProcessingScreen = () => {
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {/* Processing Header */}
-      <View style={[styles.header, { backgroundColor: colors.primary, paddingTop: insets.top + 8 }]}>
+      <View style={[styles.header, { backgroundColor: colors.primary, paddingTop: 8 }]}> 
         <View style={styles.headerContent}>
           {/* Processing Animation */}
           <View style={styles.processingCircle}>

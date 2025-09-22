@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform, ScrollView, Clipboard, Image, ActivityIndicator } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
 import QRCode from 'react-native-qrcode-svg';
 import USDCLogo from '../assets/png/USDC.png';
@@ -178,7 +178,7 @@ const tokenConfig: Record<TokenType, TokenConfig> = {
 const DepositScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const insets = useSafeAreaInsets();
+  // const insets = useSafeAreaInsets(); // Avoid hook to prevent crashes if provider not ready
   const [copied, setCopied] = useState(false);
   const [isOptedIn, setIsOptedIn] = useState<boolean | null>(null);
   const [checkingOptIn, setCheckingOptIn] = useState(true);
@@ -378,7 +378,7 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   header: {
-      paddingTop: insets.top + 8,
+      paddingTop: 12,
     paddingBottom: 32,
     paddingHorizontal: 16,
   },
@@ -647,6 +647,7 @@ const styles = StyleSheet.create({
   return (
     <View style={styles.container}>
       {/* Header */}
+      <SafeAreaView edges={['top']} style={{ backgroundColor: config.color }}>
       <View style={[styles.header, { backgroundColor: config.color }]}>
         <View style={styles.headerContent}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -664,6 +665,7 @@ const styles = StyleSheet.create({
           <Text style={styles.headerDescription}>{config.subtitle}</Text>
         </View>
       </View>
+      </SafeAreaView>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         {/* Show loading state while checking opt-in status for USDC */}

@@ -28,7 +28,7 @@ import {
   GET_USER_ACCOUNTS
 } from '../apollo/queries';
 import { useAccount } from '../contexts/AccountContext';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AddBankInfoModal } from '../components/AddBankInfoModal';
 
 // Colors matching app design
@@ -151,7 +151,7 @@ interface Bank {
 
 export const BankInfoScreen = () => {
   const navigation = useNavigation<BankInfoNavigationProp>();
-  const insets = useSafeAreaInsets();
+  // No dynamic insets; SafeAreaView handles device padding
   const { activeAccount } = useAccount();
   
   const [showAddModal, setShowAddModal] = useState(false);
@@ -368,9 +368,9 @@ export const BankInfoScreen = () => {
   // Show permission denied screen for employees without permission
   if (!canManageBankAccounts) {
     return (
-      <View style={styles.container}>
+      <SafeAreaView edges={['top']} style={styles.container}>
         {/* Header */}
-        <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+        <View style={[styles.header, { paddingTop: 8 }]}>
           <View style={styles.headerContent}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
               <Icon name="arrow-left" size={24} color="white" />
@@ -390,14 +390,14 @@ export const BankInfoScreen = () => {
             Si necesitas información sobre pagos, consulta con tu supervisor.
           </Text>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView edges={['top']} style={styles.container}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
+      <View style={[styles.header, { paddingTop: 8 }]}>
         <View style={styles.headerContent}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Icon name="arrow-left" size={24} color="white" />
@@ -486,7 +486,7 @@ export const BankInfoScreen = () => {
           editingBankInfo={editingBankInfo}
         />
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
