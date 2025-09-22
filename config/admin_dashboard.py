@@ -67,7 +67,14 @@ class ConfioAdminSite(admin.AdminSite):
             .values_list('user_id', flat=True)
         )
 
-        # Include P2P trade participants created today (buyer and seller users)
+        # Fallback: include users who logged in via Django auth today
+        active_user_ids.update(
+            User.objects
+            .filter(last_login__gte=today_start)
+            .values_list('id', flat=True)
+        )
+
+        # Include P2P trade participants created today (buyer/seller users; include legacy fields)
         active_user_ids.update(
             P2PTrade.objects
             .filter(created_at__gte=today_start, buyer_user__isnull=False)
@@ -77,6 +84,18 @@ class ConfioAdminSite(admin.AdminSite):
             P2PTrade.objects
             .filter(created_at__gte=today_start, seller_user__isnull=False)
             .values_list('seller_user_id', flat=True)
+        )
+
+        # Legacy buyer/seller fields
+        active_user_ids.update(
+            P2PTrade.objects
+            .filter(created_at__gte=today_start, buyer__isnull=False)
+            .values_list('buyer_id', flat=True)
+        )
+        active_user_ids.update(
+            P2PTrade.objects
+            .filter(created_at__gte=today_start, seller__isnull=False)
+            .values_list('seller_id', flat=True)
         )
 
         # Include direct send participants today (sender and recipient users)
