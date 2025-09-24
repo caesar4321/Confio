@@ -31,7 +31,11 @@ const GET_STATS_SUMMARY = gql`
 
 export const ConfioTokenInfoScreen = () => {
   const navigation = useNavigation();
-  const { data } = useQuery(GET_STATS_SUMMARY, { fetchPolicy: 'cache-first' });
+  const { data, refetch } = useQuery(GET_STATS_SUMMARY, {
+    fetchPolicy: 'network-only',
+    nextFetchPolicy: 'cache-first',
+    notifyOnNetworkStatusChange: true,
+  });
 
   const formatCompact = (n: number | null | undefined) => {
     if (n == null) return '-';
