@@ -122,6 +122,12 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 user.last_login = timezone.now()
                 if updated or user.last_login:
                     user.save()
+                # Touch unified activity timestamp
+                try:
+                    from users.utils import touch_user_activity
+                    touch_user_activity(user.id)
+                except Exception:
+                    pass
 
             # Ensure account-level activity is tracked regardless of Algorand address presence
             try:

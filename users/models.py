@@ -75,6 +75,8 @@ class SoftDeleteModel(models.Model):
 
 class User(AbstractUser, SoftDeleteModel):
     firebase_uid = models.CharField(max_length=128, unique=True)
+    # Unified activity timestamp for MAU/WAU/DAU (updated on any user activity)
+    last_activity_at = models.DateTimeField(null=True, blank=True, db_index=True)
     phone_country = models.CharField(
         max_length=2,
         blank=True,

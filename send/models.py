@@ -170,6 +170,24 @@ class SendTransaction(SoftDeleteModel):
         return f"SEND-{self.transaction_hash or 'pending'}: {self.token_type} {self.amount} from {self.sender_user} to {self.recipient_user or self.recipient_address}"
 
 
+# Update unified user activity on new send transactions
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from users.utils import touch_user_activity
+
+
+@receiver(post_save, sender=SendTransaction)
+def send_txn_activity(sender, instance: SendTransaction, created, **kwargs):
+    if created:
+        try:
+            if instance.sender_user_id:
+                touch_user_activity(instance.sender_user_id)
+            if instance.recipient_user_id:
+                touch_user_activity(instance.recipient_user_id)
+        except Exception:
+            pass
+
+
 class PhoneInvite(SoftDeleteModel):
     """Track phone-based invites for non-Confío friends (off-chain index)."""
     STATUS_CHOICES = [
