@@ -661,7 +661,8 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		from payments.models import PaymentTransaction
 		from p2p_exchange.models import P2PTrade
 
-		cache_key = 'stats_summary_v1'
+		# Bump cache key version to invalidate old aggregation behavior
+		cache_key = 'stats_summary_v3'
 		cached = cache.get(cache_key)
 		if cached:
 			return StatsSummaryType(**cached)
@@ -699,8 +700,8 @@ class Query(EmployeeQueries, graphene.ObjectType):
 			'protected_savings': protected_savings,
 			'daily_transactions': daily_transactions,
 		}
-		# Cache for 60 seconds
-		cache.set(cache_key, payload, 60)
+		# Cache briefly to reduce load but avoid staleness
+		cache.set(cache_key, payload, 30)
 		return StatsSummaryType(**payload)
 
 	def resolve_legalDocument(self, info, docType, language=None):
