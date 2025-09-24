@@ -193,6 +193,24 @@ class PaymentTransaction(SoftDeleteModel):
         merchant_name = self.merchant_business.name
         return f"PAY-{self.payment_transaction_id}: {self.token_type} {self.amount} from {self.payer_user} to {merchant_name}"
 
+
+# Update unified user activity on new payment transactions
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from users.utils import touch_user_activity
+
+
+@receiver(post_save, sender=PaymentTransaction)
+def payment_txn_activity(sender, instance: PaymentTransaction, created, **kwargs):
+    if created:
+        try:
+            if instance.payer_user_id:
+                touch_user_activity(instance.payer_user_id)
+            if instance.merchant_account_user_id:
+                touch_user_activity(instance.merchant_account_user_id)
+        except Exception:
+            pass
+
 class Invoice(SoftDeleteModel):
     """Model for storing payment invoices (what merchants create to request payment)"""
     STATUS_CHOICES = [

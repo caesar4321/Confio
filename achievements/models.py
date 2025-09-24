@@ -253,6 +253,21 @@ class UserAchievement(SoftDeleteModel):
         return reward_amount
 
 
+# Update unified user activity when user earns a new achievement (row created)
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from users.utils import touch_user_activity
+
+
+@receiver(post_save, sender=UserAchievement)
+def achievement_activity(sender, instance: UserAchievement, created, **kwargs):
+    if created:
+        try:
+            touch_user_activity(instance.user_id)
+        except Exception:
+            pass
+
+
 class InfluencerReferral(SoftDeleteModel):
     """Tracks referrals made by influencers"""
     

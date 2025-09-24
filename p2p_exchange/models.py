@@ -510,6 +510,40 @@ class P2PMessage(SoftDeleteModel):
     def __str__(self):
         return f"Message from {self.sender_display_name} in Trade {self.trade.id}"
 
+
+# ——— Activity signals ———
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from users.utils import touch_user_activity
+
+
+@receiver(post_save, sender=P2PTrade)
+def trade_activity(sender, instance: P2PTrade, created, **kwargs):
+    if created:
+        try:
+            if instance.buyer_user_id:
+                touch_user_activity(instance.buyer_user_id)
+            if instance.seller_user_id:
+                touch_user_activity(instance.seller_user_id)
+            if instance.buyer_id:
+                touch_user_activity(instance.buyer_id)
+            if instance.seller_id:
+                touch_user_activity(instance.seller_id)
+        except Exception:
+            pass
+
+
+@receiver(post_save, sender=P2PMessage)
+def message_activity(sender, instance: P2PMessage, created, **kwargs):
+    if created:
+        try:
+            if instance.sender_user_id:
+                touch_user_activity(instance.sender_user_id)
+            if instance.sender_id:
+                touch_user_activity(instance.sender_id)
+        except Exception:
+            pass
+
 class P2PUserStats(SoftDeleteModel):
     """Statistics for P2P trading users and businesses"""
     

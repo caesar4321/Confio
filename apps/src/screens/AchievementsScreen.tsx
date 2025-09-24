@@ -543,7 +543,7 @@ export const AchievementsScreen = () => {
             <Text style={styles.mintTitle}>Mi Progreso Viral</Text>
           </View>
           <Text style={styles.mintText}>
-            Ve tus estadísticas de influencer, sube TikToks y gana CONFIO por visualizaciones 🚀
+            Ve tus estadísticas de influencer, sube TikToks y gana CONFIO por personas referidas 🚀
           </Text>
           <View style={styles.learnMoreRow}>
             <Text style={styles.mintLearnMore}>Ver dashboard</Text>

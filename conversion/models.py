@@ -136,3 +136,19 @@ class Conversion(models.Model):
         self.status = 'FAILED'
         self.error_message = error_message
         self.save()
+
+
+# Update unified user activity on new conversions
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from users.utils import touch_user_activity
+
+
+@receiver(post_save, sender=Conversion)
+def conversion_activity(sender, instance: Conversion, created, **kwargs):
+    if created:
+        try:
+            if instance.actor_user_id:
+                touch_user_activity(instance.actor_user_id)
+        except Exception:
+            pass
