@@ -617,50 +617,6 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		user = getattr(info.context, 'user', None)
 		if not (user and getattr(user, 'is_authenticated', False)):
 			return None
-
-	def resolve_stats_summary(self, info):
-		"""Compute small set of aggregates with a short cache TTL."""
-		from django.core.cache import cache
-		from conversion.models import Conversion
-		from send.models import SendTransaction
-		from payments.models import PaymentTransaction
-		from p2p_exchange.models import P2PTrade
-
-		cache_key = 'stats_summary_v1'
-		cached = cache.get(cache_key)
-		if cached:
-			return StatsSummaryType(**cached)
-
-		now = timezone.now()
-		today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-		last_30d = now - timedelta(days=30)
-
-        # Monthly active users: align with admin — use auth login timestamp only
-        active_users_30d = User.objects.filter(last_login__gte=last_30d).count()
-
-		# Protected savings: circulating cUSD from conversions
-		conv = Conversion.objects.filter(status='COMPLETED').aggregate(
-			total_usdc_to_cusd=Sum('to_amount', filter=Q(conversion_type='usdc_to_cusd')),
-			total_cusd_to_usdc=Sum('from_amount', filter=Q(conversion_type='cusd_to_usdc')),
-		)
-		total_minted = conv['total_usdc_to_cusd'] or Decimal('0')
-		total_burned = conv['total_cusd_to_usdc'] or Decimal('0')
-		protected_savings = float(total_minted - total_burned)
-
-		# Daily transactions across sends + payments + completed/released P2P trades
-		send_count = SendTransaction.objects.filter(created_at__gte=today_start).exclude(status='FAILED').count()
-		payment_count = PaymentTransaction.objects.filter(created_at__gte=today_start).exclude(status='FAILED').count()
-		p2p_count = P2PTrade.objects.filter(created_at__gte=today_start, status__in=['COMPLETED', 'CRYPTO_RELEASED']).count()
-		daily_transactions = send_count + payment_count + p2p_count
-
-		payload = {
-			'active_users_30d': active_users_30d,
-			'protected_savings': protected_savings,
-			'daily_transactions': daily_transactions,
-		}
-		# Cache for 60 seconds
-		cache.set(cache_key, payload, 60)
-		return StatsSummaryType(**payload)
 		from .jwt_context import get_jwt_business_context_with_validation
 		jwt_context = get_jwt_business_context_with_validation(info, required_permission='view_balance')
 		if not jwt_context:
@@ -696,6 +652,50 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		except Exception:
 			# Graceful fallback to zeros to avoid client crashes
 			return BalancesType(cusd="0.00", confio="0.00", confioPresaleLocked="0.00", usdc="0.00")
+
+	def resolve_stats_summary(self, info):
+		"""Compute small set of aggregates with a short cache TTL."""
+		from django.core.cache import cache
+		from conversion.models import Conversion
+		from send.models import SendTransaction
+		from payments.models import PaymentTransaction
+		from p2p_exchange.models import P2PTrade
+
+		cache_key = 'stats_summary_v1'
+		cached = cache.get(cache_key)
+		if cached:
+			return StatsSummaryType(**cached)
+
+		now = timezone.now()
+		today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+		last_30d = now - timedelta(days=30)
+
+		# Monthly active users: align with admin — use auth login timestamp only
+		active_users_30d = User.objects.filter(last_login__gte=last_30d).count()
+
+		# Protected savings: circulating cUSD from conversions
+		conv = Conversion.objects.filter(status='COMPLETED').aggregate(
+			total_usdc_to_cusd=Sum('to_amount', filter=Q(conversion_type='usdc_to_cusd')),
+			total_cusd_to_usdc=Sum('from_amount', filter=Q(conversion_type='cusd_to_usdc')),
+		)
+		total_minted = conv['total_usdc_to_cusd'] or Decimal('0')
+		total_burned = conv['total_cusd_to_usdc'] or Decimal('0')
+		protected_savings = float(total_minted - total_burned)
+
+		# Daily transactions across sends + payments + completed/released P2P trades
+		send_count = SendTransaction.objects.filter(created_at__gte=today_start).exclude(status='FAILED').count()
+		payment_count = PaymentTransaction.objects.filter(created_at__gte=today_start).exclude(status='FAILED').count()
+		p2p_count = P2PTrade.objects.filter(created_at__gte=today_start, status__in=['COMPLETED', 'CRYPTO_RELEASED']).count()
+		daily_transactions = send_count + payment_count + p2p_count
+
+		payload = {
+			'active_users_30d': active_users_30d,
+			'protected_savings': protected_savings,
+			'daily_transactions': daily_transactions,
+		}
+		# Cache for 60 seconds
+		cache.set(cache_key, payload, 60)
+		return StatsSummaryType(**payload)
 
 	def resolve_legalDocument(self, info, docType, language=None):
 		logger.info(f"Received legal document request for type: {docType}, language: {language}")
