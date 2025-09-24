@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Feather';
+import { useQuery, gql } from '@apollo/client';
 import { useNavigation } from '@react-navigation/native';
 
 const colors = {
@@ -18,8 +19,40 @@ const colors = {
   violetLight: '#ddd6fe',
 };
 
+const GET_STATS_SUMMARY = gql`
+  query GetStatsSummary {
+    statsSummary {
+      activeUsers30d
+      protectedSavings
+      dailyTransactions
+    }
+  }
+`;
+
 export const ConfioTokenInfoScreen = () => {
   const navigation = useNavigation();
+  const { data } = useQuery(GET_STATS_SUMMARY, { fetchPolicy: 'cache-first' });
+
+  const formatCompact = (n: number | null | undefined) => {
+    if (n == null) return '-';
+    const abs = Math.abs(n);
+    if (abs >= 1e9) return `${(n / 1e9).toFixed(1).replace(/\.0$/, '')}B`;
+    if (abs >= 1e6) return `${(n / 1e6).toFixed(1).replace(/\.0$/, '')}M`;
+    if (abs >= 1e3) return `${(n / 1e3).toFixed(1).replace(/\.0$/, '')}K`;
+    return `${n}`;
+  };
+
+  const formatMoney = (n: number | null | undefined) => {
+    if (n == null) return '-';
+    try {
+      return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+      }).format(n);
+    } catch {
+      return `${Math.round(n)}`;
+    }
+  };
 
   const sections = [
     {
@@ -61,7 +94,12 @@ export const ConfioTokenInfoScreen = () => {
     },
   ];
 
-  const stats = [
+  const dynamic = data?.statsSummary;
+  const stats = dynamic ? [
+    { label: 'Usuarios Activos mensual', value: `${formatCompact(dynamic.activeUsers30d)}`, growth: 'en vivo' },
+    { label: 'Ahorros Protegidos', value: `$${formatMoney(dynamic.protectedSavings)} cUSD`, growth: 'en vivo' },
+    { label: 'Transacciones Diarias', value: `${formatCompact(dynamic.dailyTransactions)}`, growth: 'en vivo' },
+  ] : [
     { label: 'Usuarios Activos mensual', value: '8K+', growth: '+12% semanal' },
     { label: 'Ahorros Protegidos', value: '$1.2M cUSD', growth: '+25% semanal' },
     { label: 'Transacciones Diarias', value: '2.5K+', growth: '+18% semanal' },
