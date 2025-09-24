@@ -98,15 +98,11 @@ export const ConfioTokenInfoScreen = () => {
     },
   ];
 
-  const dynamic = data?.statsSummary;
-  const stats = dynamic ? [
-    { label: 'Usuarios Activos mensual', value: `${formatCompact(dynamic.activeUsers30d)}`, growth: 'en vivo' },
-    { label: 'Ahorros Protegidos', value: `$${formatMoney(dynamic.protectedSavings)} cUSD`, growth: 'en vivo' },
-    { label: 'Transacciones Diarias', value: `${formatCompact(dynamic.dailyTransactions)}`, growth: 'en vivo' },
-  ] : [
-    { label: 'Usuarios Activos mensual', value: '8K+', growth: '+12% semanal' },
-    { label: 'Ahorros Protegidos', value: '$1.2M cUSD', growth: '+25% semanal' },
-    { label: 'Transacciones Diarias', value: '2.5K+', growth: '+18% semanal' },
+  const s = data?.statsSummary;
+  const stats = [
+    { label: 'Usuarios Activos mensual', value: `${formatCompact(s?.activeUsers30d ?? 0)}`, growth: 'en vivo' },
+    { label: 'Ahorros Protegidos', value: `$${formatMoney(s?.protectedSavings ?? 0)} cUSD`, growth: 'en vivo' },
+    { label: 'Transacciones Diarias', value: `${formatCompact(s?.dailyTransactions ?? 0)}`, growth: 'en vivo' },
   ];
 
   return (

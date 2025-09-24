@@ -671,14 +671,31 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 		last_30d = now - timedelta(days=30)
 
-		# Monthly active users: align with admin — use account activity timestamp
-		active_users_30d = (
-			Account.objects
-			.filter(last_login_at__gte=last_30d)
-			.values('user_id')
-			.distinct()
-			.count()
-		)
+		# Monthly active users (30d): union of distinct users across activity sources
+		from p2p_exchange.models import P2PTrade, P2PMessage
+		from send.models import SendTransaction
+		from payments.models import PaymentTransaction
+		from conversion.models import Conversion
+		from achievements.models import UserAchievement
+		user_ids = set()
+		user_ids.update(Account.objects.filter(last_login_at__gte=last_30d).values_list('user_id', flat=True))
+		user_ids.update(User.objects.filter(last_login__gte=last_30d).values_list('id', flat=True))
+		trades = P2PTrade.objects.filter(created_at__gte=last_30d)
+		user_ids.update(trades.exclude(buyer_user__isnull=True).values_list('buyer_user_id', flat=True))
+		user_ids.update(trades.exclude(seller_user__isnull=True).values_list('seller_user_id', flat=True))
+		user_ids.update(trades.exclude(buyer__isnull=True).values_list('buyer_id', flat=True))
+		user_ids.update(trades.exclude(seller__isnull=True).values_list('seller_id', flat=True))
+		user_ids.update(P2PMessage.objects.filter(created_at__gte=last_30d).exclude(sender_user__isnull=True).values_list('sender_user_id', flat=True))
+		user_ids.update(P2PMessage.objects.filter(created_at__gte=last_30d).exclude(sender__isnull=True).values_list('sender_id', flat=True))
+		sends = SendTransaction.objects.filter(created_at__gte=last_30d)
+		user_ids.update(sends.exclude(sender_user__isnull=True).values_list('sender_user_id', flat=True))
+		user_ids.update(sends.exclude(recipient_user__isnull=True).values_list('recipient_user_id', flat=True))
+		payments = PaymentTransaction.objects.filter(created_at__gte=last_30d)
+		user_ids.update(payments.values_list('payer_user_id', flat=True))
+		user_ids.update(payments.exclude(merchant_account_user__isnull=True).values_list('merchant_account_user_id', flat=True))
+		user_ids.update(Conversion.objects.filter(created_at__gte=last_30d).exclude(actor_user__isnull=True).values_list('actor_user_id', flat=True))
+		user_ids.update(UserAchievement.objects.filter(earned_at__gte=last_30d).values_list('user_id', flat=True))
+		active_users_30d = len({int(u) for u in user_ids if u})
 
 		# Protected savings: circulating cUSD from conversions
 		conv = Conversion.objects.filter(status='COMPLETED').aggregate(
