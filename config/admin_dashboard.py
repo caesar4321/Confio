@@ -473,8 +473,14 @@ class ConfioAdminSite(admin.AdminSite):
         activity_metrics = []
         for label, days in active_ranges:
             cutoff = timezone.now() - timedelta(days=days)
-            # Align with app and use auth login timestamp only
-            count = User.objects.filter(last_login__gte=cutoff).count()
+            # Monthly/period active users via account activity (distinct users)
+            count = (
+                Account.objects
+                .filter(last_login_at__gte=cutoff)
+                .values('user_id')
+                .distinct()
+                .count()
+            )
             activity_metrics.append({
                 'label': label,
                 'count': count,
