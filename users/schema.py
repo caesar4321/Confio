@@ -635,14 +635,8 @@ class Query(EmployeeQueries, graphene.ObjectType):
 		today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
 		last_30d = now - timedelta(days=30)
 
-		# Active users in last 30 days (distinct users with any account activity)
-		active_users_30d = (
-			Account.objects
-			.filter(last_login_at__gte=last_30d)
-			.values('user_id')
-			.distinct()
-			.count()
-		)
+        # Monthly active users: align with admin — use auth login timestamp only
+        active_users_30d = User.objects.filter(last_login__gte=last_30d).count()
 
 		# Protected savings: circulating cUSD from conversions
 		conv = Conversion.objects.filter(status='COMPLETED').aggregate(
