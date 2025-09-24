@@ -106,7 +106,7 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 }
             )
             
-            # Update user info if changed
+            # Update user info and last_login
             if not created:
                 updated = False
                 if email and user.email != email:
@@ -122,6 +122,16 @@ class Web3AuthLoginMutation(graphene.Mutation):
                 user.last_login = timezone.now()
                 if updated or user.last_login:
                     user.save()
+
+            # Ensure account-level activity is tracked regardless of Algorand address presence
+            try:
+                from users.models import Account
+                acct = Account.objects.filter(user=user, account_type='personal', account_index=0).first()
+                if acct:
+                    acct.last_login_at = timezone.now()
+                    acct.save(update_fields=['last_login_at'])
+            except Exception:
+                pass
             
             # Track device fingerprint if provided
             if device_fingerprint:
