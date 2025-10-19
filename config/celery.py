@@ -23,3 +23,25 @@ try:
     app.conf.beat_schedule.update(BLOCKCHAIN_CELERY_BEAT_SCHEDULE)
 except ImportError:
     pass  # Blockchain app not yet installed
+
+# Ensure DB connections are properly managed around every Celery task
+try:
+    from celery import signals
+    from django.db import close_old_connections, connections
+
+    @signals.task_prerun.connect
+    def _celery_prerun_close_stale_conns(*args, **kwargs):
+        # Drop any stale/dangling DB connections before the task starts
+        close_old_connections()
+
+    @signals.task_postrun.connect
+    def _celery_postrun_close_all_conns(*args, **kwargs):
+        # Aggressively close all DB connections after each task to avoid leaks
+        for conn in connections.all():
+            try:
+                conn.close()
+            except Exception:
+                pass
+except Exception:
+    # If imports fail during early startup, skip signals (app will still run)
+    pass
