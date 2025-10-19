@@ -10,6 +10,7 @@ import { ContactsScreen } from '../screens/ContactsScreen';
 import ScanTab from '../screens/ScanTab';
 import { ChargeScreen } from '../screens/ChargeScreen';
 import { ExchangeScreen } from '../screens/ExchangeScreen';
+import DiscoverScreen from '../screens/DiscoverScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { Header } from './Header';
 import { useHeader } from '../contexts/HeaderContext';
@@ -105,6 +106,21 @@ export const BottomTabNavigator = () => {
       navigation={navigation}
       isHomeScreen={false}
       title="Intercambio P2P"
+      onProfilePress={undefined}
+      onNotificationPress={undefined}
+      backgroundColor="#fff"
+      showBackButton={false}
+      isLight={false}
+      unreadNotifications={0}
+      currentAccountAvatar="U"
+    />
+  ), [navigation]);
+
+  const DiscoverHeader = useCallback(() => (
+    <Header
+      navigation={navigation}
+      isHomeScreen={false}
+      title="Descubrir"
       onProfilePress={undefined}
       onNotificationPress={undefined}
       backgroundColor="#fff"
@@ -230,11 +246,13 @@ export const BottomTabNavigator = () => {
       )}
         <Tabs.Screen 
           name="Exchange" 
-          component={ExchangeScreen}
+          component={Platform.OS === 'ios' ? (DiscoverScreen as any) : (ExchangeScreen as any)}
           options={{
-            header: () => <ExchangeHeader />,
-            tabBarLabel: 'Intercambio',
-            tabBarIcon: ({ color, size }: any) => <Icon name="repeat" size={size} color={color} />
+            header: () => (Platform.OS === 'ios' ? <DiscoverHeader /> : <ExchangeHeader />),
+            tabBarLabel: Platform.OS === 'ios' ? 'Descubrir' : 'Intercambio',
+            tabBarIcon: ({ color, size }: any) => (
+              <Icon name={Platform.OS === 'ios' ? 'compass' : 'repeat'} size={size} color={color} />
+            ),
           }}
         />
         <Tabs.Screen 
