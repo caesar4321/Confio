@@ -1104,19 +1104,27 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
             
             account_info = algod_client.account_info(sender_address)
             current_balance = account_info['amount']  # in microAlgos
-            num_assets = len(account_info.get('assets', []))
+            current_min_balance = account_info.get('min-balance', 0)
+            required_balance = current_min_balance + 100_000  # Add 0.1 ALGO for the new ASA
+            buffer = 10_000  # Add 0.01 ALGO buffer for fees
+            target_balance = required_balance + buffer
             
-            # Calculate required minimum balance
-            # Base: 0.1 ALGO, Per asset: 0.1 ALGO
-            # Need one more asset slot for USDC
-            required_mbr = 100_000 + ((num_assets + 1) * 100_000)  # in microAlgos
+            logger.info(
+                "USDC opt-in balance check for %s: balance=%s, min=%s, required=%s, target=%s",
+                sender_address,
+                current_balance,
+                current_min_balance,
+                required_balance,
+                target_balance,
+            )
             
-            # If balance is insufficient, fund the difference plus a small buffer
-            if current_balance < required_mbr:
-                funding_needed = required_mbr - current_balance + 10_000  # Add 0.01 ALGO buffer
+            # If balance is insufficient, fund the difference
+            if current_balance < target_balance:
+                funding_needed = target_balance - current_balance
                 logger.info(
-                    f"Account needs {funding_needed / 1_000_000} ALGO for USDC opt-in. "
-                    f"Current: {current_balance / 1_000_000}, Required: {required_mbr / 1_000_000}"
+                    "Funding account %s with %s microAlgos before USDC opt-in",
+                    sender_address,
+                    funding_needed,
                 )
                 
                 # Fund the account with the needed amount
@@ -1447,11 +1455,60 @@ class AlgorandSponsoredOptInMutation(graphene.Mutation):
             elif asset_id_int == AlgorandAccountManager.CUSD_ASSET_ID:
                 asset_name = "cUSD"
             
+            # Ensure the account has enough balance to cover the additional ASA min balance
+            from algosdk.v2client import algod
+            algod_client = algod.AlgodClient(
+                AlgorandAccountManager.ALGOD_TOKEN,
+                AlgorandAccountManager.ALGOD_ADDRESS
+            )
+            account_info = algod_client.account_info(user_account.algorand_address)
+            current_balance = account_info.get('amount', 0)
+            current_min_balance = account_info.get('min-balance', 0)
+            required_balance = current_min_balance + 100_000  # Each ASA adds 0.1 ALGO
+            buffer = 10_000  # cover transaction fees
+            target_balance = required_balance + buffer
+
+            logger.info(
+                "USDC opt-in balance check for %s: balance=%s, min=%s, required=%s, target=%s",
+                user_account.algorand_address,
+                current_balance,
+                current_min_balance,
+                required_balance,
+                target_balance,
+            )
+            
             # Execute sponsored opt-in using async function
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
             try:
+                if current_balance < target_balance:
+                    funding_needed = target_balance - current_balance
+                    logger.info(
+                        "Funding account %s with %s microAlgos before asset %s opt-in "
+                        "(current: %s, required: %s, buffer: %s)",
+                        user_account.algorand_address,
+                        funding_needed,
+                        asset_id_int,
+                        current_balance,
+                        required_balance,
+                        buffer,
+                    )
+                    funding_result = loop.run_until_complete(
+                        algorand_sponsor_service.fund_account(
+                            user_account.algorand_address,
+                            funding_needed
+                        )
+                    )
+                    if not funding_result.get('success'):
+                        logger.error(
+                            "Failed to fund account %s for asset %s opt-in: %s",
+                            user_account.algorand_address,
+                            asset_id_int,
+                            funding_result.get('error'),
+                        )
+                        return cls(success=False, error='Failed to fund account for opt-in')
+            
                 result = loop.run_until_complete(
                     algorand_sponsor_service.execute_server_side_opt_in(
                         user_address=user_account.algorand_address,
