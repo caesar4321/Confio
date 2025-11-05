@@ -1,176 +1,195 @@
-import React, { useState, useRef } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
-  Platform,
+  TouchableOpacity,
   Share,
-  Clipboard,
   Alert,
-  StatusBar,
-  Image,
+  Clipboard,
+  Linking,
 } from 'react-native';
+import Icon from 'react-native-vector-icons/Feather';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types/navigation';
 import { useAuth } from '../contexts/AuthContext';
-import Icon from 'react-native-vector-icons/Feather';
-import QRCode from 'react-native-qrcode-svg';
-import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { Header } from '../navigation/Header';
-import ViewShot from 'react-native-view-shot';
-import { SHARE_LINKS } from '../config/shareLinks';
+import { ReferralInputModal } from '../components/ReferralInputModal';
 
 const colors = {
-  primary: '#00d4aa',
-  primaryDark: '#00b894',
-  background: '#f8f9fa',
-  white: '#ffffff',
-  text: '#333333',
-  textLight: '#666666',
-  border: '#e9ecef',
-  warning: '#fff3cd',
-  warningBorder: '#ffeaa7',
-  warningText: '#856404',
-  info: '#e8f4f8',
-  infoText: '#0c5460',
+  background: '#F3F4F6',
+  surface: '#FFFFFF',
+  primary: '#10B981',
+  primaryDark: '#047857',
+  primaryLight: '#ECFDF5',
+  text: '#111827',
+  textMuted: '#6B7280',
 };
 
-export const ConfioAddressScreen = () => {
+export const ConfioAddressScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { userProfile } = useAuth();
-  const [hasSharedBefore, setHasSharedBefore] = useState(false);
-  const username = userProfile?.username ? `@${userProfile.username}` : '@usuario';
-  const addressUrl = userProfile?.username ? SHARE_LINKS.web.userAddress(userProfile.username) : SHARE_LINKS.web.userAddress('usuario');
-  const qrRef = useRef<ViewShot>(null);
+  const rawUsername = userProfile?.username || '';
+  const username = rawUsername ? `@${rawUsername}` : '';
+  const needsFriendlyUsername = React.useMemo(() => {
+    if (!rawUsername) return true;
+    if (rawUsername.startsWith('user_')) return true;
+    if (/^[a-z0-9]{10,}$/.test(rawUsername)) return true;
+    return false;
+  }, [rawUsername]);
+  const [showReferralModal, setShowReferralModal] = React.useState(false);
 
-  const handleShare = async () => {
-    if (!hasSharedBefore) {
-      Alert.alert(
-        'Recuerda',
-        'Esta dirección es para uso personal. Los comercios deben usar "Pagar" para recibir pagos formales y tener soporte y facturación.',
-        [
-          {
-            text: 'Entendido',
-            onPress: () => {
-              setHasSharedBefore(true);
-              doShare();
-            },
-          },
-        ]
-      );
+  const shareMessage = React.useMemo(() => {
+    const safeUsername = username || '@tuUsuario';
+    return [
+      'Únete a Confío y gana US$5 en $CONFIO conmigo.',
+      '',
+      '1. Descarga Confío: https://confio.lat/wa',
+      `2. En el registro, escribe mi usuario ${safeUsername} en "¿Quién te invitó?"`,
+      '3. Completa tu primera operación válida:',
+      '   • Recarga de dólares digitales (US$20+)',
+      '   • Depósito de USDC + conversión a cUSD (US$20+)',
+      '   • Enviar, pagar o trade P2P',
+      '',
+      'Cuando lo hagas, ambos recibimos el equivalente a US$5 en $CONFIO.',
+    ].join('\n');
+  }, [username]);
+
+  const handleCopy = React.useCallback(() => {
+    if (!username) {
+      Alert.alert('Configura tu usuario', 'Edita tu perfil para crear un @usuario y poder compartirlo.');
       return;
     }
-    doShare();
-  };
+    Clipboard.setString(username);
+    Alert.alert('Usuario copiado', 'Comparte tu @usuario para que tus amigos lo ingresen al registrarse.');
+  }, [username]);
 
-  const doShare = async () => {
-    const shareText = `Este es mi Confío address para recibir dinero digital: ${addressUrl}
-
-⚠️ Solo para envíos personales. Los pagos a negocios se deben hacer por la función "Pagar" en la app de Confío.`;
-
+  const handleShare = React.useCallback(async () => {
+    const encodedMessage = encodeURIComponent(shareMessage);
+    const whatsappSchemeUrl = `whatsapp://send?text=${encodedMessage}`;
+    const whatsappWebUrl = `https://wa.me/?text=${encodedMessage}`;
     try {
-      await Share.share({
-        message: shareText,
-        title: 'Mi dirección de Confío',
-      });
-    } catch (error) {
-      console.error('Error sharing:', error);
-    }
-  };
-
-  const handleCopyAddress = () => {
-    Clipboard.setString(addressUrl);
-    Alert.alert('Dirección copiada');
-  };
-
-  const handleSaveQR = async () => {
-    try {
-      const qrNode = qrRef.current;
-      if (!qrNode) {
-        throw new Error('QR code reference not found');
+      const canUseScheme = await Linking.canOpenURL(whatsappSchemeUrl);
+      if (canUseScheme) {
+        await Linking.openURL(whatsappSchemeUrl);
+      } else {
+        await Linking.openURL(whatsappWebUrl);
       }
-      if (typeof qrNode.capture !== 'function') {
-        throw new Error('QR code capture method not found');
-      }
-      const uri = await qrNode.capture();
-      await CameraRoll.save(uri, { type: 'photo' });
-      Alert.alert('Éxito', 'QR guardado en galería');
     } catch (error) {
-      console.error('Error saving QR:', error);
-      Alert.alert('Error', 'No se pudo guardar el QR. Por favor, intenta de nuevo.');
+      console.error('Error abriendo WhatsApp:', error);
+      try {
+        await Share.share({
+          message: shareMessage,
+          title: 'Invitación Confío',
+        });
+      } catch (fallbackError) {
+        console.error('Error compartiendo invitación:', fallbackError);
+      }
     }
-  };
+  }, [shareMessage]);
+
+  const steps = [
+    'Copia tu @usuario de Confío y envíalo por WhatsApp, SMS o redes.',
+    'Tu amigo abre Confío y, en "¿Quién te invitó?", escribe tu @usuario exacto.',
+    'Acompáñalo hasta completar su primera operación válida. Cuando se confirme, ambos reciben el equivalente a US$5 en $CONFIO.',
+  ];
+
+  const friendTips = [
+    'Tu @usuario siempre empieza con "@" y no distingue mayúsculas.',
+    'La recompensa se libera cuando tu amigo completa su primera operación válida en Confío.',
+    'Puedes invitar a todos los amigos que quieras. No hay límite de recompensas.',
+  ];
 
   return (
     <View style={styles.container}>
       <Header
         navigation={navigation}
-        title="Mi dirección de Confío"
+        title="Comparte tu usuario Confío"
         backgroundColor={colors.primary}
         isLight={true}
         showBackButton={true}
       />
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
-        <ViewShot ref={qrRef} options={{ format: 'png', quality: 1 }}>
-          <View style={{ alignItems: 'center', marginBottom: 16 }}>
-            <Image
-              source={require('../assets/png/CONFIO.png')}
-              style={{ width: 64, height: 64, resizeMode: 'contain', marginBottom: 4 }}
-            />
-            <Text style={{ color: '#00b894', fontWeight: 'bold', fontSize: 16 }}>confio.lat</Text>
-          </View>
-          <View style={styles.addressSection}>
-            <Text style={styles.addressLabel}>Tu dirección personal</Text>
-            <View style={styles.addressDisplay}>
-              <Text style={styles.addressText}>{username}</Text>
-              <TouchableOpacity style={styles.copyBtn} onPress={handleCopyAddress}>
-                <Text style={styles.copyBtnText}>Copiar</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.infoSection}>
-              <Text style={styles.infoText}>
-                {'✅ Esta es tu dirección personal para recibir dinero\n✅ Envíos entre personas = gratis\n✅ Funciona desde cualquier navegador'}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.qrSection}>
-            <View style={styles.qrCode}>
-              <View style={styles.qrCodeInner}>
-                <QRCode
-                  value={addressUrl}
-                  size={170}
-                  color={colors.primary}
-                  backgroundColor={colors.white}
-                />
-              </View>
-            </View>
-            <View style={styles.actions}>
-              <TouchableOpacity style={styles.btnPrimary} onPress={handleShare}>
-                <Icon name="share-2" size={20} color={colors.white} />
-                <Text style={styles.btnPrimaryText}>Compartir</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.btnSecondary} onPress={handleSaveQR}>
-                <Icon name="download" size={20} color={colors.text} />
-                <Text style={styles.btnSecondaryText}>Guardar QR</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </ViewShot>
-
-        <View style={styles.warning}>
-          <View style={styles.warningHeader}>
-            <Icon name="alert-triangle" size={20} color={colors.warningText} />
-            <Text style={styles.warningTitle}>Importante - Solo uso personal</Text>
-          </View>
-          <Text style={styles.warningText}>
-            Esta dirección es para recibir fondos personales. Si eres comercio o negocio, debes usar el botón "Pagar" en la app (comisión 0.9% para soporte y facturación).
+        <View style={styles.heroCard}>
+          <Text style={styles.heroEyebrow}>Programa de referidos</Text>
+          <Text style={styles.heroTitle}>Invita y ganen US$5 en $CONFIO</Text>
+          <Text style={styles.heroSubtitle}>
+            Solo necesitas compartir tu @usuario. Pide a tus amigos escribirlo cuando Confío les pregunte "¿Quién te
+            invitó?" y acompáñalos hasta completar la primera operación válida para que ambos reciban US$5 en $CONFIO.
           </Text>
         </View>
+
+        <View style={styles.usernameCard}>
+          <Text style={styles.usernameLabel}>Tu usuario Confío</Text>
+          <Text style={styles.usernameValue}>{username || 'Configura tu @usuario'}</Text>
+          {needsFriendlyUsername && (
+            <TouchableOpacity style={styles.updateUsernameButton} onPress={() => navigation.navigate('UpdateUsername')}>
+              <Icon name="edit-3" size={16} color={colors.primaryDark} />
+              <Text style={styles.updateUsernameText}>Actualizar mi usuario</Text>
+              <Icon name="chevron-right" size={16} color={colors.primaryDark} />
+            </TouchableOpacity>
+          )}
+          <View style={styles.usernameActions}>
+            <TouchableOpacity style={styles.copyButton} onPress={handleCopy}>
+              <Icon name="copy" size={16} color={colors.primaryDark} />
+              <Text style={styles.copyButtonText}>Copiar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
+              <Icon name="share-2" size={16} color="#FFFFFF" />
+              <Text style={styles.shareButtonText}>Compartir por WhatsApp</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Cómo reclamar la recompensa</Text>
+          {steps.map((step, index) => (
+            <View key={step} style={styles.stepRow}>
+              <View style={styles.stepNumber}>
+                <Text style={styles.stepNumberText}>{index + 1}</Text>
+              </View>
+              <Text style={styles.stepText}>{step}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Tips para tus invitados</Text>
+          {friendTips.map((tip) => (
+            <View key={tip} style={styles.tipRow}>
+              <Icon name="check-circle" size={18} color={colors.primaryDark} />
+              <Text style={styles.tipText}>{tip}</Text>
+            </View>
+          ))}
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Operaciones que activan el bono</Text>
+          <Text style={styles.reasonText}>Tu invitado debe completar una de estas acciones para liberar el bono:</Text>
+          <View style={styles.criteriaList}>
+            <Text style={styles.criteriaItem}>• Primera recarga de dólares digitales mayor a US$20</Text>
+            <Text style={styles.criteriaItem}>• Primer depósito de USDC convertido a cUSD (≥ US$20)</Text>
+            <Text style={styles.criteriaItem}>• Primer envío dentro de Confío</Text>
+            <Text style={styles.criteriaItem}>• Primer pago a comercio con Confío</Text>
+            <Text style={styles.criteriaItem}>• Primer trade P2P completado</Text>
+          </View>
+          <Text style={styles.criteriaNote}>El bono se acredita en $CONFIO al tipo equivalente a US$5.</Text>
+        </View>
+
+        <TouchableOpacity style={styles.referralButton} onPress={() => setShowReferralModal(true)}>
+          <Icon name="user-plus" size={18} color={colors.primaryDark} />
+          <Text style={styles.referralButtonText}>Registrar quién te invitó</Text>
+          <Icon name="chevron-right" size={16} color={colors.primaryDark} />
+        </TouchableOpacity>
       </ScrollView>
+
+      <ReferralInputModal
+        visible={showReferralModal}
+        onClose={() => setShowReferralModal(false)}
+        onSuccess={() => setShowReferralModal(false)}
+      />
     </View>
   );
 };
@@ -185,164 +204,195 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 20,
+    paddingBottom: 32,
+    gap: 16,
   },
-  qrSection: {
-    backgroundColor: colors.white,
-    borderRadius: 16,
+  heroCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 24,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  heroEyebrow: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primaryDark,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  heroTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 12,
+  },
+  heroSubtitle: {
+    fontSize: 14,
+    color: colors.textMuted,
+    lineHeight: 20,
+  },
+  usernameCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
     padding: 20,
-    marginBottom: 20,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 2,
+    gap: 16,
   },
-  qrCode: {
-    width: 200,
-    height: 200,
-    backgroundColor: colors.white,
-    borderRadius: 12,
-    marginBottom: 20,
-    alignSelf: 'center',
-    padding: 0,
-    borderWidth: 2,
-    borderColor: colors.primary,
-    borderStyle: 'dashed',
-    justifyContent: 'center',
-    alignItems: 'center',
+  usernameLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primaryDark,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
-  qrCodeInner: {
-    width: 170,
-    height: 170,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: colors.white,
-    borderRadius: 8,
+  usernameValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
   },
-  actions: {
+  usernameActions: {
     flexDirection: 'row',
     gap: 12,
   },
-  btnPrimary: {
-    flex: 1,
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    padding: 16,
+  updateUsernameButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 8,
-  },
-  btnPrimaryText: {
-    color: colors.white,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  btnSecondary: {
-    flex: 1,
-    backgroundColor: colors.background,
-    borderWidth: 2,
-    borderColor: colors.border,
-    borderRadius: 12,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  btnSecondaryText: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  addressSection: {
-    backgroundColor: colors.white,
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 20,
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  addressLabel: {
-    fontSize: 14,
-    color: colors.textLight,
-    marginBottom: 8,
-    fontWeight: '500',
-  },
-  addressDisplay: {
-    backgroundColor: '#f3f4f6',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     marginTop: 8,
-    marginBottom: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
   },
-  addressText: {
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 16,
-    color: colors.text,
+  updateUsernameText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primaryDark,
   },
-  copyBtn: {
-    marginLeft: 16,
-    backgroundColor: colors.primary,
-    borderRadius: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 14,
+  copyButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    paddingVertical: 12,
+    backgroundColor: colors.primaryLight,
+    gap: 8,
   },
-  copyBtnText: {
-    color: colors.white,
-    fontWeight: 'bold',
+  copyButtonText: {
+    color: colors.primaryDark,
+    fontWeight: '600',
     fontSize: 14,
   },
-  infoSection: {
-    backgroundColor: colors.info,
+  shareButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     borderRadius: 12,
-    padding: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.primaryDark,
+    gap: 8,
   },
-  infoText: {
+  shareButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  sectionCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 20,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
+    elevation: 2,
+    gap: 14,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  stepNumber: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumberText: {
     fontSize: 13,
-    color: colors.infoText,
+    fontWeight: '700',
+    color: colors.primaryDark,
+  },
+  stepText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 19,
+  },
+  tipRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  tipText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 19,
+  },
+  reasonText: {
+    fontSize: 13,
+    color: colors.textMuted,
     lineHeight: 20,
   },
-  warning: {
-    backgroundColor: colors.warning,
-    borderWidth: 1,
-    borderColor: colors.warningBorder,
-    borderRadius: 12,
-    padding: 16,
+  criteriaList: {
+    gap: 6,
   },
-  warningHeader: {
+  criteriaItem: {
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 18,
+  },
+  criteriaNote: {
+    marginTop: 8,
+    fontSize: 12,
+    color: colors.primaryDark,
+  },
+  referralButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#ECFDF5',
   },
-  warningTitle: {
+  referralButtonText: {
+    flex: 1,
     fontSize: 14,
     fontWeight: '600',
-    color: colors.warningText,
+    color: colors.primaryDark,
   },
-  warningText: {
-    fontSize: 13,
-    color: colors.warningText,
-    lineHeight: 20,
-  },
-}); 
+});
+
+export default ConfioAddressScreen;

@@ -1,25 +1,19 @@
-"""
-Unified referral system mutations
-Handles both influencer and friend referrals
-"""
+"""Unified referral system mutations for Confío usernames or phone numbers."""
 import graphene
-from graphql import GraphQLError
 from django.db import transaction as db_transaction
 from .models import User
 from .phone_utils import normalize_any_phone
-from achievements.models import InfluencerReferral, UserAchievement, AchievementType
+from achievements.models import UserReferral, UserAchievement, AchievementType
 from .decorators import rate_limit, check_suspicious_activity
+from django.utils import timezone
 import re
 
 
 class SetReferrer(graphene.Mutation):
-    """
-    Single mutation for setting referrer (influencer or friend)
-    Can only be done once per user within 48 hours of signup
-    """
+    """Registers who invited the current user (username or phone)."""
     class Arguments:
         referrer_identifier = graphene.String(required=True)
-        referral_type = graphene.String()  # 'influencer' or 'friend', auto-detected if not provided
+        referral_type = graphene.String()  # kept for backward compatibility
     
     success = graphene.Boolean()
     error = graphene.String()
@@ -36,113 +30,69 @@ class SetReferrer(graphene.Mutation):
         
         try:
             # Check if user already has a referral
-            existing_referral = InfluencerReferral.objects.filter(referred_user=user).first()
+            existing_referral = UserReferral.objects.filter(referred_user=user, deleted_at__isnull=True).first()
             if existing_referral:
                 return SetReferrer(
                     success=False,
-                    error="Ya tienes un referidor registrado. Solo puedes ser referido una vez."
+                    error=f"Ya registraste a @{existing_referral.referrer_identifier}."
                 )
-            
-            # Check if within 48 hours of signup
-            from django.utils import timezone
-            from datetime import timedelta
-            
-            if user.created_at < timezone.now() - timedelta(hours=48):
-                return SetReferrer(
-                    success=False,
-                    error="El período para registrar un referidor ha expirado (48 horas)."
-                )
-            
+
             # Clean the identifier
             identifier = referrer_identifier.strip().lower()
-            
+
             # Auto-detect type if not provided
-            if not referral_type:
-                # Check if it's a phone number pattern
-                phone_pattern = re.compile(r'^\+?\d{10,15}$')
-                if phone_pattern.match(identifier.replace(' ', '')):
-                    referral_type = 'friend'
-                # Check if it's an invite code pattern (6-8 alphanumeric)
-                elif re.match(r'^[A-Z0-9]{6,8}$', identifier.upper()):
-                    referral_type = 'friend'
-                else:
-                    # Assume username (TikTok or Confío)
-                    referral_type = 'influencer'
-            
-            # Always remove @ if present for any username type
-            identifier = identifier.lstrip('@')
-            
-            # Find the referrer
-            referrer = None
-            referrer_username = identifier
-            
-            # Debug logging
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"SetReferrer: identifier='{identifier}', referral_type='{referral_type}'")
-            
-            if referral_type == 'friend':
-                # Detect if it's a phone number
-                if identifier.startswith('+') and len(identifier) >= 10:
-                    # Canonical lookup by phone_key
-                    clean_phone = '+' + ''.join(filter(str.isdigit, identifier))
-                    key = normalize_any_phone(clean_phone)
-                    if key:
-                        referrer = User.objects.filter(phone_key=key).first()
-                    if not referrer:
-                        return SetReferrer(
-                            success=False,
-                            error=f"No se encontró ningún usuario con el número {clean_phone}. Verifica que el número sea correcto."
-                        )
-                else:
-                    # Username lookup
-                    # Validate username format (alphanumeric, underscore, 3-20 chars)
-                    if not re.match(r'^[a-zA-Z0-9_]{3,20}$', identifier):
-                        return SetReferrer(
-                            success=False,
-                            error="Nombre de usuario inválido. Debe tener 3-20 caracteres alfanuméricos."
-                        )
-                    
-                    referrer = User.objects.filter(username__iexact=identifier).first()
-                    logger.info(f"Username lookup for '{identifier}': found={referrer is not None}")
-                    if not referrer:
-                        logger.warning(f"User not found with username: {identifier}")
-                        return SetReferrer(
-                            success=False,
-                            error=f"No se encontró ningún usuario con el username @{identifier}"
-                        )
-                
-                # Prevent self-referral
-                if referrer.id == user.id:
+            # Always remove @ if present and normalize spaces
+            identifier = identifier.lstrip('@').strip()
+            referral_type = 'friend'
+
+            # Determine whether identifier is phone or username
+            is_phone = re.fullmatch(r'^\+?\d{10,15}$', identifier.replace(' ', '')) is not None
+
+            referrer_user = None
+            referrer_identifier = identifier
+
+            if is_phone:
+                clean_phone = '+' + ''.join(filter(str.isdigit, identifier))
+                normalized = normalize_any_phone(clean_phone)
+                if not normalized:
                     return SetReferrer(
                         success=False,
-                        error="No puedes ser tu propio referidor."
+                        error="Número de teléfono inválido."
                     )
-                
-                referrer_username = referrer.username
+                referrer_user = User.objects.filter(phone_key=normalized).first()
+                if not referrer_user:
+                    return SetReferrer(
+                        success=False,
+                        error=f"No se encontró ningún usuario con el número {clean_phone}."
+                    )
+                referrer_identifier = referrer_user.username or clean_phone
             else:
-                # Influencer (TikTok username)
-                # Validate TikTok username format (letters, numbers, underscores, periods, 2-24 chars)
-                if not re.match(r'^[a-zA-Z0-9_.]{2,24}$', identifier):
+                if not re.match(r'^[a-zA-Z0-9_]{3,20}$', identifier):
                     return SetReferrer(
                         success=False,
-                        error="Username de TikTok inválido. Debe tener 2-24 caracteres (letras, números, _, .)"
+                        error="Nombre de usuario inválido. Usa solo letras, números o guión bajo (3-20 caracteres)."
                     )
-                
-                # For influencers, we don't validate if they exist in our system
-                # They might not have a Confío account yet
-                referrer_username = identifier
-            
+                referrer_user = User.objects.filter(username__iexact=identifier).first()
+                if not referrer_user:
+                    return SetReferrer(
+                        success=False,
+                        error=f"No se encontró ningún usuario con el username @{identifier}"
+                    )
+                referrer_identifier = referrer_user.username
+
+            if referrer_user and referrer_user.id == user.id:
+                return SetReferrer(success=False, error="No puedes ser tu propio referidor.")
+
             # Create the referral record
             with db_transaction.atomic():
-                referral = InfluencerReferral.objects.create(
+                referral = UserReferral.objects.create(
                     referred_user=user,
-                    referrer_identifier=referrer_username,
-                    influencer_user=referrer if referral_type == 'friend' else None,
+                    referrer_identifier=referrer_identifier,
+                    referrer_user=referrer_user,
                     status='pending',
                     attribution_data={
-                        'referral_type': referral_type,
-                        'identifier_used': identifier,
+                        'referral_type': 'friend',
+                        'identifier_used': referrer_identifier,
                         'registered_at': timezone.now().isoformat(),
                     }
                 )
@@ -150,21 +100,10 @@ class SetReferrer(graphene.Mutation):
                 # Note: Rewards will be given when first transaction is completed
                 # This is handled by transaction signals
                 
-                message = (
-                    f"¡Referidor registrado! Cuando completes tu primera transacción, "
-                    f"ambos recibirán 4 CONFIO."
-                )
-                
-                if referral_type == 'influencer':
-                    message = (
-                        f"¡Seguidor de @{referrer_username} registrado! "
-                        f"Completa tu primera transacción para que ambos reciban 4 CONFIO."
-                    )
-                
                 return SetReferrer(
                     success=True,
-                    referral_type=referral_type,
-                    message=message
+                    referral_type='friend',
+                    message="¡Referidor registrado! Completa tu primera operación válida y ambos recibirán el equivalente a US$5 en $CONFIO."
                 )
                 
         except Exception as e:
@@ -178,10 +117,9 @@ class SetReferrer(graphene.Mutation):
 
 
 class CheckReferralStatus(graphene.Mutation):
-    """Check if user can still set a referrer"""
+    """Returns the registered referrer, if any."""
     
     can_set_referrer = graphene.Boolean()
-    time_remaining_hours = graphene.Int()
     existing_referrer = graphene.String()
     
     @classmethod
@@ -190,26 +128,10 @@ class CheckReferralStatus(graphene.Mutation):
         if not (user and getattr(user, 'is_authenticated', False)):
             return CheckReferralStatus(can_set_referrer=False)
         
-        # Check existing referral
-        existing = InfluencerReferral.objects.filter(referred_user=user).first()
+        existing = UserReferral.objects.filter(referred_user=user, deleted_at__isnull=True).first()
         if existing:
             return CheckReferralStatus(
                 can_set_referrer=False,
                 existing_referrer=existing.referrer_identifier
             )
-        
-        # Check time limit
-        from django.utils import timezone
-        from datetime import timedelta
-        
-        signup_deadline = user.created_at + timedelta(hours=48)
-        if timezone.now() > signup_deadline:
-            return CheckReferralStatus(can_set_referrer=False, time_remaining_hours=0)
-        
-        time_remaining = signup_deadline - timezone.now()
-        hours_remaining = int(time_remaining.total_seconds() / 3600)
-        
-        return CheckReferralStatus(
-            can_set_referrer=True,
-            time_remaining_hours=hours_remaining
-        )
+        return CheckReferralStatus(can_set_referrer=True)

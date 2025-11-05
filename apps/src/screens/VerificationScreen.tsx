@@ -7,7 +7,7 @@ import { RootStackNavigationProp } from '../types/navigation';
 import Icon from 'react-native-vector-icons/Feather';
 import { Header } from '../navigation/Header';
 import { useMutation, useQuery, useApolloClient } from '@apollo/client';
-import { REQUEST_IDENTITY_UPLOAD, SUBMIT_IDENTITY_VERIFICATION_S3, REQUEST_PREMIUM_UPGRADE } from '../apollo/mutations';
+import { REQUEST_IDENTITY_UPLOAD, SUBMIT_IDENTITY_VERIFICATION_S3 } from '../apollo/mutations';
 // Gallery access now uses Android Photo Picker via a small native module
 import { pickImageUri } from '../native/MediaPicker';
 import { uploadFileToPresigned, uploadFileToPresignedForm } from '../services/uploadService';
@@ -66,7 +66,6 @@ const VerificationScreen = () => {
   const [verifiedDob, setVerifiedDob] = useState<string>('');
 
   const [requestIdentityUpload] = useMutation(REQUEST_IDENTITY_UPLOAD);
-  const [requestPremiumUpgrade] = useMutation(REQUEST_PREMIUM_UPGRADE);
   const [submitIdentityVerificationS3, { loading: submitting } ] = useMutation(SUBMIT_IDENTITY_VERIFICATION_S3);
   const backDevice = useCameraDevice('back');
   const frontDevice = useCameraDevice('front');
@@ -78,7 +77,6 @@ const VerificationScreen = () => {
   const [previewPurpose, setPreviewPurpose] = useState<'front'|'back'|'selfie'|'payout'|'business'>('front');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [requestingPremium, setRequestingPremium] = useState(false);
   const apolloClient = useApolloClient();
   const normalizeStatus = (s?: any): 'unverified'|'pending'|'verified'|'rejected' => {
     const v = (s ?? '').toString().trim().toLowerCase();
@@ -186,70 +184,33 @@ const VerificationScreen = () => {
     }
   };
 
-  const handleRequestPremium = async () => {
-    try {
-      setRequestingPremium(true);
-      const { data } = await requestPremiumUpgrade({ variables: { reason: 'User requested Trader Premium' } });
-      const res = data?.requestPremiumUpgrade;
-      if (!res?.success) {
-        console.warn('[Verification] Premium request failed:', res?.error);
-        Alert.alert('Solicitud fallida', res?.error || 'No se pudo solicitar Premium.');
-      } else {
-        console.log('[Verification] Premium upgrade requested. Level:', res.verificationLevel);
-        Alert.alert('Solicitud enviada', 'Revisaremos tu solicitud de Trader Premium.');
-      }
-    } catch (e: any) {
-      console.error('[Verification] Premium request error:', e?.message || e);
-      Alert.alert('Error', 'Ocurrió un error al solicitar Premium.');
-    } finally {
-      setRequestingPremium(false);
-    }
-  };
-
   const verificationLevels: VerificationLevel[] = [
     {
       level: 0,
-      title: "Usuario Básico",
-      subtitle: "Solo teléfono verificado",
+      title: "Cuenta Básica",
+      subtitle: "Teléfono confirmado",
       features: [
-        "Enviar y recibir sin límites",
-        "Pagar sin límites",
-        "Comprar P2P sin límites",
-        "Ideal para uso diario (no traders)"
+        "Envíos a billeteras externas: hasta 10 CONFIO por día",
+        "Límite semanal acumulado: 50 CONFIO",
+        "Recibe recompensas dentro de Confío sin restricciones"
       ],
       color: colors.neutralDark,
-      textColor: '#4B5563', // gray-600
-      icon: "user-check"
+      textColor: '#374151',
+      icon: "unlock"
     },
     {
       level: 1,
-      title: "Trader Verificado",
-      subtitle: "Identidad confirmada",
+      title: "Verificación de identidad",
+      subtitle: "Desbloquea retiros mayores",
       features: [
-        "Enviar hasta US$10,000/día",
-        "Recibir sin límites",
-        "Publicar ofertas P2P hasta US$10,000/día",
-        "Insignia de confianza y prioridad"
+        "Solicitada si recibes más de 100 CONFIO en recompensas",
+        "Retiros únicos mayores a 500 CONFIO requieren revisión manual",
+        "Protege tu cuenta con validaciones adicionales"
       ],
       color: colors.primaryLight,
       textColor: colors.primaryText,
       icon: "shield",
-      required: "Para publicar ofertas P2P o +US$10,000/mes volumen"
-    },
-    {
-      level: 2,
-      title: "Trader Premium",
-      subtitle: "Verificación avanzada + historial",
-      features: [
-        "Enviar y ofertas P2P sin límites",
-        "Recibir sin límites",
-        "Herramientas avanzadas de trading",
-        "Soporte prioritario y funciones beta"
-      ],
-      color: colors.secondary,
-      textColor: "white",
-      icon: "star",
-      required: "Desbloqueado tras 30 días + US$25,000 volumen + buenas calificaciones"
+      required: "Sube tu documento oficial para habilitar retiros grandes de CONFIO"
     }
   ];
 
@@ -341,9 +302,7 @@ const VerificationScreen = () => {
             <Icon 
               name={levelInfo.icon} 
               size={24} 
-              color={levelInfo.level === 0 ? '#4B5563' : 
-                     levelInfo.level === 1 ? colors.primaryText :
-                     isActive ? 'white' : colors.secondaryText} 
+              color={isActive ? levelInfo.textColor : '#6B7280'} 
             />
             <View style={styles.levelTitleText}>
               <Text style={[styles.levelTitle, { color: isActive ? levelInfo.textColor : '#1F2937' }]}>
@@ -372,9 +331,7 @@ const VerificationScreen = () => {
               <Icon 
                 name="check-circle" 
                 size={14} 
-                color={levelInfo.level === 0 ? '#4B5563' : 
-                       levelInfo.level === 1 ? colors.primaryText :
-                       isActive ? 'white' : colors.secondaryText} 
+                color={isActive ? levelInfo.textColor : '#6B7280'} 
               />
               <Text style={[styles.featureText, { color: isActive ? levelInfo.textColor : '#4B5563' }]}>
                 {feature}
@@ -383,38 +340,22 @@ const VerificationScreen = () => {
           ))}
         </View>
 
-        {canUpgrade && (
-          levelInfo.level === 2 ? (
-            <TouchableOpacity
-              style={[
-                styles.verifyButton,
-                {
-                  backgroundColor: ((isBusinessAccount ? isBusinessVerified : (verificationStatus === 'verified')) ? colors.secondary : '#D1D5DB'),
-                  opacity: requestingPremium ? 0.7 : 1,
-                }
-              ]}
-              disabled={requestingPremium || !(isBusinessAccount ? isBusinessVerified : (verificationStatus === 'verified'))}
-              onPress={handleRequestPremium}
-            >
-              <Text style={styles.verifyButtonText}>{requestingPremium ? 'Solicitando…' : 'Solicitar Premium'}</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity 
-              style={[styles.verifyButton, { backgroundColor: (
-                isBusinessAccount
-                  ? ((businessVerificationStatusEffective === 'pending' || isBusinessVerified) ? '#D1D5DB' : colors.primary)
-                  : ((verificationStatus === 'pending' || verificationStatus === 'verified') ? '#D1D5DB' : colors.primary)
-              ) }]}
-              disabled={isBusinessAccount ? (businessVerificationStatusEffective === 'pending' || isBusinessVerified) : (verificationStatus === 'pending' || verificationStatus === 'verified')}
-              onPress={() => setShowUploadFlow(true)}
-            >
-              <Text style={styles.verifyButtonText}>
-                {isBusinessAccount
-                  ? (isBusinessVerified ? 'Verificado' : (businessVerificationStatusEffective === 'pending' ? 'En revisión' : 'Verificar Ahora'))
-                  : (verificationStatus === 'pending' ? 'En revisión' : verificationStatus === 'verified' ? 'Verificado' : 'Verificar Ahora')}
-              </Text>
-            </TouchableOpacity>
-          )
+        {canUpgrade && levelInfo.level === 1 && (
+          <TouchableOpacity 
+            style={[styles.verifyButton, { backgroundColor: (
+              isBusinessAccount
+                ? ((businessVerificationStatusEffective === 'pending' || isBusinessVerified) ? '#D1D5DB' : colors.primary)
+                : ((verificationStatus === 'pending' || verificationStatus === 'verified') ? '#D1D5DB' : colors.primary)
+            ) }]}
+            disabled={isBusinessAccount ? (businessVerificationStatusEffective === 'pending' || isBusinessVerified) : (verificationStatus === 'pending' || verificationStatus === 'verified')}
+            onPress={() => setShowUploadFlow(true)}
+          >
+            <Text style={styles.verifyButtonText}>
+              {isBusinessAccount
+                ? (isBusinessVerified ? 'Verificado' : (businessVerificationStatusEffective === 'pending' ? 'En revisión' : 'Verificar ahora'))
+                : (verificationStatus === 'pending' ? 'En revisión' : verificationStatus === 'verified' ? 'Verificado' : 'Verificar ahora')}
+            </Text>
+          </TouchableOpacity>
         )}
         
         {levelInfo.level > currentLevel + 1 && (
@@ -876,6 +817,8 @@ const VerificationScreen = () => {
     );
   }
 
+  const safeLevelIndex = Math.min(currentLevel, verificationLevels.length - 1);
+
   return (
     <View style={styles.container}>
       <Header 
@@ -891,11 +834,11 @@ const VerificationScreen = () => {
             <View style={styles.statusHeader}>
               <View>
                 <Text style={styles.statusTitle}>Tu nivel actual</Text>
-                <Text style={styles.statusSubtitle}>{verificationLevels[currentLevel].title}</Text>
+                <Text style={styles.statusSubtitle}>{verificationLevels[safeLevelIndex].title}</Text>
               </View>
-              <View style={[styles.levelBadge, { backgroundColor: verificationLevels[currentLevel].color }]}>
-                <Text style={[styles.levelBadgeText, { color: verificationLevels[currentLevel].textColor }]}>
-                  Nivel {currentLevel}
+              <View style={[styles.levelBadge, { backgroundColor: verificationLevels[safeLevelIndex].color }]}>
+                <Text style={[styles.levelBadgeText, { color: verificationLevels[safeLevelIndex].textColor }]}>
+                  {safeLevelIndex === 0 ? 'Cuenta básica' : 'Verificado'}
                 </Text>
               </View>
             </View>
@@ -903,15 +846,35 @@ const VerificationScreen = () => {
 
           {/* Benefits Info */}
           <View style={styles.benefitsBox}>
-            <Icon name="trending-up" size={20} color={colors.info} style={styles.benefitsIcon} />
-            <View>
-              <Text style={styles.benefitsTitle}>¿Por qué verificarse?</Text>
-              <Text style={styles.benefitsText}>
-                La verificación solo se requiere para publicar ofertas P2P o volúmenes altos
-              </Text>
-              <Text style={styles.benefitsTip}>
-                💡 Los usuarios básicos pueden usar todas las funciones principales sin verificación
-              </Text>
+            <View style={styles.benefitsHeader}>
+              <Icon name="trending-up" size={20} color={colors.info} />
+              <Text style={styles.benefitsTitle}>Retira tus recompensas con seguridad</Text>
+            </View>
+            <View style={styles.benefitsList}>
+              <View style={[styles.benefitsItem, styles.benefitsItemSpacing]}>
+                <Text style={styles.benefitsBullet}>•</Text>
+                <Text style={styles.benefitsText}>
+                  Las cuentas básicas pueden enviar hasta 10 CONFIO (recompensas de referidos) por día y 50 por semana a su billetera personal.
+                </Text>
+              </View>
+              <View style={[styles.benefitsItem, styles.benefitsItemSpacing]}>
+                <Text style={styles.benefitsBullet}>•</Text>
+                <Text style={styles.benefitsText}>
+                  Cuando acumulas más de 100 CONFIO provenientes de referidos activamos verificaciones adicionales de teléfono y dispositivo para proteger tu cuenta.
+                </Text>
+              </View>
+              <View style={styles.benefitsItem}>
+                <Text style={styles.benefitsBullet}>•</Text>
+                <Text style={styles.benefitsText}>
+                  Retiros únicos mayores a 500 CONFIO requieren verificación completa (documento oficial) y revisión manual del equipo de cumplimiento.
+                </Text>
+              </View>
+              <View style={styles.benefitsItem}>
+                <Text style={styles.benefitsBullet}>•</Text>
+                <Text style={styles.benefitsText}>
+                  No hay límites ni verificaciones extra para retirar cUSD o USDC: puedes transferirlos libremente desde cualquier nivel.
+                </Text>
+              </View>
             </View>
           </View>
 
@@ -926,8 +889,8 @@ const VerificationScreen = () => {
             <View>
               <Text style={styles.footerTitle}>Tu privacidad está protegida</Text>
               <Text style={styles.footerText}>
-                Solo procesamos manualmente las verificaciones de usuarios que publican ofertas P2P. 
-                Los usuarios regulares no necesitan verificación adicional.
+                Solo solicitamos documentos cuando tus recompensas superan los límites automáticos o pides retiros grandes.
+                Los datos se almacenan cifrados y el equipo de cumplimiento es el único con acceso.
               </Text>
             </View>
           </View>
@@ -1005,29 +968,44 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#BFDBFE', // blue-200
     borderRadius: 12,
-    padding: 16,
+    padding: 18,
     marginBottom: 24,
-    flexDirection: 'row',
   },
-  benefitsIcon: {
-    marginRight: 12,
-    marginTop: 2,
+  benefitsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
   },
   benefitsTitle: {
+    flex: 1,
     fontSize: 16,
     fontWeight: '600',
     color: '#1E40AF', // blue-800
-    marginBottom: 4,
+    marginLeft: 12,
+    lineHeight: 22,
+  },
+  benefitsList: {
+    marginTop: 4,
+  },
+  benefitsItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  benefitsItemSpacing: {
+    marginBottom: 10,
+  },
+  benefitsBullet: {
+    fontSize: 18,
+    lineHeight: 22,
+    color: '#2563EB', // blue-600
+    marginTop: -1,
+    marginRight: 10,
   },
   benefitsText: {
-    fontSize: 14,
-    color: '#1E40AF', // blue-700
-    marginBottom: 8,
-  },
-  benefitsTip: {
-    fontSize: 12,
-    color: '#2563EB', // blue-600
-    fontWeight: '500',
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#1E3A8A', // blue-900
   },
   levelsContainer: {
     gap: 16,

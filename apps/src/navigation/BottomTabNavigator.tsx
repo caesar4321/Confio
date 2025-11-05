@@ -16,6 +16,7 @@ import { Header } from './Header';
 import { useHeader } from '../contexts/HeaderContext';
 import { useAccount } from '../contexts/AccountContext';
 import { Text } from 'react-native';
+import { useCountry } from '../contexts/CountryContext';
 
 // Single navigator instance
 const Tabs = createBottomTabNavigator<BottomTabParamList>();
@@ -26,6 +27,7 @@ export const BottomTabNavigator = () => {
   const navigation = useNavigation<TabNavigatorNavigationProp>();
   const { unreadNotifications, currentAccountAvatar, profileMenu } = useHeader();
   const { activeAccount, isLoading: accountsLoading } = useAccount();
+  const { userCountry } = useCountry();
 
   // 🔥 Fix: Normalize the account type to lowercase for comparison
   const accountType = (activeAccount?.type || 'personal').toLowerCase();
@@ -130,6 +132,14 @@ export const BottomTabNavigator = () => {
       currentAccountAvatar="U"
     />
   ), [navigation]);
+
+  const normalizedCountryIso = useMemo(() => {
+    return userCountry?.[2] || null;
+  }, [userCountry]);
+
+  const isP2PEnabled = useMemo(() => {
+    return Platform.OS === 'android' && normalizedCountryIso === 'VE';
+  }, [normalizedCountryIso]);
 
   const ProfileHeader = useCallback(() => (
     <Header
@@ -246,12 +256,12 @@ export const BottomTabNavigator = () => {
       )}
         <Tabs.Screen 
           name="Exchange" 
-          component={Platform.OS === 'ios' ? (DiscoverScreen as any) : (ExchangeScreen as any)}
+          component={isP2PEnabled ? (ExchangeScreen as any) : (DiscoverScreen as any)}
           options={{
-            header: () => (Platform.OS === 'ios' ? <DiscoverHeader /> : <ExchangeHeader />),
-            tabBarLabel: Platform.OS === 'ios' ? 'Descubrir' : 'Intercambio',
+            header: () => (isP2PEnabled ? <ExchangeHeader /> : <DiscoverHeader />),
+            tabBarLabel: isP2PEnabled ? 'Intercambio' : 'Descubrir',
             tabBarIcon: ({ color, size }: any) => (
-              <Icon name={Platform.OS === 'ios' ? 'compass' : 'repeat'} size={size} color={color} />
+              <Icon name={isP2PEnabled ? 'repeat' : 'compass'} size={size} color={color} />
             ),
           }}
         />

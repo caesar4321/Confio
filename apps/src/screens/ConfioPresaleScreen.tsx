@@ -224,7 +224,7 @@ export const ConfioPresaleScreen = () => {
                 <View style={styles.benefitItem}>
                   <Icon name="unlock" size={24} color={colors.secondary} />
                   <View style={styles.benefitContent}>
-                    <Text style={styles.benefitTitle}>1. Toca “Reclamar mis $CONFIO”</Text>
+                    <Text style={styles.benefitTitle}>1. Toca "Reclamar mis $CONFIO"</Text>
                     <Text style={styles.benefitDescription}>Te guiamos con un paso rápido y seguro.</Text>
                   </View>
                 </View>

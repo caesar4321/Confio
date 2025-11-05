@@ -222,13 +222,13 @@ export const ConfioTokenInfoScreen = () => {
         <View style={styles.ctaSection}>
           <Text style={styles.ctaTitle}>¿Listo para ser parte del cambio?</Text>
           <Text style={styles.ctaSubtitle}>
-            Gana más $CONFIO completando logros y ayudando a crecer la comunidad
+            Gana más $CONFIO invitando amigos y guiándolos en su primera operación
           </Text>
           <TouchableOpacity 
             style={styles.ctaButton}
             onPress={() => navigation.navigate('Achievements')}
           >
-            <Text style={styles.ctaButtonText}>Ver Mis Logros</Text>
+            <Text style={styles.ctaButtonText}>Ver programa de referidos</Text>
             <Icon name="arrow-right" size={20} color="#fff" />
           </TouchableOpacity>
         </View>

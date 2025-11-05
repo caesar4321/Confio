@@ -6,9 +6,10 @@ from .models import (
 )
 from security.models import IdentityVerification
 from achievements.models import (
-    AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare,
+    AchievementType, UserAchievement, UserReferral, TikTokViralShare,
     ConfioRewardBalance, ConfioRewardTransaction, InfluencerAmbassador, AmbassadorActivity
 )
+InfluencerReferral = UserReferral
 from django.db.models import Sum, Q
 from decimal import Decimal
 from .country_codes import COUNTRY_CODES
@@ -372,12 +373,17 @@ class UserAchievementType(DjangoObjectType):
 
 
 class InfluencerReferralType(DjangoObjectType):
+	influencer_user = graphene.Field(lambda: UserType)
+
 	class Meta:
 		model = InfluencerReferral
-		fields = ('id', 'referred_user', 'referrer_identifier', 'influencer_user', 'status',
+		fields = ('id', 'referred_user', 'referrer_identifier', 'referrer_user', 'status',
 				 'first_transaction_at', 'total_transaction_volume', 'referrer_confio_awarded',
 				 'referee_confio_awarded', 'reward_claimed_at', 'attribution_data',
 				 'created_at', 'updated_at')
+
+	def resolve_influencer_user(self, info):
+		return getattr(self, 'referrer_user', None)
 
 
 class TikTokViralShareType(DjangoObjectType):

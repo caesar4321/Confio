@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform, Linking, Image, Share, Alert, Clipboard } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
 import { useAuth } from '../contexts/AuthContext';
 import { useAccount } from '../contexts/AccountContext';
@@ -9,8 +9,7 @@ import { RootStackParamList, MainStackParamList } from '../types/navigation';
 import { getCountryByIso } from '../utils/countries';
 import { usePushNotificationPrompt } from '../hooks/usePushNotificationPrompt';
 import { PushNotificationModal } from '../components/PushNotificationModal';
-import { useQuery } from '@apollo/client';
-import { GET_USER_ACHIEVEMENTS, GET_ACHIEVEMENT_TYPES } from '../apollo/queries';
+import { ReferralInputModal } from '../components/ReferralInputModal';
 
 // Utility function to format phone number with country code
 const formatPhoneNumber = (phoneNumber?: string, phoneCountry?: string): string => {
@@ -51,17 +50,67 @@ export const ProfileScreen = () => {
   const navigation = useNavigation<ProfileScreenNavigationProp>();
   const { showModal, handleAllow, handleDeny, checkAndShowPrompt, needsSettings } = usePushNotificationPrompt();
   const [hasCheckedThisFocus, setHasCheckedThisFocus] = React.useState(false);
-  
-  // Fetch real achievements
-  const { data: achievementsData, loading: achievementsLoading } = useQuery(GET_USER_ACHIEVEMENTS, {
-    fetchPolicy: 'cache-and-network',
-  });
-  
-  // Fetch all available achievement types to get the correct total count
-  const { data: achievementTypesData, loading: achievementTypesLoading } = useQuery(GET_ACHIEVEMENT_TYPES, {
-    fetchPolicy: 'cache-and-network',
-  });
+  const rawUsername = userProfile?.username || '';
+  const username = rawUsername ? `@${rawUsername}` : '';
+  const needsFriendlyUsername = React.useMemo(() => {
+    if (!rawUsername) return true;
+    if (rawUsername.startsWith('user_')) return true;
+    // Treat long alphanumeric handles without separators as auto-generated
+    if (/^[a-z0-9]{10,}$/.test(rawUsername)) return true;
+    return false;
+  }, [rawUsername]);
+  const [showReferralModal, setShowReferralModal] = React.useState(false);
+  const referralShareMessage = React.useMemo(() => {
+    const safeUsername = username || '@tuUsuario';
+    return [
+      'Únete a Confío y gana US$5 en $CONFIO conmigo.',
+      '',
+      '1. Descarga Confío: https://confio.lat/wa',
+      `2. En el registro, escribe mi usuario ${safeUsername} en "¿Quién te invitó?"`,
+      '3. Completa tu primera operación válida:',
+      '   • Recarga de dólares digitales (US$20+)',
+      '   • Depósito de USDC + conversión a cUSD (US$20+)',
+      '   • Enviar, pagar o trade P2P',
+      '',
+      'Cuando lo hagas, ambos recibimos el equivalente a US$5 en $CONFIO.',
+    ].join('\n');
+  }, [username]);
 
+  const handleShareReferral = React.useCallback(async () => {
+    const encodedMessage = encodeURIComponent(referralShareMessage);
+    const whatsappSchemeUrl = `whatsapp://send?text=${encodedMessage}`;
+    const whatsappWebUrl = `https://wa.me/?text=${encodedMessage}`;
+    try {
+      const canUseScheme = await Linking.canOpenURL(whatsappSchemeUrl);
+      if (canUseScheme) {
+        await Linking.openURL(whatsappSchemeUrl);
+      } else {
+        await Linking.openURL(whatsappWebUrl);
+      }
+    } catch (error) {
+      console.error('Error al abrir WhatsApp:', error);
+      try {
+        await Share.share({
+          message: referralShareMessage,
+          title: 'Invitación Confío',
+        });
+      } catch (shareError) {
+        console.error('Error al usar el menú compartir:', shareError);
+      }
+    }
+  }, [referralShareMessage]);
+
+  const handleCopyUsername = React.useCallback(() => {
+    if (!username) {
+      Alert.alert(
+        'Configura tu usuario',
+        'Edita tu perfil y crea un @usuario para poder invitar amigos y ganar US$5.'
+      );
+      return;
+    }
+    Clipboard.setString(username);
+    Alert.alert('Usuario copiado', 'Comparte tu @usuario por WhatsApp o redes sociales.');
+  }, [username]);
   // Debug active account changes to ensure real-time updates
   React.useEffect(() => {
     console.log('ProfileScreen - activeAccount changed:', {
@@ -136,31 +185,6 @@ export const ProfileScreen = () => {
       console.error(`Error opening ${platform} link:`, error);
     }
   };
-
-  // Get real achievements from query
-  const userAchievements = achievementsData?.userAchievements || [];
-  const achievementTypes = achievementTypesData?.achievementTypes || [];
-  
-  // Debug achievements data (can be removed after testing)
-  React.useEffect(() => {
-    console.log('ProfileScreen Debug:');
-    console.log('- achievementsData:', achievementsData);
-    console.log('- userAchievements:', userAchievements);
-    console.log('- achievementTypes:', achievementTypes);
-    console.log('- completedCount:', userAchievements.filter(a => 
-      a.status?.toLowerCase() === 'earned' || a.status?.toLowerCase() === 'claimed'
-    ).length);
-    console.log('- totalAchievements:', achievementTypes.length);
-  }, [achievementsData, userAchievements, achievementTypes, achievementsLoading, achievementTypesLoading]);
-  
-  // Count completed achievements (earned or claimed)
-  // Note: GraphQL returns uppercase statuses like "CLAIMED", "EARNED"
-  const completedCount = userAchievements.filter(a => 
-    a.status?.toLowerCase() === 'earned' || a.status?.toLowerCase() === 'claimed'
-  ).length;
-  
-  // Use the total number of available achievement types (not just user's achievements)
-  const totalAchievements = achievementTypes.length || 0;
 
   // Get display information based on active account
   const getDisplayInfo = () => {
@@ -244,45 +268,90 @@ export const ProfileScreen = () => {
         </View>
       </View>
 
-      {/* Achievements Card - Only show for personal accounts */}
+      {/* Referral Program Card */}
       {activeAccount?.type.toLowerCase() !== 'business' && (
-        <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('Achievements')}>
-          <View style={styles.cardHeader}>
-            <View style={styles.cardTitleRow}>
-              <Icon name="award" size={20} color={colors.primary} />
-              <Text style={styles.cardTitle}>Logros</Text>
+        <View style={styles.referralCard}>
+          <View style={styles.referralHeader}>
+            <View style={styles.referralIconBadge}>
+              <Icon name="gift" size={20} color="#FFFFFF" />
             </View>
-            <View style={styles.achievementProgress}>
-              <Text style={styles.achievementProgressText}>
-                {(achievementsLoading || achievementTypesLoading) ? '...' : `${completedCount}/${totalAchievements}`}
+            <View style={styles.referralHeaderText}>
+              <Text style={styles.referralTitle}>Invita y ganen US$5 en $CONFIO</Text>
+              <Text style={styles.referralSubtitle}>
+                Cuando tu amigo completa su primera operación válida en Confío, ambos reciben el equivalente a US$5 en $CONFIO.
               </Text>
-              <Icon name="chevron-right" size={16} color="#9CA3AF" />
             </View>
           </View>
-          <View style={styles.achievementPreview}>
-            {userAchievements.slice(0, 5).map((achievement, index) => (
-            <View 
-              key={achievement.id || index} 
-              style={[
-                styles.achievementDot,
-                (achievement.status === 'earned' || achievement.status === 'claimed') 
-                  ? styles.achievementDotCompleted 
-                  : styles.achievementDotLocked
-              ]}
-            />
-          ))}
-          {/* Show placeholder dots if we have less than 5 achievements */}
-          {userAchievements.length < 5 && Array.from({ length: 5 - userAchievements.length }).map((_, index) => (
-            <View 
-              key={`placeholder-${index}`} 
-              style={[styles.achievementDot, styles.achievementDotLocked]}
-            />
-          ))}
-          {totalAchievements > 5 && (
-            <Text style={styles.achievementMore}>+{totalAchievements - 5}</Text>
+
+          <View style={styles.referralUsername}>
+            <Text style={styles.referralUsernameLabel}>Tu usuario Confío</Text>
+            <Text style={styles.referralUsernameValue}>{username || 'Configura tu @usuario'}</Text>
+            {needsFriendlyUsername && (
+              <Text style={styles.referralUsernameHint}>
+                Elige un usuario corto y fácil de recordar para que tus amigos lo escriban sin errores.
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.referralActions}>
+            <TouchableOpacity style={styles.referralCopyButton} onPress={handleCopyUsername}>
+              <Icon name="copy" size={16} color="#047857" />
+              <Text style={styles.referralCopyText}>Copiar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.referralShareButton} onPress={handleShareReferral}>
+              <Icon name="share-2" size={16} color="#FFFFFF" />
+              <Text style={styles.referralShareText}>Compartir por WhatsApp</Text>
+            </TouchableOpacity>
+          </View>
+
+          {needsFriendlyUsername && (
+            <TouchableOpacity style={styles.referralUpdateUsername} onPress={() => navigation.navigate('UpdateUsername')}>
+              <Icon name="edit-3" size={16} color="#047857" />
+              <Text style={styles.referralUpdateUsernameText}>Actualizar mi usuario</Text>
+              <Icon name="chevron-right" size={16} color="#047857" />
+            </TouchableOpacity>
           )}
+
+          <View style={styles.referralSteps}>
+            <View style={styles.referralStep}>
+              <Text style={styles.referralStepNumber}>1</Text>
+              <Text style={styles.referralStepText}>Envía tu @usuario a la persona que quieres invitar.</Text>
+            </View>
+            <View style={styles.referralStep}>
+              <Text style={styles.referralStepNumber}>2</Text>
+              <Text style={styles.referralStepText}>
+                Dile que lo escriba cuando la app pregunte "¿Quién te invitó?" durante el registro.
+              </Text>
+            </View>
+            <View style={styles.referralStep}>
+              <Text style={styles.referralStepNumber}>3</Text>
+              <Text style={styles.referralStepText}>
+                Ayúdalo a completar su primera operación válida (recarga, depósito USDC + conversión a cUSD, enviar, pagar o P2P).
+                Al finalizar, Confío acredita US$5 en $CONFIO a cada uno.
+              </Text>
+            </View>
+          </View>
+          <View style={styles.referralCriteria}>
+            <Text style={styles.referralCriteriaTitle}>¿Qué cuenta como primera operación para liberar el bono?</Text>
+            <Text style={styles.referralCriteriaItem}>• Primera recarga de dólares digitales mayor a US$20</Text>
+            <Text style={styles.referralCriteriaItem}>• Primer depósito de USDC convertido a cUSD (≥ US$20)</Text>
+            <Text style={styles.referralCriteriaItem}>• Primer envío dentro de Confío</Text>
+            <Text style={styles.referralCriteriaItem}>• Primer pago a negocio con Confío</Text>
+            <Text style={styles.referralCriteriaItem}>• Primer trade P2P completado</Text>
+            <Text style={styles.referralCriteriaNote}>El bono se acredita en $CONFIO al tipo de cambio equivalente a US$5.</Text>
+          </View>
+
+          <TouchableOpacity style={styles.referralRegisterButton} onPress={() => setShowReferralModal(true)}>
+            <Icon name="user-plus" size={16} color="#047857" />
+            <Text style={styles.referralRegisterButtonText}>Registrar quién te invitó</Text>
+            <Icon name="chevron-right" size={16} color="#047857" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.referralLink} onPress={() => navigation.navigate('Achievements')}>
+            <Text style={styles.referralLinkText}>Ver instrucciones completas</Text>
+            <Icon name="chevron-right" size={16} color="#047857" />
+          </TouchableOpacity>
         </View>
-      </TouchableOpacity>
       )}
 
       {/* Account Management Card */}
@@ -302,9 +371,19 @@ export const ProfileScreen = () => {
             <Text style={styles.cardOptionText}>Verificación</Text>
             <Icon name="chevron-right" size={16} color="#9CA3AF" />
           </TouchableOpacity>
-          
-          {/* Hide payment methods for employees without permission */}
-          {(!activeAccount?.isEmployee || activeAccount?.employeePermissions?.manageBankAccounts) && (
+          {activeAccount?.type.toLowerCase() === 'personal' && (
+            <TouchableOpacity 
+              style={styles.cardOption}
+              onPress={() => navigation.navigate('UpdateUsername')}
+            >
+              <Icon name="edit-3" size={18} color="#6B7280" />
+              <Text style={styles.cardOptionText}>Editar usuario Confío</Text>
+              <Icon name="chevron-right" size={16} color="#9CA3AF" />
+            </TouchableOpacity>
+          )}
+
+          {/* Payment methods menu disabled while P2P rollout is limited to Venezuela */}
+          {false && (!activeAccount?.isEmployee || activeAccount?.employeePermissions?.manageBankAccounts) && (
             <TouchableOpacity 
               style={styles.cardOption}
               onPress={() => navigation.navigate('BankInfo')}
@@ -321,7 +400,7 @@ export const ProfileScreen = () => {
               onPress={() => navigation.navigate('ConfioAddress')}
             >
               <Icon name="at-sign" size={18} color="#6B7280" />
-              <Text style={styles.cardOptionText}>Mi dirección Confío</Text>
+              <Text style={styles.cardOptionText}>Compartir mi usuario</Text>
               <Icon name="chevron-right" size={16} color="#9CA3AF" />
             </TouchableOpacity>
           )}
@@ -441,7 +520,12 @@ export const ProfileScreen = () => {
       <TouchableOpacity style={styles.signOutButton} onPress={signOut}>
         <Text style={styles.signOutText}>Cerrar Sesión</Text>
       </TouchableOpacity>
-    </ScrollView>
+      </ScrollView>
+      <ReferralInputModal
+        visible={showReferralModal}
+        onClose={() => setShowReferralModal(false)}
+        onSuccess={() => setShowReferralModal(false)}
+      />
     
     {/* Push Notification Permission Modal */}
     <PushNotificationModal
@@ -568,36 +652,204 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     marginRight: 8,
   },
-  achievementProgress: {
+  referralCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    padding: 20,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
+  },
+  referralHeader: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 16,
+    marginBottom: 16,
+  },
+  referralIconBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    justifyContent: 'center',
     alignItems: 'center',
+  },
+  referralHeaderText: {
+    flex: 1,
     gap: 4,
   },
-  achievementProgressText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: colors.primary,
+  referralTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
   },
-  achievementPreview: {
+  referralSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 18,
+  },
+  referralUsername: {
+    backgroundColor: '#ECFDF5',
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  referralUsernameLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#047857',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  referralUsernameValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#047857',
+  },
+  referralUsernameHint: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#047857',
+    lineHeight: 18,
+  },
+  referralActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 18,
+  },
+  referralCopyButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#ECFDF5',
+    gap: 8,
+  },
+  referralCopyText: {
+    color: '#047857',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  referralShareButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#047857',
+    gap: 8,
+  },
+  referralShareText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  referralUpdateUsername: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    marginBottom: 18,
   },
-  achievementDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  referralUpdateUsernameText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#047857',
   },
-  achievementDotCompleted: {
-    backgroundColor: colors.primary,
+  referralSteps: {
+    gap: 12,
+    marginBottom: 16,
   },
-  achievementDotLocked: {
-    backgroundColor: '#E5E7EB',
+  referralStep: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
   },
-  achievementMore: {
+  referralStepNumber: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#ECFDF5',
+    textAlign: 'center',
+    lineHeight: 24,
+    fontWeight: '700',
+    fontSize: 13,
+    color: '#047857',
+  },
+  referralStepText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 19,
+  },
+  referralCriteria: {
+    marginTop: 4,
+    marginBottom: 16,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: '#F9FAFB',
+    gap: 4,
+  },
+  referralCriteriaTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 4,
+  },
+  referralCriteriaItem: {
+    fontSize: 13,
+    color: '#6B7280',
+    lineHeight: 18,
+  },
+  referralCriteriaNote: {
+    marginTop: 8,
     fontSize: 12,
-    color: '#9CA3AF',
-    marginLeft: 4,
+    color: '#047857',
+  },
+  referralRegisterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#ECFDF5',
+    marginBottom: 12,
+  },
+  referralRegisterButtonText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#047857',
+  },
+  referralLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  referralLinkText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#047857',
   },
   founderSection: {
     paddingHorizontal: 16,

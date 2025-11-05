@@ -1,106 +1,172 @@
-import React from 'react';
-import { View, Text, StyleSheet, Linking, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import Icon from 'react-native-vector-icons/Feather';
+import { useNavigation } from '@react-navigation/native';
+import { NavigationProp } from '@react-navigation/native';
+import { MainStackParamList } from '../types/navigation';
+
+type MenuItem = {
+  key: string;
+  title: string;
+  description: string;
+  icon: string;
+  action: () => void;
+};
 
 export const DiscoverScreen = () => {
+  const navigation = useNavigation<NavigationProp<MainStackParamList>>();
 
-  // Two primary tutorials
-  const TUTORIALS: Array<{ key: string; title: string; description: string; icon: any; url: string }> = [
-    {
-      key: 'general',
-      title: 'Tutorial general de Confío',
-      description: 'Guía rápida para empezar a usar la app.',
-      icon: 'play-circle',
-      url: 'https://youtu.be/WCpoBZzgMyY?si=fHoDD7updJz_3yo4',
-    },
-    {
-      key: 'earn',
-      title: 'Cómo ganar con Confío',
-      description: 'Aprende a aprovechar Confío para generar ingresos.',
-      icon: 'trending-up',
-      url: 'https://youtu.be/LY-H_N9FVDo',
-    },
-  ];
+  const MENU_ITEMS: MenuItem[] = useMemo(
+    () => [
+      {
+        key: 'topup',
+        title: 'Recarga dólares digitales',
+        description: 'Compra dólares estables en minutos con métodos locales.',
+        icon: 'dollar-sign',
+        action: () => navigation.navigate('BottomTabs' as never, { screen: 'Exchange' } as never),
+      },
+      {
+        key: 'invite',
+        title: 'Invita a tus amigos con tu usuario',
+        description: 'Comparte tu @usuario y gana el equivalente a US$5 en $CONFIO por cada amigo que se una a Confío.',
+        icon: 'user-plus',
+        action: () => navigation.navigate('Achievements' as never),
+      },
+      {
+        key: 'invest',
+        title: 'Invierte en la app Confío',
+        description: 'Explora la preventa y las oportunidades para ser parte del proyecto.',
+        icon: 'trending-up',
+        action: () => navigation.navigate('ConfioPresale' as never),
+      },
+      {
+        key: 'deposit',
+        title: 'Deposita USDC desde un exchange (avanzado)',
+        description: 'Transfiere USDC desde Binance, Coinbase u otros exchanges compatibles.',
+        icon: 'download-cloud',
+        action: () => navigation.navigate('USDCDeposit' as never, { tokenType: 'usdc' } as never),
+
+      },
+    ],
+    [navigation]
+  );
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <Icon name="compass" size={48} color="#8B5CF6" style={{ marginRight: 12 }} />
-        <View>
-          <Text style={styles.title}>Descubrir</Text>
-          <Text style={styles.subtitle}>Aprende a usar Confío paso a paso.</Text>
+      <View style={styles.hero}>
+        <View style={styles.heroIcon}>
+          <Icon name="compass" size={28} color="#047857" />
+        </View>
+        <View style={styles.heroText}>
+          <Text style={styles.heroTitle}>Acciones principales</Text>
+          <Text style={styles.heroSubtitle}>Descubre los pasos esenciales para sacarle jugo a Confío.</Text>
         </View>
       </View>
 
+      <Text style={styles.sectionLabel}>Tus próximos pasos</Text>
       <View style={styles.grid}>
-        {TUTORIALS.map((item: any) => (
-          <TouchableOpacity key={item.key} style={styles.card} onPress={() => Linking.openURL(item.url)} activeOpacity={0.85}>
-            <View style={styles.cardIconWrap}>
-              <Icon name={item.icon} size={22} color="#8B5CF6" />
+        {MENU_ITEMS.map((item) => (
+          <TouchableOpacity
+            key={item.key}
+            style={styles.card}
+            onPress={item.action}
+            activeOpacity={0.85}
+          >
+            <View style={styles.cardContent}>
+              <View style={styles.cardIconWrap}>
+                <Icon name={item.icon} size={22} color="#047857" />
+              </View>
+              <View style={styles.cardTextWrap}>
+                <Text style={styles.cardTitle}>{item.title}</Text>
+                <Text style={styles.cardDesc}>{item.description}</Text>
+              </View>
             </View>
-            <View style={styles.cardTextWrap}>
-              <Text style={styles.cardTitle}>{item.title}</Text>
-              <Text style={styles.cardDesc}>{item.description}</Text>
+            <View style={styles.cardChevron}>
+              <Icon name="chevron-right" size={18} color="#9CA3AF" />
             </View>
-            <Icon name="chevron-right" size={20} color="#9CA3AF" />
           </TouchableOpacity>
         ))}
       </View>
-
-      <TouchableOpacity style={styles.footerCta} onPress={() => Linking.openURL('https://confio.lat')}>
-        <Text style={styles.footerCtaText}>Más en confio.lat</Text>
-        <Icon name="external-link" size={16} color="#8B5CF6" />
-      </TouchableOpacity>
     </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
-  content: { padding: 16, paddingBottom: 32 },
-  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  title: {
-    fontSize: 22,
+  container: { flex: 1, backgroundColor: '#F3F4F6' },
+  content: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 32 },
+  hero: {
+    flexDirection: 'row',
+    backgroundColor: '#ECFDF5',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 24,
+  },
+  heroIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#D1FAE5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  heroText: { flex: 1 },
+  heroTitle: {
+    fontSize: 20,
     fontWeight: '700',
-    color: '#111827',
-    marginBottom: 2,
+    color: '#065F46',
+    marginBottom: 6,
   },
-  subtitle: {
-    fontSize: 16,
+  heroSubtitle: {
+    fontSize: 14,
+    color: '#047857',
+    lineHeight: 20,
+  },
+  sectionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
     color: '#6B7280',
-    marginBottom: 16,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 12,
   },
-  grid: { marginTop: 8 },
+  grid: { },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9FAFB',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
     marginBottom: 12,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 3,
   },
+  cardContent: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   cardIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: '#EEF2FF',
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: '#ECFDF5',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: 16,
   },
   cardTextWrap: { flex: 1 },
-  cardTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  cardDesc: { fontSize: 13, color: '#6B7280', marginTop: 2 },
-  footerCta: {
-    alignSelf: 'center',
-    marginTop: 6,
-    flexDirection: 'row',
+  cardTitle: { fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 4 },
+  cardDesc: { fontSize: 13, color: '#6B7280', lineHeight: 18 },
+  cardChevron: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#F9FAFB',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'center',
+    marginLeft: 12,
   },
-  footerCtaText: { color: '#8B5CF6', fontWeight: '600', marginRight: 6 },
 });
 
 export default DiscoverScreen;

@@ -1,1435 +1,495 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Share, Platform, TextInput, Alert, Linking, Image } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import Icon from 'react-native-vector-icons/Feather';
-import { useNavigation } from '@react-navigation/native';
-import { useAuth } from '../contexts/AuthContext';
-import { useAccount } from '../contexts/AccountContext';
-import { useQuery, useMutation } from '@apollo/client';
+import React, { useMemo, useState } from 'react';
 import {
-  GET_ACHIEVEMENT_TYPES,
-  GET_USER_ACHIEVEMENTS,
-  CLAIM_ACHIEVEMENT_REWARD,
-  SUBMIT_TIKTOK_SHARE,
-  GET_MY_CONFIO_BALANCE,
-  CHECK_REFERRAL_STATUS
-} from '../apollo/queries';
-import { ShareAchievementModal } from '../components/ShareAchievementModal';
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Share,
+  Alert,
+  Clipboard,
+} from 'react-native';
+import Icon from 'react-native-vector-icons/Feather';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { NavigationProp } from '@react-navigation/native';
+import { MainStackParamList } from '../types/navigation';
+import { useAuth } from '../contexts/AuthContext';
 import { ReferralInputModal } from '../components/ReferralInputModal';
-import { PioneroBadgeModal } from '../components/PioneroBadgeModal';
 
 const colors = {
-  primary: '#34d399',
-  primaryLight: '#d1fae5',
-  primaryDark: '#10b981',
-  secondary: '#8b5cf6',
-  secondaryLight: '#e9d5ff',
-  accent: '#3b82f6',
-  neutral: '#f9fafb',
-  neutralDark: '#f3f4f6',
-  dark: '#111827',
-  violet: '#8b5cf6',
-  violetLight: '#ddd6fe',
-  silver: '#C0C0C0',
-  bronze: '#CD7F32',
-  mint: '#3ADBBB',
-  mintLight: '#B8F0E4',
+  background: '#F3F4F6',
+  surface: '#FFFFFF',
+  primary: '#10B981',
+  primaryMuted: '#6EE7B7',
+  primaryDark: '#047857',
+  text: '#111827',
+  textMuted: '#6B7280',
+  divider: '#E5E7EB',
 };
 
-type Achievement = {
-  id: string;
-  name: string;
+type Step = {
+  title: string;
   description: string;
-  iconEmoji?: string;
-  status: 'pending' | 'earned' | 'claimed' | 'expired';
-  earnedAt?: string;
-  claimedAt?: string;
-  progressData?: any;
-  earnedValue?: number;
-  achievementType: {
-    slug: string;
-    name: string;
-    description: string;
-    category: string;
-    iconEmoji?: string;
-    confioReward: number;
-    displayOrder: number;
-  };
 };
 
-type AchievementType = {
-  id: string;
-  slug: string;
-  name: string;
-  description: string;
-  category: string;
-  iconEmoji?: string;
-  confioReward: number;
-  displayOrder: number;
-};
-
-export const AchievementsScreen = () => {
-  const navigation = useNavigation();
+export const AchievementsScreen: React.FC = () => {
+  const navigation = useNavigation<NavigationProp<MainStackParamList>>();
   const { userProfile } = useAuth();
-  const { activeAccount } = useAccount();
+  const rawUsername = userProfile?.username || '';
+  const username = rawUsername ? `@${rawUsername}` : '';
+  const needsFriendlyUsername = useMemo(() => {
+    if (!rawUsername) return true;
+    if (rawUsername.startsWith('user_')) return true;
+    if (/^[a-z0-9]{10,}$/.test(rawUsername)) return true;
+    return false;
+  }, [rawUsername]);
   const [showReferralModal, setShowReferralModal] = useState(false);
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [showPioneroModal, setShowPioneroModal] = useState(false);
-  const [canShowReferralBox, setCanShowReferralBox] = useState(false);
-  const [selectedAchievement, setSelectedAchievement] = useState<{
-    id: string;
-    name: string;
-    description: string;
-    confioReward: number;
-    category: string;
-    slug?: string;
-    status?: string;
-  } | null>(null);
-  
-  // GraphQL queries
-  const { data: achievementTypesData, loading: achievementTypesLoading, error: achievementTypesError } = useQuery(GET_ACHIEVEMENT_TYPES);
-  const { data: userAchievementsData, loading: userAchievementsLoading, error: userAchievementsError, refetch: refetchAchievements } = useQuery(GET_USER_ACHIEVEMENTS);
-  const { data: confioBalanceData, refetch: refetchBalance } = useQuery(GET_MY_CONFIO_BALANCE);
-  
-  // GraphQL mutations
-  const [claimAchievementReward] = useMutation(CLAIM_ACHIEVEMENT_REWARD);
-  const [submitTikTokShare] = useMutation(SUBMIT_TIKTOK_SHARE);
-  const [checkReferralStatus] = useMutation(CHECK_REFERRAL_STATUS);
-  
-  // Process the achievement data
-  const achievementTypes: AchievementType[] = achievementTypesData?.achievementTypes || [];
-  const userAchievements: Achievement[] = userAchievementsData?.userAchievements || [];
-  
-  // Check referral status on mount
-  React.useEffect(() => {
-    checkReferralStatus().then(({ data }) => {
-      if (data?.checkReferralStatus) {
-        setCanShowReferralBox(data.checkReferralStatus.canSetReferrer);
-      }
-    }).catch(err => {
-      console.error('Error checking referral status:', err);
-      // On error, show the box anyway for testing
-      setCanShowReferralBox(true);
-    });
-  }, []);
 
-  // Debug logging
-  React.useEffect(() => {
-    console.log('AchievementsScreen Debug:');
-    console.log('- Achievement Types Loading:', achievementTypesLoading);
-    console.log('- User Achievements Loading:', userAchievementsLoading);
-    console.log('- Achievement Types Error:', achievementTypesError);
-    console.log('- User Achievements Error:', userAchievementsError);
-    console.log('- Achievement Types Count:', achievementTypes?.length || 0);
-    console.log('- User Achievements Count:', userAchievements?.length || 0);
-    console.log('- Achievement Types Data:', achievementTypesData);
-    console.log('- User Achievements Data:', userAchievementsData);
-    console.log('- Achievements Array:', achievements?.length || 0);
-  }, [achievementTypes, userAchievements, achievementTypesLoading, userAchievementsLoading, achievementTypesError, userAchievementsError, achievementTypesData, userAchievementsData, achievements]);
-  
-  // Create a map of user achievements by achievement type slug
-  const userAchievementMap = React.useMemo(() => {
-    const map = new Map();
-    if (userAchievements && Array.isArray(userAchievements)) {
-      userAchievements.forEach(achievement => {
-        if (achievement?.achievementType?.slug) {
-          map.set(achievement.achievementType.slug, achievement);
-        }
-      });
-    }
-    return map;
-  }, [userAchievements]);
-  
-  // Combine achievement types with user progress, fallback to mock data if empty
-  const achievements: Achievement[] = React.useMemo(() => {
-    if (achievementTypes && achievementTypes.length > 0) {
-      return achievementTypes.map(type => {
-        const userAchievement = userAchievementMap.get(type.slug);
-        // Normalize status to lowercase
-        const normalizedStatus = userAchievement?.status?.toLowerCase() || 'pending';
-        return {
-          id: userAchievement?.id || type.id,
-          name: type.name,
-          description: type.description,
-          iconEmoji: type.iconEmoji,
-          status: normalizedStatus,
-          earnedAt: userAchievement?.earnedAt,
-          claimedAt: userAchievement?.claimedAt,
-          progressData: userAchievement?.progressData,
-          earnedValue: userAchievement?.earnedValue,
-          achievementType: type
-        };
-      }).sort((a, b) => a.achievementType.displayOrder - b.achievementType.displayOrder);
-    } else {
-      // Use mock data when GraphQL data is not available
-      return mockAchievements || [];
-    }
-  }, [achievementTypes, userAchievementMap, mockAchievements]);
+  const shareMessage = useMemo(() => {
+    const safeUsername = username || '@tuUsuario';
+    return [
+      'Únete a Confío y gana US$5 en $CONFIO conmigo.',
+      '',
+      '1. Descarga Confío: https://confio.lat/wa',
+      `2. En el registro, escribe mi usuario ${safeUsername} en "¿Quién te invitó?"`,
+      '3. Completa tu primera operación válida:',
+      '   • Recarga de dólares digitales (US$20+)',
+      '   • Depósito de USDC + conversión a cUSD (US$20+)',
+      '   • Enviar, pagar o trade P2P',
+      '',
+      'Cuando lo hagas, ambos recibimos el equivalente a US$5 en $CONFIO.',
+    ].join('\n');
+  }, [username]);
 
-  // Ensure referral-share card is always available: inject a pending "Referido Exitoso" if missing
-  const displayAchievements: Achievement[] = React.useMemo(() => {
-    const list = Array.isArray(achievements) ? [...achievements] : [];
-    const hasReferral = list.some(a => {
-      const slug = a?.achievementType?.slug?.toLowerCase?.();
-      return slug === 'referido_exitoso' || slug === 'successful_referral';
-    });
-    if (!hasReferral) {
-      list.push({
-        id: 'referral-pending',
-        name: 'Referido Exitoso',
-        description: 'Invita amigos y gana 4 CONFIO cuando completen su primera transacción',
-        iconEmoji: '🤝',
-        status: 'pending',
-        achievementType: {
-          slug: 'referido_exitoso',
-          name: 'Referido Exitoso',
-          description: 'Gana 4 CONFIO por cada referido exitoso',
-          category: 'ambassador',
-          confioReward: 4,
-          displayOrder: 1000,
-        }
-      } as Achievement);
-    }
-    return list;
-  }, [achievements]);
+  const steps: Step[] = useMemo(
+    () => [
+      {
+        title: 'Comparte tu usuario Confío',
+        description: 'Envía tu @usuario a amigos, familia o clientes para que te mencionen al registrarse.',
+      },
+      {
+        title: 'Tu amigo ingresa tu @usuario',
+        description: 'Durante el onboarding verán "¿Quién te invitó?". Ahí deben escribir tu @usuario tal cual.',
+      },
+      {
+        title: 'Primera operación completada',
+        description:
+          'Tu invitado debe completar una operación válida: recarga (US$20+), depósito USDC + conversión a cUSD (US$20+), enviar, pagar o P2P.',
+      },
+      {
+        title: 'US$5 en $CONFIO para ambos',
+        description: 'Confío acreditará el equivalente a US$5 en $CONFIO a cada uno automáticamente. Puedes repetirlo todas las veces que quieras.',
+      },
+    ],
+    []
+  );
 
-  const mockAchievements = React.useMemo<Achievement[]>(() => [
-    // Fallback mock data when GraphQL is loading or unavailable
-    {
-      id: 'mock-welcome',
-      name: 'Pionero Beta',
-      description: 'Únete a Confío durante la fase beta - Exclusivo para los primeros usuarios',
-      iconEmoji: '🚀',
-      status: 'earned',
-      earnedAt: new Date().toISOString(),
-      progressData: null,
-      earnedValue: null,
-      achievementType: {
-        slug: 'welcome_signup',
-        name: 'Pionero Beta',
-        description: 'Únete a Confío durante la fase beta - Exclusivo para los primeros usuarios',
-        category: 'onboarding',
-        iconEmoji: '🚀',
-        confioReward: 4,
-        displayOrder: 1
-      }
-    },
-    {
-      id: 'mock-verification',
-      name: 'Cuenta Verificada',
-      description: 'Completa la verificación de identidad',
-      iconEmoji: '🛡️',
-      status: 'pending',
-      earnedAt: null,
-      progressData: { current: 0, target: 1 },
-      earnedValue: null,
-      achievementType: {
-        slug: 'identity_verified',
-        name: 'Cuenta Verificada',
-        description: 'Completa la verificación de identidad',
-        category: 'verification',
-        iconEmoji: '🛡️',
-        confioReward: 20,
-        displayOrder: 2
-      }
-    },
-    {
-      id: 'mock-first-trade',
-      name: 'Trader Novato',
-      description: 'Completa tu primer intercambio P2P exitoso',
-      iconEmoji: '🔄',
-      status: 'pending',
-      earnedAt: null,
-      progressData: { current: 0, target: 1 },
-      earnedValue: null,
-      achievementType: {
-        slug: 'first_p2p_trade',
-        name: 'Trader Novato',
-        description: 'Completa tu primer intercambio P2P exitoso',
-        category: 'trading',
-        iconEmoji: '🔄',
-        confioReward: 20,
-        displayOrder: 20
-      }
-    },
-    {
-      id: 'mock-nano-influencer',
-      name: 'Nano-Influencer',
-      description: 'Trae entre 1-10 referidos que completen su registro',
-      iconEmoji: '🌱',
-      status: 'pending',
-      earnedAt: null,
-      progressData: { current: 0, target: 1 },
-      earnedValue: null,
-      achievementType: {
-        slug: 'nano_influencer',
-        name: 'Nano-Influencer',
-        description: 'Trae entre 1-10 referidos que completen su registro',
-        category: 'ambassador',
-        iconEmoji: '🌱',
-        confioReward: 4,
-        displayOrder: 10
-      }
-    },
-    {
-      id: 'mock-primera-viral',
-      name: 'Primera Viral',
-      description: 'Tu TikTok sobre Confío alcanzó 1,000 visualizaciones',
-      iconEmoji: '🎬',
-      status: 'pending',
-      earnedAt: null,
-      progressData: { current: 0, target: 1000 },
-      earnedValue: null,
-      achievementType: {
-        slug: 'primera_viral',
-        name: 'Primera Viral',
-        description: 'Tu TikTok sobre Confío alcanzó 1,000 visualizaciones',
-        category: 'social',
-        iconEmoji: '🎬',
-        confioReward: 50,
-        displayOrder: 30
-      }
-    }
-  ], []);
-
-  const handleClaimReward = async (achievement: Achievement) => {
-    if (achievement.status?.toLowerCase() !== 'earned') return;
-    
+  const handleShare = async () => {
+    const encodedMessage = encodeURIComponent(shareMessage);
+    const whatsappSchemeUrl = `whatsapp://send?text=${encodedMessage}`;
+    const whatsappWebUrl = `https://wa.me/?text=${encodedMessage}`;
     try {
-      const result = await claimAchievementReward({
-        variables: { achievementId: achievement.id }
-      });
-      
-      if (result.data?.claimAchievementReward?.success) {
-        Alert.alert(
-          '¡Recompensa Reclamada!',
-          `Has reclamado ${achievement.achievementType.confioReward} $CONFIO`,
-          [{ text: 'OK' }]
-        );
-        refetchAchievements();
-        refetchBalance();
+      const canUseScheme = await Linking.canOpenURL(whatsappSchemeUrl);
+      if (canUseScheme) {
+        await Linking.openURL(whatsappSchemeUrl);
       } else {
-        Alert.alert('Error', result.data?.claimAchievementReward?.error || 'No se pudo reclamar la recompensa');
+        await Linking.openURL(whatsappWebUrl);
       }
     } catch (error) {
-      console.error('Error claiming reward:', error);
-      Alert.alert('Error', 'Ocurrió un error al reclamar la recompensa');
+      console.error('Error abriendo WhatsApp:', error);
+      try {
+        await Share.share({
+          message: shareMessage,
+          title: 'Invitación Confío',
+        });
+      } catch (fallbackError) {
+        console.error('Error compartiendo invitación:', fallbackError);
+      }
     }
   };
 
-
-
-  const handleShare = async (achievement: Achievement) => {
-    console.log('handleShare called with:', achievement?.name, achievement?.status);
-    
-    // Allow sharing for earned, claimed, or pending referral achievements
-    const slug = achievement?.achievementType?.slug;
-    const isReferralSlug = slug === 'referido_exitoso' || slug === 'successful_referral';
-    if (achievement.status?.toLowerCase() !== 'earned' && 
-        achievement.status?.toLowerCase() !== 'claimed' &&
-        !(isReferralSlug && achievement?.status?.toLowerCase() === 'pending')) {
-      console.log('handleShare returning early - status check failed');
+  const handleCopy = () => {
+    if (!username) {
+      Alert.alert('Configura tu usuario', 'Actualiza tu perfil para crear un @usuario y comienza a invitar.');
       return;
     }
-    
-    console.log('Setting selected achievement and showing modal');
-    setSelectedAchievement({
-      id: achievement.id,
-      name: achievement.name,
-      description: achievement.description,
-      confioReward: achievement.achievementType.confioReward || 0,
-      category: achievement.achievementType.category,
-      slug: achievement.achievementType.slug,
-    });
-    setShowShareModal(true);
+    Clipboard.setString(username);
+    Alert.alert('Usuario copiado', 'Ya puedes pegar tu @usuario en WhatsApp o cualquier app.');
   };
-  
-  const promptForTikTokUrl = (achievement: Achievement) => {
-    Alert.prompt(
-      'Enlace de TikTok',
-      'Pega el enlace de tu video de TikTok aquí:',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Enviar',
-          onPress: (tiktokUrl) => {
-            if (tiktokUrl && tiktokUrl.includes('tiktok.com')) {
-              submitTikTokShare({
-                variables: {
-                  tiktokUrl: tiktokUrl.trim(),
-                  shareType: 'achievement',
-                  achievementId: achievement.id,
-                  hashtagsUsed: JSON.stringify(['#Confio', '#RetoConfio', '#LogroConfio', '#AppDeDolares', '#DolarDigital'])
-                }
-              }).then(result => {
-                if (result.data?.submitTikTokShare?.success) {
-                  Alert.alert(
-                    '¡TikTok Enviado!',
-                    'Hemos recibido tu enlace de TikTok. Te notificaremos cuando sea verificado y recibas CONFIO extra por las visualizaciones.',
-                    [{ text: 'OK' }]
-                  );
-                } else {
-                  Alert.alert('Error', 'No se pudo procesar el enlace de TikTok');
-                }
-              }).catch(error => {
-                console.error('Error submitting TikTok share:', error);
-                Alert.alert('Error', 'Ocurrió un error al procesar el enlace');
-              });
-            } else {
-              Alert.alert('Error', 'Por favor ingresa un enlace válido de TikTok');
-            }
-          }
-        }
-      ],
-      'plain-text'
-    );
-  };
-
-  const getCategoryColor = (category: string) => {
-    const normalizedCategory = category.toLowerCase();
-    switch (normalizedCategory) {
-      case 'onboarding': return colors.primary;
-      case 'trading': return colors.secondary;
-      case 'payments': return '#FF6B6B';
-      case 'social': return colors.accent;
-      case 'verification': return '#FFB800';
-      case 'ambassador': return '#FFD700';
-      default: return colors.primary;
-    }
-  };
-  
-  const getCategoryIcon = (category: string) => {
-    const normalizedCategory = category.toLowerCase();
-    switch (normalizedCategory) {
-      case 'onboarding': return 'home';
-      case 'trading': return 'refresh-cw';
-      case 'payments': return 'credit-card';
-      case 'social': return 'users';
-      case 'verification': return 'shield';
-      case 'ambassador': return 'award';
-      default: return 'star';
-    }
-  };
-
-  const getProgressPercentage = (achievement: Achievement) => {
-    if (!achievement.progressData) return 0;
-    const { current, target } = achievement.progressData;
-    if (!current || !target) return 0;
-    return Math.min((current / target) * 100, 100);
-  };
-
-  const completedCount = (displayAchievements || []).filter(a => a.status?.toLowerCase() === 'earned' || a.status?.toLowerCase() === 'claimed').length;
-  
-  // Use actual CONFIO balance from database
-  const confioBalance = confioBalanceData?.myConfioBalance;
-  const totalConfioEarned = confioBalance?.totalLocked || 0;
-  
-  // Calculate pending rewards (earned but not claimed)
-  const pendingConfio = (displayAchievements || [])
-    .filter(a => a.status?.toLowerCase() === 'earned')
-    .reduce((sum, a) => sum + (a.achievementType?.confioReward || 0), 0);
-
-  const categories = [
-    { key: 'onboarding', name: 'Bienvenida', icon: 'home' },
-    { key: 'verification', name: 'Verificación', icon: 'shield' },
-    { key: 'trading', name: 'Intercambios', icon: 'refresh-cw' },
-    { key: 'payments', name: 'Pagos y Transacciones', icon: 'credit-card' },
-    { key: 'social', name: 'Comunidad', icon: 'users' },
-    { key: 'ambassador', name: 'Embajador', icon: 'award' },
-  ];
-  
-  // Show loading state only for a brief moment, then show mock data
-  const isInitialLoading = (achievementTypesLoading || userAchievementsLoading) && (!achievements || achievements.length === 0);
-  
-  if (isInitialLoading) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top','bottom']}>
-        <View style={[styles.header, { paddingTop: 12 }]}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Icon name="arrow-left" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Logros</Text>
-          <View style={styles.headerSpacer} />
-        </View>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Cargando logros...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   return (
-    <SafeAreaView style={styles.container} edges={['top','bottom']}>
-      <View style={[styles.header, { paddingTop: 12 }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Icon name="arrow-left" size={24} color="#fff" />
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Icon name="arrow-left" size={20} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Logros</Text>
-        <View style={styles.headerSpacer} />
-      </View>
 
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Stats Overview */}
-        <View style={styles.statsContainer}>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{completedCount}</Text>
-            <Text style={styles.statLabel}>Completados</Text>
+        <View style={styles.heroCard}>
+          <Text style={styles.heroEyebrow}>Programa de referidos Confío</Text>
+          <Text style={styles.heroTitle}>US$5 en $CONFIO para ti y tu amigo</Text>
+          <Text style={styles.heroSubtitle}>
+            Comparte tu @usuario. Cuando tu invitado completa su primera operación válida, Confío recompensa a ambos con el equivalente a US$5 en $CONFIO.
+          </Text>
+
+          <View style={styles.usernamePill}>
+            <Text style={styles.usernameLabel}>Tu usuario</Text>
+            <Text style={styles.usernameValue}>{username || 'Configura tu @usuario'}</Text>
+            {needsFriendlyUsername && (
+              <Text style={styles.usernameHint}>
+                Crea un usuario corto y fácil de recordar antes de compartirlo.
+              </Text>
+            )}
           </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{achievements?.length || 0}</Text>
-            <Text style={styles.statLabel}>Total</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Icon name="lock" size={16} color={colors.violet} style={styles.lockIcon} />
-            <Text style={styles.statNumber}>{totalConfioEarned}</Text>
-            <Text style={styles.statLabel}>$CONFIO</Text>
-            <TouchableOpacity 
-              style={styles.infoButton}
-              onPress={() => navigation.navigate('ConfioTokenInfo' as any)}
-            >
-              <Icon name="info" size={14} color={colors.violet} />
+
+          <View style={styles.heroActions}>
+            <TouchableOpacity style={styles.copyButton} onPress={handleCopy}>
+              <Icon name="copy" size={18} color={colors.primaryDark} />
+              <Text style={styles.copyButtonText}>Copiar usuario</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
+              <Icon name="share-2" size={18} color="#fff" />
+              <Text style={styles.shareButtonText}>Compartir por WhatsApp</Text>
             </TouchableOpacity>
           </View>
-        </View>
-
-        {/* 1. Tu Futuro con $CONFIO - PRIMARY (Purple) */}
-        <TouchableOpacity 
-          style={styles.inspirationalCard}
-          onPress={() => navigation.navigate('ConfioTokenInfo' as any)}
-        >
-          <View style={styles.inspirationalHeader}>
-            <Icon name="zap" size={20} color={colors.violet} />
-            <Text style={styles.inspirationalTitle}>Tu Futuro con $CONFIO</Text>
-          </View>
-          <Text style={styles.inspirationalText}>
-            Imagina cuando toda Venezuela, Argentina y Bolivia usen la app de Confío... 🚀
-          </Text>
-          <Text style={styles.inspirationalSubtext}>
-            Tus monedas están bloqueadas ahora, pero su valor crecerá con la adopción
-          </Text>
-          <View style={styles.learnMoreRow}>
-            <Text style={styles.learnMoreText}>Aprende más</Text>
-            <Icon name="chevron-right" size={16} color={colors.violet} />
-          </View>
-        </TouchableOpacity>
-
-        {/* 2. Unified Referral - SECONDARY (Orange) - Only show if can set referrer */}
-        {canShowReferralBox && (
-          <TouchableOpacity 
-            style={styles.orangeCard}
-            onPress={() => setShowReferralModal(true)}
-          >
-            <View style={styles.cardHeader}>
-              <Icon name="users" size={20} color="#F59E0B" />
-              <Text style={styles.orangeTitle}>¿Quién te invitó a Confío?</Text>
-            </View>
-            <Text style={styles.orangeText}>
-              Ingresa el código de tu amigo o el @username del influencer para que ambos reciban 4 CONFIO
-            </Text>
-            <View style={styles.learnMoreRow}>
-              <Text style={styles.orangeLearnMore}>Agregar referencia</Text>
-              <Icon name="chevron-right" size={16} color="#F59E0B" />
-            </View>
-          </TouchableOpacity>
-        )}
-        
-        {/* 3. Mi Progreso Viral - TERTIARY (Mint) */}
-        <TouchableOpacity 
-          style={styles.mintCard}
-          onPress={() => navigation.navigate('MiProgresoViral' as any)}
-        >
-          <View style={styles.cardHeader}>
-            <Icon name="trending-up" size={20} color={colors.mint} />
-            <Text style={styles.mintTitle}>Mi Progreso Viral</Text>
-          </View>
-          <Text style={styles.mintText}>
-            Ve tus estadísticas de influencer, sube TikToks y gana CONFIO por personas referidas 🚀
-          </Text>
-          <View style={styles.learnMoreRow}>
-            <Text style={styles.mintLearnMore}>Ver dashboard</Text>
-            <Icon name="chevron-right" size={16} color={colors.mint} />
-          </View>
-        </TouchableOpacity>
-
-
-        {/* Progress Bar */}
-        <View style={styles.progressContainer}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressTitle}>Progreso General</Text>
-            <Text style={styles.progressText}>
-              {(achievements && achievements.length > 0) ? Math.round((completedCount / achievements.length) * 100) : 0}%
-            </Text>
-          </View>
-          <View style={styles.progressBarBg}>
-            <View 
-              style={[
-                styles.progressBarFill, 
-                { width: (achievements && achievements.length > 0) ? `${(completedCount / achievements.length) * 100}%` : '0%' }
-              ]} 
-            />
-          </View>
-          {(!achievements || achievements.length === 0) && (
-            <Text style={styles.noDataText}>
-              Cargando logros desde el servidor...
-            </Text>
+          {needsFriendlyUsername && (
+            <TouchableOpacity style={styles.updateUsernameButton} onPress={() => navigation.navigate('UpdateUsername')}>
+              <Icon name="edit-3" size={16} color={colors.primaryDark} />
+              <Text style={styles.updateUsernameText}>Actualizar mi usuario</Text>
+              <Icon name="chevron-right" size={16} color={colors.primaryDark} />
+            </TouchableOpacity>
           )}
         </View>
 
-        {/* Categories */}
-        {categories.map(category => {
-          const categoryAchievements = (displayAchievements || []).filter(a => a.achievementType?.category?.toLowerCase() === category.key);
-          const categoryCompleted = categoryAchievements.filter(a => a.status?.toLowerCase() === 'earned' || a.status?.toLowerCase() === 'claimed').length;
-          
-          // Skip empty categories
-          if (categoryAchievements.length === 0) {
-            return null;
-          }
-          
-          return (
-            <View key={category.key} style={styles.categorySection}>
-              <View style={styles.categoryHeader}>
-                <View style={styles.categoryTitleRow}>
-                  <Icon name={category.icon} size={20} color={getCategoryColor(category.key)} />
-                  <Text style={styles.categoryTitle}>{category.name}</Text>
-                </View>
-                <Text style={styles.categoryProgress}>
-                  {categoryCompleted}/{categoryAchievements.length}
-                </Text>
+        <View style={styles.referrerCard}>
+          <Text style={styles.referrerTitle}>¿Quién te invitó a Confío?</Text>
+          <Text style={styles.referrerSubtitle}>
+            Si aún no registraste a la persona que te invitó, ingresa su @usuario o número de teléfono para que también reciba el bono.
+          </Text>
+          <TouchableOpacity style={styles.referrerButton} onPress={() => setShowReferralModal(true)}>
+            <Icon name="user-plus" size={18} color={colors.primaryDark} />
+            <Text style={styles.referrerButtonText}>Registrar invitador</Text>
+            <Icon name="chevron-right" size={16} color={colors.primaryDark} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Cómo reclamar los US$5</Text>
+          {steps.map((step, index) => (
+            <View key={step.title} style={styles.stepRow}>
+              <View style={styles.stepNumberWrap}>
+                <Text style={styles.stepNumber}>{index + 1}</Text>
               </View>
-
-              {categoryAchievements.map(achievement => {
-                // Debug logging for referral achievement
-                if (achievement?.achievementType?.slug === 'referido_exitoso' || achievement?.achievementType?.slug === 'successful_referral') {
-                  console.log('Found referral achievement:', {
-                    slug: achievement.achievementType.slug,
-                    status: achievement.status,
-                    name: achievement.name,
-                    id: achievement.id
-                  });
-                }
-                return (
-                <TouchableOpacity
-                  key={achievement.id}
-                  style={[
-                    styles.achievementCard,
-                    (achievement.status?.toLowerCase() === 'earned' || achievement.status?.toLowerCase() === 'claimed') && styles.achievementCardCompleted,
-                    ((achievement?.achievementType?.slug === 'referido_exitoso' || achievement?.achievementType?.slug === 'successful_referral') && achievement?.status?.toLowerCase() === 'pending') && styles.achievementCardReferral,
-                    achievement?.achievementType?.slug === 'pionero_beta' && styles.achievementCardPionero
-                  ]}
-                  onPress={() => {
-                    console.log('Achievement clicked:', {
-                      name: achievement?.name,
-                      slug: achievement?.achievementType?.slug,
-                      status: achievement?.status,
-                      statusLower: achievement?.status?.toLowerCase()
-                    });
-                    
-                    // Special handling for Pionero Beta - show modal
-                    if (achievement?.achievementType?.slug === 'pionero_beta') {
-                      setSelectedAchievement({
-                        id: achievement.id,
-                        name: achievement.name,
-                        description: achievement.description,
-                        confioReward: achievement.achievementType.confioReward || 0,
-                        category: achievement.achievementType.category,
-                        slug: achievement.achievementType.slug,
-                        status: achievement.status
-                      });
-                      setShowPioneroModal(true);
-                    } else if (achievement?.status?.toLowerCase() === 'earned') {
-                      handleClaimReward(achievement);
-                    } else if (achievement?.status?.toLowerCase() === 'claimed' || 
-                              (achievement?.achievementType?.slug === 'referido_exitoso' && achievement?.status?.toLowerCase() === 'pending')) {
-                      handleShare(achievement);
-                    }
-                  }}
-                  disabled={!achievement || (achievement.status?.toLowerCase() === 'pending' && (achievement?.achievementType?.slug !== 'referido_exitoso' && achievement?.achievementType?.slug !== 'successful_referral' && achievement?.achievementType?.slug !== 'pionero_beta'))}
-                >
-                  <View style={[
-                    styles.achievementIcon,
-                    (achievement?.status?.toLowerCase() === 'earned' || achievement?.status?.toLowerCase() === 'claimed') && styles.achievementIconCompleted,
-                    achievement?.achievementType?.slug === 'pionero_beta' && styles.achievementIconPionero
-                  ]}>
-                    {achievement?.achievementType?.slug === 'pionero_beta' ? (
-                      <Image 
-                        source={require('../assets/png/PioneroBeta.png')} 
-                        style={styles.pioneroBadge}
-                        resizeMode="contain"
-                      />
-                    ) : achievement?.achievementType?.iconEmoji ? (
-                      <Text style={styles.achievementEmoji}>{achievement.achievementType.iconEmoji}</Text>
-                    ) : (
-                      <Icon 
-                        name={getCategoryIcon(achievement?.achievementType?.category || 'onboarding')} 
-                        size={24} 
-                        color={(achievement?.status?.toLowerCase() === 'earned' || achievement?.status?.toLowerCase() === 'claimed') ? '#fff' : '#9CA3AF'} 
-                      />
-                    )}
-                  </View>
-
-                  <View style={styles.achievementContent}>
-                    <View style={styles.achievementTitleRow}>
-                      <Text style={[
-                        styles.achievementName,
-                        achievement?.status?.toLowerCase() === 'pending' && styles.achievementNameLocked
-                      ]}>
-                        {achievement?.name || 'Unknown Achievement'}
-                      </Text>
-                      {achievement?.status?.toLowerCase() === 'earned' && (
-                        <View style={styles.claimableBadge}>
-                          <Text style={styles.claimableText}>¡Reclamar!</Text>
-                        </View>
-                      )}
-                      {achievement?.status?.toLowerCase() === 'claimed' && (
-                        <Icon name="check-circle" size={16} color={colors.primary} />
-                      )}
-                      {/* Show share hint for pending referral achievement */}
-                      {(achievement?.achievementType?.slug === 'referido_exitoso' || achievement?.achievementType?.slug === 'successful_referral') && achievement?.status?.toLowerCase() === 'pending' && (
-                        <View style={styles.shareHintBadge}>
-                          <Icon name="share-2" size={12} color="#fff" />
-                          <Text style={styles.shareHintText}>Compartir</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={styles.achievementDescription}>
-                      {achievement?.description || 'No description available'}
-                    </Text>
-                    
-                    {achievement?.progressData && achievement?.status?.toLowerCase() === 'pending' && (
-                      <View style={styles.achievementProgressContainer}>
-                        <View style={styles.achievementProgressBg}>
-                          <View 
-                            style={[
-                              styles.achievementProgressFill,
-                              { width: `${getProgressPercentage(achievement)}%` }
-                            ]} 
-                          />
-                        </View>
-                        <Text style={styles.achievementProgressText}>
-                          {achievement.progressData?.current || 0}/{achievement.progressData?.target || 1}
-                        </Text>
-                      </View>
-                    )}
-
-                    {(achievement?.achievementType?.confioReward || 0) > 0 && (
-                      <View style={styles.rewardContainer}>
-                        <Icon name="gift" size={14} color={colors.violet} />
-                        <Text style={styles.rewardText}>{achievement?.achievementType?.confioReward || 0} $CONFIO</Text>
-                      </View>
-                    )}
-
-                    {achievement?.earnedAt && (
-                      <Text style={styles.achievementDate}>
-                        {achievement?.status?.toLowerCase() === 'claimed' ? 'Reclamado' : 'Completado'}: {new Date(achievement.earnedAt).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
-                      </Text>
-                    )}
-                  </View>
-
-                  {/* Show action button for earned/claimed achievements OR for pending referral achievement */}
-                  {((achievement?.status?.toLowerCase() === 'earned' || achievement?.status?.toLowerCase() === 'claimed') || 
-                    ((achievement?.achievementType?.slug === 'referido_exitoso' || achievement?.achievementType?.slug === 'successful_referral') && achievement?.status?.toLowerCase() === 'pending')) && (
-                    <TouchableOpacity 
-                      style={styles.actionButton}
-                      onPress={() => {
-                        if (achievement?.status?.toLowerCase() === 'earned') {
-                          handleClaimReward(achievement);
-                        } else if (achievement?.status?.toLowerCase() === 'claimed' || 
-                                  ((achievement?.achievementType?.slug === 'referido_exitoso' || achievement?.achievementType?.slug === 'successful_referral') && achievement?.status?.toLowerCase() === 'pending')) {
-                          handleShare(achievement);
-                        }
-                      }}
-                    >
-                      <Icon 
-                        name={achievement?.status?.toLowerCase() === 'earned' ? "gift" : "share-2"} 
-                        size={20} 
-                        color={achievement?.status?.toLowerCase() === 'earned' ? colors.violet : colors.accent} 
-                      />
-                    </TouchableOpacity>
-                  )}
-                </TouchableOpacity>
-              );})}
+              <View style={styles.stepContent}>
+                <Text style={styles.stepTitle}>{step.title}</Text>
+                <Text style={styles.stepDescription}>{step.description}</Text>
+              </View>
             </View>
-          );
-        })}
+          ))}
+        </View>
 
-        <View style={styles.bottomPadding} />
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Tips para compartir</Text>
+          <View style={styles.tipRow}>
+            <Icon name="send" size={18} color={colors.primaryDark} />
+            <Text style={styles.tipText}>Incluye tu @usuario en mensajes de WhatsApp, Telegram o redes sociales.</Text>
+          </View>
+          <View style={styles.tipRow}>
+            <Icon name="check-circle" size={18} color={colors.primaryDark} />
+            <Text style={styles.tipText}>Recuérdale a tu amigo escribir tu @usuario al registrarse.</Text>
+          </View>
+          <View style={styles.tipRow}>
+            <Icon name="zap" size={18} color={colors.primaryDark} />
+            <Text style={styles.tipText}>Ayúdalo a completar su primera compra o envío para activar la recompensa.</Text>
+          </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>¿Qué verás aquí pronto?</Text>
+          <Text style={styles.futureText}>
+            Estamos simplificando el programa de logros para enfocarlo 100% en invitaciones. Pronto tendrás el resumen
+            de invitaciones completadas y tus recompensas en esta pantalla.
+          </Text>
+          <View style={styles.criteria}>
+            <Text style={styles.criteriaTitle}>Operaciones válidas para el bono:</Text>
+            <Text style={styles.criteriaItem}>• Primera recarga de dólares digitales mayor a US$20</Text>
+            <Text style={styles.criteriaItem}>• Primer depósito de USDC convertido a cUSD (≥ US$20)</Text>
+            <Text style={styles.criteriaItem}>• Primer envío dentro de Confío</Text>
+            <Text style={styles.criteriaItem}>• Primer pago a comercio con Confío</Text>
+            <Text style={styles.criteriaItem}>• Primer trade P2P completado</Text>
+            <Text style={styles.criteriaNote}>El bono se acredita en $CONFIO al tipo equivalente a US$5.</Text>
+          </View>
+        </View>
+
+        <ReferralInputModal
+          visible={showReferralModal}
+          onClose={() => setShowReferralModal(false)}
+          onSuccess={() => setShowReferralModal(false)}
+        />
+
+        <View style={styles.bottomSpacer} />
       </ScrollView>
-      
-      {selectedAchievement && (
-        <ShareAchievementModal
-          visible={showShareModal}
-          onClose={() => {
-            setShowShareModal(false);
-            setSelectedAchievement(null);
-          }}
-          achievement={selectedAchievement}
-        />
-      )}
-      
-      <ReferralInputModal
-        visible={showReferralModal}
-        onClose={() => setShowReferralModal(false)}
-        onSuccess={() => {
-          setShowReferralModal(false);
-          // Optionally refresh achievements
-          refetchAchievements();
-        }}
-      />
-      
-      {selectedAchievement && selectedAchievement.slug === 'pionero_beta' && (
-        <PioneroBadgeModal
-          visible={showPioneroModal}
-          onClose={() => {
-            setShowPioneroModal(false);
-          }}
-          achievement={selectedAchievement}
-        />
-      )}
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#fff',
   },
-  header: {
-    backgroundColor: colors.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 12,
-    paddingBottom: 20,
+  content: {
     paddingHorizontal: 20,
+    paddingBottom: 32,
   },
   backButton: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  headerSpacer: {
-    width: 40,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    gap: 12,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: colors.neutralDark,
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    position: 'relative',
-  },
-  actionCardsWrapper: {
-    paddingHorizontal: 16,
-    marginBottom: 20,
-  },
-  actionCard: {
-    borderRadius: 16,
-    padding: 16,
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
     marginBottom: 12,
-    borderWidth: 1.5,
   },
-  primaryActionCard: {
-    backgroundColor: colors.violetLight,
-    borderColor: colors.violet,
+  heroCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    padding: 24,
+    marginBottom: 24,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    elevation: 3,
   },
-  secondaryActionCard: {
-    backgroundColor: colors.primaryLight,
-    borderColor: colors.primary,
+  heroEyebrow: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primaryDark,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 8,
   },
-  tertiaryActionCard: {
-    backgroundColor: '#FFF7ED',
-    borderColor: '#FB923C',
-  },
-  actionCardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  actionCardContent: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  actionCardTitle: {
-    fontSize: 16,
+  heroTitle: {
+    fontSize: 24,
     fontWeight: '700',
+    color: colors.text,
+    marginBottom: 12,
+  },
+  heroSubtitle: {
+    fontSize: 15,
+    color: colors.textMuted,
+    lineHeight: 22,
+  },
+  usernamePill: {
+    marginTop: 20,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: colors.primaryMuted,
+    alignSelf: 'flex-start',
+  },
+  usernameLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.primaryDark,
     marginBottom: 2,
   },
-  actionCardDescription: {
-    fontSize: 13,
-    color: '#6B7280',
-  },
-  lockIcon: {
-    position: 'absolute',
-    top: 8,
-    left: 8,
-  },
-  infoButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    padding: 4,
-  },
-  statNumber: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.dark,
-    marginBottom: 4,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  inspirationalCard: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-    backgroundColor: colors.violetLight,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.violet,
-  },
-  inspirationalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  inspirationalTitle: {
+  usernameValue: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.dark,
+    color: colors.primaryDark,
   },
-  inspirationalText: {
-    fontSize: 15,
-    color: colors.dark,
-    marginBottom: 6,
-    fontWeight: '500',
+  usernameHint: {
+    marginTop: 6,
+    fontSize: 12,
+    color: colors.primaryDark,
+    lineHeight: 18,
   },
-  inspirationalSubtext: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginBottom: 12,
+  usernameHint: {
+    marginTop: 6,
+    fontSize: 12,
+    color: colors.primaryDark,
+    lineHeight: 18,
   },
-  learnMoreRow: {
+  heroActions: {
+    flexDirection: 'row',
+    marginTop: 24,
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  copyButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-  },
-  learnMoreText: {
-    fontSize: 14,
-    color: colors.violet,
-    fontWeight: '600',
-  },
-  progressContainer: {
-    marginHorizontal: 16,
-    marginBottom: 24,
-    backgroundColor: colors.neutral,
-    borderRadius: 12,
-    padding: 16,
-  },
-  progressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  progressTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.dark,
-  },
-  progressText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: colors.primary,
-  },
-  progressBarBg: {
-    height: 8,
-    backgroundColor: '#E5E7EB',
-    borderRadius: 4,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: colors.primary,
-    borderRadius: 4,
-  },
-  categorySection: {
-    marginBottom: 24,
+    paddingVertical: 12,
     paddingHorizontal: 16,
-  },
-  categoryHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  categoryTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  categoryTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.dark,
-  },
-  categoryProgress: {
-    fontSize: 14,
-    color: '#6B7280',
-  },
-  achievementCard: {
-    flexDirection: 'row',
-    backgroundColor: colors.neutral,
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  achievementCardCompleted: {
-    borderColor: colors.primaryLight,
-    backgroundColor: '#F0FDF4',
-  },
-  achievementCardReferral: {
-    backgroundColor: '#e8f4ff',
-    borderColor: colors.accent,
-    borderWidth: 1.5,
-  },
-  achievementCardPionero: {
-    backgroundColor: '#FFF8DC',
-    borderColor: '#FFD700',
-    borderWidth: 2,
-    shadowColor: '#FFD700',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  achievementIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#E5E7EB',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  achievementIconCompleted: {
-    backgroundColor: colors.primary,
-  },
-  achievementIconPionero: {
-    backgroundColor: '#FFD700',
-    borderWidth: 2,
-    borderColor: '#FFA500',
-  },
-  pioneroBadge: {
-    width: 36,
-    height: 36,
-  },
-  achievementContent: {
-    flex: 1,
-  },
-  achievementName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.dark,
-    marginBottom: 4,
-  },
-  achievementNameLocked: {
-    color: '#9CA3AF',
-  },
-  achievementDescription: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginBottom: 8,
-  },
-  achievementProgressContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    backgroundColor: '#ECFDF5',
     gap: 8,
-    marginTop: 8,
   },
-  achievementProgressBg: {
-    flex: 1,
-    height: 4,
-    backgroundColor: '#E5E7EB',
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  achievementProgressFill: {
-    height: '100%',
-    backgroundColor: colors.primary,
-    borderRadius: 2,
-  },
-  achievementProgressText: {
-    fontSize: 12,
-    color: '#6B7280',
-  },
-  rewardContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 4,
-  },
-  rewardText: {
-    fontSize: 14,
+  copyButtonText: {
+    color: colors.primaryDark,
     fontWeight: '600',
-    color: colors.violet,
-  },
-  achievementDate: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    marginTop: 4,
+    fontSize: 14,
   },
   shareButton: {
-    padding: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    backgroundColor: colors.primaryDark,
+    gap: 8,
   },
-  bottomPadding: {
-    height: 40,
+  shareButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 14,
   },
-  loadingContainer: {
+  referrerCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 20,
+    marginBottom: 20,
+    gap: 12,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
+    elevation: 2,
+  },
+  referrerTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  referrerSubtitle: {
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 19,
+  },
+  referrerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    backgroundColor: '#ECFDF5',
+  },
+  referrerButtonText: {
     flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primaryDark,
+  },
+  updateUsernameButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+  },
+  updateUsernameText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primaryDark,
+  },
+  sectionCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 20,
+    marginBottom: 20,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
+    elevation: 2,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 16,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 14,
+  },
+  stepNumberWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#ECFDF5',
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
+    marginRight: 12,
   },
-  loadingText: {
-    fontSize: 16,
-    color: '#6B7280',
-  },
-  actionCardsContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 20,
-    gap: 12,
-  },
-  actionCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginBottom: 12,
-  },
-  primaryActionCard: {
-    backgroundColor: colors.violetLight,
-    borderColor: colors.violet,
-    borderWidth: 2,
-  },
-  secondaryActionCard: {
-    backgroundColor: colors.primaryLight,
-    borderColor: colors.primary,
-  },
-  tertiaryActionCard: {
-    backgroundColor: '#FFF7ED',
-    borderColor: '#FB923C',
-  },
-  actionCardContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  actionCardTitle: {
-    fontSize: 16,
+  stepNumber: {
+    fontSize: 14,
     fontWeight: '700',
-    color: colors.dark,
+    color: colors.primaryDark,
+  },
+  stepContent: {
     flex: 1,
   },
-  actionCardDescription: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-  influencerCard: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-    backgroundColor: colors.primaryLight,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  orangeCard: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-    backgroundColor: '#FFF7ED',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#FB923C',
-  },
-  greenCard: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-    backgroundColor: colors.primaryLight,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.primary,
-  },
-  mintCard: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-    backgroundColor: colors.mintLight,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.mint,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  orangeTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#F59E0B',
-  },
-  orangeText: {
+  stepTitle: {
     fontSize: 15,
-    color: '#92400E',
-    marginBottom: 12,
-    fontWeight: '500',
-  },
-  orangeLearnMore: {
-    fontSize: 14,
-    color: '#F59E0B',
     fontWeight: '600',
-  },
-  orangeInputCard: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-    backgroundColor: '#FFF7ED',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#FB923C',
-  },
-  orangeInputHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  orangeInputTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#F59E0B',
-  },
-  greenTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  greenText: {
-    fontSize: 15,
-    color: '#047857',
-    marginBottom: 12,
-    fontWeight: '500',
-  },
-  greenLearnMore: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  mintTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.mint,
-  },
-  mintText: {
-    fontSize: 15,
-    color: '#0F766E',
-    marginBottom: 12,
-    fontWeight: '500',
-  },
-  mintLearnMore: {
-    fontSize: 14,
-    color: colors.mint,
-    fontWeight: '600',
-  },
-  shareButtonsRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 12,
-  },
-  socialShareButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.mint,
-  },
-  socialShareText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.mint,
-  },
-  influencerInputCard: {
-    marginHorizontal: 16,
-    marginBottom: 20,
-    backgroundColor: colors.neutralDark,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.violet,
-  },
-  influencerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  influencerTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: colors.dark,
-  },
-  influencerText: {
-    fontSize: 15,
-    color: colors.dark,
-    marginBottom: 12,
-    fontWeight: '500',
-  },
-  influencerInputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.dark,
-    marginBottom: 8,
-  },
-  influencerInput: {
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    padding: 12,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    marginBottom: 16,
-  },
-  inputWithAt: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    marginBottom: 12,
-  },
-  atSymbol: {
-    paddingLeft: 12,
-    paddingRight: 4,
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.violet,
-  },
-  influencerInputWithAt: {
-    flex: 1,
-    padding: 12,
-    fontSize: 16,
-    paddingLeft: 0,
-  },
-  inputHint: {
-    fontSize: 12,
-    color: '#6B7280',
-    fontStyle: 'italic',
-    marginBottom: 16,
-  },
-  influencerButtonRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: '#E5E7EB',
-    borderRadius: 8,
-    padding: 12,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#6B7280',
-  },
-  submitButton: {
-    flex: 1,
-    backgroundColor: colors.violet,
-    borderRadius: 8,
-    padding: 12,
-    alignItems: 'center',
-  },
-  submitButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  achievementEmoji: {
-    fontSize: 24,
-  },
-  achievementTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    color: colors.text,
     marginBottom: 4,
   },
-  claimableBadge: {
-    backgroundColor: colors.violet,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+  stepDescription: {
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 19,
   },
-  claimableText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  shareHintBadge: {
-    backgroundColor: colors.accent,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+  tipRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 12,
   },
-  shareHintText: {
-    fontSize: 10,
+  tipText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 19,
+  },
+  criteria: {
+    marginTop: 16,
+    padding: 14,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    gap: 6,
+  },
+  criteriaTitle: {
+    fontSize: 13,
     fontWeight: '600',
-    color: '#fff',
+    color: '#374151',
   },
-  actionButton: {
-    padding: 8,
+  criteriaItem: {
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 18,
   },
-  categoryTitlePriority: {
-    fontWeight: '700',
-    color: colors.violet,
-  },
-  noDataText: {
+  criteriaNote: {
+    marginTop: 6,
     fontSize: 12,
-    color: '#9CA3AF',
-    textAlign: 'center',
-    marginTop: 8,
+    color: colors.primaryDark,
+  },
+  futureText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    lineHeight: 20,
+  },
+  bottomSpacer: {
+    height: 32,
   },
 });
+
+export default AchievementsScreen;

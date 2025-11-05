@@ -636,8 +636,8 @@ export const HomeScreen = () => {
     },
     {
       id: 'exchange',
-      label: 'Intercambio',
-      icon: 'refresh-cw',
+      label: 'Recargar',
+      icon: 'dollar-sign',
       color: '#3b82f6',
       route: () => navigation.navigate('BottomTabs', { screen: 'Exchange' }),
     },

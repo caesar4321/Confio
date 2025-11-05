@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -60,6 +60,17 @@ export const CreateOfferScreen = () => {
   
   // Use centralized country selection hook
   const { selectedCountry, showCountryModal, selectCountry, openCountryModal, closeCountryModal } = useCountrySelection();
+  const venezuelaCountry = useMemo<Country | null>(() => {
+    const match = countries.find((c) => c[2] === 'VE');
+    return match || null;
+  }, []);
+  const availableCountries = useMemo<Country[]>(() => (venezuelaCountry ? [venezuelaCountry] : []), [venezuelaCountry]);
+  const selectedCountryIso = selectedCountry?.[2];
+  useEffect(() => {
+    if (venezuelaCountry && selectedCountryIso !== 'VE') {
+      selectCountry(venezuelaCountry);
+    }
+  }, [venezuelaCountry, selectedCountryIso, selectCountry]);
   
   // Use currency system based on selected country
   const { currency, formatAmount, inputFormatting } = useCurrency();
@@ -143,13 +154,10 @@ export const CreateOfferScreen = () => {
   
   // Set country when in edit mode
   React.useEffect(() => {
-    if (editMode && offerData?.countryCode) {
-      const country = countries.find(c => c[2] === offerData.countryCode);
-      if (country) {
-        selectCountry(country);
-      }
+    if (editMode && offerData?.countryCode === 'VE' && venezuelaCountry) {
+      selectCountry(venezuelaCountry);
     }
-  }, [editMode, offerData?.countryCode, selectCountry]);
+  }, [editMode, offerData?.countryCode, selectCountry, venezuelaCountry]);
   
 
 
@@ -393,9 +401,9 @@ export const CreateOfferScreen = () => {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>País de operación</Text>
           <TouchableOpacity
-            style={[styles.countrySelector, editMode && styles.disabledInput]}
-            onPress={() => !editMode && openCountryModal()}
-            disabled={editMode}
+            style={[styles.countrySelector, styles.disabledInput]}
+            onPress={openCountryModal}
+            disabled
           >
             <View style={styles.countryDisplay}>
               <Text style={styles.countryFlag}>{selectedCountry?.[3] || '🌍'}</Text>
@@ -406,7 +414,7 @@ export const CreateOfferScreen = () => {
             <Icon name="chevron-down" size={20} color={editMode ? "#D1D5DB" : "#6B7280"} />
           </TouchableOpacity>
           <Text style={styles.helpText}>
-            {editMode ? 'El país no se puede cambiar' : 'País donde operarás y recibirás pagos locales'}
+            Disponible solo en Venezuela en esta primera fase
           </Text>
         </View>
 
@@ -652,7 +660,7 @@ export const CreateOfferScreen = () => {
             <View style={styles.placeholder} />
           </View>
           <FlatList
-            data={countries}
+            data={availableCountries}
             keyExtractor={(item, index) => `${item[2]}-${index}`}
             renderItem={({ item }) => (
               <TouchableOpacity
