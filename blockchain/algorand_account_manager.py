@@ -307,25 +307,68 @@ class AlgorandAccountManager:
             
             # Use sponsored opt-in service for automatic opt-in
             logger.info(f"Account {address} needs opt-in for asset {asset_id}, using sponsored service")
-            
+
+            # Calculate minimum balance requirements and fund account if needed
+            current_balance = account_info.get('amount', 0)
+            current_min_balance = account_info.get('min-balance', 0)
+
+            # Each ASA increases the minimum balance requirement by 100_000 microAlgos
+            required_balance = current_min_balance + 100_000
+            buffer = 10_000  # add small buffer to cover transaction fees
+            target_balance = required_balance + buffer
+
             from blockchain.algorand_sponsor_service import algorand_sponsor_service
             import asyncio
-            
-            # Create and run async opt-in
+
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
+                if current_balance < target_balance:
+                    funding_needed = target_balance - current_balance
+                    logger.info(
+                        "Account %s requires %s microAlgos to meet min balance for asset %s opt-in "
+                        "(current: %s, required: %s, buffer: %s)",
+                        address,
+                        funding_needed,
+                        asset_id,
+                        current_balance,
+                        required_balance,
+                        buffer,
+                    )
+                    funding_result = loop.run_until_complete(
+                        algorand_sponsor_service.fund_account(address, funding_needed)
+                    )
+                    if not funding_result.get('success'):
+                        logger.warning(
+                            "Failed to fund account %s for asset %s opt-in: %s",
+                            address,
+                            asset_id,
+                            funding_result.get('error'),
+                        )
+                        return False
+                    logger.info(
+                        "Funded account %s with %.6f ALGO for asset %s opt-in",
+                        address,
+                        funding_result.get('amount_algo'),
+                        asset_id,
+                    )
+
                 result = loop.run_until_complete(
                     algorand_sponsor_service.execute_server_side_opt_in(address, asset_id)
                 )
-                
+
                 if result.get('success'):
                     logger.info(f"Successfully auto-opted {address} into asset {asset_id}")
                     return True
                 else:
-                    logger.warning(f"Auto opt-in failed for {address} to asset {asset_id}: {result.get('error')}")
+                    logger.warning(
+                        "Auto opt-in failed for %s to asset %s: %s",
+                        address,
+                        asset_id,
+                        result.get('error'),
+                    )
                     return False
-                    
+
             except Exception as e:
                 logger.error(f"Error during sponsored opt-in for {address} to asset {asset_id}: {e}")
                 return False
