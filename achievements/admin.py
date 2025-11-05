@@ -9,7 +9,7 @@ from django.utils.decorators import method_decorator
 import logging
 
 from .models import (
-    AchievementType, UserAchievement, InfluencerReferral, 
+    AchievementType, UserAchievement, UserReferral, 
     TikTokViralShare, ConfioRewardBalance, ConfioRewardTransaction,
     InfluencerAmbassador, AmbassadorActivity,
     PioneroBetaTracker, ConfioGrowthMetric
@@ -70,8 +70,8 @@ class FraudStatusFilter(admin.SimpleListFilter):
 
 
 @admin.register(AchievementType)
-class AchievementTypeAdmin(admin.ModelAdmin):
-    """Admin for achievement types"""
+class RewardProgramAdmin(admin.ModelAdmin):
+    """Admin for reward program definitions"""
     list_display = ('emoji_name', 'slug', 'category_display', 'confio_reward_display', 'users_earned', 'is_active', 'display_order')
     list_filter = ('category', 'is_active', 'created_at')
     search_fields = ('name', 'slug', 'description')
@@ -103,7 +103,7 @@ class AchievementTypeAdmin(admin.ModelAdmin):
         if obj.slug == 'pionero_beta':
             return format_html('{} <b>{}</b>', emoji, obj.name)
         return format_html('{} {}', emoji, obj.name)
-    emoji_name.short_description = 'Achievement'
+    emoji_name.short_description = 'Reward Program'
     emoji_name.admin_order_field = 'name'
     
     def users_earned(self, obj):
@@ -167,8 +167,8 @@ class AchievementTypeAdmin(admin.ModelAdmin):
 
 
 @admin.register(UserAchievement)
-class UserAchievementAdmin(admin.ModelAdmin):
-    """Admin for user achievements"""
+class UserRewardAdmin(admin.ModelAdmin):
+    """Admin for user reward progression"""
     list_display = ('user_display', 'achievement_display', 'status_display', 'reward_display', 'fraud_indicator', 'earned_at', 'claimed_at')
     list_filter = ('status', FraudStatusFilter, 'earned_at', 'claimed_at', 'achievement_type__category', 'achievement_type__is_active')
     search_fields = ('user__username', 'user__email', 'achievement_type__name', 'achievement_type__slug', 'device_fingerprint_hash', 'claim_ip_address')
@@ -295,7 +295,7 @@ class UserAchievementAdmin(admin.ModelAdmin):
             security_metadata__fraud_detected__isnull=False
         ).order_by('-updated_at')[:20]
         
-        # 4. Achievement Type Analysis
+        # 4. Reward Program Analysis
         achievement_fraud_stats = AchievementType.objects.annotate(
             total_earned=Count('user_achievements', filter=Q(user_achievements__status__in=['earned', 'claimed'])),
             fraud_count=Count('user_achievements', filter=Q(user_achievements__security_metadata__fraud_detected__isnull=False)),
@@ -327,7 +327,7 @@ class UserAchievementAdmin(admin.ModelAdmin):
         
         context = {
             **self.admin_site.each_context(request),
-            'title': 'Achievement Fraud Detection Dashboard',
+            'title': 'Reward Fraud Detection Dashboard',
             'suspicious_devices': suspicious_devices[:20],  # Top 20
             'suspicious_ips': suspicious_ips[:20],  # Top 20
             'recent_fraud': recent_fraud,
@@ -348,7 +348,7 @@ class UserAchievementAdmin(admin.ModelAdmin):
         return TemplateResponse(request, 'admin/achievements/userachievement/fraud_dashboard.html', context)
     
     fieldsets = (
-        ('User & Achievement', {
+        ('User & Reward', {
             'fields': ('user', 'achievement_type', 'status')
         }),
         ('Reward Information', {
@@ -388,7 +388,7 @@ class UserAchievementAdmin(admin.ModelAdmin):
             emoji,
             obj.achievement_type.name
         )
-    achievement_display.short_description = 'Achievement'
+    achievement_display.short_description = 'Reward'
     achievement_display.admin_order_field = 'achievement_type__name'
     
     def reward_display(self, obj):
@@ -453,7 +453,7 @@ class UserAchievementAdmin(admin.ModelAdmin):
         if same_device_count > 0:
             color = '#F59E0B' if same_device_count < 3 else '#DC2626'
             return format_html(
-                '<span style="color: {};" title="Full hash: {}">{}... ({} other achievements)</span>',
+                '<span style="color: {};" title="Full hash: {}">{}... ({} other rewards)</span>',
                 color,
                 obj.device_fingerprint_hash,
                 hash_preview,
@@ -508,7 +508,7 @@ class UserAchievementAdmin(admin.ModelAdmin):
             status='earned',
             earned_at=timezone.now()
         )
-        self.message_user(request, f"{updated} achievements marked as earned.")
+        self.message_user(request, f"{updated} rewards marked as earned.")
     mark_as_earned.short_description = "Mark selected as earned"
     
     def mark_as_claimed(self, request, queryset):
@@ -516,7 +516,7 @@ class UserAchievementAdmin(admin.ModelAdmin):
         for achievement in queryset.filter(status='earned'):
             if achievement.claim_reward():
                 count += 1
-        self.message_user(request, f"{count} achievements claimed with rewards distributed.")
+        self.message_user(request, f"{count} rewards claimed and balances updated.")
     mark_as_claimed.short_description = "Claim rewards for selected"
     
     def mark_as_fraudulent(self, request, queryset):
@@ -540,15 +540,15 @@ class UserAchievementAdmin(admin.ModelAdmin):
                 fraud_count += 1
                 
                 logger.warning(
-                    f"Achievement {achievement.id} marked as fraudulent by {request.user.username}. "
+                    f"Reward unlock {achievement.id} flagged by {request.user.username}. "
                     f"User: {achievement.user.id}, Type: {achievement.achievement_type.slug}"
                 )
         
-        messages.warning(request, f"{fraud_count} achievements marked as fraudulent.")
+        messages.warning(request, f"{fraud_count} rewards flagged as fraudulent.")
     mark_as_fraudulent.short_description = "Mark selected as fraudulent"
     
     def block_device(self, request, queryset):
-        """Block all achievements from the same device"""
+        """Block all reward unlocks from the same device"""
         from django.contrib import messages
         
         device_hashes = set()
@@ -557,7 +557,7 @@ class UserAchievementAdmin(admin.ModelAdmin):
                 device_hashes.add(achievement.device_fingerprint_hash)
         
         if not device_hashes:
-            messages.warning(request, "No device fingerprints found in selected achievements.")
+            messages.warning(request, "No device fingerprints found for the selected rewards.")
             return
         
         blocked_count = 0
@@ -582,44 +582,142 @@ class UserAchievementAdmin(admin.ModelAdmin):
             
             logger.warning(
                 f"Device {device_hash[:8]}... blocked by {request.user.username}. "
-                f"{blocked_count} achievements affected."
+                f"{blocked_count} rewards affected."
             )
         
         messages.warning(
             request, 
-            f"Blocked {blocked_count} achievements from {len(device_hashes)} device(s)."
+            f"Blocked {blocked_count} rewards from {len(device_hashes)} device(s)."
         )
-    block_device.short_description = "Block all achievements from same device"
+    block_device.short_description = "Block all rewards from same device"
 
 
-@admin.register(InfluencerReferral)
-class InfluencerReferralAdmin(admin.ModelAdmin):
-    """Admin for influencer referrals"""
-    list_display = ('referrer_identifier', 'referred_user', 'status', 'created_at')
-    list_filter = ('status', 'created_at')
-    search_fields = ('referred_user__username', 'referred_user__email', 'referrer_identifier')
+@admin.register(UserReferral)
+class UserReferralAdmin(admin.ModelAdmin):
+    """Admin for Confío referral records"""
+    list_display = (
+        'referrer_identifier',
+        'referrer_user_display',
+        'referred_user',
+        'status_display',
+        'total_volume_display',
+        'referrer_reward_display',
+        'referee_reward_display',
+        'created_at',
+    )
+    list_display_links = ('referrer_identifier', 'referred_user')
+    list_filter = ('status', 'created_at', 'first_transaction_at', 'reward_claimed_at')
+    search_fields = (
+        'referred_user__username',
+        'referred_user__email',
+        'referrer_identifier',
+        'referrer_user__username',
+        'referrer_user__email',
+    )
     readonly_fields = ('created_at', 'updated_at')
-    raw_id_fields = ('referred_user', 'influencer_user')
+    raw_id_fields = ('referred_user', 'referrer_user')
+    list_select_related = ('referred_user', 'referrer_user')
+    actions = ('mark_as_active', 'mark_as_converted', 'mark_as_inactive', 'mark_rewards_claimed')
+    fieldsets = (
+        ('Referral', {'fields': ('referred_user', 'referrer_identifier', 'referrer_user', 'status')}),
+        ('Performance', {'fields': ('first_transaction_at', 'total_transaction_volume')}),
+        ('Rewards', {'fields': ('referrer_confio_awarded', 'referee_confio_awarded', 'reward_claimed_at')}),
+        ('Attribution', {'fields': ('attribution_data',)}),
+        ('Timestamps', {'fields': ('created_at', 'updated_at')}),
+    )
     
+    @admin.display(description="Status", ordering='status')
     def status_display(self, obj):
         status_colors = {
             'pending': '#9CA3AF',
             'active': '#10B981',
             'converted': '#8B5CF6',
-            'ambassador': '#F59E0B'
+            'inactive': '#EF4444',
+            'ambassador': '#F59E0B',
         }
         return format_html(
             '<span style="color: {}; font-weight: bold;">{}</span>',
             status_colors.get(obj.status, '#000'),
             obj.get_status_display()
         )
-    status_display.short_description = "Status"
+    
+    @admin.display(description="Volume", ordering='total_transaction_volume')
+    def total_volume_display(self, obj):
+        amount = obj.total_transaction_volume or 0
+        return format_html('<strong>${}</strong>', f"{amount:,.2f}")
+    
+    @admin.display(description="Referrer Reward", ordering='referrer_confio_awarded')
+    def referrer_reward_display(self, obj):
+        amount = obj.referrer_confio_awarded or 0
+        return format_html('<span>{} CONFIO</span>', f"{amount:,.2f}")
+    
+    @admin.display(description="Referee Reward", ordering='referee_confio_awarded')
+    def referee_reward_display(self, obj):
+        amount = obj.referee_confio_awarded or 0
+        return format_html('<span>{} CONFIO</span>', f"{amount:,.2f}")
+    
+    @admin.display(description="Referrer User", ordering='referrer_user__username')
+    def referrer_user_display(self, obj):
+        if obj.referrer_user:
+            username = obj.referrer_user.username
+            if username:
+                label = f"@{username}"
+            else:
+                fallback = obj.referrer_user.email or getattr(obj.referrer_user, 'phone', None)
+                label = fallback or f"ID {obj.referrer_user_id}"
+            return format_html('<strong>{}</strong>', label)
+        return format_html('<span style="color: #6B7280;">Unlinked</span>')
+    
+    @admin.action(description="Mark selected referrals as Active")
+    def mark_as_active(self, request, queryset):
+        updated = queryset.update(status='active')
+        self.message_user(request, f"{updated} referrals marked as active.")
+    
+    @admin.action(description="Mark selected referrals as Converted")
+    def mark_as_converted(self, request, queryset):
+        now = timezone.now()
+        updated = 0
+        for referral in queryset:
+            referral.status = 'converted'
+            fields = ['status']
+            if not referral.first_transaction_at:
+                referral.first_transaction_at = now
+                fields.append('first_transaction_at')
+            referral.save(update_fields=fields)
+            updated += 1
+        self.message_user(request, f"{updated} referrals marked as converted.")
+    
+    @admin.action(description="Mark selected referrals as Inactive")
+    def mark_as_inactive(self, request, queryset):
+        updated = queryset.update(status='inactive')
+        self.message_user(request, f"{updated} referrals marked as inactive.")
+    
+    @admin.action(description="Set rewards as claimed now")
+    def mark_rewards_claimed(self, request, queryset):
+        count = 0
+        for referral in queryset:
+            if referral.reward_claimed_at and referral.status == 'converted':
+                continue
+            referral.reward_claimed_at = timezone.now()
+            if referral.status not in ('converted', 'inactive'):
+                referral.status = 'converted'
+            referral.save(update_fields=['reward_claimed_at', 'status'])
+            count += 1
+        self.message_user(request, f"{count} referrals updated with claimed rewards.")
 
 
 @admin.register(TikTokViralShare)
-class TikTokViralShareAdmin(admin.ModelAdmin):
-    """Admin for TikTok viral shares"""
-    list_display = ('user', 'tiktok_username', 'share_type', 'status_display', 'created_at')
+class SocialReferralShareAdmin(admin.ModelAdmin):
+    """Admin for social referral shares (e.g., TikTok)"""
+    list_display = (
+        'user',
+        'tiktok_username',
+        'share_type',
+        'status_display',
+        'performance_badge',
+        'total_confio_awarded_display',
+        'created_at',
+    )
     list_filter = ('status', 'share_type', 'created_at')
     search_fields = ('user__username', 'user__email', 'tiktok_username')
     readonly_fields = ('created_at', 'updated_at')
@@ -638,41 +736,137 @@ class TikTokViralShareAdmin(admin.ModelAdmin):
             obj.get_status_display()
         )
     status_display.short_description = "Status"
+    
+    @admin.display(description="Performance")
+    def performance_badge(self, obj):
+        tiers = {
+            'viral': ('#10B981', 'Viral'),
+            'hot': ('#F97316', 'Hot'),
+            'trending': ('#3B82F6', 'Trending'),
+            'growing': ('#8B5CF6', 'Growing'),
+            'new': ('#6B7280', 'New'),
+        }
+        color, label = tiers.get(obj.performance_tier, ('#6B7280', obj.performance_tier.title()))
+        return format_html('<span style="color:{}; font-weight:bold;">{}</span>', color, label)
+    
+    @admin.display(description="Total Reward", ordering='total_confio_awarded')
+    def total_confio_awarded_display(self, obj):
+        amount = obj.total_confio_awarded or 0
+        formatted = f"{amount:,.2f}"
+        return format_html('<strong>{} CONFIO</strong>', formatted)
 
 
 @admin.register(ConfioRewardBalance)
-class ConfioRewardBalanceAdmin(admin.ModelAdmin):
-    """Admin for CONFIO reward balances"""
-    list_display = ('user', 'total_earned', 'total_locked', 'available_balance', 'created_at')
+class RewardWalletAdmin(admin.ModelAdmin):
+    """Admin for CONFIO reward wallets"""
+    list_display = ('user', 'total_earned_display', 'total_locked_display', 'available_balance_display', 'created_at')
     list_filter = ('created_at',)
     search_fields = ('user__username', 'user__email')
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('user',)
 
+    @admin.display(description="Total Earned", ordering='total_earned')
+    def total_earned_display(self, obj):
+        formatted = f"{obj.total_earned:,.2f}"
+        return format_html('<span>{} CONFIO</span>', formatted)
+    
+    @admin.display(description="Locked", ordering='total_locked')
+    def total_locked_display(self, obj):
+        formatted = f"{obj.total_locked:,.2f}"
+        return format_html('<span style="color:#F59E0B;">{} CONFIO</span>', formatted)
+    
+    @admin.display(description="Available", ordering='total_unlocked')
+    def available_balance_display(self, obj):
+        formatted = f"{obj.available_balance:,.2f}"
+        return format_html('<strong>{} CONFIO</strong>', formatted)
+
 
 @admin.register(ConfioRewardTransaction)
-class ConfioRewardTransactionAdmin(admin.ModelAdmin):
-    """Admin for CONFIO reward transactions"""
-    list_display = ('user', 'transaction_type', 'amount', 'balance_after', 'created_at')
+class RewardLedgerEntryAdmin(admin.ModelAdmin):
+    """Admin for individual CONFIO reward ledger entries"""
+    list_display = ('user', 'transaction_type_badge', 'amount_display', 'balance_after_display', 'created_at')
     list_filter = ('transaction_type', 'created_at')
     search_fields = ('user__username', 'user__email', 'description')
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('user',)
 
+    @admin.display(description="Transaction Type", ordering='transaction_type')
+    def transaction_type_badge(self, obj):
+        colors = {
+            'earned': '#10B981',
+            'unlocked': '#3B82F6',
+            'spent': '#EF4444',
+            'transferred': '#8B5CF6',
+            'adjusted': '#F59E0B',
+        }
+        return format_html(
+            '<span style="color:{}; font-weight:bold;">{}</span>',
+            colors.get(obj.transaction_type, '#6B7280'),
+            obj.get_transaction_type_display()
+        )
+    
+    @admin.display(description="Amount", ordering='amount')
+    def amount_display(self, obj):
+        sign = '-' if obj.transaction_type in ['spent', 'transferred'] else '+'
+        amount = f"{obj.amount:,.2f}"
+        return format_html('<strong>{}{} CONFIO</strong>', sign, amount)
+    
+    @admin.display(description="Balance After", ordering='balance_after')
+    def balance_after_display(self, obj):
+        balance = f"{obj.balance_after:,.2f}"
+        return format_html('<span>{} CONFIO</span>', balance)
+
 
 @admin.register(InfluencerAmbassador)
-class InfluencerAmbassadorAdmin(admin.ModelAdmin):
-    """Admin for influencer ambassadors"""
-    list_display = ('user', 'tier', 'status', 'total_referrals', 'performance_score')
+class ReferralAmbassadorAdmin(admin.ModelAdmin):
+    """Admin for top referral ambassadors"""
+    list_display = (
+        'user',
+        'tier_badge',
+        'status_chip',
+        'total_referrals',
+        'active_referrals',
+        'confio_earned_display',
+        'referral_transaction_volume_display',
+        'performance_score',
+    )
     list_filter = ('tier', 'status', 'created_at')
     search_fields = ('user__username', 'user__email')
     readonly_fields = ('created_at', 'updated_at', 'tier_achieved_at', 'last_activity_at')
     raw_id_fields = ('user',)
 
+    @admin.display(description="Tier", ordering='tier')
+    def tier_badge(self, obj):
+        return format_html('<span style="font-weight:bold;">{}</span>', obj.tier_display)
+    
+    @admin.display(description="Status", ordering='status')
+    def status_chip(self, obj):
+        colors = {
+            'active': '#10B981',
+            'paused': '#F59E0B',
+            'terminated': '#EF4444',
+        }
+        return format_html(
+            '<span style="color:{}; font-weight:bold;">{}</span>',
+            colors.get(obj.status, '#6B7280'),
+            obj.get_status_display()
+        )
+    
+    @admin.display(description="CONFIO Earned", ordering='confio_earned')
+    def confio_earned_display(self, obj):
+        amount = f"{obj.confio_earned:,.2f}"
+        return format_html('<strong>{} CONFIO</strong>', amount)
+    
+    @admin.display(description="Referral Volume", ordering='referral_transaction_volume')
+    def referral_transaction_volume_display(self, obj):
+        amount = f"{obj.referral_transaction_volume:,.2f}"
+        return format_html('<span>${}</span>', amount)
+    
+
 
 @admin.register(AmbassadorActivity)
-class AmbassadorActivityAdmin(admin.ModelAdmin):
-    """Admin for ambassador activities"""
+class ReferralAmbassadorActivityAdmin(admin.ModelAdmin):
+    """Admin for referral ambassador activities"""
     list_display = ('ambassador', 'activity_type', 'confio_earned', 'created_at')
     list_filter = ('activity_type', 'created_at')
     search_fields = ('ambassador__user__username', 'description')

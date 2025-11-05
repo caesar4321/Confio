@@ -6,6 +6,7 @@ from payments.models import PaymentTransaction
 from p2p_exchange.models import P2PTrade
 from conversion.models import Conversion
 from .models_unified import UnifiedTransactionTable
+from achievements.signals import _award_referral_pair
 
 
 def create_unified_transaction_from_send(send_transaction):
@@ -277,6 +278,16 @@ def handle_send_transaction_save(sender, instance, created, **kwargs):
     """Create/update unified transaction when SendTransaction is saved"""
     if instance.deleted_at is None:  # Only process non-deleted transactions
         create_unified_transaction_from_send(instance)
+        # Award referral on first successful send by referred user
+        try:
+            # Consider only successful/confimed sends
+            if str(instance.status).upper() in ['CONFIRMED', 'COMPLETED', 'SUCCESS']:
+                if instance.sender_user_id:
+                    _award_referral_pair(instance.sender_user)
+                if instance.recipient_user_id:
+                    _award_referral_pair(instance.recipient_user)
+        except Exception:
+            pass
 
 
 @receiver(post_save, sender=PaymentTransaction)
@@ -284,6 +295,15 @@ def handle_payment_transaction_save(sender, instance, created, **kwargs):
     """Create/update unified transaction when PaymentTransaction is saved"""
     if instance.deleted_at is None:  # Only process non-deleted transactions
         create_unified_transaction_from_payment(instance)
+        # Award referral on first successful merchant payment by referred user
+        try:
+            # Treat PAID/CONFIRMED as success
+            status = str(instance.status).upper()
+            if status in ['PAID', 'CONFIRMED']:
+                if instance.payer_user_id:
+                    _award_referral_pair(instance.payer_user)
+        except Exception:
+            pass
 
 
 @receiver(post_save, sender=P2PTrade)
