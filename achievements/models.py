@@ -75,8 +75,8 @@ class AchievementType(SoftDeleteModel):
     
     class Meta:
         ordering = ['category', 'display_order', 'name']
-        verbose_name = "Achievement Type"
-        verbose_name_plural = "Achievement Types"
+        verbose_name = "Reward Program (Deprecated)"
+        verbose_name_plural = "Reward Programs (Deprecated)"
     
     def __str__(self):
         emoji = f"{self.icon_emoji} " if self.icon_emoji else ""
@@ -185,8 +185,8 @@ class UserAchievement(SoftDeleteModel):
     class Meta:
         unique_together = [('user', 'achievement_type', 'deleted_at')]
         ordering = ['-earned_at', '-created_at']
-        verbose_name = "User Achievement"
-        verbose_name_plural = "User Achievements"
+        verbose_name = "User Reward (Deprecated)"
+        verbose_name_plural = "User Rewards (Deprecated)"
     
     def __str__(self):
         status = dict(self.STATUS_CHOICES).get(self.status, self.status)
@@ -268,10 +268,11 @@ def achievement_activity(sender, instance: UserAchievement, created, **kwargs):
             pass
 
 
-class InfluencerReferral(SoftDeleteModel):
-    """Tracks referrals made by influencers"""
+class UserReferral(SoftDeleteModel):
+    """Tracks referrals made by Confío users/inviters"""
     
     STATUS_CHOICES = [
+        ('pending', 'Pendiente'),
         ('active', 'Activo'),
         ('converted', 'Convertido'),
         ('inactive', 'Inactivo'),
@@ -286,13 +287,13 @@ class InfluencerReferral(SoftDeleteModel):
         max_length=50,
         help_text="Identifier of the referrer (@username, code, etc.)"
     )
-    influencer_user = models.ForeignKey(
+    referrer_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='referrals_as_influencer',
-        help_text="Actual user who made the referral (if registered)"
+        related_name='referrals_as_referrer',
+        help_text="Usuario de Confío que hizo la invitación (si está registrado)"
     )
     status = models.CharField(
         max_length=20,
@@ -336,15 +337,15 @@ class InfluencerReferral(SoftDeleteModel):
     class Meta:
         unique_together = [('referred_user', 'deleted_at')]
         ordering = ['-created_at']
-        verbose_name = "Influencer Referral"
-        verbose_name_plural = "Influencer Referrals"
+        verbose_name = "User Referral"
+        verbose_name_plural = "User Referrals"
     
     def __str__(self):
         return f"{self.referred_user.username} referred by {self.referrer_identifier}"
     
     @classmethod
-    def get_influencer_stats(cls, referrer_identifier):
-        """Get statistics for an influencer"""
+    def get_referral_stats(cls, referrer_identifier):
+        """Get aggregated statistics for a referrer"""
         referrals = cls.objects.filter(
             referrer_identifier__iexact=referrer_identifier,
             deleted_at__isnull=True
@@ -365,14 +366,23 @@ class InfluencerReferral(SoftDeleteModel):
     
     @classmethod
     def check_ambassador_eligibility(cls, referrer_identifier):
-        """Check if an influencer is eligible for ambassador status"""
-        stats = cls.get_influencer_stats(referrer_identifier)
+        """Check if a referrer is eligible for ambassador status"""
+        stats = cls.get_referral_stats(referrer_identifier)
         
         # Requirements: 50+ referrals, 20+ active
         return (
             stats['total_referrals'] >= 50 and
             stats['active_referrals'] >= 20
         )
+
+    @classmethod
+    def get_influencer_stats(cls, referrer_identifier):
+        """Backwards compatibility alias"""
+        return cls.get_referral_stats(referrer_identifier)
+
+
+# Backwards compatibility alias for legacy imports
+InfluencerReferral = UserReferral
 
 
 class TikTokViralShare(SoftDeleteModel):
@@ -482,8 +492,8 @@ class TikTokViralShare(SoftDeleteModel):
     
     class Meta:
         ordering = ['-created_at']
-        verbose_name = "TikTok Viral Share"
-        verbose_name_plural = "TikTok Viral Shares"
+        verbose_name = "Social Referral Share (Deprecated)"
+        verbose_name_plural = "Social Referral Shares (Deprecated)"
     
     def __str__(self):
         return f"{self.user.username} - {self.share_type} ({self.status})"
@@ -595,8 +605,8 @@ class ConfioRewardBalance(SoftDeleteModel):
     )
     
     class Meta:
-        verbose_name = "CONFIO Balance"
-        verbose_name_plural = "CONFIO Balances"
+        verbose_name = "Reward Wallet (Deprecated)"
+        verbose_name_plural = "Reward Wallets (Deprecated)"
     
     def __str__(self):
         return f"{self.user.username}: {self.total_locked} locked / {self.total_unlocked} available"
@@ -654,8 +664,8 @@ class ConfioRewardTransaction(SoftDeleteModel):
     
     class Meta:
         ordering = ['-created_at']
-        verbose_name = "CONFIO Transaction"
-        verbose_name_plural = "CONFIO Transactions"
+        verbose_name = "Reward Ledger Entry (Deprecated)"
+        verbose_name_plural = "Reward Ledger Entries (Deprecated)"
     
     def __str__(self):
         return f"{self.user.username} - {self.transaction_type}: {self.amount} CONFIO"
@@ -782,8 +792,8 @@ class InfluencerAmbassador(SoftDeleteModel):
     
     class Meta:
         ordering = ['-confio_earned', '-total_referrals']
-        verbose_name = "Influencer Ambassador"
-        verbose_name_plural = "Influencer Ambassadors"
+        verbose_name = "Referral Ambassador (Deprecated)"
+        verbose_name_plural = "Referral Ambassadors (Deprecated)"
     
     def __str__(self):
         return f"{self.user.username} - {self.get_tier_display()} Ambassador"
@@ -965,8 +975,8 @@ class AmbassadorActivity(SoftDeleteModel):
     
     class Meta:
         ordering = ['-created_at']
-        verbose_name = "Ambassador Activity"
-        verbose_name_plural = "Ambassador Activities"
+        verbose_name = "Referral Ambassador Activity (Deprecated)"
+        verbose_name_plural = "Referral Ambassador Activities (Deprecated)"
     
     def __str__(self):
         return f"{self.ambassador.user.username} - {self.get_activity_type_display()}"

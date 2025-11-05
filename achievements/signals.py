@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db.models import Count, Q
 
-from .models import AchievementType, UserAchievement, InfluencerReferral, PioneroBetaTracker
+from .models import AchievementType, UserAchievement, UserReferral, PioneroBetaTracker
 from p2p_exchange.models import P2PTrade
 from security.models import DeviceFingerprint, IPAddress, UserDevice
 from notifications.utils import create_notification
@@ -185,8 +185,8 @@ def handle_p2p_trade_achievements(sender, instance, created, **kwargs):
                     earned_at=timezone.now()
                 )
                 
-                # Check if this user was referred and award referrer achievement
-                check_referral_achievement(user)
+                # Check referral and award both sides if applicable
+                _award_referral_pair(user)
             
             # Check for "10 Intercambios" achievement (only COMPLETED trades with personal accounts)
             trades_count = P2PTrade.objects.filter(
@@ -214,39 +214,66 @@ def handle_p2p_trade_achievements(sender, instance, created, **kwargs):
             pass
 
 
-def check_referral_achievement(user):
+def _award_referral_pair(user):
     """
-    Check if the user's referrer should get the successful referral achievement
+    Award referral achievements for both sides when the referred user completes
+    their first transaction (of any type). Safe to call multiple times.
     """
     try:
         # Find if this user was referred
-        referral = InfluencerReferral.objects.filter(
+        referral = UserReferral.objects.filter(
             referred_user=user,
             status='pending'
         ).first()
         
-        if referral:
-            # Update referral status
-            referral.mark_as_converted()
-            
-            # Award achievement to the referrer if they exist in the system
-            if referral.influencer_user:
+        if not referral:
+            return
+
+        # Update referral conversion timestamp and status
+        referral.first_transaction_at = referral.first_transaction_at or timezone.now()
+        try:
+            # Some environments may not have this helper; update inline
+            if hasattr(referral, 'mark_as_converted'):
+                referral.mark_as_converted()
+            else:
+                referral.status = 'converted'
+                referral.save(update_fields=['status', 'first_transaction_at'])
+        except Exception:
+            referral.status = 'converted'
+            referral.save(update_fields=['status', 'first_transaction_at'])
+
+        # Award INVITER achievement
+        if referral.referrer_user:
+            try:
                 successful_referral = AchievementType.objects.get(slug='successful_referral')
                 if not UserAchievement.objects.filter(
-                    user=referral.influencer_user,
+                    user=referral.referrer_user,
                     achievement_type=successful_referral
                 ).exists():
                     UserAchievement.objects.create(
-                        user=referral.influencer_user,
+                        user=referral.referrer_user,
                         achievement_type=successful_referral,
                         status='earned',
                         earned_at=timezone.now()
                     )
-            
-            # Award the referee their achievement (already handled in SetReferrer mutation)
-            # but update the referral status
-            referral.first_transaction_at = timezone.now()
-            referral.save(update_fields=['first_transaction_at'])
-            
+            except AchievementType.DoesNotExist:
+                pass
+
+        # Award INVITEE achievement
+        try:
+            invited_ach = AchievementType.objects.get(slug='llegaste_por_influencer')
+            if not UserAchievement.objects.filter(
+                user=user,
+                achievement_type=invited_ach
+            ).exists():
+                UserAchievement.objects.create(
+                    user=user,
+                    achievement_type=invited_ach,
+                    status='earned',
+                    earned_at=timezone.now()
+                )
+        except AchievementType.DoesNotExist:
+            pass
+
     except AchievementType.DoesNotExist:
         pass

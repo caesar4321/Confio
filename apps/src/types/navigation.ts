@@ -32,6 +32,7 @@ export type MainStackParamList = {
   CreateBusiness: undefined;
   EditBusiness: undefined;
   EditProfile: undefined;
+  UpdateUsername: undefined;
   PhoneVerification: undefined;
   TraderProfile: {
     offer?: {

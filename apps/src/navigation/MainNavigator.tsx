@@ -9,6 +9,7 @@ import { NotificationScreen } from '../screens/NotificationScreen';
 import { CreateBusinessScreen } from '../screens/CreateBusinessScreen';
 import { EditBusinessScreen } from '../screens/EditBusinessScreen';
 import { EditProfileScreen } from '../screens/EditProfileScreen';
+import { UpdateUsernameScreen } from '../screens/UpdateUsernameScreen';
 import PhoneVerificationScreen from '../screens/PhoneVerificationScreen';
 import { AccountDetailScreen } from '../screens/AccountDetailScreen';
 import DepositScreen from '../screens/DepositScreen';
@@ -35,7 +36,7 @@ import { TraderRatingScreen } from '../screens/TraderRatingScreen';
 import { ScanScreen } from '../screens/ScanScreen';
 import { CreateOfferScreen } from '../screens/CreateOfferScreen';
 import { BankInfoScreen } from '../screens/BankInfoScreen';
-import { AchievementsScreen } from '../screens/AchievementsScreen';
+import AchievementsScreen from '../screens/AchievementsScreen';
 import { ConfioTokenInfoScreen } from '../screens/ConfioTokenInfoScreen';
 import { ConfioPresaleScreen } from '../screens/ConfioPresaleScreen';
 import { ConfioPresaleParticipateScreen } from '../screens/ConfioPresaleParticipateScreen';
@@ -114,6 +115,13 @@ export const MainNavigator = () => {
       <Stack.Screen 
         name="EditProfile" 
         component={EditProfileScreen}
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen 
+        name="UpdateUsername" 
+        component={UpdateUsernameScreen}
         options={{
           headerShown: false,
         }}

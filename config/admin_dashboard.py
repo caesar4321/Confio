@@ -764,24 +764,24 @@ confio_admin_site.register(BusinessEmployee, BusinessEmployeeAdmin)
 confio_admin_site.register(EmployeeInvitation, EmployeeInvitationAdmin)
 
 # CONFIO Reward models
-from achievements.models import ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, InfluencerReferral, TikTokViralShare, ConfioGrowthMetric
+from achievements.models import ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, UserReferral, TikTokViralShare, ConfioGrowthMetric
 # Achievement models are now registered below
 
 # Achievement models
-from achievements.admin import AchievementTypeAdmin, UserAchievementAdmin, InfluencerReferralAdmin, TikTokViralShareAdmin, ConfioRewardBalanceAdmin, ConfioRewardTransactionAdmin, ConfioGrowthMetricAdmin
-confio_admin_site.register(ConfioRewardBalance, ConfioRewardBalanceAdmin)
-confio_admin_site.register(ConfioRewardTransaction, ConfioRewardTransactionAdmin)
-confio_admin_site.register(AchievementType, AchievementTypeAdmin)
-confio_admin_site.register(UserAchievement, UserAchievementAdmin)
-confio_admin_site.register(InfluencerReferral, InfluencerReferralAdmin)
-confio_admin_site.register(TikTokViralShare, TikTokViralShareAdmin)
+from achievements.admin import RewardProgramAdmin, UserRewardAdmin, UserReferralAdmin, SocialReferralShareAdmin, RewardWalletAdmin, RewardLedgerEntryAdmin, ConfioGrowthMetricAdmin
+confio_admin_site.register(ConfioRewardBalance, RewardWalletAdmin)
+confio_admin_site.register(ConfioRewardTransaction, RewardLedgerEntryAdmin)
+confio_admin_site.register(AchievementType, RewardProgramAdmin)
+confio_admin_site.register(UserAchievement, UserRewardAdmin)
+confio_admin_site.register(UserReferral, UserReferralAdmin)
+confio_admin_site.register(TikTokViralShare, SocialReferralShareAdmin)
 confio_admin_site.register(ConfioGrowthMetric, ConfioGrowthMetricAdmin)
 
 # Ambassador models
 from achievements.models import InfluencerAmbassador, AmbassadorActivity, PioneroBetaTracker
-from achievements.admin import InfluencerAmbassadorAdmin, AmbassadorActivityAdmin, PioneroBetaTrackerAdmin
-confio_admin_site.register(InfluencerAmbassador, InfluencerAmbassadorAdmin)
-confio_admin_site.register(AmbassadorActivity, AmbassadorActivityAdmin)
+from achievements.admin import ReferralAmbassadorAdmin, ReferralAmbassadorActivityAdmin, PioneroBetaTrackerAdmin
+confio_admin_site.register(InfluencerAmbassador, ReferralAmbassadorAdmin)
+confio_admin_site.register(AmbassadorActivity, ReferralAmbassadorActivityAdmin)
 confio_admin_site.register(PioneroBetaTracker, PioneroBetaTrackerAdmin)
 
 # Unified Transaction Tables

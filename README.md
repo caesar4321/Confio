@@ -620,7 +620,7 @@ Confío uses a custom Cloudflare Workers-based link shortener for WhatsApp share
   - iOS → TestFlight with referral data
   - Android → Play Store with referrer parameter
   - Desktop → Landing page with campaign data
-- **Deferred Deep Linking**: Post-install attribution with 48-hour window
+- **Deferred Deep Linking**: Post-install attribution with a short-lived link window
 - **Analytics**: Track clicks, platforms, and countries
 - **Cost-Effective**: Free tier covers most usage (vs $1,200/month Branch.io)
 
@@ -1652,9 +1652,13 @@ The security app includes an enhanced admin interface for monitoring:
 - Suspicious activity alerts
 - Ban management system
 
-### KYC Requirements (Disabled for MVP)
+### KYC Requirements for $CONFIO Withdrawals
 
-For the blockchain MVP, KYC requirements have been disabled to maintain the permissionless nature of crypto transactions. The check_kyc_required function always returns False, but the infrastructure remains in place for future compliance needs if required.
+- Las cuentas básicas (sin KYC) pueden retirar hasta 10 CONFIO por día y 50 por semana.
+- Cuando un usuario acumula más de 100 CONFIO activamos validaciones adicionales de teléfono y dispositivo.
+- Cualquier solicitud de retiro único superior a 500 CONFIO requiere verificación completa (documento oficial) y revisión manual del equipo de cumplimiento.
+- Las salidas en cUSD o USDC no tienen restricciones adicionales: están habilitadas incluso en cuentas básicas.
+- La infraestructura de `check_kyc_required` sigue siendo configurable para ampliar controles según se necesite.
 
 ### Privacy Considerations
 
@@ -3009,7 +3013,7 @@ The referral system supports three types of referrals in a single flow:
 3. **Friend Phone** - Phone number with country code
 
 **How it works:**
-- New users have 48 hours after signup to enter a referrer
+- New users can enter a referrer at any time via profile settings until one is registered
 - Both parties receive rewards only after the referred user completes their first transaction
 - Clear distinction: "Conexión Exitosa" for invited users, "Referido Exitoso" for inviters
 
@@ -3047,9 +3051,17 @@ The referral system supports three types of referrals in a single flow:
 
 ### Unified Referral System
 - Single referral input for any identifier (username, code, phone)
-- 48-hour window after signup to set referrer
+- Users can register their referrer from the profile screen (single submission; no changes after recording)
 - Both parties receive rewards on first transaction
 - Prevents gaming through one-time-only referral setting
+
+### $CONFIO Withdrawal Verification
+- Base limits for cuentas básicas (solo teléfono verificado):
+  - Hasta 10 CONFIO por día hacia billeteras externas
+  - Hasta 50 CONFIO por semana acumulada
+- Controles automáticos cuando tus recompensas superan 100 CONFIO o tu saldo crece rápido: confirmamos teléfono, dispositivo y actividad
+- Retiros únicos superiores a 500 CONFIO requieren verificación completa (documento oficial) y una revisión manual del equipo de cumplimiento
+- Puedes adelantar la verificación completa desde la app si planeas retiros grandes o frecuentes
 
 ### Implementation Architecture
 
@@ -3075,7 +3087,7 @@ checkReferralStatus
 #### Frontend Components
 - **AchievementsScreen** (`apps/src/screens/AchievementsScreen.tsx`):
   - Displays achievement progress
-  - Shows referral box only during 48-hour window
+  - Highlights referral prompts until a referrer is registered
   - Claim rewards functionality
   - Share achievements to social media
 
@@ -3114,7 +3126,7 @@ python manage.py reorder_achievements
   - Three input types: Influencer, @Username, Phone
   - Country code picker with 244 countries
   - Real-time validation feedback
-- **Orange Referral Box**: Prominent call-to-action during 48-hour window
+- **Referral Prompt**: Persistent call-to-action until a referrer is registered
 
 ### Key Simplifications from Original Design
 

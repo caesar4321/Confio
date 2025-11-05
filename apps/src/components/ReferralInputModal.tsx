@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,16 +11,15 @@ import {
   Platform,
   FlatList,
 } from 'react-native';
-import { useMutation, useQuery } from '@apollo/client';
+import { useMutation } from '@apollo/client';
 import { gql } from '@apollo/client';
 import Icon from 'react-native-vector-icons/Feather';
 import { countries, Country } from '../utils/countries';
+import { useAuth } from '../contexts/AuthContext';
 
 const CHECK_REFERRAL_STATUS = gql`
   mutation CheckReferralStatus {
     checkReferralStatus {
-      canSetReferrer
-      timeRemainingHours
       existingReferrer
     }
   }
@@ -49,26 +48,43 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
   onSuccess,
 }) => {
   const [referrerInput, setReferrerInput] = useState('');
-  const [inputType, setInputType] = useState<'influencer' | 'friend' | 'phone'>('influencer');
+  const [inputType, setInputType] = useState<'friend' | 'phone'>('friend');
   const [showSuccess, setShowSuccess] = useState(false);
-  const [selectedCountry, setSelectedCountry] = useState<Country>(countries.find(c => c[2] === 'VE') || countries[0]); // Default to Venezuela
+  const { userProfile } = useAuth();
+  const defaultCountry = useMemo<Country>(() => {
+    if (userProfile?.phoneCountry) {
+      const match = countries.find((c) => c[2] === userProfile.phoneCountry);
+      if (match) return match;
+    }
+    return countries.find((c) => c[2] === 'VE') || countries[0];
+  }, [userProfile?.phoneCountry]);
+
+  const [selectedCountry, setSelectedCountry] = useState<Country>(defaultCountry);
+
+  useEffect(() => {
+    setSelectedCountry(defaultCountry);
+  }, [defaultCountry]);
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   
   const [checkStatus] = useMutation(CHECK_REFERRAL_STATUS);
   const [setReferrer, { loading }] = useMutation(SET_REFERRER);
   
   const [canSetReferrer, setCanSetReferrer] = useState(true);
-  const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
+  const [existingReferrer, setExistingReferrer] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (visible) {
       checkStatus().then(({ data }) => {
         if (data?.checkReferralStatus) {
-          setCanSetReferrer(data.checkReferralStatus.canSetReferrer);
-          setTimeRemaining(data.checkReferralStatus.timeRemainingHours);
-          if (data.checkReferralStatus.existingReferrer) {
-            setError(`Ya tienes registrado a: ${data.checkReferralStatus.existingReferrer}`);
+          const registered = data.checkReferralStatus.existingReferrer || null;
+          setExistingReferrer(registered);
+          const allowed = !registered;
+          setCanSetReferrer(allowed);
+          if (registered) {
+            setError(`Ya registraste a: ${registered}`);
+          } else {
+            setError('');
           }
         }
       }).catch(err => {
@@ -79,14 +95,14 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
 
   const handleSubmit = async () => {
     if (!referrerInput.trim()) {
-      setError('Por favor ingresa un código o username');
+      setError('Por favor ingresa un @usuario o número de teléfono');
       return;
     }
 
     let finalIdentifier = referrerInput.trim();
     
     // Add @ prefix for usernames if not present
-    if ((inputType === 'influencer' || inputType === 'friend') && !finalIdentifier.startsWith('@')) {
+    if (inputType === 'friend' && !finalIdentifier.startsWith('@')) {
       finalIdentifier = '@' + finalIdentifier;
     }
     
@@ -100,7 +116,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
       const { data, errors } = await setReferrer({
         variables: {
           referrerIdentifier: finalIdentifier,
-          referralType: inputType === 'phone' ? 'friend' : inputType,
+          referralType: inputType === 'phone' ? 'friend' : 'friend',
         },
       });
 
@@ -136,7 +152,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
             <Text style={styles.successEmoji}>🎉</Text>
             <Text style={styles.successTitle}>¡Referidor Registrado!</Text>
             <Text style={styles.successMessage}>
-              Cuando completes tu primera transacción, ambos recibirán 4 CONFIO
+              Cuando completes tu primera operación válida, ambos recibirán el equivalente a US$5 en $CONFIO.
             </Text>
           </View>
         </View>
@@ -166,68 +182,43 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
           {canSetReferrer ? (
             <>
               <Text style={styles.subtitle}>
-                Ingresa el código de tu amigo o el @username del influencer
+                Ingresa el @usuario o número de teléfono de la persona que te invitó. Puedes registrarlo en cualquier momento.
               </Text>
 
-              {timeRemaining !== null && timeRemaining < 24 && (
-                <View style={styles.warningBox}>
-                  <Text style={styles.warningText}>
-                    ⏰ Te quedan {timeRemaining} horas para registrar un referidor
-                  </Text>
-                </View>
-              )}
-
               <View style={styles.inputTypeSelector}>
-                <TouchableOpacity
+              <TouchableOpacity
+                style={[
+                  styles.typeButton,
+                  inputType === 'friend' && styles.typeButtonActive,
+                ]}
+                onPress={() => setInputType('friend')}
+              >
+                <Text
                   style={[
-                    styles.typeButton,
-                    inputType === 'influencer' && styles.typeButtonActive,
+                    styles.typeButtonText,
+                    inputType === 'friend' && styles.typeButtonTextActive,
                   ]}
-                  onPress={() => setInputType('influencer')}
                 >
-                  <Text
-                    style={[
-                      styles.typeButtonText,
-                      inputType === 'influencer' && styles.typeButtonTextActive,
-                    ]}
-                  >
-                    Influencer
-                  </Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity
+                  @Usuario
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[
+                  styles.typeButton,
+                  inputType === 'phone' && styles.typeButtonActive,
+                ]}
+                onPress={() => setInputType('phone')}
+              >
+                <Text
                   style={[
-                    styles.typeButton,
-                    inputType === 'friend' && styles.typeButtonActive,
+                    styles.typeButtonText,
+                    inputType === 'phone' && styles.typeButtonTextActive,
                   ]}
-                  onPress={() => setInputType('friend')}
                 >
-                  <Text
-                    style={[
-                      styles.typeButtonText,
-                      inputType === 'friend' && styles.typeButtonTextActive,
-                    ]}
-                  >
-                    @Username
-                  </Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity
-                  style={[
-                    styles.typeButton,
-                    inputType === 'phone' && styles.typeButtonActive,
-                  ]}
-                  onPress={() => setInputType('phone')}
-                >
-                  <Text
-                    style={[
-                      styles.typeButtonText,
-                      inputType === 'phone' && styles.typeButtonTextActive,
-                    ]}
-                  >
-                    Teléfono
-                  </Text>
-                </TouchableOpacity>
+                  Teléfono
+                </Text>
+              </TouchableOpacity>
               </View>
 
               {inputType === 'phone' ? (
@@ -265,11 +256,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
                       setReferrerInput(text.replace('@', ''));
                       setError('');
                     }}
-                    placeholder={
-                      inputType === 'influencer'
-                        ? 'username del TikTok'
-                        : 'username de Confío'
-                    }
+                    placeholder="username de Confío"
                     placeholderTextColor="#9CA3AF"
                     autoCapitalize="none"
                     autoCorrect={false}
@@ -283,7 +270,7 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
 
               <View style={styles.infoBox}>
                 <Text style={styles.infoText}>
-                  💡 Ambos recibirán 4 CONFIO cuando completes tu primera transacción
+                  💡 Ambos recibirán el equivalente a US$5 en $CONFIO cuando completes tu primera operación válida.
                 </Text>
               </View>
 
@@ -311,7 +298,10 @@ export const ReferralInputModal: React.FC<ReferralInputModalProps> = ({
           ) : (
             <View style={styles.cannotSetContainer}>
               <Text style={styles.cannotSetText}>
-                {error || 'El período para registrar un referidor ha expirado'}
+                {error ||
+                  (existingReferrer
+                    ? `Ya registraste a ${existingReferrer}.`
+                    : 'No es posible registrar un referidor en este momento.')}
               </Text>
               <TouchableOpacity style={styles.closeOnlyButton} onPress={onClose}>
                 <Text style={styles.closeOnlyButtonText}>Cerrar</Text>
@@ -419,17 +409,6 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginBottom: 20,
     lineHeight: 22,
-  },
-  warningBox: {
-    backgroundColor: '#FEF3C7',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  warningText: {
-    fontSize: 14,
-    color: '#92400E',
-    textAlign: 'center',
   },
   inputTypeSelector: {
     flexDirection: 'row',
