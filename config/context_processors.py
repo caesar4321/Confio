@@ -1,10 +1,19 @@
+from datetime import timedelta
+from decimal import Decimal
+
 from django.db.models import Count, Sum, Q
 from django.utils import timezone
-from datetime import timedelta
+
 from users.models import User
-from achievements.models import UserAchievement
+from achievements.models import (
+    UserAchievement,
+    ReferralWithdrawalLog,
+    ConfioRewardTransaction,
+)
 from p2p_exchange.models import P2PTrade
 from presale.models import PresalePurchase, PresalePhase
+from security.models import DeviceFingerprint
+from blockchain.mutations import REFERRAL_ACHIEVEMENT_SLUGS
 
 
 def admin_dashboard_stats(request):
@@ -19,51 +28,59 @@ def admin_dashboard_stats(request):
     
     
     try:
-        # Fraud Statistics
-        total_achievements = UserAchievement.objects.count()
-        fraud_detected = UserAchievement.objects.filter(
-            security_metadata__fraud_detected__isnull=False
-        ).count()
-        suspicious_activity = UserAchievement.objects.filter(
-            security_metadata__suspicious_ip=True
-        ).count()
-        
-        # Count unique devices with multiple users
-        from collections import defaultdict
-        device_stats = defaultdict(set)
-        
-        achievements_with_device = UserAchievement.objects.filter(
-            device_fingerprint_hash__isnull=False
-        ).values('device_fingerprint_hash', 'user_id')
-        
-        for achievement in achievements_with_device:
-            device_stats[achievement['device_fingerprint_hash']].add(achievement['user_id'])
-        
-        multi_user_devices = sum(1 for users in device_stats.values() if len(users) > 1)
-        
-        # Calculate potential fraud loss
-        potential_loss = UserAchievement.objects.filter(
-            security_metadata__fraud_detected__isnull=False,
-            status='claimed'
-        ).aggregate(
-            total=Sum('achievement_type__confio_reward')
-        )['total'] or 0
-        
-        fraud_stats = {
-            'total_achievements': total_achievements,
-            'fraud_detected': fraud_detected,
-            'fraud_percentage': (fraud_detected / total_achievements * 100) if total_achievements > 0 else 0,
-            'suspicious_activity': suspicious_activity,
-            'multi_user_devices': multi_user_devices,
-            'potential_loss': potential_loss,
-            'potential_loss_usd': float(potential_loss) / 4,  # 4 CONFIO = $1
-        }
-        
-        # User Statistics
         now = timezone.now()
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         week_start = now - timedelta(days=7)
+
+        # Referral reward statistics
+        referral_logs = ReferralWithdrawalLog.objects.all()
+        referral_daily = referral_logs.filter(created_at__gte=now - timedelta(days=1))
+        referral_weekly = referral_logs.filter(created_at__gte=week_start)
+
+        total_withdrawn = referral_logs.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        daily_withdrawn = referral_daily.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        weekly_withdrawn = referral_weekly.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        pending_review = referral_logs.filter(requires_review=True).count()
+        high_value = referral_logs.filter(amount__gte=Decimal('500')).count()
+        unique_referral_users = referral_logs.values('user').distinct().count()
+
+        referral_achievement_ids = list(
+            UserAchievement.objects.filter(
+                achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS
+            ).values_list('id', flat=True)
+        )
+        referral_earned_total = ConfioRewardTransaction.objects.filter(
+            transaction_type='earned',
+            reference_type='achievement',
+            reference_id__in=[str(pk) for pk in referral_achievement_ids],
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+
+        referral_available = referral_earned_total - total_withdrawn
+        if referral_available < Decimal('0'):
+            referral_available = Decimal('0')
+
+        # Multi-user device detection (legacy achievements still informative for abuse)
+        multi_user_devices = DeviceFingerprint.objects.annotate(
+            user_count=Count(
+                'users',
+                filter=Q(users__achievements__achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS),
+                distinct=True,
+            )
+        ).filter(user_count__gt=1).count()
+
+        fraud_stats = {
+            'earned_total': referral_earned_total,
+            'total_withdrawn': total_withdrawn,
+            'available_total': referral_available,
+            'daily_withdrawn': daily_withdrawn,
+            'weekly_withdrawn': weekly_withdrawn,
+            'pending_review': pending_review,
+            'high_value': high_value,
+            'unique_users': unique_referral_users,
+            'multi_user_devices': multi_user_devices,
+        }
         
+        # User Statistics
         user_stats = {
             'total_users': User.objects.filter(is_active=True).count(),
             'new_users_today': User.objects.filter(date_joined__gte=today_start).count(),

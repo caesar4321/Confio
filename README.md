@@ -69,6 +69,13 @@ We host all infrastructure in **AWS eu-central-2 (Zurich)** region for optimal d
 - ✅ **Sponsored transactions** — users never pay gas fees
 - ✅ **Secure key storage** — using react-native-keychain with hardware encryption
 
+### Referral Fraud Guardrails
+- **Device/IP ownership**: each referral withdrawal invokes `_check_referral_device_ip_limits`. Shared device fingerprints or more than three distinct referral earners on the same IP are blocked until manual review (`blockchain/mutations.py:697-706`).
+- **Identity requirements**: once a user earns ≥100 CONFIO from referrals, full identity verification is required for any further withdrawals (replacing the old phone-only gate) (`blockchain/mutations.py:707-716`).
+- **Rate limits for unverified users**: without KYC, referral payouts are capped at 10 CONFIO per day and 50 CONFIO per week. Regression tests cover the daily clamp (`blockchain/mutations.py:842-855`, `blockchain/tests.py:159-193`).
+- **High-value withdrawals**: single referral withdrawals above 500 CONFIO demand identity verification even if other limits are not triggered (`blockchain/mutations.py:857-861`).
+- **Fraud analytics**: the admin dashboard now highlights referral metrics—earned vs. available balances, withdrawal velocity, review queue, and flagged devices—to surface abuse trends quickly (`templates/admin/dashboard.html`, `config/admin_dashboard.py`).
+
 ## 🔄 Recent Updates (August 2025)
 
 ### Security Enhancements
