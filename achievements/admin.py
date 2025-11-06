@@ -7,6 +7,8 @@ from django.template.response import TemplateResponse
 from django.contrib.admin.views.decorators import staff_member_required
 from django.utils.decorators import method_decorator
 import logging
+from decimal import Decimal
+from datetime import timedelta
 
 from .models import (
     AchievementType,
@@ -235,7 +237,11 @@ class UserRewardAdmin(admin.ModelAdmin):
         from django.db.models import Count, Q, F
         from collections import defaultdict
         import json
-        
+
+        now = timezone.now()
+        one_day_ago = now - timedelta(days=1)
+        one_week_ago = now - timedelta(days=7)
+
         # Get device data from DeviceFingerprint model
         from security.models import DeviceFingerprint as SecurityDeviceFingerprint
         
@@ -323,6 +329,7 @@ class UserRewardAdmin(admin.ModelAdmin):
         # Get total devices from DeviceFingerprint model
         from security.models import DeviceFingerprint
         total_devices_tracked = DeviceFingerprint.objects.count()
+        multi_user_devices_count = len(suspicious_devices)
         
         # Calculate potential fraud loss
         potential_loss = UserAchievement.objects.filter(
@@ -331,6 +338,30 @@ class UserRewardAdmin(admin.ModelAdmin):
         ).aggregate(
             total=Sum('achievement_type__confio_reward')
         )['total'] or 0
+
+        # Referral withdrawal statistics
+        referral_withdrawals = ReferralWithdrawalLog.objects.all()
+        referral_daily = referral_withdrawals.filter(created_at__gte=one_day_ago)
+        referral_weekly = referral_withdrawals.filter(created_at__gte=one_week_ago)
+
+        referral_total_amount = referral_withdrawals.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        referral_daily_amount = referral_daily.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        referral_weekly_amount = referral_weekly.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        referral_high_value = referral_withdrawals.filter(amount__gte=Decimal('500')).count()
+        referral_pending_review = referral_withdrawals.filter(requires_review=True).count()
+        referral_unique_users = referral_withdrawals.values('user').distinct().count()
+
+        referral_achievement_ids = UserAchievement.objects.filter(
+            achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS
+        ).values_list('id', flat=True)
+        referral_earned_total = ConfioRewardTransaction.objects.filter(
+            transaction_type='earned',
+            reference_type='achievement',
+            reference_id__in=referral_achievement_ids
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        referral_available_total = referral_earned_total - referral_total_amount
+        if referral_available_total < Decimal('0'):
+            referral_available_total = Decimal('0')
         
         context = {
             **self.admin_site.each_context(request),
@@ -344,9 +375,21 @@ class UserRewardAdmin(admin.ModelAdmin):
                 'total_fraud': total_fraud,
                 'total_suspicious': total_suspicious,
                 'total_devices_tracked': total_devices_tracked,
+                'multi_user_devices_count': multi_user_devices_count,
                 'fraud_percentage': (total_fraud / total_achievements * 100) if total_achievements > 0 else 0,
                 'potential_loss': potential_loss,
                 'potential_loss_usd': float(potential_loss) / 4,  # 4 CONFIO = $1
+            },
+            'referral_stats': {
+                'total_withdrawals': referral_withdrawals.count(),
+                'total_amount': referral_total_amount,
+                'daily_amount': referral_daily_amount,
+                'weekly_amount': referral_weekly_amount,
+                'high_value_count': referral_high_value,
+                'pending_review': referral_pending_review,
+                'unique_users': referral_unique_users,
+                'earned_total': referral_earned_total,
+                'available_total': referral_available_total,
             },
             'opts': self.model._meta,
             'has_filters': False,

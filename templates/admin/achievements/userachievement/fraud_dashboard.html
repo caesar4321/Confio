@@ -35,10 +35,26 @@
         font-size: 12px;
         margin-top: 5px;
     }
+    .stat-secondary {
+        color: #2563eb;
+        font-size: 14px;
+        font-weight: 600;
+    }
     .danger { color: #dc3545; }
     .warning { color: #ffc107; }
     .success { color: #28a745; }
     .info { color: #17a2b8; }
+    .referral-grid {
+        margin-top: 10px;
+    }
+    .referral-grid .stat-card {
+        border-left: 4px solid #2563eb;
+    }
+    .stat-note {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #6b7280;
+    }
     
     .section {
         background: white;
@@ -144,6 +160,48 @@
             <div class="stat-label">Potential Loss</div>
             <div class="stat-sublabel">{{ stats.potential_loss|floatformat:0 }} CONFIO</div>
         </div>
+        <div class="stat-card">
+            <div class="stat-value info">{{ stats.multi_user_devices_count|floatformat:0 }}</div>
+            <div class="stat-label">Multi-Account Devices</div>
+            <div class="stat-sublabel">Devices sharing referral achievements</div>
+        </div>
+    </div>
+
+    <!-- Referral Withdrawal Statistics -->
+    <div class="section">
+        <h2>🎯 Referral Rewards Overview</h2>
+        <div class="stats-grid referral-grid">
+            <div class="stat-card">
+                <div class="stat-value">{{ referral_stats.total_withdrawals|floatformat:0 }}</div>
+                <div class="stat-label">Total Referral Withdrawals</div>
+                <div class="stat-sublabel">{{ referral_stats.unique_users|floatformat:0 }} unique users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value success">{{ referral_stats.total_amount|floatformat:2 }}</div>
+                <div class="stat-label">Total CONFIO Paid</div>
+                <div class="stat-sublabel">Lifetime referrals</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ referral_stats.daily_amount|floatformat:2 }}</div>
+                <div class="stat-label">24h Withdrawals</div>
+                <div class="stat-sublabel">{{ referral_stats.weekly_amount|floatformat:2 }} over last 7d</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value warning">{{ referral_stats.pending_review|floatformat:0 }}</div>
+                <div class="stat-label">Pending Manual Review</div>
+                <div class="stat-sublabel">{{ referral_stats.high_value_count|floatformat:0 }} high-value (500+)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ referral_stats.earned_total|floatformat:2 }}</div>
+                <div class="stat-label">Referral CONFIO Earned</div>
+                <div class="stat-sublabel">
+                    <span class="stat-secondary">{{ referral_stats.available_total|floatformat:2 }} CONFIO</span> available to withdraw
+                </div>
+            </div>
+        </div>
+        <p class="stat-note">
+            Las métricas usan solo recompensas por referidos. Depósitos, compras de presale u otros orígenes de CONFIO no están sujetos a estos límites.
+        </p>
     </div>
     
     {% if stats.total_fraud > 0 or stats.total_suspicious > 0 %}
