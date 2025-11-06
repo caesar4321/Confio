@@ -1,18 +1,141 @@
 """
 Blockchain-related GraphQL mutations
 """
-import graphene
+import asyncio
 import logging
+from datetime import timedelta
 from decimal import Decimal
 from typing import Optional
+
+import graphene
 from django.conf import settings
+from django.db.models import Sum
+from django.db.models.functions import Coalesce, Greatest
+from django.utils import timezone
+
 from users.models import Account
 from .algorand_account_manager import AlgorandAccountManager
 from .algorand_sponsor_service import algorand_sponsor_service
-import asyncio
 
 logger = logging.getLogger(__name__)
 
+REFERRAL_ACHIEVEMENT_SLUGS = {'successful_referral', 'llegaste_por_influencer'}
+REFERRAL_DAILY_LIMIT = Decimal('10')
+REFERRAL_WEEKLY_LIMIT = Decimal('50')
+REFERRAL_SINGLE_REVIEW_THRESHOLD = Decimal('500')
+REFERRAL_VERIFICATION_TRIGGER = Decimal('100')
+
+
+def _get_referral_reward_summary(user) -> dict:
+    """Aggregate referral-earned CONFIO balances for a user."""
+    from achievements.models import UserAchievement, ConfioRewardTransaction, ReferralWithdrawalLog
+
+    referral_ids = list(
+        UserAchievement.objects.filter(
+            user=user,
+            achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS
+        ).values_list('id', flat=True)
+    )
+    if not referral_ids:
+        zero = Decimal('0')
+        return {'earned': zero, 'spent': zero, 'available': zero}
+
+    str_ids = [str(pk) for pk in referral_ids]
+    earned = (
+        ConfioRewardTransaction.objects.filter(
+            user=user,
+            transaction_type='earned',
+            reference_type='achievement',
+            reference_id__in=str_ids
+        ).aggregate(total=Coalesce(Sum('amount'), Decimal('0')))['total'] or Decimal('0')
+    )
+    spent = (
+        ReferralWithdrawalLog.objects.filter(user=user)
+        .aggregate(total=Coalesce(Sum('amount'), Decimal('0')))['total'] or Decimal('0')
+    )
+    available = earned - spent
+    if available < Decimal('0'):
+        available = Decimal('0')
+    return {'earned': earned, 'spent': spent, 'available': available}
+
+
+def _calculate_referral_portion(user, amount: Decimal) -> Decimal:
+    """Return the portion of the withdrawal that should be treated as referral-earned CONFIO."""
+    if amount <= Decimal('0'):
+        return Decimal('0')
+    summary = _get_referral_reward_summary(user)
+    available = summary['available']
+    if available <= Decimal('0'):
+        return Decimal('0')
+    return min(amount, available)
+
+
+def _sum_referral_withdrawals(user, since=None) -> Decimal:
+    """Sum referral withdrawals in a given window."""
+    from achievements.models import ReferralWithdrawalLog
+
+    qs = ReferralWithdrawalLog.objects.filter(user=user)
+    if since is not None:
+        qs = qs.filter(created_at__gte=since)
+    return qs.aggregate(total=Coalesce(Sum('amount'), Decimal('0')))['total'] or Decimal('0')
+
+
+def _record_referral_withdrawal(user, amount: Decimal, *, reference_id: str = '', requires_review: bool = False):
+    """Persist referral withdrawal metadata and adjust reward balances."""
+    if amount <= Decimal('0'):
+        return
+
+    from django.db import transaction as db_transaction
+    from django.db.models import F
+    from achievements.models import ReferralWithdrawalLog, ConfioRewardBalance, ConfioRewardTransaction
+
+    with db_transaction.atomic():
+        existing = ReferralWithdrawalLog.all_objects.filter(
+            reference_type='send_transaction',
+            reference_id=reference_id,
+        ).select_for_update().first()
+
+        delta = amount
+        if existing:
+            previous_amount = existing.amount or Decimal('0')
+            if existing.deleted_at is None and previous_amount == amount and existing.requires_review == requires_review:
+                return
+            existing.amount = amount
+            existing.requires_review = requires_review
+            existing.deleted_at = None
+            existing.save(update_fields=['amount', 'requires_review', 'deleted_at', 'updated_at'])
+            log = existing
+            delta = amount - previous_amount
+        else:
+            log = ReferralWithdrawalLog.objects.create(
+                user=user,
+                amount=amount,
+                requires_review=requires_review,
+                reference_type='send_transaction',
+                reference_id=reference_id,
+            )
+            delta = amount
+
+        if delta == 0:
+            return
+
+        balance, _ = ConfioRewardBalance.objects.get_or_create(user=user)
+        ConfioRewardBalance.objects.filter(pk=balance.pk).update(
+            total_spent=F('total_spent') + delta,
+            total_locked=Greatest(F('total_locked') - delta, Decimal('0')),
+        )
+        balance.refresh_from_db()
+
+        if delta > 0:
+            ConfioRewardTransaction.objects.create(
+                user=user,
+                transaction_type='spent',
+                amount=delta,
+                balance_after=balance.total_locked,
+                reference_type='referral_withdrawal',
+                reference_id=reference_id,
+                description='Retiro de recompensas por referidos',
+            )
 
 class EnsureAlgorandReadyMutation(graphene.Mutation):
     """
@@ -37,6 +160,13 @@ class EnsureAlgorandReadyMutation(graphene.Mutation):
             user = info.context.user
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
+            
+            try:
+                amount_decimal = Decimal(str(amount))
+            except Exception:
+                return cls(success=False, error='Monto inválido')
+            if amount_decimal <= Decimal('0'):
+                return cls(success=False, error='El monto debe ser mayor a cero')
             
             # Resolve a specific account if provided; otherwise default to personal index 0
             if account_id:
@@ -651,14 +781,37 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                 asset_balance = next((asset['amount'] for asset in assets if asset['asset-id'] == asset_id), 0)
                 asset_info = algod_client.asset_info(asset_id)
                 decimals = asset_info['params'].get('decimals', 0)
-                balance_formatted = asset_balance / (10 ** decimals)
+                scale = Decimal(10) ** Decimal(decimals)
+                balance_formatted = Decimal(asset_balance) / scale
                 
-                if balance_formatted < Decimal(str(amount)):
+                if balance_formatted < amount_decimal:
                     return cls(
                         success=False,
                         error=f'Insufficient {asset_type} balance. You have {balance_formatted} but trying to send {amount}'
                     )
-            
+                
+                # Apply referral restrictions for CONFIO withdrawals
+                if asset_type == 'CONFIO':
+                    referral_summary = _get_referral_reward_summary(user)
+                    referral_portion = _calculate_referral_portion(user, amount_decimal)
+
+                    if referral_summary['earned'] >= REFERRAL_VERIFICATION_TRIGGER and not user.is_phone_verified:
+                        return cls(success=False, error='Verifica tu número de teléfono para continuar con retiros de recompensas de referidos.')
+
+                    if referral_portion > Decimal('0'):
+                        now = timezone.now()
+                        if not user.is_identity_verified:
+                            daily_total = _sum_referral_withdrawals(user, now - timedelta(days=1))
+                            if daily_total + referral_portion > REFERRAL_DAILY_LIMIT:
+                                return cls(success=False, error='Las cuentas básicas solo pueden retirar 10 CONFIO de referidos por día. Completa tu verificación para ampliar el límite.')
+                            weekly_total = _sum_referral_withdrawals(user, now - timedelta(days=7))
+                            if weekly_total + referral_portion > REFERRAL_WEEKLY_LIMIT:
+                                return cls(success=False, error='Las cuentas básicas solo pueden retirar 50 CONFIO de referidos por semana. Completa tu verificación para ampliar el límite.')
+
+                        if referral_portion > REFERRAL_SINGLE_REVIEW_THRESHOLD and not user.is_identity_verified:
+                            return cls(success=False, error='Necesitas completar la verificación de identidad para retiros mayores a 500 CONFIO provenientes de referidos.')
+            # Native ALGO transfers do not use ASA scaling
+
             # Create sponsored transaction using async function
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -669,7 +822,7 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                     algorand_sponsor_service.create_sponsored_transfer(
                         sender=user_account.algorand_address,
                         recipient=resolved_recipient_address,  # Use the resolved address
-                        amount=Decimal(str(amount)),
+                        amount=amount_decimal,
                         asset_id=asset_id,
                         note=note
                     )
@@ -908,6 +1061,21 @@ class SubmitSponsoredGroupMutation(graphene.Mutation):
                     }
                 )
                 logger.info(f"SendTransaction persisted for tx {result['tx_id']} (created={created})")
+
+                if token_type == 'CONFIO':
+                    referral_portion = _calculate_referral_portion(user, amount_dec)
+                    if referral_portion > Decimal('0'):
+                        requires_review = referral_portion > REFERRAL_SINGLE_REVIEW_THRESHOLD
+                        reference_id = str(stx.id) if stx else (result.get('tx_id') or '')
+                        _record_referral_withdrawal(
+                            user,
+                            referral_portion,
+                            reference_id=reference_id,
+                            requires_review=requires_review,
+                        )
+                        if requires_review and stx:
+                            stx.status = 'AML_REVIEW'
+                            stx.save(update_fields=['status'])
             except Exception as pe:
                 logger.warning(f"Failed to persist SendTransaction for tx {result.get('tx_id')}: {pe}")
 
