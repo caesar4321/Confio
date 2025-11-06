@@ -982,6 +982,52 @@ class AmbassadorActivity(SoftDeleteModel):
         return f"{self.ambassador.user.username} - {self.get_activity_type_display()}"
 
 
+class ReferralWithdrawalLog(SoftDeleteModel):
+    """Tracks withdrawals of CONFIO rewards earned via referrals"""
+    
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='referral_withdrawal_logs'
+    )
+    amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Amount of referral-earned CONFIO withdrawn"
+    )
+    reference_type = models.CharField(
+        max_length=50,
+        default='send_transaction',
+        help_text="Source of the withdrawal record, e.g., send_transaction"
+    )
+    reference_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Identifier for the source record (transaction hash, send ID, etc.)"
+    )
+    notes = models.TextField(
+        blank=True,
+        help_text="Optional notes for manual review"
+    )
+    requires_review = models.BooleanField(
+        default=False,
+        help_text="Whether this withdrawal requires manual compliance review"
+    )
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Referral Withdrawal Log"
+        verbose_name_plural = "Referral Withdrawal Logs"
+        indexes = [
+            models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['reference_type', 'reference_id']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user_id} - {self.amount} CONFIO ({self.reference_type}:{self.reference_id})"
+
+
 class ConfioGrowthMetric(models.Model):
     """Stores growth metrics for the CONFIO token info screen"""
     
