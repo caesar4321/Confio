@@ -206,18 +206,6 @@ class EnsureAlgorandReadyMutation(graphene.Mutation):
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
-            try:
-                amount_decimal = Decimal(str(amount))
-            except Exception:
-                return cls(success=False, error='Monto inválido')
-            if amount_decimal <= Decimal('0'):
-                return cls(success=False, error='El monto debe ser mayor a cero')
-
-            if str(asset_type or '').upper() == 'CONFIO':
-                abuse_error = _check_referral_device_ip_limits(user)
-                if abuse_error:
-                    return cls(success=False, error=abuse_error)
-            
             # Resolve a specific account if provided; otherwise default to personal index 0
             if account_id:
                 from users.jwt_context import resolve_account_for_write
@@ -697,6 +685,27 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             if not user.is_authenticated:
                 return cls(success=False, error='Not authenticated')
             
+            try:
+                amount_decimal = Decimal(str(amount))
+            except Exception:
+                return cls(success=False, error='Monto inválido')
+            if amount_decimal <= Decimal('0'):
+                return cls(success=False, error='El monto debe ser mayor a cero')
+
+            asset_type_upper = str(asset_type or '').upper()
+
+            if asset_type_upper == 'CONFIO':
+                abuse_error = _check_referral_device_ip_limits(user)
+                if abuse_error:
+                    return cls(success=False, error=abuse_error)
+                
+                referral_summary = _get_referral_reward_summary(user)
+                if referral_summary['earned'] >= REFERRAL_VERIFICATION_TRIGGER and not user.is_identity_verified:
+                    return cls(
+                        success=False,
+                        error='Necesitas completar la verificación de identidad para seguir retirando recompensas de referidos.'
+                    )
+
             # Get JWT context for account determination
             from users.jwt_context import get_jwt_business_context_with_validation
             jwt_context = get_jwt_business_context_with_validation(info, required_permission='send_funds')
@@ -799,13 +808,13 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
             
             # Determine asset ID based on type
             asset_id = None
-            if asset_type == 'CONFIO':
+            if asset_type_upper == 'CONFIO':
                 asset_id = AlgorandAccountManager.CONFIO_ASSET_ID
-            elif asset_type == 'USDC':
+            elif asset_type_upper == 'USDC':
                 asset_id = AlgorandAccountManager.USDC_ASSET_ID
-            elif asset_type == 'CUSD':
+            elif asset_type_upper == 'CUSD':
                 asset_id = AlgorandAccountManager.CUSD_ASSET_ID
-            elif asset_type == 'ALGO':
+            elif asset_type_upper == 'ALGO':
                 asset_id = None  # Native ALGO transfer
             else:
                 return cls(success=False, error=f'Unsupported asset type: {asset_type}')
@@ -841,13 +850,9 @@ class AlgorandSponsoredSendMutation(graphene.Mutation):
                     )
                 
                 # Apply referral restrictions for CONFIO withdrawals
-                if asset_type == 'CONFIO':
+                if asset_type_upper == 'CONFIO':
                     referral_summary = _get_referral_reward_summary(user)
                     referral_portion = _calculate_referral_portion(user, amount_decimal)
-
-                    if referral_summary['earned'] >= REFERRAL_VERIFICATION_TRIGGER and not user.is_phone_verified:
-                        return cls(success=False, error='Verifica tu número de teléfono para continuar con retiros de recompensas de referidos.')
-
                     if referral_portion > Decimal('0'):
                         now = timezone.now()
                         if not user.is_identity_verified:

@@ -16,12 +16,13 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from users.models import User, Account, Business, Country, Bank, BankInfo, WalletPepper, WalletDerivationPepper
-from security.models import IdentityVerification
+from security.models import IdentityVerification, DeviceFingerprint
 from achievements.admin_views import achievement_dashboard
-from achievements.models import UserAchievement
+from achievements.models import UserAchievement, ReferralWithdrawalLog, ConfioRewardTransaction, UserReferral
 from p2p_exchange.models import P2POffer, P2PTrade, P2PUserStats, P2PDispute
 from send.models import SendTransaction
 from payments.models import PaymentTransaction
+from blockchain.mutations import REFERRAL_ACHIEVEMENT_SLUGS
 
 
 class ConfioAdminSite(admin.AdminSite):
@@ -181,43 +182,77 @@ class ConfioAdminSite(admin.AdminSite):
             evidence_count=Count('evidences')
         ).order_by('-opened_at')[:10]
         
-        # Fraud Detection Statistics
-        total_achievements = UserAchievement.objects.count()
-        fraud_detected = UserAchievement.objects.filter(
-            security_metadata__fraud_detected__isnull=False
-        ).count()
-        suspicious_activity = UserAchievement.objects.filter(
-            security_metadata__suspicious_ip=True
-        ).count()
-        
-        # Count unique devices with multiple users from DeviceFingerprint model
-        from security.models import DeviceFingerprint
-        
-        # Count devices that have more than one user
+        # Referral reward security statistics
+        referral_logs = ReferralWithdrawalLog.objects.all()
+        total_withdrawn = referral_logs.aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        daily_withdrawn = referral_logs.filter(created_at__gte=now - timedelta(days=1)).aggregate(
+            total=Sum('amount')
+        )['total'] or Decimal('0')
+        weekly_withdrawn = referral_logs.filter(created_at__gte=now - timedelta(days=7)).aggregate(
+            total=Sum('amount')
+        )['total'] or Decimal('0')
+        pending_review = referral_logs.filter(requires_review=True).count()
+        high_value = referral_logs.filter(amount__gte=Decimal('500')).count()
+        unique_referral_users = referral_logs.values('user').distinct().count()
+
+        referral_achievement_ids = list(
+            UserAchievement.objects.filter(
+                achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS
+            ).values_list('id', flat=True)
+        )
+        referral_earned_total = ConfioRewardTransaction.objects.filter(
+            transaction_type='earned',
+            reference_type='achievement',
+            reference_id__in=[str(pk) for pk in referral_achievement_ids],
+        ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
+        referral_available = referral_earned_total - total_withdrawn
+        if referral_available < Decimal('0'):
+            referral_available = Decimal('0')
+
         multi_user_devices = DeviceFingerprint.objects.annotate(
-            user_count=Count('users', distinct=True)
+            user_count=Count(
+                'users',
+                filter=Q(users__achievements__achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS),
+                distinct=True,
+            )
         ).filter(user_count__gt=1).count()
-        
-        # Also get total unique devices tracked
-        total_devices_tracked = DeviceFingerprint.objects.count()
-        
-        # Calculate potential fraud loss
-        potential_loss = UserAchievement.objects.filter(
-            security_metadata__fraud_detected__isnull=False,
-            status='claimed'
-        ).aggregate(
-            total=Sum('achievement_type__confio_reward')
-        )['total'] or 0
-        
+
         context['fraud_stats'] = {
-            'total_achievements': total_achievements,
-            'fraud_detected': fraud_detected,
-            'fraud_percentage': (fraud_detected / total_achievements * 100) if total_achievements > 0 else 0,
-            'suspicious_activity': suspicious_activity,
+            'earned_total': referral_earned_total,
+            'available_total': referral_available,
+            'total_withdrawn': total_withdrawn,
+            'daily_withdrawn': daily_withdrawn,
+            'weekly_withdrawn': weekly_withdrawn,
+            'pending_review': pending_review,
+            'high_value': high_value,
+            'unique_users': unique_referral_users,
             'multi_user_devices': multi_user_devices,
-            'total_devices_tracked': total_devices_tracked,
-            'potential_loss': potential_loss,
-            'potential_loss_usd': float(potential_loss) / 4,  # 4 CONFIO = $1
+        }
+
+        referral_records = UserReferral.objects.filter(deleted_at__isnull=True)
+        total_referrals = referral_records.count()
+        converted_referrals = referral_records.filter(status='converted').count()
+        new_referrals_week = referral_records.filter(created_at__gte=last_7_start).count()
+        converted_week = referral_records.filter(
+            status='converted',
+            reward_claimed_at__gte=last_7_start
+        ).count()
+        engaged_referrals = referral_records.filter(total_transaction_volume__gt=0).count()
+        total_awarded = referral_records.aggregate(
+            total=Sum('referrer_confio_awarded')
+        )['total'] or Decimal('0')
+        conversion_rate = (converted_referrals / total_referrals * 100) if total_referrals else 0
+        avg_reward = (total_awarded / converted_referrals) if converted_referrals else Decimal('0')
+
+        context['referral_stats'] = {
+            'total': total_referrals,
+            'converted': converted_referrals,
+            'conversion_rate': conversion_rate,
+            'new_week': new_referrals_week,
+            'converted_week': converted_week,
+            'engaged': engaged_referrals,
+            'avg_confio_award': avg_reward,
+            'total_awarded': total_awarded,
         }
         
         # Transaction metrics
