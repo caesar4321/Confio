@@ -9,10 +9,17 @@ from django.utils.decorators import method_decorator
 import logging
 
 from .models import (
-    AchievementType, UserAchievement, UserReferral, 
-    TikTokViralShare, ConfioRewardBalance, ConfioRewardTransaction,
-    InfluencerAmbassador, AmbassadorActivity,
-    PioneroBetaTracker, ConfioGrowthMetric
+    AchievementType,
+    UserAchievement,
+    UserReferral,
+    ReferralWithdrawalLog,
+    TikTokViralShare,
+    ConfioRewardBalance,
+    ConfioRewardTransaction,
+    InfluencerAmbassador,
+    AmbassadorActivity,
+    PioneroBetaTracker,
+    ConfioGrowthMetric,
 )
 
 logger = logging.getLogger(__name__)
@@ -873,6 +880,38 @@ class ReferralAmbassadorActivityAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('ambassador',)
 
+
+@admin.register(ReferralWithdrawalLog)
+class ReferralWithdrawalLogAdmin(admin.ModelAdmin):
+    """Admin for referral withdrawal records"""
+    list_display = (
+        'user',
+        'amount',
+        'requires_review',
+        'reference_type',
+        'reference_id',
+        'created_at',
+    )
+    list_filter = ('requires_review', 'created_at')
+    search_fields = (
+        'user__username',
+        'user__email',
+        'reference_id',
+        'notes',
+    )
+    readonly_fields = ('created_at', 'updated_at')
+    raw_id_fields = ('user',)
+    actions = ('mark_reviewed', 'flag_for_review')
+
+    @admin.action(description="Mark selected logs as reviewed")
+    def mark_reviewed(self, request, queryset):
+        updated = queryset.update(requires_review=False)
+        self.message_user(request, f"{updated} registros marcados como revisados.")
+
+    @admin.action(description="Flag selected logs for manual review")
+    def flag_for_review(self, request, queryset):
+        updated = queryset.update(requires_review=True)
+        self.message_user(request, f"{updated} registros marcados para revisión manual.")
 
 
 @admin.register(PioneroBetaTracker)
