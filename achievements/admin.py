@@ -368,7 +368,7 @@ class UserRewardAdmin(admin.ModelAdmin):
         
         context = {
             **self.admin_site.each_context(request),
-            'title': 'Reward Fraud Detection Dashboard',
+            'title': '$CONFIO Reward Security Dashboard',
             'suspicious_devices': suspicious_devices[:20],  # Top 20
             'suspicious_ips': suspicious_ips[:20],  # Top 20
             'recent_fraud': recent_fraud,
