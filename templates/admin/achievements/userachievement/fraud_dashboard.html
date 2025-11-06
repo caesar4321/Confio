@@ -124,84 +124,82 @@
 
 {% block content %}
 <div class="fraud-dashboard">
-    <h1>🔍 Achievement Fraud Detection Dashboard</h1>
+    <h1>🔍 $CONFIO Rewards Security Dashboard</h1>
     
     <div class="dashboard-actions">
-        <a href="{% url 'admin:achievements_userachievement_changelist' %}">← Back to Achievements</a>
-        <a href="{% url 'admin:achievements_userachievement_changelist' %}?fraud_status=fraud">View All Fraud</a>
-        <a href="{% url 'admin:achievements_userachievement_changelist' %}?fraud_status=multi_device">View Multi-Device</a>
+        <a href="{% url 'admin:achievements_referralwithdrawallog_changelist' %}">Manage Referral Withdrawals</a>
+        <a href="{% url 'admin:achievements_userachievement_changelist' %}">Legacy Reward Records</a>
     </div>
     
-    <!-- Overall Statistics -->
-    <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-value">{{ stats.total_achievements|floatformat:0 }}</div>
-            <div class="stat-label">Total Achievements</div>
-        </div>
-        
-        <div class="stat-card">
-            <div class="stat-value danger">{{ stats.total_fraud|floatformat:0 }}</div>
-            <div class="stat-label">Confirmed Fraud</div>
-            <div class="stat-sublabel">{{ stats.fraud_percentage|floatformat:1 }}% of total</div>
-        </div>
-        
-        <div class="stat-card">
-            <div class="stat-value warning">{{ stats.total_suspicious|floatformat:0 }}</div>
-            <div class="stat-label">Suspicious Activity</div>
-        </div>
-        
-        <div class="stat-card">
-            <div class="stat-value info">{{ stats.total_devices_tracked|floatformat:0 }}</div>
-            <div class="stat-label">Unique Devices</div>
-        </div>
-        
-        <div class="stat-card">
-            <div class="stat-value danger">${{ stats.potential_loss_usd|floatformat:2 }}</div>
-            <div class="stat-label">Potential Loss</div>
-            <div class="stat-sublabel">{{ stats.potential_loss|floatformat:0 }} CONFIO</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-value info">{{ stats.multi_user_devices_count|floatformat:0 }}</div>
-            <div class="stat-label">Multi-Account Devices</div>
-            <div class="stat-sublabel">Devices sharing referral achievements</div>
-        </div>
-    </div>
-
-    <!-- Referral Withdrawal Statistics -->
+    <!-- CONFIO Referral Overview -->
     <div class="section">
         <h2>🎯 Referral Rewards Overview</h2>
         <div class="stats-grid referral-grid">
             <div class="stat-card">
-                <div class="stat-value">{{ referral_stats.total_withdrawals|floatformat:0 }}</div>
-                <div class="stat-label">Total Referral Withdrawals</div>
-                <div class="stat-sublabel">{{ referral_stats.unique_users|floatformat:0 }} unique users</div>
+                <div class="stat-value success">{{ referral_stats.earned_total|floatformat:2 }}</div>
+                <div class="stat-label">CONFIO Earned via Referrals</div>
+                <div class="stat-sublabel">{{ referral_stats.unique_users|floatformat:0 }} users rewarded</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value success">{{ referral_stats.total_amount|floatformat:2 }}</div>
-                <div class="stat-label">Total CONFIO Paid</div>
-                <div class="stat-sublabel">Lifetime referrals</div>
+                <div class="stat-value">{{ referral_stats.total_amount|floatformat:2 }}</div>
+                <div class="stat-label">CONFIO Withdrawn</div>
+                <div class="stat-sublabel">{{ referral_stats.total_withdrawals|floatformat:0 }} total requests</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ referral_stats.available_total|floatformat:2 }}</div>
+                <div class="stat-label">CONFIO Still Available</div>
+                <div class="stat-sublabel">Recompensas de referidos sin retirar</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value warning">{{ referral_stats.pending_review|floatformat:0 }}</div>
+                <div class="stat-label">Withdrawals Pending Review</div>
+                <div class="stat-sublabel">{{ referral_stats.high_value_count|floatformat:0 }} high-value (≥500 CONFIO)</div>
             </div>
             <div class="stat-card">
                 <div class="stat-value">{{ referral_stats.daily_amount|floatformat:2 }}</div>
                 <div class="stat-label">24h Withdrawals</div>
-                <div class="stat-sublabel">{{ referral_stats.weekly_amount|floatformat:2 }} over last 7d</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value warning">{{ referral_stats.pending_review|floatformat:0 }}</div>
-                <div class="stat-label">Pending Manual Review</div>
-                <div class="stat-sublabel">{{ referral_stats.high_value_count|floatformat:0 }} high-value (500+)</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value">{{ referral_stats.earned_total|floatformat:2 }}</div>
-                <div class="stat-label">Referral CONFIO Earned</div>
                 <div class="stat-sublabel">
-                    <span class="stat-secondary">{{ referral_stats.available_total|floatformat:2 }} CONFIO</span> available to withdraw
+                    <span class="stat-secondary">{{ referral_stats.weekly_amount|floatformat:2 }} CONFIO</span> last 7 days
                 </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value info">{{ stats.multi_user_devices_count|floatformat:0 }}</div>
+                <div class="stat-label">Multi-Account Devices</div>
+                <div class="stat-sublabel">Devices sharing referral rewards</div>
             </div>
         </div>
         <p class="stat-note">
             Las métricas usan solo recompensas por referidos. Depósitos, compras de presale u otros orígenes de CONFIO no están sujetos a estos límites.
         </p>
+    </div>
+
+    <!-- Legacy Achievement Signals -->
+    <div class="section">
+        <h2>📊 Legacy Achievement Monitoring</h2>
+        <div class="stats-grid legacy-grid">
+            <div class="stat-card">
+                <div class="stat-value">{{ stats.total_achievements|floatformat:0 }}</div>
+                <div class="stat-label">Reward Events Tracked</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value danger">{{ stats.total_fraud|floatformat:0 }}</div>
+                <div class="stat-label">Confirmed Fraud Cases</div>
+                <div class="stat-sublabel">{{ stats.fraud_percentage|floatformat:1 }}% of total</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value warning">{{ stats.total_suspicious|floatformat:0 }}</div>
+                <div class="stat-label">Suspicious Activity</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value info">{{ stats.total_devices_tracked|floatformat:0 }}</div>
+                <div class="stat-label">Unique Devices</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value danger">${{ stats.potential_loss_usd|floatformat:2 }}</div>
+                <div class="stat-label">Potential Loss (legacy)</div>
+                <div class="stat-sublabel">{{ stats.potential_loss|floatformat:0 }} CONFIO</div>
+            </div>
+        </div>
     </div>
     
     {% if stats.total_fraud > 0 or stats.total_suspicious > 0 %}
