@@ -353,13 +353,14 @@ class UserRewardAdmin(admin.ModelAdmin):
         referral_pending_review = referral_withdrawals.filter(requires_review=True).count()
         referral_unique_users = referral_withdrawals.values('user').distinct().count()
 
-        referral_achievement_ids = UserAchievement.objects.filter(
+        referral_achievement_ids = list(UserAchievement.objects.filter(
             achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS
-        ).values_list('id', flat=True)
+        ).values_list('id', flat=True))
+        referral_achievement_ids_str = [str(pk) for pk in referral_achievement_ids]
         referral_earned_total = ConfioRewardTransaction.objects.filter(
             transaction_type='earned',
             reference_type='achievement',
-            reference_id__in=referral_achievement_ids
+            reference_id__in=referral_achievement_ids_str
         ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
         referral_available_total = referral_earned_total - referral_total_amount
         if referral_available_total < Decimal('0'):
