@@ -295,6 +295,34 @@
         </div>
     </div>
     
+    {% if referral_stats %}
+    <div class="metrics-grid" style="margin-top: 20px;">
+        <div class="metric-card">
+            <div class="metric-label">Referral Signups</div>
+            <div class="metric-value">{{ referral_stats.total|default:"0"|intcomma }}</div>
+            <div class="metric-change">Converted: {{ referral_stats.converted|default:"0"|intcomma }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Activation Rate</div>
+            <div class="metric-value">{{ referral_stats.conversion_rate|floatformat:1 }}%</div>
+            <div class="metric-change">Engaged referrers: {{ referral_stats.engaged|default:"0"|intcomma }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">New Referrals (7d)</div>
+            <div class="metric-value">{{ referral_stats.new_week|default:"0"|intcomma }}</div>
+            <div class="metric-change">Converted (7d): {{ referral_stats.converted_week|default:"0"|intcomma }}</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Avg Reward / Converted</div>
+            <div class="metric-value">{{ referral_stats.avg_confio_award|floatformat:2 }} CONFIO</div>
+            <div class="metric-change">Total awarded: {{ referral_stats.total_awarded|floatformat:2 }} CONFIO</div>
+        </div>
+    </div>
+    <p style="font-size: 13px; color: #4b5563; margin: -10px 0 30px;">
+        Referral metrics reflect balances earned via invites only. cUSD, USDC, and presale funds remain unrestricted.
+    </p>
+    {% endif %}
+    
     <!-- Presale Status -->
     <h2 class="section-title">🚀 CONFIO Token Presale TEST</h2>
     <p>Presale Active: {{ presale_active|default:"NOT SET" }}</p>
@@ -344,67 +372,65 @@
     </div>
     {% endif %}
 
-    <!-- Fraud Detection Statistics -->
+    <!-- $CONFIO Reward Security -->
     {% if fraud_stats %}
-    <h2 class="section-title">🔍 Fraud Detection Overview</h2>
+    <h2 class="section-title">🔍 $CONFIO Reward Security</h2>
+    <p style="margin-bottom: 18px; color: #1f2937;">
+        Monitoring referral-earned $CONFIO balances and withdrawal limits. Presale and externally deposited tokens stay unrestricted.
+    </p>
     <div class="metrics-grid">
         <div class="metric-card">
-            <div class="metric-label">Total Achievements</div>
-            <div class="metric-value">{{ fraud_stats.total_achievements|intcomma }}</div>
-            <div class="metric-change">All time</div>
+            <div class="metric-label">Referral Rewards Earned</div>
+            <div class="metric-value">{{ fraud_stats.earned_total|default:"0"|floatformat:2 }} CONFIO</div>
+            <div class="metric-change">Lifetime referral earnings</div>
         </div>
         
         <div class="metric-card">
-            <div class="metric-label">Confirmed Fraud</div>
-            <div class="metric-value" style="color: #dc2626;">{{ fraud_stats.fraud_detected|intcomma }}</div>
-            <div class="metric-change">{{ fraud_stats.fraud_percentage|floatformat:1 }}% of total</div>
+            <div class="metric-label">Available for Withdrawal</div>
+            <div class="metric-value" style="color: #16a34a;">{{ fraud_stats.available_total|default:"0"|floatformat:2 }} CONFIO</div>
+            <div class="metric-change">Withdrawn to date: {{ fraud_stats.total_withdrawn|default:"0"|floatformat:2 }} CONFIO</div>
         </div>
         
         <div class="metric-card">
-            <div class="metric-label">Suspicious Activity</div>
-            <div class="metric-value" style="color: #f59e0b;">{{ fraud_stats.suspicious_activity|intcomma }}</div>
-            <div class="metric-change">Under review</div>
+            <div class="metric-label">Withdrawal Velocity</div>
+            <div class="metric-value" style="color: #2563eb;">{{ fraud_stats.daily_withdrawn|default:"0"|floatformat:2 }} CONFIO</div>
+            <div class="metric-change">Last 7 days: {{ fraud_stats.weekly_withdrawn|default:"0"|floatformat:2 }} CONFIO</div>
         </div>
         
         <div class="metric-card">
-            <div class="metric-label">Multi-User Devices</div>
-            <div class="metric-value" style="color: #3b82f6;">{{ fraud_stats.multi_user_devices|intcomma }}</div>
-            <div class="metric-change">Devices with multiple accounts</div>
+            <div class="metric-label">Reviews & High Value</div>
+            <div class="metric-value" style="color: #dc2626;">{{ fraud_stats.pending_review|default:"0" }}</div>
+            <div class="metric-change">High-value (&gt;500 CONFIO): {{ fraud_stats.high_value|default:"0" }}</div>
         </div>
         
         <div class="metric-card">
-            <div class="metric-label">Unique Devices</div>
-            <div class="metric-value">{{ fraud_stats.total_devices_tracked|intcomma }}</div>
-            <div class="metric-change">Total devices tracked</div>
+            <div class="metric-label">Unique Referrers</div>
+            <div class="metric-value">{{ fraud_stats.unique_users|default:"0"|intcomma }}</div>
+            <div class="metric-change">With referral withdrawals</div>
         </div>
         
         <div class="metric-card">
-            <div class="metric-label">Potential Loss</div>
-            <div class="metric-value" style="color: #10b981;">${{ fraud_stats.potential_loss_usd|floatformat:2 }}</div>
-            <div class="metric-change">{{ fraud_stats.potential_loss|floatformat:0 }} CONFIO</div>
+            <div class="metric-label">Device Watchlist</div>
+            <div class="metric-value" style="color: #f59e0b;">{{ fraud_stats.multi_user_devices|default:"0"|intcomma }}</div>
+            <div class="metric-change">Devices with multiple referral accounts</div>
         </div>
     </div>
     
-    {% if fraud_stats.fraud_detected > 0 or fraud_stats.suspicious_activity > 0 %}
+    {% if fraud_stats.pending_review > 0 %}
     <div class="alert-box" style="margin-bottom: 20px;">
         <span class="alert-icon">⚠️</span>
         <div>
-            <strong>Security Alert:</strong> 
-            {% if fraud_stats.fraud_detected > 0 %}
-            {{ fraud_stats.fraud_detected }} confirmed fraudulent achievement{{ fraud_stats.fraud_detected|pluralize }}.
-            {% endif %}
-            {% if fraud_stats.suspicious_activity > 0 %}
-            {{ fraud_stats.suspicious_activity }} achievement{{ fraud_stats.suspicious_activity|pluralize }} with suspicious activity.
-            {% endif %}
+            <strong>Review queue:</strong>
+            {{ fraud_stats.pending_review }} withdrawal{{ fraud_stats.pending_review|pluralize }} awaiting manual verification.
         </div>
     </div>
     {% endif %}
     
-    <!-- Fraud Action Buttons - Always visible -->
+    <!-- Reward Security Actions -->
     <div style="margin-bottom: 20px;">
-        <a href="{% url 'confio_admin:achievements_userachievement_fraud_dashboard' %}" class="action-button" style="margin-right: 10px;">🔍 Detailed Fraud Dashboard</a>
-        <a href="{% url 'confio_admin:achievements_userachievement_changelist' %}?fraud_status=fraud" class="action-button secondary" style="margin-right: 10px;">View All Fraud Cases</a>
-        <a href="{% url 'confio_admin:achievements_userachievement_changelist' %}?fraud_status=multi_device" class="action-button secondary">Multi-Device Issues</a>
+        <a href="{% url 'confio_admin:achievements_userachievement_fraud_dashboard' %}" class="action-button" style="margin-right: 10px;">🔍 Reward Security Dashboard</a>
+        <a href="{% url 'confio_admin:achievements_userachievement_changelist' %}?fraud_status=multi_device" class="action-button secondary" style="margin-right: 10px;">Device Flags</a>
+        <a href="{% url 'confio_admin:achievements_referralwithdrawallog_changelist' %}" class="action-button secondary">Withdrawal Log</a>
     </div>
     {% endif %}
     
