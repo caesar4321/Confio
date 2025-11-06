@@ -24,6 +24,7 @@ REFERRAL_DAILY_LIMIT = Decimal('10')
 REFERRAL_WEEKLY_LIMIT = Decimal('50')
 REFERRAL_SINGLE_REVIEW_THRESHOLD = Decimal('500')
 REFERRAL_VERIFICATION_TRIGGER = Decimal('100')
+REFERRAL_MAX_USERS_PER_IP = 3
 
 
 def _get_referral_reward_summary(user) -> dict:
@@ -137,6 +138,50 @@ def _record_referral_withdrawal(user, amount: Decimal, *, reference_id: str = ''
                 description='Retiro de recompensas por referidos',
             )
 
+
+def _check_referral_device_ip_limits(user) -> Optional[str]:
+    """Return an error message if the user's referral rewards violate device/IP limits."""
+    from achievements.models import UserAchievement
+
+    referral_qs = UserAchievement.objects.filter(
+        user=user,
+        achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS,
+        deleted_at__isnull=True,
+    )
+
+    device_hashes = set(
+        referral_qs.exclude(device_fingerprint_hash__isnull=True).values_list('device_fingerprint_hash', flat=True)
+    )
+    if device_hashes:
+        conflict = UserAchievement.objects.filter(
+            achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS,
+            device_fingerprint_hash__in=device_hashes,
+            deleted_at__isnull=True,
+        ).exclude(user=user).exists()
+        if conflict:
+            return 'Detectamos varias cuentas usando el mismo dispositivo. Solo la primera cuenta puede retirar recompensas de referidos desde ese dispositivo.'
+
+    ip_addresses = set(
+        referral_qs.exclude(claim_ip_address__isnull=True).values_list('claim_ip_address', flat=True)
+    )
+    for ip in ip_addresses:
+        if not ip:
+            continue
+        distinct_count = (
+            UserAchievement.objects.filter(
+                achievement_type__slug__in=REFERRAL_ACHIEVEMENT_SLUGS,
+                claim_ip_address=ip,
+                deleted_at__isnull=True,
+            )
+            .values('user')
+            .distinct()
+            .count()
+        )
+        if distinct_count > REFERRAL_MAX_USERS_PER_IP:
+            return 'Detectamos múltiples cuentas retirando recompensas desde la misma red. Completa la verificación de identidad para continuar.'
+
+    return None
+
 class EnsureAlgorandReadyMutation(graphene.Mutation):
     """
     Ensures the current user's Algorand account is ready with proper opt-ins.
@@ -167,6 +212,11 @@ class EnsureAlgorandReadyMutation(graphene.Mutation):
                 return cls(success=False, error='Monto inválido')
             if amount_decimal <= Decimal('0'):
                 return cls(success=False, error='El monto debe ser mayor a cero')
+
+            if str(asset_type or '').upper() == 'CONFIO':
+                abuse_error = _check_referral_device_ip_limits(user)
+                if abuse_error:
+                    return cls(success=False, error=abuse_error)
             
             # Resolve a specific account if provided; otherwise default to personal index 0
             if account_id:
