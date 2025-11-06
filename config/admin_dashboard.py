@@ -764,16 +764,35 @@ confio_admin_site.register(BusinessEmployee, BusinessEmployeeAdmin)
 confio_admin_site.register(EmployeeInvitation, EmployeeInvitationAdmin)
 
 # CONFIO Reward models
-from achievements.models import ConfioRewardBalance, ConfioRewardTransaction, AchievementType, UserAchievement, UserReferral, TikTokViralShare, ConfioGrowthMetric
+from achievements.models import (
+    ConfioRewardBalance,
+    ConfioRewardTransaction,
+    AchievementType,
+    UserAchievement,
+    UserReferral,
+    ReferralWithdrawalLog,
+    TikTokViralShare,
+    ConfioGrowthMetric,
+)
 # Achievement models are now registered below
 
 # Achievement models
-from achievements.admin import RewardProgramAdmin, UserRewardAdmin, UserReferralAdmin, SocialReferralShareAdmin, RewardWalletAdmin, RewardLedgerEntryAdmin, ConfioGrowthMetricAdmin
+from achievements.admin import (
+    RewardProgramAdmin,
+    UserRewardAdmin,
+    UserReferralAdmin,
+    SocialReferralShareAdmin,
+    RewardWalletAdmin,
+    RewardLedgerEntryAdmin,
+    ReferralWithdrawalLogAdmin,
+    ConfioGrowthMetricAdmin,
+)
 confio_admin_site.register(ConfioRewardBalance, RewardWalletAdmin)
 confio_admin_site.register(ConfioRewardTransaction, RewardLedgerEntryAdmin)
 confio_admin_site.register(AchievementType, RewardProgramAdmin)
 confio_admin_site.register(UserAchievement, UserRewardAdmin)
 confio_admin_site.register(UserReferral, UserReferralAdmin)
+confio_admin_site.register(ReferralWithdrawalLog, ReferralWithdrawalLogAdmin)
 confio_admin_site.register(TikTokViralShare, SocialReferralShareAdmin)
 confio_admin_site.register(ConfioGrowthMetric, ConfioGrowthMetricAdmin)
 
