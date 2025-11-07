@@ -314,8 +314,8 @@
         </div>
         <div class="metric-card">
             <div class="metric-label">Avg Reward / Converted</div>
-            <div class="metric-value">{{ referral_stats.avg_confio_award|floatformat:2 }} CONFIO</div>
-            <div class="metric-change">Total awarded: {{ referral_stats.total_awarded|floatformat:2 }} CONFIO</div>
+            <div class="metric-value">{{ referral_stats.avg_rewards_per_converted|floatformat:2 }}</div>
+            <div class="metric-change">Eligible rewards: {{ referral_stats.eligible_events|default:"0"|intcomma }}</div>
         </div>
     </div>
     <p style="font-size: 13px; color: #4b5563; margin: -10px 0 30px;">

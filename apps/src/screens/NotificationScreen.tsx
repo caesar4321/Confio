@@ -13,6 +13,14 @@ import moment from 'moment';
 import 'moment/locale/es';
 import { contactService } from '../services/contactService';
 
+const REFERRAL_EVENT_TYPE_MAP: Record<string, string> = {
+  REFERRAL_EVENT_TOP_UP: 'top_up',
+  REFERRAL_EVENT_CONVERSION: 'conversion_usdc_to_cusd',
+  REFERRAL_EVENT_SEND: 'send',
+  REFERRAL_EVENT_PAYMENT: 'payment',
+  REFERRAL_EVENT_P2P_TRADE: 'p2p_trade',
+};
+
 type NotificationScreenNavigationProp = NativeStackNavigationProp<MainStackParamList>;
 
 interface Notification {
@@ -69,6 +77,17 @@ export const NotificationScreen = () => {
     setRefreshing(false);
   }, [refetch]);
 
+  const parseParams = (url: string) => {
+    const query = url.split('?')[1];
+    const params: Record<string, string> = {};
+    if (!query) return params;
+    query.split('&').forEach(pair => {
+      const [key, value] = pair.split('=');
+      if (key) params[key] = decodeURIComponent(value || '');
+    });
+    return params;
+  };
+
   const handleNotificationPress = useCallback(async (notification: Notification) => {
     // Mark as read if not already
     if (!notification.isRead) {
@@ -103,6 +122,44 @@ export const NotificationScreen = () => {
       const url = notification.actionUrl;
       if (url.includes('verification')) {
         navigation.navigate('Verification');
+        return;
+      }
+      const normalizedUrl = url.toLowerCase();
+
+      if (normalizedUrl.includes('referrals/friend-joined')) {
+        const params = parseParams(url);
+        navigation.navigate('ReferralFriendJoined', {
+          friendName: params.friend_name || undefined,
+        });
+        return;
+      }
+      if (normalizedUrl.includes('referrals/action')) {
+        const params = parseParams(url);
+        navigation.navigate('ReferralActionPrompt', {
+          event: params.event || undefined,
+        });
+        return;
+      }
+      if (normalizedUrl.includes('referrals/event-detail')) {
+        const params = parseParams(url);
+        navigation.navigate('ReferralEventDetail', {
+          event: params.event || undefined,
+          referralId: params.referral_id || undefined,
+          role: (params.role as 'referrer' | 'referee') || undefined,
+          friendName: params.friend_name || undefined,
+        });
+        return;
+      }
+      if (normalizedUrl.includes('referrals')) {
+        navigation.navigate('MiProgresoViral');
+        return;
+      }
+      if (url.endsWith('send') || url.includes('send?')) {
+        navigation.navigate('SendToFriend');
+        return;
+      }
+      if (url.includes('wallet')) {
+        navigation.navigate('ConfioAddress');
         return;
       }
       if (url.includes('p2p/trade/')) {
@@ -333,6 +390,14 @@ export const NotificationScreen = () => {
         // Unknown actionUrl: fall back to notifications list (no-op navigation)
         console.log('[NotificationScreen] Unhandled actionUrl, staying on Notifications:', url);
       }
+    } else if (REFERRAL_EVENT_TYPE_MAP[notifType]) {
+      navigation.navigate('ReferralEventDetail', {
+        event: parsedData.event || REFERRAL_EVENT_TYPE_MAP[notifType],
+        referralId: parsedData.referral_id || parsedData.referralId,
+        role: parsedData.role,
+        friendName: parsedData.friend_name || parsedData.friendName,
+      });
+      return;
     } else if (notification.relatedObjectType && notification.relatedObjectId) {
       // Fallback: navigate using related object info when no actionUrl is provided
       const type = notification.relatedObjectType;
@@ -449,6 +514,23 @@ export const NotificationScreen = () => {
         });
       }
     }
+
+    if (notification.notificationType === 'REFERRAL_FRIEND_JOINED') {
+      navigation.navigate('ReferralFriendJoined', {
+        friendName: notification.data?.friend_name || undefined,
+      });
+      return;
+    }
+
+    if (
+      notification.notificationType === 'REFERRAL_ACTION_REMINDER' ||
+      notification.notificationType === 'REFERRAL_FIRST_TRANSACTION'
+    ) {
+      navigation.navigate('ReferralActionPrompt', {
+        event: notification.data?.event || undefined,
+      });
+      return;
+    }
   }, [markNotificationRead, navigation]);
 
   const handleMarkAllAsRead = useCallback(async () => {
@@ -534,6 +616,11 @@ export const NotificationScreen = () => {
       
       // Achievements
       ACHIEVEMENT_EARNED: { icon: 'award', color: '#FFD700' },
+
+      // Referrals
+      REFERRAL_FRIEND_JOINED: { icon: 'users', color: '#F97316' },
+      REFERRAL_FIRST_TRANSACTION: { icon: 'trending-up', color: '#10B981' },
+      REFERRAL_ACTION_REMINDER: { icon: 'target', color: '#F97316' },
     };
     
     return iconMap[type] || { icon: 'bell', color: '#6B7280' };
@@ -717,10 +804,12 @@ export const NotificationScreen = () => {
 
   const EmptyState = () => (
     <View style={styles.emptyState}>
-      <Icon name="bell" size={64} color="#D1D5DB" />
+      <View style={styles.emptyIconWrapper}>
+        <Text style={styles.emptyEmoji}>📬</Text>
+      </View>
       <Text style={styles.emptyTitle}>No tienes notificaciones</Text>
       <Text style={styles.emptySubtitle}>
-        Cuando tengas nuevas notificaciones aparecerán aquí
+        Te avisaremos cuando haya novedades para que puedas actuar de inmediato.
       </Text>
     </View>
   );
@@ -892,6 +981,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 40,
     paddingTop: 100,
+  },
+  emptyIconWrapper: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: '#EEF2FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyEmoji: {
+    fontSize: 40,
   },
   emptyTitle: {
     fontSize: 18,

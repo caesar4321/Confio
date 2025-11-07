@@ -346,6 +346,9 @@ export type MainStackParamList = {
   ConfioTokenomics: undefined;
   MiProgresoViral: undefined;
   ViralTemplates: undefined;
+  ReferralFriendJoined: { friendName?: string };
+  ReferralActionPrompt: { event?: string };
+  ReferralEventDetail: { event?: string; referralId?: string | number; role?: 'referee' | 'referrer'; friendName?: string };
   // NotificationSettings: undefined; // Hidden: Notifications mandatory
 };
 

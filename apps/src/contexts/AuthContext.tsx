@@ -405,25 +405,36 @@ export const AuthProvider = ({ children, navigationRef }: AuthProviderProps) => 
             mutation: GENERATE_OPT_IN_TRANSACTIONS
           });
           
-          if (data?.generateOptInTransactions?.success && data?.generateOptInTransactions?.transactions) {
-            console.log('[AuthContext] Opt-in transactions needed, processing...');
-            
-            // Parse transactions
-            const transactions = JSON.parse(data.generateOptInTransactions.transactions);
-            
-            // Use AlgorandService to process opt-in
-            const { default: algorandService } = await import('../services/algorandService');
-            const optInSuccess = await algorandService.processSponsoredOptIn(transactions);
-            
-            if (optInSuccess) {
-              console.log('[AuthContext] Auto opt-in completed successfully');
-            } else {
-              console.error('[AuthContext] Auto opt-in failed');
+          const mutationResult = data?.generateOptInTransactions;
+          if (mutationResult?.success && mutationResult?.transactions) {
+            // Parse transactions payload defensively; GraphQL JSONString may already be an array in some environments
+            let transactions: any = mutationResult.transactions;
+            if (typeof transactions === 'string') {
+              try {
+                transactions = JSON.parse(transactions);
+              } catch (parseError) {
+                console.error('[AuthContext] Failed to parse opt-in transactions payload:', parseError);
+                transactions = null;
+              }
             }
-          } else if (data?.generateOptInTransactions?.success) {
+
+            if (Array.isArray(transactions) && transactions.length > 0) {
+              console.log('[AuthContext] Opt-in transactions needed, processing...');
+              const { default: algorandService } = await import('../services/algorandService');
+              const optInSuccess = await algorandService.processSponsoredOptIn(transactions);
+              
+              if (optInSuccess) {
+                console.log('[AuthContext] Auto opt-in completed successfully');
+              } else {
+                console.error('[AuthContext] Auto opt-in failed');
+              }
+            } else {
+              console.log('[AuthContext] No opt-in transactions returned; user likely already opted in');
+            }
+          } else if (mutationResult?.success) {
             console.log('[AuthContext] User already opted into all required assets');
           } else {
-            console.error('[AuthContext] Failed to generate opt-in transactions:', data?.generateOptInTransactions?.error);
+            console.error('[AuthContext] Failed to generate opt-in transactions:', mutationResult?.error);
           }
           
         } catch (optInError) {

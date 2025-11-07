@@ -277,6 +277,12 @@ class UserReferral(SoftDeleteModel):
         ('converted', 'Convertido'),
         ('inactive', 'Inactivo'),
     ]
+
+    REWARD_STATUS_CHOICES = [
+        ('pending', 'Pendiente'),
+        ('eligible', 'Elegible'),
+        ('failed', 'Fallido'),
+    ]
     
     referred_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -333,6 +339,58 @@ class UserReferral(SoftDeleteModel):
         blank=True,
         help_text="Additional attribution data"
     )
+    reward_status = models.CharField(
+        max_length=20,
+        choices=REWARD_STATUS_CHOICES,
+        default='pending',
+        help_text="Estado de elegibilidad en la bóveda on-chain"
+    )
+    reward_event = models.CharField(
+        max_length=50,
+        blank=True,
+        help_text="Evento que activó la recompensa (send, payment, p2p_trade, etc.)"
+    )
+    reward_referee_confio = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text="CONFIO asignado al referido (en unidades token)"
+    )
+    reward_referrer_confio = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text="CONFIO asignado al referidor (en unidades token)"
+    )
+    reward_tx_id = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text="ID de transacción Algorand que marcó la elegibilidad"
+    )
+    reward_box_name = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text="Nombre de box utilizado en la bóveda de recompensas"
+    )
+    reward_error = models.TextField(
+        blank=True,
+        help_text="Último error registrado al intentar marcar elegibilidad"
+    )
+    reward_last_attempt_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Último intento de sincronizar con la bóveda de recompensas"
+    )
+    reward_submitted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Fecha en que se registró exitosamente la elegibilidad on-chain"
+    )
+    reward_metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Metadatos adicionales (ej. parámetros Algorand)"
+    )
     
     class Meta:
         unique_together = [('referred_user', 'deleted_at')]
@@ -379,6 +437,86 @@ class UserReferral(SoftDeleteModel):
     def get_influencer_stats(cls, referrer_identifier):
         """Backwards compatibility alias"""
         return cls.get_referral_stats(referrer_identifier)
+
+
+class ReferralRewardEvent(models.Model):
+    """Stores the first confirmed qualifying event for referral rewards."""
+
+    ROLE_CHOICES = [
+        ('referrer', 'Referrer'),
+        ('referee', 'Referee'),
+    ]
+    STATUS_CHOICES = [
+        ('pending', 'Pendiente'),
+        ('eligible', 'Elegible'),
+        ('failed', 'Fallido'),
+        ('skipped', 'Omitido'),
+    ]
+
+    referral = models.ForeignKey(
+        UserReferral,
+        on_delete=models.CASCADE,
+        related_name='reward_events',
+        null=True,
+        blank=True,
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='referral_reward_events',
+    )
+    trigger = models.CharField(
+        max_length=40,
+        help_text='Evento que activó la recompensa (send, payment, etc.)'
+    )
+    actor_role = models.CharField(
+        max_length=20,
+        choices=ROLE_CHOICES,
+    )
+    amount = models.DecimalField(
+        max_digits=19,
+        decimal_places=6,
+        default=0,
+        help_text='Monto asociado con el evento (ej. USDC convertido)'
+    )
+    transaction_reference = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text='Hash o ID de referencia para el evento'
+    )
+    occurred_at = models.DateTimeField()
+    reward_status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending'
+    )
+    referee_confio = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    referrer_confio = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    reward_tx_id = models.CharField(max_length=128, blank=True)
+    error = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-occurred_at']
+        verbose_name = "Referral Reward Event"
+        verbose_name_plural = "Referral Reward Events"
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'trigger'],
+                name='unique_first_reward_event_per_trigger'
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=['user', 'trigger', 'reward_status'],
+                name='reward_event_lookup'
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user} - {self.trigger} ({self.actor_role})"
 
 
 # Backwards compatibility alias for legacy imports

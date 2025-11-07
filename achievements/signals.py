@@ -4,7 +4,19 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.db.models import Count, Q
 
-from .models import AchievementType, UserAchievement, UserReferral, PioneroBetaTracker
+from .models import (
+    AchievementType,
+    UserAchievement,
+    UserReferral,
+    PioneroBetaTracker,
+    ReferralRewardEvent,
+)
+from achievements.services.referral_rewards import (
+    EventContext,
+    sync_referral_reward_for_event,
+    DEFAULT_EVENT_REWARD_CONFIG,
+    notify_referral_joined,
+)
 from p2p_exchange.models import P2PTrade
 from security.models import DeviceFingerprint, IPAddress, UserDevice
 from notifications.utils import create_notification
@@ -277,3 +289,33 @@ def _award_referral_pair(user):
 
     except AchievementType.DoesNotExist:
         pass
+
+
+@receiver(post_save, sender=UserReferral)
+def sync_pending_reward_events(sender, instance: UserReferral, created, **kwargs):
+    """When a referral exists, link and process any pending reward events."""
+    if created:
+        notify_referral_joined(instance)
+
+    users_to_check = [u for u in [instance.referred_user, instance.referrer_user] if u]
+    if not users_to_check:
+        return
+
+    pending_events = ReferralRewardEvent.objects.filter(
+        user__in=users_to_check,
+        referral__isnull=True,
+        reward_status='pending',
+        trigger__in=DEFAULT_EVENT_REWARD_CONFIG.keys(),
+    )
+
+    for event in pending_events:
+        event.referral = instance
+        event.save(update_fields=['referral', 'updated_at'])
+        sync_referral_reward_for_event(
+            event.user,
+            EventContext(
+                event=event.trigger,
+                amount=event.amount,
+                metadata=event.metadata,
+            ),
+        )

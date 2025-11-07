@@ -75,6 +75,34 @@ We host all infrastructure in **AWS eu-central-2 (Zurich)** region for optimal d
 - **Rate limits for unverified users**: without KYC, referral payouts are capped at 10 CONFIO per day and 50 CONFIO per week. Regression tests cover the daily clamp (`blockchain/mutations.py:842-855`, `blockchain/tests.py:159-193`).
 - **High-value withdrawals**: single referral withdrawals above 500 CONFIO demand identity verification even if other limits are not triggered (`blockchain/mutations.py:857-861`).
 - **Fraud analytics**: the admin dashboard now highlights referral metrics—earned vs. available balances, withdrawal velocity, review queue, and flagged devices—to surface abuse trends quickly (`templates/admin/dashboard.html`, `config/admin_dashboard.py`).
+- **Environment**: configure `ALGORAND_REWARD_APP_ID`, `ALGORAND_REWARD_ADMIN_MNEMONIC`, and `ALGORAND_REWARD_SPONSOR_ADDRESS` (git-crypt protected) to sync referral rewards with the Algorand vault (`config/settings.py`).
+
+## 🔧 Environment Profiles (`CONFIO_ENV`)
+
+Confío now loads environment variables automatically based on the `CONFIO_ENV` flag so testnet settings are never overwritten by production deploys.
+
+| `CONFIO_ENV` value | Loaded file          | Expected `ALGORAND_NETWORK` | Use case                     |
+|--------------------|----------------------|-----------------------------|------------------------------|
+| `mainnet` *(default)* | `.env` (legacy mainnet bundle) | `mainnet`                   | EC2 / production services    |
+| `testnet`          | `.env.testnet`       | `testnet`                   | Local debugging & QA         |
+| `localnet`         | `.env.localnet` *(optional)* | `localnet`                 | Private devnets              |
+
+Because `CONFIO_ENV` defaults to `mainnet`, **export `CONFIO_ENV=testnet` before running any local commands**:
+
+```bash
+# Backend (Django, Celery, tests)
+export CONFIO_ENV=testnet
+python manage.py migrate
+python manage.py runserver 0.0.0.0:8000
+
+# React Native app (Metro + bundler)
+cd apps
+CONFIO_ENV=testnet yarn ios   # or yarn android
+```
+
+The loader in `config/settings.py` automatically pulls `.env.<CONFIO_ENV>` and raises an error if the file's `ALGORAND_NETWORK` does not match the selected profile, preventing accidental mainnet calls from a test build. React Native's `babel.config.js` uses the same flag so the mobile app reads the matching `.env.<env>` file under `apps/`.
+
+> **Tip:** add `export CONFIO_ENV=testnet` to your shell profile or `.envrc` so every local session stays on the safe testnet defaults.
 
 ## 🔄 Recent Updates (August 2025)
 

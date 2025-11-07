@@ -325,11 +325,9 @@ class GenerateOptInTransactionsMutation(graphene.Mutation):
             assets_to_opt_in = [aid for aid in coerced_ids if aid not in current_assets]
             
             if not assets_to_opt_in:
-                logger.info(f"User already opted into all requested assets")
-                return cls(
-                    success=True,
-                    transactions=[]
-                )
+                logger.info("User already opted into all requested assets")
+                # Returning null keeps the GraphQL field optional and signals no action required
+                return cls(success=True, transactions=None)
             
             # Create atomic sponsored opt-in for all needed assets
             from blockchain.algorand_sponsor_service import algorand_sponsor_service

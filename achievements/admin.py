@@ -16,6 +16,7 @@ from .models import (
     AchievementType,
     UserAchievement,
     UserReferral,
+    ReferralRewardEvent,
     ReferralWithdrawalLog,
     TikTokViralShare,
     ConfioRewardBalance,
@@ -656,10 +657,11 @@ class UserReferralAdmin(admin.ModelAdmin):
         'total_volume_display',
         'referrer_reward_display',
         'referee_reward_display',
+        'reward_status_display',
         'created_at',
     )
     list_display_links = ('referrer_identifier', 'referred_user')
-    list_filter = ('status', 'created_at', 'first_transaction_at', 'reward_claimed_at')
+    list_filter = ('status', 'reward_status', 'created_at', 'first_transaction_at', 'reward_claimed_at', 'reward_submitted_at')
     search_fields = (
         'referred_user__username',
         'referred_user__email',
@@ -675,6 +677,20 @@ class UserReferralAdmin(admin.ModelAdmin):
         ('Referral', {'fields': ('referred_user', 'referrer_identifier', 'referrer_user', 'status')}),
         ('Performance', {'fields': ('first_transaction_at', 'total_transaction_volume')}),
         ('Rewards', {'fields': ('referrer_confio_awarded', 'referee_confio_awarded', 'reward_claimed_at')}),
+        ('On-chain Eligibility', {
+            'fields': (
+                'reward_status',
+                'reward_event',
+                'reward_referee_confio',
+                'reward_referrer_confio',
+                'reward_tx_id',
+                'reward_box_name',
+                'reward_submitted_at',
+                'reward_last_attempt_at',
+                'reward_error',
+                'reward_metadata',
+            ),
+        }),
         ('Attribution', {'fields': ('attribution_data',)}),
         ('Timestamps', {'fields': ('created_at', 'updated_at')}),
     )
@@ -708,6 +724,20 @@ class UserReferralAdmin(admin.ModelAdmin):
     def referee_reward_display(self, obj):
         amount = obj.referee_confio_awarded or 0
         return format_html('<span>{} CONFIO</span>', f"{amount:,.2f}")
+
+    @admin.display(description="On-chain Status", ordering='reward_status')
+    def reward_status_display(self, obj):
+        colors = {
+            'pending': '#F59E0B',
+            'eligible': '#10B981',
+            'failed': '#EF4444',
+        }
+        label = obj.get_reward_status_display()
+        return format_html(
+            '<span style="color: {}; font-weight: 600;">{}</span>',
+            colors.get(obj.reward_status, '#6B7280'),
+            label
+        )
     
     @admin.display(description="Referrer User", ordering='referrer_user__username')
     def referrer_user_display(self, obj):
@@ -757,6 +787,35 @@ class UserReferralAdmin(admin.ModelAdmin):
             referral.save(update_fields=['reward_claimed_at', 'status'])
             count += 1
         self.message_user(request, f"{count} referrals updated with claimed rewards.")
+
+
+@admin.register(ReferralRewardEvent)
+class ReferralRewardEventAdmin(admin.ModelAdmin):
+    """Admin for referral reward events."""
+
+    list_display = (
+        'user',
+        'trigger',
+        'actor_role',
+        'reward_status',
+        'amount_display',
+        'occurred_at',
+        'referral',
+    )
+    list_filter = ('reward_status', 'trigger', 'actor_role', 'occurred_at')
+    search_fields = (
+        'user__username',
+        'user__email',
+        'transaction_reference',
+        'reward_tx_id',
+    )
+    readonly_fields = ('created_at', 'updated_at')
+    raw_id_fields = ('user', 'referral')
+    date_hierarchy = 'occurred_at'
+
+    @admin.display(description="Amount", ordering='amount')
+    def amount_display(self, obj):
+        return format_html('<strong>{:,.2f}</strong>', obj.amount or 0)
 
 
 @admin.register(TikTokViralShare)
