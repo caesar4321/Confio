@@ -18,7 +18,13 @@ from decimal import Decimal
 from users.models import User, Account, Business, Country, Bank, BankInfo, WalletPepper, WalletDerivationPepper
 from security.models import IdentityVerification, DeviceFingerprint
 from achievements.admin_views import achievement_dashboard
-from achievements.models import UserAchievement, ReferralWithdrawalLog, ConfioRewardTransaction, UserReferral
+from achievements.models import (
+    UserAchievement,
+    ReferralWithdrawalLog,
+    ConfioRewardTransaction,
+    UserReferral,
+    ReferralRewardEvent,
+)
 from p2p_exchange.models import P2POffer, P2PTrade, P2PUserStats, P2PDispute
 from send.models import SendTransaction
 from payments.models import PaymentTransaction
@@ -241,8 +247,11 @@ class ConfioAdminSite(admin.AdminSite):
         total_awarded = referral_records.aggregate(
             total=Sum('referrer_confio_awarded')
         )['total'] or Decimal('0')
+        eligible_events = ReferralRewardEvent.objects.filter(
+            reward_status='eligible'
+        ).count()
         conversion_rate = (converted_referrals / total_referrals * 100) if total_referrals else 0
-        avg_reward = (total_awarded / converted_referrals) if converted_referrals else Decimal('0')
+        avg_rewards_per_converted = (eligible_events / converted_referrals) if converted_referrals else 0
 
         context['referral_stats'] = {
             'total': total_referrals,
@@ -251,8 +260,9 @@ class ConfioAdminSite(admin.AdminSite):
             'new_week': new_referrals_week,
             'converted_week': converted_week,
             'engaged': engaged_referrals,
-            'avg_confio_award': avg_reward,
+            'avg_rewards_per_converted': avg_rewards_per_converted,
             'total_awarded': total_awarded,
+            'eligible_events': eligible_events,
         }
         
         # Transaction metrics
@@ -816,6 +826,7 @@ from achievements.admin import (
     RewardProgramAdmin,
     UserRewardAdmin,
     UserReferralAdmin,
+    ReferralRewardEventAdmin,
     SocialReferralShareAdmin,
     RewardWalletAdmin,
     RewardLedgerEntryAdmin,
@@ -827,6 +838,7 @@ confio_admin_site.register(ConfioRewardTransaction, RewardLedgerEntryAdmin)
 confio_admin_site.register(AchievementType, RewardProgramAdmin)
 confio_admin_site.register(UserAchievement, UserRewardAdmin)
 confio_admin_site.register(UserReferral, UserReferralAdmin)
+confio_admin_site.register(ReferralRewardEvent, ReferralRewardEventAdmin)
 confio_admin_site.register(ReferralWithdrawalLog, ReferralWithdrawalLogAdmin)
 confio_admin_site.register(TikTokViralShare, SocialReferralShareAdmin)
 confio_admin_site.register(ConfioGrowthMetric, ConfioGrowthMetricAdmin)

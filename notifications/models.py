@@ -58,6 +58,16 @@ class NotificationType(models.TextChoices):
     # Achievements
     ACHIEVEMENT_EARNED = 'ACHIEVEMENT_EARNED', 'Achievement Earned'
     
+    # Referrals
+    REFERRAL_FRIEND_JOINED = 'REFERRAL_FRIEND_JOINED', 'Referral Friend Joined'
+    REFERRAL_FIRST_TRANSACTION = 'REFERRAL_FIRST_TRANSACTION', 'Referral First Transaction'
+    REFERRAL_ACTION_REMINDER = 'REFERRAL_ACTION_REMINDER', 'Referral Action Reminder'
+    REFERRAL_EVENT_TOP_UP = 'REFERRAL_EVENT_TOP_UP', 'Referral Event - Top Up'
+    REFERRAL_EVENT_CONVERSION = 'REFERRAL_EVENT_CONVERSION', 'Referral Event - Conversion'
+    REFERRAL_EVENT_SEND = 'REFERRAL_EVENT_SEND', 'Referral Event - Send'
+    REFERRAL_EVENT_PAYMENT = 'REFERRAL_EVENT_PAYMENT', 'Referral Event - Payment'
+    REFERRAL_EVENT_P2P_TRADE = 'REFERRAL_EVENT_P2P_TRADE', 'Referral Event - P2P Trade'
+    
     # General
     PROMOTION = 'PROMOTION', 'Promotion'
     SYSTEM = 'SYSTEM', 'System Notification'

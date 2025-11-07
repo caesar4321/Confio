@@ -483,6 +483,11 @@ class AlgorandService {
 
       // Check if we received an array of transactions from backend
       if (Array.isArray(assetIdOrTransactions)) {
+        if (assetIdOrTransactions.length === 0) {
+          console.log('[AlgorandService] No opt-in transactions to process; already opted in');
+          return true;
+        }
+
         console.log(`[AlgorandService] Processing ${assetIdOrTransactions.length} opt-in transactions from backend`);
         
         // The backend sends an array with the structure from GenerateOptInTransactionsMutation
