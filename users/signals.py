@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.utils import timezone
@@ -7,6 +9,10 @@ from p2p_exchange.models import P2PTrade
 from conversion.models import Conversion
 from .models_unified import UnifiedTransactionTable
 from achievements.signals import _award_referral_pair
+from achievements.services.referral_rewards import (
+    EventContext,
+    sync_referral_reward_for_event,
+)
 
 
 def create_unified_transaction_from_send(send_transaction):
@@ -284,6 +290,17 @@ def handle_send_transaction_save(sender, instance, created, **kwargs):
             if str(instance.status).upper() in ['CONFIRMED', 'COMPLETED', 'SUCCESS']:
                 if instance.sender_user_id:
                     _award_referral_pair(instance.sender_user)
+                    sync_referral_reward_for_event(
+                        instance.sender_user,
+                        EventContext(
+                            event="send",
+                            amount=Decimal(instance.amount),
+                            metadata={
+                                "send_id": instance.id,
+                                "transaction_hash": instance.transaction_hash or "",
+                            },
+                        ),
+                    )
                 if instance.recipient_user_id:
                     _award_referral_pair(instance.recipient_user)
         except Exception:
@@ -302,6 +319,17 @@ def handle_payment_transaction_save(sender, instance, created, **kwargs):
             if status in ['PAID', 'CONFIRMED']:
                 if instance.payer_user_id:
                     _award_referral_pair(instance.payer_user)
+                    sync_referral_reward_for_event(
+                        instance.payer_user,
+                        EventContext(
+                            event="payment",
+                            amount=Decimal(instance.amount),
+                            metadata={
+                                "payment_id": instance.id,
+                                "invoice_id": instance.invoice_id if instance.invoice_id else None,
+                            },
+                        ),
+                    )
         except Exception:
             pass
 
@@ -311,6 +339,35 @@ def handle_p2p_trade_save(sender, instance, created, **kwargs):
     """Create/update unified transaction when P2PTrade is saved"""
     if instance.deleted_at is None:  # Only process non-deleted transactions
         create_unified_transaction_from_p2p_trade(instance)
+        try:
+            status = str(instance.status).upper()
+            if status in ['CRYPTO_RELEASED', 'COMPLETED']:
+                if instance.buyer_user_id:
+                    sync_referral_reward_for_event(
+                        instance.buyer_user,
+                        EventContext(
+                            event="p2p_trade",
+                            amount=Decimal(instance.crypto_amount),
+                            metadata={
+                                "trade_id": instance.id,
+                                "role": "buyer",
+                            },
+                        ),
+                    )
+                if instance.seller_user_id:
+                    sync_referral_reward_for_event(
+                        instance.seller_user,
+                        EventContext(
+                            event="p2p_trade",
+                            amount=Decimal(instance.crypto_amount),
+                            metadata={
+                                "trade_id": instance.id,
+                                "role": "seller",
+                            },
+                        ),
+                    )
+        except Exception:
+            pass
 
 
 @receiver(post_save, sender=Conversion)
@@ -319,6 +376,24 @@ def handle_conversion_save(sender, instance, created, **kwargs):
     # Conversions don't have deleted_at, check is_deleted instead
     if not instance.is_deleted:
         create_unified_transaction_from_conversion(instance)
+        try:
+            if (
+                instance.conversion_type == 'usdc_to_cusd'
+                and instance.status == 'COMPLETED'
+                and instance.actor_user_id
+            ):
+                sync_referral_reward_for_event(
+                    instance.actor_user,
+                    EventContext(
+                        event="conversion_usdc_to_cusd",
+                        amount=Decimal(instance.from_amount),
+                        metadata={
+                            "conversion_id": str(instance.conversion_id),
+                        },
+                    ),
+                )
+        except Exception:
+            pass
 
 
 # Handle soft deletes
