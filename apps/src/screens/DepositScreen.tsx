@@ -313,6 +313,7 @@ const DepositScreen = () => {
         // Already opted in
         console.log('[DepositScreen] User already opted in to USDC');
         setIsOptedIn(true);
+        setNeedsWalletSetup(false);
         await refetchOptIns();
         return;
       }
@@ -342,6 +343,7 @@ const DepositScreen = () => {
           // Refresh accounts to ensure address is loaded
           await refreshAccounts();
           setIsOptedIn(true);
+          setNeedsWalletSetup(false);
         } else {
           console.error('[DepositScreen] Failed to submit opt-in transaction');
         }
