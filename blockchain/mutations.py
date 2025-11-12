@@ -1326,22 +1326,38 @@ class OptInToAssetByTypeMutation(graphene.Mutation):
             account_info = algod_client.account_info(sender_address)
             current_balance = account_info['amount']  # in microAlgos
             current_min_balance = account_info.get('min-balance', 0)
-            required_balance = current_min_balance + 100_000  # Add 0.1 ALGO for the new ASA
-            buffer = 10_000  # Add 0.01 ALGO buffer for fees
-            target_balance = required_balance + buffer
-            
+
+            # Algorand MBR calculation for asset opt-in:
+            # - Base MBR = 100,000 microAlgos (0.1 ALGO)
+            # - Each asset adds 100,000 microAlgos
+            # - Add safety buffer to handle edge cases and transaction fees
+            # The actual minimum balance increases by more than just 100k due to
+            # schema changes and other factors, so we use a generous buffer
+            ASSET_OPT_IN_MBR = 100_000  # Base asset opt-in cost
+            SAFETY_BUFFER = 250_000     # Safety margin for edge cases and fees
+
+            required_balance = current_min_balance + ASSET_OPT_IN_MBR
+            target_balance = required_balance + SAFETY_BUFFER
+
+            # Calculate funding needed
+            funding_needed = max(target_balance - current_balance, 0)
+
+            # Ensure meaningful top-up if any shortfall is detected
+            if funding_needed > 0 and funding_needed < 200_000:
+                funding_needed = 200_000  # Minimum funding to avoid multiple small transactions
+
             logger.info(
-                "USDC opt-in balance check for %s: balance=%s, min=%s, required=%s, target=%s",
+                "USDC opt-in balance check for %s: balance=%s, min=%s, required=%s, target=%s, funding=%s",
                 sender_address,
                 current_balance,
                 current_min_balance,
                 required_balance,
                 target_balance,
+                funding_needed,
             )
-            
+
             # If balance is insufficient, fund the difference
-            if current_balance < target_balance:
-                funding_needed = target_balance - current_balance
+            if funding_needed > 0:
                 logger.info(
                     "Funding account %s with %s microAlgos before USDC opt-in",
                     sender_address,
